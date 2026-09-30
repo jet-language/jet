@@ -1,0 +1,13 @@
+Error [E0121]: `items` was consumed by `.to_list()`, so it can't be used here
+  --> tests/ui/iter_next_moved_source.jet:7:12
+    |
+  7 |     print(&items.next())
+    |            ^^^^^
+  --> tests/ui/iter_next_moved_source.jet:5:13
+    |
+  5 |     all :: ^items.to_list()
+    |             ^^^^^ `items` moved to `.to_list()` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `items` after the move, or give `.to_list()` a copy with `~items` where it moved.
+ Note: `items` is one-pass — materialize it first with `items.to_list()`, or create a fresh source for the second drive
+More: jet-lang.dev/e/E0121

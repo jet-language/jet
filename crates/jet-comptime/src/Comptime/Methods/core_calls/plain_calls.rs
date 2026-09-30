@@ -1495,14 +1495,20 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
             })
         }
+        // D-CRYPTO-RNG1=A: a missing or rejected provider is `None`; the Jet
+        // wrapper in `Core/crypto/random.jet` reports it as `Unavailable`.
         ("core.crypto.random", "bytes") => {
             let count = match one(0)? {
                 CtValue::Int(value) => *value,
                 _ => return Err(unsupported("crypto.random.bytes expects an Int", span)),
             };
-            crypto_entropy_kernel::jet_crypto_entropy_bytes(count)
-                .map(CtValue::Bytes)
-                .map_err(|error| unsupported(&error.to_string(), span))
+            Ok(match crypto_entropy_kernel::jet_crypto_entropy_bytes(count) {
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(_) => CtValue::absent(Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                }))),
+            })
         }
         // --- core.text.fmt: CtValue adapters over the shared Prelude kernel ---
         // The Display route `"{value}"` / `print(value)` lower to on every

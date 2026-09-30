@@ -268,6 +268,7 @@ pub use Methods::{
     apply_raylib_ambient_core_call, apply_repl_authorized_core_call,
     apply_repl_authorized_core_call_with_type, display_core_pure_value,
     eval_regex_replace_all_with, history_callback_fingerprint, history_command_schema_from_mir,
+    jet_crypto_zeroize,
     set_trace_id, sketch_add, with_world_rng_provider, HistoryCommandSchema,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
@@ -749,6 +750,17 @@ pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
     }
 }
 
+/// TIR typed TOML decode parses with the codec's own parser; a failure is the
+/// canonical `EncodingError` (frame it with [`codec_parse_error_for_tir`]).
+pub fn toml_parse_for_tir(text: &str) -> Result<CtValue, CtValue> {
+    EncodingLite::toml_parse(text)
+}
+
+/// TIR typed YAML decode; same contract as [`toml_parse_for_tir`].
+pub fn yaml_parse_for_tir(text: &str) -> Result<CtValue, CtValue> {
+    EncodingLite::yaml_parse(text)
+}
+
 /// TIR/JIT bridge for the canonical whole-value CBOR parser.
 ///
 /// Keep options validation, limits, deterministic-form checks, and error
@@ -958,12 +970,15 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
         fact_items,
         build_facts,
         &fact_registry,
+        None,
     )
 }
 
 /// Evaluate a closed value against the caller's already-registered semantic
 /// facts. Sema uses this variant so nested state rows are never reconstructed
-/// from a parallel source-side lookup.
+/// from a parallel source-side lookup. `checked_core` carries the loaded Core
+/// source signatures and bodies, so a fragment calls Core functions exactly as
+/// runtime code does.
 pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
     init: &crate::AST::Expr,
     funcs: &HashMap<String, &'a Func>,
@@ -982,6 +997,7 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
     fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     fact_registry: &jet_foundation::Facts::FactRegistry,
+    checked_core: Option<&MirBridge::MirFragmentNominalFacts>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let closed = fold_build_facts(init, fact_items, build_facts, fact_registry);
     let mut nominal_facts = MirBridge::MirFragmentNominalFacts::default();
@@ -993,6 +1009,10 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
             row.derives.clear();
             nominal_facts.enums.insert(row.name.clone(), row);
         }
+    }
+    if let Some(checked) = checked_core {
+        nominal_facts.core_source_sigs = checked.core_source_sigs.clone();
+        nominal_facts.core_source_bodies = checked.core_source_bodies.clone();
     }
     evaluate_with_imports_opts_collecting_structs_and_methods(
         &closed,
@@ -1845,16 +1865,28 @@ pub fn run_block_with_imports(
     }
 }
 
-/// Return the canonical call closure used by owned comptime evaluation.
+/// Add the functions `init` names directly to `roots`; pair with
+/// [`reachable_owned_function_closure`].
 ///
 /// Sema uses this read-only projection to stage only function bodies that a
 /// mandatory comptime construct can execute. The projection performs no
 /// evaluation and therefore does not change optional-fold work or fuel policy.
-pub fn reachable_owned_function_names(
+pub fn reachable_owned_function_roots<F: std::borrow::Borrow<Func>>(
     init: &crate::AST::Expr,
-    funcs: &HashMap<String, Func>,
+    funcs: &HashMap<String, F>,
+    roots: &mut std::collections::HashSet<String>,
+) {
+    Purity::reachable_func_roots(init, funcs, roots)
+}
+
+/// The canonical call closure used by owned comptime evaluation: `roots` and
+/// every function they reach. One closure over many roots equals the union of
+/// each root's closure.
+pub fn reachable_owned_function_closure<F: std::borrow::Borrow<Func>>(
+    roots: std::collections::HashSet<String>,
+    funcs: &HashMap<String, F>,
 ) -> std::collections::HashSet<String> {
-    Purity::reachable_func_names(init, funcs)
+    Purity::reachable_func_closure(roots, funcs)
 }
 
 /// Owned-function variant used while sema is mutating function bodies for
@@ -2410,7 +2442,7 @@ fn expand_derive_items(
                         "E0956",
                         "a `prep loop` source is not a compile-time list".to_string(),
                         "`prep loop` expands one item template for each value in its source list".to_string(),
-                        "use a reflected/comptime list such as `T.@fields`, or a closed type list like `[TypeA, TypeB]`".to_string(),
+                        "use a reflected/comptime list such as `T.$fields`, or a closed type list like `[TypeA, TypeB]`".to_string(),
                         Some(source.span()),
                     ));
                 };
@@ -2449,11 +2481,11 @@ fn eval_template_loop_source(
         };
         if let Some(binding) = binding {
             if let Some(CtValue::Struct { fields, .. }) =
-                scope_value(scope, binding.trim_start_matches('@'))
+                scope_value(scope, binding.trim_start_matches('$'))
             {
                 if let Some((_, value)) = fields
                     .iter()
-                    .find(|(name, _)| name == member.trim_start_matches('@'))
+                    .find(|(name, _)| name == member.trim_start_matches('$'))
                 {
                     return Ok(value.clone());
                 }
@@ -2474,7 +2506,7 @@ fn eval_template_loop_source(
                 let name = match value {
                     crate::AST::Expr::Ident(name, _) => name.clone(),
                     crate::AST::Expr::ComptimeName { name, .. } => {
-                        name.trim_start_matches('@').to_string()
+                        name.trim_start_matches('$').to_string()
                     }
                     _ => return Err(diagnostic),
                 };
@@ -2766,7 +2798,7 @@ fn expand_template_loop_block(
             "E0956",
             "a `prep loop` source is not a compile-time list".to_string(),
             "`prep loop` expands one statement template for each value in its source list".to_string(),
-            "use a reflected/comptime list such as `T.@fields`".to_string(),
+            "use a reflected/comptime list such as `T.$fields`".to_string(),
             Some(span),
         ));
     };
@@ -3051,12 +3083,12 @@ fn derive_loop_side(subject: Option<&crate::AST::Expr>) -> Option<&str> {
     Some(match ident {
         "self" => "left",
         "rhs" => "right",
-        name => name.trim_start_matches('@'),
+        name => name.trim_start_matches('$'),
     })
 }
 
 fn cartesian_payload_owner(side: &str, variant: &str, scope: &HashMap<String, CtValue>) -> String {
-    let variant = variant.trim_start_matches('@');
+    let variant = variant.trim_start_matches('$');
     let left = scope_value(scope, "left").and_then(reflected_variant_name);
     let right = scope_value(scope, "right").and_then(reflected_variant_name);
     match side {
@@ -3130,18 +3162,18 @@ fn payload_binding_prefix(owner: &str, value: &CtValue) -> String {
 }
 
 fn payload_binding_owner(variant: &str, scope: &HashMap<String, CtValue>) -> String {
-    let key = variant.trim_start_matches('@');
+    let key = variant.trim_start_matches('$');
     for (name, value) in scope {
         let Some(reflected) = derive_reflected_name(value) else {
             continue;
         };
-        if reflected == key || name.trim_start_matches('@') == key {
+        if reflected == key || name.trim_start_matches('$') == key {
             if matches!(
                 value,
                 CtValue::Struct { fields, .. }
                     if fields.iter().any(|(field, _)| field == "index")
             ) {
-                return payload_binding_prefix(name.trim_start_matches('@'), value);
+                return payload_binding_prefix(name.trim_start_matches('$'), value);
             }
         }
     }
@@ -3186,7 +3218,7 @@ fn derive_variant_payload_fields(
     variant: &str,
     scope: &HashMap<String, CtValue>,
 ) -> Option<Vec<CtValue>> {
-    let key = variant.trim_start_matches('@');
+    let key = variant.trim_start_matches('$');
     if let Some(value) = scope_value(scope, key) {
         if let Some(payload) = field_info_payload(value) {
             return Some(payload);
@@ -3247,8 +3279,9 @@ fn expand_template_name(
     interp: &mut Interpreter::Interp<'_>,
     scope: &mut HashMap<String, CtValue>,
 ) -> Result<String, Diagnostic> {
-    let explicit = name.starts_with('@');
-    let binding = name.strip_prefix('@').unwrap_or(name);
+    // D-NAME-SPLICE1=B: `$name` splices the template binding `name`.
+    let explicit = name.starts_with('$');
+    let binding = name.strip_prefix('$').unwrap_or(name);
     match scope_value(scope, binding) {
         Some(CtValue::Str(value)) => Ok(value.clone()),
         Some(CtValue::Struct { fields, .. }) if explicit => fields
@@ -3261,7 +3294,7 @@ fn expand_template_name(
             .ok_or_else(|| {
                 Diagnostic::error(
                     "E0956",
-                    format!("compile-time name `@{binding}` has no text name"),
+                    format!("compile-time name `${binding}` has no text name"),
                     "a generated item name needs the reflected value's `name` field".to_string(),
                     "bind the name to a String value".to_string(),
                     Some(span),
@@ -3315,11 +3348,11 @@ fn expand_template_expr_node(
             };
             if let Some(binding) = binding {
                 if let Some(CtValue::Struct { fields, .. }) =
-                    scope_value(scope, binding.trim_start_matches('@'))
+                    scope_value(scope, binding.trim_start_matches('$'))
                 {
                     if let Some((_, value)) = fields
                         .iter()
-                        .find(|(name, _)| name == member.trim_start_matches('@'))
+                        .find(|(name, _)| name == member.trim_start_matches('$'))
                     {
                         if let Some(literal) = comptime_literal_expr(value.clone(), span) {
                             *expr = literal;
@@ -3328,7 +3361,12 @@ fn expand_template_expr_node(
                     }
                 }
             }
-            if member.starts_with('@') {
+            // A `$` member that names no template binding is a compiler fact
+            // (`self.$layout`) and stays for sema; one that does is a splice.
+            if member
+                .strip_prefix('$')
+                .is_some_and(|bare| scope_value(scope, bare).is_some())
+            {
                 if let Some(payload_owner) = derive_payload_owner(binding, scope) {
                     let field_name = expand_template_name(member, span, interp, scope)?;
                     *expr = crate::AST::Expr::Ident(format!("{payload_owner}_{field_name}"), span);
@@ -3338,14 +3376,14 @@ fn expand_template_expr_node(
             }
         }
         crate::AST::Expr::ComptimeName { name, .. } => {
-            if let Some(value) = scope_value(scope, name.trim_start_matches('@')).cloned() {
+            if let Some(value) = scope_value(scope, name.trim_start_matches('$')).cloned() {
                 if let Some(literal) = comptime_literal_expr(value, span) {
                     *expr = literal;
                 }
             }
         }
-        crate::AST::Expr::Ident(name, _) if name.starts_with('@') => {
-            if let Some(value) = scope_value(scope, name.trim_start_matches('@')).cloned() {
+        crate::AST::Expr::Ident(name, _) if name.starts_with('$') => {
+            if let Some(value) = scope_value(scope, name.trim_start_matches('$')).cloned() {
                 if let Some(literal) = comptime_literal_expr(value, span) {
                     *expr = literal;
                 }
@@ -3381,7 +3419,7 @@ fn expand_template_expr_node(
                 let binding = match receiver.as_ref() {
                     crate::AST::Expr::Ident(name, _)
                     | crate::AST::Expr::ComptimeName { name, .. } => {
-                        Some(name.trim_start_matches('@'))
+                        Some(name.trim_start_matches('$'))
                     }
                     _ => None,
                 };
@@ -3463,7 +3501,7 @@ fn expand_template_expr_node(
 }
 
 fn scope_value<'a>(scope: &'a HashMap<String, CtValue>, name: &str) -> Option<&'a CtValue> {
-    scope.get(name).or_else(|| scope.get(&format!("@{name}")))
+    scope.get(name).or_else(|| scope.get(&format!("${name}")))
 }
 
 fn comptime_literal_expr(

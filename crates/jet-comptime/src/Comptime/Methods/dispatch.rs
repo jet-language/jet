@@ -421,7 +421,7 @@ pub fn eval_build_time_io(
     if builtin == crate::Syntax::BUILTIN_FIND {
         return eval_locked_find(base_dir, &rel, embed_inputs, span);
     }
-    let bytes = crate::SHA256::read_file_nofollow_at_root(
+    let bytes = jet_foundation::CheckReads::read_nofollow_at_root(
         base_dir,
         Path::new(&rel),
         crate::SHA256::MAX_TREE_FILE_BYTES,
@@ -487,7 +487,7 @@ pub fn eval_locked_find(
     let mut matches = find_glob(&base_root, glob, span)?;
     matches.sort();
     for rel in &matches {
-        let bytes = crate::SHA256::read_file_nofollow_at_root(
+        let bytes = jet_foundation::CheckReads::read_nofollow_at_root(
             base_dir,
             Path::new(rel),
             crate::SHA256::MAX_TREE_FILE_BYTES,
@@ -538,7 +538,7 @@ pub fn eval_build_embed(
             Some(span),
         ));
     }
-    let bytes = crate::SHA256::read_file_nofollow_at_root(
+    let bytes = jet_foundation::CheckReads::read_nofollow_at_root(
         base_dir,
         Path::new(rel),
         crate::SHA256::MAX_TREE_FILE_BYTES,
@@ -616,12 +616,14 @@ fn walk_find(
     max_depth: usize,
     out: &mut Vec<String>,
 ) -> std::io::Result<()> {
-    let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
-        let ty = entry.file_type()?;
-        let path = entry.path();
-        let logical_path = logical_dir.join(entry.file_name());
+    // #2517 S1b: the listing is a check input; a file added under a walked
+    // directory must invalidate a recorded result.
+    for path in jet_foundation::CheckReads::read_dir_sorted(dir)? {
+        let ty = std::fs::symlink_metadata(&path)?.file_type();
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        let logical_path = logical_dir.join(name);
         if ty.is_dir() {
             let dir_depth = depth + 1;
             if dir_depth < max_depth {
@@ -879,6 +881,25 @@ impl<'a> Interp<'a> {
         }
         if name == crate::Syntax::BUILTIN_FIND {
             return self.eval_find(args, span);
+        }
+        // D-DBG1=A: the checked development trace. Sema recorded the site
+        // text as the second argument; the line matches every compiled tier.
+        // In dev mode it joins the buffered stderr sink; comptime evaluation
+        // prints while compiling.
+        if name == crate::Syntax::INTERNAL_DEBUG_TRACE && args.len() == 2 {
+            let value = self.eval(&args[0].expr, scope)?;
+            let site = self.eval(&args[1].expr, scope)?.jet_show();
+            let line = format!(
+                "{} {site} = {}",
+                crate::Syntax::DEBUG_TRACE_PREFIX,
+                self.debug_value(&value)
+            );
+            if let Some(sink) = self.sink.as_mut() {
+                sink.stderr.push_str(&jet_term_print_frame(&line));
+            } else {
+                eprintln!("{line}");
+            }
+            return Ok(value);
         }
         if name == "panic" {
             let msg = match args.first() {
@@ -1728,7 +1749,7 @@ impl<'a> Interp<'a> {
             .first()
             .ok_or_else(|| unsupported(&format!("{builtin} with no path"), span))?;
         let rel = check_embed_path(builtin, arg, span)?;
-        match crate::SHA256::read_file_nofollow_at_root(
+        match jet_foundation::CheckReads::read_nofollow_at_root(
             &self.base_dir,
             Path::new(&rel),
             crate::SHA256::MAX_TREE_FILE_BYTES,

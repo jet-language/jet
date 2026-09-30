@@ -402,8 +402,8 @@ fn sema_plugin_api_type_name(ty: Type, dimensions: [SemaPluginUnitDimension]) ->
         .Fn(params, ret, effect_bound, _, _, _) -> {
             param_names := (loop param in params -> sema_plugin_api_type_name(param, dimensions))
             output := "fn({param_names.join(", ")})"
-            if ret != None -> output = "{output} {sema_plugin_api_type_name(ret ?? Type.Named{name: "Unit"}, dimensions)}"
-            if effect_bound != None -> output = "{output} -[{(effect_bound ?? [EffectRowEntry]{}).map(row -> row.name).join(", ")}]>"
+            if ret != None -> output = "{output} {sema_plugin_api_type_name(ret, dimensions)}"
+            if effect_bound != None -> output = "{output} -[{effect_bound.map(row -> row.name).join(", ")}]>"
             return output
         }
         .Apply(name, args) -> {
@@ -523,7 +523,7 @@ fn sema_plugin_view_provenance(value: ViewProvenance) -> String Never! {
     access :: if value.mutable -> "write" else -> "read"
     if value.sources.len() == 1 {
         source :: sema_plugin_view_source_path(value.sources[0])
-        parts :: source.split(";path:")
+        parts :: source.split(";path:").to_list()
         return "{parts[0]};access:{access};path:{if parts.len() > 1 -> parts[1] else -> ""}"
     }
     sources := value.sources

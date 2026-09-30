@@ -80,14 +80,89 @@ impl<'a> Checker<'a> {
         None
     }
 
+    /// D-FAIL-INFER-UNION1=A: the pre-pass probes the function body itself;
+    /// a callback's failures belong to the callback's own carrier.
+    pub(crate) fn failure_union_probing(&self) -> bool {
+        self.failure_union_probe.is_some() && !self.in_lambda_body
+    }
+
+    /// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: record the value an `Err(...)`
+    /// sends down the default route. A leading-dot case with no expected
+    /// type (`Err(.NotFound(n))`) becomes a case of the function's own error
+    /// type, with the payload types of its checked arguments.
+    fn probe_failure_value(&mut self, inner: &mut Expr) {
+        let saved_expected = self.expected_type.take();
+        if let Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            span,
+            ..
+        } = inner
+        {
+            if type_name.is_empty() {
+                let name = variant.clone();
+                let span = *span;
+                let mut payload = Vec::with_capacity(args.len());
+                for arg in args.iter_mut() {
+                    let (label, expr) = match arg {
+                        crate::AST::EnumLitArg::Positional(expr) => (None, expr),
+                        crate::AST::EnumLitArg::Named { label, expr } => {
+                            (Some(label.clone()), expr)
+                        }
+                    };
+                    let ty = self
+                        .infer_owning_value(expr)
+                        .unwrap_or_else(|| Type::Named("_".to_string()));
+                    payload.push((label, ty));
+                }
+                self.expected_type = saved_expected;
+                if let Some(probe) = self.failure_union_probe.as_mut() {
+                    probe.cases.push(crate::Sema::FailureCase {
+                        name,
+                        payload,
+                        span,
+                    });
+                }
+                return;
+            }
+        }
+        let payload = self.infer_owning_value(inner);
+        self.expected_type = saved_expected;
+        if let Some(probe) = self.failure_union_probe.as_mut() {
+            match payload {
+                Some(payload) => probe.add_member(&payload),
+                None => probe.general = true,
+            }
+        }
+    }
+
     pub(crate) fn infer_err(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
         let expected_result = self.expected_type.clone().and_then(|expected| {
             expected
                 .unwrap_result()
                 .map(|(ok_ty, err_ty)| (ok_ty.clone(), err_ty.clone()))
         });
+        if let Some((ok_ty, err_ty)) = expected_result
+            .as_ref()
+            .filter(|(_, err_ty)| is_default_error(err_ty) && self.failure_union_probing())
+        {
+            let carrier = Type::Result {
+                ok: Box::new(ok_ty.clone()),
+                err: Box::new(err_ty.clone()),
+            };
+            self.probe_failure_value(inner);
+            return Some(carrier);
+        }
+        // D-FAIL-INFER-UNION1=A: an inferred union that holds the general
+        // `Err` builds that member from a message, like the default route.
+        let general_target = expected_result.as_ref().is_some_and(|(_, err_ty)| {
+            is_default_error(err_ty)
+                || err_ty.union_contains(&Type::Named(Syntax::TYPE_ERR.to_string()))
+        });
+        let message_literal = matches!(inner.without_parens(), Expr::Str(..));
         let payload_expected = expected_result.as_ref().map(|(_, err_ty)| {
-            if is_default_error(err_ty) {
+            if is_default_error(err_ty) || (general_target && message_literal) {
                 Type::String
             } else {
                 err_ty.clone()
@@ -99,7 +174,7 @@ impl<'a> Checker<'a> {
             self.infer_owning_value(inner)?
         };
         if let Some((ok_ty, err_ty)) = expected_result {
-            if is_default_error(&err_ty) && payload == Type::String {
+            if general_target && payload == Type::String {
                 let message = std::mem::replace(inner.as_mut(), Expr::Absent(span));
                 let call = Call {
                     name: Syntax::LIT_ERR.to_string(),
@@ -331,6 +406,69 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// #3708: the unannotated callee of a failure-domain diagnostic, as
+    /// `(module index, function name)`, when the bundle failure solve may
+    /// still prove its failure set empty. A Core wrapper (`math.inv`) is an
+    /// ordinary source function in its own module, so it reaches the same
+    /// solve as a same-module callee; its `T Never!` contract is only known
+    /// once every body is checked.
+    fn inferable_failure_callee(&self, inner: &Expr) -> Option<(usize, String)> {
+        let (module_idx, name, signature) = match inner.without_parens() {
+            Expr::Call(call) => self.resolve_failure_function(&call.name)?,
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
+                if let Some((module, _, _)) = self.core_module_path_from_receiver(receiver) {
+                    let source = jet_foundation::CoreModuleExports::core_source_module(&module)?;
+                    if !jet_foundation::CoreModuleExports::core_source_owns(&module, method) {
+                        return None;
+                    }
+                    let source_idx = self
+                        .modules?
+                        .iter()
+                        .position(|candidate| candidate.module_alias == source.alias)?;
+                    self.resolve_failure_function_in_module(source_idx, method.clone())?
+                } else {
+                    let Expr::Ident(alias, _) = receiver.without_parens() else {
+                        return None;
+                    };
+                    self.resolve_failure_function(&format!("{alias}.{method}"))?
+                }
+            }
+            _ => return None,
+        };
+        (!signature.is_extern && signature.failure_contract().is_default())
+            .then_some((module_idx, name))
+    }
+
+    /// #3708: hand the failure-domain diagnostic just reported against an
+    /// inferable callee to the bundle failure solve. The call is checked as
+    /// the `T Never!` plain return it has when the solve discharges the
+    /// obligation; otherwise the solve emits the diagnostic unchanged.
+    fn defer_failure_obligation(
+        &mut self,
+        callee: (usize, String),
+        inner: &mut Expr,
+        convert: &mut TryConvert,
+        ok: &Type,
+        err: &Type,
+    ) -> Option<Type> {
+        let (module_idx, callee) = callee;
+        if let Some(diagnostic) = self.diags.last_mut() {
+            let detail = diagnostic.detail.take().unwrap_or_default();
+            diagnostic.detail = Some(format!(
+                "{}{module_idx}:{callee}\n{detail}",
+                crate::Sema::FAILURE_OBLIGATION_MARK,
+            ));
+        }
+        *convert = TryConvert::Never;
+        publish_try_call_carrier(inner, || Type::Result {
+            ok: Box::new(ok.clone()),
+            err: Box::new(err.clone()),
+        });
+        Some(ok.clone())
+    }
+
     /// Build the caller-side repair from the source declaration when the
     /// declaration is available. Keeping the authored success spelling avoids
     /// putting diagnostic glosses such as `(a whole number)` into a source
@@ -535,6 +673,39 @@ impl<'a> Checker<'a> {
                     return Some((*ok).clone());
                 }
                 match &ret {
+                    // D-FAIL-INFER-UNION1=A: the failure-union pre-pass
+                    // records what passes up into the default route; the
+                    // conversion is decided by the real check once the
+                    // function's failure set is known.
+                    Type::Result { err: ret_err, .. }
+                        if is_default_error(ret_err) && self.failure_union_probing() =>
+                    {
+                        let callee = is_default_error(&err)
+                            .then(|| self.inferable_failure_callee(inner.as_ref()))
+                            .flatten();
+                        if let Some(probe) = self.failure_union_probe.as_mut() {
+                            match callee {
+                                Some(callee) => {
+                                    probe.edges.insert(callee);
+                                }
+                                None => probe.add_member(&err),
+                            }
+                        }
+                        self.task_body_propagates = true;
+                        publish_try_call_carrier(inner.as_mut(), || Type::Result {
+                            ok: Box::new((*ok).clone()),
+                            err: Box::new((*err).clone()),
+                        });
+                        Some((*ok).clone())
+                    }
+                    // D9: a `_` hole domain already has its one E0119 at the
+                    // signature. Keep the success value typed so the body
+                    // reports nothing that only repeats that error.
+                    Type::Result { err: ret_err, .. }
+                        if matches!(ret_err.as_ref(), Type::Named(name) if name == "_") =>
+                    {
+                        Some((*ok).clone())
+                    }
                     // D-FAILURE-FOUNDATION1: `!Never` is a proof that the
                     // caller has no reachable failure route.  A reachable
                     // fallible operand therefore cannot be propagated into
@@ -543,13 +714,19 @@ impl<'a> Checker<'a> {
                         if matches!(ret_err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
                             && !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER) =>
                     {
+                        // #3708: an unannotated callee may still be proven
+                        // infallible by the bundle failure solve. Accept the
+                        // call as `Never` and keep the diagnostic as an
+                        // obligation the solve discharges or emits.
+                        let pending_callee = self.inferable_failure_callee(inner.as_ref());
                         self.report_failure_domain_mismatch(
                             span,
                             inner.as_ref(),
                             err.as_ref(),
                             ret_err.as_ref(),
                         );
-                        None
+                        let callee = pending_callee?;
+                        self.defer_failure_obligation(callee, inner.as_mut(), convert, &ok, &err)
                     }
                     // E2-M7: error types match — propagate and unwrap the Ok value.
                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
@@ -679,13 +856,15 @@ impl<'a> Checker<'a> {
                             return None;
                         }
                         // E2404: no declared conversion between these two typed error types.
+                        let pending_callee = self.inferable_failure_callee(inner.as_ref());
                         self.report_failure_domain_mismatch(
                             span,
                             inner.as_ref(),
                             err.as_ref(),
                             ret_err.as_ref(),
                         );
-                        None
+                        let callee = pending_callee?;
+                        self.defer_failure_obligation(callee, inner.as_mut(), convert, &ok, &err)
                     }
                     _ => {
                         let (what, why, fix) = if implicit_propagation {
@@ -714,9 +893,11 @@ impl<'a> Checker<'a> {
                                 ),
                             )
                         };
+                        let pending_callee = self.inferable_failure_callee(inner.as_ref());
                         self.diags
                             .push(Diagnostic::error("E0403", what, why, fix, Some(span)));
-                        None
+                        let callee = pending_callee?;
+                        self.defer_failure_obligation(callee, inner.as_mut(), convert, &ok, &err)
                     }
                 }
             }
@@ -855,6 +1036,11 @@ impl<'a> Checker<'a> {
                         let expr_ty = self.infer(e);
                         self.expected_type = saved;
                         if let Some(expr_ty) = expr_ty {
+                            let expr_ty =
+                                self.widen_numeric_return(e, &expr_ty, ret_ty).unwrap_or(expr_ty);
+                            // D-OPT-LIFT1=A: `?? return value` fills a `T?` slot.
+                            let expr_ty =
+                                self.lift_optional_slot(ret_ty, &expr_ty, e).unwrap_or(expr_ty);
                             self.check_type_assignable(ret_ty, &expr_ty, e.span());
                         }
                     }
@@ -1259,6 +1445,8 @@ impl<'a> Checker<'a> {
                         let et = self.infer(e);
                         self.expected_type = saved;
                         if let Some(et) = et {
+                            let et = self.widen_numeric_return(e, &et, rt).unwrap_or(et);
+                            let et = self.lift_optional_slot(rt, &et, e).unwrap_or(et);
                             let espan = e.span();
                             self.check_type_assignable(rt, &et, espan);
                         }
@@ -1336,11 +1524,15 @@ impl<'a> Checker<'a> {
                 *args = call.args;
                 Some(payload)
             }
-            // D-ORRETURN-ERG1=B: `?? break` / `?? next` — loop-only.
+            // D-ORRETURN-ERG1=B: `?? break` / `?? next` — loop-only. A `?? break`
+            // is a reachable loop exit, so it records its break flow exactly as
+            // a statement `break` does.
             OrFallback::Break(kw_span) => {
                 if self.loop_depth == 0 {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_BREAK, *kw_span));
+                } else {
+                    self.check_break_without_value(None, *kw_span);
                 }
                 Some(payload)
             }
@@ -1474,6 +1666,12 @@ impl<'a> Checker<'a> {
                         let expr_ty = self.infer(expr);
                         self.expected_type = saved;
                         if let Some(expr_ty) = expr_ty {
+                            let expr_ty = self
+                                .widen_numeric_return(expr, &expr_ty, ret_ty)
+                                .unwrap_or(expr_ty);
+                            let expr_ty = self
+                                .lift_optional_slot(ret_ty, &expr_ty, expr)
+                                .unwrap_or(expr_ty);
                             self.check_type_assignable(ret_ty, &expr_ty, expr.span());
                         }
                     }

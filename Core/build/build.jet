@@ -109,7 +109,7 @@ pub struct BuildGraph {
 /// BuildPlan, so failing closed here is preferable to returning an empty
 /// graph that looks like a successful build.  The comptime dispatcher replaces
 /// this body with the checked projection.
-pub fn graph(_plan: BuildPlan) -> BuildGraph {
+pub fn graph(_plan: BuildPlan) -> BuildGraph Never! {
     panic("core.build.graph requires a checked BuildPlan in build/comptime code")
 }
 
@@ -117,7 +117,7 @@ pub fn graph(_plan: BuildPlan) -> BuildGraph {
 /// making cache policy decisions.  All deltas are ordered lexicographically;
 /// action keys compare recipe identity, while affected files follow changed
 /// actions through declared outputs, consumers, and target dependencies.
-pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff {
+pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never! {
     if !valid_graph(before) || !valid_graph(after) {
         panic("core.build.receipt_diff requires canonical BuildGraph values")
     }

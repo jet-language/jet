@@ -35,6 +35,47 @@ fn division_fix_hint(want: &Type, got: &Type, value: &Expr) -> String {
     type_fix_hint(want, got)
 }
 
+/// D-DISCARD1=A (owner ruling): when a return type is written, a mismatched
+/// value is most likely the wrong type or shape of the value itself. The fix
+/// names the conversion or wrap for the value and never suggests changing the
+/// declared return type.
+fn return_value_fix(want: &Type, got: &Type) -> String {
+    let want = want.without_user_tags();
+    let got = got.without_user_tags();
+    match (want, got) {
+        (Type::Int, Type::Named(name)) if name == Syntax::TYPE_FRACTION => {
+            "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
+                .to_string()
+        }
+        (Type::List(item), got) if **item == *got => {
+            "wrap the value in a list: `[value]`".to_string()
+        }
+        (want, Type::List(item)) if **item == *want => {
+            "this is a whole list; hand back one element, or combine the elements into one value"
+                .to_string()
+        }
+        (want, Type::Option(item)) if **item == *want => {
+            "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`"
+                .to_string()
+        }
+        (want, _) if want.name() == "String" => {
+            "put the value in text with interpolation: \"{value}\"".to_string()
+        }
+        _ => {
+            let hint = type_fix_hint(want, got);
+            if hint.starts_with("use ") && hint.ends_with(" here") {
+                format!(
+                    "hand back a {} value: convert this value to {}, or return the value you meant",
+                    want.name(),
+                    want.name()
+                )
+            } else {
+                hint
+            }
+        }
+    }
+}
+
 fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
@@ -423,7 +464,10 @@ impl<'a> Checker<'a> {
 
     /// E0433 candidate: this statement drops the non-Unit result of a direct
     /// or method call. The solved effect phase reports it when the callee's
-    /// row is empty. Sites where the call can still matter stay quiet: a
+    /// row is empty and the call cannot fail. A call under an automatic or
+    /// written `?` whose declared contract is not `T Never!` still carries a
+    /// failure; the fact records that, and the bundle failure solve (#3708)
+    /// decides it. Sites where the call can still matter stay quiet: a
     /// write-marked or taken place, a callback argument (its effects belong
     /// to the call site, not the callee's row), or an error already reported
     /// on the statement.
@@ -444,27 +488,36 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let (callee_spans, callee_name, args, receiver) = match expr {
+        let (expr, under_try) = match expr.without_parens() {
+            Expr::Try(inner, ..) => (inner.without_parens(), true),
+            other => (other, false),
+        };
+        let (callee_spans, callee_name, args, receiver, declared_return) = match expr {
             Expr::Call(call) => (
                 [call.name_span, call.name_span],
                 call.name.clone(),
                 &call.args,
                 None,
+                call.resolved_ret.as_ref(),
             ),
             Expr::MethodCall {
                 receiver,
                 method,
                 method_span,
                 args,
+                resolved_ret,
                 ..
             } => (
                 [*method_span, expr.span()],
                 method.clone(),
                 args,
                 Some(receiver.as_ref()),
+                resolved_ret.as_ref(),
             ),
             _ => return,
         };
+        let failure_open = under_try
+            && !matches!(declared_return, Some(Type::Result { err, .. }) if err.is_never());
         let marks_place = |value: &Expr| {
             matches!(
                 value,
@@ -510,6 +563,7 @@ impl<'a> Checker<'a> {
                 callee_name,
                 call_text,
                 span,
+                failure_open,
             });
     }
 
@@ -518,6 +572,25 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
         if !self.enter_source_nesting(stmt.span()) {
             return;
+        }
+        // #3708: statement forms whose failure routes are owned by their own
+        // runtime protocol (task groups, transactions, live/reactive scopes,
+        // generators, deferred closes) keep the enclosing default route.
+        if !self.in_lambda_body
+            && matches!(
+                stmt,
+                Stmt::TaskGroup { .. }
+                    | Stmt::Transact { .. }
+                    | Stmt::Live { .. }
+                    | Stmt::Reactive { .. }
+                    | Stmt::Shield { .. }
+                    | Stmt::Switched { .. }
+                    | Stmt::ScopeMember { .. }
+                    | Stmt::Yield(..)
+                    | Stmt::DeferClose { .. }
+            )
+        {
+            self.failure_direct_source = true;
         }
         let before = self.flow.clone();
         let before_direct = self.fx_direct.clone();
@@ -739,11 +812,9 @@ impl<'a> Checker<'a> {
                 self.report_lending_view_escape(e, "be returned");
                 self.allow_string_view_read = saved_string_view_read;
                 self.expected_type = saved_expected;
-                if let Some(source) = et.as_ref() {
-                    if source != &rt && source.numeric_widening_to(&rt).is_some() {
-                        let source = source.clone();
-                        self.widen_numeric_expr(e, &source, &rt);
-                        et = Some(rt.clone());
+                if let Some(source) = et.clone() {
+                    if let Some(widened) = self.widen_numeric_return(e, &source, &rt) {
+                        et = Some(widened);
                     }
                 }
                 // #1164: direct `View`/`ViewMut` returns use the dedicated
@@ -832,6 +903,32 @@ impl<'a> Checker<'a> {
                     let value = std::mem::replace(e, Expr::Absent(value_span));
                     *e = Expr::Ok(Box::new(value), value_span);
                     et = Some(rt.clone());
+                }
+                // #3708: a fallible value returned as-is (not the success
+                // payload lifted into `Ok`) is this body's own failure source.
+                // An `Err(...)` node is read from the checked AST instead, so
+                // the failure-union probe records its typed value.
+                if !self.in_lambda_body
+                    && !matches!(e.without_parens(), Expr::Ok(..) | Expr::Err(..))
+                    && et
+                        .as_ref()
+                        .is_some_and(|ty| matches!(ty, Type::Result { err, .. } if !err.is_never()))
+                {
+                    self.failure_direct_source = true;
+                }
+                // D-OPT-LIFT1=A: a plain payload fills a `T?` return slot,
+                // including the `T?` success slot of a `T? E!` contract.
+                if let Some(actual) = et.clone() {
+                    if let Some(lifted) = self.lift_optional_slot(&rt, &actual, e) {
+                        et = Some(lifted);
+                    } else if let Type::Result { ok, .. } = &rt {
+                        if self.lift_optional_slot(ok, &actual, e).is_some() {
+                            let value_span = e.span();
+                            let value = std::mem::replace(e, Expr::Absent(value_span));
+                            *e = Expr::Ok(Box::new(value), value_span);
+                            et = Some(rt.clone());
+                        }
+                    }
                 }
                 if et
                     .as_ref()
@@ -969,16 +1066,25 @@ impl<'a> Checker<'a> {
                     {
                         let display_return = self.display_type(&rt);
                         let display_actual = self.display_type(&et);
+                        // D-DISCARD1=A (owner ruling): a written return type
+                        // is the contract, so the mismatch is taught as a
+                        // fault in the returned value, never as a prompt to
+                        // change the declaration.
                         self.diags.push(Diagnostic::error(
                             "E0113",
                             format!(
-                                "`{}` promises to return {}, but this returns {}",
+                                "this value is {}, but `{}` returns {}",
+                                display_actual.show(),
                                 self.fn_name,
-                                display_return.show(),
-                                display_actual.show()
+                                display_return.name()
                             ),
-                            "the value handed back must match the declared return type".to_string(),
-                            type_fix_hint(&display_return, &display_actual),
+                            format!(
+                                "`{}` declares {} as its result, so the value it hands back must be {}",
+                                self.fn_name,
+                                display_return.name(),
+                                display_return.name()
+                            ),
+                            return_value_fix(&display_return, &display_actual),
                             Some(e.span()),
                         ));
                     }
@@ -989,10 +1095,9 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                                 "E0113",
                                 format!("`{}` doesn't return a value", self.fn_name),
-                                "a function only hands back a value if it declares a return type before `->`"
-                                    .to_string(),
+                                "a function hands back a value only when it declares a return type".to_string(),
                                 format!(
-                                    "remove the value (`return;`), or declare `{}` as the return type before `->`",
+                                    "remove the value (a bare `return`), or write `-> {}` after the parameter list",
                                     ty_name
                                 ),
                                 Some(e.span()),
@@ -1320,6 +1425,16 @@ impl<'a> Checker<'a> {
                                 *span,
                                 source_ty.as_ref(),
                             ));
+                        }
+                    }
+                }
+                // D-OPT-LIFT1=A: a plain payload fills a `T?` place (local,
+                // field, or list/map item). A compound update reads the old
+                // value first, so it never lifts.
+                if !is_compound {
+                    if let (Some(source), Some(target_ty)) = (vt.clone(), place_ty.as_ref()) {
+                        if let Some(lifted) = self.lift_optional_slot(target_ty, &source, value) {
+                            vt = Some(lifted);
                         }
                     }
                 }
@@ -2092,6 +2207,7 @@ impl<'a> Checker<'a> {
                 let must_use_call_target = self.ignored_must_use_call_target(expr);
                 let discard_calls_start = self.fx_memory_calls.len();
                 let discard_diagnostics_start = self.diags.len();
+                let lost_tail = self.lost_tail_span == Some(expr.span());
                 let saved_expected = self.expected_type.take();
                 let inferred = self.infer_statement_expr(expr);
                 self.expected_type = saved_expected;
@@ -2112,12 +2228,31 @@ impl<'a> Checker<'a> {
                             ));
                     } else if !self.suppress_must_use {
                         self.check_ignored_must_use(expr, &ty, expr.span(), must_use_call_target);
-                        self.record_discarded_result(
-                            expr,
-                            &ty,
-                            discard_calls_start,
-                            discard_diagnostics_start,
-                        );
+                        if lost_tail {
+                            // D-DISCARD1=A: the last line of a function with
+                            // no written return type; its value goes nowhere.
+                            let unit = matches!(&ty, Type::Named(name)
+                                if name == Syntax::INTERNAL_UNIT_TYPE || name == Syntax::TYPE_UNIT)
+                                || ty.is_never();
+                            let reported = self.diags[discard_diagnostics_start..]
+                                .iter()
+                                .any(|diagnostic| diagnostic.severity == Severity::Error);
+                            if !unit && !reported {
+                                let shown = self.display_type(&ty).name();
+                                self.diags.push(crate::Sema::Effects::e0433_lost_tail(
+                                    &self.fn_name,
+                                    &shown,
+                                    expr.span(),
+                                ));
+                            }
+                        } else {
+                            self.record_discarded_result(
+                                expr,
+                                &ty,
+                                discard_calls_start,
+                                discard_diagnostics_start,
+                            );
+                        }
                     }
                     // An implicit fallible `Unit` call carries its success
                     // value in `Result<Unit, E>`. L0508 is about dropping
@@ -2480,6 +2615,13 @@ impl<'a> Checker<'a> {
                             ));
                         }
                         let borrowed = collection_root_name(collection);
+                        // A written drive (`loop x in &items`) holds the same
+                        // source for the whole body, so a change to it inside
+                        // the body is the same overlap as for a by-value drive.
+                        let driven = borrowed.clone().or_else(|| match &*collection {
+                            Expr::Place(inner, _, _) => collection_root_name(inner),
+                            _ => None,
+                        });
                         // A collection iterated by value is consumed: each
                         // step hands you the element itself. Match codegen's
                         // `by_value` predicate exactly — task-handle lists
@@ -2562,7 +2704,7 @@ impl<'a> Checker<'a> {
                             _ => None,
                         };
                         self.loop_depth += 1;
-                        if let Some(n) = borrowed.clone() {
+                        if let Some(n) = driven.clone() {
                             self.iter_borrowed.insert(n);
                         }
                         self.push_scope();
@@ -2745,7 +2887,7 @@ impl<'a> Checker<'a> {
                             self.lending_view_loop_vars.remove(name);
                         }
                         self.pop_scope();
-                        if let Some(n) = borrowed.clone() {
+                        if let Some(n) = driven {
                             self.iter_borrowed.remove(&n);
                         }
                         self.loop_depth -= 1;

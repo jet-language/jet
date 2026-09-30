@@ -1185,8 +1185,15 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
             TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),
-            // D-META-STAGE1=B: a module-level `@name :: expr` binding.
-            TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {
+            // D-PREP-SURFACE2=A: `NAME :: value` in a module body is a module
+            // constant, evaluated while building only when written
+            // `NAME :: prep { value }`; a retired `@NAME :: value` teaches
+            // E0388 and recovers as `NAME :: prep { value }`.
+            TokKind::Ident(ref n)
+                if n.starts_with(Syntax::RETIRED_COMPTIME_MARK)
+                    || (Syntax::is_constant_name(n)
+                        && matches!(self.peek2().kind, TokKind::ColonColon)) =>
+            {
                 self.comptime_def().map(Item::Const)
             }
             TokKind::Dollar => {

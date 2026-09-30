@@ -201,7 +201,7 @@ fn layout_info_for_struct(s: &StructDef, engine: &TargetLayoutEngine<'_>) -> CtV
 }
 
 /// Build the focused layout projection for a struct without exposing the
-/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.@layout`.
+/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
 pub fn build_struct_layout_info(s: &StructDef) -> CtValue {
     let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
     build_struct_layout_info_with_engine(s, &engine)
@@ -250,7 +250,7 @@ fn layout_info_for_enum(def: &EnumDef, engine: &TargetLayoutEngine<'_>) -> CtVal
 }
 
 /// Build the focused layout projection for an enum without exposing the
-/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.@layout`.
+/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
 pub fn build_enum_layout_info(def: &EnumDef) -> CtValue {
     let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
     build_enum_layout_info_with_engine(def, &engine)
@@ -759,7 +759,7 @@ pub fn build_registered_fact_info(name: &str) -> Option<CtValue> {
     let kind = registered_fact_kind(row.name)?;
     let value = fact_value(kind, row.name, std::iter::empty::<String>(), None, None);
     let path = if row.name == "Attribution" {
-        "report.@attribution".to_string()
+        "report.$attribution".to_string()
     } else {
         row.name.to_string()
     };
@@ -914,14 +914,14 @@ fn declared_function_facts(
         facts.push(fact_info(
             kind,
             name,
-            format!("{path}.@{name}"),
+            format!("{path}.${name}"),
             fact_value_with_detail(kind, name, std::iter::empty::<String>(), value, detail),
         ));
     }
     facts.push(fact_info(
         "Maturity",
         "maturity",
-        format!("{path}.@maturity"),
+        format!("{path}.$maturity"),
         fact_value_with_detail(
             "Maturity",
             "maturity",
@@ -942,7 +942,7 @@ fn declared_function_facts(
             facts.push(fact_info(
                 "ViewProvenance",
                 "view_provenance",
-                format!("{path}.@view_provenance.{slot_name}"),
+                format!("{path}.$view_provenance.{slot_name}"),
                 fact_value_with_detail(
                     "ViewProvenance",
                     "view_provenance",
@@ -961,7 +961,7 @@ fn declared_function_facts(
         facts.push(fact_info(
             "ViewProvenance",
             "view_provenance",
-            format!("{path}.@view_provenance.return"),
+            format!("{path}.$view_provenance.return"),
             fact_value_with_detail(
                 "ViewProvenance",
                 "view_provenance",
@@ -989,9 +989,9 @@ fn type_fact_rows(path: &str, ty: &Type) -> Vec<CtValue> {
             let kind = fact_kind_for(entry.plane, &entry.fact);
             let name = kind.to_ascii_lowercase();
             let suffix = if entry.path.is_empty() {
-                format!("@{name}")
+                format!("${name}")
             } else {
-                format!("{}.@{name}", entry.path.join("."))
+                format!("{}.${name}", entry.path.join("."))
             };
             fact_info(
                 kind,
@@ -1009,7 +1009,7 @@ fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
         facts.push(fact_info(
             "Range",
             "range",
-            format!("{}.@range", definition.name),
+            format!("{}.$range", definition.name),
             fact_value(
                 "Range",
                 "range",
@@ -1023,7 +1023,7 @@ fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
         facts.push(fact_info(
             "Dimension",
             "dimension",
-            format!("{}.@dimension", definition.name),
+            format!("{}.$dimension", definition.name),
             fact_value(
                 "Dimension",
                 "dimension",
@@ -1192,7 +1192,7 @@ fn marker_declaration_sites(declaration: &crate::AST::MarkerDecl) -> Vec<CtValue
     declaration
         .params
         .iter()
-        .find(|parameter| parameter.name == "@sites")
+        .find(|parameter| parameter.name == "$sites")
         .and_then(|parameter| parameter.value.as_deref())
         .and_then(|value| match value {
             Expr::ListLit(values, _) => Some(values.as_slice()),
@@ -1217,7 +1217,7 @@ fn marker_declaration_repeatable(declaration: &crate::AST::MarkerDecl) -> bool {
     declaration
         .params
         .iter()
-        .find(|parameter| parameter.name == "@repeatable")
+        .find(|parameter| parameter.name == "$repeatable")
         .and_then(|parameter| parameter.value.as_deref())
         .is_some_and(|value| matches!(value, Expr::Bool(true, _)))
 }
@@ -1488,7 +1488,7 @@ pub fn build_state_ref(owner: &str, state: &str) -> CtValue {
     )
 }
 
-/// Build the typed state values returned by `Type.@states`.
+/// Build the typed state values returned by `Type.$states`.
 pub fn build_state_refs(owner: &str, states: &[String]) -> CtValue {
     ct_list(
         states
@@ -1535,7 +1535,7 @@ pub fn build_state_infos_with_graph(
     )
 }
 
-/// Build the typed effect values returned by `fn.@effects`.
+/// Build the typed effect values returned by `fn.$effects`.
 pub fn build_effect_info(effects: &[String]) -> CtValue {
     ct_struct(
         "EffectInfo",
@@ -1771,7 +1771,7 @@ pub fn reflect_type_value_with_target_and_graph_and_facts(
                         if let Some((_, CtValue::List(facts))) =
                             fields.iter_mut().find(|(name, _)| name == "facts")
                         {
-                            let path = format!("{module}.{type_name}.@unit_scale_provenance");
+                            let path = format!("{module}.{type_name}.$unit_scale_provenance");
                             facts.push(fact_info(
                                 "UnitScaleProvenance",
                                 "unit_scale_provenance",
@@ -1878,7 +1878,7 @@ pub(crate) fn fact_read_value_with_registry(
         }
     }
     let is_build_subject =
-        matches!(subject.as_ref(), Expr::ComptimeName { name, .. } if name == "@build");
+        matches!(subject.as_ref(), Expr::ComptimeName { name, .. } if name == "$build");
     let read = if member == crate::Syntax::BUILD_INFO_PROFILE {
         if !is_build_subject {
             return None;
@@ -2142,7 +2142,7 @@ pub fn build_struct_type_info_with_path_and_vocabulary(
 }
 
 /// Build a struct reflection handle with the same target engine used by the
-/// focused `T.@layout` projection.
+/// focused `T.$layout` projection.
 pub fn build_struct_type_info_with_path_and_vocabulary_and_engine(
     s: &StructDef,
     states: &[String],

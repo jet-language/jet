@@ -143,14 +143,23 @@ pub(crate) fn layout_handle_renamed_to_layout(span: Span) -> Diagnostic {
 }
 
 /// D-ACRO-CASE1=A / D-ACRO-LEX1=A: a retired word-cased acronym spelling.
+/// When `span` covers exactly the written name, the edit replaces it with the
+/// canonical caps form; a span over a wider type expression gets no edit.
 pub(crate) fn retired_acronym_spelling_diag(old: &str, canonical: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
+    let diagnostic = Diagnostic::error(
         "E0358",
         format!("`{old}` is spelled `{canonical}`"),
         "Jet keeps acronyms fully capitalized inside PascalCase names (D-ACRO-CASE1=A, D-ACRO-LEX1=A)".to_string(),
         format!("write `{canonical}` instead of `{old}`"),
         Some(span),
-    )
+    );
+    if span.end.saturating_sub(span.start) != old.len() {
+        return diagnostic;
+    }
+    diagnostic.with_edit(crate::Diagnostics::TextEdit {
+        span,
+        new_text: canonical.to_string(),
+    })
 }
 
 pub(crate) fn is_io_error_type_name(name: &str) -> bool {
@@ -190,7 +199,7 @@ fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
         "NamingCase" => "write it only inside `#RenameAll(case: snake)`",
         "ObligationMode" => "write it only inside `#Unsafe(\"reason\", obligations: .Track)`",
         "PolicySetting" => "write it only inside `#Policy(gc)`, `#Policy(copies: .Explicit)`, or another registered non-memory policy",
-        "Site" => "write it only as `@sites: [...]` on a `marker` declaration",
+        "Site" => "write it only as `$sites: [...]` on a `marker` declaration",
         "State" => "write it only inside `#State(state: .Draft)` or `#Transition(from:, to:)`",
         "TaintKind" => "it has no live marker: its only user was the retired `#Tainted`, now `#Input`",
         "Target" => "write it only inside `#Target(target: Web)`",
@@ -4167,13 +4176,8 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("message".to_string(), Type::String),
             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
         ]),
-        "Instant" => Some(vec![("unix_ns".to_string(), Type::Int)]),
         "Duration" => Some(vec![("ns".to_string(), Type::Int)]),
         "Stopwatch" => Some(vec![("start_ns".to_string(), Type::Int)]),
-        "Clock" => Some(vec![
-            ("unix_ms".to_string(), Type::Int),
-            ("fake".to_string(), Type::Bool),
-        ]),
         "Period" => Some(vec![
             ("years".to_string(), Type::Int),
             ("months".to_string(), Type::Int),

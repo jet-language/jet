@@ -1,0 +1,13 @@
+// A taking call on a field moves that field out of its owner. The sibling
+// field stays usable; reading the taken field again is E0121.
+struct Buffer { text: String }
+struct Holder { buf: Buffer, tag: String }
+impl Buffer {
+    fn seal(^self) { print(self.text) }
+}
+fn run() {
+    holder :: Holder{buf: Buffer{text: "hello"}, tag: "kept"}
+    ^holder.buf.seal()
+    print(holder.tag)
+    print(holder.buf.text)
+}

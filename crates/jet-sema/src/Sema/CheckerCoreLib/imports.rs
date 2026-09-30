@@ -332,6 +332,7 @@ impl<'a> Checker<'a> {
             self.expected_type = saved;
             if let Some(aty) = aty {
                 let aty = self.widen_numeric_argument(&mut arg.expr, aty, pty, *pconv);
+                let aty = self.lift_optional_argument(&mut arg.expr, aty, pty, *pconv);
                 let arg_span = arg.expr.span();
                 if sig.is_pure
                     && crate::Sema::Diagnostics::is_clock_type(pty)
@@ -404,6 +405,21 @@ impl<'a> Checker<'a> {
             return self.infer_import_call_with_warning(
                 alias, real_idx, &real_name, alias_span, span, type_args, args, resolved_ret_out, false,
             );
+        }
+        // D-MOD-CYCLE1=A: an imported package is one namespace; the function
+        // may live in any of its files.
+        if !target.funcs.contains_key(&semantic_name) {
+            if let Some(owner) = self
+                .name_ledger
+                .namespace_siblings(mod_idx)
+                .into_iter()
+                .find(|&sibling| mods[sibling].funcs.contains_key(name))
+            {
+                return self.infer_import_call_with_warning(
+                    alias, owner, name, alias_span, span, type_args, args, resolved_ret_out,
+                    warn_soft_public,
+                );
+            }
         }
         if target.funcs.contains_key(&semantic_name) {
             let is_pub = self
@@ -732,6 +748,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(aty) = aty {
                     let aty = self.widen_numeric_argument(&mut arg.expr, aty, pty, *pconv);
+                    let aty = self.lift_optional_argument(&mut arg.expr, aty, pty, *pconv);
                     let span = arg.expr.span();
                     let loan_param_ty = match pty {
                         Type::Named(qualified) => qualified
@@ -744,9 +761,7 @@ impl<'a> Checker<'a> {
                                             "Secret" | "SigningKey" | "X25519SecretKey"
                                         )
                                     {
-                                        Some(crate::Sema::Diagnostics::core_crypto_nominal(
-                                            Type::Named(leaf.to_string()),
-                                        ))
+                                        Some(crate::Sema::Diagnostics::core_crypto_canonical_type(leaf))
                                     } else {
                                         None
                                     }

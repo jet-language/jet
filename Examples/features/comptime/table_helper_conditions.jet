@@ -1,0 +1,31 @@
+// D-MODULE-VALUE1: a literal `@` table may call a helper whose condition table
+// combines comparisons with a plain-return (`Bool Never!`) helper through `&&`
+// and `||`. The compile-time evaluator reads that helper's result as the same
+// `Bool` the compiled program branches on.
+fn one_of(value: String, choices: [String]) -> Bool Never! {
+    loop choice in choices {
+        if value == choice -> return true
+    }
+    false
+}
+
+fn leaf_for(module_name: String, member: String) -> String? {
+    if {
+        module_name == "core.time" && one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
+        (module_name == "core.http" && one_of(member, [String]{"get", "post"})) || module_name == "core.net" -> Val("Net")
+        module_name == "core.files" && member == "scope" -> Val("FS.Read")
+        else -> None
+    }
+}
+
+LEAVES :: prep { [String]{
+    leaf_for("core.time", "sleep") ?? "none",
+    leaf_for("core.time", "now") ?? "none",
+    leaf_for("core.http", "post") ?? "none",
+    leaf_for("core.net", "dial") ?? "none",
+    leaf_for("core.files", "scope") ?? "none"
+} }
+
+fn run() {
+    loop leaf in LEAVES -> print(leaf)
+}

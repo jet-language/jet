@@ -762,4 +762,106 @@ impl<'a> Parser<'a> {
             span: Span::new(start, end),
         })
     }
+
+    /// D-PAT-NAMED-NEST1=A: in a condition, where `{` usually opens the body,
+    /// `.Case{` starts named payload entries only when its first entry reads
+    /// as one: `..`, `field:`, `field,`, or a lone `field}` directly followed
+    /// by the body (`{` or `->`). No block starts with those tokens.
+    pub(super) fn named_pattern_brace_ahead(&self) -> bool {
+        let kind = |offset: usize| self.toks.get(self.pos + offset).map(|t| &t.kind);
+        if !matches!(kind(0), Some(TokKind::LBrace)) {
+            return false;
+        }
+        match kind(1) {
+            Some(TokKind::DotDot) => true,
+            Some(TokKind::Ident(name)) if name != Syntax::PAT_WILDCARD_SLOT => match kind(2) {
+                Some(TokKind::Colon | TokKind::Comma) => true,
+                Some(TokKind::RBrace) => matches!(
+                    kind(3),
+                    Some(TokKind::LBrace | TokKind::UnifiedArrow | TokKind::LambdaArrow)
+                ),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// D-PAT-NAMED-NEST1=A: the brace body of `.Case{field: pat, field, ..}`.
+    /// Each entry is `field: slot` or the shorthand `field` (binds `field`);
+    /// an optional `..` ends the list. Sema maps the entries onto the case's
+    /// positional payload slots. Returns the slots and the closing `}` end.
+    pub(super) fn named_pattern_slots(
+        &mut self,
+        variant: &str,
+    ) -> Result<(Vec<crate::AST::PatSlot>, usize), Diagnostic> {
+        use crate::AST::PatSlot;
+        self.expect(TokKind::LBrace, "to open a named-field pattern")?;
+        let mut slots = Vec::new();
+        loop {
+            self.skip_named_pattern_line_breaks();
+            if matches!(self.peek().kind, TokKind::RBrace) {
+                break;
+            }
+            if matches!(self.peek().kind, TokKind::DotDot) {
+                let rest = self.bump().span;
+                self.skip_named_pattern_line_breaks();
+                if !matches!(self.peek().kind, TokKind::RBrace) {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "`..` must be the last entry of a named-field pattern".to_string(),
+                        "`..` stands for every field the pattern does not name".to_string(),
+                        format!("move `..` to the end: `.{variant}{{field: pattern, ..}}`"),
+                        Some(rest),
+                    ));
+                }
+                slots.push(PatSlot::Rest(rest));
+                break;
+            }
+            let field = match &self.peek().kind {
+                TokKind::Ident(name) if name != Syntax::PAT_WILDCARD_SLOT => name.clone(),
+                _ => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("`.{variant}{{…}}` mixes a positional entry with field names"),
+                        "a named-field pattern labels every entry; one pattern uses one form"
+                            .to_string(),
+                        format!(
+                            "write `field: pattern` for this entry, or match by position with `.{variant}(…)`"
+                        ),
+                        Some(self.peek().span),
+                    ));
+                }
+            };
+            let field_span = self.bump().span;
+            let slot = if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                self.pattern_slot()?
+            } else {
+                PatSlot::Bind {
+                    name: field.clone(),
+                    span: field_span,
+                }
+            };
+            slots.push(PatSlot::Named {
+                field,
+                field_span,
+                slot: Box::new(slot),
+            });
+            self.skip_named_pattern_line_breaks();
+            if !matches!(self.peek().kind, TokKind::Comma) {
+                break;
+            }
+            self.bump();
+        }
+        self.expect(TokKind::RBrace, "after named-field pattern entries")?;
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok((slots, end))
+    }
+
+    /// Line breaks inside a multi-line named-field pattern lex as `;`.
+    fn skip_named_pattern_line_breaks(&mut self) {
+        while matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+    }
 }

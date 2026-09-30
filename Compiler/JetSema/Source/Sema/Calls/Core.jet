@@ -25,7 +25,7 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, alias: String
     module_name := imported.module_name
     target_index :: sema_registration_module_index(graph, imported.module_name)
     if target_index != None {
-        index :: target_index ?? return None
+        index :: target_index
         module_name = graph.modules[index].module_name
     }
     if !sema_core_import_is_core(module_name) -> return None
@@ -142,7 +142,7 @@ fn sema_call_core_projection_error(module_name: String, member: String, error: C
 pub fn sema_call_core_record(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     typed_signature :: core_call_typed_signature(module_name, member, actual_arity)
     if typed_signature != None -> return core_call(module_name, member)
-    projection :: core_call_projection(module_name, member, @CORE_CALL_COVERAGE_SEMA, actual_arity)
+    projection :: core_call_projection(module_name, member, CORE_CALL_COVERAGE_SEMA, actual_arity)
     if projection == {
         .Row(record) -> return Val(record)
         .Error(error) -> {
@@ -166,7 +166,7 @@ pub fn sema_call_core_typed_signature(record: CoreCallRecord, actual_arity: Int,
 pub fn sema_call_core_receiver_record(receiver_type: Type, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     receiver_name := sema_expr_type_base_name(receiver_type) ?? type_name(receiver_type)
     record :: core_receiver_method(receiver_name, member) ?? return None
-    if !core_call_coverage_contains(record.coverage, @CORE_CALL_COVERAGE_SEMA) {
+    if !core_call_coverage_contains(record.coverage, CORE_CALL_COVERAGE_SEMA) {
         &diagnostics.push(sema_error("E0904", span, "`{receiver_name}.{member}` has no source semantic call contract", "the registered Core receiver row is not covered by this semantic projection", "use a receiver operation with SEMA coverage"))
         return None
     }
@@ -479,8 +479,8 @@ fn sema_call_core_result_type(signature: CoreTypedCallSignature, type_args: [Typ
 // The fixed path starts from the canonical Source contract. Specialized native
 // polymorphic bodies remain ahead of this entry point when no fixed row exists.
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    canonical_record :: sema_call_core_record(record.module_name, record.member, args.len(), span, diagnostics) ?? return None
-    if !core_call_coverage_contains(canonical_record.coverage, @CORE_CALL_COVERAGE_SEMA) {
+    canonical_record :: sema_call_core_record(record.module_name, record.member, args.len(), span, &diagnostics) ?? return None
+    if !core_call_coverage_contains(canonical_record.coverage, CORE_CALL_COVERAGE_SEMA) {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no source semantic call contract", "only SEMA-authorized Core records enter fixed-call checking", "use a SEMA-covered Core call"))
         return None
     }
@@ -489,7 +489,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no fixed source typed call contract", "fixed Core checking consumes only a complete Source signature", "use the source-owned special checker for a polymorphic Core operation without a fixed row"))
         return None
     }
-    if !sema_call_core_check_type_args(canonical_record.module_name, canonical_record.member, signature.type_parameters.len(), true, type_args, span, diagnostics) -> return None
+    if !sema_call_core_check_type_args(canonical_record.module_name, canonical_record.member, signature.type_parameters.len(), true, type_args, span, &diagnostics) -> return None
     source_args := [CallArg]{}
     local_args := [CallArg]{}
     loop argument in args {
@@ -497,9 +497,9 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         &local_args.push(argument)
     }
     shape_params := sema_call_core_parameter_records(signature, [Type]{}, span, false)
-    binding :: sema_call_bind_args("{canonical_record.module_name}.{canonical_record.member}", shape_params, &local_args, span, diagnostics) ?? return None
-    resolved_type_args :: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, environment, &scopes, &state, &tail_store, &context, diagnostics) ?? return None
-    if !sema_call_core_check_type_constraints(signature, resolved_type_args, args, span, environment, diagnostics) -> return None
+    binding :: sema_call_bind_args("{canonical_record.module_name}.{canonical_record.member}", shape_params, &local_args, span, &diagnostics) ?? return None
+    resolved_type_args :: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_call_core_check_type_constraints(signature, resolved_type_args, args, span, environment, &diagnostics) -> return None
     params := sema_call_core_parameter_records(signature, resolved_type_args, span, type_args.len() == 0)
     checked_args :: sema_call_check_bound_arguments_owned(&state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, &local_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     values :: loop argument in checked_args -> argument.value
@@ -508,8 +508,8 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         return None
     }
     fallibility := sema_call_failure_carrier(Val(result_type))
-    if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, diagnostics) -> return None
-    value :: sema_call_core_tir(canonical_record, values, span, resolved_type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, diagnostics) ?? return None
+    if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
+    value :: sema_call_core_tir(canonical_record, values, span, resolved_type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
     sema_expression_call_expected(value, expected, environment, context, &diagnostics)
 }
 
@@ -521,10 +521,10 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
         .None -> {}
     }
-    route :: sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, true, args.len(), span, diagnostics) ?? return None
+    route :: sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, true, args.len(), span, &diagnostics) ?? return None
     if route == {
-        .Source(target) -> return sema_call_core_check_source_owned(target, "{module_name}.{member}", type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, diagnostics)
-        .Core(record) -> return sema_call_core_check_fixed_record(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, diagnostics)
+        .Source(target) -> return sema_call_core_check_source_owned(target, "{module_name}.{member}", type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Core(record) -> return sema_call_core_check_fixed_record(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     None
 }

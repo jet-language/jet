@@ -575,6 +575,57 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The project owns `.jet/build`, so web dev staging and publication anchor at
+/// the project root: `jet dev --target=web` run from a repository
+/// subdirectory publishes to `<repo>/.jet/build` and serves it.
+#[test]
+fn jet_dev_web_publishes_from_a_repository_subdirectory() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping jet_dev_web_publishes_from_a_repository_subdirectory (need rustc)");
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!("jet_dev_web_subdir_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let app = root.join("app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("app.jet"), "fn run() {\n    print(\"hello web\")\n}\n").unwrap();
+    let port = unused_local_port();
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet", "--target=web", &format!("--port={port}")])
+        .current_dir(&app)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start `jet dev --target=web`");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+
+    assert_eq!(wait_for_app_preview(stdout), port);
+    let (status, body) = http_get(port, "/app.js").expect("GET /app.js failed");
+    assert_eq!(status, 200);
+    let trailer: &[u8] = b"//# sourceMappingURL=app.js.map\n";
+    let published =
+        fs::read(root.join(".jet/build/app.js")).expect("app.js published at the project root");
+    assert_eq!(
+        published.strip_suffix(trailer).unwrap_or(&published),
+        body.strip_suffix(trailer).unwrap_or(&body),
+        "served app.js must be the bundle published under the project root"
+    );
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn tanstack_start_dev_reference_loop_recovers_last_good_browser_state() {
     if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") {
@@ -1158,6 +1209,121 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
         );
     }
 
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #3782: the first save after `ready` must rebuild (the watcher baseline is
+/// taken before the first build, not after the server reports ready); a
+/// pending invalid edit reports its candidate revision next to the accepted
+/// one on `/__jet_dev_status`; and `jet dev --json` emits a `jet.status/v1`
+/// record with `jet.report/v3` diagnostics for every watch-cycle build.
+#[test]
+fn jet_dev_web_first_save_after_ready_rebuilds_with_revision_facts() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping jet_dev_web_first_save_after_ready_rebuilds_with_revision_facts (need rustc)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_dev_web_first_save_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src_path = dir.join("app.jet");
+    fs::write(&src_path, FIXTURE_SRC).unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet", "--target=web", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start `jet dev --target=web --json`");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let (line_tx, line_rx) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if line_tx.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let next_line = |needle: &str, timeout: Duration| -> String {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match line_rx.recv_timeout(remaining) {
+                Ok(line) if line.contains(needle) => return line,
+                Ok(_) => {}
+                Err(_) => panic!("jet dev stdout never carried {needle:?} within {timeout:?}"),
+            }
+        }
+    };
+    let preview = next_line("App preview: ", Duration::from_secs(120));
+    let port = port_from_url_line(&preview, "App preview: ").expect("app preview port");
+    forget_canvas_session(port);
+
+    // Save in place (truncate + write) the moment the server is ready.
+    fs::write(&src_path, FIXTURE_SRC_EDITED).unwrap();
+    let accepted = wait_for_version_change(port, "1", Duration::from_secs(60));
+    assert_eq!(accepted, "2", "the first save after ready was not rebuilt");
+    let rebuilt = next_line("\"action\":\"dev.rebuild\"", Duration::from_secs(10));
+    assert!(rebuilt.starts_with("{\"schema\":\"jet.status/v1\""), "{rebuilt}");
+    assert!(rebuilt.contains("\"ok\":true,\"reports\":[]"), "{rebuilt}");
+    assert!(rebuilt.contains("\"candidate\":null"), "{rebuilt}");
+    assert!(rebuilt.contains("\"accepted_revision\":2"), "{rebuilt}");
+
+    // An atomic invalid save is rejected: the served revision stays 2 and the
+    // diagnostic names the rejected candidate 3 on both surfaces.
+    let broken = FIXTURE_SRC_EDITED.replace("print(size.height)", "print(size.height +)");
+    let staged = dir.join("app.jet.tmp");
+    fs::write(&staged, broken).unwrap();
+    fs::rename(&staged, &src_path).unwrap();
+    let error = wait_for_status(port, "tab-a", "error", Duration::from_secs(60));
+    for fact in [
+        "\"version\":2,",
+        "\"code\":\"E0003\"",
+        "\"candidate\":3,",
+        "\"diagnostic_revision\":3,",
+        "\"accepted_revision\":2,",
+        "\"last_good_revision\":2}",
+    ] {
+        assert!(error.contains(fact), "dev status missing {fact}: {error}");
+    }
+    let rejected = next_line("\"action\":\"dev.rebuild\"", Duration::from_secs(10));
+    for fact in [
+        "\"ok\":false",
+        "\"schema\":\"jet.report/v3\"",
+        "E0003",
+        "\"candidate\":3",
+        "\"diagnostic_revision\":3",
+        "\"accepted_revision\":2",
+        "\"last_good_revision\":2",
+    ] {
+        assert!(rejected.contains(fact), "watch-cycle record missing {fact}: {rejected}");
+    }
+
+    // Recovery publishes exactly the rejected candidate.
+    fs::write(&src_path, FIXTURE_SRC).unwrap();
+    let recovered = wait_for_version_change(port, "2", Duration::from_secs(60));
+    assert_eq!(recovered, "3");
+    let ready = wait_for_status(port, "tab-a", "ready", Duration::from_secs(10));
+    assert!(ready.contains("\"diagnostic_revision\":null,"), "{ready}");
+    assert!(ready.contains("\"accepted_revision\":3,"), "{ready}");
+
+    drop(guard);
     let _ = fs::remove_dir_all(&dir);
 }
 

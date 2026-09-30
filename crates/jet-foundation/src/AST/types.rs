@@ -1,6 +1,11 @@
 use crate::Diagnostics::Span;
 use crate::AST::Expr;
 
+/// The canonical nominal of the source-owned `core.compute` Tensor
+/// declaration (`Core/compute/compute.jet`).
+pub const CORE_COMPUTE_TENSOR_IDENTITY: &str =
+    "<corelib>/Core/compute::Core/compute/compute.jet::Tensor";
+
 /// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
 ///
 /// Keys are nominal base-dimension identities. Entries stay sorted and zero
@@ -1201,6 +1206,29 @@ fn effect_names(row: &[(String, Span)]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+/// A callable type's surface spelling: `fn(T) -> U`, `fn(T) -[E]> U`, and
+/// the unit-fallible `fn(T) IOError!` with no arrow before its contract.
+fn fn_type_surface(
+    mut signature: String,
+    ret: Option<&Type>,
+    effect_bound: Option<&[(String, Span)]>,
+) -> String {
+    let ret = ret.filter(|ty| !is_unit_callable_return(ty));
+    let unit_fallible =
+        ret.is_some_and(|ty| matches!(ty, Type::Result { ok, .. } if is_unit_type(ok)));
+    if let Some(row) = effect_bound {
+        signature.push_str(" -[");
+        signature.push_str(&effect_names(row));
+        signature.push_str("]>");
+    } else if ret.is_some() && !unit_fallible {
+        signature.push_str(" ->");
+    }
+    if let Some(ret) = ret {
+        signature.push(' ');
+        signature.push_str(&ret.name());
+    }
+    signature
+}
 fn is_unit_type(ty: &Type) -> bool {
     matches!(
         ty,
@@ -2073,10 +2101,13 @@ impl Type {
     /// Compute values all share the `JetTensor` storage substrate. An erased
     /// `Tensor` is compatible with a shaped alias; two shaped aliases still
     /// require exact equality, so `Vec<3>` cannot silently become `Vec<4>`.
+    /// D-COMPUTE-TYPE1: the source-owned `core.compute` declaration is the one
+    /// Tensor owner, so its canonical nominal is the same family as the
+    /// `Tensor` spelling.
     pub fn is_compute_tensor_family(&self) -> bool {
         match self {
             Type::Tagged { inner, .. } => inner.is_compute_tensor_family(),
-            Type::Named(name) => name == "Tensor",
+            Type::Named(name) => name == "Tensor" || name == CORE_COMPUTE_TENSOR_IDENTITY,
             Type::Apply { name, args } if name == "Tensor" => args.len() <= 1,
             Type::Apply { name, args } if matches!(name.as_str(), "Vec" | "Matrix") => {
                 let expected = if name == "Vec" { 1 } else { 2 };
@@ -2254,19 +2285,7 @@ impl Type {
                 ..
             } => {
                 let ps = fn_param_names(params, param_contract.as_deref());
-                let mut signature = format!("fn({ps})");
-                if let Some(r) = ret {
-                    if !is_unit_callable_return(r) {
-                        signature.push(' ');
-                        signature.push_str(&r.name());
-                    }
-                }
-                if let Some(row) = effect_bound {
-                    signature.push_str(" -[");
-                    signature.push_str(&effect_names(row));
-                    signature.push_str("]>");
-                }
-                signature
+                fn_type_surface(format!("fn({ps})"), ret.as_deref(), effect_bound.as_deref())
             }
             Type::Named(n) if n == crate::Syntax::TYPE_DECIMAL => {
                 "Decimal (an exact base-10 number)".to_string()
@@ -2359,19 +2378,7 @@ impl Type {
                 ..
             } => {
                 let ps = fn_param_names(params, param_contract.as_deref());
-                let mut signature = format!("fn({ps})");
-                if let Some(r) = ret {
-                    if !is_unit_callable_return(r) {
-                        signature.push(' ');
-                        signature.push_str(&r.name());
-                    }
-                }
-                if let Some(row) = effect_bound {
-                    signature.push_str(" -[");
-                    signature.push_str(&effect_names(row));
-                    signature.push_str("]>");
-                }
-                signature
+                fn_type_surface(format!("fn({ps})"), ret.as_deref(), effect_bound.as_deref())
             }
             Type::Named(n) => n.clone(),
             Type::Measure(measure) => measure.expression(),
@@ -2695,9 +2702,9 @@ mod tests {
         };
 
         assert_ne!(bare, labelled);
-        assert_eq!(bare.name(), "fn(Bool) Int");
-        assert_eq!(labelled.name(), "fn(*, force: Bool) Int");
-        assert_eq!(labelled.show(), "fn(*, force: Bool) Int");
+        assert_eq!(bare.name(), "fn(Bool) -> Int");
+        assert_eq!(labelled.name(), "fn(*, force: Bool) -> Int");
+        assert_eq!(labelled.show(), "fn(*, force: Bool) -> Int");
         assert_eq!(Type::Named("dep.Point".to_string()).leaf_name(), "Point");
         assert_eq!(
             Type::Apply {
@@ -2745,7 +2752,7 @@ mod tests {
         };
         assert_eq!(
             callback.name(),
-            "fn(Int? (DbError | TimeoutError)!) IOError! -[]>"
+            "fn(Int? (DbError | TimeoutError)!) -[]> IOError!"
         );
     }
 

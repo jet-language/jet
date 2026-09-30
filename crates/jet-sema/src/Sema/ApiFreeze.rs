@@ -842,7 +842,7 @@ fn collect_pub_fns(
 /// The API cache directory for a project (`<root>/.jet/cache/api/`), honouring the
 /// `JET_API_CACHE_DIR` test override (mirrors the schema cache override).
 pub fn api_cache_dir(project_root: &Path) -> PathBuf {
-    if let Ok(override_dir) = std::env::var("JET_API_CACHE_DIR") {
+    if let Some(override_dir) = jet_foundation::CheckReads::env_var("JET_API_CACHE_DIR") {
         PathBuf::from(override_dir)
     } else {
         project_root
@@ -854,7 +854,7 @@ pub fn api_cache_dir(project_root: &Path) -> PathBuf {
 /// Load a package's frozen-API snapshot from disk, or `None` if no prior freeze.
 pub fn load_snapshot(project_root: &Path, package: &str) -> Option<ApiSnapshot> {
     let path = api_cache_dir(project_root).join(format!("{}.api", package));
-    let raw = std::fs::read_to_string(&path).ok()?;
+    let raw = jet_foundation::CheckReads::read_to_string(&path).ok()?;
     ApiSnapshot::parse(&raw).ok()
 }
 
@@ -871,13 +871,12 @@ pub fn save_snapshot(project_root: &Path, snap: &ApiSnapshot) -> Result<(), Stri
 pub fn load_all_snapshots(project_root: &Path) -> Vec<ApiSnapshot> {
     let dir = api_cache_dir(project_root);
     let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let path = e.path();
+    if let Ok(entries) = jet_foundation::CheckReads::read_dir_sorted(&dir) {
+        for path in entries {
             if path.extension().and_then(|x| x.to_str()) != Some("api") {
                 continue;
             }
-            if let Ok(raw) = std::fs::read_to_string(&path) {
+            if let Ok(raw) = jet_foundation::CheckReads::read_to_string(&path) {
                 if let Ok(snap) = ApiSnapshot::parse(&raw) {
                     out.push(snap);
                 }

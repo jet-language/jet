@@ -1,0 +1,11 @@
+// A diagnostic inside a string interpolation nested in another interpolation
+// points at the nested expression's own line, not at an earlier line.
+struct Loc { line: Int }
+
+fn show(location: Loc?) -> String {
+    "{if location == None -> "None" else -> "{(location ?? Loc{line: 0}).line}"}"
+}
+
+fn run() {
+    print(show(Val(Loc{line: 3})))
+}

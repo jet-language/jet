@@ -143,7 +143,7 @@ fn jet_rust_emit_prelude_symbol(ctx: &JetRustEmitContext, id: MirPreludeCallId) 
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude route is missing from the program registry", "every checked operation route must carry one canonical Prelude row", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude route is missing from the program registry", "every checked operation route must carry one canonical Prelude row", None)
     "__jet_missing_prelude_{id.value}"
 }
 
@@ -151,7 +151,7 @@ fn jet_rust_emit_source_path(ctx: &JetRustEmitContext, id: MirSourceFileId) -> S
     loop row in ctx.program.source_files {
         if row.id == id -> return jet_rust_emit_quote(row.path)
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR panic location names a missing source file", "source spans must resolve to immutable source-file rows before emission", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR panic location names a missing source file", "source spans must resolve to immutable source-file rows before emission", None)
     "\"<missing-source>\""
 }
 
@@ -479,16 +479,16 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MirTy
                     }
                 }
             }
-            mapped :: loop item in nested -> jet_rust_emit_partial_substitute_type(ctx, item, parameters, arguments)
-            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Apply{name: name, args: mapped}))
+            mapped :: loop item in nested -> jet_rust_emit_partial_substitute_type(&ctx, item, parameters, arguments)
+            jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Apply{name: name, args: mapped}))
         }
-        .List(inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.List{inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
-        .Map(key, value) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Map{key: jet_rust_emit_partial_substitute_type(ctx, key, parameters, arguments), value: jet_rust_emit_partial_substitute_type(ctx, value, parameters, arguments)}))
-        .Shared(inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Shared{inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
-        .Option(inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Option{inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
-        .Result(ok, err) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Result{ok: jet_rust_emit_partial_substitute_type(ctx, ok, parameters, arguments), err: jet_rust_emit_partial_substitute_type(ctx, err, parameters, arguments)}))
+        .List(inner) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.List{inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
+        .Map(key, value) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Map{key: jet_rust_emit_partial_substitute_type(ctx, key, parameters, arguments), value: jet_rust_emit_partial_substitute_type(ctx, value, parameters, arguments)}))
+        .Shared(inner) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Shared{inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
+        .Option(inner) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Option{inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
+        .Result(ok, err) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Result{ok: jet_rust_emit_partial_substitute_type(ctx, ok, parameters, arguments), err: jet_rust_emit_partial_substitute_type(ctx, err, parameters, arguments)}))
         .Fn(signature) -> {
-            mapped_params :: loop parameter in signature.params -> jet_rust_emit_partial_substitute_type(ctx, parameter, parameters, arguments)
+            mapped_params :: loop parameter in signature.params -> jet_rust_emit_partial_substitute_type(&ctx, parameter, parameters, arguments)
             mapped_ret :: if signature.ret == .Val(ret_ty) -> Val(jet_rust_emit_partial_substitute_type(ctx, ret_ty, parameters, arguments)) else -> None
             mapped_signature :: MirFunctionSignature{
                 params: mapped_params,
@@ -498,25 +498,25 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MirTy
                 call_metadata: signature.call_metadata,
                 return_view_provenance: signature.return_view_provenance,
             }
-            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Fn{signature: mapped_signature}))
+            jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Fn{signature: mapped_signature}))
         }
         .SendFn(params, ret, conventions) -> {
-            mapped_params :: loop parameter in params -> jet_rust_emit_partial_substitute_type(ctx, parameter, parameters, arguments)
+            mapped_params :: loop parameter in params -> jet_rust_emit_partial_substitute_type(&ctx, parameter, parameters, arguments)
             mapped_ret :: if ret == .Val(ret_ty) -> Val(jet_rust_emit_partial_substitute_type(ctx, ret_ty, parameters, arguments)) else -> None
-            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.SendFn{params: mapped_params, ret: mapped_ret, conventions: conventions}))
+            jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.SendFn{params: mapped_params, ret: mapped_ret, conventions: conventions}))
         }
         .Tuple(fields) -> {
             mapped_fields :: loop field in fields -> MirTupleField{name: field.name, ty: jet_rust_emit_partial_substitute_type(ctx, field.ty, parameters, arguments)}
-            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Tuple{fields: mapped_fields}))
+            jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Tuple{fields: mapped_fields}))
         }
-        .FixedList(elem, len) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.FixedList{elem: jet_rust_emit_partial_substitute_type(ctx, elem, parameters, arguments), len: len}))
-        .InlineRange(base, lo, hi) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.InlineRange{base: jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), lo: lo, hi: hi}))
-        .Tagged(marker, inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Tagged{marker: marker, inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
+        .FixedList(elem, len) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.FixedList{elem: jet_rust_emit_partial_substitute_type(ctx, elem, parameters, arguments), len: len}))
+        .InlineRange(base, lo, hi) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.InlineRange{base: jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), lo: lo, hi: hi}))
+        .Tagged(marker, inner) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Tagged{marker: marker, inner: jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments)}))
         .Union(members) -> {
-            mapped :: loop member in members -> jet_rust_emit_partial_substitute_type(ctx, member, parameters, arguments)
-            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Union{members: mapped}))
+            mapped :: loop member in members -> jet_rust_emit_partial_substitute_type(&ctx, member, parameters, arguments)
+            jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Union{members: mapped}))
         }
-        .Quantity(base, dimension) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Quantity{base: jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), dimension: dimension}))
+        .Quantity(base, dimension) -> jet_rust_emit_partial_type_instance(&ctx, mir_type_from_kind(MirTypeKind.Quantity{base: jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), dimension: dimension}))
         else -> source
     }
 }
@@ -524,7 +524,7 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MirTy
 fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, field: MirField) -> String Never! {
     parent := jet_rust_emit_partial_node_type(function, base, prefix)
     if parent == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR partial storage owner type is missing", "every checked projected move must retain the parent place type needed to preserve its canonical field layout", Val(field.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR partial storage owner type is missing", "every checked projected move must retain the parent place type needed to preserve its canonical field layout", Val(field.span))
         return jet_rust_emit_type(ctx, field.ty)
     }
     parent_type := parent ?? field.ty
@@ -547,7 +547,7 @@ fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MirFunct
             .Apply(name, args) -> {
                 if name.id == owner || parent_type.identity == (Val(owner)) {
                     if args.len() != generic_params.len() {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR partial storage owner has incomplete type arguments", "projected field slots must use the same checked generic instantiation as their parent aggregate", Val(field.span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR partial storage owner has incomplete type arguments", "projected field slots must use the same checked generic instantiation as their parent aggregate", Val(field.span))
                         return jet_rust_emit_type(ctx, field.ty)
                     }
                     specialized :: jet_rust_emit_partial_substitute_type(ctx, field.ty, generic_params, args)
@@ -557,7 +557,7 @@ fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MirFunct
             else -> {}
         }
     }
-    jet_rust_emit_type(ctx, field.ty)
+    jet_rust_emit_type(&ctx, field.ty)
 }
 
 fn jet_rust_emit_partial_field_reference(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, fields: [MirFieldId], mutable: Bool) -> String Never! {
@@ -666,7 +666,7 @@ fn jet_rust_emit_partial_restore(ctx: &JetRustEmitContext, function: MirFunction
         slot :: jet_rust_emit_partial_field_slot(base, child_prefix)
         value := "{slot}.take().expect(\"MIR initialized field\")"
         if {
-            jet_rust_emit_partial_type_is_tuple(ctx, owner) -> {
+            jet_rust_emit_partial_type_is_tuple(&ctx, owner) -> {
             &values.push(value)
             }
             else -> {
@@ -694,7 +694,7 @@ fn jet_rust_emit_partial_write(ctx: &JetRustEmitContext, function: MirFunction, 
     if {
         fields.len() == 1 -> {
         nested_owner := jet_rust_emit_partial_node_owner(ctx, function, base, child_prefix)
-        clear := if nested_owner != None -> jet_rust_emit_partial_clear(ctx, function, base, child_prefix, nested_owner ?? MirTypeId{value: 0}) else -> ""
+        clear := if nested_owner != None -> jet_rust_emit_partial_clear(&ctx, function, base, child_prefix, nested_owner ?? MirTypeId{value: 0}) else -> ""
         partial = "{clear}{slot} = Some(__jet_replacement);"
         }
         else -> {
@@ -817,7 +817,7 @@ fn jet_rust_emit_partial_drop_value(ctx: &JetRustEmitContext, function: MirFunct
 
 fn jet_rust_emit_partial_owner(ctx: &JetRustEmitContext, field: MirFieldId) -> MirTypeId? {
     loop row in ctx.program.fields { if row.id == field -> return Val(row.owner) }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR partial move field is missing from the program registry", "field projections must retain their owner identity for split storage", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR partial move field is missing from the program registry", "field projections must retain their owner identity for split storage", None)
     None
 }
 
@@ -892,7 +892,7 @@ fn jet_rust_emit_place(ctx: &JetRustEmitContext, function: MirFunction, id: MirP
     loop place in function.places {
         if place.id == id -> return jet_rust_emit_place_base(ctx, function, place.base, mutable, place.projections)
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR place identity is missing from its function", "all read/write/move place operations must resolve to one checked place row", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR place identity is missing from its function", "all read/write/move place operations must resolve to one checked place row", None)
     "__jet_missing_place_{id.value}"
 }
 
@@ -946,7 +946,7 @@ fn jet_rust_emit_partial_fields(ctx: &JetRustEmitContext, owner: MirTypeId) -> [
 // Partial split, restore, move, write, and drop helpers above use the same path-qualified storage tree.
 
 fn jet_rust_emit_place_lvalue(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId) -> String Never! {
-    jet_rust_emit_place(ctx, function, id, true)
+    jet_rust_emit_place(&ctx, function, id, true)
 }
 
 fn jet_rust_emit_place_write(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId, value: String) -> String Never! {
@@ -999,7 +999,7 @@ fn jet_rust_emit_place_write(ctx: &JetRustEmitContext, function: MirFunction, id
             return "{jet_rust_emit_place_lvalue(ctx, function, id)} = {value}"
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR place write identity is missing from its function", "checked place writes require a complete place row", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR place write identity is missing from its function", "checked place writes require a complete place row", None)
     "()"
 }
 
@@ -1008,7 +1008,7 @@ fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MirFunction, id:
         if place.id == id {
             if place.projections.len() != 0 {
                 if jet_rust_emit_partial_move(ctx, function, id) == .Val(partial) -> return partial
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "projected MIR move lacks a source ownership projection", "checked projected moves require a canonical partial-move plan", Val(place.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "projected MIR move lacks a source ownership projection", "checked projected moves require a canonical partial-move plan", Val(place.span))
                 return "unreachable!(\"unsupported projected MIR move\")"
             }
             if jet_rust_emit_partial_root_has(function, place.base) {
@@ -1027,12 +1027,12 @@ fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MirFunction, id:
                 .Parameter(binding) -> return jet_rust_emit_value_move(binding)
                 .Capture(binding) -> return jet_rust_emit_value_move(binding)
                 .Static(_) -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "checked MIR rejected a static move", "static places may only be read or written through their declared storage protocol", Val(place.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "checked MIR rejected a static move", "static places may only be read or written through their declared storage protocol", Val(place.span))
                     return "unreachable!(\"unsupported static move\")"
                 }
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR move place identity is missing from its function", "checked move operations require a complete place row", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR move place identity is missing from its function", "checked move operations require a complete place row", None)
     "unreachable!(\"missing MIR move place\")"
 }

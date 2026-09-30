@@ -42,10 +42,31 @@ fn jet_ring_csv_render(rows: &Vec<Vec<String>>) -> String {
     jet_csv_kernel::render(rows)
 }
 
-// D-SHAPE-CTORVERB1=C: generic TTL uses ExpiringValue.new.
-fn jet_expiring_new<T: Clone>(value: T, ttl_ms: i64, clock_now: i64) -> JetExpiring<T> {
-    JetExpiring::new(value, clock_now.saturating_add(ttl_ms))
+// D-SHAPE-CTORVERB1=C: generic TTL uses ExpiringValue.new. The checked MIR
+// route passes the TTL and the Clock by reference.
+fn jet_expiring_new<T: Clone>(
+    value: T,
+    ttl: &jet_std::Duration,
+    clock: &jet_std::Clock,
+) -> JetExpiring<T> {
+    JetExpiring::new(value, clock.now().saturating_add(ttl.as_millis()))
 }
-fn jet_expiring_get<T: Clone>(exp: &JetExpiring<T>, now_ms: i64) -> Result<T, JetExpired> {
-    exp.get(now_ms)
+fn jet_expiring_get<T: Clone>(exp: &JetExpiring<T>, clock: &jet_std::Clock) -> Result<T, JetExpired> {
+    exp.get(clock.now())
+}
+// D-TTLVAL1=A: the secret wrapper observes the caller's Clock, so later ticks
+// on that clock expire it.
+fn jet_expiring_secret_new<T>(
+    value: T,
+    ttl: &jet_std::Duration,
+    clock: &jet_std::Clock,
+) -> JetExpiringSecret<T> {
+    let observer = clock.observer();
+    JetExpiringSecret::new(value, ttl.as_millis(), move || observer.now())
+}
+fn jet_expiring_secret_with<T, F, R>(exp: &JetExpiringSecret<T>, callback: F) -> Result<R, JetExpired>
+where
+    F: FnOnce(&T) -> R,
+{
+    exp.with(callback)
 }

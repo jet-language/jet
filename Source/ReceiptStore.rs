@@ -94,9 +94,11 @@ const REDACTION_MARKER: &[u8] = b"<redacted>";
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Whole-invocation receipt participants are deterministic verdict/build acts.
-/// `run`/`dev` already reuse their compile actions through the tier caches;
-/// mutation and interactive verbs do not claim a whole-invocation receipt.
-pub const PARTICIPATING_VERBS: &[&str] = &["check", "build", "test", "prove", "budget check"];
+/// `run`/`dev` already reuse their compile actions through the tier caches,
+/// and `check` and `build` answer from their typed Receipt node
+/// (D-BUILD-NOCHANGE1); mutation and interactive verbs do not claim a
+/// whole-invocation receipt.
+pub const PARTICIPATING_VERBS: &[&str] = &["test", "prove", "budget check"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptInput {
@@ -2289,9 +2291,14 @@ fn canonical_authority_roots(
     if let Some(root) = workspace_root.as_ref() {
         roots.insert(root.clone());
     }
-    let authority_root = package_root
-        .or(workspace_root)
-        .unwrap_or_else(|| start.to_path_buf());
+    // Evidence, replay records, and proofs live in the one workspace-root
+    // `.jet/`, never in a per-package one.
+    let authority_root = crate::Loader::selected_project_root(start).map_err(|diagnostic| {
+        format!(
+            "couldn't resolve the workspace root for `{}`: {diagnostic:?}",
+            target.display()
+        )
+    })?;
     Ok((roots, authority_root))
 }
 
@@ -2688,8 +2695,6 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 pub fn participating_verb(argv: &[String]) -> Option<&'static str> {
     match argv.first().map(String::as_str) {
-        Some("check") => Some("check"),
-        Some("build") => Some("build"),
         Some("test") => Some("test"),
         Some("prove") => Some("prove"),
         Some("budget") if argv.get(1).map(String::as_str) == Some("check") => {

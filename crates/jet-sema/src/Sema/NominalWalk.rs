@@ -39,6 +39,9 @@ pub(crate) enum NominalQuery {
     ViewBoundary,
     CellGuard,
     SharedHandle,
+    /// Can a value hold an observable `Clock`. Keyed by nominal name in the
+    /// checked module's own registry (see `type_contains_observable_clock`).
+    ObservableClock,
 }
 
 /// Named instantiations proven neutral for each question while the
@@ -107,22 +110,11 @@ impl<'r> NominalWalk<'r> {
         if !neutral || self.finished.is_empty() {
             return;
         }
-        if let Some(memo) = self.registry.nominal_memo.0.borrow_mut().as_mut() {
-            memo.neutral
-                .entry(self.query)
-                .or_default()
-                .extend(self.finished);
-        }
+        self.registry.record_neutral_nominals(self.query, self.finished);
     }
 
     fn memo_holds(&self, key: &str) -> bool {
-        self.registry
-            .nominal_memo
-            .0
-            .borrow()
-            .as_ref()
-            .and_then(|memo| memo.neutral.get(&self.query))
-            .is_some_and(|neutral| neutral.contains(key))
+        self.registry.nominal_memo_holds(self.query, key)
     }
 }
 
@@ -164,6 +156,28 @@ impl TypeRegistry {
         NominalMemoScope {
             registry: self,
             opened,
+        }
+    }
+
+    /// Whether the open memo already proved `key` neutral for `query`.
+    pub(crate) fn nominal_memo_holds(&self, query: NominalQuery, key: &str) -> bool {
+        self.nominal_memo
+            .0
+            .borrow()
+            .as_ref()
+            .and_then(|memo| memo.neutral.get(&query))
+            .is_some_and(|neutral| neutral.contains(key))
+    }
+
+    /// Record `keys` as neutral for `query` while the memo is open; a closed
+    /// memo keeps nothing.
+    pub(crate) fn record_neutral_nominals(
+        &self,
+        query: NominalQuery,
+        keys: impl IntoIterator<Item = String>,
+    ) {
+        if let Some(memo) = self.nominal_memo.0.borrow_mut().as_mut() {
+            memo.neutral.entry(query).or_default().extend(keys);
         }
     }
 }

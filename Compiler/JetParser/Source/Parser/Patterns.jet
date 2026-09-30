@@ -336,18 +336,21 @@ fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
     }
 }
 
-fn parser_parse_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
+// D-PAT-NAMED-NEST1=A: `allow_named` admits the named payload form
+// `.Case{field: pat, ..}`. It is false where a following `{` opens a block
+// (an `if` condition), exactly as for struct literals.
+fn parser_parse_pattern(state: &JetParserState, depth: Int, allow_named: Bool) -> ParsedPattern {
     if depth > 128 {
         span :: parser_current(&state).span
         parser_add_error(&state, span, "this pattern is nested too deeply", "pattern recursion is bounded against adversarial nesting", "reduce the pattern nesting depth")
         return ParsedPattern{pattern: Pattern.Variant{variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: span}, span: span}
     }
-    first :: parser_parse_pattern_atom(&state, depth + 1)
+    first :: parser_parse_pattern_atom(&state, depth + 1, allow_named)
     alternatives := [Pattern]{first.pattern}
     end := first.span
     loop parser_current_kind(&state) == TOKEN_PIPE {
         parser_bump(&state)
-        next :: parser_parse_pattern_atom(&state, depth + 1)
+        next :: parser_parse_pattern_atom(&state, depth + 1, allow_named)
         &alternatives.push(next.pattern)
         end = next.span
     }
@@ -356,13 +359,13 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
     ParsedPattern{pattern: Pattern.Or{alternatives: alternatives, span: span}, span: span}
 }
 
-fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPattern {
+fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bool) -> ParsedPattern {
     start :: parser_current(&state)
     if start.kind == TOKEN_QUESTION {
         parser_bump(&state)
         binding :: parser_expect_name(&state, "after `?` in a present-value pattern")
         span :: parser_cover(start.span, binding.span)
-        return ParsedPattern{pattern: Pattern.Present{binding: binding.payload.decoded, binding_span: binding.span, span: span}, span: span}
+        return ParsedPattern{pattern: Pattern.Present{binding: binding.payload.decoded, binding_span: binding.span, inner: None, span: span}, span: span}
     }
     if start.kind == TOKEN_BANG || start.kind == TOKEN_NULL {
         parser_bump(&state)
@@ -415,14 +418,35 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         path_span = member.span
     }
     if path == "Ok" || path == "Err" {
-        parser_expect(&state, TOKEN_LPAREN, "`(` after a result pattern")
-        binding :: parser_expect_name(&state, "inside a result pattern")
+        open :: parser_expect(&state, TOKEN_LPAREN, "`(` after a result pattern")
+        slot :: parser_parse_pattern_slot(&state, depth + 1)
         close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a result pattern")
         span :: parser_cover(start.span, close.span)
-        if path == "Ok" -> return ParsedPattern{pattern: Pattern.Ok{binding: binding.payload.decoded, binding_span: binding.span, span: span}, span: span}
-        return ParsedPattern{pattern: Pattern.Err{binding: binding.payload.decoded, binding_span: binding.span, span: span}, span: span}
+        binding := "_"
+        binding_span := open.span
+        inner := Pattern?{None}
+        if slot == {
+            .Bind(name, name_span) -> {
+                binding = name
+                binding_span = name_span
+            }
+            .Nested(nested) -> inner = Val(nested)
+            .Wildcard -> {}
+            .Range(_, _) -> parser_add_error(&state, open.span, "a result pattern binds its payload", "`Ok(…)` and `Err(…)` take a binding, `_`, or a nested pattern", "bind the payload and compare it explicitly")
+            // A payload slot never parses as a named entry.
+            .Named(_, _, _) | .Rest(_) -> {}
+        }
+        if path == "Ok" -> return ParsedPattern{pattern: Pattern.Ok{binding: binding, binding_span: binding_span, inner: inner, span: span}, span: span}
+        return ParsedPattern{pattern: Pattern.Err{binding: binding, binding_span: binding_span, inner: inner, span: span}, span: span}
     }
-    if parser_current_kind(&state) == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, path_span, depth + 1)
+    if parser_current_kind(&state) == TOKEN_LBRACE {
+        if !leading_dot -> return parser_parse_struct_pattern(&state, path_span, depth + 1)
+        if allow_named || parser_named_pattern_brace_ahead(&state) {
+            named :: parser_parse_named_pattern_slots(&state, path, depth + 1)
+            span :: parser_cover(start.span, named.end)
+            return ParsedPattern{pattern: Pattern.Variant{variant: path, bindings: named.slots, leading_dot: true, span: span}, span: span}
+        }
+    }
     bindings := [PatSlot]{}
     end := path_span
     if parser_current_kind(&state) == TOKEN_LPAREN {
@@ -445,6 +469,8 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
 
 fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
     start :: parser_current(&state)
+    // S31: a leading-dot pattern nests inside the payload slot.
+    if start.kind == TOKEN_DOT -> return PatSlot.Nested{pattern: parser_parse_pattern(&state, depth + 1, true).pattern}
     if start.kind == TOKEN_INT {
         parser_bump(&state)
         low :: start.payload.integer ?? 0
@@ -458,6 +484,67 @@ fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
     }
     name :: parser_expect_name(&state, "in a variant binding")
     if name.payload.decoded == "_" -> PatSlot.Wildcard else -> PatSlot.Bind{name: name.payload.decoded, span: name.span}
+}
+
+// D-PAT-NAMED-NEST1=A: in a condition, where `{` usually opens the body,
+// `.Case{` starts named payload entries only when its first entry reads as
+// one: `..`, `field:`, `field,`, or a lone `field}` directly followed by the
+// body (`{` or `->`). No block starts with those tokens.
+fn parser_named_pattern_brace_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_LBRACE -> return false
+    first :: parser_lookahead(&state, 1)
+    if first.kind == TOKEN_DOT_DOT -> return true
+    if first.kind != TOKEN_IDENT || first.payload.decoded == "_" -> return false
+    second :: parser_kind_at(&state, 2)
+    if second == TOKEN_COLON || second == TOKEN_COMMA -> return true
+    if second != TOKEN_RBRACE -> return false
+    after :: parser_kind_at(&state, 3)
+    after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW
+}
+
+// Line breaks inside a multi-line named-field pattern lex as `;`.
+fn parser_skip_named_pattern_line_breaks(state: &JetParserState) Never! {
+    loop parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+}
+
+// D-PAT-NAMED-NEST1=A: the brace body of `.Case{field: pat, field, ..}`.
+// Each entry is `field: slot` or the shorthand `field` (binds `field`); an
+// optional `..` ends the list. Sema places the entries on the case's
+// positional payload slots.
+fn parser_parse_named_pattern_slots(state: &JetParserState, variant: String, depth: Int) -> (slots: [PatSlot], end: Span) {
+    parser_bump(&state)
+    slots := [PatSlot]{}
+    loop {
+        parser_skip_named_pattern_line_breaks(&state)
+        if parser_current_kind(&state) == TOKEN_RBRACE || parser_current_kind(&state) == TOKEN_EOF -> break
+        entry :: parser_current(&state)
+        if entry.kind == TOKEN_DOT_DOT {
+            parser_bump(&state)
+            parser_skip_named_pattern_line_breaks(&state)
+            if parser_current_kind(&state) != TOKEN_RBRACE {
+                parser_add_error(&state, entry.span, "`..` must be the last entry of a named-field pattern", "`..` stands for every field the pattern does not name", "move `..` to the end: `.{variant}{{field: pattern, ..}}`")
+            }
+            &slots.push(PatSlot.Rest{span: entry.span})
+            break
+        }
+        if entry.kind != TOKEN_IDENT || entry.payload.decoded == "_" {
+            parser_add_error(&state, entry.span, "`.{variant}{{…}}` mixes a positional entry with field names", "a named-field pattern labels every entry; one pattern uses one form", "write `field: pattern` for this entry, or match by position with `.{variant}(…)`")
+            parser_parse_pattern_slot(&state, depth + 1)
+        } else {
+            parser_bump(&state)
+            slot := PatSlot.Bind{name: entry.payload.decoded, span: entry.span}
+            if parser_current_kind(&state) == TOKEN_COLON {
+                parser_bump(&state)
+                slot = parser_parse_pattern_slot(&state, depth + 1)
+            }
+            &slots.push(PatSlot.Named{field: entry.payload.decoded, field_span: entry.span, slot: slot})
+        }
+        parser_skip_named_pattern_line_breaks(&state)
+        if parser_current_kind(&state) != TOKEN_COMMA -> break
+        parser_bump(&state)
+    }
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after named-field pattern entries")
+    (slots: slots, end: close.span)
 }
 
 fn parser_parse_pattern_sequence(state: &JetParserState, depth: Int) -> ParsedPattern {

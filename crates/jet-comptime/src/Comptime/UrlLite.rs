@@ -2,7 +2,7 @@
 
 mod url_kernel {
     #[derive(Clone, Debug)]
-    pub struct JetURL {
+    pub struct JetURLParts {
         pub scheme: String,
         pub username: Option<String>,
         pub password: Option<String>,
@@ -39,7 +39,7 @@ mod url_kernel {
     }
 }
 
-pub(super) type UrlParts = url_kernel::JetURL;
+pub(super) type UrlParts = url_kernel::JetURLParts;
 /// The one MIME value the HTTP message kernel names as `jet_std::JetMIME`.
 pub(crate) use url_kernel::JetMIME;
 
@@ -59,7 +59,7 @@ pub(super) fn from_marshaled(
     typed_host: Option<Vec<(String, bool)>>,
     typed_path: Option<Vec<(String, bool)>>,
 ) -> UrlParts {
-    url_kernel::JetURL {
+    url_kernel::JetURLParts {
         scheme,
         username,
         password,
@@ -74,7 +74,7 @@ pub(super) fn from_marshaled(
 }
 
 pub(super) fn parse(input: &str) -> Result<UrlParts, String> {
-    url_kernel::JetURL::parse(&input.to_string())
+    url_kernel::JetURLParts::parse(&input.to_string())
 }
 
 pub(super) fn validate_typed_url_literal(literals: &[String]) -> Result<(), String> {
@@ -84,7 +84,7 @@ pub(super) fn validate_typed_url_literal(literals: &[String]) -> Result<(), Stri
 
 pub(super) fn typed_url_literal(literals: &[String], holes: &[String]) -> UrlParts {
     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
-    url_kernel::jet_typed_url_literal(&literal_refs, holes.to_vec())
+    url_kernel::jet_typed_url_parts_literal(&literal_refs, holes.to_vec())
 }
 
 pub(super) fn from_parts(
@@ -94,7 +94,7 @@ pub(super) fn from_parts(
     query: &[Vec<String>],
     fragment: &str,
 ) -> Result<UrlParts, String> {
-    url_kernel::JetURL::from_parts(
+    url_kernel::JetURLParts::from_parts(
         &scheme.to_string(),
         &host.to_string(),
         &path.to_string(),
@@ -104,7 +104,7 @@ pub(super) fn from_parts(
 }
 
 pub(super) fn file(path: &str) -> UrlParts {
-    url_kernel::JetURL::file(&path.to_string())
+    url_kernel::JetURLParts::file(&path.to_string())
 }
 
 pub(super) fn data(mime_rendered: &str, text: &str) -> UrlParts {
@@ -115,7 +115,7 @@ pub(super) fn data(mime_rendered: &str, text: &str) -> UrlParts {
             params: Vec::new(),
         }
     });
-    url_kernel::JetURL::data(&mime, &text.to_string())
+    url_kernel::JetURLParts::data(&mime, &text.to_string())
 }
 
 pub(super) fn url_render_query(pairs: &[(String, String)]) -> String {

@@ -233,7 +233,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn source_fragment(&self, span: Span) -> Option<String> {
+    pub(in crate::Parser) fn source_fragment(&self, span: Span) -> Option<String> {
         self.source
             .as_deref()
             .and_then(|source| source.get(span.start..span.end))
@@ -349,11 +349,31 @@ impl<'a> Parser<'a> {
             index = self.scan_contract_member(index)?;
             members += 1;
             match self.toks.get(index).map(|token| &token.kind)? {
+                // The retired infix contract `T ! E` (the `!` followed by one
+                // type name and then `{`, `,`, `)` or `=`) is not a suffix
+                // `T!`; its `!` is left for `parse_retired_prefix_error`.
+                TokKind::Bang if self.retired_infix_contract_at(index) => return None,
                 TokKind::Bang => return Some(members > 1),
                 TokKind::Pipe => index += 1,
                 _ => return None,
             }
         }
+    }
+
+    /// Does the `!` at `bang` open the retired infix `T ! E` error type?
+    fn retired_infix_contract_at(&self, bang: usize) -> bool {
+        if !matches!(
+            self.toks.get(bang + 1).map(|token| &token.kind),
+            Some(TokKind::Ident(_))
+        ) {
+            return false;
+        }
+        self.scan_contract_member(bang + 1).is_some_and(|end| {
+            matches!(
+                self.toks.get(end).map(|token| &token.kind),
+                Some(TokKind::LBrace | TokKind::Comma | TokKind::RParen | TokKind::Eq)
+            )
+        })
     }
 
     /// D-TYPE-SUFFIX1=A: parse the error half of a contract and its `!`.

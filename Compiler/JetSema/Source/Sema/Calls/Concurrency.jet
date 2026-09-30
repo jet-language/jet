@@ -74,22 +74,23 @@ fn sema_call_concurrency_reject_parallel_type(role: String, ty: Type, span: Span
 fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if value.kind == {
         .Lambda(lambda) -> {
+            updated_lambda := lambda
             valid := true
-            loop name in lambda.capture_facts.mutable {
-                &diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(name, "parallel worker", lambda.source_span))
+            loop name in updated_lambda.capture_facts.mutable {
+                &diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(name, "parallel worker", updated_lambda.source_span))
                 valid = false
             }
-            loop capture in lambda.captures {
+            loop capture in updated_lambda.captures {
                 mutable := false
-                loop name in lambda.capture_facts.mutable { if name == capture.source -> mutable = true }
+                loop name in updated_lambda.capture_facts.mutable { if name == capture.source -> mutable = true }
                 if mutable -> next
-                closure_taken := sema_ownership_crossing_capture_taken(lambda, capture, environment, context.generic_params)
+                closure_taken := sema_ownership_crossing_capture_taken(updated_lambda, capture, environment, context.generic_params)
                 problem :: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.ParallelWorker, closure_taken, environment, scopes, state, context) ?? next
-                &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.ParallelWorker, lambda.source_span))
+                &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.ParallelWorker, updated_lambda.source_span))
                 valid = false
             }
-            sema_function_reactive_note_parallel_lambda(&context, lambda)
-            lambda.is_move = true
+            sema_function_reactive_note_parallel_lambda(&context, updated_lambda)
+            updated_lambda.is_move = true
             return valid
         }
         else -> {}
@@ -114,27 +115,28 @@ fn sema_call_concurrency_infer_callback(argument: CallArg, required: Type, envir
 }
 
 fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    updated_args := args
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_call_concurrency_check_labels("send", args, span, &diagnostics)
-    if args.len() != 1 {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E0104", span, "`send` expects 1 argument, got {args.len()}", "a sender sends exactly one payload value", "write `.send(value)` with one payload"))
+    sema_call_concurrency_check_labels("send", updated_args, span, &diagnostics)
+    if updated_args.len() != 1 {
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_error("E0104", span, "`send` expects 1 argument, got {updated_args.len()}", "a sender sends exactly one payload value", "write `.send(value)` with one payload"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     payload_ty :: sema_call_concurrency_sender_element(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    payload :: sema_call_concurrency_check_value(args[0], payload_ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    crossing_problem := sema_ownership_crossing_problem_for_expr(args[0].expr, payload_ty, SemaSendCrossing.ChannelSend, args[0].convention == AccessConvention.Move, environment, scopes, state, context)
+    payload :: sema_call_concurrency_check_value(updated_args[0], payload_ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    crossing_problem := sema_ownership_crossing_problem_for_expr(updated_args[0].expr, payload_ty, SemaSendCrossing.ChannelSend, updated_args[0].convention == AccessConvention.Move, environment, scopes, state, context)
     if crossing_problem == .Val(problem) {
-        value_name := if args[0].expr == {.Ident(name, _) -> name else -> "this value"}
-        &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, payload_ty, problem, SemaSendCrossing.ChannelSend, args[0].span))
+        value_name := if updated_args[0].expr == {.Ident(name, _) -> name else -> "this value"}
+        &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, payload_ty, problem, SemaSendCrossing.ChannelSend, updated_args[0].span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     params := [SemaCallParam]{SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload_ty), variadic: false}}
-    ownership := sema_ownership_check_method_call(&state, "send", receiver, AccessConvention.Read, params, &args, scopes, span, &diagnostics)
+    ownership := sema_ownership_check_method_call(&state, "send", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := payload
-    if args[0].flags.implicit_clone || args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
-    sema_function_reactive_note_channel(&context, args[0].expr, payload_ty)
+    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
+    sema_function_reactive_note_channel(&context, updated_args[0].expr, payload_ty)
     lowered := [TExpr]{value}
     tir := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)
     checked := sema_expr_expected(tir, expected, environment, &diagnostics)

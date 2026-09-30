@@ -1,0 +1,12 @@
+// core.encoding.toml — `#` comments, whole-line and inline, are skipped by the parser.
+// A malformed line is rejected with a parse error rather than a crash.
+use core.encoding.toml as toml
+
+fn run() {
+    commented :: toml.parse("# count setting\ncount = 2 # inline\n") ?? panic("toml")
+    print("toml commented: {commented}")
+    if toml.parse("count = \n") == {
+        .Ok(tree) -> print("toml missing value: accepted {tree}")
+        .Err(e) -> print("toml missing value: rejected")
+    }
+}

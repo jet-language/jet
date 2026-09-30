@@ -2098,7 +2098,7 @@ mod tests {
         ));
 
         jet_foundation::Outcome::jet_journey_reset();
-        jet_foundation::Outcome::jet_journey_frame("build.jet", 23, "build", || {
+        jet_foundation::Outcome::jet_journey_frame("build.jet", 23, 5, "build", || {
             "while declaring app".to_string()
         });
         let jet_error = failed.to_jet_err().expect("default error carrier");
@@ -2122,10 +2122,11 @@ mod tests {
         assert_eq!(report.context_frames[0].text, "while declaring app");
         assert_eq!(report.context_frames[0].file, "build.jet");
         assert_eq!(report.context_frames[0].line, 23);
-        assert_eq!(report.source_journey.len(), 1);
-        assert_eq!(report.source_journey[0].fn_name, "build");
-        assert_eq!(report.source_journey[0].file, "build.jet");
-        assert_eq!(report.source_journey[0].line, 23);
+        let origin = report.origin.as_ref().expect("the failing build call is the origin");
+        assert_eq!(origin.fn_name, "build");
+        assert_eq!(origin.file, "build.jet");
+        assert_eq!(origin.line, 23);
+        assert!(report.source_journey.is_empty());
         assert!(report.to_json().contains(
             "\"details\":{\"variant\":\"DuplicateTargetName\",\"fields\":{\"value\":\"app\"}"
         ));

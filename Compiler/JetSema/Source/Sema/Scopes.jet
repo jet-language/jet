@@ -197,16 +197,16 @@ pub fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, t
     }
     existing :: sema_loop_value_collecting_type(context)
     if existing == None {
-        sema_loop_value_set_collecting_type(context, ty)
+        sema_loop_value_set_collecting_type(&context, ty)
         return true
     }
-    expected :: existing ?? ty
+    expected :: existing
     if type_identity_equal(expected, ty) -> return true
     joined :: sema_expr_numeric_join(expected, ty) ?? {
         &diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is {type_name(ty)} instead of {type_name(expected)}", "convert every item to one type, or split the loops"))
         return false
     }
-    sema_loop_value_set_collecting_type(context, joined)
+    sema_loop_value_set_collecting_type(&context, joined)
     true
 }
 
@@ -291,6 +291,8 @@ pub struct SemaScopeEnvironment {
     pub declarations: [SemaScopeDeclaration]
     pub generic_params: [TGenericParam]
     pub comptime_body_values: [SemaComptimeBodyValue]
+    // L0303 (#3716): the module's dispatch-table `else` arms, from the parser.
+    pub else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
 }
  
 pub struct SemaCheckContext {
@@ -350,6 +352,9 @@ pub struct SemaCheckContext {
     // Source starts of else-less value dispatch chains already proved (E0307);
     // every level of one chain shares its span, and the outermost level wins.
     pub noelse_chain_starts: [Int]
+    // D-DISCARD1=A: the last statement of a named function with no written
+    // return type; a non-Unit value there is thrown away (E0433).
+    pub lost_tail_span: Span?
 }
 
  
@@ -464,6 +469,7 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
         function_name: "",
         fallback_err_denial: None,
         noelse_chain_starts: [Int]{},
+        lost_tail_span: None,
         arrow_loop_body: false,
     }
 }
@@ -514,6 +520,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         function_name: source.function_name,
         fallback_err_denial: source.fallback_err_denial,
         noelse_chain_starts: ~source.noelse_chain_starts,
+        lost_tail_span: source.lost_tail_span,
     }
 }
 

@@ -1,6 +1,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
+use crate::Sema::NominalWalk::NominalQuery;
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
@@ -615,32 +616,6 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         let display_type_name = self.display_type_name(type_name, None);
-        if type_name == "Secret" && !self.registry.contains(type_name) {
-            let expected = match method {
-                "from_text" => Some(Type::String),
-                "from_bytes" => Some(Type::List(Box::new(crate::Sema::CheckerCoreLib::u8_ty()))),
-                _ => None,
-            };
-            if let Some(expected) = expected {
-                if args.len() != 1 {
-                    self.diags
-                        .push(crate::Sema::CheckerCoreLib::wrong_core_arity(
-                            &format!("Secret.{method}"),
-                            1,
-                            args.len(),
-                            span,
-                        ));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                } else {
-                    self.expect_core_arg(&format!("Secret.{method}"), 0, &expected, &mut args[0]);
-                }
-                return Some(crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(
-                    "Secret".to_string(),
-                )));
-            }
-        }
         // D-TEXTHEAD-TYPE1=A: checked text constructors are ordinary static
         // calls backed by the CheckedText impl. `from` keeps the failure in
         // the normal Result/Error route; `raw` is the explicit unsafe escape;
@@ -1428,6 +1403,8 @@ impl<'a> Checker<'a> {
                 if let Some(arg_ty) = arg_ty {
                     let arg_ty =
                         self.widen_numeric_argument(&mut arg.expr, arg_ty, param_ty, *param_conv);
+                    let arg_ty =
+                        self.lift_optional_argument(&mut arg.expr, arg_ty, param_ty, *param_conv);
                     let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
                     // S48: a concrete value meets a trait-typed parameter; the
                     // box is materialised at lowering, not spelled by the caller,
@@ -1633,8 +1610,10 @@ impl<'a> Checker<'a> {
             } else {
                 param.ty.clone()
             };
-            // A `&name` argument grants the place itself; never copy it.
+            // A `&name` argument grants the place itself, and a write parameter
+            // is a borrow slot; never copy either.
             if arg.convention == AccessConvention::Write
+                || param.convention == AccessConvention::Write
                 || (param.convention == AccessConvention::Read && !param_ty.is_scalar())
             {
                 self.borrow_ctx = true;
@@ -1651,6 +1630,8 @@ impl<'a> Checker<'a> {
             if let Some(arg_ty) = arg_ty {
                 let arg_ty =
                     self.widen_numeric_argument(&mut arg.expr, arg_ty, &param_ty, param.convention);
+                let arg_ty =
+                    self.lift_optional_argument(&mut arg.expr, arg_ty, &param_ty, param.convention);
                 let reported = self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
                 if !reported && arg_ty != param_ty {
                     self.diags.push(Diagnostic::error(
@@ -1932,7 +1913,12 @@ impl<'a> Checker<'a> {
             if mods[mod_idx].registry.contains(type_name) {
                 return Some(mod_idx);
             }
-            return None;
+            // D-MOD-CYCLE1=A: an imported package is one namespace.
+            return self
+                .name_ledger
+                .namespace_siblings(mod_idx)
+                .into_iter()
+                .find(|&sibling| mods[sibling].registry.contains(type_name));
         }
         if type_name.contains("::") {
             let (namespace, leaf) = type_name.rsplit_once("::")?;
@@ -2163,6 +2149,11 @@ impl<'a> Checker<'a> {
     /// already answered no (a yes ends the whole query). Keeping it visited
     /// keeps the walk linear on large mutually recursive type graphs, where
     /// every `==`, interpolation, and copy asks this question.
+    ///
+    /// A query that answers no has walked everything its nominals reach, so
+    /// each nominal of this module it entered answers no as well; the open
+    /// registry memo keeps them, and later queries stop there instead of
+    /// walking the same type graph again (D-COMPILE-SPEED1, #3661).
     pub(crate) fn type_contains_observable_clock(&self, ty: &Type) -> bool {
         fn contains(
             checker: &Checker<'_>,
@@ -2208,6 +2199,13 @@ impl<'a> Checker<'a> {
                             return false;
                         };
                     if !seen.insert((owner_mod, name.clone())) {
+                        return false;
+                    }
+                    if owner_mod == checker.module_idx
+                        && checker
+                            .registry
+                            .nominal_memo_holds(NominalQuery::ObservableClock, name)
+                    {
                         return false;
                     }
                     let registry = if owner_mod == checker.module_idx {
@@ -2265,7 +2263,17 @@ impl<'a> Checker<'a> {
             }
         }
 
-        contains(self, ty, self.module_idx, &mut HashSet::new())
+        let mut seen = HashSet::new();
+        let found = contains(self, ty, self.module_idx, &mut seen);
+        if !found {
+            self.registry.record_neutral_nominals(
+                NominalQuery::ObservableClock,
+                seen.into_iter()
+                    .filter(|(module, _)| *module == self.module_idx)
+                    .map(|(_, name)| name),
+            );
+        }
+        found
     }
 
     /// D-FIELDPOL1: `type_name`'s computed fields (name → span + declared
@@ -2288,6 +2296,14 @@ impl<'a> Checker<'a> {
     /// Check if `enum_name` is a known enum in the current or any imported module.
     pub(crate) fn is_known_enum(&self, enum_name: &str) -> bool {
         if self.registry.enum_variants(enum_name).is_some() {
+            return true;
+        }
+        if self
+            .canonical_enum_registry(enum_name, |registry, leaf| {
+                registry.enum_variants(leaf).map(|_| ())
+            })
+            .is_some()
+        {
             return true;
         }
         if let Some(mods) = self.modules {
@@ -2389,6 +2405,13 @@ impl<'a> Checker<'a> {
         if let Some(v) = self.registry.enum_variants(enum_name) {
             return Some(v.clone());
         }
+        // A canonical nominal (`<owner>::Leaf`) names its declaring module
+        // directly; imported Core enums reach patterns in this spelling.
+        if let Some(variants) = self.canonical_enum_registry(enum_name, |registry, leaf| {
+            registry.enum_variants(leaf).cloned()
+        }) {
+            return Some(variants);
+        }
         if let Some(mods) = self.modules {
             for &idx in self.imports.values() {
                 if self.type_is_pub_in(idx, enum_name) {
@@ -2488,6 +2511,10 @@ impl<'a> Checker<'a> {
     /// "Fire.Burn")`. Returns `None` for a bare `Ident` (no hop — the
     /// single-segment `Enum.Variant` routes stay untouched), for chains not
     /// rooted at a known enum, or when a local shadows the type name.
+    ///
+    /// D-MOD2: a chain rooted at a file-module alias names the imported enum
+    /// by its qualified spelling — `types.Kind.Beta` → `("types.Kind",
+    /// "Beta")`. The path is empty for the bare `types.Kind` receiver.
     pub(crate) fn fold_enum_variant_path(&self, e: &Expr) -> Option<(String, String)> {
         fn walk<'e>(e: &'e Expr) -> Option<(&'e str, Vec<&'e str>)> {
             match e {
@@ -2501,13 +2528,49 @@ impl<'a> Checker<'a> {
             }
         }
         let (root, segs) = walk(e)?;
-        if segs.is_empty() {
+        if segs.is_empty() || self.lookup(root).is_some() {
             return None;
         }
-        if self.lookup(root).is_some() || !self.is_known_enum(root) {
+        if self.imports.contains_key(root) && !self.is_known_enum(root) {
+            let qualified = format!("{root}.{}", segs[0]);
+            if !self.is_known_enum(&qualified) {
+                return None;
+            }
+            let identity = self.import_qualified_nominal(&qualified)?;
+            return Some((identity, segs[1..].join(".")));
+        }
+        if !self.is_known_enum(root) {
             return None;
+        }
+        // D-MOD2: a member-imported enum (`use types.[Kind]`) keeps its
+        // owner's canonical identity; every other spelling keeps its own.
+        if self.member_imported_type(root) {
+            return Some((self.imported_nominal_head(root), segs.join(".")));
         }
         Some((root.to_string(), segs.join(".")))
+    }
+
+    /// D-MOD2: `name` is bound here by a member import of another module's
+    /// type (`use types.[Kind]`), so its identity is the owner's canonical one.
+    pub(crate) fn member_imported_type(&self, name: &str) -> bool {
+        !name.contains("::")
+            && !self.registry.contains(name)
+            && self
+                .name_ledger
+                .alias(self.module_idx, name)
+                .is_some_and(|alias| alias.target_module.is_some_and(|owner| owner != self.module_idx))
+    }
+
+    /// D-MOD2: the canonical nominal identity (`<owner>::Leaf`) of a name
+    /// qualified by a file-module alias (`types.Kind`). `None` when the
+    /// namespace is not an import alias of this module, so bare and local
+    /// spellings keep their existing identity.
+    pub(crate) fn import_qualified_nominal(&self, name: &str) -> Option<String> {
+        let (namespace, _) = Self::split_type_name(name);
+        if name.contains("::") || !namespace.is_some_and(|namespace| self.imports.contains_key(namespace)) {
+            return None;
+        }
+        Some(self.imported_nominal_head(name))
     }
 
     /// D-TAG1: the enum's variant groups (group path → span + ordered leaf paths),
@@ -2520,6 +2583,11 @@ impl<'a> Checker<'a> {
         if let Some(g) = self.registry.enum_groups(enum_name) {
             return Some(g.clone());
         }
+        if let Some(groups) = self.canonical_enum_registry(enum_name, |registry, leaf| {
+            registry.enum_groups(leaf).cloned()
+        }) {
+            return Some(groups);
+        }
         if let Some(mods) = self.modules {
             for &idx in self.imports.values() {
                 if self.type_is_pub_in(idx, enum_name) {
@@ -2530,6 +2598,28 @@ impl<'a> Checker<'a> {
             }
         }
         None
+    }
+
+    /// Resolve a canonical nominal enum identity (`<owner>::Leaf`) or an
+    /// import-alias-qualified spelling (`types.Kind`) to its declaring
+    /// module's registry entry. Bare names use the import scan.
+    fn canonical_enum_registry<T>(
+        &self,
+        enum_name: &str,
+        read: impl Fn(&super::TypeRegistry, &str) -> Option<T>,
+    ) -> Option<T> {
+        let (namespace, leaf) = Self::split_type_name(enum_name);
+        let qualified = enum_name.contains("::")
+            || namespace.is_some_and(|namespace| self.imports.contains_key(namespace));
+        if !qualified {
+            return None;
+        }
+        let owner = self.struct_owner_module(leaf, namespace)?;
+        if owner == self.module_idx {
+            return read(self.registry, leaf);
+        }
+        let module = self.modules?.get(owner)?;
+        read(&module.registry, leaf).filter(|_| self.type_is_pub_in(owner, leaf))
     }
 
     pub(crate) fn field_is_pub_in(&self, owner_mod: usize, type_name: &str, field: &str) -> bool {
@@ -2563,6 +2653,10 @@ impl<'a> Checker<'a> {
         let mut actual = self.resolve_type(actual.clone());
         if expected != actual && self.implicitly_convert_unit(value, &expected, &actual) {
             actual = expected.clone();
+        }
+        // D-OPT-LIFT1=A: a plain payload fills a `T?` field.
+        if let Some(lifted) = self.lift_optional_slot(&expected, &actual, value) {
+            actual = lifted;
         }
         let reported = self.check_type_assignable(&expected, &actual, span);
         if !reported {
@@ -2621,6 +2715,9 @@ impl<'a> Checker<'a> {
         let mut actual = self.resolve_type(actual.clone());
         if expected != actual && self.implicitly_convert_unit(value, &expected, &actual) {
             actual = expected.clone();
+        }
+        if let Some(lifted) = self.lift_optional_slot(&expected, &actual, value) {
+            actual = lifted;
         }
         if self.check_type_assignable(&expected, &actual, span) {
             return;
@@ -3020,35 +3117,16 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
-        let core_crypto_module = self.is_core_crypto_module();
-        let core_imported_type = self
-            .core_item_imports
-            .get(type_name)
-            .zip(self.core_imports.get(type_name))
-            .is_some_and(|(item, module)| {
-                crate::Sema::CheckerCoreLib::core_module_type_item(module, item)
-            })
-            || import_ns.is_some_and(|namespace| {
-                crate::Sema::CheckerCoreLib::core_module_type_item(namespace, type_name)
-                    || self
-                        .core_imports
-                        .get(namespace)
-                        .is_some_and(|module| {
-                            crate::Sema::CheckerCoreLib::core_module_type_item(module, type_name)
-                        })
-            })
-            || (core_crypto_module
-                && crate::Sema::CheckerCoreLib::core_module_type_item("core.crypto", type_name));
-        let nominal_name = if core_imported_type || owner_mod == self.module_idx {
+        // A literal of an imported struct carries the owner's canonical
+        // identity, the same one the owner's signatures and methods use, so
+        // `crypto.X25519PublicKey{…}` and `crypto.X25519PublicKey.from_text(…)`
+        // name one type.
+        let nominal_name = if owner_mod == self.module_idx {
             type_name.to_string()
         } else {
             self.canonical_nominal_name(owner_mod, type_name)
         };
-        let nominal = if core_imported_type {
-            crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(nominal_name.clone()))
-        } else {
-            Type::Named(nominal_name.clone())
-        };
+        let nominal = Type::Named(nominal_name.clone());
         if !type_args.is_empty() {
             Type::Apply {
                 name: nominal_name,
@@ -3280,9 +3358,15 @@ impl<'a> Checker<'a> {
             .expected_type
             .clone()
             .filter(|ty| matches!(ty, Type::Apply { name, .. } if name == type_name));
-        let ty = contextual_ty
-            .clone()
-            .unwrap_or_else(|| Type::Named(type_name.to_string()));
+        // D-MOD2: an enum named through a member import carries its owner's
+        // canonical identity, the one every signature from that owner uses.
+        let ty = contextual_ty.clone().unwrap_or_else(|| {
+            if self.member_imported_type(type_name) {
+                Type::Named(self.imported_nominal_head(type_name))
+            } else {
+                Type::Named(type_name.to_string())
+            }
+        });
         let display_type_name = self.display_type_name(type_name, None);
         let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
             self.diags.push(Diagnostic::error(
@@ -3724,7 +3808,11 @@ impl<'a> Checker<'a> {
         // fallible call as `T !E` here; ordinary value positions unwrap the
         // same call through the existing automatic propagation rule. This
         // includes contextual `.Ok` / `.Err` syntax before normalization.
-        let preserve_result_carrier = super::CheckerCore::pattern_consumes_result_carrier(pattern);
+        // D-OUTCOME-SHAPE1=A: a `.Val`/`.None` level of a value chain that
+        // also handles `.Err` tests the same `T? E!` carrier.
+        let preserve_result_carrier = super::CheckerCore::pattern_consumes_result_carrier(pattern)
+            || (super::CheckerCore::names_optional_state(pattern)
+                && self.carrier_chain_subjects.contains(&subject.span().start));
         // Source spans are the diagnostic anchor, not an AST identity. Compiler
         // generated codec/derive bodies intentionally stamp every synthetic
         // node with one declaration span, so a span-only cache would let one
@@ -3805,7 +3893,7 @@ impl<'a> Checker<'a> {
         let Some(st) = subj_ty else {
             return (None, HashMap::new());
         };
-        super::CheckerCore::normalize_contextual_pattern(pattern, &st);
+        self.normalize_pattern_tree(pattern, &st);
         let bindings = self.validate_pattern(&st, pattern, span);
         if cached_subject_ty.is_none() && !matches!(pattern, Pattern::Struct { .. }) {
             self.mark_pattern_subject_moved(subject, &bindings);
@@ -3993,6 +4081,26 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> HashMap<String, Type> {
         match (subject_ty, pattern) {
+            // S31: a nested payload pattern is validated against the payload
+            // type and contributes its own bindings.
+            (
+                Type::Option(payload),
+                Pattern::Present {
+                    inner: Some(inner), ..
+                },
+            )
+            | (
+                Type::Result { ok: payload, .. },
+                Pattern::Ok {
+                    inner: Some(inner), ..
+                },
+            )
+            | (
+                Type::Result { err: payload, .. },
+                Pattern::Err {
+                    inner: Some(inner), ..
+                },
+            ) => self.validate_pattern(payload, inner, inner.span()),
             (Type::Option(inner), Pattern::Present { binding, .. }) => {
                 let mut map = HashMap::new();
                 map.insert(binding.clone(), (**inner).clone());
@@ -4071,11 +4179,15 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                let mut result = HashMap::new();
-                if let Some(crate::AST::PatSlot::Bind { name, .. }) = bindings.first() {
-                    result.insert(name.clone(), member_ty);
+                match bindings.first() {
+                    Some(crate::AST::PatSlot::Bind { name, .. }) => {
+                        HashMap::from([(name.clone(), member_ty)])
+                    }
+                    Some(crate::AST::PatSlot::Nested(inner)) => {
+                        self.validate_pattern(&member_ty, inner, inner.span())
+                    }
+                    _ => HashMap::new(),
                 }
-                result
             }
             (
                 Type::Named(type_name)
@@ -4229,13 +4341,15 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                let mut result = HashMap::new();
-                if let (Some(ty), Some(crate::AST::PatSlot::Bind { name, .. })) =
-                    (payload_ty, bindings.first())
-                {
-                    result.insert(name.clone(), ty);
+                match (payload_ty, bindings.first()) {
+                    (Some(ty), Some(crate::AST::PatSlot::Bind { name, .. })) => {
+                        HashMap::from([(name.clone(), ty)])
+                    }
+                    (Some(ty), Some(crate::AST::PatSlot::Nested(inner))) => {
+                        self.validate_pattern(&ty, inner, inner.span())
+                    }
+                    _ => HashMap::new(),
                 }
-                result
             }
             (
                 Type::Named(enum_name)
@@ -4294,6 +4408,9 @@ impl<'a> Checker<'a> {
                                 result.insert(name.clone(), ty.clone());
                             }
                             crate::AST::PatSlot::Wildcard => {}
+                            crate::AST::PatSlot::Nested(inner) => {
+                                result.extend(self.validate_pattern(ty, inner, inner.span()));
+                            }
                             crate::AST::PatSlot::Range { .. } => {
                                 self.diags.push(Diagnostic::error(
                                     "E0316",
@@ -4302,6 +4419,9 @@ impl<'a> Checker<'a> {
                                     "write a name like `n` instead of a range".to_string(),
                                     Some(span),
                                 ));
+                            }
+                            crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+                                unreachable!("normalize_pattern_tree places named payload entries")
                             }
                         }
                     }
@@ -4352,6 +4472,9 @@ impl<'a> Checker<'a> {
                                 result.insert(name.clone(), ty.clone());
                             }
                             crate::AST::PatSlot::Wildcard => {}
+                            crate::AST::PatSlot::Nested(inner) => {
+                                result.extend(self.validate_pattern(ty, inner, inner.span()));
+                            }
                             crate::AST::PatSlot::Range { .. } => {
                                 self.diags.push(Diagnostic::error(
                                     "E0316",
@@ -4360,6 +4483,9 @@ impl<'a> Checker<'a> {
                                     "write a name like `c` instead of a range".to_string(),
                                     Some(span),
                                 ));
+                            }
+                            crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+                                unreachable!("normalize_pattern_tree places named payload entries")
                             }
                         }
                     }
@@ -4440,6 +4566,9 @@ impl<'a> Checker<'a> {
                             result.insert(name.clone(), ty.clone());
                         }
                         crate::AST::PatSlot::Wildcard => {}
+                        crate::AST::PatSlot::Nested(inner) => {
+                            result.extend(self.validate_pattern(ty, inner, inner.span()));
+                        }
                         crate::AST::PatSlot::Range { lo, hi } => {
                             // D-PATR: field must be Int, an inline range, or Char;
                             // lo must be <= hi.
@@ -4463,6 +4592,9 @@ impl<'a> Checker<'a> {
                                     Some(span),
                                 ));
                             }
+                        }
+                        crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+                            unreachable!("normalize_pattern_tree places named payload entries")
                         }
                     }
                 }

@@ -1058,7 +1058,10 @@ pub(crate) fn resolve_builtin_op(
         ("delete", 1) if is_deque => TBuiltinOp::DequeDelete,
         _ => return None,
     };
-    let emitted_borrow = if is_iter {
+    let emitted_borrow = if matches!(op, TBuiltinOp::IterNext) {
+        // Explicit helper call: `jet_iter_next(&mut receiver)`.
+        crate::Collections::BuiltinReceiverBorrow::EagerWrite
+    } else if is_iter {
         crate::Collections::BuiltinReceiverBorrow::Move
     } else {
         match &op {

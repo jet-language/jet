@@ -136,7 +136,7 @@ fn parser_expression_form_dispatch_atom(state: &JetParserState, depth: Int) -> P
     comparator_op :: parser_expression_form_dispatch_op(parser_current_kind(&state)) ?? return lhs
     parser_bump(&state)
     if comparator_op == BinOp.Eq && parser_expression_form_pattern_rhs_ahead(&state) {
-        pattern :: parser_parse_pattern(&state, depth + 1)
+        pattern :: parser_parse_pattern(&state, depth + 1, true)
         span :: parser_cover(lhs.span, pattern.span)
         return ParsedExpr{expr: parser_expression_form_pattern_condition(&state, lhs.expr, pattern, comparator_op), span: span}
     }
@@ -157,7 +157,7 @@ fn parser_expression_form_arm_atom(state: &JetParserState, subject: Expr, op: Bi
         return inner
     }
     if parser_expression_form_pattern_rhs_ahead(&state) {
-        pattern :: parser_parse_pattern(&state, depth + 1)
+        pattern :: parser_parse_pattern(&state, depth + 1, true)
         return parser_expression_form_pattern_condition(&state, subject, pattern, op)
     }
     raw :: parser_expression_form_dispatch_atom(&state, depth + 1)
@@ -341,11 +341,12 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
     else_body := [Stmt]{}
     else_value := Expr.NoElse{span: start}
     end := start
+    last_arm_end := start.end
     loop {
         parser_skip_semicolons(&state)
         kind :: parser_current_kind(&state)
         if kind == TOKEN_KW_ELSE {
-            parser_bump(&state)
+            else_token :: parser_bump(&state)
             parser_expect(&state, TOKEN_UNIFIED_ARROW, "after `else` in a value dispatch")
             branch :: parser_expression_form_selected_value(&state, depth + 1)
             else_body = branch.body
@@ -353,6 +354,9 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
             parser_skip_semicolons(&state)
             close :: parser_expect(&state, TOKEN_RBRACE, "after the final `else` value dispatch arm")
             end = close.span
+            // L0303 (#3716): sema reports this arm when the arms before it
+            // already cover a closed set.
+            &state.else_arms.push(ElseArmSpan{table: parser_cover(start, close.span), arm: Span{start: else_token.span.start, end: branch.span.end}, delete: Span{start: last_arm_end, end: branch.span.end}})
             break
         }
         if kind == TOKEN_RBRACE {
@@ -378,6 +382,7 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
         parser_expect(&state, TOKEN_UNIFIED_ARROW, "after a value dispatch arm head")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
         &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
+        last_arm_end = branch.span.end
     }
     if arms.len() == 0 {
         parser_expression_form_error(&state, "E0003", start, "a value dispatch needs at least one arm before `else`", "`else` is a fallback, not a condition", "add a value or pattern arm before `else`")

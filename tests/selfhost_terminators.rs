@@ -94,7 +94,7 @@ fn decode_events(value: MirValue) -> Result<Vec<TerminatorEvent>, String> {
 impl Pass {
     fn evaluate(&self, source: &[u8], facts: &[RawTokenFact], fuel: u64) -> Result<Vec<TerminatorEvent>, String> {
         let args = input_values(source, facts)?;
-        let config = MirEvalConfig { fuel, ..MirEvalConfig::default() };
+        let config = MirEvalConfig { fuel: Some(fuel), ..MirEvalConfig::default() };
         let result = evaluate_mir_function_with_config(&self.mir, self.function, &args, &config)
             .map_err(|error| format!("{:?}", error.diagnostic))?;
         if result.status != MirExecutionStatus::Completed || result.exit_code != 0

@@ -117,7 +117,7 @@ fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float
                 &diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
                 return None
             }
-            numeric :: if float_value != None -> sema_tir_expr(Type.Float, TExprKind.FloatLit{value: float_value ?? 0.0}, span) else -> sema_tir_expr(Type.Float, TExprKind.FloatLit{value: Float.from_int(int_value ?? 0)}, span)
+            numeric :: if float_value != None -> sema_tir_expr(Type.Float, TExprKind.FloatLit{value: float_value}, span) else -> sema_tir_expr(Type.Float, TExprKind.FloatLit{value: Float.from_int(int_value ?? 0)}, span)
             destination_symbol :: symbol_id(SymbolKind.Type, unit.package, "", unit.name)
             value :: sema_tir_expr(Type.Named{name: unit.name}, TExprKind.DistinctCtor{owner: destination_symbol, argument: numeric, base: Type.Float}, span)
             return sema_expr_expected(value, expected, environment, &diagnostics)
@@ -143,8 +143,8 @@ fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float
         &diagnostics.push(sema_error("E0134", suffix_span, "`{suffix}` isn't a unit in scope", "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here", "import the family that defines `{suffix}`, or write the number without a suffix"))
         return None
     }
-    if int_value != None -> return sema_expr_expected(sema_tir_expr(Type.Int, TExprKind.IntLit{value: int_value ?? 0, width: None}, span), expected, environment, &diagnostics)
-    if float_value != None -> return sema_expr_expected(sema_tir_expr(Type.Float, TExprKind.FloatLit{value: float_value ?? 0.0}, span), expected, environment, &diagnostics)
+    if int_value != None -> return sema_expr_expected(sema_tir_expr(Type.Int, TExprKind.IntLit{value: int_value, width: None}, span), expected, environment, &diagnostics)
+    if float_value != None -> return sema_expr_expected(sema_tir_expr(Type.Float, TExprKind.FloatLit{value: float_value}, span), expected, environment, &diagnostics)
     &diagnostics.push(sema_error("E0109", span, "this unit literal has no numeric value", "a literal needs an integer or floating-point payload", "write a numeric literal"))
     None
 }
@@ -170,6 +170,15 @@ fn sema_expression_list_element_needs_expected_type(element: Expr) -> Bool Never
         .TypedLit(head, _, _) -> head == None
         .Paren(inner, _) -> sema_expression_list_element_needs_expected_type(inner)
         .Unary(op, inner, _) -> op == UnOp.Neg && sema_expression_list_element_needs_expected_type(inner)
+        else -> false
+    }
+}
+
+// `[["41"], [], ["x"]]`: an empty item takes its type from a sibling.
+fn sema_expression_list_element_is_empty_list(element: Expr) -> Bool Never! {
+    if element == {
+        .ListLit(elements, _) -> elements.len() == 0
+        .Paren(inner, _) -> sema_expression_list_element_is_empty_list(inner)
         else -> false
     }
 }
@@ -239,7 +248,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
     index := 0
     loop index < elements.len() {
         element := elements[index]
-        if expected_element == None && sema_expression_list_element_needs_expected_type(element) {
+        if expected_element == None && (sema_expression_list_element_needs_expected_type(element) || sema_expression_list_element_is_empty_list(element)) {
             &checked_parts.push(None)
             &element_types.push(None)
             &deferred.push(index)
@@ -513,7 +522,7 @@ fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, envi
         }
     }
     if expected != None && expected_fields == None {
-        &diagnostics.push(sema_type_mismatch(expected ?? Type.Int, Type.Tuple{fields: [TypeTupleField]{}}, span))
+        &diagnostics.push(sema_type_mismatch(expected, Type.Tuple{fields: [TypeTupleField]{}}, span))
         return None
     }
     values := [TExpr]{}

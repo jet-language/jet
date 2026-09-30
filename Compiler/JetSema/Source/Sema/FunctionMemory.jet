@@ -344,60 +344,67 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
         stmt := stmts[index]
         if stmt == {
             .Val(binding) -> {
-                if sema_function_memory_contains_name(promoted_names, binding.name) && sema_function_memory_binding_may_own_heap(binding) && effective == .Val(policy) && policy.value == PolicyValue.Enabled {
+                updated_binding := binding
+                if sema_function_memory_contains_name(promoted_names, updated_binding.name) && sema_function_memory_binding_may_own_heap(updated_binding) && effective == .Val(policy) && policy.value == PolicyValue.Enabled {
                     scope :: policy.provenance[policy.provenance.len() - 1].scope
-                    edges := sema_function_memory_promotion_edges(binding.init)
+                    edges := sema_function_memory_promotion_edges(updated_binding.init)
                     filtered_edges := [GcPromotionEdge]{}
                     loop edge in edges {
-                        if edge.binding != binding.name && sema_function_memory_contains_name(promoted_names, edge.binding) -> &filtered_edges.push(edge)
+                        if edge.binding != updated_binding.name && sema_function_memory_contains_name(promoted_names, edge.binding) -> &filtered_edges.push(edge)
                     }
                     sema_function_memory_sort_and_deduplicate_edges(&filtered_edges)
-                    binding.gc_promotion = Val(GcPromotion{
-                        span: binding.name_span,
+                    updated_binding.gc_promotion = Val(GcPromotion{
+                        span: updated_binding.name_span,
                         scope: sema_function_memory_policy_scope_name(scope),
                         policy_provenance: policy.explanation,
                         reason: "returned heap graph requires identity beyond its lexical owner",
                         edges: filtered_edges,
-                        collection_len: sema_function_memory_collection_len(binding.init),
+                        collection_len: sema_function_memory_collection_len(updated_binding.init),
                     })
-                    if sema_function_memory_contains_name(direct_returns, binding.name) -> promoted_return = true
+                    if sema_function_memory_contains_name(direct_returns, updated_binding.name) -> promoted_return = true
                 }
-                stmts[index] = Stmt.Val{binding: binding}
+                stmts[index] = Stmt.Val{binding: updated_binding}
             }
             .Policy(declarations, body, span) -> {
+                updated_body := body
                 nested := chain
                 loop declaration in declarations -> &nested.push(declaration)
-                promoted_return = sema_function_memory_annotate_scope(&body, nested, &diagnostics, &complete) || promoted_return
-                stmts[index] = Stmt.Policy{declarations: declarations, body: body, span: span}
+                promoted_return = sema_function_memory_annotate_scope(&updated_body, nested, &diagnostics, &complete) || promoted_return
+                stmts[index] = Stmt.Policy{declarations: declarations, body: updated_body, span: span}
             }
             .While(condition, body, span, arrow_body, label) -> {
-                promoted_return = sema_function_memory_annotate_scope(&body, chain, &diagnostics, &complete) || promoted_return
-                stmts[index] = Stmt.While{cond: condition, body: body, span: span, arrow_body: arrow_body, label: label}
+                updated_body := body
+                promoted_return = sema_function_memory_annotate_scope(&updated_body, chain, &diagnostics, &complete) || promoted_return
+                stmts[index] = Stmt.While{cond: condition, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             }
             .For(variable, var_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
-                promoted_return = sema_function_memory_annotate_scope(&body, chain, &diagnostics, &complete) || promoted_return
-                stmts[index] = Stmt.For{var: variable, var_span: var_span, var2: variable_two, kind: kind, body: body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: vectorization}
+                updated_body := body
+                promoted_return = sema_function_memory_annotate_scope(&updated_body, chain, &diagnostics, &complete) || promoted_return
+                stmts[index] = Stmt.For{var: variable, var_span: var_span, var2: variable_two, kind: kind, body: updated_body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: vectorization}
             }
             .Loop(body, span, arrow_body, label) -> {
-                promoted_return = sema_function_memory_annotate_scope(&body, chain, &diagnostics, &complete) || promoted_return
-                stmts[index] = Stmt.Loop{body: body, span: span, arrow_body: arrow_body, label: label}
+                updated_body := body
+                promoted_return = sema_function_memory_annotate_scope(&updated_body, chain, &diagnostics, &complete) || promoted_return
+                stmts[index] = Stmt.Loop{body: updated_body, span: span, arrow_body: arrow_body, label: label}
             }
             .CountedLoop(init, condition, step, body, span, arrow_body, label) -> {
-                promoted_return = sema_function_memory_annotate_scope(&body, chain, &diagnostics, &complete) || promoted_return
-                stmts[index] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: body, span: span, arrow_body: arrow_body, label: label}
+                updated_body := body
+                promoted_return = sema_function_memory_annotate_scope(&updated_body, chain, &diagnostics, &complete) || promoted_return
+                stmts[index] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             }
             .Switch(subject, arms, else_body, span) -> {
+                updated_else_body := else_body
                 loop arm_index in 0..<arms.len() {
                     arm := arms[arm_index]
                     promoted_return = sema_function_memory_annotate_scope(&arm.body, chain, &diagnostics, &complete) || promoted_return
                     arms[arm_index] = arm
                 }
-                if else_body != None {
-                    body :: else_body ?? [Stmt]{}
+                if updated_else_body != None {
+                    body :: updated_else_body
                     promoted_return = sema_function_memory_annotate_scope(&body, chain, &diagnostics, &complete) || promoted_return
-                    else_body = Val(body)
+                    updated_else_body = Val(body)
                 }
-                stmts[index] = Stmt.Switch{subject: subject, arms: arms, else_body: else_body, span: span}
+                stmts[index] = Stmt.Switch{subject: subject, arms: arms, else_body: updated_else_body, span: span}
             }
             else -> {}
         }
@@ -413,16 +420,17 @@ fn sema_function_memory_propagate_transfers(function: &Func, promoted: [String])
     loop index < function.body.len() {
         if function.body[index] == {
             .Val(binding) -> {
-                callee := sema_function_memory_called_function_name(binding.init)
-                if function.gc_scope && callee != None && sema_function_memory_contains_name(promoted, callee ?? "") && !binding.gc_transferred {
-                    binding.gc_transferred = true
+                updated_binding := binding
+                callee := sema_function_memory_called_function_name(updated_binding.init)
+                if function.gc_scope && callee != None && sema_function_memory_contains_name(promoted, callee ?? "") && !updated_binding.gc_transferred {
+                    updated_binding.gc_transferred = true
                     changed = true
                 }
-                if sema_function_memory_contains_name(returned, binding.name) && (binding.gc_promotion != None || binding.gc_transferred) && !function.gc_return {
+                if sema_function_memory_contains_name(returned, updated_binding.name) && (updated_binding.gc_promotion != None || updated_binding.gc_transferred) && !function.gc_return {
                     function.gc_return = true
                     changed = true
                 }
-                function.body[index] = Stmt.Val{binding: binding}
+                function.body[index] = Stmt.Val{binding: updated_binding}
             }
             else -> {}
         }
@@ -554,7 +562,7 @@ fn sema_function_memory_collect_expr_idents(expression: Expr, names: &[String]) 
             sema_function_memory_collect_expr_idents(entry.value, &names)
         }
         .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_function_memory_collect_expr_idents(field.value, &names)
-        .TypedLit(_, body, _) -> sema_function_memory_collect_typed_lit_idents(body, names)
+        .TypedLit(_, body, _) -> sema_function_memory_collect_typed_lit_idents(body, &names)
         .TupleLit(fields, _, _) -> loop field in fields -> sema_function_memory_collect_expr_idents(field.value, &names)
         .EnumLit(_, _, _, args, _, _) -> loop argument in args {
             if argument == {

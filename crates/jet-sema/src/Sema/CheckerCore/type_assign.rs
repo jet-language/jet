@@ -1,4 +1,4 @@
-use super::helpers::no_any_type;
+use super::helpers::{no_any_type, type_hole_diag};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
 use crate::Sema::Bundle::fn_types_compatible;
@@ -277,6 +277,10 @@ impl<'a> Checker<'a> {
                     self.diags.push(no_any_type(span));
                     return;
                 }
+                if n == "_" {
+                    self.diags.push(type_hole_diag(span));
+                    return;
+                }
                 // D-SERDE13=B: the retired `Data` spelling points at `DataTree`.
                 if n == "Data" {
                     self.diags.push(data_renamed_to_datatree(span));
@@ -535,6 +539,9 @@ impl<'a> Checker<'a> {
                                 | "Matrix"
                                 | Syntax::TYPE_ATOMIC
                             | "Set" | Syntax::TYPE_TALLY | Syntax::TYPE_QUEUE
+                            // D-ITER-RESUME1=A: a helper that pulls from a
+                            // caller's lazy source names it as `&Iter<T>`.
+                            | Syntax::TYPE_ITER
                             // D-ITERTOOLS1=A: expanded generic collection handles.
                             | Syntax::TYPE_RANK | "PriorityQueue" | "Cache"
                             | "Decimal"
@@ -829,13 +836,16 @@ impl<'a> Checker<'a> {
             Type::Char => {}
             Type::Result { ok, err } => {
                 self.check_declared_type_rules(ok, span);
+                let domain_errors = self.diags.len();
                 self.check_declared_type_rules(err, span);
                 // D-FAILURE-FOUNDATION1=A: every explicit `!` domain is
                 // checked after source/import spellings are resolved. Keep
                 // this beside the recursive declared-type walk so callbacks,
-                // aliases, fields, and function returns share one rule.
+                // aliases, fields, and function returns share one rule. A
+                // domain that is already reported (an unknown name or the `_`
+                // hole) gets no second, dependent E2417.
                 let resolved_error = self.resolve_type((**err).clone());
-                if !self.is_error_domain(&resolved_error) {
+                if self.diags.len() == domain_errors && !self.is_error_domain(&resolved_error) {
                     let domain = resolved_error.show();
                     self.diags.push(Diagnostic::from_row(
                         "E2417",
@@ -1047,6 +1057,67 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-OPT-LIFT1=A: a plain `T` fills a slot whose checked type is `T?`
+    /// (returns, call arguments, struct fields, list and map items, typed
+    /// bindings, and reassignment). The slot type is already fixed, so the
+    /// lift never picks a callee or infers a generic; it adds exactly one
+    /// `Present` around the value (after any numeric widening), which every
+    /// tier lowers through the existing optional constructor. Nested
+    /// optionals never arise: a value that is already optional or fallible
+    /// is left for the ordinary checks (E0108/E0309). Returns the slot type
+    /// when the value was lifted.
+    pub(crate) fn lift_optional_slot(
+        &mut self,
+        want: &Type,
+        got: &Type,
+        expr: &mut crate::AST::Expr,
+    ) -> Option<Type> {
+        let Type::Option(payload) = want.without_user_tags() else {
+            return None;
+        };
+        let plain = got.without_user_tags();
+        if plain.unwrap_option().is_some() || plain.unwrap_result().is_some() || plain.is_never()
+        {
+            return None;
+        }
+        if matches!(
+            expr.without_parens(),
+            crate::AST::Expr::Present(..) | crate::AST::Expr::Absent(_)
+        ) {
+            return None;
+        }
+        let payload = payload.as_ref();
+        let fits = got == payload
+            || self.nominal_type_identity(payload, got)
+            || matches!(payload, Type::Union(members) if members.iter().any(|m| m == got));
+        if !fits {
+            if got.numeric_widening_to(payload).is_none() {
+                return None;
+            }
+            self.widen_numeric_expr(expr, got, payload);
+        }
+        let span = expr.span();
+        let value = std::mem::replace(expr, crate::AST::Expr::Absent(span));
+        *expr = crate::AST::Expr::Present(Box::new(value), span);
+        Some(want.clone())
+    }
+
+    /// D-OPT-LIFT1=A at a call argument: the callee is already chosen, so a
+    /// plain payload fills its `T?` parameter. A write parameter edits the
+    /// caller's own binding and never lifts.
+    pub(crate) fn lift_optional_argument(
+        &mut self,
+        expr: &mut crate::AST::Expr,
+        got: Type,
+        want: &Type,
+        convention: crate::AST::AccessConvention,
+    ) -> Type {
+        if convention == crate::AST::AccessConvention::Write {
+            return got;
+        }
+        self.lift_optional_slot(want, &got, expr).unwrap_or(got)
+    }
+
     /// Returns true when a diagnostic was emitted or compatibility was
     /// handled; callers may add a context-specific error otherwise.
     ///
@@ -1253,7 +1324,19 @@ impl<'a> Checker<'a> {
             }
             return true;
         }
-        if want.unwrap_option().is_some() && got.unwrap_option().is_none() {
+        if let (Some(payload), None) = (want.unwrap_option(), got.unwrap_option()) {
+            // D-OPT-LIFT1=A: slots lift a plain payload before this check
+            // (`lift_optional_slot`), so this row reports a real payload
+            // mismatch. A position that is not a lifting slot keeps the
+            // explicit constructor.
+            let fix = if payload == got {
+                format!(
+                    "this position does not lift a plain value; write `{}(...)`",
+                    Syntax::LIT_VALUE
+                )
+            } else {
+                type_fix_hint(payload, got)
+            };
             self.diags.push(Diagnostic::error(
                 "E0108",
                 format!(
@@ -1261,8 +1344,13 @@ impl<'a> Checker<'a> {
                     want.show(),
                     got.show()
                 ),
-                "an optional value is required here".to_string(),
-                format!("wrap it with `{}(...)`", Syntax::LIT_VALUE),
+                format!(
+                    "`{}` means a `{}` or `{}`",
+                    want.name(),
+                    payload.name(),
+                    Syntax::LIT_NULL
+                ),
+                fix,
                 Some(span),
             ));
             return true;

@@ -66,9 +66,9 @@ pub(super) fn parse_program(src: &str) -> Result<crate::AST::Program, Diagnostic
     })
 }
 
-/// Read the one config-surface spelling of environment access. The lexer has
-/// already separated `$` from the following identifier, so quoted shell text
-/// such as `"echo $HOME"` is not mistaken for a Jet environment read. String
+/// Read the one config-surface spelling of environment access. The lexer
+/// reads `$NAME` as one word (D-COMPILER-NS1=A), so quoted shell text such as
+/// `"echo $HOME"` is not mistaken for a Jet environment read. String
 /// interpolation token streams are walked recursively because they are parsed
 /// as expressions by the config parser.
 pub(super) fn environment_reads(src: &str) -> Result<Vec<EnvironmentRead>, Diagnostic> {
@@ -83,17 +83,12 @@ pub(super) fn environment_reads(src: &str) -> Result<Vec<EnvironmentRead>, Diagn
 
 fn collect_environment_reads(tokens: &[Token], reads: &mut Vec<EnvironmentRead>) {
     let tokens = crate::Lexer::without_comments(tokens);
-    for (index, token) in tokens.iter().enumerate() {
-        if matches!(&token.kind, TokKind::Dollar) {
-            if let Some(Token {
-                kind: TokKind::Ident(name),
-                ..
-            }) = tokens.get(index + 1)
-            {
-                let name = format!("${name}");
-                if !reads.iter().any(|read| read.name == name) {
+    for token in tokens.iter() {
+        if let TokKind::Ident(name) = &token.kind {
+            if Syntax::is_comptime_name(name) {
+                if !reads.iter().any(|read| &read.name == name) {
                     reads.push(EnvironmentRead {
-                        name,
+                        name: name.clone(),
                         ty: Syntax::TYPE_STRING.to_string(),
                     });
                 }

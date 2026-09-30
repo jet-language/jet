@@ -116,6 +116,7 @@ impl<'a> Parser<'a> {
             pattern: Pattern::Ok {
                 binding: ok_binding,
                 binding_span: ok_binding_span,
+                inner: None,
                 span: ok_pattern_span,
             },
             span: ok_pattern_span,
@@ -125,6 +126,7 @@ impl<'a> Parser<'a> {
             pattern: Pattern::Err {
                 binding: err_binding,
                 binding_span: err_binding_span,
+                inner: None,
                 span: err_pattern_span,
             },
             span: err_pattern_span,
@@ -992,7 +994,7 @@ impl<'a> Parser<'a> {
         // A bare pattern head: parse it standalone and attach the subject.
         let save = self.pos;
         let save_diags = self.diags.len();
-        if let Some(pattern) = self.try_pattern_rhs()? {
+        if let Some(pattern) = self.try_pattern_rhs(true)? {
             // A pattern may be followed by a Boolean guard before the arm
             // arrow (`.Key(key) && key == "b" -> ...`). Keep the pattern as a
             // PatternTest so sema can put its payload bindings in scope while
@@ -1275,7 +1277,7 @@ impl<'a> Parser<'a> {
         };
         let op_span = self.bump().span;
         if op == BinOp::Eq {
-            if let Some(pattern) = self.try_pattern_rhs()? {
+            if let Some(pattern) = self.try_pattern_rhs(true)? {
                 let span = Span::new(lhs.span().start, pat_span(&pattern).end.max(op_span.end));
                 return Ok(Expr::PatternTest {
                     subject: Box::new(lhs),
@@ -1910,47 +1912,7 @@ impl<'a> Parser<'a> {
                             let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
                             if !matches!(self.peek().kind, TokKind::RParen) {
                                 loop {
-                                    let slot = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT)
-                                    {
-                                        self.bump();
-                                        crate::AST::PatSlot::Wildcard
-                                    } else if let TokKind::Int(lo_val, _) =
-                                        &self.peek().kind.clone()
-                                    {
-                                        let lo = *lo_val;
-                                        self.bump();
-                                        if matches!(self.peek().kind, TokKind::DotDot) {
-                                            self.bump();
-                                            if let TokKind::Int(hi_val, _) =
-                                                &self.peek().kind.clone()
-                                            {
-                                                let hi = *hi_val;
-                                                self.bump();
-                                                crate::AST::PatSlot::Range { lo, hi }
-                                            } else {
-                                                return Err(Diagnostic::error(
-                                                    "E0003",
-                                                    "expected an integer after `..` in a range pattern".to_string(),
-                                                    "range patterns need both ends: `lo..hi`".to_string(),
-                                                    "write `0..100` for an inclusive range".to_string(),
-                                                    Some(self.peek().span),
-                                                ));
-                                            }
-                                        } else {
-                                            return Err(Diagnostic::error(
-                                                "E0003",
-                                                "expected `..` after the lower bound of a range pattern".to_string(),
-                                                "range patterns need `lo..hi` syntax".to_string(),
-                                                "write `0..100` for an inclusive range".to_string(),
-                                                Some(self.peek().span),
-                                            ));
-                                        }
-                                    } else {
-                                        let (name, span) =
-                                            self.expect_ident("for a pattern binding")?;
-                                        crate::AST::PatSlot::Bind { name, span }
-                                    };
-                                    bindings.push(slot);
+                                    bindings.push(self.pattern_slot()?);
                                     if matches!(self.peek().kind, TokKind::RParen) {
                                         break;
                                     }

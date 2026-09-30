@@ -53,14 +53,14 @@ fn jet_rust_emit_validate_function(ctx: &JetRustEmitContext, function: MirFuncti
         loop target in mir_terminator_targets(block.terminator) {
             found := false
             loop candidate in function.blocks { if candidate.id == target -> found = true }
-            if !found -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR terminator targets a missing block", "checked CFG edges must resolve before source emission", Val(block.span))
+            if !found -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR terminator targets a missing block", "checked CFG edges must resolve before source emission", Val(block.span))
         }
     }
-    if !found_entry -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR function entry block is missing", "each checked function must have one block matching its entry identity", Val(function.span))
+    if !found_entry -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR function entry block is missing", "each checked function must have one block matching its entry identity", Val(function.span))
 }
 
 fn jet_rust_emit_validate_program(ctx: &JetRustEmitContext) Never! {
-    loop function in ctx.program.functions -> jet_rust_emit_validate_function(ctx, function)
+    loop function in ctx.program.functions -> jet_rust_emit_validate_function(&ctx, function)
 }
 
 fn jet_rust_emit_foreign_abi(abi: MirForeignAbi) -> String Never! {
@@ -90,7 +90,7 @@ fn jet_rust_emit_foreign_param_type(ctx: &JetRustEmitContext, foreign: MirForeig
         if parameter.ty.kind == {
             .Fn(signature) -> {
                 if signature.params.len() == 0 {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "native callback start parameter has no event payload", "native callback start rows must carry a checked FfiCallbackEvent payload", Val(foreign.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "native callback start parameter has no event payload", "native callback start rows must carry a checked FfiCallbackEvent payload", Val(foreign.span))
                     return "()"
                 }
                 payload := signature.params[0]
@@ -103,7 +103,7 @@ fn jet_rust_emit_foreign_param_type(ctx: &JetRustEmitContext, foreign: MirForeig
                     }
                     else -> {}
                 }
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "native callback start parameter has an invalid event payload", "native callback start rows must carry FfiCallbackEvent<T> as their first callback parameter", Val(foreign.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "native callback start parameter has an invalid event payload", "native callback start rows must carry FfiCallbackEvent<T> as their first callback parameter", Val(foreign.span))
                 return "()"
             }
             else -> {}
@@ -113,14 +113,14 @@ fn jet_rust_emit_foreign_param_type(ctx: &JetRustEmitContext, foreign: MirForeig
     if foreign.foreign_language == MirForeignLanguage.C && transport == "" {
         visited := [MirTypeId]{}
         if !jet_rust_emit_c_abi_type_supported(ctx, parameter.ty, &visited) {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C parameter has no checked physical ABI representation", "direct C parameters require C-safe scalar, fixed-array, repr(C) record, or tagged C enum facts", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C parameter has no checked physical ABI representation", "direct C parameters require C-safe scalar, fixed-array, repr(C) record, or tagged C enum facts", Val(foreign.span))
         }
         abi_type :: jet_rust_emit_c_abi_type(ctx, parameter.ty)
         if parameter.access == MirAccess.Write -> return "*mut {abi_type}"
         return abi_type
     }
     if foreign.raw_scalar_abi && parameter.ty.kind == MirTypeKind.Int -> return jet_rust_emit_type(ctx, parameter.ty)
-    jet_rust_emit_callable_param_type(ctx, parameter.ty, parameter.access)
+    jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
 }
 
 fn jet_rust_emit_foreign_return_type(ctx: &JetRustEmitContext, foreign: MirForeign) -> String Never! {
@@ -131,11 +131,11 @@ fn jet_rust_emit_foreign_return_type(ctx: &JetRustEmitContext, foreign: MirForei
     if foreign.foreign_language == MirForeignLanguage.C && transport == "" {
         visited := [MirTypeId]{}
         if !jet_rust_emit_c_abi_type_supported(ctx, ty, &visited) {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C return has no checked physical ABI representation", "direct C returns require C-safe scalar, fixed-array, repr(C) record, or tagged C enum facts", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C return has no checked physical ABI representation", "direct C returns require C-safe scalar, fixed-array, repr(C) record, or tagged C enum facts", Val(foreign.span))
         }
         return jet_rust_emit_c_abi_type(ctx, ty)
     }
-    jet_rust_emit_type(ctx, ty)
+    jet_rust_emit_type(&ctx, ty)
 }
 
 fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MirForeign) -> [String] Never! {

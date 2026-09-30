@@ -102,8 +102,8 @@ fn jet_eval_compiler_services_token_kind(kind: Int) -> String? {
     if kind == TOKEN_RBRACKET -> return Val("punctuation.right_bracket")
     if kind == TOKEN_RBRACE -> return Val("punctuation.right_brace")
     if kind == TOKEN_QUESTION -> return Val("operator.try")
-    if kind == TOKEN_PLUS_PLUS -> return Val("operator.increment")
-    if kind == TOKEN_MINUS_MINUS -> return Val("operator.decrement")
+    if kind == TOKEN_PLUS_PLUS -> return Val("retired.plus_plus")
+    if kind == TOKEN_MINUS_MINUS -> return Val("retired.minus_minus")
     if kind == TOKEN_GT -> return Val("operator.greater")
     if kind == TOKEN_SHR -> return Val("operator.shift_right")
     if kind == TOKEN_FENCE_CLOSE -> return Val("operator.fence_close")
@@ -236,7 +236,7 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
         }})
     }
     value := TComptimeValue.Struct{type_name: "CompilerSourceMap", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
         TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(sources)},
         TComptimeField{name: "generated_lines", value: TComptimeValue.List{values: generated_lines}},
     }}
@@ -259,7 +259,7 @@ fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> TCompti
         &tokens.push(value)
     }
     TComptimeValue.Struct{type_name: "CompilerLexed", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
         TComptimeField{name: "tokens", value: TComptimeValue.List{values: tokens}},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics)},
@@ -330,7 +330,7 @@ fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) 
         loop item in parsed.program.items -> &items.push(jet_eval_compiler_services_syntax_node(item))
     }
     TComptimeValue.Struct{type_name: "CompilerSyntaxTree", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
         TComptimeField{name: "items", value: TComptimeValue.List{values: items}},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics)},
@@ -428,7 +428,7 @@ pub fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput
     semantic_index := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}
     if !has_errors && index.complete -> semantic_index = TComptimeValue.Present{value: index.value}
     value := TComptimeValue.Struct{type_name: "CompilerChecked", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(@JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(input.parsed.source)},
         TComptimeField{name: "syntax", value: input.parsed.value},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics)},

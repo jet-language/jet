@@ -51,15 +51,6 @@ fn core_call_is_known(module: &str, name: &str) -> bool {
         || Syntax::core_marker_application(module, name).is_some()
 }
 
-/// Transparent source-owned HTTP provider leaves retain their native carrier
-/// instead of acquiring the ordinary imported-function default `Err`.
-fn source_owned_http_carrier(module: &str, name: &str) -> bool {
-    matches!(
-        (module, name),
-        ("core.http.client", "request") | ("core.http.server", "response")
-    )
-}
-
 fn unit_callback_type() -> Type {
     Type::Fn {
         params: Vec::new(),
@@ -2653,19 +2644,50 @@ impl<'a> Checker<'a> {
         }
         let fixed_sig =
             resolved_core_fixed_sig(module, name, type_args, span, &mut self.diags);
-        // Source-owned Core members are ordinary checked Jet functions.  The
-        // source module itself keeps the fixed signature so its `core.<same
-        // module>` provider calls do not recurse back into the wrapper.  Leaves
-        // owned by the native provider must stay on the fixed-signature path;
-        // routing those through a source wrapper would add the default `Err`
-        // carrier to direct HTTP/native carriers such as `HTTPRequest`.
+        // D-A11YGATE1=B (c134 Phase 6): E2930 (empty accessible label on an
+        // interactive-role node) is checked here, on the raw call-site args,
+        // before a source-owned member routes to its Core wrapper, so every
+        // route checks the user's call site. It always runs — the diagnostic
+        // is `Severity::Lint`, and CLI layers decide whether to show it
+        // (`jet lint --a11y`) or suppress it (`jet build`/`jet run`), per
+        // D-A11YGATE1's opt-in-surface, never-blocking contract.
+        if module == "core.ui" && name == "node_role" {
+            self.check_a11y_node_role_label(args, span);
+        }
+        // D-AUTODIFF1: record every `core.compute` consumer before any route
+        // returns, so a source-owned member stays visible to the autodiff
+        // trace check exactly like a native one.
+        if module == "core.compute" {
+            self.fx_compute_calls
+                .push(crate::Sema::Effects::ComputeCallFact {
+                    method: name.to_string(),
+                    span,
+                });
+        }
+        // D-COMPUTE-GRAD1=E: `compute.gradient(f, ...)` over a function value
+        // is the autodiff transform. Core also owns a Tensor-valued
+        // `gradient(pred, target)`, so the function-valued form is claimed
+        // before the source-owned route below can bind it to that wrapper.
+        if module == "core.compute"
+            && matches!(name, "gradient" | "value_and_gradient" | "vjp" | "jvp")
+            && args
+                .first()
+                .is_some_and(|arg| compute_function_names(self, &arg.expr).is_some())
+        {
+            return self.infer_compute_transform(name, span, args);
+        }
+        // Source-owned Core members are ordinary checked Jet functions: the
+        // caller sees the wrapper's declared contract (`-> T Never!`,
+        // `-> T E!`), the same row every backend calls. Only the source module
+        // itself keeps the fixed signature, so its `core.<same module>`
+        // provider calls do not recurse back into the wrapper. The module is
+        // identified by its registered alias, never by file name: a user
+        // `uuid.jet` is not `Core/crypto/uuid.jet`.
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
             if jet_foundation::CoreModuleExports::core_source_owns(module, name)
-                && !source_owned_http_carrier(module, name)
-                && source.path != self.module_path
-                && !source.path.ends_with(&format!("/{path}", path = self.module_path))
+                && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
             {
                 let source_idx = self.modules.and_then(|modules| {
                     modules
@@ -3046,15 +3068,6 @@ impl<'a> Checker<'a> {
                 _ => unreachable!(),
             })
         }
-        // D-EFF1: record the effect this Core call contributes to the enclosing
-        // function's inferred set (erased in codegen; purely a sema fact).
-        if module == "core.compute" {
-            self.fx_compute_calls
-                .push(crate::Sema::Effects::ComputeCallFact {
-                    method: name.to_string(),
-                    span,
-                });
-        }
         // Plain calls carry their erased arity in the foundation record.
         // Keep the richer Jet type construction below in sema, but make
         // every consumer reject a row-shaped call from the same fact.
@@ -3205,15 +3218,6 @@ impl<'a> Checker<'a> {
                 self.infer(&mut a.expr);
             }
             return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
-        }
-        // D-A11YGATE1=B (c134 Phase 6): E2930 (empty accessible label on an
-        // interactive-role node) is checked here, on the raw call-site args,
-        // independent of `sig`/arity checking below. It always runs — the
-        // diagnostic is `Severity::Lint`, and CLI layers decide whether to
-        // show it (`jet lint --a11y`) or suppress it (`jet build`/`jet run`),
-        // per D-A11YGATE1's opt-in-surface, never-blocking contract.
-        if module == "core.ui" && name == "node_role" {
-            self.check_a11y_node_role_label(args, span);
         }
         if module == "core.auth" && matches!(name, "verify_jwt" | "verify_paseto") {
             let required = if name == "verify_jwt" {
@@ -4827,7 +4831,21 @@ impl<'a> Checker<'a> {
                         &elem,
                         AccessConvention::Read,
                     );
-                    self.check_type_assignable(&elem, &value_ty, value_arg.expr.span());
+                    if !self.check_type_assignable(&elem, &value_ty, value_arg.expr.span()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`{}` writes a {} through this pointer, but the value is {}",
+                                Syntax::MEM_VOLATILE_WRITE,
+                                elem.show(),
+                                value_ty.show()
+                            ),
+                            "a volatile write stores a value of the pointer's element type"
+                                .to_string(),
+                            format!("write a `{}` value", elem.name()),
+                            Some(value_arg.expr.span()),
+                        ));
+                    }
                 }
                 return Some(unit_ty());
             }
@@ -6842,7 +6860,7 @@ impl<'a> Checker<'a> {
                             "E3101",
                             format!("`core.sys.{name}` requires an audited `#Unsafe` region"),
                             "POSIX process and session control can change credentials, signals, and process topology (I1)".to_string(),
-                            format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `prep if @build.os` / `#Target(OS.*)`"),
+                            format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `prep if $build.os` / `#Target(OS.*)`"),
                             Some(span),
                         ));
                 }

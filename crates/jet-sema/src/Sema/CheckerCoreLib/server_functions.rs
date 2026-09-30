@@ -61,7 +61,8 @@ pub(crate) fn validate_server_function_boundary(
 
     match function.failure_contract() {
         FailureContract::Default { success, error }
-        | FailureContract::Explicit { success, error } => {
+        | FailureContract::Explicit { success, error }
+        | FailureContract::Inferred { success, error } => {
             if !wire_type_ok(&success, reg) {
                 diagnostics.push(wire_error(
                     function,
@@ -81,6 +82,7 @@ pub(crate) fn validate_server_function_boundary(
         }
         FailureContract::Optional { success }
         | FailureContract::ProvenUnreachable { success }
+        | FailureContract::InferredNever { success }
         | FailureContract::Converted { success, .. } => {
             if !wire_type_ok(&success, reg) {
                 diagnostics.push(wire_error(

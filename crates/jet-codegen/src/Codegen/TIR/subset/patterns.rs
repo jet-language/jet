@@ -114,6 +114,17 @@ pub(crate) fn fallible_pattern_binding(pattern: &Pattern) -> Option<String> {
     }
 }
 
+/// S31: an arm head whose pattern test (possibly the first term of a guard
+/// chain) nests a payload pattern. These tables lower through the same
+/// short-circuit condition chain as guarded arms.
+pub(crate) fn arm_has_nested_pattern(cond: &Expr) -> bool {
+    match cond {
+        Expr::PatternTest { pattern, .. } => pattern.has_nested_pattern(),
+        Expr::Binary(BinOp::And, left, _, _) => arm_has_nested_pattern(left),
+        _ => false,
+    }
+}
+
 /// Mirror codegen's `switch_arm_pattern_owned` (Statement.rs): an arm whose head
 /// is a variant pattern over `subject`. Returns the `Pattern` (Variant or Or of
 /// variants), or `None` for ranges / comparison / Bool arms. The arm head is a
@@ -279,12 +290,13 @@ pub(crate) fn pattern_subjects_match(cx: &Cx, a: &Expr, b: &Expr) -> bool {
 /// pattern binds its first alt's names (all alts bind the same names — E0317).
 pub(crate) fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
     match pattern {
-        Pattern::Variant { bindings, .. } => {
-            for slot in bindings {
-                if let PatSlot::Bind { name, .. } = slot {
-                    locals.insert(name.clone());
-                }
-            }
+        Pattern::Variant { .. } => {
+            locals.extend(
+                pattern
+                    .binding_names()
+                    .into_iter()
+                    .map(|binding| binding.local_name().to_owned()),
+            );
         }
         Pattern::Or(alts, _) => {
             if let Some(first) = alts.first() {

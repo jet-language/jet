@@ -333,17 +333,17 @@ fn unicode_text_behavior_matches_comptime_and_aot() {
 use core.text as text
 use core.regex as re
 
-@FOLDED :: text.casefold("Straßeİς")
-@LOWERED :: text.lower("ΟΣ")
-@UPPERED :: text.upper("ßև")
-@METHOD_LOWERED :: "__PINNED_UPPER__".to_lower()
-@METHOD_UPPERED :: "__PINNED_LOWER__".to_upper()
-@METHOD_TRIMMED :: "__PINNED_SPACE__jet__PINNED_SPACE__".trim()
-@KEYCAP :: text.display_width("1️⃣")
-@EMOJI :: text.display_width("©️")
-@IGNORABLE :: text.display_width("́‍")
-@CLASSES :: text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ")
-@REGEX_SPACE :: re.is_match(.{"\s"}, " ")
+FOLDED :: prep { text.casefold("Straßeİς") }
+LOWERED :: prep { text.lower("ΟΣ") }
+UPPERED :: prep { text.upper("ßև") }
+METHOD_LOWERED :: prep { "__PINNED_UPPER__".to_lower() }
+METHOD_UPPERED :: prep { "__PINNED_LOWER__".to_upper() }
+METHOD_TRIMMED :: prep { "__PINNED_SPACE__jet__PINNED_SPACE__".trim() }
+KEYCAP :: prep { text.display_width("1️⃣") }
+EMOJI :: prep { text.display_width("©️") }
+IGNORABLE :: prep { text.display_width("́‍") }
+CLASSES :: prep { text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ") }
+REGEX_SPACE :: prep { re.is_match(.{"\s"}, " ") }
 
 fn run() {
     runtime_folded :: text.casefold("Straßeİς")
@@ -361,17 +361,17 @@ fn run() {
     regex_number :: re.is_match(.{"\p{{Number}}+"}, "٣")
     regex_whitespace :: re.is_match(.{"\p{{White_Space}}+"}, " ")
     insensitive :: re.compile_with("k", re.flags(true, false, false)) ?? panic("regex")
-    print("{@FOLDED}|{runtime_folded}")
-    print("{@LOWERED}|{runtime_lowered}")
-    print("{@UPPERED}|{runtime_uppered}")
-    print(@METHOD_LOWERED == "__PINNED_LOWER__" && runtime_method_lowered == "__PINNED_LOWER__")
-    print(@METHOD_UPPERED == "__PINNED_UPPER__" && runtime_method_uppered == "__PINNED_UPPER__")
-    print("{@METHOD_TRIMMED}|{runtime_method_trimmed}")
-    print("{@KEYCAP}|{runtime_keycap}")
-    print("{@EMOJI}|{runtime_emoji}")
-    print("{@IGNORABLE}|{runtime_ignorable}")
-    print("{@CLASSES}|{runtime_classes}")
-    print("{@REGEX_SPACE}|{runtime_regex_space}")
+    print("{FOLDED}|{runtime_folded}")
+    print("{LOWERED}|{runtime_lowered}")
+    print("{UPPERED}|{runtime_uppered}")
+    print(METHOD_LOWERED == "__PINNED_LOWER__" && runtime_method_lowered == "__PINNED_LOWER__")
+    print(METHOD_UPPERED == "__PINNED_UPPER__" && runtime_method_uppered == "__PINNED_UPPER__")
+    print("{METHOD_TRIMMED}|{runtime_method_trimmed}")
+    print("{KEYCAP}|{runtime_keycap}")
+    print("{EMOJI}|{runtime_emoji}")
+    print("{IGNORABLE}|{runtime_ignorable}")
+    print("{CLASSES}|{runtime_classes}")
+    print("{REGEX_SPACE}|{runtime_regex_space}")
     print(regex_alpha && regex_number && regex_whitespace && insensitive.is_match("K"))
 }
 "#

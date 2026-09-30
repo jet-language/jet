@@ -2,7 +2,7 @@
 // places, calls, functions and control flow; target adapters consume these facts
 // rather than recreating source-level policy.
 
-@MIR_SCHEMA_VERSION :: 6
+MIR_SCHEMA_VERSION :: prep { 6 }
 
 pub struct MirFunctionId { pub value: Int }
 
@@ -868,8 +868,8 @@ fn mir_marked_display_name(ty: MirType) -> String {
 pub fn mir_function_signature_display_name(signature: MirFunctionSignature) -> String {
     params :: mir_signature_parameter_names(signature.params, signature.param_contract)
     out := "fn({params})"
-    if signature.ret.map(value -> !mir_type_is_unit(value)) ?? false {
-        out = "{out} {signature.ret.map(value -> mir_type_display_name(value)) ?? ""}"
+    if signature.ret == .Val(value) {
+        if !mir_type_is_unit(value) -> out = "{out} {mir_type_display_name(value)}"
     }
     if signature.effect_bound != None -> out = "{out} -[{(signature.effect_bound ?? [String]{}).join(",")}]>"
     out

@@ -1835,7 +1835,7 @@ fn data_loader_payload(
     if state.source.kind == jet_foundation::PreludeDataFlow::LoaderKind::File
         && state.source.member.is_empty()
     {
-        let payload = std::fs::read(&state.raw_locator).map_err(|error| {
+        let payload = jet_foundation::CheckReads::read(&state.raw_locator).map_err(|error| {
             data_loader_failure(
                 "IO",
                 "data.loader.file",

@@ -24,7 +24,7 @@ pub struct CoreModuleDeclaration {
 }
 
 fn core_module_export(module_name: String) -> CoreModuleExportNames? {
-    loop row in @CORE_MODULE_EXPORTS {
+    loop row in CORE_MODULE_EXPORTS {
         if row.module_name == module_name -> return Val(row)
     }
     None
@@ -74,7 +74,7 @@ fn core_module_type_leaf(name: String) -> String Never! {
 pub fn core_type_modules(name: String) -> [String] Never! {
     leaf :: core_module_type_leaf(name)
     modules := [String]{}
-    loop row in @CORE_MODULE_EXPORTS {
+    loop row in CORE_MODULE_EXPORTS {
         if core_module_export_has_name(row.type_exports, leaf) -> &modules.push(row.module_name)
     }
     modules

@@ -319,7 +319,7 @@ fn write_cbor_float(out: &[U8], n: Float) {
     &out.push(U8{251})
     k := 7
     loop k >= 0 {
-        &out.push(U8{(bits >> (k * 8)) & 255})
+        &out.push(to_u8(bits >> (k * 8)))
         k -= 1
     }
 }
@@ -334,32 +334,39 @@ fn write_cbor_int(out: &[U8], n: Int) {
 
 fn write_cbor_head(out: &[U8], major: Int, n: Int) {
     if n < 24 {
-        &out.push(U8{(major << 5) | n})
+        &out.push(to_u8((major << 5) | n))
         return
     }
     if n < 256 {
-        &out.push(U8{(major << 5) | 24})
+        &out.push(to_u8((major << 5) | 24))
         &out.push(U8{n})
         return
     }
     if n < 65536 {
-        &out.push(U8{(major << 5) | 25})
-        &out.push(U8{n >> 8})
-        &out.push(U8{n & 255})
+        &out.push(to_u8((major << 5) | 25))
+        &out.push(to_u8(n >> 8))
+        &out.push(to_u8(n))
         return
     }
     if n < 4294967296 {
-        &out.push(U8{(major << 5) | 26})
-        &out.push(U8{(n >> 24) & 255})
-        &out.push(U8{(n >> 16) & 255})
-        &out.push(U8{(n >> 8) & 255})
-        &out.push(U8{n & 255})
+        &out.push(to_u8((major << 5) | 26))
+        &out.push(to_u8(n >> 24))
+        &out.push(to_u8(n >> 16))
+        &out.push(to_u8(n >> 8))
+        &out.push(to_u8(n))
         return
     }
-    &out.push(U8{(major << 5) | 27})
+    &out.push(to_u8((major << 5) | 27))
     k := 7
     loop k >= 0 {
-        &out.push(U8{(n >> (k * 8)) & 255})
+        &out.push(to_u8(n >> (k * 8)))
         k -= 1
     }
+}
+
+/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
+/// checked `U8{}` conversion.
+fn to_u8(n: Int) -> U8 Never! {
+    v :: n & 255
+    (U8{v})
 }

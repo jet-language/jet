@@ -2,11 +2,12 @@ use super::*;
 use jet_foundation::DataTree::DataTree;
 
 /// `jet fix --edition=2027` rewrites `json.canonical(x)` per D-JSONCANON1:
-/// `json.canonical(x)` when the enclosing function is fallible, otherwise
-/// `json.canonical(x) ?? panic("value is not canonical JSON")`. A re-run
-/// must be a no-op (idempotent), including when the existing fallback
-/// already has a space before `??` (the bug that made `jet fix` double-
-/// append the panic fallback on every re-run).
+/// an omitted contract is the implicit default `Err`, so a fallible function
+/// keeps `json.canonical(x)` and propagates automatically, while a `Never!`
+/// function gets `json.canonical(x) ?? panic("value is not canonical JSON")`.
+/// A re-run must be a no-op (idempotent), including when the existing
+/// fallback already has a space before `??` (the bug that made `jet fix`
+/// double-append the panic fallback on every re-run).
 #[test]
 fn jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent() {
     let dir = isolated_cwd("jsoncanon_fix");
@@ -15,21 +16,21 @@ fn jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent() {
         &file,
         r#"use core.encoding.json as json
 
-fn show() {
-    data := json.parse("{\"a\":1}") ?? panic("json")
-    r := json.canonical(data)
+pub fn show() Never! {
+    data :: json.parse(`{"a":1}`) ?? panic("json")
+    r :: json.canonical(data)
     print(r)
 }
 
-fn sign() -> String {
-    data := json.parse("{\"a\":1}")
-    r := json.canonical(data)
-    return r
+pub fn sign() -> String {
+    data :: json.parse(`{"a":1}`)
+    r :: json.canonical(data)
+    r
 }
 
-fn already_migrated() {
-    data := json.parse("{\"a\":1}") ?? panic("json")
-    r := json.canonical(data) ?? panic("value is not canonical JSON")
+pub fn already_migrated() Never! {
+    data :: json.parse(`{"a":1}`) ?? panic("json")
+    r :: json.canonical(data) ?? panic("value is not canonical JSON")
     print(r)
 }
 "#,
@@ -52,11 +53,11 @@ fn already_migrated() {
 
     let after_first = run_fix(&file);
     assert!(
-        after_first.contains("json.canonical(data) ?? panic(\"value is not canonical JSON\")\n    print(r)\n}\n\nfn sign"),
+        after_first.contains("json.canonical(data) ?? panic(\"value is not canonical JSON\")\n    print(r)\n}\n\npub fn sign"),
         "infallible fn `show` must get the panic fallback:\n{after_first}"
     );
     assert!(
-        after_first.contains("json.canonical(data)\n    return r"),
+        after_first.contains("r :: json.canonical(data)\n    r\n}"),
         "fallible fn `sign` must use automatic propagation, not a panic fallback:\n{after_first}"
     );
     assert!(
@@ -91,7 +92,8 @@ fn jet_fix_reports_one_print_family_migration_per_retired_spelling() {
         "jet fix --dry-run failed: {}",
         String::from_utf8_lossy(&preview.stderr)
     );
-    let report = String::from_utf8_lossy(&preview.stdout);
+    // The diff is the command's output (stdout); the summary is status (stderr).
+    let report = String::from_utf8_lossy(&preview.stderr);
     assert!(report.contains("would apply 3 fixes"), "{report}");
     assert!(
         report.contains("rewrote 3 retired print-family spellings (D-ONCE-PRINT1=A)"),
@@ -134,7 +136,7 @@ fn jet_fix_apply_writes_replay_log_and_undo_restores_source() {
         "jet fix failed: {}",
         String::from_utf8_lossy(&applied.stderr)
     );
-    let log = String::from_utf8_lossy(&applied.stdout)
+    let log = String::from_utf8_lossy(&applied.stderr)
         .lines()
         .find_map(|line| line.trim().strip_prefix("log: "))
         .map(PathBuf::from)
@@ -656,8 +658,9 @@ fn quiet_suppresses_status_output_without_changing_behavior() {
         .output()
         .unwrap();
     assert!(loud_out.status.success(), "{:?}", loud_out);
+    // Status lines are human status output, which the output profile routes to stderr.
     assert!(
-        !String::from_utf8_lossy(&loud_out.stdout).trim().is_empty(),
+        !String::from_utf8_lossy(&loud_out.stderr).trim().is_empty(),
         "jet init without --quiet should print a confirmation"
     );
 
@@ -669,9 +672,10 @@ fn quiet_suppresses_status_output_without_changing_behavior() {
         .unwrap();
     assert!(quiet_out.status.success(), "{:?}", quiet_out);
     assert!(
-        String::from_utf8_lossy(&quiet_out.stdout).trim().is_empty(),
-        "jet init --quiet must suppress its non-error status line, got: {}",
-        String::from_utf8_lossy(&quiet_out.stdout)
+        String::from_utf8_lossy(&quiet_out.stdout).trim().is_empty()
+            && String::from_utf8_lossy(&quiet_out.stderr).trim().is_empty(),
+        "jet init --quiet must suppress its non-error status line, got: {:?}",
+        quiet_out
     );
     assert!(
         quiet.join(jet::Syntax::PACKAGE_FILE).is_file(),
@@ -860,6 +864,112 @@ fn top_level_help_lists_job_vocabulary_only() {
     }
 }
 
+/// Run a help surface and return stdout with the version scrubbed.
+fn help_stdout(args: &[&str]) -> String {
+    let out = Command::new(jet())
+        .args(args)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "jet {args:?} failed: {out:?}");
+    String::from_utf8_lossy(&out.stdout).replace(env!("CARGO_PKG_VERSION"), "VERSION")
+}
+
+/// The command word of each `jet <command>` row in a screen's first section.
+fn listed_commands(screen: &str, heading: &str) -> Vec<String> {
+    screen
+        .split_once(heading)
+        .unwrap_or_else(|| panic!("missing `{heading}` section:\n{screen}"))
+        .1
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .filter_map(|line| line.strip_prefix("  jet "))
+        .map(|rest| rest.split_whitespace().next().unwrap().to_string())
+        .collect()
+}
+
+/// #3724: `jet help` lists commands most used first, in the census-measured
+/// `frequency_rank` order, and the greeting shows its rows in that same order.
+#[test]
+fn help_lists_commands_by_frequency_rank() {
+    let help = help_stdout(&["help"]);
+    let listed = listed_commands(&help, "\nUsage:\n");
+    let position = |name: &str| {
+        listed
+            .iter()
+            .position(|word| word == name)
+            .unwrap_or_else(|| panic!("`jet help` omits `{name}`:\n{help}"))
+    };
+    for common in ["run", "check", "new", "test"] {
+        for rare in ["registry", "db", "bind"] {
+            assert!(
+                position(common) < position(rare),
+                "`{common}` must precede `{rare}` in `jet help`:\n{help}"
+            );
+        }
+    }
+    let registry_order: Vec<String> = jet::CLI::commands_in(jet::CLI::HelpOrder::Frequency)
+        .into_iter()
+        .filter(|command| jet::CLI::is_canonical_top_level(command.name))
+        .map(|command| command.name.to_string())
+        .collect();
+    assert_eq!(listed, registry_order, "`jet help` must follow frequency_rank");
+    assert_eq!(
+        help,
+        help_stdout(&["help", "--sort", "frequency"]),
+        "`--sort frequency` is the default order"
+    );
+
+    let greeting = help_stdout(&["--color=never"]);
+    let headline = listed_commands(&greeting, "\nGet started:\n");
+    assert!(
+        headline.len() >= 3 && headline.iter().any(|name| name == "run"),
+        "the greeting must show the headline commands:\n{greeting}"
+    );
+    let in_help_order: Vec<usize> = headline.iter().map(|name| position(name)).collect();
+    assert!(
+        in_help_order.windows(2).all(|pair| pair[0] < pair[1]),
+        "the greeting must list its commands in `jet help` order:\n{greeting}"
+    );
+    check_snapshot("help_frequency.txt", &help);
+}
+
+/// #3724 / D-HELP-SORT1=A (owner spelling): `jet help --sort az` lists every
+/// command A to Z, `--sort za` Z to A, and any other order is a usage error.
+#[test]
+fn help_sort_az_lists_a_to_z() {
+    let az = help_stdout(&["help", "--sort", "az"]);
+    let listed = listed_commands(&az, "\nUsage:\n");
+    let mut every: Vec<String> = jet::CLI::COMMANDS
+        .iter()
+        .filter(|command| jet::CLI::is_canonical_top_level(command.name))
+        .map(|command| command.name.to_string())
+        .collect();
+    every.sort_by_key(|name| name.to_ascii_lowercase());
+    assert_eq!(listed, every, "`--sort az` must list every command A to Z");
+    assert_eq!(listed_commands(&help_stdout(&["help", "--sort=az"]), "\nUsage:\n"), every);
+
+    let za = help_stdout(&["help", "--sort", "za"]);
+    every.reverse();
+    assert_eq!(
+        listed_commands(&za, "\nUsage:\n"),
+        every,
+        "`--sort za` must list every command Z to A"
+    );
+
+    let unknown = Command::new(jet())
+        .args(["help", "--sort", "alpha"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(
+        !unknown.status.success() && stderr.contains("E2104") && stderr.contains("frequency, az, za"),
+        "an unknown order must name the valid ones: {unknown:?}"
+    );
+    check_snapshot("help_az.txt", &az);
+}
+
 #[test]
 fn command_overrides_report_themselves_and_default_bypasses_them() {
     if !common::have_rustc() {
@@ -886,7 +996,7 @@ fn run() {}
     .unwrap();
 
     let override_run = Command::new(jet())
-        .args(["test", "override.jet", "--serial"])
+        .args(["test", "override.jet", "--serial", "--capture=all"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -897,24 +1007,27 @@ fn run() {}
         override_run
     );
     let override_stdout = String::from_utf8_lossy(&override_run.stdout);
+    // The selection note is status output, which goes to stderr.
+    let override_stderr = String::from_utf8_lossy(&override_run.stderr);
     assert!(
-        override_stdout.contains("jet test: using fn test override"),
-        "{override_stdout}"
+        override_stderr.contains("jet test: using fn test override"),
+        "{override_stderr}"
     );
     assert!(override_stdout.contains("override"), "{override_stdout}");
     assert!(override_stdout.contains("stock: pass"), "{override_stdout}");
 
     let stock_run = Command::new(jet())
-        .args(["test", "override.jet", "--show-default", "--serial"])
+        .args(["test", "override.jet", "--show-default", "--serial", "--capture=all"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
     assert!(stock_run.status.success(), "stock failed: {:?}", stock_run);
     let stock_stdout = String::from_utf8_lossy(&stock_run.stdout);
+    let stock_stderr = String::from_utf8_lossy(&stock_run.stderr);
     assert!(
-        !stock_stdout.contains("using fn test override"),
-        "{stock_stdout}"
+        !stock_stderr.contains("using fn test override"),
+        "{stock_stderr}"
     );
     assert!(!stock_stdout.contains("override\n"), "{stock_stdout}");
     assert!(stock_stdout.contains("stock"), "{stock_stdout}");
@@ -991,8 +1104,8 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     assert!(stock.status.success(), "stock command failed: {:?}", stock);
     let stock_stdout = String::from_utf8_lossy(&stock.stdout);
     assert!(
-        stock_stdout.contains("jet run: using stock default"),
-        "{stock_stdout}"
+        String::from_utf8_lossy(&stock.stderr).contains("jet run: using stock default"),
+        "{stock:?}"
     );
     assert!(stock_stdout.contains("stock"), "{stock_stdout}");
     assert!(!stock_stdout.contains("role\n"), "{stock_stdout}");
@@ -1073,18 +1186,17 @@ fn per_command_help_flag_works_without_running_the_command() {
 }
 
 /// #1659 criterion 2 (round 2): `--help`/`-h` also works for the
-/// `owns_flag_vocabulary` commands — `jet prove`/`jet budget`/`jet report`
-/// used to error-teach E2102 or E2101, and `jet clean`/`jet update`/
-/// `jet image`/`jet trust` used to silently EXECUTE the real command instead
-/// of printing help. All seven must print help and exit 0 without doing real
-/// work.
+/// `owns_flag_vocabulary` commands — `jet prove`/`jet budget` used to
+/// error-teach E2102, and `jet clean`/`jet update`/`jet image`/`jet trust`
+/// used to silently EXECUTE the real command instead of printing help. All
+/// six must print help and exit 0 without doing real work. (`jet report` is
+/// retired into `jet inspect build`, D-CLI-ONE1=A.)
 #[test]
 fn owns_flag_vocabulary_help_flag_prints_help_not_execute() {
     let dir = isolated_cwd("help_flag_owns_vocab");
     for (cmd, flag) in [
         ("prove", "--help"),
         ("budget", "-h"),
-        ("report", "--help"),
         ("clean", "--help"),
         ("update", "-h"),
         ("image", "--help"),
@@ -1464,8 +1576,9 @@ fn measured_test_targets_filter_and_json_match_test_runner_contract() {
     fs::write(dir.join("root.jet"), source).unwrap();
     fs::write(dir.join("nested/child.jet"), source).unwrap();
 
+    // Passing claims print only under `--capture=all` (the default shows failures).
     let tests = Command::new(jet())
-        .args(["test", "--show-default", ".", "--filter=needle"])
+        .args(["test", "--show-default", ".", "--filter=needle", "--capture=all"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -1492,6 +1605,7 @@ fn measured_test_targets_filter_and_json_match_test_runner_contract() {
             ".",
             "--measure",
             "--filter=measured-needle",
+            "--capture=all",
         ])
         .current_dir(&dir)
         .env("NO_COLOR", "1")

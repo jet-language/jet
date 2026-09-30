@@ -110,7 +110,10 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
             CaseLawKind::Sentence,
         );
     }
-    for (line_index, line) in jet::CLI::usage_page("1.0.0").lines().enumerate() {
+    for (line_index, line) in jet::CLI::usage_page("1.0.0", jet::CLI::HelpOrder::Frequency)
+        .lines()
+        .enumerate()
+    {
         let line = line.trim();
         if line_index == 0 {
             add(

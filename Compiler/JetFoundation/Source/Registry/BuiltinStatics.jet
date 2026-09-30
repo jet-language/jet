@@ -119,10 +119,6 @@ fn builtin_static_crypto_secret(name: String) -> Type Never! {
     Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: name}}
 }
 
-fn builtin_static_crypto_result(ok: Type) -> Type Never! {
-    Type.Result{ok: ok, err: Type.Named{name: "CryptoError"}}
-}
-
 fn builtin_static_crypto(module_name: String, owner: String, method: String, parameters: [Type], return_type: Type, member: String) -> BuiltinStaticRow Never! {
     builtin_static_in(module_name, builtin_static(owner, method, parameters, return_type, BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: member}))
 }
@@ -135,7 +131,7 @@ fn builtin_static_precise(owner: String, method: String, source: Type, target: T
     builtin_static(owner, method, [Type]{source}, target, BuiltinStaticLowering.Precise{type_name: type_name, function: function})
 }
 
-@BUILTIN_STATIC_ROWS :: [BuiltinStaticRow]{
+BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
     builtin_static("Int", "parse", [Type]{Type.String}, Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseInt}),
     builtin_static("Int", "from_radix", [Type]{Type.String, Type.Int}, Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, BuiltinStaticLowering.IntFromRadix),
     builtin_static("Float", "parse", [Type]{Type.String}, Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseFloat}),
@@ -178,28 +174,16 @@ fn builtin_static_precise(owner: String, method: String, source: Type, target: T
     builtin_static_precise("Int", "from_decimal", Type.Named{name: "Decimal"}, Type.Int, "Decimal", "to_int"),
     builtin_static_precise("Int", "from_fraction", Type.Named{name: "Fraction"}, Type.Int, "Fraction", "to_int"),
     builtin_static_arity_code(builtin_static_in("core.compute.solve", builtin_static_generic(builtin_static("Solver", "new", [Type]{Type.Named{name: "T"}}, Type.Named{name: "Solver"}, BuiltinStaticLowering.ArgumentHandle{operation: THandleOp.SolverNew}), [String]{"T"}, 0)), "E0101"),
-    builtin_static_crypto("core.crypto", "Hasher", "new", [Type]{}, Type.Named{name: "Hasher"}, "__hasher_new"),
-    builtin_static_crypto("core.crypto", "Secret", "from_text", [Type]{Type.String}, builtin_static_crypto_secret("Secret"), "__secret_from_text"),
-    builtin_static_crypto("core.crypto", "Secret", "from_bytes", [Type]{builtin_static_u8_list()}, builtin_static_crypto_secret("Secret"), "__secret_from_bytes"),
-    builtin_static_crypto("core.crypto", "SigningKey", "new_random", [Type]{}, builtin_static_crypto_result(builtin_static_crypto_secret("SigningKey")), "__signing_generate"),
-    builtin_static_crypto("core.crypto", "X25519SecretKey", "new_random", [Type]{}, builtin_static_crypto_result(builtin_static_crypto_secret("X25519SecretKey")), "__x25519_generate"),
-    builtin_static_crypto("core.crypto", "VerifyKey", "from_bytes", [Type]{builtin_static_u8_list()}, builtin_static_crypto_result(Type.Named{name: "VerifyKey"}), "__verify_key_from_bytes"),
-    builtin_static_crypto("core.crypto", "X25519PublicKey", "from_bytes", [Type]{builtin_static_u8_list()}, builtin_static_crypto_result(Type.Named{name: "X25519PublicKey"}), "__x25519_public_from_bytes"),
-    builtin_static_crypto("core.crypto", "X25519PublicKey", "from_text", [Type]{Type.String}, builtin_static_crypto_result(Type.Named{name: "X25519PublicKey"}), "__x25519_public_from_text"),
-    builtin_static_crypto("core.crypto", "Signature", "from_bytes", [Type]{builtin_static_u8_list()}, builtin_static_crypto_result(Type.Named{name: "Signature"}), "__signature_from_bytes"),
-    builtin_static_crypto("core.crypto", "Sealed", "from_bytes", [Type]{builtin_static_u8_list()}, builtin_static_crypto_result(Type.Named{name: "Sealed"}), "__sealed_from_bytes"),
-    builtin_static_crypto("core.crypto", "WrappedKey", "from_bytes", [Type]{builtin_static_u8_list()}, builtin_static_crypto_result(Type.Named{name: "WrappedKey"}), "__wrapped_from_bytes"),
-    builtin_static_crypto("core.crypto", "PasswordHash", "parse", [Type]{Type.String}, builtin_static_crypto_result(Type.Named{name: "PasswordHash"}), "__password_parse"),
     builtin_static_crypto("core.crypto", "WrappedVaultKey", "from_bytes", [Type]{builtin_static_u8_list()}, Type.Result{ok: Type.Named{name: "WrappedVaultKey"}, err: Type.Named{name: "KeyWrapError"}}, "__vault_wrapped_from_bytes"),
     builtin_static_crypto("core.crypto", "KeyUnlock", "Recipient", [Type]{builtin_static_crypto_secret("X25519SecretKey")}, Type.Named{name: "KeyUnlock"}, "__vault_unlock_recipient"),
     builtin_static_crypto("core.crypto", "KeyUnlock", "Passphrase", [Type]{builtin_static_crypto_secret("Secret")}, Type.Named{name: "KeyUnlock"}, "__vault_unlock_passphrase"),
     builtin_static_crypto("core.crypto.vault", "WrappedVaultKey", "from_bytes", [Type]{builtin_static_u8_list()}, Type.Result{ok: Type.Named{name: "WrappedVaultKey"}, err: Type.Named{name: "KeyWrapError"}}, "__vault_wrapped_from_bytes"),
     builtin_static_crypto("core.crypto.vault", "KeyUnlock", "Recipient", [Type]{builtin_static_crypto_secret("X25519SecretKey")}, Type.Named{name: "KeyUnlock"}, "__vault_unlock_recipient"),
     builtin_static_crypto("core.crypto.vault", "KeyUnlock", "Passphrase", [Type]{builtin_static_crypto_secret("Secret")}, Type.Named{name: "KeyUnlock"}, "__vault_unlock_passphrase")
-}
+} }
 
 // Numeric destination owners (`numeric_type_from_name`) and their host words.
-@BUILTIN_NUMERIC_KINDS :: [BuiltinNumericKind]{
+BUILTIN_NUMERIC_KINDS :: prep { [BuiltinNumericKind]{
     BuiltinNumericKind{name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
     BuiltinNumericKind{name: "I8", ty: Type.IntN{signed: true, bits: 8}, rust: "i8", integer: true, fixed: true, signed: true, bits: 8},
     BuiltinNumericKind{name: "I16", ty: Type.IntN{signed: true, bits: 16}, rust: "i16", integer: true, fixed: true, signed: true, bits: 16},
@@ -212,10 +196,10 @@ fn builtin_static_precise(owner: String, method: String, source: Type, target: T
     BuiltinNumericKind{name: "Float", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
     BuiltinNumericKind{name: "F64", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
     BuiltinNumericKind{name: "F32", ty: Type.Float32, rust: "f32", integer: false, fixed: false, signed: true, bits: 32}
-}
+} }
 
 // D-SHAPE-CONVERT1=A: destination-owned `from_<source>` spellings.
-@BUILTIN_NUMERIC_SOURCES :: [BuiltinNumericSource]{
+BUILTIN_NUMERIC_SOURCES :: prep { [BuiltinNumericSource]{
     BuiltinNumericSource{method: "from_i8", source: "I8"},
     BuiltinNumericSource{method: "from_i64", source: "I64"},
     BuiltinNumericSource{method: "from_i16", source: "I16"},
@@ -229,17 +213,17 @@ fn builtin_static_precise(owner: String, method: String, source: Type, target: T
     BuiltinNumericSource{method: "from_float", source: "Float"},
     BuiltinNumericSource{method: "from_decimal", source: "Decimal"},
     BuiltinNumericSource{method: "from_fraction", source: "Fraction"}
-}
+} }
 
 fn builtin_numeric_kind(name: String) -> BuiltinNumericKind? {
-    loop kind in @BUILTIN_NUMERIC_KINDS {
+    loop kind in BUILTIN_NUMERIC_KINDS {
         if kind.name == name -> return Val(kind)
     }
     None
 }
 
 fn builtin_numeric_source(method: String) -> String? {
-    loop row in @BUILTIN_NUMERIC_SOURCES {
+    loop row in BUILTIN_NUMERIC_SOURCES {
         if row.method == method -> return Val(row.source)
     }
     None
@@ -317,7 +301,7 @@ fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow
 // whose module matches how the owner was named.
 pub fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := [BuiltinStaticRow]{}
-    loop row in @BUILTIN_STATIC_ROWS {
+    loop row in BUILTIN_STATIC_ROWS {
         if row.owner == owner && row.method == method -> &rows.push(row)
     }
     if builtin_static_numeric_row(owner, method) == .Val(row) -> &rows.push(row)

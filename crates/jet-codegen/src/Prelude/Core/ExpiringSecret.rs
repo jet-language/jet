@@ -1,7 +1,7 @@
 // The one secret-lifetime
 // wrapper. T is sema-restricted to existing move-only, zeroizing secret types.
 struct JetExpiringSecret<T> {
-    value: Option<T>,
+    value: std::sync::Mutex<Option<T>>,
     deadline_ms: i64,
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
 }
@@ -12,25 +12,23 @@ impl<T> JetExpiringSecret<T> {
     {
         let deadline_ms = clock().saturating_add(ttl_ms);
         Self {
-            value: Some(value),
+            value: std::sync::Mutex::new(Some(value)),
             deadline_ms,
             clock: Box::new(clock),
         }
     }
 
-    fn with<F, R>(&mut self, callback: F) -> Result<R, JetExpired>
+    fn with<F, R>(&self, callback: F) -> Result<R, JetExpired>
     where
         F: FnOnce(&T) -> R,
     {
-        if self.value.is_none() || (self.clock)() > self.deadline_ms {
-            self.value.take();
-            return Err(JetExpired);
+        let mut value = self.value.lock().unwrap_or_else(|error| error.into_inner());
+        if (self.clock)() > self.deadline_ms {
+            value.take();
         }
-        Ok(callback(self.value.as_ref().expect("checked above")))
-    }
-}
-impl<T> Drop for JetExpiringSecret<T> {
-    fn drop(&mut self) {
-        self.value.take();
+        match value.as_ref() {
+            Some(value) => Ok(callback(value)),
+            None => Err(JetExpired),
+        }
     }
 }

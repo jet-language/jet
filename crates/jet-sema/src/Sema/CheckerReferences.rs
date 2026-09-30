@@ -6,7 +6,6 @@ impl<'a> Checker<'a> {
     fn unused_name_is_intentional(name: &str) -> bool {
         name.is_empty()
             || name.starts_with('_')
-            || name.starts_with("@_")
             || name == crate::Syntax::KW_SELF
             || name == "result"
             || name == crate::Syntax::AMBIENT_ERR
@@ -100,11 +99,7 @@ impl<'a> Checker<'a> {
         }
         crate::Diagnostics::TextEdit {
             span: binding.span,
-            new_text: if let Some(rest) = name.strip_prefix('@') {
-                format!("@_{rest}")
-            } else {
-                format!("_{name}")
-            },
+            new_text: format!("_{name}"),
         }
     }
 

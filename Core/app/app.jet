@@ -41,11 +41,11 @@ pub struct LiveQuery {
     pub generation: Int
     pub subscribers: Int
 }
-pub fn auth(users_table: String) -> Auth {
+pub fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
 
-pub fn auth_oauth(auth: Auth, providers: String) -> Auth {
+pub fn auth_oauth(auth: Auth, providers: String) -> Auth Never! {
     configured := [String]{}
     loop comma_group in providers.split(",") {
         loop raw in comma_group.split(" ") {
@@ -58,7 +58,7 @@ pub fn auth_oauth(auth: Auth, providers: String) -> Auth {
     Auth{users_table: canonical_table(auth.users_table), providers: configured}
 }
 
-pub fn auth_routes(auth: Auth) -> String {
+pub fn auth_routes(auth: Auth) -> String Never! {
     table := canonical_table(auth.users_table)
     routes := [String]{
         "POST /login -> password ({table})",
@@ -74,7 +74,7 @@ pub fn auth_routes(auth: Auth) -> String {
     "AuthRoutes({routes.join("; ")})"
 }
 
-pub fn auth_show(auth: Auth) -> String {
+pub fn auth_show(auth: Auth) -> String Never! {
     table := canonical_table(auth.users_table)
     providers := canonical_providers(auth.providers)
     "Auth(users={table}, providers=[{providers.join(",")}])"
@@ -94,33 +94,33 @@ fn canonical_providers(values: [String]) -> [String] {
     providers
 }
 
-pub fn live(key: String, data: String) -> LiveQuery {
+pub fn live(key: String, data: String) -> LiveQuery Never! {
     if !valid_footprint(key) -> return live_error("invalid live footprint")
     if data.bytes().len() > LIVE_MAX_PAYLOAD -> return live_error("live query payload is too large")
     LiveQuery{key: canonical_footprint(key), data: data, generation: 1, subscribers: 0}
 }
 
-pub fn live_get(q: LiveQuery) -> String {
+pub fn live_get(q: LiveQuery) -> String Never! {
     if valid_live_error(q) -> return "LiveError({q.data})"
     if !valid_live_query(q) -> return "LiveError(invalid live query)"
     q.data
 }
 
-pub fn live_show(q: LiveQuery) -> String {
+pub fn live_show(q: LiveQuery) -> String Never! {
     if valid_live_error(q) -> return "LiveQueryError(id=0, reason={q.data})"
     if !valid_live_query(q) -> return "LiveQueryError(id=0, reason=invalid live query)"
     source :: if q.key.starts_with("ext:") -> "external" else -> "database"
     "LiveQuery(key={q.key},source={source},footprint={q.key},generation={q.generation},active=true,dirty=false,refreshing=false,observers={q.subscribers},freshness_ms=0,cause=created,value_bytes={q.data.bytes().len()},error_bytes=0)"
 }
 
-pub fn live_stats() -> String {
+pub fn live_stats() -> String Never! {
     // Source evaluation has no ambient registry.  The runtime route replaces
     // this projection with shared registry facts; zero is the actual local
     // state, not a swallowed provider error.
     "LiveStats(queries=0,active=0,refreshing=0,limit=1024,evictions=0,invalidations=0,ws_pushes=0)"
 }
 
-pub fn subscribe(source: String) -> LiveQuery {
+pub fn subscribe(source: String) -> LiveQuery Never! {
     if !valid_live_source(source) -> return live_error("subscription source is invalid")
     LiveQuery{key: "ext:{source.trim()}", data: "", generation: 1, subscribers: 1}
 }
@@ -135,7 +135,7 @@ pub fn transact_invalidate(write_set: String) -> Int AppError! {
     Err(AppError.Unsupported)
 }
 
-pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery {
+pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! {
     if valid_live_error(q) -> return live_error(q.data)
     if !valid_live_query(q) -> return live_error("live query is invalid")
     if payload.bytes().len() > LIVE_MAX_PAYLOAD -> return live_error("live query payload is too large")

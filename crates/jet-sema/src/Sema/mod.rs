@@ -175,6 +175,218 @@ pub(crate) fn checked_body_return_type(function: &Func, raw_protocol_return: boo
     }
 }
 
+/// #3708: first detail line of an E2404 whose verdict belongs to the bundle
+/// failure solve: `<mark><module_idx>:<callee>`. The solve drops the
+/// diagnostic when the callee's inferred failure set is empty and strips the
+/// line otherwise.
+pub(crate) const FAILURE_OBLIGATION_MARK: &str = "inferred-failure-obligation:";
+
+/// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: what one probe of an unannotated
+/// function body found on its default failure route. The failure-union
+/// pre-pass joins these rows over the call graph before any real body check.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct FailureUnionProbe {
+    /// Typed failures made here (`Err(value)`) or passed up from a callee
+    /// with a written contract.
+    pub(crate) members: Vec<Type>,
+    /// Function-owned cases (`Err(.NotFound(n))`) in first-use order.
+    pub(crate) cases: Vec<FailureCase>,
+    /// Unannotated callees `(module index, name)` whose failures pass up.
+    pub(crate) edges: BTreeSet<(usize, String)>,
+    /// The general `Err` reaches this body: `Err("msg")`, an `Err!` callee,
+    /// or a failure source that carries no typed value.
+    pub(crate) general: bool,
+}
+
+/// D-ERR-CASES1=A: one `Err(.Case(payload))` written in an unannotated
+/// function. The payload types come from the checked arguments.
+#[derive(Debug, Clone)]
+pub(crate) struct FailureCase {
+    pub(crate) name: String,
+    pub(crate) payload: Vec<(Option<String>, Type)>,
+    pub(crate) span: Span,
+}
+
+impl FailureUnionProbe {
+    pub(crate) fn add_member(&mut self, ty: &Type) {
+        match ty {
+            Type::Union(members) => {
+                for member in members {
+                    self.add_member(member);
+                }
+            }
+            Type::String => self.general = true,
+            Type::Named(name) if name == crate::Syntax::TYPE_ERR => self.general = true,
+            Type::Named(name) if name == crate::Syntax::TYPE_NEVER => {}
+            ty => {
+                if !self.members.contains(ty) {
+                    self.members.push(ty.clone());
+                }
+            }
+        }
+    }
+}
+
+/// #3708: a function whose failure contract sema may infer. No contract was
+/// written (or `run` received only the D-FAIL-EXIT1 default), and nothing
+/// else owns its return protocol.
+pub(crate) fn failure_inference_candidate(function: &Func, entry: bool) -> bool {
+    let contract = function.failure_contract();
+    let defaulted_run = entry
+        && function.name == "run"
+        && function.params.is_empty()
+        && function.return_type_span.is_none()
+        && matches!(
+            &function.return_type,
+            Some(Type::Result { err, .. })
+                if matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+        );
+    (contract.is_default() || defaulted_run)
+        && !function.compiler_generated
+        && !function.is_comptime
+        && !function.is_job
+        && function.every.is_none()
+        && function.inline_foreign.is_none()
+        && !function.gc_return
+        && function.pre.is_empty()
+        && function.post.is_empty()
+        && function.web_marker.is_none()
+        && function.external_type.is_none()
+        && !matches!(
+            &function.return_type,
+            Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_STREAM
+        )
+}
+
+/// #3708: the same-module callees whose failures a checked body propagates,
+/// or `None` when the body has a failure source of its own: an `Err`, a
+/// propagating `?` over anything but a named call, or a callback that
+/// propagates into this function.
+fn body_failure_edges(body: &[crate::AST::Stmt]) -> Option<BTreeSet<String>> {
+    let mut edges = BTreeSet::new();
+    let mut source = false;
+    for stmt in body {
+        stmt.for_each_expr(|expr| match expr {
+            Expr::Err(..) => source = true,
+            Expr::Lambda(lambda) if lambda.meta.fallible_propagation => source = true,
+            Expr::Try(inner, _, convert, _) => match inner.without_parens() {
+                Expr::Call(call) => {
+                    edges.insert(call.name.clone());
+                }
+                _ if matches!(convert, crate::AST::TryConvert::Never) => {}
+                _ => source = true,
+            },
+            _ => {}
+        });
+        if source {
+            return None;
+        }
+    }
+    Some(edges)
+}
+
+/// #3708 (D-FAILURE-FOUNDATION1=A): "Every function has the structured Error
+/// route by default. Sema removes it when impossible." After every body is
+/// checked, a greatest fixpoint over same-module call edges finds the
+/// unannotated functions whose failure set is empty; each is projected onto
+/// the `T Never!` carrier (reported as `inferred: none`), which every tier
+/// lowers as a plain return (#3740). A function used as a value keeps its
+/// declared callable type. E2404 obligations recorded against a callee are
+/// then discharged or emitted. Returns each module's inferred-infallible
+/// function names (indexed like `bundle.modules`) for later solved checks.
+pub(crate) fn solve_inferred_failure(
+    bundle: &mut crate::AST::ProgramBundle,
+    module_summaries: &[(String, HashMap<String, Effects::EffectSummary>)],
+    address_taken: &HashSet<String>,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<HashSet<String>> {
+    let mut inferred = Vec::with_capacity(bundle.modules.len());
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let summaries = module_summaries.get(module_idx).map(|(_, rows)| rows);
+        let entry = module_idx == bundle.entry;
+        let mut empty = HashSet::new();
+        let mut candidates = HashMap::new();
+        for item in &module.items {
+            let crate::AST::Item::Func(function) = item else {
+                continue;
+            };
+            if function.failure_contract().is_proven_unreachable() {
+                empty.insert(function.name.clone());
+                continue;
+            }
+            if !failure_inference_candidate(function, entry)
+                || address_taken.contains(&function.name)
+                || summaries
+                    .and_then(|rows| rows.get(&function.name))
+                    .is_none_or(|row| row.failure_direct)
+            {
+                continue;
+            }
+            if let Some(edges) = body_failure_edges(&function.body) {
+                candidates.insert(function.name.clone(), edges);
+            }
+        }
+        let mut solved: HashSet<String> = candidates.keys().cloned().collect();
+        loop {
+            let fallible: Vec<String> = solved
+                .iter()
+                .filter(|name| {
+                    candidates[*name]
+                        .iter()
+                        .any(|edge| !solved.contains(edge) && !empty.contains(edge))
+                })
+                .cloned()
+                .collect();
+            if fallible.is_empty() {
+                break;
+            }
+            for name in fallible {
+                solved.remove(&name);
+            }
+        }
+        inferred.push(solved);
+    }
+    for (module, solved) in bundle.modules.iter_mut().zip(&inferred) {
+        for item in &mut module.items {
+            let crate::AST::Item::Func(function) = item else {
+                continue;
+            };
+            if !solved.contains(&function.name) {
+                continue;
+            }
+            let success = match function.failure_contract() {
+                crate::AST::FailureContract::Default { success, .. }
+                | crate::AST::FailureContract::Explicit { success, .. } => success,
+                _ => continue,
+            };
+            function.return_type = Some(Type::Result {
+                ok: Box::new(success),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string())),
+            });
+            function.return_type_span = None;
+        }
+    }
+    diags.retain_mut(|diagnostic| {
+        let Some(detail) = diagnostic.detail.as_deref() else {
+            return true;
+        };
+        let Some(rest) = detail.strip_prefix(FAILURE_OBLIGATION_MARK) else {
+            return true;
+        };
+        let (obligation, remainder) = rest.split_once('\n').unwrap_or((rest, ""));
+        let discharged = obligation.split_once(':').is_some_and(|(module_idx, callee)| {
+            module_idx
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| inferred.get(index))
+                .is_some_and(|solved| solved.contains(callee))
+        });
+        diagnostic.detail = Some(remainder.to_string());
+        !discharged
+    });
+    inferred
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum TypeDef {
     Struct {
@@ -1899,6 +2111,9 @@ pub(crate) struct Checker<'a> {
     /// Statements that dropped a call's non-Unit result. The solved effect
     /// phase reports those whose callee row is empty (E0433).
     fx_discarded_results: Vec<Effects::DiscardedResultFact>,
+    /// D-DISCARD1=A: span of the last statement of a named function with no
+    /// written return type. A non-Unit value there is thrown away (E0433).
+    lost_tail_span: Option<Span>,
     memory_control_multiplier: Option<u64>,
     /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
     /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
@@ -2005,6 +2220,10 @@ pub(crate) struct Checker<'a> {
     /// span so sema checks effects and ownership once while both lowered copies
     /// retain the same resolved call metadata.
     result_handler_subject_types: HashMap<usize, (Type, Expr)>,
+    /// D-OUTCOME-SHAPE1=A: subject span starts of value-form pattern chains
+    /// that handle a `T? E!` failure themselves; their `.Val`/`.None` levels
+    /// test that same carrier instead of passing the failure up.
+    carrier_chain_subjects: HashSet<usize>,
     /// Loop bindings that lend one `ViewMut<T>` element from a collection.
     /// These values may edit during the iteration but may not be retained.
     lending_view_loop_vars: HashSet<String>,
@@ -2063,6 +2282,14 @@ pub(crate) struct Checker<'a> {
     /// is typed against the enclosing fallible return. `infer_lambda` scopes it
     /// per lambda and harvests it into `LambdaMeta::fallible_propagation`.
     task_body_propagates: bool,
+    /// #3708: this function body (outside lambdas) produces a failure that is
+    /// not a `Try`/`Err` node of the checked AST. Deliberately absent from
+    /// the erased-scope snapshot: restoring it could only forget a source.
+    failure_direct_source: bool,
+    /// D-FAIL-INFER-UNION1=A: set only while the failure-union pre-pass
+    /// probes a clone of an unannotated function. Each failure that reaches
+    /// the default `Err` route is recorded here instead of being reported.
+    failure_union_probe: Option<FailureUnionProbe>,
     /// True while an open callback return is being inferred. A fallible callee
     /// in this position supplies the callback's own Result carrier; it must not
     /// be auto-unwrapped against the enclosing function's return row.
@@ -2271,6 +2498,7 @@ struct ErasedScopeSnapshot {
     iter_borrowed: HashSet<String>,
     noelse_chains_checked: HashSet<usize>,
     result_handler_subject_types: HashMap<usize, (Type, Expr)>,
+    carrier_chain_subjects: HashSet<usize>,
     lending_view_loop_vars: HashSet<String>,
     return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
     views_used_in_stmt: HashSet<String>,
@@ -2404,6 +2632,7 @@ impl<'a> Checker<'a> {
             iter_borrowed: self.iter_borrowed.clone(),
             noelse_chains_checked: self.noelse_chains_checked.clone(),
             result_handler_subject_types: self.result_handler_subject_types.clone(),
+            carrier_chain_subjects: self.carrier_chain_subjects.clone(),
             lending_view_loop_vars: self.lending_view_loop_vars.clone(),
             return_view_provenance: self.return_view_provenance.clone(),
             views_used_in_stmt: self.views_used_in_stmt.clone(),
@@ -2533,6 +2762,7 @@ impl<'a> Checker<'a> {
         self.iter_borrowed = snapshot.iter_borrowed;
         self.noelse_chains_checked = snapshot.noelse_chains_checked;
         self.result_handler_subject_types = snapshot.result_handler_subject_types;
+        self.carrier_chain_subjects = snapshot.carrier_chain_subjects;
         self.lending_view_loop_vars = snapshot.lending_view_loop_vars;
         self.return_view_provenance = snapshot.return_view_provenance;
         self.views_used_in_stmt = snapshot.views_used_in_stmt;
@@ -2794,13 +3024,20 @@ impl<'a> Checker<'a> {
         // `fn outer<P: Shape>(shape: P)` may forward `P` to another
         // `<P: Shape>` generic (`inner<P>(shape)` or `inner(shape)`).
         if let Type::Named(name) = ty {
-            let declared_bound = self.type_param_scope.iter().any(|param| {
-                param.name == *name && param.bounds.iter().any(|candidate| candidate == bound)
-            });
+            let mut in_scope = false;
+            let mut declared_bound = false;
+            for param in self.type_param_scope.iter().filter(|param| param.name == *name) {
+                in_scope = true;
+                declared_bound |= param.bounds.iter().any(|candidate| candidate == bound);
+            }
             if declared_bound {
                 return true;
             }
-            if bound == crate::Generics::DECODE {
+            // An in-scope type parameter without a declared `Decode` bound can
+            // be instantiated with any type, so it never satisfies `Decode`.
+            // A concrete named type (a `#Codable` / `#Decode` struct or enum)
+            // falls through to its registered derive or impl below.
+            if in_scope && bound == crate::Generics::DECODE {
                 return false;
             }
         }
@@ -3236,7 +3473,7 @@ pub use DevtoolsPanel::{
     E_DEVTOOLS_UNFED_FIELD,
 };
 pub(crate) use Diagnostics::*;
-pub use Diagnostics::type_requires_owned_iteration;
+pub use Diagnostics::{is_core_error_family_type, type_requires_owned_iteration};
 pub(crate) use Effects::*;
 pub(crate) use Guest::{
     check_guest_export_surface, check_guest_import_surface, check_guest_symbol_collisions,

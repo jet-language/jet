@@ -4159,7 +4159,7 @@ impl THandleOp {
                 "jet_db_begin",
                 1,
                 1,
-                &[false],
+                &[true],
                 Some(Effect::DB),
                 carrier,
             ),
@@ -4168,7 +4168,7 @@ impl THandleOp {
                 "jet_db_commit",
                 1,
                 1,
-                &[false],
+                &[true],
                 Some(Effect::DB),
                 carrier,
             ),
@@ -4177,7 +4177,7 @@ impl THandleOp {
                 "jet_db_rollback",
                 1,
                 1,
-                &[false],
+                &[true],
                 Some(Effect::DB),
                 carrier,
             ),
@@ -4322,7 +4322,7 @@ impl THandleOp {
                 "jet_db_lease_close",
                 1,
                 1,
-                &[false],
+                &[true],
                 Some(Effect::DB),
                 carrier,
             ),
@@ -6345,6 +6345,14 @@ impl TBuiltinOp {
             Sum { float: false, .. } => b("sum", "jet_list_sum", 1, 1, &[false], None, carrier),
             Min { float: false, .. } => b("min", "jet_list_min", 1, 1, &[false], None, carrier),
             Max { float: false, .. } => b("max", "jet_list_max", 1, 1, &[false], None, carrier),
+            // D-FLOATSORT1: Float extrema use the collection sort order, so a
+            // NaN item is the greatest value and never the least.
+            Min { float: true } => {
+                b("min_float", "jet_list_min_float", 1, 1, &[false], None, carrier)
+            }
+            Max { float: true } => {
+                b("max_float", "jet_list_max_float", 1, 1, &[false], None, carrier)
+            }
             ListMinMax { .. } => prelude(
                 MirPreludeFamily::BuiltinMethod,
                 "core.list",
@@ -6654,8 +6662,6 @@ impl TBuiltinOp {
             | Contains
             | JoinSep
             | Product { .. }
-            | Min { float: true, .. }
-            | Max { float: true, .. }
             | Unzip { .. }
             | Chars
             | EndsWith
@@ -9183,6 +9189,25 @@ pub(super) fn journey_reset_route() -> Result<TPreludeRoute, LowerError> {
     )
 }
 
+/// #3713: the `Err(...)` a function returns claims where its failure started.
+/// Arguments: source file, line, column, function.
+pub(super) fn journey_origin_route() -> Result<TPreludeRoute, LowerError> {
+    prelude_route_row(
+        MirPreludeFamily::StaticPrelude,
+        "core.errors",
+        "journey_origin",
+        "jet_journey_origin",
+        4,
+        4,
+        &[true, false, false, true],
+        None,
+        &TFailureCarrier::Infallible,
+        MirPreludeAbi::Effect,
+        "failure journey origin",
+    )
+}
+
+/// Arguments: error, source file, line, column, function, note.
 pub(super) fn failure_context_route(
     result: &Type,
     carrier: &TFailureCarrier,
@@ -9193,9 +9218,9 @@ pub(super) fn failure_context_route(
         "core.errors",
         "err_with_context_frame",
         "jet_err_with_context_frame",
-        5,
-        5,
-        &[false, true, false, true, false],
+        6,
+        6,
+        &[false, true, false, false, true, false],
         None,
         &TFailureCarrier::Infallible,
         MirPreludeAbi::Value,
@@ -9203,6 +9228,7 @@ pub(super) fn failure_context_route(
     )
 }
 
+/// Arguments: source file, line, column, function, note.
 pub(super) fn failure_note_route(
     result: &Type,
     carrier: &TFailureCarrier,
@@ -9213,9 +9239,9 @@ pub(super) fn failure_note_route(
         "core.errors",
         "journey_frame_text",
         "jet_journey_frame_text",
-        4,
-        4,
-        &[true, false, true, true],
+        5,
+        5,
+        &[true, false, false, true, true],
         None,
         &TFailureCarrier::Infallible,
         MirPreludeAbi::Effect,

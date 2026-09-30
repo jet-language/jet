@@ -151,9 +151,9 @@ fn sema_call_compiler_value_owner(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_call_compiler_value_owner(inner)
         .Named(name) | .Apply(name, _) -> {
-            parts := name.split("::")
+            parts := name.split("::").to_list()
             canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
-            dotted := canonical.split(".")
+            dotted := canonical.split(".").to_list()
             return Val(if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical)
         }
         else -> {}
@@ -345,7 +345,7 @@ pub fn sema_call_try_compiler_value_method(
     }
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_effect_record_intrinsic_effects(environment, scopes, context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type :: sema_call_compiler_value_method_type(owner, method) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed_values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}

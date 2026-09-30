@@ -1296,7 +1296,7 @@ mod devtools {
 /// handles here; admission, deadlines, health, reset, and draining live in the
 /// included Prelude kernel.
 pub(crate) mod pool {
-    use super::{JetDebug, JetShow};
+    use super::{JetDebug, JetDisplay, JetShow};
 
     pub(crate) mod jet_std {
         pub(crate) use super::super::wire::DBError;
@@ -1988,17 +1988,22 @@ fn jet_jit_db_open(path: i64) -> i64 {
     runtime_open(&clone_string(path)) as i64
 }
 
-fn jet_jit_db_close(handle: i64) -> i8 {
-    let handle = handle as u64;
+/// Close a direct connection, or a policy scope and the connection it owns.
+/// Shared by the Cranelift symbol and the interpreter adapter.
+fn close_db_handle(handle: u64) -> bool {
     if scope_parts(handle).is_some() {
         let base = base_handle(handle);
         DB_SCOPES.with(|scopes| {
             scopes.borrow_mut().remove(&handle);
         });
-        i8::from(runtime_close(base))
+        runtime_close(base)
     } else {
-        i8::from(runtime_close(handle))
+        runtime_close(handle)
     }
+}
+
+fn jet_jit_db_close(handle: i64) -> i8 {
+    i8::from(close_db_handle(handle as u64))
 }
 
 fn jet_jit_db_begin(handle: i64) -> i8 {
@@ -2914,7 +2919,8 @@ pub(crate) fn ambient_core_call(
             Err(error) => return Some(Err(error)),
         };
         pool_lease_close(handle);
-        return Some(Ok(CtValue::Unit));
+        // `DBLease.close()` is `Unit DBError!`: success is the Ok carrier.
+        return Some(Ok(CtValue::Present(Box::new(CtValue::Unit))));
     }
 
     if module == "core.handle" && method.starts_with("db_pool.") {
@@ -2932,7 +2938,229 @@ pub(crate) fn ambient_core_call(
             (_, Err(error)) => Err(error),
         });
     }
-    None
+    connection_core_call(module, method, &args, span)
+}
+
+fn handle_value(type_name: &str, handle: u64) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle as i64))],
+    }
+}
+
+fn is_handle_value(value: &CtValue, expected: &str) -> bool {
+    matches!(value, CtValue::Struct { type_name, .. } if type_name == expected)
+}
+
+/// A connection or policy scope receiver: both carry one canonical native id.
+fn connection_or_scope_id(value: &CtValue, span: Span) -> Result<u64, Diagnostic> {
+    match value {
+        CtValue::Struct { type_name, .. } if type_name == "DBConnection" || type_name == "DBScope" => {
+            pool_id(value, type_name, span)
+        }
+        _ => Err(db_diag("expected a DBConnection or DBScope handle", span)),
+    }
+}
+
+fn opened_connection(handle: u64, span: Span) -> Result<CtValue, Diagnostic> {
+    if handle == 0 {
+        return Err(db_diag("database open failed", span));
+    }
+    Ok(handle_value("DBConnection", handle))
+}
+
+/// `RowPolicy` keeps the table and the canonical spelling of the compiled
+/// expression; `with_policy` recompiles it through the one policy language.
+fn policy_value(table: &str, compiled: wire::JetRowPolicyExpr) -> CtValue {
+    CtValue::Struct {
+        type_name: "RowPolicy".to_string(),
+        fields: vec![
+            ("table".to_string(), CtValue::Str(table.to_string())),
+            (
+                "expression".to_string(),
+                CtValue::Str(compiled.canonical().to_string()),
+            ),
+        ],
+    }
+}
+
+fn policy_parts(
+    value: &CtValue,
+    span: Span,
+) -> Result<(String, wire::JetRowPolicyExpr), Diagnostic> {
+    let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) = (
+        ambient_db_field(value, "table"),
+        ambient_db_field(value, "expression"),
+    ) else {
+        return Err(db_diag("expected a RowPolicy value", span));
+    };
+    wire::jet_db_policy_compile(table, expression).map_err(|message| db_diag(message, span))
+}
+
+fn db_value_ct(value: wire::DBValue) -> CtValue {
+    let (variant, payload) = match value {
+        wire::DBValue::Null => ("Null", None),
+        wire::DBValue::Int(value) => ("Int", Some(CtValue::Int(value))),
+        wire::DBValue::Float(value) => (
+            "Float",
+            Some(CtValue::Float(jet_foundation::AST::CtFloat::f64(value))),
+        ),
+        wire::DBValue::Text(value) => ("Text", Some(CtValue::Str(value))),
+        wire::DBValue::Bool(value) => ("Bool", Some(CtValue::Bool(value))),
+        wire::DBValue::Blob(value) => ("Blob", Some(CtValue::Bytes(value))),
+    };
+    CtValue::Enum {
+        type_name: "DBValue".to_string(),
+        variant: variant.to_string(),
+        args: payload.into_iter().map(|value| (None, value)).collect(),
+    }
+}
+
+fn db_row_ct(row: wire::JetDBRow) -> CtValue {
+    CtValue::Map(
+        row.into_iter()
+            .map(|(key, value)| (jet_foundation::AST::CtKey::Str(key), db_value_ct(value)))
+            .collect(),
+    )
+}
+
+fn db_row_from_ct(value: &CtValue, span: Span) -> Result<wire::JetDBRow, Diagnostic> {
+    let CtValue::Map(entries) = value else {
+        return Err(db_diag("database row is not a map", span));
+    };
+    entries
+        .iter()
+        .map(|(key, value)| match key {
+            jet_foundation::AST::CtKey::Str(key) => Ok((key.clone(), ambient_db_value(value, span)?)),
+            _ => Err(db_diag("database row column name is not a String", span)),
+        })
+        .collect()
+}
+
+fn db_outcome<T>(result: Result<T, wire::DBError>, ok: impl FnOnce(T) -> CtValue) -> CtValue {
+    match result {
+        Ok(value) => CtValue::Present(Box::new(ok(value))),
+        Err(error) => CtValue::failed(Box::new(db_error_value(error.message))),
+    }
+}
+
+/// `DBValue` accessors report a plain `String` failure (`T String!`).
+fn db_value_outcome<T>(result: Result<T, String>, ok: impl FnOnce(T) -> CtValue) -> CtValue {
+    match result {
+        Ok(value) => CtValue::Present(Box::new(ok(value))),
+        Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
+    }
+}
+
+/// D-DBDRIVER1 / D-DBPOLICY-BIND1: interpreter connections, policies, scopes,
+/// rows and `DBValue` accessors. Handles are the canonical native ids the
+/// Cranelift host uses, and SQL rewriting, row decoding and accessor meaning
+/// stay in the shared wire kernel.
+fn connection_core_call(
+    module: &str,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let result = match (module, method, args) {
+        ("core.db", "open_memory", []) => {
+            jit_job_queue_install_provider();
+            opened_connection(runtime_open_memory(), span)
+        }
+        ("core.db", "open", [CtValue::Str(path)]) => {
+            jit_job_queue_install_provider();
+            opened_connection(runtime_open(path), span)
+        }
+        ("core.db", "policy", [CtValue::Str(table), CtValue::Str(expression)]) => Ok(db_outcome(
+            wire::jet_db_policy_compile(table, expression)
+                .map_err(|message| wire::DBError { message }),
+            |(table, compiled)| policy_value(&table, compiled),
+        )),
+        ("core.db", "policy_audit", [scope]) => pool_id(scope, "DBScope", span).and_then(|scope| {
+            scope_parts(scope)
+                .map(|(_, table, compiled, user, _)| {
+                    CtValue::Str(wire::jet_db_policy_audit_line(&table, compiled, &user))
+                })
+                .ok_or_else(|| db_diag("unknown database scope handle", span))
+        }),
+        (
+            "core.db",
+            "row_value" | "row_int" | "row_float" | "row_text" | "row_bool",
+            [row, CtValue::Str(key)],
+        ) => db_row_from_ct(row, span).map(|row| match method {
+            "row_value" => db_outcome(wire::jet_db_row_value(&row, key), db_value_ct),
+            "row_int" => db_outcome(wire::jet_db_row_int(&row, key), CtValue::Int),
+            "row_float" => db_outcome(wire::jet_db_row_float(&row, key), |value| {
+                CtValue::Float(jet_foundation::AST::CtFloat::f64(value))
+            }),
+            "row_text" => db_outcome(wire::jet_db_row_text(&row, key), CtValue::Str),
+            _ => db_outcome(wire::jet_db_row_bool(&row, key), CtValue::Bool),
+        }),
+        ("core.handle", "db.with_policy", [connection, policy, CtValue::Str(user)])
+            if is_handle_value(connection, "DBConnection") =>
+        {
+            pool_id(connection, "DBConnection", span).and_then(|connection| {
+                let (table, compiled) = policy_parts(policy, span)?;
+                match new_scope(connection, table, compiled, user.clone()) {
+                    0 => Err(db_diag("database policy scope could not be created", span)),
+                    scope => Ok(handle_value("DBScope", scope as u64)),
+                }
+            })
+        }
+        ("core.handle", "db.begin" | "db.commit" | "db.rollback" | "db.close", [receiver])
+            if is_handle_value(receiver, "DBConnection") || is_handle_value(receiver, "DBScope") =>
+        {
+            connection_or_scope_id(receiver, span).map(|handle| {
+                CtValue::Bool(match method {
+                    "db.begin" => runtime::jet_db_begin(base_handle(handle)),
+                    "db.commit" => runtime::jet_db_commit(base_handle(handle)),
+                    "db.rollback" => runtime::jet_db_rollback(base_handle(handle)),
+                    _ => close_db_handle(handle),
+                })
+            })
+        }
+        ("core.handle", "query" | "query_one" | "execute", [scope, sql, _metadata])
+            if is_handle_value(scope, "DBScope") =>
+        {
+            let scope = match pool_id(scope, "DBScope", span) {
+                Ok(scope) => scope,
+                Err(error) => return Some(Err(error)),
+            };
+            ambient_sql_value(sql, span).map(|sql| match method {
+                "execute" => db_outcome(scoped_execute(scope, &sql, false), CtValue::Int),
+                "query" => db_outcome(scoped_query(scope, &sql, false), |rows| {
+                    CtValue::List(rows.into_iter().map(db_row_ct).collect())
+                }),
+                _ => db_outcome(
+                    scoped_query(scope, &sql, false).map(wire::jet_db_first_row),
+                    |row| match row {
+                        Ok(row) => CtValue::Present(Box::new(db_row_ct(row))),
+                        Err(_) => CtValue::absent(Type::Map {
+                            key: Box::new(Type::String),
+                            key_span: None,
+                            value: Box::new(Type::Named("DBValue".to_string())),
+                        }),
+                    },
+                ),
+            })
+        }
+        (
+            "core.encoding.datatree",
+            "int" | "float" | "text" | "bool" | "blob" | "is_null",
+            [value @ CtValue::Enum { type_name, .. }],
+        ) if type_name == "DBValue" => ambient_db_value(value, span).map(|value| match method {
+            "int" => db_value_outcome(value.int(), CtValue::Int),
+            "float" => db_value_outcome(value.float(), |value| {
+                CtValue::Float(jet_foundation::AST::CtFloat::f64(value))
+            }),
+            "text" => db_value_outcome(value.text(), CtValue::Str),
+            "bool" => db_value_outcome(value.bool(), CtValue::Bool),
+            "blob" => db_value_outcome(value.blob(), CtValue::Bytes),
+            _ => CtValue::Bool(value.is_null()),
+        }),
+        _ => return None,
+    };
+    Some(result)
 }
 
 pub(crate) fn ambient_handle(
@@ -2953,7 +3181,7 @@ pub(crate) fn ambient_handle(
             Err(error) => return Some(Err(error)),
         };
         pool_lease_close(handle);
-        return Some(Ok(CtValue::Unit));
+        return Some(Ok(CtValue::Present(Box::new(CtValue::Unit))));
     }
 
     let deadline = match operation {
@@ -3051,10 +3279,12 @@ fn runtime_open_untracked(path: &str) -> u64 {
     runtime::jet_db_open(path)
 }
 
-/// Release every native database owner associated with the resident image.
-/// Console leases drop their typed proxies before this boundary, so removing
-/// the canonical maps also closes returned pool drivers.
-pub(crate) fn teardown_resident_resources() {
+/// Release every native database owner a run created, while the native
+/// connection table is still alive. Leases go first so their drivers return
+/// to their pools; dropping the pools then closes the pooled drivers, and the
+/// remaining direct handles close last. Left to thread-local destruction, a
+/// pool could close its drivers after the connection table was destroyed.
+pub(crate) fn release_db_resources() {
     DB_SCOPES.with(|scopes| scopes.borrow_mut().clear());
     DB_LEASES.with(|leases| {
         let _ = std::mem::take(&mut *leases.borrow_mut());

@@ -647,7 +647,7 @@ fn run() {
 
 #[test]
 fn tracked_float_symbol_exposes_its_binding_site() {
-    let src = "fn run() {\n    #Track speed :: 3.5\n    @origin :: speed.@origin\n    print(@origin?.source ?? \"missing\")\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    origin :: prep { speed.$origin }\n    print(origin?.source ?? \"missing\")\n}\n";
     let path = temp_fixture("tracked_float_binding.jet", src);
     let symbols = open_symbols(&path).expect("tracked-value semantic symbols");
     let speed = symbols
@@ -671,21 +671,21 @@ fn tracked_float_symbol_exposes_its_binding_site() {
 
     let index = open(&path).expect("tracked-value semindex");
     let origin_read = index
-        .references_to("@origin")
+        .references_to("origin")
         .into_iter()
         .find_map(|reference| reference.fact.as_ref())
-        .expect("typed @origin semindex reference");
-    assert_eq!(origin_read.name, "@origin");
+        .expect("typed origin semindex reference");
+    assert_eq!(origin_read.name, "origin");
     assert_eq!(origin_read.kind, "Origin");
     assert_eq!(origin_read.type_name, "OriginInfo?");
     assert!(index.to_json().contains(
-        "\"fact\":{\"name\":\"@origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}"
+        "\"fact\":{\"name\":\"origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}"
     ));
     let fact_symbol = symbols
-        .lookup("@origin")
+        .lookup("origin")
         .into_iter()
         .find(|symbol| symbol.signature == "@origin: OriginInfo?")
-        .expect("typed @origin semantic symbol");
+        .expect("typed origin semantic symbol");
     assert_eq!(fact_symbol.kind, SemanticSymbolKind::Member);
 }
 

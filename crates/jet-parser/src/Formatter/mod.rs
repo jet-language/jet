@@ -84,40 +84,48 @@ fn canonical_simplify_program(prog: &Program) -> Vec<u8> {
 }
 
 fn normalize_simplify_items(items: &mut [Item]) {
+    for_each_simplify_func(items, &mut |function| {
+        normalize_simplify_body(&mut function.body)
+    });
+}
+
+/// Visit every callable body the simplify catalog rewrites: free functions,
+/// type and impl methods, and functions nested in code modules.
+fn for_each_simplify_func(items: &mut [Item], visit: &mut dyn FnMut(&mut Func)) {
     for item in items {
         match item {
-            Item::Func(function) => normalize_simplify_body(&mut function.body),
+            Item::Func(function) => visit(function),
             Item::Struct(definition) => {
                 for function in &mut definition.methods {
-                    normalize_simplify_body(&mut function.body);
+                    visit(function);
                 }
                 for implementation in &mut definition.trait_impls {
                     for function in &mut implementation.methods {
-                        normalize_simplify_body(&mut function.body);
+                        visit(function);
                     }
                 }
             }
             Item::Enum(definition) => {
                 for function in &mut definition.methods {
-                    normalize_simplify_body(&mut function.body);
+                    visit(function);
                 }
                 for implementation in &mut definition.trait_impls {
                     for function in &mut implementation.methods {
-                        normalize_simplify_body(&mut function.body);
+                        visit(function);
                     }
                 }
             }
             Item::Impl(definition) => {
                 for function in &mut definition.methods {
-                    normalize_simplify_body(&mut function.body);
+                    visit(function);
                 }
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &mut module.body {
-                    normalize_simplify_items(body);
+                    for_each_simplify_func(body, visit);
                 }
             }
-            Item::GenericModule(module) => normalize_simplify_items(&mut module.body),
+            Item::GenericModule(module) => for_each_simplify_func(&mut module.body, visit),
             _ => {}
         }
     }
@@ -128,6 +136,96 @@ fn normalize_simplify_body(body: &mut Vec<Stmt>) {
         let value = value.clone();
         body[0] = Stmt::Expr(value);
     }
+}
+
+/// D-OPT-LIFT1=A / D-FMT-SIMPLIFY1=A: a plain value fills a slot whose type
+/// is already `T?`, so `Val(x)` returned from a function declared `-> T?` is
+/// redundant. The rewrite is syntactic, so it unwraps only payloads whose
+/// type never comes from the optional context: a name, a field path, or a
+/// `Bool` or `Char` literal. Numeric and text literals (typed text and sized
+/// numbers take their type from context), contextual `.{}`/`.Case` forms, and
+/// calls (whose generics may infer from the expected type) keep `Val`. Lambda
+/// bodies return from the lambda and are never entered.
+fn strip_redundant_optional_returns(items: &mut [Item]) {
+    for_each_simplify_func(items, &mut |function| {
+        if !matches!(function.return_type, Some(crate::AST::Type::Option(_))) {
+            return;
+        }
+        strip_optional_returns_in_body(&mut function.body);
+        if let Some(Stmt::Expr(tail)) = function.body.last_mut() {
+            unwrap_redundant_optional_value(tail);
+        }
+    });
+}
+
+fn strip_optional_returns_in_body(body: &mut [Stmt]) {
+    for stmt in body {
+        match stmt {
+            Stmt::Return(Some(value), _) => unwrap_redundant_optional_value(value),
+            Stmt::Expr(expr) => strip_optional_returns_in_if(expr),
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::CountedLoop { body, .. } => strip_optional_returns_in_body(body),
+            Stmt::Switch {
+                arms, else_body, ..
+            } => {
+                for arm in arms {
+                    strip_optional_returns_in_body(&mut arm.body);
+                }
+                if let Some(body) = else_body {
+                    strip_optional_returns_in_body(body);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Statement-position `if` chains carry their bodies on `Expr::If`; an
+/// `else if` nests as the else value.
+fn strip_optional_returns_in_if(expr: &mut crate::AST::Expr) {
+    if let crate::AST::Expr::If {
+        then_body,
+        else_body,
+        else_value,
+        ..
+    } = expr
+    {
+        strip_optional_returns_in_body(then_body);
+        strip_optional_returns_in_body(else_body);
+        strip_optional_returns_in_if(else_value);
+    }
+}
+
+fn unwrap_redundant_optional_value(value: &mut crate::AST::Expr) {
+    use crate::AST::{EnumLitArg, Expr};
+    fn self_typed(expr: &Expr) -> bool {
+        match expr {
+            Expr::Ident(..) | Expr::Bool(..) | Expr::Char(..) => true,
+            Expr::Field(base, _, _) => self_typed(base),
+            _ => false,
+        }
+    }
+    let Expr::EnumLit {
+        type_name,
+        variant,
+        args,
+        ..
+    } = value
+    else {
+        return;
+    };
+    if !type_name.is_empty() || variant.as_str() != Syntax::LIT_VALUE {
+        return;
+    }
+    let [EnumLitArg::Positional(inner)] = args.as_slice() else {
+        return;
+    };
+    if !self_typed(inner) {
+        return;
+    }
+    *value = inner.clone();
 }
 
 fn canonicalize_struct_literal_heads(canonical: &[u8]) -> Vec<u8> {
@@ -1183,11 +1281,10 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                 src[..c.name_span.start]
                     .rfind(&format!("#{}", Syntax::MARKER_PERSIST))
                     .unwrap_or(c.name_span.start)
-            } else if c.is_comptime {
-                // D-META-STAGE1=B: the compile-time mark rides the name, so the
-                // name span already covers it and only a force marker can sit
-                // in front. Scanning back for a retired keyword would find the
-                // word inside a leading comment and split the comment off.
+            } else if !c.attrs.is_empty() {
+                // D-CONSTMARK1: only a storage marker can sit in front of a
+                // constant's name. Scanning back for a retired keyword would
+                // find the word inside a leading comment and split it off.
                 let before = &src[..c.name_span.start];
                 before
                     .rfind("#Static")
@@ -2251,6 +2348,13 @@ pub fn format_source_with_options(
             crate::Parser::parse_for_fmt(&toks)?
         }
     };
+    // D-OPT-LIFT1=A: dropping a redundant `Val(x)` changes the parsed AST, so
+    // it is applied to the program itself; the identity check below then
+    // compares plain and simplified renderings of the same rewritten program.
+    let mut prog = prog;
+    if options.simplify {
+        strip_redundant_optional_returns(&mut prog.items);
+    }
     let comment_toks: Vec<_> = toks
         .iter()
         .filter(|token| {

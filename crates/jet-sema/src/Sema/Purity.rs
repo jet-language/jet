@@ -38,10 +38,19 @@ pub fn e3401(
             pure_fn_name, call_name
         ),
         why,
-        format!(
-            "give `{}` an explicit `-[]>` bound, or remove the call from `{}`",
-            call_name, pure_fn_name
-        ),
+        // The callee's row is inferred or built in, so the user can only
+        // change the pure caller: lose the call or lose the empty bound.
+        if path.is_empty() {
+            format!(
+                "remove the call from `{}`, or drop the `-[]>` bound from `{}` so its effects are inferred",
+                pure_fn_name, pure_fn_name
+            )
+        } else {
+            format!(
+                "remove the call to `{}`, or drop the `-[]>` bound from `{}` so its effects are inferred",
+                call_name, pure_fn_name
+            )
+        },
         Some(span),
     )
     .with_rights_chain("pure", call_chain, std::iter::empty::<String>(), None)

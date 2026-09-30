@@ -12,26 +12,8 @@ use core as core
 
 // core.testing — deterministic tests and comparison records.
 //
-// Fixture, golden, and world state remain host-owned; callback comparison and
-// bounded history generation stay portable Jet code.
-pub struct TestSuite {
-    pub name: String
-    pub passed: Int
-    pub failed: Int
-}
-
-pub struct Fake {
-    pub seed: Int
-}
-
-pub struct Clock {
-    pub unix_ms: Int
-    pub fake: Bool
-}
-
-pub struct Rng {
-    pub state: Int
-}
+// Fixture, golden, world, fake-data, and suite state remain host-owned;
+// callback comparison and bounded history generation stay portable Jet code.
 
 pub fn assert_equal(comparison: TestComparison) -> Bool {
     // The typed provider also requires recorded samples; the source twin can
@@ -115,16 +97,17 @@ pub fn temp_dir(prefix: String) -[FS]> String { core.testing.temp_dir(prefix) }
 
 pub fn corpus(glob: String) -[FS]> [String] { core.testing.corpus(glob) }
 
-pub fn fake_clock(unix_ms: Int) -> Clock { {unix_ms: unix_ms, fake: true} }
+/// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
+pub fn fake_clock(unix_ms: Int) -> Clock { Clock.new(unix_ms) }
 
-pub fn fake_rng(seed: Int) -> Rng {
-    // Keep the source twin bit-for-bit aligned with the provider constructor.
-    {state: seed}
-}
+/// A deterministic Prelude `Rng` seeded by the provider constructor.
+pub fn fake_rng(seed: Int) -> Rng { core.testing.fake_rng(seed) }
 
-pub fn fake_data(seed: Int) -> Fake { {seed: seed} }
+/// The deterministic Prelude `Fake` data capability built by the provider constructor.
+pub fn fake_data(seed: Int) -> Fake { core.testing.fake_data(seed) }
 
-pub fn test_suite() -> TestSuite { {name: "default", passed: 0, failed: 0} }
+/// The Prelude `TestSuite` carrying the current harness iteration and result.
+pub fn test_suite() -> TestSuite { core.testing.test_suite() }
 
 pub fn world(body: fn(DeterministicWorld)) { core.testing.world(body) }
 

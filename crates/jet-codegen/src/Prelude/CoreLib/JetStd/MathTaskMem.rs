@@ -1015,8 +1015,8 @@ macro_rules! jet_lane_show {
             }
         }
 
-        pub fn try_receive(&self) -> Option<T> {
-            self.inner.try_receive()
+        pub fn try_receive(&self) -> JetOutcome<T, JetAbsent> {
+            self.inner.try_receive().ok_or(JetAbsent)
         }
 
         pub fn is_timer(&self) -> bool {

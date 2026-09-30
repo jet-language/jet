@@ -556,6 +556,32 @@ impl LoaderError {
         self
     }
 
+    /// D5: attach the module's origin to diagnostics raised while reading it.
+    /// Diagnostics from nested imports already carry their own file, and a
+    /// diagnostic with no source text has nothing to render against.
+    fn with_module_origin(mut self, display: &str, path: &Path) -> Self {
+        let mut origin: Option<std::sync::Arc<crate::Diagnostics::DiagnosticOrigin>> = None;
+        for entry in &mut self.diagnostics {
+            if entry.file != display
+                || entry.source.is_empty()
+                || entry.diagnostic.origin().is_some()
+            {
+                continue;
+            }
+            let origin = origin
+                .get_or_insert_with(|| {
+                    std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
+                        display,
+                        path.to_string_lossy().into_owned(),
+                        entry.source.clone(),
+                    ))
+                })
+                .clone();
+            entry.diagnostic.set_origin(origin);
+        }
+        self
+    }
+
     fn into_plain(self) -> Vec<Diagnostic> {
         self.diagnostics
             .into_iter()
@@ -2634,7 +2660,11 @@ fn load_entry_with_overlays_mode_on_stack(
                 )
             })?
             .0;
-        let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
+        // Embedded Core sources are vetted stdlib internals (I1): they may
+        // spell the reserved `__name` namespace, e.g. `core.crypto.__zeroize`.
+        // Only this embedded-Core path lexes that way; a user file, even one
+        // named `Core/...`, goes through `Lexer::lex` and still gets E0067.
+        let (tokens, lex_diags) = Lexer::lex_generated(&source_for_parse);
         if !lex_diags.is_empty() {
             return Err(record_loader_error(
                 &mut sink,
@@ -2855,6 +2885,8 @@ fn project_package_outputs(
             name: address.clone(),
             name_span: span,
             value,
+            is_pub: false,
+            is_package_pub: false,
             meta: None,
             attrs: Vec::new(),
             rust_kind: RustConstKind::Const,
@@ -2886,6 +2918,8 @@ fn project_package_outputs(
                 inferred: true,
                 span,
             },
+            is_pub: false,
+            is_package_pub: false,
             meta: None,
             attrs: Vec::new(),
             rust_kind: RustConstKind::Const,
@@ -2903,11 +2937,11 @@ fn project_package_outputs(
 /// D-UNSAFE-OBLIG1=A: optional admin/CI organization floor. The configured
 /// path is an explicit build input; unreadable or malformed input fails closed.
 fn load_organization_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, LoaderError> {
-    let Ok(configured) = std::env::var(Syntax::ENV_ORG_UNSAFE_POLICY) else {
+    let Some(configured) = jet_foundation::CheckReads::env_var(Syntax::ENV_ORG_UNSAFE_POLICY) else {
         return Ok(Vec::new());
     };
     let path = PathBuf::from(&configured);
-    let source = match fs::read_to_string(&path) {
+    let source = match jet_foundation::CheckReads::read_to_string(&path) {
         Ok(source) => source,
         Err(error) => {
             return Err(LoaderError::at(
@@ -3187,6 +3221,30 @@ pub fn find_package_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagno
 /// inline Package carrier, stopping at the active workspace boundary.
 pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
     find_package_root_checked(start).ok().flatten()
+}
+
+/// D-MOD-CYCLE1=A: the member file of the package rooted at `root` that
+/// declares the package's top-level `fn run`. A package is one namespace with
+/// at most one `fn run`, so this file is the program entry; a library package
+/// has none.
+pub fn package_run_member(root: &Path) -> Option<PathBuf> {
+    let resolver = AuthorityResolver::open(root).ok()?;
+    let files = resolver.discover_source_files().ok()?;
+    files
+        .into_iter()
+        .find(|file| {
+            file.relative.file_name().and_then(|name| name.to_str()) != Some(Syntax::PACKAGE_FILE)
+                && file.text().is_ok_and(|source| {
+                    let (tokens, lex_diagnostics) = Lexer::lex(&source);
+                    lex_diagnostics.is_empty()
+                        && crate::Parser::parse_with_source(&tokens, &source).is_ok_and(|program| {
+                            program.items.iter().any(|item| {
+                                matches!(item, Item::Func(function) if function.name == "run")
+                            })
+                        })
+                })
+        })
+        .map(|file| file.path)
 }
 
 /// Verify the source trees a locked build is about to load.
@@ -3511,10 +3569,11 @@ fn locked_store_source_path(
             "the lock has no safe immutable store fingerprint",
         ));
     }
-    let root = std::env::var("JET_PACKAGE_STORE_DIR")
-        .or_else(|_| std::env::var("HOME").map(|home| format!("{home}/.jet/store")))
-        .or_else(|_| std::env::var("USERPROFILE").map(|home| format!("{home}/.jet/store")))
-        .unwrap_or_else(|_| ".jet/store".to_string());
+    let env = jet_foundation::CheckReads::env_var;
+    let root = env("JET_PACKAGE_STORE_DIR")
+        .or_else(|| env("HOME").map(|home| format!("{home}/.jet/store")))
+        .or_else(|| env("USERPROFILE").map(|home| format!("{home}/.jet/store")))
+        .unwrap_or_else(|| ".jet/store".to_string());
     Ok(PathBuf::from(root).join(format!(
         "{}-{}-{}",
         dep_name, package.version, fingerprint
@@ -3722,7 +3781,22 @@ fn dry_resolve_path_deps(mf: &Manifest::Manifest, project_root: &Path) -> Result
     let mut seen: std::collections::HashMap<String, (String, Vec<String>)> =
         std::collections::HashMap::new();
     let root_name = mf.package.name.clone();
-    dry_resolve_recursive(mf, project_root, &[root_name], &mut seen, false)
+    // D-MOD-CYCLE1=A: sibling packages (Compiler/JetLexer -> ../JetFoundation)
+    // share a dependency the root also declares. A transitive path may leave
+    // its declaring package only to reach a directory the root package itself
+    // names as a path dependency, so no directory beyond the root's own
+    // declarations is ever reached.
+    let root_path_deps: Vec<PathBuf> = mf
+        .dependencies
+        .values()
+        .filter_map(|spec| match spec {
+            Manifest::DepSpec::Path { path } if !Path::new(path).is_absolute() => {
+                std::fs::canonicalize(project_root.join(path)).ok()
+            }
+            _ => None,
+        })
+        .collect();
+    dry_resolve_recursive(mf, project_root, &[root_name], &mut seen, false, &root_path_deps)
 }
 
 fn dry_resolve_recursive(
@@ -3731,12 +3805,17 @@ fn dry_resolve_recursive(
     chain: &[String],
     seen: &mut std::collections::HashMap<String, (String, Vec<String>)>,
     enforce_path_boundary: bool,
+    root_path_deps: &[PathBuf],
 ) -> Result<(), Diagnostic> {
     for (dep_alias, spec) in &mf.dependencies {
         let Manifest::DepSpec::Path { path } = spec else {
             continue; // only path deps are resolved dry; git deps need fetch
         };
         let dep_path = normalize_path(&pkg_dir.join(path));
+        let declared_by_root = !Path::new(path).is_absolute()
+            && std::fs::canonicalize(&dep_path)
+                .is_ok_and(|resolved| root_path_deps.contains(&resolved));
+        let enforce_path_boundary = enforce_path_boundary && !declared_by_root;
         if enforce_path_boundary
             && (Path::new(path).is_absolute() || !dep_path.starts_with(pkg_dir))
         {
@@ -3791,7 +3870,7 @@ fn dry_resolve_recursive(
         } else {
             seen.insert(dep_pkg_name.clone(), (dep_version, child_chain.clone()));
             // Recurse into transitive deps.
-            dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen, true)?;
+            dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen, true, root_path_deps)?;
         }
     }
     Ok(())
@@ -4105,7 +4184,60 @@ fn apply_auto_derive_default(items: &mut [Item], default: bool) {
     }
 }
 
+/// Load one module and its imports. D5: every error raised while reading an
+/// imported (non-entry) file carries that file's origin, so it renders
+/// against the imported file instead of at a byte offset inside the entry.
+#[allow(clippy::too_many_arguments)]
 fn load_file(
+    path: &Path,
+    display: &str,
+    project_root: &Path,
+    pkg_dep_dirs: &HashMap<String, DependencyDir>,
+    pkg_resolution: &PkgResolution,
+    package_policy: &[crate::Policy::PolicyDeclaration],
+    package_lints_deny: &[String],
+    modules: &mut Vec<LoadedModule>,
+    path_to_idx: &mut HashMap<PathBuf, usize>,
+    stack: &mut Vec<PathBuf>,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+    parse_teaching: &mut Vec<Diagnostic>,
+    project_parts: &crate::ProjectParts::ProjectPartsReport,
+    project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
+    dependencies: &mut Vec<PathBuf>,
+    prepared_frontend: Option<&mut PreparedFrontend>,
+) -> Result<(), LoaderError> {
+    let is_entry = path_to_idx.is_empty();
+    load_file_located(
+        path,
+        display,
+        project_root,
+        pkg_dep_dirs,
+        pkg_resolution,
+        package_policy,
+        package_lints_deny,
+        modules,
+        path_to_idx,
+        stack,
+        overlays,
+        for_check,
+        parse_teaching,
+        project_parts,
+        project_part_failures,
+        dependencies,
+        prepared_frontend,
+    )
+    .map_err(|error| {
+        if is_entry {
+            error
+        } else {
+            error.with_module_origin(display, path)
+        }
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_file_located(
     path: &Path,
     display: &str,
     project_root: &Path,
@@ -4210,7 +4342,7 @@ fn load_file(
     // carries that file's origin (the same identity sema attaches), so it
     // renders against the imported file instead of at a byte offset inside
     // the entry document. The entry (the first file loaded) keeps the
-    // caller's own file context.
+    // caller's own file context. Errors get the same origin in `load_file`.
     let is_entry = path_to_idx.is_empty();
     if is_entry || teaching.is_empty() {
         parse_teaching.extend(teaching);
@@ -4801,11 +4933,23 @@ fn resolve_file_import(
     pkg_resolution: &PkgResolution,
     span: Span,
 ) -> Result<PathBuf, Diagnostic> {
-    if path_str.contains("..") {
+    // Owner ruling 2026-09-30: a file outside every package is an early
+    // multi-file prototype, so its quoted imports resolve relative to the
+    // importing file, `..` included. Inside a package the package rules hold
+    // and `..` stays E0602.
+    let loose = is_loose_file(importing);
+    if path_str.contains("..") && !loose {
         return Err(e0602(span));
     }
     let base = importing.parent().unwrap_or(Path::new("."));
-    let mut resolved = base.to_path_buf();
+    // A loose `..` walks real folders, so anchor it at an absolute base
+    // before `normalize_path` folds the parent segments.
+    let mut resolved = if loose {
+        let folder = if base.as_os_str().is_empty() { Path::new(".") } else { base };
+        std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf())
+    } else {
+        base.to_path_buf()
+    };
     for part in path_str.split('/') {
         if part.is_empty() || part == "." {
             continue;
@@ -4814,10 +4958,20 @@ fn resolve_file_import(
     }
     resolved.set_extension(Syntax::FILE_EXT);
     let resolved = normalize_path(&resolved);
-    let resolver = dependency_authority_for_path(importing, pkg_dep_dirs, pkg_resolution)
-        .cloned()
-        .map(Ok)
-        .unwrap_or_else(|| AuthorityResolver::open(project_root).map_err(|error| error.diagnostic()))?;
+    let resolver = if loose {
+        let folder = resolved
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        AuthorityResolver::open(folder).map_err(|error| error.diagnostic())?
+    } else {
+        dependency_authority_for_path(importing, pkg_dep_dirs, pkg_resolution)
+            .cloned()
+            .map(Ok)
+            .unwrap_or_else(|| {
+                AuthorityResolver::open(project_root).map_err(|error| error.diagnostic())
+            })?
+    };
     let relative = resolved.strip_prefix(resolver.root()).map_err(|_| {
         jet_pkg_model::Authority::AuthorityError::Escapes(resolved.clone()).diagnostic()
     })?;
@@ -4852,6 +5006,23 @@ fn resolve_file_import(
         )
     })?;
     Ok(checked.path)
+}
+
+/// A loose file belongs to no package: it has no leading `package { }` header
+/// of its own (a one-file package) and no `package.jet` above it. Only loose
+/// files may import each other by relative path.
+fn is_loose_file(importing: &Path) -> bool {
+    let has_header = jet_foundation::CheckReads::read_to_string(importing)
+        .map(|source| !matches!(crate::Package::extract_inline_package(&source), Ok(None)))
+        .unwrap_or(false);
+    if has_header {
+        return false;
+    }
+    let folder = importing
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    matches!(find_manifest_root_checked(folder), Ok(None))
 }
 
 fn resolve_module_import(
@@ -5164,12 +5335,10 @@ fn e0983_unrealized_library(name: &str, span: Span) -> Diagnostic {
 fn e0602(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0602",
-        "this import path escapes the project".to_string(),
-        "file imports stay inside the folder that contains the entry `.jet` file — `..` isn't allowed"
+        "this import path escapes the package".to_string(),
+        "inside a package, file imports stay in the package tree — `..` works only for loose files outside any package"
             .to_string(),
-        format!(
-            "use a path without `..`, or move the file inside the project tree"
-        ),
+        "use a path without `..`, or move the file inside the package tree".to_string(),
         Some(span),
     )
 }

@@ -4,13 +4,13 @@ Error [E0622]: A module binding's value must be a literal
   9 | GRAY :: gray(U8{128})
     |         ^^^^^^^^^^^^^
  Why: A module constant is folded once while building, so its value must be literal data: numbers, text, typed literals, and enum cases
- Fix: Write the value as literal data, such as `Rgb{r: U8{0}, g: U8{0}, b: U8{0}}`, or compute it inside a function
+ Fix: Write the value as literal data, such as `Rgb{r: U8{0}, g: U8{0}, b: U8{0}}`, prepare it while building with `NAME :: prep { value }`, or compute it inside a function
 More: jet-lang.dev/e/E0622
 
 Error [E0622]: A module binding's value must be a literal
   --> tests/ui/module_value_call.jet:10:11
     |
- 10 | CURSOR := Rgb{r: U8{255}, g: U8{255}, b: U8{255}}
+ 10 | cursor := Rgb{r: U8{255}, g: U8{255}, b: U8{255}}
     |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `fn run`
  Fix: Use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant

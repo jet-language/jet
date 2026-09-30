@@ -59,7 +59,7 @@ fn sema_hardware_result(check: SemaMethodSpecialCheck) -> SemaHardwareMethodChec
 }
 
 fn sema_hardware_place_key(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> String? {
-    places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
+    places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
     if places.len() != 1 -> return None
     key := places[0].root_key
     if key == "" -> return None
@@ -73,7 +73,7 @@ fn sema_hardware_place_frame(expression: Expr, scopes: SemaScopeTable) -> Int? {
 }
 
 pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> SemaHardwareDmaTransferFact? {
-    key :: sema_hardware_place_key(expression, scopes, state) ?? return None
+    key :: sema_hardware_place_key(expression, scopes, &state) ?? return None
     loop fact in scopes.hardware_definite_transfers {
         if fact.transfer_key == key -> return Val(fact)
     }
@@ -81,7 +81,7 @@ pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeT
 }
 
 pub fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    key :: sema_hardware_place_key(expression, scopes, state) ?? return true
+    key :: sema_hardware_place_key(expression, scopes, &state) ?? return true
     loop transfer in scopes.hardware_transfers {
         if transfer.buffer_key != key -> next
         &context.hardware_use.dma_operations.push(sema_hardware_dma_buffer_use_fact(transfer.buffer_name))
@@ -342,7 +342,7 @@ fn sema_hardware_dma_start(receiver: Expr, receiver_value: TExpr, args: [CallArg
         &diagnostics.push(sema_error("E0112", args[1].span, "`dma.start` needs a named buffer", "the checked transfer must retain one exact buffer identity for device ownership and wait", "pass a local buffer value as the second argument"))
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
-    buffer_key :: sema_hardware_place_key(args[1].expr, scopes, state) ?? {
+    buffer_key :: sema_hardware_place_key(args[1].expr, scopes, &state) ?? {
         &diagnostics.push(sema_error("E0112", args[1].span, "`dma.start` needs one exact buffer identity", "the checked transfer must retain the local symbol identity that owns the in-flight buffer", "pass one local buffer value as the second argument"))
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
@@ -379,7 +379,7 @@ fn sema_hardware_dma_wait(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         &diagnostics.push(sema_error("E0904", span, "DMA wait has no named transfer binding", "wait must consume the exact transfer fact produced by `dma.start`", "wait on the local transfer returned by `dma.start`"))
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
-    receiver_key :: sema_hardware_place_key(receiver, scopes, state) ?? {
+    receiver_key :: sema_hardware_place_key(receiver, scopes, &state) ?? {
         &diagnostics.push(sema_error("E0904", span, "DMA wait has no exact transfer identity for `{transfer_name}`", "wait must resolve the local symbol that owns the checked start fact, not only its spelling", "wait on the visible transfer binding returned by `dma.start`"))
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }

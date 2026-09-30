@@ -433,7 +433,7 @@ fn compiler_api_is_compile_time_only() {
 fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
     for operation in ["lex", "parse", "check", "source_map"] {
         let zero = format!(
-            "use core.compiler as compiler\n@VALUE :: compiler.{operation}()\n"
+            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}() }}\n"
         );
         let diagnostics = jet::compile(&zero).expect_err("zero-argument call must be rejected");
         assert!(
@@ -442,7 +442,7 @@ fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
         );
 
         let extra = format!(
-            "use core.compiler as compiler\n@VALUE :: compiler.{operation}(\"source\", \"extra\")\n"
+            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}(\"source\", \"extra\") }}\n"
         );
         let diagnostics =
             jet::compile(&extra).expect_err("extra-argument call must be rejected");

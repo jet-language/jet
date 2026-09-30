@@ -221,150 +221,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
-        "core.crypto",
-        "constant_time_equal_bytes",
-        "jet_crypto_constant_time_equal_bytes_impl",
-        false,
-        &[true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_constant_time_equal_bytes")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "constant_time_equal",
-        "jet_crypto_constant_time_secret_impl",
-        false,
-        &[true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_constant_time_equal")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "hkdf_sha256",
-        "jet_crypto_hkdf_sha256_impl",
-        false,
-        &[true, true, true, false],
-    )
-    .with_jit_symbol("jet_jit_crypto_hkdf_sha256")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "x25519_public",
-        "jet_crypto_x25519_public_impl",
-        false,
-        &[true],
-    )
-    .with_jit_symbol("jet_jit_crypto_x25519_public_from_bytes")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "__x25519_public",
-        "jet_crypto_x25519_public_typed_impl",
-        false,
-        &[true],
-    )
-    .with_jit_symbol("jet_jit_crypto_x25519_public")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "__x25519_public_text",
-        "jet_crypto_x25519_public_text_impl",
-        false,
-        &[true],
-    )
-    .with_jit_symbol("jet_jit_crypto_x25519_public_text")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "__signing_public",
-        "jet_crypto_signing_public_impl",
-        false,
-        &[true],
-    )
-    .with_jit_symbol("jet_jit_crypto_signing_public")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "x25519_shared",
-        "jet_crypto_x25519_shared_impl",
-        false,
-        &[true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_x25519_shared")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "x25519",
-        "jet_crypto_x25519_typed_impl",
-        false,
-        &[true, false],
-    )
-    .with_jit_symbol("jet_jit_crypto_x25519")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto.expert",
-        "x25519_raw",
-        "jet_crypto_expert_x25519_impl",
-        false,
-        &[true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_expert_x25519_raw")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "wrap",
-        "jet_crypto_wrap_typed_impl",
-        false,
-        &[true, false],
-    )
-    .with_jit_symbol("jet_jit_crypto_wrap")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "unwrap",
-        "jet_crypto_unwrap_typed_impl",
-        false,
-        &[true, false],
-    )
-    .with_jit_symbol("jet_jit_crypto_unwrap")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "sign",
-        "jet_crypto_sign_typed_impl",
-        false,
-        &[true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_sign")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "verify",
-        "jet_crypto_verify_typed_impl",
-        false,
-        &[true, true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_verify")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "seal",
-        "jet_crypto_seal_typed_impl",
-        false,
-        &[false, true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_seal")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "open",
-        "jet_crypto_open_typed_impl",
-        false,
-        &[true, false, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_open")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
         "core.sync",
         "counter_new",
         "jet_sync_counter_new",
@@ -451,24 +307,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
     .with_jit_symbol("jet_jit_net_sendfile"),
-    CoreCallRecord::new(
-        "core.crypto",
-        "__secret_from_bytes",
-        "jet_crypto_secret_from_bytes_impl",
-        false,
-        &[true],
-    )
-    .with_jit_symbol("jet_jit_crypto_secret_from_bytes")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto.expert",
-        "open_v1",
-        "jet_crypto_expert_open_v1_impl",
-        false,
-        &[true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_expert_open_v1")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.crypto.vault",
         "get",
@@ -582,42 +420,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
     .without_direct_aot()
     .without_direct_jit(),
-    CoreCallRecord::new(
-        "core.crypto.expert",
-        "migrate_v1",
-        "jet_crypto_expert_migrate_v1_impl",
-        false,
-        &[true, true, true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_expert_migrate_v1")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "__password_text",
-        "jet_crypto_password_text_impl",
-        false,
-        &[true],
-    )
-    .with_jit_symbol("jet_jit_crypto_password_text")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "file_open",
-        "jet_crypto_file_open_impl",
-        false,
-        &[true, true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_file_open")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.crypto",
-        "file_seal",
-        "jet_crypto_file_seal_impl",
-        false,
-        &[true, true, true],
-    )
-    .with_jit_symbol("jet_jit_crypto_file_seal")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 
 pub(crate) fn tir_core_call_records() -> &'static [CoreCallRecord] {
@@ -1883,16 +1685,12 @@ fn lower_compute_transform_call(
 
 fn core_source_module_target(
     source_signature: &crate::Codegen::CoreSourceFunctionSignature,
-    alias: &str,
     method: &str,
 ) -> TModuleCallForm {
-    let (rust_mod, rust_fn) = match source_signature.module_identity.as_deref() {
-        Some(module_identity) => (module_identity.to_string(), method.to_string()),
-        // Comptime fragments currently carry checked signatures without a
-        // module row. Preserve their prior resolved Rust target projection.
-        None => (crate::Codegen::mangle(alias), mangle(method).to_string()),
-    };
-    TModuleCallForm::Qualified { rust_mod, rust_fn }
+    TModuleCallForm::Qualified {
+        rust_mod: source_signature.module_identity.clone(),
+        rust_fn: method.to_string(),
+    }
 }
 
 fn checked_core_source_call_signature(
@@ -1968,9 +1766,7 @@ fn lower_core_source_call(
         Ok(target_return) => Some(target_return),
         Err(error) => return Some(invariant_method_expr(method_span, error)),
     };
-    let form = if source_signature.module_identity.is_some()
-        && !source_signature.type_params.is_empty()
-    {
+    let form = if !source_signature.type_params.is_empty() {
         let Some(instance) =
             demand_core_source_generic_function(cx, method, source_signature, &targs, type_args)
         else {
@@ -1980,15 +1776,11 @@ fn lower_core_source_call(
             ));
         };
         TModuleCallForm::Qualified {
-            rust_mod: source_signature
-                .module_identity
-                .as_ref()
-                .expect("checked source module identity")
-                .clone(),
+            rust_mod: source_signature.module_identity.clone(),
             rust_fn: instance,
         }
     } else {
-        core_source_module_target(source_signature, alias, method)
+        core_source_module_target(source_signature, method)
     };
     Some(TExpr {
         ty,
@@ -2028,12 +1820,12 @@ fn lower_core_string_source_call(
         return None;
     }
     let module = jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE;
-    let Some(alias) = cx.core_source_modules.get(module) else {
+    if !cx.core_source_modules.contains_key(module) {
         return Some(invariant_method_expr(
             method_span,
             "private String source module is not loaded",
         ));
-    };
+    }
     let Some(source_signature) = cx
         .core_source_sigs
         .get(&(module.to_string(), method.to_string()))
@@ -2093,7 +1885,7 @@ fn lower_core_string_source_call(
     Some(TExpr {
         ty,
         kind: TExprKind::ModuleCall {
-            form: core_source_module_target(source_signature, alias, method),
+            form: core_source_module_target(source_signature, method),
             target_return,
             type_args: type_args.to_vec(),
             args: lowered_args,
@@ -2351,20 +2143,9 @@ fn normalize_http_static_files_args(args: &mut Vec<TExpr>) {
     }
 }
 
-fn crypto_instance_helper(kind: &str, method: &str) -> Option<&'static str> {
+fn vault_instance_helper(kind: &str, method: &str) -> Option<&'static str> {
     match (kind, method) {
-        ("SigningKey", "public_key") => Some("__signing_public"),
-        ("X25519SecretKey", "public_key") => Some("__x25519_public"),
-        ("VerifyKey", "bytes") => Some("__verify_key_bytes"),
-        ("X25519PublicKey", "bytes") => Some("__x25519_public_bytes"),
-        ("X25519PublicKey", "text") => Some("__x25519_public_text"),
-        ("Signature", "bytes") => Some("__signature_bytes"),
-        ("Sealed", "bytes") => Some("__sealed_bytes"),
-        ("WrappedKey", "bytes") => Some("__wrapped_bytes"),
         ("WrappedVaultKey", "bytes") => Some("__vault_wrapped_bytes"),
-        ("PasswordHash", "text") => Some("__password_text"),
-        ("Hasher", "update") => Some("__hasher_update"),
-        ("Hasher", "digest") => Some("__hasher_digest"),
         _ => None,
     }
 }
@@ -2457,124 +2238,12 @@ fn lower_data_schema_call(
     })
 }
 
-/// Keep the generic `core.crypto` call off the large method-dispatch frame.
-/// This is the same resolved CoreCall shape as the full dispatcher below; the
-/// sema fixed-signature fact makes the narrow route total.
-fn lower_core_crypto_alias_fast(
+/// Lower the vault key-wrap carrier's byte view without retaining the full
+/// dispatcher frame while the receiver itself is lowered.
+fn lower_vault_instance_fast(
     receiver: &Expr,
     method: &str,
     method_span: Span,
-    args: &[crate::AST::CallArg],
-    resolved_ret: Option<&Type>,
-    cx: &Cx,
-    env: &mut LowerEnv,
-) -> Option<TExpr> {
-    let Expr::Ident(alias, _) = receiver else {
-        return None;
-    };
-    if env.locals.contains_key(alias) {
-        return None;
-    }
-    let target = cx
-        .core_import_module_for_function(&env.fn_name, alias)
-        .map(|module| (module.to_owned(), method.to_owned()))
-        .or_else(|| {
-            cx.inline_reexport_core
-                .get(&(alias.clone(), method.to_owned()))
-                .cloned()
-        });
-    let Some((module, core_method)) = target else {
-        return None;
-    };
-    if !matches!(module.as_str(), "core.crypto" | "core.crypto.expert") {
-        return None;
-    }
-    let source_owned = cx
-        .core_source_modules
-        .get(&module)
-        .is_some_and(|source_alias| {
-            source_alias != &cx.module_alias
-                && jet_foundation::CoreModuleExports::core_source_owns(&module, &core_method)
-        });
-    let has_tir_record = TIR_CORE_CALL_RECORDS.iter().any(|record| {
-        record.receiver_types.is_empty()
-            && record.module == module
-            && record.member == core_method
-    });
-    if source_owned && !has_tir_record {
-        // Unaccelerated source-owned Core methods must reach the loaded Jet
-        // implementation through lower_core_source_call below.
-        return None;
-    }
-
-    if static_call_type_name_lower(receiver, env).as_deref() == Some("Secret")
-        && matches!(method, "from_text" | "from_bytes")
-    {
-        return None;
-    }
-    let Some((params, _)) = crate::Sema::core_fixed_sig(&module, &core_method) else {
-        return Some(invariant_method_expr(
-            method_span,
-            "crypto alias without a checked core signature",
-        ));
-    };
-    let Some(ty) = resolved_ret.cloned() else {
-        return Some(invariant_method_expr(
-            method_span,
-            "crypto alias without a resolved return type",
-        ));
-    };
-    let raw_args: Vec<TExpr> = args
-        .iter()
-        .map(|arg| lower_expr(&arg.expr, cx, env))
-        .collect();
-    let widen_to_vec = core_widen_to_vec(&module, &core_method, &raw_args);
-    let mut targs = Vec::with_capacity(raw_args.len());
-    for (index, value) in raw_args.into_iter().enumerate() {
-        let Some(widen) = widen_to_vec.get(index).copied() else {
-            return Some(invariant_method_expr(
-                method_span,
-                "crypto alias without a widening fact for every argument",
-            ));
-        };
-        if widen {
-            targs.push(value);
-        } else {
-            let Some((_, expected)) = params.get(index) else {
-                return Some(invariant_method_expr(
-                    method_span,
-                    "crypto alias argument exceeds its checked core signature",
-                ));
-            };
-            targs.push(preserve_typed_list_shape(value, expected, cx));
-        }
-    }
-    let record = match checked_core_record(&module, &core_method, targs.len(), method_span) {
-        Ok(record) => record,
-        Err(expr) => return Some(expr),
-    };
-    prepare_generic_serde_codec(cx, &env.fn_name, &module, &core_method, &mut targs, &ty);
-    Some(TExpr {
-        ty: ty.clone(),
-        kind: TExprKind::CoreCall {
-            record,
-            args: targs,
-            source_span: method_span,
-            type_args: Vec::new(),
-            widen_to_vec,
-            data_plan: None,
-            fallibility: TFailureCarrier::from_checked_type(&ty),
-        },
-    })
-}
-
-/// Lower crypto nominal receiver methods without retaining the full dispatcher
-/// frame while the receiver itself is lowered.
-fn lower_crypto_instance_fast(
-    receiver: &Expr,
-    method: &str,
-    method_span: Span,
-    call_args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
     resolved_ret: Option<&Type>,
     lowered_receiver: &mut Option<TExpr>,
@@ -2588,20 +2257,14 @@ fn lower_crypto_instance_fast(
         return None;
     }
     let kind = recv_type.as_deref()?.rsplit('.').next()?;
-    let helper = crypto_instance_helper(kind, method)?;
+    let helper = vault_instance_helper(kind, method)?;
     let recv = lowered_receiver
         .take()
         .unwrap_or_else(|| lower_expr(receiver, cx, env));
-    let mut args = vec![recv];
-    if kind == "Hasher" && method == "update" {
-        args.extend(call_args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
-    }
+    let args = vec![recv];
     let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
     let ty = match resolved_ret.cloned() {
         Some(ty) => ty,
-        None if kind == "Hasher" && method == "update" => {
-            Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
-        }
         None => {
             return Some(invariant_method_expr(
                 method_span,
@@ -2980,17 +2643,11 @@ pub(crate) fn lower_method_call_with_sig(
     {
         return lowered;
     }
-    if let Some(lowered) =
-        lower_core_crypto_alias_fast(receiver, method, method_span, args, resolved_ret, cx, env)
-    {
-        return lowered;
-    }
     let mut lowered_receiver = lowered_receiver;
-    if let Some(lowered) = lower_crypto_instance_fast(
+    if let Some(lowered) = lower_vault_instance_fast(
         receiver,
         method,
         method_span,
-        args,
         recv_type,
         resolved_ret,
         &mut lowered_receiver,
@@ -3299,10 +2956,15 @@ fn route_response_expr(
             // Core aliases remain MethodCall nodes after sema.  Their checked
             // return fact is the authority that this is an endpoint response;
             // only then recover the constructor payload from its checked args.
-            let returns_http_response = matches!(
-                resolved_ret.as_ref(),
-                Some(Type::Named(name)) if name == "HTTPResponse"
-            );
+            // A source-owned constructor declares `-> HTTPResponse Never!`,
+            // whose proven-unreachable failure rail is still a response.
+            let returns_http_response = match resolved_ret.as_ref() {
+                Some(Type::Named(name)) => name == "HTTPResponse",
+                Some(Type::Result { ok, err }) => {
+                    err.is_never() && matches!(ok.as_ref(), Type::Named(name) if name == "HTTPResponse")
+                }
+                _ => false,
+            };
             if returns_http_response
                 && matches!(method.as_str(), "response" | "json" | "empty_response")
             {
@@ -4032,11 +3694,9 @@ fn lower_game_handle_receiver(receiver: &Expr, cx: &Cx, env: &mut LowerEnv) -> O
 }
 
 fn infer_comptime_host_owner(receiver: &Expr, method: &str) -> Option<&'static str> {
-    let comptime_recv = match receiver {
-        Expr::ComptimeName { .. } => true,
-        Expr::Ident(name, _) => crate::Syntax::is_comptime_name(name),
-        _ => false,
-    };
+    // D-PREP-SURFACE2=A: a build-time value is read as a folded compile-time
+    // name; the case of a plain name never makes it one.
+    let comptime_recv = matches!(receiver, Expr::ComptimeName { .. });
     if !comptime_recv {
         return None;
     }
@@ -5334,23 +4994,13 @@ fn lower_method_call_impl(
         }
         tasks
     }
+    // The vault's opaque key-wrap carriers are the one remaining host-owned
+    // static surface; every core.crypto type method is Jet-declared Core.
     let crypto_static = static_call_type_name_lower(receiver, env).and_then(|ty| {
         let helper = match (ty.as_str(), method) {
-            ("Secret", "from_text") => "__secret_from_text",
-            ("Secret", "from_bytes") => "__secret_from_bytes",
-            ("SigningKey", "new_random") => "__signing_generate",
-            ("X25519SecretKey", "new_random") => "__x25519_generate",
-            ("VerifyKey", "from_bytes") => "__verify_key_from_bytes",
-            ("X25519PublicKey", "from_bytes") => "__x25519_public_from_bytes",
-            ("X25519PublicKey", "from_text") => "__x25519_public_from_text",
-            ("Signature", "from_bytes") => "__signature_from_bytes",
-            ("Sealed", "from_bytes") => "__sealed_from_bytes",
-            ("WrappedKey", "from_bytes") => "__wrapped_from_bytes",
             ("WrappedVaultKey", "from_bytes") => "__vault_wrapped_from_bytes",
             ("KeyUnlock", "Recipient") => "__vault_unlock_recipient",
             ("KeyUnlock", "Passphrase") => "__vault_unlock_passphrase",
-            ("PasswordHash", "parse") => "__password_parse",
-            ("Hasher", "new") => "__hasher_new",
             _ => return None,
         };
         Some(helper)
@@ -5388,19 +5038,13 @@ fn lower_method_call_impl(
         .as_deref()
         .map(|name| name.rsplit('.').next().unwrap_or(name))
     {
-        if let Some(helper) = crypto_instance_helper(kind, method) {
+        if let Some(helper) = vault_instance_helper(kind, method) {
             return in_own_frame(|| {
                 let recv = lower_expr(receiver, cx, env);
-                let mut targs = vec![recv];
-                if kind == "Hasher" && method == "update" {
-                    targs.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
-                }
+                let targs = vec![recv];
                 let widen_to_vec = core_widen_to_vec("core.crypto", helper, &targs);
                 let ty = match resolved_ret.cloned() {
                     Some(ty) => ty,
-                    None if kind == "Hasher" && method == "update" => {
-                        Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
-                    }
                     None => {
                         return invariant_method_expr(
                             method_span,
@@ -12864,15 +12508,38 @@ fn lower_method_call_impl(
                 // carrier: the resident tier stored `Payment.Client.client()` in an
                 // i8 slot and refused the next `^handle` argument, which wants the
                 // i64 handle. Ask the one method table which spelling it knows.
+                // An imported source type (`crypto.Secret.from_text`) has no leaf
+                // row at all: `register_imported_methods` keys it by the declaring
+                // module's canonical nominal, exactly as instance calls look it up,
+                // and that identity also names the checked function target.
                 let dotted_key = (type_name.clone(), method.to_string());
                 let lookup_type_name = if cx.method_sigs.contains_key(&dotted_key)
                     || cx.method_rets.contains_key(&dotted_key)
                 {
-                    type_name.as_str()
+                    type_name.clone()
+                } else {
+                    let leaf = type_name
+                        .rsplit_once('.')
+                        .map_or(type_name.as_str(), |(_, leaf)| leaf);
+                    let leaf_key = (leaf.to_string(), method.to_string());
+                    match cx.imported_type_metadata_name(&type_name) {
+                        Some(identity)
+                            if !cx.method_sigs.contains_key(&leaf_key)
+                                && !cx.method_rets.contains_key(&leaf_key)
+                                && cx
+                                    .method_sigs
+                                    .contains_key(&(identity.clone(), method.to_string())) =>
+                        {
+                            identity
+                        }
+                        _ => leaf.to_string(),
+                    }
+                };
+                let lookup_type_name = lookup_type_name.as_str();
+                let type_name = if lookup_type_name.contains("::") {
+                    lookup_type_name.to_string()
                 } else {
                     type_name
-                        .rsplit_once('.')
-                        .map_or(type_name.as_str(), |(_, leaf)| leaf)
                 };
                 let operator_method = operator_rhs.and_then(|rhs| {
                     let trait_name = operator_trait_for_method(method)?;
@@ -13711,8 +13378,10 @@ fn prepare_generic_serde_codec(
             }
         }
     }
-    if matches!(module, "core.encoding.json" | "core.encoding.toml")
-        && matches!(method, "to_string" | "to_string_pretty")
+    if matches!(
+        module,
+        "core.encoding.json" | "core.encoding.toml" | "core.encoding.yaml"
+    ) && matches!(method, "to_string" | "to_string_pretty")
     {
         if let Some(arg) = args.first_mut() {
             let value = std::mem::replace(
@@ -13755,7 +13424,7 @@ mod checked_core_source_target_tests {
             cx.core_source_sigs.insert(
                 (module.to_string(), method.to_string()),
                 crate::Codegen::CoreSourceFunctionSignature {
-                    module_identity: Some(checked_module_identity.to_string()),
+                    module_identity: checked_module_identity.to_string(),
                     type_params: Vec::new(),
                     params: vec![
                         (AccessConvention::Move, Type::String),
@@ -13823,7 +13492,7 @@ mod checked_core_source_target_tests {
                 return_view_provenance: None,
             };
             let signature = crate::Codegen::CoreSourceFunctionSignature {
-                module_identity: Some("source-package::Core/web/query.jet".to_string()),
+                module_identity: "source-package::Core/web/query.jet".to_string(),
                 type_params: Vec::new(),
                 params: vec![(AccessConvention::Move, callback)],
                 return_type: None,
@@ -13858,7 +13527,7 @@ mod checked_core_source_target_tests {
             let cx = crate::Codegen::build_cx(&program, source_text, "caller.jet");
             let owner = "source-package::Core/data/data.jet";
             let signature = crate::Codegen::CoreSourceFunctionSignature {
-                module_identity: Some(owner.to_string()),
+                module_identity: owner.to_string(),
                 type_params: vec!["T".to_string()],
                 params: vec![
                     (AccessConvention::Move, Type::String),

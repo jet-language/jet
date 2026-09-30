@@ -127,9 +127,15 @@ fn main_error_type(program: &MirProgram, artifact: MirArtifactId) -> Option<Entr
         program.types.iter().find(|definition| definition.id == id)
             .map(|definition| definition.key.as_str())
     });
+    // Same carrier test as the resident `print` lowering of `[FieldError]`
+    // (functions_compile.rs `display_value_of_type`).
+    let field_errors = matches!(error.kind(), jet_foundation::MIR::MirTypeKind::List(inner)
+        if matches!(inner.kind(), jet_foundation::MIR::MirTypeKind::Apply { name, args }
+            if name.name == "FieldError" && args.is_empty()));
     match builtin {
         Some(jet_foundation::Syntax::TYPE_ERR) => Some(EntryErrorType::Default),
         Some(jet_foundation::Syntax::TYPE_IO_ERROR) => Some(EntryErrorType::Io),
+        _ if field_errors => Some(EntryErrorType::FieldErrors),
         _ => super::runtime_host::runtime_type_id(error).map(EntryErrorType::Descriptor),
     }
 }
@@ -318,7 +324,6 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         conditions: Vec::new(),
         shared_guard_states: HashMap::new(),
         expirings: Vec::new(),
-        secrets: Vec::new(),
         crypto_values: Vec::new(),
         net_values: Vec::new(),
         service_callbacks: HashMap::new(),

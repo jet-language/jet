@@ -135,7 +135,8 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             value :: parser_parse_template_loop(&state)
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
         }
-        parser_comptime_const_ahead(&state, 0) -> {
+        // 3A: `pub NAME :: value` exports a module constant like any item.
+        parser_comptime_const_ahead(&state, 0) || (modifiers.markers.len() > 0 && parser_marked_const_ahead(&state, 0)) || ((modifiers.is_pub || modifiers.is_package_pub) && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -994,8 +995,8 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
 
 fn parser_report_retired_const(state: &JetParserState, kind: Int, span: Span) {
     if kind == {
-        TOKEN_KW_CONST -> parser_add_error_code(&state, "E0146", span, "`const` is retired — write `@`", "explicit compile-time demand is a marker on an immutable binding", "write `@name :: …` (or `#Persist name := …` for hot-reload state)")
-        else -> parser_add_error_code(&state, "E0374", span, "`comptime` is retired", "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane", "remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build")
+        TOKEN_KW_CONST -> parser_add_error_code(&state, "E0146", span, "`const` is retired — write `NAME :: prep {{ … }}`", "a compile-time constant is an immutable binding whose value is prepared while building", "write `NAME :: prep {{ … }}` (or `#Persist name := …` for hot-reload state)")
+        else -> parser_add_error_code(&state, "E0374", span, "`comptime` is retired", "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane", "remove the keyword; a build-time value is written `NAME :: prep {{ … }}`, and `prep {{ … }}` runs other work while building")
     }
 }
 fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
@@ -1010,12 +1011,31 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         }
         parser_report_retired_const(&state, TOKEN_KW_COMPTIME, error_span)
     }
+    // D-PREP-SURFACE2=A + owner ruling (2026-09-30): compile time is always
+    // explicit. Only `NAME :: prep { value }` is evaluated while building; a
+    // retired `@NAME :: value` or `comptime` form recovers with its old
+    // compile-time meaning after its teaching error.
+    binding_name := ""
+    retired_at := ""
+    recovered_comptime := false
     name_token := if {
         start.kind == TOKEN_AT -> {
             parser_bump(&state)
-            at_name :: parser_expect_name(&state, "after `@` in a compile-time binding")
-            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a compile-time binding name")
+            at_name :: parser_expect_name(&state, "after `@` in a constant")
+            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
+            binding_name = at_name.payload.decoded.to_ascii_upper()
+            retired_at = "@{at_name.payload.decoded}"
             at_name
+        }
+        start.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON -> {
+            parser_bump(&state)
+            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
+            if start.payload.decoded.starts_with("@") {
+                retired_at = start.payload.decoded
+            } else {
+                binding_name = start.payload.decoded
+            }
+            start
         }
         else -> {
             if {
@@ -1024,16 +1044,42 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                     parser_report_retired_const(&state, start.kind, start.span)
                 }
                 !modifiers.is_comptime -> {
-                    parser_add_error(&state, start.span, "expected a compile-time binding", "compile-time constants use `@name :: value`", "write `@name :: value`")
+                    parser_add_error(&state, start.span, "expected a constant binding", "a module constant is an ALL_CAPS name", "write `NAME :: value`, or `NAME :: prep {{ value }}` to evaluate it while building")
                     if start.kind != TOKEN_EOF -> parser_bump(&state)
                 }
             }
             retired_name :: parser_expect_name(&state, "after a retired constant keyword")
             parser_expect(&state, TOKEN_EQ, "`=` after a retired constant name")
+            binding_name = retired_name.payload.decoded
+            recovered_comptime = true
             retired_name
         }
     }
-    parsed_value :: parser_parse_expression(&state, 1, 0)
+    prepared := false
+    parsed_value := ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}
+    if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
+        head :: parser_bump(&state)
+        block :: parser_parse_value_block(&state, 0)
+        span :: parser_cover(head.span, block.span)
+        parsed_value = ParsedExpr{expr: Expr.Unit{span: span}, span: span}
+        if block.statements.len() == 0 && block.tail == .Val(tail) {
+            prepared = true
+            parsed_value = ParsedExpr{expr: tail, span: span}
+        } else {
+            parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "D-PREP-SURFACE2=A makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
+        }
+    } else {
+        parsed_value = parser_parse_expression(&state, 1, 0)
+    }
+    if retired_at != "" {
+        recovered_comptime = true
+        if prepared && start.kind != TOKEN_AT {
+            binding_name = parser_retire_const_mark(&state, name_token)
+        } else {
+            binding_name = parser_retire_const_decl(&state, parser_cover(start.span, name_token.span), retired_at)
+        }
+        if start.kind == TOKEN_AT -> binding_name = binding_name.to_ascii_upper()
+    }
     terminator := parser_current(&state)
     terminator_span := terminator.span
     if terminator.kind == TOKEN_RBRACE || terminator.kind == TOKEN_EOF -> terminator_span = parsed_value.span
@@ -1053,9 +1099,11 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         if marker.name == "Inline" -> &attrs.push(ConstAttr.ForceInline)
         marker_index += 1
     }
-    result := ast_const(name_token.payload.decoded, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
+    result := ast_const(binding_name, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
     result.attrs = attrs
-    result.is_comptime = true
+    result.is_pub = modifiers.is_pub
+    result.is_package_pub = modifiers.is_package_pub
+    result.is_comptime = prepared || recovered_comptime
     result.rust_kind = rust_kind
     result.ty = None
     result
@@ -1267,7 +1315,7 @@ fn parser_parse_effect_decl(state: &JetParserState) -> EffectDecl {
     irreversible := false
     declaration_end := name.span.end
     fact := parser_current(&state)
-    if fact.kind == TOKEN_IDENT && fact.payload.decoded == "@irreversible" {
+    if fact.kind == TOKEN_IDENT && fact.payload.decoded == "$irreversible" {
         parser_bump(&state)
         irreversible = true
         declaration_end = fact.span.end

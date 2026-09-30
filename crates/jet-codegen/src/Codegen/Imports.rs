@@ -248,12 +248,13 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
             cx.type_names.insert(leaf);
         }
     }
+    let secret = cx.secret_containing_types();
     for item in items {
         match item {
             Item::Struct(s) => {
                 if !cx.cloneable.contains(&s.name)
                     && type_is_cloneable_struct(s, &cx.type_names)
-                    && !cx.type_contains_secret(&Type::Named(s.name.clone()))
+                    && !secret.contains(&s.name)
                 {
                     cx.cloneable.insert(s.name.clone());
                 }
@@ -264,7 +265,7 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
             Item::Enum(e) => {
                 if !cx.cloneable.contains(&e.name)
                     && type_is_cloneable_enum(e, &cx.type_names)
-                    && !cx.type_contains_secret(&Type::Named(e.name.clone()))
+                    && !secret.contains(&e.name)
                 {
                     cx.cloneable.insert(e.name.clone());
                 }
@@ -963,6 +964,17 @@ pub(crate) fn inline_import_maps(
                         .original
                         .expect("member walker returned a binding without a member");
                     let local = binding.local;
+                    // D-MOD2: type, trait and constant members bind as
+                    // NameLedger aliases, not function-call scope entries.
+                    if matches!(
+                        bundle
+                            .name_ledger
+                            .declaration(target, orig)
+                            .map(|declaration| declaration.kind.as_str()),
+                        Some("type" | "trait" | "const" | "tag" | "protocol")
+                    ) {
+                        continue;
+                    }
                     let real_name = bundle
                         .name_ledger
                         .effective_alias(module_idx, &local)
@@ -1394,6 +1406,16 @@ fn unqualified_file_function_entries(
                 }) {
                     continue;
                 }
+                // D-MOD2: a type, trait or constant member binds as a
+                // NameLedger alias; nominal lookup and constant keys read it,
+                // so it needs no function-signature entry.
+                if bundle
+                    .name_ledger
+                    .effective_alias(module_idx, &local)
+                    .is_some_and(|alias| alias.target_module == Some(target))
+                {
+                    continue;
+                }
                 unreachable!(
                     "imported member missing after sema: module={module_idx} alias={module_alias} member={orig}"
                 );
@@ -1530,7 +1552,7 @@ pub(crate) fn core_source_sig_map(
             map.insert(
                 (source.module.to_string(), function.name.clone()),
                 super::CoreSourceFunctionSignature {
-                    module_identity: Some(super::Context::module_identity(bundle, target)),
+                    module_identity: super::Context::module_identity(bundle, target),
                     type_params: function
                         .type_params
                         .iter()
@@ -1587,7 +1609,7 @@ pub(crate) fn core_source_sig_map(
                 map.insert(
                     (part.source.module.to_string(), function.name.clone()),
                     super::CoreSourceFunctionSignature {
-                        module_identity: Some(super::Context::module_identity(bundle, target)),
+                        module_identity: super::Context::module_identity(bundle, target),
                         type_params: function
                             .type_params
                             .iter()

@@ -100,6 +100,24 @@ fn pascal(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
     for segment in name.split('.') {
         check(segment, span, category, out);
     }
+    // D-ACRO-LEX1=A: a type-like declaration keeps every lexicon acronym in
+    // caps (`MirType` -> `MIRType`). The edit covers the whole written name.
+    if span.start != span.end
+        && name
+            .split('.')
+            .all(|segment| Syntax::name_has_case(segment, NameCase::Pascal))
+    {
+        let canonical = name
+            .split('.')
+            .map(Syntax::respell_acronym_name)
+            .collect::<Vec<_>>()
+            .join(".");
+        if canonical != name {
+            out.push(crate::Sema::CheckerCoreLib::retired_acronym_spelling_diag(
+                name, &canonical, span,
+            ));
+        }
+    }
 }
 
 fn snake(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
@@ -260,6 +278,12 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             for m in &i.methods {
                 func_names(m, "method", out);
             }
+        }
+        // Owner ruling (2026-09-30): an immutable module binding is ALL_CAPS;
+        // a mutable one is never ALL_CAPS.
+        Item::Const(c) if c.mutable => {
+            snake(&c.name, c.name_span, "module variable", out);
+            expr_names(&c.value, out);
         }
         Item::Const(c) => {
             screaming(&c.name, c.name_span, "constant", out);
@@ -572,11 +596,18 @@ fn pattern_names(pattern: &Pattern, out: &mut Vec<Diagnostic>) {
     match pattern {
         Pattern::Variant { bindings, .. } => {
             for binding in bindings {
-                if let (Some(name), Some(span)) = (binding.as_bind(), binding.binding_span()) {
-                    snake(name, span, "pattern binding", out);
-                }
+                slot_names(binding, out);
             }
         }
+        Pattern::Present {
+            inner: Some(inner), ..
+        }
+        | Pattern::Ok {
+            inner: Some(inner), ..
+        }
+        | Pattern::Err {
+            inner: Some(inner), ..
+        } => pattern_names(inner, out),
         Pattern::Present {
             binding,
             binding_span,
@@ -622,6 +653,17 @@ fn pattern_names(pattern: &Pattern, out: &mut Vec<Diagnostic>) {
             }
         }
         Pattern::Absent(_) | Pattern::Range { .. } => {}
+    }
+}
+
+fn slot_names(slot: &crate::AST::PatSlot, out: &mut Vec<Diagnostic>) {
+    match slot {
+        crate::AST::PatSlot::Bind { name, span } => snake(name, *span, "pattern binding", out),
+        crate::AST::PatSlot::Nested(inner) => pattern_names(inner, out),
+        crate::AST::PatSlot::Named { slot, .. } => slot_names(slot, out),
+        crate::AST::PatSlot::Wildcard
+        | crate::AST::PatSlot::Range { .. }
+        | crate::AST::PatSlot::Rest(_) => {}
     }
 }
 

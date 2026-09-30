@@ -78,7 +78,7 @@ pub enum Item {
     /// compile time and may add ordinary Jet items; the declaration erases
     /// after its row has been registered.
     MarkerDecl(MarkerDecl),
-    /// D-FACTDECL1=A: `fact Name(@holds: …, @safe: …, …)` declares one
+    /// D-FACTDECL1=A: `fact Name($holds: …, $safe: …, …)` declares one
     /// non-code registry row. It erases before TIR after the registry has read
     /// the same source declaration.
     FactDecl(FactDecl),
@@ -90,15 +90,15 @@ pub struct EffectDecl {
     pub name_span: Span,
     /// D-OPENTABLE1=D: a Prelude effect leaf may carry one machine-readable
     /// irreversibility fact. The declaration parser accepts exactly
-    /// `@irreversible`; no second annotation table exists.
+    /// `$irreversible`; no second annotation table exists.
     pub irreversible: bool,
     pub span: Span,
 }
 
 /// D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)`. The rule's own
-/// arguments and facts about the rule (@sites, @repeatable, …) share one
+/// arguments and facts about the rule ($sites, $repeatable, …) share one
 /// named-parameter list; a fact is a parameter whose name carries the
-/// compile-time sigil (`Syntax::is_comptime_name`). A body is optional: when
+/// compiler-fact sigil (`Syntax::is_comptime_name`). A body is optional: when
 /// present it is checked at compile time and may reject or emit additive code.
 #[derive(Debug, Clone)]
 pub struct MarkerDecl {
@@ -128,8 +128,8 @@ pub struct UserPolicyDecl {
 /// D-META-FORM1=A: one entry in a `marker Name(...)` parameter list. An
 /// ordinary entry is `name: Type [{default}]` — an argument the marker's
 /// own use site supplies (`ty` carries the type, `value` an optional
-/// default). An `@`-marked entry (`Syntax::is_comptime_name(&name)`) is
-/// `@name: value` — a fixed fact about the rule itself (@sites, @repeatable,
+/// default). A `$`-marked entry (`Syntax::is_comptime_name(&name)`) is
+/// `$name: value` — a fixed fact about the rule itself ($sites, $repeatable,
 /// …), so it carries no type and `value` is always present.
 #[derive(Debug, Clone)]
 pub struct MarkerDeclParam {
@@ -1237,7 +1237,26 @@ impl Func {
     /// Project the declaration into the one structured failure fact consumed
     /// by sema, tooling, and every execution tier.
     pub fn failure_contract(&self) -> super::FailureContract {
-        super::FailureContract::from_return_type(self.return_type.as_ref())
+        let contract = super::FailureContract::from_return_type(self.return_type.as_ref());
+        // #3708: sema's failure-set solve projects an empty inferred set as a
+        // `Never` error route with no written contract span; a written
+        // `Never!` always carries its source span. D-FAIL-INFER-UNION1=A: the
+        // failure-union pre-pass projects a typed set the same way. The
+        // defaulted `run` keeps its span-less `Err!` as an explicit contract.
+        match contract {
+            super::FailureContract::ProvenUnreachable { success }
+                if self.return_type_span.is_none() =>
+            {
+                super::FailureContract::InferredNever { success }
+            }
+            super::FailureContract::Explicit { success, error }
+                if self.return_type_span.is_none()
+                    && !matches!(&error, Type::Named(name) if name == crate::Syntax::TYPE_ERR) =>
+            {
+                super::FailureContract::Inferred { success, error }
+            }
+            contract => contract,
+        }
     }
 
     /// Every callable has a Result-shaped carrier. An omitted return contract

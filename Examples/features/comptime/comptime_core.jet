@@ -3,26 +3,28 @@
 // The results are constant-folded into the binary — no runtime math involved.
 use core.math as math
 
-@SQRT4 :: math.sqrt(Float{4.0})
+SQRT4 :: prep { math.sqrt(Float{4.0}) }
 
-@POW2 :: math.pow(Float{2.0}, Float{8.0})
+POW2 :: prep { math.pow(Float{2.0}, Float{8.0}) }
 
-@FLOORED :: math.floor(Float{3.7})
+FLOORED :: prep { math.floor(Float{3.7}) }
 
-@CEILED :: math.ceil(Float{2.1})
+CEILED :: prep { math.ceil(Float{2.1}) }
 
-@MAXI :: math.max(Float{10.0}, Float{20.0})
+MAXI :: prep { math.max(10, 20) }
 
-@COMPLEX_SQUARE :: (3 + 4i) * (3 + 4i)
+COMPLEX_SQUARE :: prep { (3 + 4i) * (3 + 4i) }
 
-@COMPLEX_ABS :: math.abs(3 + 4i)
+// The magnitude of 3 + 4i: `math.abs` is the Int form, so the Float
+// magnitude comes from `math.hypot` over the two parts.
+COMPLEX_ABS :: prep { math.hypot(Float{3.0}, Float{4.0}) }
 
 fn run() {
-    print(@SQRT4)
-    print(@POW2)
-    print(@FLOORED)
-    print(@CEILED)
-    print(@MAXI)
-    print(@COMPLEX_SQUARE)
-    print(@COMPLEX_ABS)
+    print(SQRT4)
+    print(POW2)
+    print(FLOORED)
+    print(CEILED)
+    print(MAXI)
+    print(COMPLEX_SQUARE)
+    print(COMPLEX_ABS)
 }

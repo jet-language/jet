@@ -185,6 +185,14 @@ impl CRecordDefinitions {
                 stack.remove(name);
                 resolved
             }
+            // `Atomic<T>` is one lock-free 64-bit word in every checked C
+            // record (Layout::atomic_layout), whatever the scalar `T`.
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_ATOMIC
+                    && matches!(args.as_slice(), [inner] if jet_foundation::Layout::atomic_scalar_type(inner)) =>
+            {
+                Some("core::sync::atomic::AtomicI64".to_string())
+            }
             Type::Fn { .. } => Some("*mut core::ffi::c_void".to_string()),
             _ => None,
         }

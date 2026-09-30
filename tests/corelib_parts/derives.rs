@@ -745,7 +745,7 @@ fn user_derive_orphan_rule_allows_either_local_side() {
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
 derive T.RemoteLabel {
-    fn remote_label(self) -> String -> "remote:{T.@name}"
+    fn remote_label(self) -> String -> "remote:{T.$name}"
 }
 
 #LocalLabel
@@ -760,7 +760,7 @@ pub fn remote_type_label() -> String {
 use labels
 
 derive T.LocalLabel {
-    fn local_label(self) -> String -> "local:{T.@name}"
+    fn local_label(self) -> String -> "local:{T.$name}"
 }
 
 #RemoteLabel
@@ -793,13 +793,13 @@ fn user_derive_layout_fact_matches_reflection_projection() {
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
 derive T.LayoutFacts {
-    info :: T.@layout
+    info :: T.$layout
     reflected :: T.reflect().layout
     selected :: info[.count]
     kind :: info.kind
     target :: info.target
     guarantee :: info.guarantee
-    source :: info.source
+    layout_source :: info.source
     reflected_kind :: reflected.kind
     field_name :: selected.name
     size :: info.size
@@ -807,7 +807,7 @@ derive T.LayoutFacts {
     selected_offset :: selected.offset
     reflected_offset :: reflected.fields[0].offset
     name :: T.reflect().name
-    fn layout_facts(self) -> String -> "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}:{@size}:{@reflected_size}:{@selected_offset}:{@reflected_offset}"
+    fn layout_facts(self) -> String -> "{$kind}:{$target}:{$guarantee}:{$layout_source}:{$reflected_kind}:{$field_name}:{$size}:{$reflected_size}:{$selected_offset}:{$reflected_offset}"
 }
 
 #LayoutFacts
@@ -899,7 +899,7 @@ derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
     fn get_value(self) -> @param -> ~self.value
-    fn type_name(self) -> String -> T.@name
+    fn type_name(self) -> String -> T.$name
 }
 
 #TypeName
@@ -981,12 +981,12 @@ fn structure_once_loops_cover_marker_impl_and_test_items() {
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("structure_once.jet");
     let source = r#"
-marker AddFields(@sites: [.Type]) {
-    type_name :: target.@name
-    prep loop field in target.@fields {
-        method :: "field_{field.@name}"
-        impl @type_name {
-            fn @method(self) -> String -> field.@name
+marker AddFields($sites: [.Type]) {
+    type_name :: target.$name
+    prep loop field in target.$fields {
+        method :: "field_{field.$name}"
+        impl $type_name {
+            fn $method(self) -> String -> field.$name
         }
     }
 }
@@ -996,7 +996,7 @@ struct Case { n: Int }
 #AddFields
 struct Person { first: String  last: String }
 
-@CASES :: [Case]{ Case{ n: 1 }, Case{ n: 2 } }
+CASES :: prep { [Case]{ Case{ n: 1 }, Case{ n: 2 } } }
 
 prep loop T in [Person] {
     impl T {
@@ -1004,7 +1004,7 @@ prep loop T in [Person] {
     }
 }
 
-prep loop case in @CASES {
+prep loop case in CASES {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }
@@ -1037,9 +1037,9 @@ fn run() {
 fn structure_once_duplicate_generated_tests_reenter_test_registration() {
     let source = r#"
 struct Case { n: Int }
-@CASES :: [Case]{ Case{ n: 1 }, Case{ n: 1 } }
+CASES :: prep { [Case]{ Case{ n: 1 }, Case{ n: 1 } } }
 
-prep loop case in @CASES {
+prep loop case in CASES {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }

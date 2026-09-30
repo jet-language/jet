@@ -70,37 +70,52 @@ pub fn live_codes() -> Vec<String> {
         .collect()
 }
 
-/// D-CONF-READ1=A: normalize every user spelling of a registered build fact
-/// before the command layer chooses its source file. Dynamic settings keep
-/// their declared key; the registry still owns the `Build.Settings` row.
+/// D-CONF-READ1=A / D-BUILD-FACT3=A: normalize every user spelling of a
+/// registered build fact (`$build.os`, `$package.name`, or the row name
+/// `Build.Package.Name`) before the command layer chooses its source file.
+/// Dynamic settings keep their declared key; the registry still owns the
+/// `Build.Settings` row.
 pub fn build_fact_name(query: &str) -> Option<String> {
     let query = query.trim();
-    let query = query.strip_prefix('@').unwrap_or(query);
+    let query = query
+        .strip_prefix(jet_foundation::Syntax::COMPTIME_MARK)
+        .unwrap_or(query);
     let lower = query.to_ascii_lowercase();
-    let registered_path = format!("@{lower}");
     let fixed = match lower.as_str() {
-        "build.package.name" => Some("Build.Package.Name"),
-        "build.package.version" => Some("Build.Package.Version"),
-        "build.os" => Some("Build.OS"),
-        "build.profile" => Some("Build.Profile"),
-        "build.stamp.git" => Some("Build.Stamp.Git"),
-        "build.stamp.dirty" => Some("Build.Stamp.Dirty"),
-        "build.stamp.toolchain" => Some("Build.Stamp.Toolchain"),
-        "build.stamp.at" => Some("Build.Stamp.At"),
+        "package.name" | "build.package.name" => {
+            Some(("Build.Package.Name", jet_foundation::Syntax::COMPILER_BUILD_FACT_PACKAGE_NAME))
+        }
+        "package.version" | "build.package.version" => Some((
+            "Build.Package.Version",
+            jet_foundation::Syntax::COMPILER_BUILD_FACT_PACKAGE_VERSION,
+        )),
+        "build.os" => Some(("Build.OS", jet_foundation::Syntax::COMPILER_BUILD_FACT_OS)),
+        "build.profile" => {
+            Some(("Build.Profile", jet_foundation::Syntax::COMPILER_BUILD_FACT_PROFILE_PATH))
+        }
+        "build.stamp.git" => {
+            Some(("Build.Stamp.Git", jet_foundation::Syntax::COMPILER_BUILD_FACT_STAMP_GIT))
+        }
+        "build.stamp.dirty" => {
+            Some(("Build.Stamp.Dirty", jet_foundation::Syntax::COMPILER_BUILD_FACT_STAMP_DIRTY))
+        }
+        "build.stamp.toolchain" => Some((
+            "Build.Stamp.Toolchain",
+            jet_foundation::Syntax::COMPILER_BUILD_FACT_STAMP_TOOLCHAIN,
+        )),
+        "build.stamp.at" => {
+            Some(("Build.Stamp.At", jet_foundation::Syntax::COMPILER_BUILD_FACT_STAMP_AT))
+        }
         _ => None,
     };
-    if let Some(name) =
-        fixed.filter(|_| jet_foundation::Registry::build_fact_read(&registered_path).is_some())
-    {
-        return Some(name.to_string());
+    if let Some((name, path)) = fixed {
+        return jet_foundation::Registry::build_fact_read(path)
+            .is_some()
+            .then(|| name.to_string());
     }
-    let prefix = "build.settings.";
-    if lower.starts_with(prefix) {
-        if let Some(key) = jet_foundation::Registry::build_setting_key(&registered_path) {
-            return Some(format!("Build.Settings.{key}"));
-        }
-    }
-    None
+    let registered_path = format!("{}{lower}", jet_foundation::Syntax::COMPTIME_MARK);
+    let key = jet_foundation::Registry::build_setting_key(&registered_path)?;
+    Some(format!("Build.Settings.{key}"))
 }
 
 pub fn is_build_fact_query(query: &str) -> bool {
@@ -618,7 +633,7 @@ mod marker_registry_tests {
     #[test]
     fn build_fact_queries_use_the_registered_paths() {
         assert_eq!(
-            super::build_fact_name("@BUILD.PACKAGE.NAME").as_deref(),
+            super::build_fact_name("$PACKAGE.NAME").as_deref(),
             Some("Build.Package.Name")
         );
         assert_eq!(
@@ -626,7 +641,7 @@ mod marker_registry_tests {
             Some("Build.Settings.cache_slots")
         );
         assert_eq!(
-            super::build_fact_name("@BUILD.SETTINGS.CACHE_SLOTS").as_deref(),
+            super::build_fact_name("$BUILD.SETTINGS.CACHE_SLOTS").as_deref(),
             Some("Build.Settings.cache_slots")
         );
         assert!(super::is_build_fact_query("Build.Stamp.Dirty"));

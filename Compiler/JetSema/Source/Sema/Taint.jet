@@ -4,11 +4,11 @@
 // the registration graph's declaration identities; it is never reconstructed
 // from generated TIR and it does not maintain a second name registry.
 
-@SEMA_TAINT_ORIGIN_NET :: "$origin.net"
-@SEMA_TAINT_ORIGIN_FS :: "$origin.fs"
-@SEMA_TAINT_ORIGIN_ENV :: "$origin.env"
-@SEMA_TAINT_ORIGIN_PROCESS :: "$origin.process"
-@SEMA_TAINT_ORIGIN_FFI :: "$origin.ffi"
+SEMA_TAINT_ORIGIN_NET :: prep { "$origin.net" }
+SEMA_TAINT_ORIGIN_FS :: prep { "$origin.fs" }
+SEMA_TAINT_ORIGIN_ENV :: prep { "$origin.env" }
+SEMA_TAINT_ORIGIN_PROCESS :: prep { "$origin.process" }
+SEMA_TAINT_ORIGIN_FFI :: prep { "$origin.ffi" }
 
 
 pub struct SemaTaintTagFact {
@@ -201,11 +201,11 @@ fn sema_taint_add_builtin_tags(catalog: &[SemaTaintCatalog]) Never! {
         }
     }
     origin_rows := [SemaTaintTagFact]{
-        SemaTaintTagFact{name: @SEMA_TAINT_ORIGIN_NET, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Net"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: @SEMA_TAINT_ORIGIN_FS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FS"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: @SEMA_TAINT_ORIGIN_ENV, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Env"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: @SEMA_TAINT_ORIGIN_PROCESS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Exec"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: @SEMA_TAINT_ORIGIN_FFI, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FFI"}, span: Span{start: 0, end: 0}, visibility: 2},
+        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_NET, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Net"}, span: Span{start: 0, end: 0}, visibility: 2},
+        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_FS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FS"}, span: Span{start: 0, end: 0}, visibility: 2},
+        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_ENV, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Env"}, span: Span{start: 0, end: 0}, visibility: 2},
+        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_PROCESS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Exec"}, span: Span{start: 0, end: 0}, visibility: 2},
+        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_FFI, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FFI"}, span: Span{start: 0, end: 0}, visibility: 2},
     }
     loop row in origin_rows -> &catalog[0].tags.push(row)
 }
@@ -362,7 +362,7 @@ fn sema_taint_add_callable(catalog: &[SemaTaintCatalog], module_identity: String
         .None -> {}
     }
     ffi_origin := function.inline_foreign != None
-    if ffi_origin -> sema_taint_add(&return_tags, @SEMA_TAINT_ORIGIN_FFI)
+    if ffi_origin -> sema_taint_add(&return_tags, SEMA_TAINT_ORIGIN_FFI)
     key := sema_taint_callable_key(module_identity, owner, function.name)
     &catalog[0].callables.push(SemaTaintCallableFact{key: key, module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: function.return_type, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, span: function.name_span})
     sema_taint_add_source_path(&catalog, module_alias, owner, function.name)
@@ -371,9 +371,9 @@ fn sema_taint_add_callable(catalog: &[SemaTaintCatalog], module_identity: String
 fn sema_taint_add_extern_callable(catalog: &[SemaTaintCatalog], module_identity: String, function: ExternFn) Never! {
     params := [SemaTaintTagList]{}
     loop parameter in function.params -> &params.push(SemaTaintTagList{tags: sema_taint_type_tags(parameter.ty)})
-    returns := [String]{@SEMA_TAINT_ORIGIN_FFI}
+    returns := [String]{SEMA_TAINT_ORIGIN_FFI}
     if function.return_type != None -> returns = sema_taint_type_tags(function.return_type ?? Type.Named{name: "Unit"})
-    sema_taint_add(&returns, @SEMA_TAINT_ORIGIN_FFI)
+    sema_taint_add(&returns, SEMA_TAINT_ORIGIN_FFI)
     &catalog[0].callables.push(SemaTaintCallableFact{key: "{module_identity}:{function.name}", module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: function.return_type, scrub_tag: None, ffi_origin: true, span: function.name_span})
 }
 
@@ -483,10 +483,10 @@ fn sema_taint_validate_tag_graph(tag_value: String, module_identity: String, gra
 pub fn sema_taint_validate_tag(tag_value: String, env: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     graph := env.registration_graph
     if graph == {
-        .Val(value) -> return sema_taint_validate_tag_graph(tag_value, env.module_identity, value, span, diagnostics)
+        .Val(value) -> return sema_taint_validate_tag_graph(tag_value, env.module_identity, value, span, &diagnostics)
         .None -> {}
     }
-    if sema_taint_builtin_tag(tag_value) != None || tag_value == @SEMA_TAINT_ORIGIN_NET || tag_value == @SEMA_TAINT_ORIGIN_FS || tag_value == @SEMA_TAINT_ORIGIN_ENV || tag_value == @SEMA_TAINT_ORIGIN_PROCESS || tag_value == @SEMA_TAINT_ORIGIN_FFI -> return true
+    if sema_taint_builtin_tag(tag_value) != None || tag_value == SEMA_TAINT_ORIGIN_NET || tag_value == SEMA_TAINT_ORIGIN_FS || tag_value == SEMA_TAINT_ORIGIN_ENV || tag_value == SEMA_TAINT_ORIGIN_PROCESS || tag_value == SEMA_TAINT_ORIGIN_FFI -> return true
     candidates := [String]{"Input", "PII", "Secret", "Credential"}
     suggestion := sema_taint_closest(tag_value, candidates)
     fix := ""
@@ -542,7 +542,7 @@ fn sema_taint_set_binding(bindings: &[SemaTaintBindingFact], name: String, tags:
             &bindings.push(SemaTaintBindingFact{name: name, tags: ~tags, type_name: type_name})
         }
         else -> {
-            bindings[index ?? 0] = SemaTaintBindingFact{name: name, tags: ~tags, type_name: type_name}
+            bindings[index] = SemaTaintBindingFact{name: name, tags: ~tags, type_name: type_name}
         }
     }
 }
@@ -688,8 +688,8 @@ fn sema_taint_scrub(state: SemaTaintFlowState, tags: &[String], owner: String, n
     fact :: sema_taint_find_callable(state.catalog, state.module_identity, owner, name) ?? return
     if fact.scrub_tag == {
         .Val(tag_value) -> {
-            sema_taint_remove(tags, tag_value)
-            sema_taint_clear_origins(tags)
+            sema_taint_remove(&tags, tag_value)
+            sema_taint_clear_origins(&tags)
         }
         .None -> {}
     }

@@ -45,30 +45,30 @@ fn packet_value(packet: Packet) -> Int Never! {
     }
 }
 
-@EXPECTED_ONE :: label(1)
-@EXPECTED_OTHER :: label(2)
-@EXPECTED_EARLY :: early(true)
-@EXPECTED_LATE :: early(false)
-@EXPECTED_RANGE :: packet_value(Packet.Data(12))
-@EXPECTED_OR :: packet_value(Packet.Retry(2))
-@EXPECTED_NESTED_RETURN :: packet_value(Packet.Data(0))
-@EXPECTED_EMPTY :: packet_value(Packet.Empty)
-@EXPECTED_WILDCARD :: packet_value(Packet.Ignore(17))
+EXPECTED_ONE :: prep { label(1) }
+EXPECTED_OTHER :: prep { label(2) }
+EXPECTED_EARLY :: prep { early(true) }
+EXPECTED_LATE :: prep { early(false) }
+EXPECTED_RANGE :: prep { packet_value(Packet.Data(12)) }
+EXPECTED_OR :: prep { packet_value(Packet.Retry(2)) }
+EXPECTED_NESTED_RETURN :: prep { packet_value(Packet.Data(0)) }
+EXPECTED_EMPTY :: prep { packet_value(Packet.Empty) }
+EXPECTED_WILDCARD :: prep { packet_value(Packet.Ignore(17)) }
 
 fn run() {
-    print(@EXPECTED_ONE)
-    print(@EXPECTED_OTHER)
-    print(@EXPECTED_EARLY)
-    print(@EXPECTED_LATE)
+    print(EXPECTED_ONE)
+    print(EXPECTED_OTHER)
+    print(EXPECTED_EARLY)
+    print(EXPECTED_LATE)
     print(label(1))
     print(label(2))
     print(early(true))
     print(early(false))
-    print(@EXPECTED_RANGE)
-    print(@EXPECTED_OR)
-    print(@EXPECTED_NESTED_RETURN)
-    print(@EXPECTED_EMPTY)
-    print(@EXPECTED_WILDCARD)
+    print(EXPECTED_RANGE)
+    print(EXPECTED_OR)
+    print(EXPECTED_NESTED_RETURN)
+    print(EXPECTED_EMPTY)
+    print(EXPECTED_WILDCARD)
     print(packet_value(Packet.Data(12)))
     print(packet_value(Packet.Retry(2)))
     print(packet_value(Packet.Data(0)))

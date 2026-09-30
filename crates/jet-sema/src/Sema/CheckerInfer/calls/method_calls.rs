@@ -1520,6 +1520,104 @@ impl<'a> Checker<'a> {
                         *resolved_ret_out = Some(Type::Named("KeyUnlock".to_string()));
                         return Some(Type::Named("KeyUnlock".to_string()));
                     }
+                    // D-SOLVER-LIB1=A: `Solver` is a runtime handle, not a
+                    // declared Core struct, so its constructor must be claimed
+                    // before the generic Core type-item static route below.
+                    if ns == "core.compute.solve" && leaf == Syntax::SOLVER_TYPE && method == "new"
+                    {
+                        if args.len() != 1 {
+                            self.diags.push(Diagnostic::error(
+                                "E0101",
+                                format!("`Solver.new` takes 1 argument, got {}", args.len()),
+                                "solver construction needs one deterministic seed".to_string(),
+                                "write `Solve.Solver.new(seed)`".to_string(),
+                                Some(span),
+                            ));
+                        }
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        let ret = Type::Named(Syntax::SOLVER_TYPE.to_string());
+                        *recv_type_out = Some(Syntax::SOLVER_TYPE.to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    // `core.game` constructors mint runtime handles (GameScene,
+                    // GameReplay, GameBackend) that `game.run` and codegen's
+                    // `game_static_type` expect with the module-qualified
+                    // receiver intact, so claim them before the generic Core
+                    // type-item route rewrites the receiver to the source struct.
+                    if ns == "core.game" {
+                        match (leaf.as_str(), method) {
+                            ("Scene", "new") => {
+                                if args.len() != 1 {
+                                    self.diags.push(wrong_core_arity(
+                                        "Scene.new",
+                                        1,
+                                        args.len(),
+                                        span,
+                                    ));
+                                }
+                                if let Some(arg) = args.get_mut(0) {
+                                    self.expect_core_arg("Scene.new", 0, &Type::String, arg);
+                                }
+                                *recv_type_out = Some("GameSceneType".to_string());
+                                return Some(Type::Named("GameScene".to_string()));
+                            }
+                            ("Replay", "record") => {
+                                if args.len() != 1 {
+                                    self.diags.push(wrong_core_arity(
+                                        "Replay.record",
+                                        1,
+                                        args.len(),
+                                        span,
+                                    ));
+                                }
+                                if let Some(arg) = args.get_mut(0) {
+                                    self.expect_core_arg("Replay.record", 0, &Type::String, arg);
+                                    if let Expr::Str(parts, literal_span) = &arg.expr {
+                                        if let [StrPart::Lit(path)] = parts.as_slice() {
+                                            if crate::Syntax::artifact_kind(path)
+                                                != Some(crate::Syntax::ArtifactKind::GameReplay)
+                                            {
+                                                let actual = crate::Syntax::artifact_kind(path);
+                                                let why = match actual {
+                                                        Some(crate::Syntax::ArtifactKind::ProofReplay) => "that suffix identifies a proof replay, not a game input replay".to_string(),
+                                                        Some(kind) => format!("that suffix identifies a {kind:?} artifact, not a game input replay"),
+                                                        None => format!("game input replay paths end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+                                                    };
+                                                self.diags.push(Diagnostic::error(
+                                                        "E0103",
+                                                        format!("`Replay.record` needs a `{}` game replay path", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+                                                        why,
+                                                        format!("rename the path to end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+                                                        Some(*literal_span),
+                                                    ));
+                                            }
+                                        }
+                                    }
+                                }
+                                *recv_type_out = Some("GameReplayType".to_string());
+                                return Some(Type::Named("GameReplay".to_string()));
+                            }
+                            ("Backend", "headless") => {
+                                if !args.is_empty() {
+                                    self.diags.push(wrong_core_arity(
+                                        "Backend.headless",
+                                        0,
+                                        args.len(),
+                                        span,
+                                    ));
+                                    for a in args.iter_mut() {
+                                        self.infer(&mut a.expr);
+                                    }
+                                }
+                                *recv_type_out = Some("GameBackendType".to_string());
+                                return Some(Type::Named("GameBackend".to_string()));
+                            }
+                            _ => {}
+                        }
+                    }
                     if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
                         let type_name = if matches!(
                             ns.as_str(),
@@ -1538,22 +1636,6 @@ impl<'a> Checker<'a> {
                             leaf.clone()
                         };
                         **receiver = Expr::Ident(type_name.clone(), span);
-                        if ns == "core.crypto"
-                            && type_name == "Secret"
-                            && matches!(method, "from_text" | "from_bytes")
-                        {
-                            let ret = self.check_static_method(
-                                &type_name,
-                                method,
-                                span,
-                                owner_type_args,
-                                type_args,
-                                args,
-                            );
-                            *resolved_ret_out = ret.clone();
-                            return ret;
-                        }
-
                         // `core.mem` allocator fields are constructor sentinels, not
                         // ordinary static types. Preserve the checked return fact on
                         // the call node before the generic static-method fallback.
@@ -1894,94 +1976,6 @@ impl<'a> Checker<'a> {
                             type_args,
                             args,
                         );
-                    }
-                    if ns == "core.compute.solve" && leaf == Syntax::SOLVER_TYPE && method == "new"
-                    {
-                        if args.len() != 1 {
-                            self.diags.push(Diagnostic::error(
-                                "E0101",
-                                format!("`Solver.new` takes 1 argument, got {}", args.len()),
-                                "solver construction needs one deterministic seed".to_string(),
-                                "write `Solve.Solver.new(seed)`".to_string(),
-                                Some(span),
-                            ));
-                        }
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        *recv_type_out = Some(Syntax::SOLVER_TYPE.to_string());
-                        return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
-                    }
-                    if ns == "core.game" {
-                        match (leaf.as_str(), method) {
-                            ("Scene", "new") => {
-                                if args.len() != 1 {
-                                    self.diags.push(wrong_core_arity(
-                                        "Scene.new",
-                                        1,
-                                        args.len(),
-                                        span,
-                                    ));
-                                }
-                                if let Some(arg) = args.get_mut(0) {
-                                    self.expect_core_arg("Scene.new", 0, &Type::String, arg);
-                                }
-                                *recv_type_out = Some("GameSceneType".to_string());
-                                return Some(Type::Named("GameScene".to_string()));
-                            }
-                            ("Replay", "record") => {
-                                if args.len() != 1 {
-                                    self.diags.push(wrong_core_arity(
-                                        "Replay.record",
-                                        1,
-                                        args.len(),
-                                        span,
-                                    ));
-                                }
-                                if let Some(arg) = args.get_mut(0) {
-                                    self.expect_core_arg("Replay.record", 0, &Type::String, arg);
-                                    if let Expr::Str(parts, literal_span) = &arg.expr {
-                                        if let [StrPart::Lit(path)] = parts.as_slice() {
-                                            if crate::Syntax::artifact_kind(path)
-                                                != Some(crate::Syntax::ArtifactKind::GameReplay)
-                                            {
-                                                let actual = crate::Syntax::artifact_kind(path);
-                                                let why = match actual {
-                                                        Some(crate::Syntax::ArtifactKind::ProofReplay) => "that suffix identifies a proof replay, not a game input replay".to_string(),
-                                                        Some(kind) => format!("that suffix identifies a {kind:?} artifact, not a game input replay"),
-                                                        None => format!("game input replay paths end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
-                                                    };
-                                                self.diags.push(Diagnostic::error(
-                                                        "E0103",
-                                                        format!("`Replay.record` needs a `{}` game replay path", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
-                                                        why,
-                                                        format!("rename the path to end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
-                                                        Some(*literal_span),
-                                                    ));
-                                            }
-                                        }
-                                    }
-                                }
-                                *recv_type_out = Some("GameReplayType".to_string());
-                                return Some(Type::Named("GameReplay".to_string()));
-                            }
-                            ("Backend", "headless") => {
-                                if !args.is_empty() {
-                                    self.diags.push(wrong_core_arity(
-                                        "Backend.headless",
-                                        0,
-                                        args.len(),
-                                        span,
-                                    ));
-                                    for a in args.iter_mut() {
-                                        self.infer(&mut a.expr);
-                                    }
-                                }
-                                *recv_type_out = Some("GameBackendType".to_string());
-                                return Some(Type::Named("GameBackend".to_string()));
-                            }
-                            _ => {}
-                        }
                     }
                 }
             }
@@ -3541,7 +3535,7 @@ impl<'a> Checker<'a> {
                 "E0311",
                 "`.origin()` is retired for tracked values".to_string(),
                 "`#Track` origin is a compile-time fact, not runtime metadata".to_string(),
-                "read `value.@origin` in comptime code".to_string(),
+                "read `value.$origin` in comptime code".to_string(),
                 Some(span),
             ));
             for arg in args.iter_mut() {
@@ -6817,7 +6811,24 @@ impl<'a> Checker<'a> {
                             .min_by(|(left, _), (right, _)| left.cmp(right))
                             .map(|(trait_name, msig)| (trait_name.clone(), msig.clone()))
                     });
-                if let Some((trait_name, msig)) = known_method {
+                if let Some((trait_name, mut msig)) = known_method {
+                    // Inside a generic body the bounded parameter is the
+                    // trait's `Self`: `left.compare(right)` with `T: Comparable`
+                    // wants a `T`. Synthetic operator traits spell `Self` as
+                    // the empty name.
+                    let self_subst: HashMap<String, Type> = [
+                        ("Self".to_string(), recv_ty.clone()),
+                        (String::new(), recv_ty.clone()),
+                    ]
+                    .into_iter()
+                    .collect();
+                    for param in &mut msig.params {
+                        param.ty = crate::Generics::substitute_type(&param.ty, &self_subst);
+                    }
+                    msig.return_type = msig
+                        .return_type
+                        .as_ref()
+                        .map(|ret| crate::Generics::substitute_type(ret, &self_subst));
                     self.record_open_memory_dispatch(
                         span,
                         "generic trait dispatch has no sealed target set",
@@ -7851,19 +7862,7 @@ impl<'a> Checker<'a> {
                         | "CompilerKeyValue"
                         | "CompilerProfile"
                         | "CompilerProfileSet"
-                        | "Digest256"
-                        | "Digest512"
-                        | "SigningKey"
-                        | "X25519SecretKey"
-                        | "VerifyKey"
-                        | "X25519PublicKey"
-                        | "Signature"
-                        | "Sealed"
-                        | "WrappedKey"
                         | "WrappedVaultKey"
-                        | "PasswordHash"
-                        | "Hasher"
-                        | "Secret"
                 ) {
                     *recv_type_out = Some(name.to_string());
                 }
@@ -8349,6 +8348,26 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.mark_moved_by(n.clone(), *nspan, format!("{dispatch_type_name}.{method}"));
+            } else if let Some(place) = self.place_from_expr(receiver).filter(|place| {
+                !place.projections.is_empty()
+                    && place
+                        .projections
+                        .iter()
+                        .all(|projection| matches!(projection, crate::Sema::ViewProjection::Field(_)))
+            }) {
+                // A taking call on a field moves that field out of its owner
+                // (a partial move); siblings stay usable and a later read of
+                // the field or its owner is E0121.
+                if !self
+                    .place_expr_type(receiver)
+                    .is_some_and(|ty| type_is_copy(&ty))
+                {
+                    self.mark_moved_place_by(
+                        place,
+                        crate::Sema::ReceiverMarks::place_span(receiver),
+                        format!("{dispatch_type_name}.{method}"),
+                    );
+                }
             }
         }
         self.check_method_args(

@@ -32,6 +32,64 @@ fn retired_fence_digraph(span: Span, previous: char, old: &str, new: &str) -> Di
         .with_edit(crate::Diagnostics::TextEdit { span, new_text })
 }
 
+/// D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A:
+/// compiler facts and declaration metadata moved from `@` to `$`. One retired
+/// spelling, the text that replaces it, and E0003 with a machine-applicable
+/// edit (`respelled` is `None` for a removed query with no mechanical
+/// respelling).
+fn retired_fact_mark(span: Span, old: &str, respelled: Option<&str>) -> Diagnostic {
+    let why = "compiler facts and declaration metadata carry `$`; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)".to_string();
+    match respelled {
+        Some(new) => Diagnostic::error(
+            "E0003",
+            format!("`{old}` is retired; write `{new}`"),
+            why,
+            format!("replace `{old}` with `{new}`"),
+            Some(span),
+        )
+        .with_edit(crate::Diagnostics::TextEdit { span, new_text: new.to_string() }),
+        None => Diagnostic::error(
+            "E0003",
+            format!("`{old}(…)` is retired"),
+            format!("{why}; a fact is a `$` member of the thing it describes (D-META-ROOT3=A)"),
+            "read the fact on its subject, such as `T.$fields`, `f.$effects` or `value.$origin`"
+                .to_string(),
+            Some(span),
+        ),
+    }
+}
+
+/// D-NAME-SPLICE1=B: a template name splice carries the fact sigil,
+/// `fn $method`, `impl $type_name`, `self.$field`, `.$left`. The retired `@`
+/// splice teaches E0388 with a machine-applicable edit and reads as the `$`
+/// word, so prefix `@` in code marks only a live link.
+fn retired_name_splice(span: Span, old: &str, new: &str) -> Diagnostic {
+    Diagnostic::from_row("E0388", &[("old", old), ("new", new)], Some(span)).with_edit(
+        crate::Diagnostics::TextEdit {
+            span,
+            new_text: new.to_string(),
+        },
+    )
+}
+
+/// Declaration heads whose name may be a template splice (`fn $method`).
+const SPLICED_DECLARATION_HEADS: &[&str] = &["fn", "impl", "struct", "enum", "trait", "type"];
+
+/// Declaration metadata names written `$name: value` in a `marker` or `fact`
+/// parameter list (D-DECL-META1=A).
+const DECL_METADATA: &[&str] = &[
+    "sites", "repeatable", "holds", "safe", "gates", "decision", "retired", "proved_by",
+    "inherits", "companion", "scopes", "resolution", "owns_menu", "identity", "name",
+];
+
+/// Fact and reflection members written `subject.$member` (D-META-ROOT3=A)
+/// that are not registered fact planes: template reflection members and the
+/// retired `track_origin`, which the parser teaches separately. Any other
+/// `@name` after `.` is a retired template name splice (D-NAME-SPLICE1=B).
+const REFLECTED_MEMBERS: &[&str] = &[
+    "name", "fields", "index", "kind", "ty", "base", "unknown", "track_origin", "profile",
+];
+
 /// Raw lex with no S6-R terminator insertion. Used for interpolation
 /// sub-streams (`{expr}`), which are single expressions and need no terminator.
 pub fn lex_raw(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
@@ -486,19 +544,131 @@ impl<'a> Lexer<'a> {
                     if keyword(&name[1..]).is_some() {
                         toks.push(simple(self, TokKind::At, 1));
                     } else {
-                        self.i = j;
+                        let rest = name[1..].to_string();
+                        let prev = self.at(self.i.saturating_sub(1));
+                        let prev2 = self.at(self.i.saturating_sub(2));
+                        let member = self.i > 0
+                            && prev == '.'
+                            && prev2 != '.'
+                            && (REFLECTED_MEMBERS.contains(&rest.as_str())
+                                || Syntax::fact_read_kind(&format!(
+                                    "{}{rest}",
+                                    Syntax::COMPTIME_MARK
+                                ))
+                                .is_some());
+                        let mut colon = j;
+                        while self.at(colon) == ' ' {
+                            colon += 1;
+                        }
+                        let metadata = DECL_METADATA.contains(&rest.as_str())
+                            && self.at(colon) == ':'
+                            && self.at(colon + 1) != ':';
+                        let word_ends = |at: char| !(at.is_alphanumeric() || at == '_');
+                        let package_member = rest == "build"
+                            && ".package".chars().enumerate().all(|(k, ch)| self.at(j + k) == ch)
+                            && word_ends(self.at(j + 8));
+                        let empty_call = self.at(j) == '(' && self.at(j + 1) == ')';
+                        // D-NAME-SPLICE1=B: `@name` after `.` that is not a
+                        // fact (`self.@field`, `.@left`), or naming a
+                        // declaration (`fn @method`, `impl @type_name`), is
+                        // a retired template name splice.
+                        let mut head_end = self.i;
+                        while head_end > 0 && self.at(head_end - 1) == ' ' {
+                            head_end -= 1;
+                        }
+                        let mut head_start = head_end;
+                        while head_start > 0 && !word_ends(self.at(head_start - 1)) {
+                            head_start -= 1;
+                        }
+                        let head: String = (head_start..head_end).map(|k| self.at(k)).collect();
+                        let splice = !member
+                            && ((self.i > 0 && prev == '.' && prev2 != '.')
+                                || (head_end < self.i
+                                    && SPLICED_DECLARATION_HEADS.contains(&head.as_str())));
+                        // (end of the retired text, its respelling)
+                        let respelled: Option<(usize, String)> =
+                            if member || metadata || rest == "irreversible" {
+                                Some((j, format!("{}{rest}", Syntax::COMPTIME_MARK)))
+                            } else if splice {
+                                None
+                            } else {
+                                match Syntax::retired_fact_spelling(&name) {
+                                    Some(Syntax::RetiredFactSpelling::Root(_)) if package_member => {
+                                        Some((j + 8, Syntax::FACT_ROOT_PACKAGE.to_string()))
+                                    }
+                                    Some(Syntax::RetiredFactSpelling::Root(root))
+                                        if rest != "build" && empty_call =>
+                                    {
+                                        Some((j + 2, root.to_string()))
+                                    }
+                                    Some(Syntax::RetiredFactSpelling::Root(root)) => {
+                                        Some((j, root.to_string()))
+                                    }
+                                    Some(Syntax::RetiredFactSpelling::SubjectMember) => {
+                                        self.diags.push(retired_fact_mark(
+                                            Span::new(start, self.pos(j)),
+                                            &name,
+                                            None,
+                                        ));
+                                        None
+                                    }
+                                    None => None,
+                                }
+                            };
+                        let (end, text) = match respelled {
+                            Some((end, new)) => {
+                                let span = Span::new(start, self.pos(end));
+                                let old: String = (self.i..end).map(|k| self.at(k)).collect();
+                                self.diags.push(retired_fact_mark(span, &old, Some(&new)));
+                                (end, new)
+                            }
+                            None if splice => {
+                                let new = format!("{}{rest}", Syntax::COMPTIME_MARK);
+                                self.diags.push(retired_name_splice(
+                                    Span::new(start, self.pos(j)),
+                                    &name,
+                                    &new,
+                                ));
+                                (j, new)
+                            }
+                            None => (j, name),
+                        };
+                        self.i = end;
                         let span = Span::new(start, self.pos(self.i));
                         toks.push(Token {
-                            kind: TokKind::Ident(name),
+                            kind: TokKind::Ident(text),
                             span,
                         });
                     }
                 }
                 '@' => toks.push(simple(self, TokKind::At, 1)),
                 '#' => toks.push(simple(self, TokKind::Hash, 1)),
-                // D-ONCE-DOLLAR1=B: `$` is a config-surface environment-read
-                // token. Keep it standalone so the parser can apply the
-                // config-only rule and its E0003 teaching path.
+                // D-COMPILER-NS1=A: prefix `$name` is one compiler-fact
+                // identifier (`$build`, `T.$layout`, `$sites:`). Config
+                // surfaces read the same token as a `$NAME` environment read
+                // (D-ONCE-DOLLAR1=B). A lone `$` stays its own token.
+                '$' if (next.is_alphabetic() || next == '_')
+                    && !self.at(self.i.saturating_sub(1)).is_alphanumeric()
+                    && self.at(self.i.saturating_sub(1)) != '_' =>
+                {
+                    let mut j = self.i + 1;
+                    let mut name = String::from(Syntax::COMPTIME_MARK);
+                    while j < self.chars.len() {
+                        let ch = self.at(j);
+                        if ch.is_alphanumeric() || ch == '_' {
+                            name.push(ch);
+                            j += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    self.i = j;
+                    let span = Span::new(start, self.pos(self.i));
+                    toks.push(Token {
+                        kind: TokKind::Ident(name),
+                        span,
+                    });
+                }
                 '$' => toks.push(simple(self, TokKind::Dollar, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),
@@ -1058,7 +1228,8 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
 
     #[test]
     fn at_distinguishes_prefix_package_ref_and_fence() {
-        let (tokens, diagnostics) = lex_raw("foo@bar @baz T.@layout <:0, 1:> $old $[x]$");
+        let (tokens, diagnostics) =
+            lex_raw("foo@bar @baz T.@layout <:0, 1:> $build T.$layout a$b $[x]$");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let kinds = tokens
             .into_iter()
@@ -1073,12 +1244,18 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
         assert!(matches!(kinds[6], TokKind::Ident(ref name) if name == "@layout"));
         assert!(matches!(kinds[7], TokKind::FenceOpen));
         assert!(matches!(kinds[11], TokKind::FenceClose));
-        assert!(matches!(kinds[12], TokKind::Dollar));
-        assert!(matches!(kinds[13], TokKind::Ident(ref name) if name == "old"));
-        assert!(matches!(kinds[14], TokKind::Dollar));
-        assert!(matches!(kinds[15], TokKind::LBracket));
-        assert!(matches!(kinds[17], TokKind::RBracket));
-        assert!(matches!(kinds[18], TokKind::Dollar));
+        assert!(matches!(kinds[12], TokKind::Ident(ref name) if name == "$build"));
+        assert!(matches!(kinds[13], TokKind::Ident(ref name) if name == "T"));
+        assert!(matches!(kinds[14], TokKind::Dot));
+        assert!(matches!(kinds[15], TokKind::Ident(ref name) if name == "$layout"));
+        // An adjacent `a$b` is not a fact read: `$` stays its own token.
+        assert!(matches!(kinds[16], TokKind::Ident(ref name) if name == "a"));
+        assert!(matches!(kinds[17], TokKind::Dollar));
+        assert!(matches!(kinds[18], TokKind::Ident(ref name) if name == "b"));
+        assert!(matches!(kinds[19], TokKind::Dollar));
+        assert!(matches!(kinds[20], TokKind::LBracket));
+        assert!(matches!(kinds[22], TokKind::RBracket));
+        assert!(matches!(kinds[23], TokKind::Dollar));
     }
 
     #[test]

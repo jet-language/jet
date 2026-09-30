@@ -255,7 +255,7 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
     ownership :: if receiver_expr == {
         .Val(expr) -> {
             convention := receiver_convention
-            if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, scopes, state).len() == 0 -> convention = AccessConvention.Read
+            if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() == 0 -> convention = AccessConvention.Read
             sema_ownership_check_method_call(&state, callee, expr, convention, params, &checked_args, scopes, span, &diagnostics)
         }
         .None -> sema_ownership_check_call_arguments(&state, callee, params, &checked_args, scopes, &diagnostics)
@@ -302,7 +302,7 @@ fn sema_stream_file_scope_read(receiver: Expr, receiver_value: TExpr, args: [Cal
     failure := sema_call_failure_carrier(Val(result_type))
     core_args := [TExpr]{receiver_value}
     loop argument in typed_args -> &core_args.push(argument)
-    if !sema_call_core_record_effects(record, span, [Type]{}, result_type, failure, [FunctionDefaultRef]{}, scopes, context, environment, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_call_core_record_effects(record, span, [Type]{}, result_type, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_call_core_tir(record, core_args, span, [Type]{}, [Bool]{false, false}, None, result_type, failure, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
 }
@@ -356,7 +356,7 @@ fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScop
 // Static reserved constructors. Callers must still prefer a shadowing user type.
 pub fn sema_call_try_stream_handle_static(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known := (owner == "Path" && (method == "from" || method == "home")) || (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
-    if !known || !sema_stream_handle_static_owner_is_canonical(owner, scopes, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !known || !sema_stream_handle_static_owner_is_canonical(owner, &scopes, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count := if method == "home" -> 0 else -> 1
     if args.len() != expected_count {
         sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -472,6 +472,6 @@ pub fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForI
         .EncodingReader(_) -> "IO"
         else -> { return true }
     }
-    if sema_stream_handle_fact_has_effect(context, collection.span, effect_name) -> return true
+    if sema_stream_handle_fact_has_effect(&context, collection.span, effect_name) -> return true
     sema_stream_handle_effect_fact(environment, &scopes, &context, "ForIn.stream", collection.span, collection.ty, effect_name, &diagnostics)
 }

@@ -175,17 +175,17 @@ pub fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: Str
 }
 
 fn sema_taskgroup_expression_moved(state: &SemaOwnershipState, expression: Expr, scopes: SemaScopeTable) -> Bool {
-    places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
+    places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
     loop place in places {
-        if sema_ownership_place_moved(state, place) != None -> return true
+        if sema_ownership_place_moved(&state, place) != None -> return true
     }
     false
 }
 
 fn sema_taskgroup_mark_spawn_owned(name: String, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     expression := Expr.Ident{name: name, span: span}
-    if sema_taskgroup_expression_moved(state, expression, scopes) -> return
-    places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
+    if sema_taskgroup_expression_moved(&state, expression, scopes) -> return
+    places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
     if places.len() == 0 -> return
     _ := sema_ownership_mark_move(&state, expression, scopes, "the task group", &diagnostics)
 }
@@ -438,9 +438,10 @@ fn sema_taskgroup_call_body_result(signature: Type) -> Type? {
 
 
 fn sema_taskgroup_task_group_expr(context: SemaCheckContext, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, diagnostics: &[Diagnostic], span: Span) -> TExpr? {
-    index :: sema_taskgroup_spawn_group_index(context) ?? return None
-    name := context.taskgroups.stack[index].name
-    sema_check_expression(Expr.Ident{name: name, span: span}, Val(Type.Named{name: "Group"}), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    updated_context := context
+    index :: sema_taskgroup_spawn_group_index(updated_context) ?? return None
+    name := updated_context.taskgroups.stack[index].name
+    sema_check_expression(Expr.Ident{name: name, span: span}, Val(Type.Named{name: "Group"}), environment, &scopes, &state, &tail_store, &updated_context, &diagnostics)
 }
 
 fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
@@ -487,13 +488,13 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
         binding_index :: sema_scope_resolve_index(scopes, name) ?? return None
         binding := scopes.bindings[binding_index]
         if binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write) {
-            places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
+            places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
             if places.len() > 0 -> place = Val(places[0])
             if binding.access == AccessConvention.Write -> access = AccessConvention.Write
         }
     }
     if place == None -> return None
-    sema_taskgroup_admit_scoped_borrow(context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, span, scopes, &diagnostics)
+    sema_taskgroup_admit_scoped_borrow(&context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, span, scopes, &diagnostics)
 }
 
 pub fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {
@@ -547,7 +548,7 @@ pub fn sema_taskgroup_check_scoped_loan_read(context: &SemaCheckContext, express
     if context.taskgroups.in_spawn || context.taskgroups.scoped_loan_read_reported -> return
     is_place_read := if expression == {.Index(_, _, _, _) | .Field(_, _, _) -> true else -> false}
     if !is_place_read -> return
-    place :: sema_ownership_places_from_expr_in_state(expression, scopes, state)
+    place :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
     if place.len() == 0 -> return
     loop frame in context.taskgroups.stack {
         loop held in frame.borrows {
@@ -571,8 +572,8 @@ fn sema_taskgroup_collect_branch_moves(expression: Expr, scopes: SemaScopeTable,
 }
 
 fn sema_taskgroup_mark_branch_move(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    if sema_taskgroup_expression_moved(state, expression, scopes) -> return
-    places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
+    if sema_taskgroup_expression_moved(&state, expression, scopes) -> return
+    places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
     if places.len() > 0 -> _ := sema_ownership_mark_move(&state, expression, scopes, "the task group combinator", &diagnostics)
 }
 

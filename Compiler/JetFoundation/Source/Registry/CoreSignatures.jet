@@ -549,7 +549,7 @@ fn core_sig_fixed(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? 
 
 pub fn core_call_typed_signature_for(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     row :: core_call(request.module_name, request.member) ?? return None
-    if !core_call_coverage_contains(row.coverage, @CORE_CALL_COVERAGE_SEMA) -> return None
+    if !core_call_coverage_contains(row.coverage, CORE_CALL_COVERAGE_SEMA) -> return None
     resolved_signature := core_sig_fixed(request) ?? return None
     if resolved_signature.module_name != request.module_name || resolved_signature.member != request.member -> return None
     if request.type_args.len() > 0 && request.type_args.len() != resolved_signature.type_parameters.len() -> return None

@@ -4,6 +4,8 @@ pub mod AST;
 pub mod Authority;
 mod BuildEffects;
 pub mod CLISchema;
+/// #2517 S1b: the one audited reader for check-time file and environment reads.
+pub mod CheckReads;
 pub mod CanonicalAST;
 pub mod Collections;
 pub mod CompilerStack;
@@ -80,6 +82,8 @@ pub mod OSTarget;
 pub mod Outcome;
 #[path = "PackageEdition.rs"]
 pub mod PackageEdition;
+/// #2517: package identity, the package graph, and incremental-check keys.
+pub mod PackageIdentity;
 pub mod PerformanceBudget;
 pub mod Persist;
 pub mod PluginWire;
@@ -87,6 +91,8 @@ pub mod Policy;
 pub mod Prelude;
 pub mod Reflection;
 pub mod RegexSyntax;
+/// #2517: the one std-only binary codec for persisted compiler records.
+pub mod RecordCodec;
 pub mod Registry;
 pub mod Report;
 pub mod RuntimeDiagnosticCore;

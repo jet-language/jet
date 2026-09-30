@@ -3542,6 +3542,38 @@ fn compiler_rejects_transitive_path_dependency_escape() {
 }
 
 #[test]
+fn compiler_accepts_transitive_path_dependency_the_root_declares() {
+    // D-MOD-CYCLE1=A sibling packages: a transitive path may leave its
+    // declaring package only to reach a directory the root also declares.
+    let tmp = tmp_dir("compiler_transitive_path_root_declared");
+    let outer = tmp.join("outer");
+    let shared = tmp.join("shared");
+    write(
+        &outer,
+        "package.jet",
+        &(min_manifest("outer", "0.1.0") + "\ndeps: { shared: ../shared }\n"),
+    );
+    write(&outer, "outer.jet", "pub fn value() {}\n");
+    write(&shared, "package.jet", &min_manifest("shared", "0.1.0"));
+    write(&shared, "shared.jet", "pub fn value() {}\n");
+    let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,\n    shared: ./shared,");
+    write(&tmp, "package.jet", &raw);
+    write(&tmp, "run.jet", "fn run() {}\n");
+
+    let entry = tmp.join("run.jet");
+    let result = jet::Driver::compile_bundle_path_build(
+        entry.to_str().unwrap(),
+        jet::Driver::BuildRunOptions::default(),
+    );
+    assert!(
+        result.as_ref().err().map_or(true, |errors| errors.iter().all(|d| d.code != "E1206")),
+        "a path the root declares is not an escape: {:?}",
+        result.err().map(|errors| errors.iter().map(|d| d.code.clone()).collect::<Vec<_>>())
+    );
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn fetch_locked_rejects_tampered_path_dependency_store_entry() {
     let tmp = tmp_dir("locked_path_tamper");
     let store = tmp.join("store");

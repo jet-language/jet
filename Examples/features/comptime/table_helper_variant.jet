@@ -1,0 +1,50 @@
+// D-MODULE-VALUE1: a literal `@` table may build rows through helpers that
+// assign the explicit named-payload form `Enum.Variant{...}` to a field. The
+// compile-time evaluator gives the literal its enum identity, exactly as the
+// compiled program does.
+pub enum Route { Missing Add }
+
+pub enum Plan {
+    Unplanned
+    Routed(route: Route)
+}
+
+pub struct Row {
+    pub name: String
+    pub route: Route
+    pub plan: Plan
+}
+
+fn row(name: String) -> Row Never! {
+    Row{name: name, route: Route.Missing, plan: Plan.Unplanned}
+}
+
+fn with_route(value: ^Row, route: Route) -> Row Never! {
+    updated := value
+    updated.route = route
+    updated.plan = Plan.Routed{route: route}
+    updated
+}
+
+ROWS :: prep { [Row]{
+    row("plain"),
+    with_route(row("routed"), Route.Add)
+} }
+
+fn route_name(route: Route) -> String {
+    if route == {
+        .Missing -> "missing"
+        .Add -> "add"
+    }
+}
+
+fn describe(plan: Plan) -> String {
+    if plan == {
+        .Unplanned -> "unplanned"
+        .Routed(route) -> "routed {route_name(route)}"
+    }
+}
+
+fn run() {
+    loop value in ROWS -> print("{value.name}: {route_name(value.route)}, {describe(value.plan)}")
+}

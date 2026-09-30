@@ -523,7 +523,7 @@ impl<'a> Parser<'a> {
             .and_then(|index| self.toks.get(index))
             .is_some_and(|token| {
                 matches!(token.kind, TokKind::KwComptime)
-                    || matches!(&token.kind, TokKind::Ident(name) if Syntax::is_comptime_name(name))
+                    || matches!(&token.kind, TokKind::Ident(name) if Self::names_constant(name))
             })
     }
 

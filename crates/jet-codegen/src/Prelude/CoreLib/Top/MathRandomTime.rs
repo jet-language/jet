@@ -1231,7 +1231,7 @@ impl JetZonedDateTime {
 
 
 fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURL::parse(s)
+    crate::jet_std::JetURLParts::parse(s).map(crate::jet_std::JetURL::from_url_parts)
 }
 
 /// D-BOUND-HEAD1=A: DateTime heads are complete RFC3339 values. Sema has
@@ -1251,13 +1251,14 @@ fn jet_url_from_parts(
     query: &Vec<Vec<String>>,
     fragment: &String,
 ) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURL::from_parts(scheme, host, path, query, fragment)
+    crate::jet_std::JetURLParts::from_parts(scheme, host, path, query, fragment)
+        .map(crate::jet_std::JetURL::from_url_parts)
 }
 fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::file(path)
+    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::file(path))
 }
 fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::data(mime, text)
+    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::data(mime, text))
 }
 fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
     let rows: Vec<(String, String)> = pairs

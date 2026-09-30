@@ -794,8 +794,29 @@ impl<'a> Checker<'a> {
                         Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => Some(expr.span()),
                         _ => None,
                     });
+                    // The discarded-result fact (E0433) records the tail call
+                    // under any written or automatic `?`; match that span.
+                    let tail_call_span = stmts.iter().rev().find_map(|stmt| match stmt {
+                        Stmt::Return(Some(_), _) => Some(None),
+                        Stmt::Expr(expr) => Some(Some(match expr.without_parens() {
+                            Expr::Try(inner, ..) => inner.without_parens().span(),
+                            other => other.span(),
+                        })),
+                        _ => None,
+                    }).flatten();
                     let diagnostics_start = self.diags.len();
+                    let discarded_start = self.fx_discarded_results.len();
                     self.check_conditional_block(stmts, false);
+                    if effective_ret.is_none() {
+                        // An open callback's tail is its value, not a
+                        // discarded statement result.
+                        let tail_facts = self.fx_discarded_results.split_off(discarded_start);
+                        self.fx_discarded_results.extend(
+                            tail_facts
+                                .into_iter()
+                                .filter(|fact| Some(fact.span) != tail_call_span),
+                        );
+                    }
                     if effective_ret.is_none() || infer_failure_carrier {
                         let checked = self.diags.split_off(diagnostics_start);
                         self.diags.extend(checked.into_iter().filter(|diagnostic| {
@@ -896,14 +917,14 @@ impl<'a> Checker<'a> {
             body_ret = Some(result_ty);
         }
 
-        // An open callback row uses `None` for a valueless function. The
-        // statement checker reports the real `Unit` call result while walking
-        // the body, but that implementation detail must not turn
-        // `Fn() -> None` into the incompatible `Fn() -> Unit` signature.
-        if infer_failure_carrier
-            && exp_ret.is_none()
-            && body_ret.as_ref().is_some_and(|ty| is_unit_type(ty))
-        {
+        // An open return row uses `None` for a valueless function, as TIR
+        // lowering and the self-hosted checker do. The statement checker
+        // reports the real `Unit` call result while walking the body, but
+        // that detail must not turn `Fn() -> None` into `Fn() -> Unit`: the
+        // latter's effective return is the `Result<Unit, Err>` carrier, so a
+        // direct call of a bound `() -> print(x)` would unwrap a carrier that
+        // the lowered closure never returns.
+        if effective_ret.is_none() && body_ret.as_ref().is_some_and(|ty| is_unit_type(ty)) {
             body_ret = None;
         }
 

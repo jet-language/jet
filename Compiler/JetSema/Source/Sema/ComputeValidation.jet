@@ -110,10 +110,13 @@ fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [S
     safe
 }
 
+// GPU is the pure compute capability; memory is deny-only (D-AUTHORITY-MEM1=B),
+// so allocating a result Tensor never breaks the pure Tensor contract.
 fn sema_compute_forbidden_effects(effects: [String]) -> [String] Never! {
     result := [String]{}
     loop effect_name in effects {
-        if sema_effect_root(effect_name) != "GPU" -> &result.push(effect_name)
+        root :: sema_effect_root(effect_name)
+        if root != "GPU" && root != "Mem" -> &result.push(effect_name)
     }
     result
 }

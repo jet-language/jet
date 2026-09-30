@@ -1232,7 +1232,7 @@ fn run() {{ print(protect() ?? 0) }}
     #[test]
     fn comptime_local_disables_replay() {
         let mut service = CompilerQueries::new();
-        let source = "fn run() {\n    @_value :: 1\n}\n";
+        let source = "fn run() {\n    _value :: prep { 1 }\n}\n";
         let checked = service.check_text("comptime.jet", source, true);
         assert!(
             checked.diagnostics.is_empty(),
@@ -1256,8 +1256,8 @@ fn run() {{ print(protect() ?? 0) }}
         let main = root.join("main.jet");
         let asset = root.join("message.txt");
         let source = concat!(
-            "@MESSAGE :: embed_file(\"message.txt\")\n",
-            "fn run() { print(\"{@MESSAGE}\") }\n"
+            "MESSAGE :: prep { embed_file(\"message.txt\") }\n",
+            "fn run() { print(\"{MESSAGE}\") }\n"
         );
         std::fs::write(&asset, "first").unwrap();
         std::fs::write(&main, source).unwrap();

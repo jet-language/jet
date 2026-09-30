@@ -62,7 +62,7 @@ fn aot_jit_and_interpreter_agree_on_crossing_and_freeze() {
 #[test]
 fn comptime_accepts_the_same_pure_freeze_operation() {
     let source =
-        format!("{SOURCE}\n@FOLDED :: freeze(41)\n\nfn show() {{\n    print(@FOLDED)\n}}\n");
+        format!("{SOURCE}\nFOLDED :: prep {{ freeze(41) }}\n\nfn show() {{\n    print(FOLDED)\n}}\n");
     jet::compile(&source).expect("comptime freeze must use the shared front end");
 }
 
@@ -168,7 +168,7 @@ fn crossing_plane_interpreter_matches_expected() {
 #[test]
 fn crossing_plane_comptime_uses_the_same_front_end() {
     let source =
-        format!("{CROSSING_SOURCE}\n@FOLDED :: 40 + 2\n\nfn show() {{ print(@FOLDED) }}\n");
+        format!("{CROSSING_SOURCE}\nFOLDED :: prep {{ 40 + 2 }}\n\nfn show() {{ print(FOLDED) }}\n");
     jet::compile(&source).expect("comptime crossing source must use the shared sema path");
 }
 

@@ -598,7 +598,7 @@ impl<'a> Parser<'a> {
         Ok(body)
     }
 
-    /// D-META-BODY1=A / D-PREP-BRANCH1=A: `prep loop field in T.@fields { fn … }`
+    /// D-META-BODY1=A / D-PREP-BRANCH1=A: `prep loop field in T.$fields { fn … }`
     /// expands item templates, not runtime statements. This deliberately
     /// shares the ordinary loop source expression grammar; sema evaluates the
     /// source through the comptime interpreter during expansion. The retired
@@ -683,8 +683,8 @@ impl<'a> Parser<'a> {
             return Err(Diagnostic::error(
                 "E0381",
                 "the checked-text marker declaration is retired".to_string(),
-                "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; `@sites` records legal sites, and checked-text contracts are not a separate marker form".to_string(),
-                format!("write `marker {name}(@sites: [.Text])` for a plain rule, or use a built-in typed text head"),
+                "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form".to_string(),
+                format!("write `marker {name}($sites: [.Text])` for a plain rule, or use a built-in typed text head"),
                 Some(span),
             ));
         }
@@ -822,14 +822,14 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON => (
                     "E0381",
                     "a trailing `on` clause isn't how a marker states a fact",
-                    "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `@` names are fixed metadata values — not a clause after the list",
-                    "move the sites into the parameter list as `@sites: [.Function, …]`".to_string(),
+                    "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `$` names are fixed metadata values — not a clause after the list",
+                    "move the sites into the parameter list as `$sites: [.Function, …]`".to_string(),
                 ),
                 TokKind::LParen => (
                     "E0381",
                     "a second parameter list isn't how a marker states a fact",
-                    "D-MARKER-SITES1=B: the rule's own typed arguments and fixed metadata share one named-parameter list, told apart by the compile-time `@` sigil — not two parameter lists",
-                    "fold the second list's facts into the first as `@sites: […]`, `@repeatable: true`".to_string(),
+                    "D-MARKER-SITES1=B: the rule's own typed arguments and fixed metadata share one named-parameter list, told apart by the compiler-fact `$` sigil — not two parameter lists",
+                    "fold the second list's facts into the first as `$sites: […]`, `$repeatable: true`".to_string(),
                 ),
 
                 _ => return None,
@@ -896,7 +896,7 @@ mod marker_decl_tests {
     /// own worked example — named parameters, a fact marked with `@`.
     #[test]
     fn ratified_named_parameter_form_parses_with_an_at_marked_fact() {
-        let source = "marker Inline(mode: InlineMode, @sites: [.Function, .Method, .Constant])\nfn run() {}\n";
+        let source = "marker Inline(mode: InlineMode, $sites: [.Function, .Method, .Constant])\nfn run() {}\n";
         let (tokens, lex_diags) = Lexer::lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let program = Parser::parse(&tokens).expect("ratified marker declaration must parse");
@@ -911,7 +911,7 @@ mod marker_decl_tests {
         assert_eq!(decl.name, "Inline");
         assert_eq!(decl.params.len(), 2);
         assert_eq!(decl.params[0].name, "mode");
-        assert_eq!(decl.params[1].name, "@sites");
+        assert_eq!(decl.params[1].name, "$sites");
     }
 
     /// D-MARKER-SITES1=B: an empty site value is still a fixed metadata value,
@@ -932,7 +932,7 @@ mod marker_decl_tests {
             .expect("a NoParameters marker declaration");
         assert!(decl.params.is_empty());
 
-        let empty = "marker Empty(@sites: [], @repeatable: false)\nfn run() {}\n";
+        let empty = "marker Empty($sites: [], $repeatable: false)\nfn run() {}\n";
         let (tokens, lex_diags) = Lexer::lex(empty);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let program = Parser::parse(&tokens).expect("empty metadata list must parse");
@@ -948,7 +948,7 @@ mod marker_decl_tests {
         assert!(decl.params.iter().all(|param| param.ty.is_none()));
         assert!(decl.params.iter().all(|param| param.value.is_some()));
 
-        let many = "marker Many(@sites: [.Type, .Field], @repeatable: true, @inherits: false, @scopes: [.Type, .Field], @resolution: .Merge)\nfn run() {}\n";
+        let many = "marker Many($sites: [.Type, .Field], $repeatable: true, $inherits: false, $scopes: [.Type, .Field], $resolution: .Merge)\nfn run() {}\n";
         let (tokens, lex_diags) = Lexer::lex(many);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let program = Parser::parse(&tokens).expect("many metadata values must parse");
@@ -966,13 +966,13 @@ mod marker_decl_tests {
 
         for site in jet_foundation::Policy::RuleSite::ALL {
             let source = format!(
-                "marker Uses(@sites: [.{site}])\nfn run() {{}}\n",
+                "marker Uses($sites: [.{site}])\nfn run() {{}}\n",
                 site = site.name()
             );
             let (tokens, lex_diags) = Lexer::lex(&source);
             assert!(lex_diags.is_empty(), "{site:?}: {lex_diags:?}");
             Parser::parse(&tokens).unwrap_or_else(|diagnostics| {
-                panic!("{site:?} must use the canonical @sites list: {diagnostics:?}")
+                panic!("{site:?} must use the canonical $sites list: {diagnostics:?}")
             });
         }
     }
@@ -981,8 +981,8 @@ mod marker_decl_tests {
     #[test]
     fn fact_declaration_parses_its_law_columns() {
         let source = concat!(
-            "fact Exactness(@holds: .Value, @safe: .Gain, ",
-            "@gates: [approx, raw], @decision: \"D-TEST\")\n",
+            "fact Exactness($holds: .Value, $safe: .Gain, ",
+            "$gates: [approx, raw], $decision: \"D-TEST\")\n",
             "fn run() {}\n"
         );
         let (tokens, lex_diags) = Lexer::lex(source);
@@ -1002,7 +1002,7 @@ mod marker_decl_tests {
                 .iter()
                 .map(|param| param.name.as_str())
                 .collect::<Vec<_>>(),
-            ["@holds", "@safe", "@gates", "@decision"]
+            ["$holds", "$safe", "$gates", "$decision"]
         );
         assert!(decl
             .params
@@ -1026,17 +1026,17 @@ mod marker_decl_tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].code, "E0381");
         assert!(diagnostics[0].what.contains("retired"));
-        assert!(diagnostics[0].fix.contains("@sites"));
+        assert!(diagnostics[0].fix.contains("$sites"));
     }
 
-    /// D-META-FORM1=A: `@repeatable` is a named parameter like every other
+    /// D-META-FORM1=A: `$repeatable` is a named parameter like every other
     /// fact about a rule, never a trailing word. A new fact about rules is a
     /// new named parameter, so the list stays open-ended and the grammar does
-    /// not grow. `@sites` takes `[Site]`, the eighteen-member menu published in
+    /// not grow. `$sites` takes `[Site]`, the eighteen-member menu published in
     /// `core.compiler.lang` (`Policy::SITE_VARIANTS`).
     #[test]
     fn a_fact_about_the_rule_is_one_more_named_parameter() {
-        let source = "marker Pre(condition: String, message: String, @sites: [.Function, .Method], @repeatable: true)\nfn run() {}\n";
+        let source = "marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)\nfn run() {}\n";
         let (tokens, lex_diags) = Lexer::lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let program = Parser::parse(&tokens).expect("ratified marker declaration must parse");
@@ -1053,7 +1053,7 @@ mod marker_decl_tests {
             .iter()
             .map(|param| param.name.as_str())
             .collect();
-        assert_eq!(names, ["condition", "message", "@sites", "@repeatable"]);
+        assert_eq!(names, ["condition", "message", "$sites", "$repeatable"]);
 
         // A fact about the rule carries a value, not a type; an argument the
         // use site supplies carries a type.
@@ -1066,7 +1066,7 @@ mod marker_decl_tests {
             }
         }
 
-        // The site names `@sites` may hold are exactly the published menu.
+        // The site names `$sites` may hold are exactly the published menu.
         for site in jet_foundation::Policy::RuleSite::ALL {
             assert!(jet_foundation::Policy::SITE_VARIANTS.contains(&site.name()));
         }

@@ -1,0 +1,19 @@
+// A route handler captures resources bound with `?? panic(...)`: a DB
+// connection and an admission pool. The enclosing function lowers the
+// closure's capture operands through the same local-name rule as any other
+// read, so registering the handler compiles and runs.
+use core.db as db
+use core.http.server as server
+
+fn run() {
+    conn :: db.open_memory() ?? panic("open")
+    pool :: db.pool(":memory:", max: 1) ?? panic("pool")
+    mux :: server.mux()
+    mux.post("/order", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+        lease :: pool.acquire(deadline: 100ms) ?? return Ok(server.response(503, "busy"))
+        opened :: conn.begin()
+        lease.close() ?? panic("lease")
+        Ok(server.response(200, "began {opened}"))
+    })
+    print("order route registered")
+}

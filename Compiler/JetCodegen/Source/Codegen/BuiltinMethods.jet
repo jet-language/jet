@@ -46,7 +46,7 @@ fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
         | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LruPut
         | .LruAddNew | .LruGet | .LruRemove | .DequePushFront | .DequePushBack | .DequePopFront
         | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite(_) | .GetDisjointWrite
-        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .ViewMutNew(_) -> return true
+        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .ViewMutNew(_) | .IterNext -> return true
         .ByteBufferWrite(_) -> return true
         .ByteBufferMethod(method) -> return method == "clear" || method == "seek" || method == "rewind" || method == "next" || method == "read" || method == "read_byte" || method == "read_bytes" || method == "read_string" || method == "flush" || method == "close" || method == "shutdown" || method == "copy_to" || method == "write_to"
         else -> return false
@@ -830,7 +830,7 @@ fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, span: Span,
         .Named(_) | .Apply(_, _) -> {}
         else -> panic("checked Option.zip trait coercion source is not nominal")
     }
-    jet_codegen_require_trait_box_target(trait_target, builder)
+    jet_codegen_require_trait_box_target(trait_target, &builder)
     target_type := jet_codegen_lower_type_for_function(trait_target, builder)
     target_id :: target_type.identity ?? panic("checked Option.zip trait field has no MIR identity")
     jet_codegen_emit_value(&builder, span, trait_target, MirOperation.TraitBox{value: value, target: target_id})

@@ -1,5 +1,14 @@
+Warning [L0530] (redundant_final_return): An explicit `return` is used on the final value line
+  --> compute_transform_inline.jet:3:50
+    |
+  3 | fn loss(w: Tensor, x: Tensor) -> Tensor Never! { return compute.mul(w, x) ?? panic("loss") }
+    |                                                  ^^^^^^
+ Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
+
 Warning [L1141] (inline_autodiff): An autodiff transform result is called inline
-  --> tests/ui_lint/compute_transform_inline.jet:8:25
+  --> compute_transform_inline.jet:8:25
     |
   8 |     (dw, dx) :: compute.gradient(loss).call(w, x)
     |                         ^^^^^^^^^^^^^^^^^^^^^^^^

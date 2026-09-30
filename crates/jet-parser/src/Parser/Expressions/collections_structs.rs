@@ -353,6 +353,15 @@ impl<'a> Parser<'a> {
 
     fn finish_typed_lit_entries(&mut self) -> Result<TypedLitBody, Diagnostic> {
         let key = self.expr()?;
+        // One expression with no `:` is a whole-value body (`[K:V]{m}`);
+        // sema checks it against the head like any other one-expression body.
+        if matches!(self.peek().kind, TokKind::RBrace | TokKind::Semi) {
+            self.consume_literal_close_terminators();
+            if matches!(self.peek().kind, TokKind::RBrace) {
+                self.bump();
+                return Ok(TypedLitBody::Value(Box::new(key)));
+            }
+        }
         self.expect(TokKind::Colon, "between a map key and its value")?;
         let value = self.expr()?;
         let mut entries = vec![(key, value)];
@@ -669,7 +678,15 @@ impl<'a> Parser<'a> {
     /// ordinary value equality — sema emits E0367 only when that Ident is a
     /// known variant. Bare unit Ident followed by `|` starts an or-pattern
     /// (E0367 + recover) so `.Red | Green` and `Red | Green` teach the dot.
-    pub(in crate::Parser) fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+    ///
+    /// D-PAT-NAMED-NEST1=A: `allow_named_fields` admits the named payload
+    /// form `.Case{field: pat, ..}` after any `{`. Where a `{` usually opens
+    /// a block (an `if` condition) it is false, and the form needs a first
+    /// entry no block starts with (`named_pattern_brace_ahead`).
+    pub(in crate::Parser) fn try_pattern_rhs(
+        &mut self,
+        allow_named_fields: bool,
+    ) -> Result<Option<Pattern>, Diagnostic> {
         // D-UNIFYLIT1=A: typed pattern heads before bare tokens.
         if let Some(pat) = self.try_bin_match_pattern()? {
             return Ok(Some(pat));
@@ -773,7 +790,7 @@ impl<'a> Parser<'a> {
                 let mut alts = vec![base];
                 while matches!(self.peek().kind, TokKind::Pipe) {
                     self.bump();
-                    if let Some(alt) = self.try_or_pattern_alt()? {
+                    if let Some(alt) = self.try_or_pattern_alt(allow_named_fields)? {
                         push_or_alternative(&mut alts, alt);
                     } else {
                         return Err(Diagnostic::error(
@@ -811,46 +828,7 @@ impl<'a> Parser<'a> {
                 let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
                 if !matches!(self.peek().kind, TokKind::RParen) {
                     loop {
-                        // D-PATW: `_` in payload slot = wildcard (ignore field, bind nothing).
-                        let slot = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT)
-                        {
-                            self.bump();
-                            crate::AST::PatSlot::Wildcard
-                        } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
-                            // D-PATR: `lo..hi` range in payload slot.
-                            let lo = *lo_val;
-                            self.bump();
-                            if matches!(self.peek().kind, TokKind::DotDot) {
-                                self.bump(); // consume `..`
-                                if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
-                                    let hi = *hi_val;
-                                    self.bump();
-                                    crate::AST::PatSlot::Range { lo, hi }
-                                } else {
-                                    return Err(Diagnostic::error(
-                                        "E0003",
-                                        "expected an integer after `..` in a range pattern"
-                                            .to_string(),
-                                        "range patterns need both ends: `lo..hi`".to_string(),
-                                        "write `0..100` for an inclusive range".to_string(),
-                                        Some(self.peek().span),
-                                    ));
-                                }
-                            } else {
-                                return Err(Diagnostic::error(
-                                    "E0003",
-                                    "expected `..` after the lower bound of a range pattern"
-                                        .to_string(),
-                                    "range patterns need `lo..hi` syntax".to_string(),
-                                    "write `0..100` for an inclusive range".to_string(),
-                                    Some(self.peek().span),
-                                ));
-                            }
-                        } else {
-                            let (name, span) = self.expect_ident("for a pattern binding")?;
-                            crate::AST::PatSlot::Bind { name, span }
-                        };
-                        bindings.push(slot);
+                        bindings.push(self.pattern_slot()?);
                         if matches!(self.peek().kind, TokKind::RParen) {
                             break;
                         }
@@ -876,7 +854,7 @@ impl<'a> Parser<'a> {
                     while matches!(self.peek().kind, TokKind::Pipe) {
                         self.bump(); // consume `|`
                                      // Parse the next alternative (must be a Variant pattern).
-                        if let Some(alt) = self.try_or_pattern_alt()? {
+                        if let Some(alt) = self.try_or_pattern_alt(allow_named_fields)? {
                             push_or_alternative(&mut alts, alt);
                         } else {
                             return Err(Diagnostic::error(
@@ -926,44 +904,7 @@ impl<'a> Parser<'a> {
                     let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
                     if !matches!(self.peek().kind, TokKind::RParen) {
                         loop {
-                            let slot = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT)
-                            {
-                                self.bump();
-                                crate::AST::PatSlot::Wildcard
-                            } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
-                                let lo = *lo_val;
-                                self.bump();
-                                if matches!(self.peek().kind, TokKind::DotDot) {
-                                    self.bump();
-                                    if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
-                                        let hi = *hi_val;
-                                        self.bump();
-                                        crate::AST::PatSlot::Range { lo, hi }
-                                    } else {
-                                        return Err(Diagnostic::error(
-                                            "E0003",
-                                            "expected an integer after `..` in a range pattern"
-                                                .to_string(),
-                                            "range patterns need both ends: `lo..hi`".to_string(),
-                                            "write `0..100` for an inclusive range".to_string(),
-                                            Some(self.peek().span),
-                                        ));
-                                    }
-                                } else {
-                                    return Err(Diagnostic::error(
-                                        "E0003",
-                                        "expected `..` after the lower bound of a range pattern"
-                                            .to_string(),
-                                        "range patterns need `lo..hi` syntax".to_string(),
-                                        "write `0..100` for an inclusive range".to_string(),
-                                        Some(self.peek().span),
-                                    ));
-                                }
-                            } else {
-                                let (name, span) = self.expect_ident("for a pattern binding")?;
-                                crate::AST::PatSlot::Bind { name, span }
-                            };
-                            bindings.push(slot);
+                            bindings.push(self.pattern_slot()?);
                             if matches!(self.peek().kind, TokKind::RParen) {
                                 break;
                             }
@@ -976,6 +917,10 @@ impl<'a> Parser<'a> {
                     self.expect(TokKind::RParen, "after pattern bindings")?;
                     let end = self.toks[self.pos.saturating_sub(1)].span.end;
                     (bindings, end)
+                } else if matches!(self.peek().kind, TokKind::LBrace)
+                    && (allow_named_fields || self.named_pattern_brace_ahead())
+                {
+                    self.named_pattern_slots(&variant)?
                 } else {
                     // Unit variant with dot: `.Empty`
                     (vec![], variant_span.end)
@@ -992,7 +937,7 @@ impl<'a> Parser<'a> {
                     let mut alts = vec![base];
                     while matches!(self.peek().kind, TokKind::Pipe) {
                         self.bump(); // consume `|`
-                        if let Some(alt) = self.try_or_pattern_alt()? {
+                        if let Some(alt) = self.try_or_pattern_alt(allow_named_fields)? {
                             push_or_alternative(&mut alts, alt);
                         } else {
                             return Err(Diagnostic::error(
@@ -1014,10 +959,59 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// One payload slot inside `.Variant(…)`: a binding name, `_` (D-PATW),
+    /// an integer range `lo..hi` (D-PATR), or a nested leading-dot pattern
+    /// (S31: `.Err(.Low)`, `.Val(.Rect(w, h))`).
+    pub(in crate::Parser) fn pattern_slot(&mut self) -> Result<crate::AST::PatSlot, Diagnostic> {
+        if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT) {
+            self.bump();
+            return Ok(crate::AST::PatSlot::Wildcard);
+        }
+        if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
+            let lo = *lo_val;
+            self.bump();
+            if !matches!(self.peek().kind, TokKind::DotDot) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "expected `..` after the lower bound of a range pattern".to_string(),
+                    "range patterns need `lo..hi` syntax".to_string(),
+                    "write `0..100` for an inclusive range".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+            self.bump();
+            let TokKind::Int(hi_val, _) = &self.peek().kind.clone() else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "expected an integer after `..` in a range pattern".to_string(),
+                    "range patterns need both ends: `lo..hi`".to_string(),
+                    "write `0..100` for an inclusive range".to_string(),
+                    Some(self.peek().span),
+                ));
+            };
+            let hi = *hi_val;
+            self.bump();
+            return Ok(crate::AST::PatSlot::Range { lo, hi });
+        }
+        if matches!(self.peek().kind, TokKind::Dot)
+            && self
+                .toks
+                .get(self.pos + 1)
+                .and_then(|token| leading_dot_variant(&token.kind))
+                .is_some()
+        {
+            if let Some(inner) = self.try_pattern_rhs(true)? {
+                return Ok(crate::AST::PatSlot::Nested(Box::new(inner)));
+            }
+        }
+        let (name, span) = self.expect_ident("for a pattern binding")?;
+        Ok(crate::AST::PatSlot::Bind { name, span })
+    }
+
     /// D-ENUMDOT1 / D-PATO: one alternative after `|` in an or-pattern.
     /// Accepts a normal pattern RHS, or a bare unit PascalCase Ident (E0367).
-    fn try_or_pattern_alt(&mut self) -> Result<Option<Pattern>, Diagnostic> {
-        if let Some(alt) = self.try_pattern_rhs()? {
+    fn try_or_pattern_alt(&mut self, allow_named_fields: bool) -> Result<Option<Pattern>, Diagnostic> {
+        if let Some(alt) = self.try_pattern_rhs(allow_named_fields)? {
             return Ok(Some(alt));
         }
         let TokKind::Ident(name) = &self.peek().kind else {

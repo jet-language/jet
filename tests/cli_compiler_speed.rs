@@ -1277,10 +1277,11 @@ fn run() {
         );
     }
 
-    /// D-DEVR-TWICE1=A: the second identical `jet build` replays its receipt
-    /// instead of compiling again. Each invocation runs under its own Nix
-    /// shell temp root (`nix develop` mints a fresh `/tmp/nix-shell.*` per
-    /// shell), so the receipt context must not fingerprint that plumbing.
+    /// D-DEVR-TWICE1=A / D-BUILD-NOCHANGE1=A: the second identical
+    /// `jet build` answers from its Receipt instead of checking and compiling
+    /// again. Each invocation runs under its own Nix shell temp root
+    /// (`nix develop` mints a fresh `/tmp/nix-shell.*` per shell), so the
+    /// Receipt closure must not fingerprint that plumbing.
     #[test]
     fn second_identical_build_replays_receipt() {
         let scratch = Scratch::new("compiler-speed-receipt-replay");
@@ -1300,21 +1301,20 @@ fn run() {
              { printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_RUSTC_LOG\"\n\
              exec \"$JET_TEST_REAL_RUSTC\" \"$@\"\n",
         );
-        let contexts = scratch.join(".jet/receipts/contexts");
-        let context_pointers = || -> Vec<(PathBuf, String)> {
-            let mut pointers = fs::read_dir(&contexts)
-                .map(|entries| {
-                    entries
-                        .map(|entry| {
-                            let path = entry.unwrap().path();
-                            let key = fs::read_to_string(&path).unwrap();
-                            (path, key)
-                        })
-                        .collect::<Vec<_>>()
+        let store = scratch.join("store");
+        let logged_nodes = || -> Vec<(String, String)> {
+            jet_store::Store::new(&store)
+                .unwrap()
+                .last_build_record(&scratch.path, "main.jet")
+                .unwrap()
+                .map(|record| {
+                    record
+                        .nodes
+                        .into_iter()
+                        .map(|node| (node.kind, node.why_ran))
+                        .collect()
                 })
-                .unwrap_or_default();
-            pointers.sort();
-            pointers
+                .unwrap_or_default()
         };
 
         let build = |shell_temp: &Path| -> std::process::Output {
@@ -1347,7 +1347,7 @@ fn run() {
             "first debug build failed:\n{first_stderr}"
         );
         assert!(
-            !first_stderr.contains("ok: build current"),
+            !first_stderr.contains("up to date:"),
             "first build must do the work, not replay a receipt:\n{first_stderr}"
         );
         let first_log = fs::read_to_string(&rustc_log).unwrap();
@@ -1360,17 +1360,12 @@ fn run() {
         let binary = scratch.join(".jet/build/main");
         let first_binary = fs::read(&binary).unwrap();
         let first_modified = fs::metadata(&binary).unwrap().modified().unwrap();
-        let first_pointers = context_pointers();
-        assert_eq!(
-            first_pointers.len(),
-            1,
-            "first build must publish exactly one receipt context: {first_pointers:?}"
-        );
-        let receipt_key = first_pointers[0].1.clone();
-        assert_eq!(
-            receipt_key.len(),
-            64,
-            "receipt context pointer must hold one receipt key: {receipt_key:?}"
+        assert!(
+            logged_nodes()
+                .iter()
+                .any(|(kind, why)| kind == "check" && why != "reused"),
+            "first build must log its executed Check nodes: {:?}",
+            logged_nodes()
         );
 
         let second = build(&scratch.join("nix-shell.second"));
@@ -1380,23 +1375,18 @@ fn run() {
             Some(0),
             "second debug build failed:\n{second_stderr}"
         );
-        let expected = format!("ok: build current (receipt {})", &receipt_key[..12]);
         assert!(
-            second_stderr.contains(&expected),
-            "second identical build must replay receipt `{expected}`:\n{second_stderr}"
-        );
-        assert!(
-            !second_stderr.contains("receipt: build invalidated"),
-            "identical inputs must not invalidate the receipt:\n{second_stderr}"
+            second_stderr.contains("up to date: "),
+            "second identical build must replay its Receipt:\n{second_stderr}"
         );
         assert_eq!(
             second.stdout, first.stdout,
             "replayed build must reproduce the recorded stdout"
         );
-        assert_eq!(
-            context_pointers(),
-            first_pointers,
-            "two identical builds under different shell temp roots must share one context digest"
+        let replayed = logged_nodes();
+        assert!(
+            !replayed.is_empty() && replayed.iter().all(|(_, why)| why == "reused"),
+            "two identical builds under different shell temp roots must share one closure: {replayed:?}"
         );
         assert_eq!(
             fs::read_to_string(&rustc_log).unwrap(),

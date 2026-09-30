@@ -1,0 +1,12 @@
+// @run_cli
+// #3718: a package.jet with no authority block does not grant `Net`, so
+// opening a socket is refused before the program runs.
+use core.net as net
+
+fn run() {
+    _listener :: net.tcp_listen("127.0.0.1:0") ?? {
+        print("listen failed")
+        return
+    }
+    print("listening")
+}

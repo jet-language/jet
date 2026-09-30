@@ -288,14 +288,14 @@ fn repr_c_enum_surface_is_stable() {
 
 #[test]
 fn computed_declaration_values_format_stably() {
-    let src = "@LANES :: 2\n@BASE :: 40\nstruct Frame { values: [Int#(@LANES * 2)] }\n#Layout(c, tag: U8) enum Code { First = @BASE + 1 Second }\n";
+    let src = "LANES :: prep { 2 }\nBASE :: prep { 40 }\nstruct Frame { values: [Int#(LANES * 2)] }\n#Layout(c, tag: U8) enum Code { First = BASE + 1 Second }\n";
     let once = jet::format_source(src).expect("computed declaration values should format");
     assert!(
-        once.contains("[Int#(@LANES * 2)]"),
+        once.contains("[Int#(LANES * 2)]"),
         "fixed-list expression was lost:\n{once}"
     );
     assert!(
-        once.contains("First = @BASE + 1"),
+        once.contains("First = BASE + 1"),
         "enum expression was lost:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted computed values should re-format");
@@ -603,7 +603,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
-    prep if @build.os == {
+    prep if $build.os == {
         .Linux -> {
             b :: LinuxBackend{ name: "gtk" }
             print(b.label())
@@ -615,8 +615,8 @@ fn fmt_comptime_os_dispatch_round_trips() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
-        out.contains("prep if @build.os == {"),
-        "expected the `@if @build.os == {{` dispatch head, got:\n{out}"
+        out.contains("prep if $build.os == {"),
+        "expected the `@if $build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive. The formatter may add visible arm blocks.
     assert!(
@@ -1426,6 +1426,32 @@ fn fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table() {
     assert!(
         once.contains("if {") && !once.contains("else if"),
         "R2 did not collapse the chain into one arm table:\n{once}"
+    );
+    assert_eq!(
+        once,
+        jet::format_source_with_options(&once, options).expect("second simplify pass should work"),
+        "simplify output must be stable"
+    );
+}
+
+#[test]
+fn fmt_simplify_drops_a_redundant_val_only_in_optional_returns() {
+    // D-OPT-LIFT1=A: a plain value fills a `T?` return slot, so `--simplify`
+    // drops `Val(x)` there, in nested bodies and the tail alike. A call keeps
+    // its wrapper (its generics may infer from the expected type), and a
+    // lambda body returns from the lambda, so it is never touched.
+    let options = jet::Formatter::FormatOptions { simplify: true };
+    let source = "fn count() -> Int {\n    return 1\n}\n\nfn find(n: Int) -> Int? {\n    wrap :: (x) -> Val(x)\n    if n > 0 {\n        return Val(n)\n    }\n    if n == 0 {\n        return Val(count())\n    }\n    Val(n)\n}\n";
+
+    let once = jet::format_source_with_options(source, options)
+        .expect("a redundant Val must simplify to parseable source");
+    assert!(
+        once.contains("return n") && !once.contains("Val(n)"),
+        "the redundant return wrapper survived:\n{once}"
+    );
+    assert!(
+        once.contains("Val(count())") && once.contains("(x) -> Val(x)"),
+        "a call or lambda wrapper was dropped:\n{once}"
     );
     assert_eq!(
         once,
@@ -2502,12 +2528,12 @@ fn fmt_keeps_parens_around_binary_receiver() {
 fn fmt_prep_block_is_idempotent() {
     // D-PREP-SURFACE2=A: `prep { … }` formatting round-trips — the `prep`
     // head, brace, and body all survive a second fmt.
-    let src = r#"@LIMIT :: 1000
+    let src = r#"LIMIT :: prep { 1000 }
 
 fn run() {
     prep {
-        @ratio :: @LIMIT / 10
-        if @ratio < 1 { panic("bad") }
+        ratio :: LIMIT / 10
+        if ratio < 1 { panic("bad") }
     }
     print("ok")
 }
@@ -2639,8 +2665,8 @@ fn run() {
 
 #[test]
 fn fmt_comptime_splice_stability() {
-    // D-ONCE-AT1=D: `@name` compile-time value is a first-class AST node
-    // (Expr::ComptimeName). The formatter must emit it as `@name` so that
+    // D-NAME-SPLICE1=B: a template splice `$name` is a first-class AST node
+    // (Expr::ComptimeName). The formatter must emit it as `$name` so that
     // the round-trip is stable (previously the mark could be silently dropped
     // if it reached the formatter without an AST node).
     let src = "derive T.Debug {\n    fn tag(self) -> String -> \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
@@ -2648,26 +2674,26 @@ fn fmt_comptime_splice_stability() {
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(once, twice, "typed derive body must be fmt-idempotent");
 
-    // Standalone `@name` expression (outside emit string) round-trips as `@name`.
-    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    fn @tname(self) -> String -> @tname\n}\n\nfn run() {}\n";
-    let splice_once = jet::format_source(splice_src).expect("fmt should accept @name expression");
+    // Standalone `$name` splice (outside emit string) round-trips as `$name`.
+    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: $tname\n    fn $tname(self) -> String -> $tname\n}\n\nfn run() {}\n";
+    let splice_once = jet::format_source(splice_src).expect("fmt should accept $name splice");
     assert!(
-        splice_once.contains("@tname"),
-        "`@tname` expression must survive fmt, got:\n{splice_once}"
+        splice_once.contains("x :: $tname") && splice_once.contains("fn $tname(self)"),
+        "`$tname` splice must survive fmt, got:\n{splice_once}"
     );
-    let splice_twice = jet::format_source(&splice_once).expect("@name fmt must be idempotent");
+    let splice_twice = jet::format_source(&splice_once).expect("$name fmt must be idempotent");
     assert_eq!(
         splice_once, splice_twice,
-        "`@name` expression must be fmt-idempotent"
+        "`$name` splice must be fmt-idempotent"
     );
 }
 
 #[test]
 fn fmt_layout_compiler_fact_and_field_selector_stability() {
-    let src = "derive T.LayoutFacts {\n    info :: T.@layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
+    let src = "derive T.LayoutFacts {\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
     let once = jet::format_source(src).expect("layout compiler fact should parse");
     assert!(
-        once.contains("T.@layout"),
+        once.contains("T.$layout"),
         "fact spelling was lost:\n{once}"
     );
     assert!(
@@ -2684,10 +2710,10 @@ fn fmt_layout_compiler_fact_and_field_selector_stability() {
 
 #[test]
 fn fmt_origin_compiler_fact_stability() {
-    let src = "fn run() {\n    #Track speed :: 3.5\n    @speed_origin :: speed.@origin\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    speed_origin :: prep { speed.$origin }\n}\n";
     let once = jet::format_source(src).expect("origin compiler fact should parse");
     assert!(
-        once.contains("speed.@origin"),
+        once.contains("speed.$origin"),
         "fact spelling was lost:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted origin fact should parse");
@@ -2697,14 +2723,14 @@ fn fmt_origin_compiler_fact_stability() {
 #[test]
 fn layout_compiler_fact_rejects_unknown_and_user_owned_at_members() {
     let unknown =
-        jet::Compiler::parse_source("derive T.LayoutFacts { info :: T.@unknown }\nfn run() {}\n");
+        jet::Compiler::parse_source("derive T.LayoutFacts { info :: T.$unknown }\nfn run() {}\n");
     let unknown = unknown
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.code == "E0302")
         .expect("unknown compiler fact should have a registered diagnostic");
-    assert!(unknown.message.contains("@unknown"), "{unknown:?}");
-    assert!(unknown.fix.contains("@layout"), "{unknown:?}");
+    assert!(unknown.message.contains("$unknown"), "{unknown:?}");
+    assert!(unknown.fix.contains("$layout"), "{unknown:?}");
 
     let user_member = jet::Compiler::parse_source("struct Bad { @layout: Int }\nfn run() {}\n");
     assert!(
@@ -3936,7 +3962,7 @@ fn fmt_typed_derive_body_comment_not_duplicated() {
     // D-META-CODE1: a derive body is a typed item template. Its comments are
     // walked with the ordinary formatter and must remain attached exactly
     // once across repeated formatting.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    fn label(self) -> String -> @lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube{side: 5}\n    print(c.label())\n}\n";
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    fn label(self) -> String -> $lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),
@@ -4190,7 +4216,7 @@ fn external_module_format_remains_parseable_and_idempotent() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T>(capacity: Int, label: String) {
 #Meta(category: label)
-@SIZE :: capacity
+SIZE :: prep { capacity }
 pub struct Buffer { slots: [T#capacity] }
 module nested<U> { pub fn keep(value: U) -> U { return ~value } }
 module inner :: nested<T>
@@ -4434,11 +4460,11 @@ struct Widget {
     #Doc("display name") label: String
 }
 
-@LIMIT :: 32
+LIMIT :: prep { 32 }
 
 #Inline
 fn hot(a: Int) -> Int {
-    return a * @LIMIT
+    return a * LIMIT
 }
 
 fn run() {
@@ -4452,7 +4478,7 @@ fn run() {
     for needle in [
         "#Codable",
         "#Doc(\"display name\") label: String",
-        "@LIMIT :: 32",
+        "LIMIT :: prep { 32 }",
         "#Inline",
         "#Off print(\"off\")",
         "#Impure(\"reads the wall clock\") {",

@@ -51,12 +51,13 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
         marked := false
         name_span := parser_current(&state).span
         name := ""
+        // D-DECL-META1=A: compiler metadata carries the fact sigil
+        // (`$sites: [.Type]`); plain names are what a use site supplies.
         if {
-            parser_current_kind(&state) == TOKEN_AT -> {
-                at :: parser_bump(&state)
-                name_token :: parser_expect_name(&state, "after `@` in marker declaration metadata")
-                name = "@{name_token.payload.decoded}"
-                name_span = parser_cover(at.span, name_token.span)
+            parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded.starts_with("$") -> {
+                name_token :: parser_bump(&state)
+                name = name_token.payload.decoded
+                name_span = name_token.span
                 marked = true
             }
             else -> {

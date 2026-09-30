@@ -2196,6 +2196,10 @@ fn read_compile_phases(
                 "explain-build node has no kind",
             ));
         };
+        // Package rows (#2517) report reuse keys, not compile phases.
+        if kind == "package" {
+            continue;
+        }
         if !matches!(kind.as_str(), "check" | "compile" | "link") {
             return Err(ProviderFailure::malformed(
                 "explain-build node has an unsupported kind",

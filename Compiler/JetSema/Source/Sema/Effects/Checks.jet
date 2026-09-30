@@ -274,7 +274,7 @@ fn sema_effect_declarations_irreversible_fact(declarations: [Item], effect_name:
     if found -> Val(irreversible) else -> None
 }
 
-// The transaction wall follows the canonical `effect … @irreversible`
+// The transaction wall follows the canonical `effect … $irreversible`
 // declarations loaded from the pinned Prelude module. It deliberately does
 // not maintain a second root allowlist: adding or removing an irreversible
 // effect in Prelude/Effects.jet changes this fact at the source boundary.
@@ -426,7 +426,7 @@ fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String]) ->
 }
 
 fn sema_effect_pure_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
-    sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the ambient operation or declare the function non-pure")
+    sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
 }
 
 fn sema_effect_replayable_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
@@ -505,7 +505,7 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
         sema_effect_check_tfunc_unsafe(function, &diagnostics)
         return node
     }
-    actual :: source ?? SemaEffectFunctionSource{key: function.key, name: function.name, span: function.source_span, declared_effects: None, is_pure: false, is_replayable: false, is_unsafe: false, unsafe_reason: None, unsafe_span: None, replayable_span: None, effect_via: None}
+    actual :: source
     node.span = actual.span
     node.has_declared_row = actual.declared_effects != None
     node.is_pure = actual.is_pure
@@ -571,8 +571,8 @@ pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scop
 pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
     sema_effect_record_intrinsic_fact(
         environment,
-        scopes,
-        context,
+        &scopes,
+        &context,
         api,
         span,
         SemaCallFacts{
@@ -582,7 +582,7 @@ pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, s
             type_args: [Type]{},
             default_refs: [FunctionDefaultRef]{},
         },
-        diagnostics,
+        &diagnostics,
     )
 }
 
@@ -1103,7 +1103,7 @@ fn sema_effect_row_has_no_outcome(node: SemaEffectNode, solved: [String]) -> Boo
 }
 
 fn sema_effect_discarded_result_diagnostic(node: SemaEffectNode, span: Span) -> Diagnostic {
-    sema_error("E0433", span, "the result of this `{node.name}` call is thrown away", "`{node.name}` has no other effect, so this line does nothing", "use the result, bind it with `result :: …`, or write `.drop(\"reason\")` if dropping it is intended")
+    sema_error("E0433", span, "the result of this `{node.name}` call is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result :: …`, or write `.drop(\"reason\")` if dropping it is intended")
 }
 
 pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffectGraphResult {
@@ -1187,7 +1187,7 @@ pub fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Di
                 loop arm in arms {
                     if !sema_effect_check_unsafe_statements(arm.body, &diagnostics) -> valid = false
                 }
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body ?? [Stmt]{}, &diagnostics) -> valid = false
+                if else_body != None && !sema_effect_check_unsafe_statements(else_body, &diagnostics) -> valid = false
             }
             .Loop(body, _, _, _) -> {
                 if !sema_effect_check_unsafe_statements(body, &diagnostics) -> valid = false
@@ -1215,13 +1215,13 @@ pub fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Di
             }
             .ComptimeIf(_, _, then_body, else_body, _, _) -> {
                 if !sema_effect_check_unsafe_statements(then_body, &diagnostics) -> valid = false
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body ?? [Stmt]{}, &diagnostics) -> valid = false
+                if else_body != None && !sema_effect_check_unsafe_statements(else_body, &diagnostics) -> valid = false
             }
             .ComptimeSwitch(_, arms, else_body, _) -> {
                 loop arm in arms {
                     if !sema_effect_check_unsafe_statements(arm.body, &diagnostics) -> valid = false
                 }
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body ?? [Stmt]{}, &diagnostics) -> valid = false
+                if else_body != None && !sema_effect_check_unsafe_statements(else_body, &diagnostics) -> valid = false
             }
             .ScopeMember(_, _, _, body, _, _, _, _) -> {
                 if !sema_effect_check_unsafe_statements(body, &diagnostics) -> valid = false

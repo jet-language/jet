@@ -1,0 +1,11 @@
+// D-ERR-CASES1=A: every `Err(.Case(…))` in one function adds to that
+// function's own error type, so one case name can't carry two payload types.
+fn check_age(raw: String, age: Int) -> Int {
+    if raw == "" -> return Err(.Bad(~raw))
+    if age < 0 -> return Err(.Bad(age))
+    age
+}
+
+fn run() {
+    print(check_age("a", 1) ?? 0)
+}

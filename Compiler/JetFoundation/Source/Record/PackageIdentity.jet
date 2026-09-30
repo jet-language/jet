@@ -1,0 +1,78 @@
+// #2517 package keys, the Jet side of `jet_foundation::PackageIdentity`.
+//
+// Each key is `record_key_digest` over its fields, the framing the Rust
+// checker uses, so both checkers frame keys identically. Their compiler
+// identities differ, so their keys never collide.
+
+pub struct PackageKeySourceFile {
+    pub relative_path: String
+    pub source: String
+}
+
+pub struct PackageKeyTargetFact {
+    pub name: String
+    pub value: String
+}
+
+pub struct PackageKeyDependency {
+    pub identity: String
+    pub interface_digest: String
+}
+
+// Indexes of `names` in ascending UTF-8 byte order.
+fn package_key_byte_order(names: [String]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<names.len() {
+        &order.push(index)
+        position := order.len() - 1
+        loop position > 0 && record_bytes_before(names[index].bytes(), names[order[position - 1]].bytes()) {
+            order[position] = order[position - 1]
+            order[position - 1] = index
+            position -= 1
+        }
+    }
+    order
+}
+
+// SHA-256 over the package's member files sorted by package-relative path,
+// each as its path and the SHA-256 of its exact bytes, then the manifest's
+// SHA-256 (empty when the package has no manifest).
+pub fn package_key_source_digest(files: [PackageKeySourceFile], manifest: String?) -> String Never! {
+    fields := [String]{"jet.pkg-source/v1", "files", "{files.len()}"}
+    paths :: loop file in files -> file.relative_path
+    loop index in package_key_byte_order(paths) {
+        &fields.push(files[index].relative_path)
+        &fields.push(mir_sha256_hex(files[index].source))
+    }
+    manifest_digest :: if manifest == {
+        Val(bytes) -> mir_sha256_hex(bytes)
+        None -> ""
+    }
+    &fields.push("manifest")
+    &fields.push(manifest_digest)
+    record_key_digest(fields)
+}
+
+// SHA-256 over the target facts sema reads, sorted by name.
+pub fn package_key_target_facts_digest(facts: [PackageKeyTargetFact]) -> String Never! {
+    fields := [String]{"jet.target-facts/v1", "{facts.len()}"}
+    names :: loop fact in facts -> fact.name
+    loop index in package_key_byte_order(names) {
+        &fields.push(facts[index].name)
+        &fields.push(facts[index].value)
+    }
+    record_key_digest(fields)
+}
+
+// The Go-style action ID of one package check: compiler identity, target
+// facts, package identity, source digest, and the interface digest of each
+// direct dependency, sorted by dependency identity.
+pub fn package_key_check_key(compiler_identity: String, target_facts_digest: String, package_identity: String, source_digest: String, dependencies: [PackageKeyDependency]) -> String Never! {
+    fields := [String]{"jet.pkg-check-key/v1", compiler_identity, target_facts_digest, package_identity, source_digest, "{dependencies.len()}"}
+    identities :: loop dependency in dependencies -> dependency.identity
+    loop index in package_key_byte_order(identities) {
+        &fields.push(dependencies[index].identity)
+        &fields.push(dependencies[index].interface_digest)
+    }
+    record_key_digest(fields)
+}

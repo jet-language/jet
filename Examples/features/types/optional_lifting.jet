@@ -1,0 +1,30 @@
+// D-OPT-LIFT1=A: a plain value fills a slot whose type is already `T?`.
+struct Config {
+    limit: Int?
+}
+
+fn describe(value: String?) -> String {
+    value ?? "none"
+}
+
+fn find(n: Int) -> Int? {
+    if n > 0 -> return n
+    return None
+}
+
+fn run() {
+    limit := Val(10)          // no expected type: Val still infers Int?
+    cfg :: Config{limit: 5}
+    ids :: [Int?]{1, None}
+    limit = 20
+    print(describe("hi"))
+    print(describe(None))
+    if find(3) == 3 -> print("three")
+    if find(3) != 4 -> print("not four")
+    if find(0) != 3 -> print("absent is not three")
+    if find(3) == Val(v) -> print("found {v}")
+    print(cfg.limit ?? 0)
+    print(ids[0] ?? 0)
+    print(ids[1] ?? -1)
+    print(limit ?? 0)
+}

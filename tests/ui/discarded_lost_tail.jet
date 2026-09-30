@@ -1,0 +1,36 @@
+// E0433 (D-DISCARD1=A): a named function with no written return type returns
+// nothing, so a value on its last line is thrown away. The error lands on
+// that line instead of at a caller.
+fn total(a: Int, b: Int) {
+    a + b
+}
+
+struct Counter {
+    hits: Int
+}
+
+impl Counter {
+    fn doubled(self) {
+        self.hits * 2
+    }
+}
+
+// Quiet: a Unit last line, an explicit discard, and a written return type.
+fn report(n: Int) {
+    print(n)
+}
+
+fn warm(n: Int) {
+    total(n, n).drop("only warms the cache")
+}
+
+fn twice(n: Int) -> Int {
+    n * 2
+}
+
+fn run() {
+    total(1, 2)
+    Counter{hits: 3}.doubled()
+    report(twice(4))
+    warm(5)
+}

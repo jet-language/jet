@@ -8,9 +8,9 @@ use core.reflect as reflect
 
 #UnitFamily(Length, dimension) { meter }
 
-@ATTRIBUTION :: report.@attribution
+ATTRIBUTION :: prep { report.$attribution }
 
-@UNIT_SCALE :: Meter.@unit_scale_provenance
+UNIT_SCALE :: prep { Meter.$unit_scale_provenance }
 
 derive T.Summarize {
     info :: T.reflect()
@@ -18,14 +18,14 @@ derive T.Summarize {
     first :: info.fields[0].name
     second :: info.fields[1].name
     third :: info.fields[2].name
-    range_start :: info.@range.start
-    method_effects :: info.methods[0].@effects.values.len()
-    method_sendability :: info.methods[0].@sendability.known
-    method_movedness :: info.methods[0].@movedness.known
-    method_origin :: info.methods[0].@origin.tracked
-    method_view_mutable :: info.methods[0].@view_provenance.mutable
-    method_maturity :: info.methods[0].@maturity.level
-    fn compile_field_names(self) -> String { "{@type_name}: {@first},{@second},{@third} range={@range_start} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_origin} view={@method_view_mutable} maturity={@method_maturity == .Experimental}" }
+    range_start :: info.$range.start
+    method_effects :: info.methods[0].$effects.values.len()
+    method_sendability :: info.methods[0].$sendability.known
+    method_movedness :: info.methods[0].$movedness.known
+    method_origin :: info.methods[0].$origin.tracked
+    method_view_mutable :: info.methods[0].$view_provenance.mutable
+    method_maturity :: info.methods[0].$maturity.level
+    fn compile_field_names(self) -> String { "{$type_name}: {$first},{$second},{$third} range={$range_start} effects={$method_effects} send={$method_sendability} moved={$method_movedness} track={$method_origin} view={$method_view_mutable} maturity={$method_maturity == .Experimental}" }
 }
 
 // `reflect.of(x)` is legal exactly where `"{x}"` is, so a reflected type owns a
@@ -55,7 +55,7 @@ struct Point {
 fn run() {
     p :: Point{x: 3, y: 4, level: 2}
     print(p.compile_field_names())
-    print("attribution={@ATTRIBUTION.source} scale={@UNIT_SCALE.kind == .Rational}")
+    print("attribution={ATTRIBUTION.source} scale={UNIT_SCALE.kind == .Rational}")
     v :: reflect.of(p)
     print(v.type_name())
     print(v.path())

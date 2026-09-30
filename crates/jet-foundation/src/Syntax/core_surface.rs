@@ -123,21 +123,87 @@ pub const RETIRED_FENCE_CLOSE: &str = "]@";
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const MARKER_TRACK: &str = "Track";
 
-/// S57 (ratified, as amended by D-META-STAGE1=B and D-ONCE-AT1=D): compile-time
-/// demand. The mark belongs to the name, so it is written at every mention —
-/// `@LIMIT :: 1000` then `print("{@LIMIT}")`. A bare mark opens a compile-time
-/// block (`@ { … }`) and precedes the `if` and `loop` verbs at compile time
-/// (`@if`, `@loop`). Ordinary foldable expressions need no mark. The retired
-/// `#Known` spellings teach E0377.
-pub const COMPTIME_MARK: &str = "@";
-/// D-ONCE-AT1=D: the retired compile-time mark. It is accepted only for the
-/// E0003 teaching diagnostic outside config surfaces.
-pub const RETIRED_COMPTIME_MARK: &str = "$";
+/// D-COMPILER-NS1=A / D-META-ROOT3=A: the compiler-fact sigil. A fact is a
+/// `$` member of the thing it describes (`T.$layout`, `f.$effects`,
+/// `value.$origin`); subjectless facts use the roots `$build`, `$package`,
+/// `$phase` and `$program` (D-BUILD-FACT3=A); marker and fact declarations
+/// mark compiler metadata the same way (`$sites:`, D-DECL-META1=A). Inside a
+/// derive or marker template the same mark splices a template binding
+/// (`fn $method`, `self.$field`, `.$left`; D-NAME-SPLICE1=B). The mark
+/// belongs to the name, and programs never declare a `$` name. Config
+/// surfaces read the same token as a `$NAME` environment read
+/// (D-ONCE-DOLLAR1=B).
+pub const COMPTIME_MARK: &str = "$";
+/// D-COMPILER-NS1=A: the retired fact, metadata and splice mark. `T.@layout`,
+/// `@build.os` and `@sites:` are accepted only for the E0003 teaching
+/// diagnostic, and `fn @method` / `self.@field` only for E0388; prefix `@`
+/// in code now means a D-MEMREF1 link.
+pub const RETIRED_COMPTIME_MARK: &str = "@";
 
-/// Is this identifier a compile-time name? The mark is part of the identifier,
-/// so a plain name and a marked name never denote the same binding.
+/// Is this identifier a compiler-fact name? The mark is part of the
+/// identifier, so a plain name and a marked name never denote the same thing.
 pub fn is_comptime_name(name: &str) -> bool {
     name.starts_with(COMPTIME_MARK)
+}
+
+/// The four subjectless fact roots (D-META-ROOT3=A, D-BUILD-FACT3=A).
+pub const FACT_ROOT_BUILD: &str = "$build";
+pub const FACT_ROOT_PACKAGE: &str = "$package";
+pub const FACT_ROOT_PHASE: &str = "$phase";
+pub const FACT_ROOT_PROGRAM: &str = "$program";
+
+/// Is this `$` word one of the subjectless fact roots?
+pub fn is_fact_root(name: &str) -> bool {
+    matches!(name, FACT_ROOT_BUILD | FACT_ROOT_PACKAGE | FACT_ROOT_PHASE | FACT_ROOT_PROGRAM)
+}
+
+/// How a retired `@` fact root is spelled now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetiredFactSpelling {
+    /// Replace the word with this `$` root (`$build` -> `$build`,
+    /// `$phase` -> `$phase`).
+    Root(&'static str),
+    /// The query is gone: facts are `$` members of the subject
+    /// (`@TYPE(T)` -> `T.$fields`).
+    SubjectMember,
+}
+
+/// D-META-ROOT3=A / D-BUILD-FACT3=A: the respelling of a retired `@` fact
+/// root or metadata query written as one prefix word. `$build.package` is
+/// respelled `$package` by the caller that sees the `.package` member.
+pub fn retired_fact_spelling(name: &str) -> Option<RetiredFactSpelling> {
+    match name.strip_prefix(RETIRED_COMPTIME_MARK)? {
+        "build" => Some(RetiredFactSpelling::Root(FACT_ROOT_BUILD)),
+        "PHASE" => Some(RetiredFactSpelling::Root(FACT_ROOT_PHASE)),
+        "PROGRAM" => Some(RetiredFactSpelling::Root(FACT_ROOT_PROGRAM)),
+        "PACKAGE" => Some(RetiredFactSpelling::Root(FACT_ROOT_PACKAGE)),
+        "TYPE" | "FUNCTION" | "METHOD" | "CLOSURE" | "VALUE" => {
+            Some(RetiredFactSpelling::SubjectMember)
+        }
+        _ => None,
+    }
+}
+
+/// D-PREP-SURFACE2=A + owner ruling (2026-09-30): an immutable module or file
+/// level binding is named in ALL_CAPS, `MAX_ROWS :: 100`; block-scope names
+/// stay snake_case (D-SHAPE-CASE1). Casing never implies compile time: only
+/// `NAME :: prep { value }` is evaluated while building. This is the casing
+/// predicate only.
+pub fn is_constant_name(name: &str) -> bool {
+    !is_comptime_name(name)
+        && !name.starts_with(RETIRED_COMPTIME_MARK)
+        && name.chars().any(char::is_uppercase)
+        && crate::Syntax::name_has_case(name, crate::Syntax::NameCase::Screaming)
+}
+
+/// The name E0388 offers for a retired `@name` constant: the name without the
+/// retired mark, in ALL_CAPS (block scope respells it snake_case). The mark
+/// always meant compile time, so a declaration's edit also wraps the value,
+/// `NAME :: prep { value }`. The lexer still reads `@name` as one word so the
+/// parser can teach it; prefix `@` in code now means a D-MEMREF1 link.
+pub fn retired_constant_respelling(name: &str) -> Option<String> {
+    let rest = name.strip_prefix(RETIRED_COMPTIME_MARK)?;
+    Some(crate::Syntax::canonical_name_case(rest, crate::Syntax::NameCase::Screaming))
 }
 
 /// D-META-STAGE1=B: the retired marker spelling for compile-time demand. It is
@@ -205,6 +271,20 @@ pub const INTERP_CLOSE: &str = "}";
 
 /// S9 (ratified): the prelude-declared print function (adds a newline).
 pub const BUILTIN_PRINT: &str = "print";
+
+/// D-DBG1=A (owner: named `debug`, not `dbg`): the prelude-declared
+/// development trace. `debug(value)` returns `value` unchanged, adds no
+/// effect, and in development builds writes one stderr line
+/// `[debug] file.jet:LINE expr = <Debug form>`. Shipped artifacts and
+/// release-profile builds reject it (E3405).
+pub const BUILTIN_DEBUG: &str = "debug";
+/// D-DBG1=A: sema-only name of a checked `debug(value)` call. Sema appends
+/// the site text (`file.jet:LINE expr`) as a second argument so every
+/// evaluator prints the same line without re-reading source. Never a source
+/// spelling.
+pub const INTERNAL_DEBUG_TRACE: &str = "__jet_debug_trace";
+/// D-DBG1=A: the stderr prefix every tier writes before the site text.
+pub const DEBUG_TRACE_PREFIX: &str = "[debug]";
 
 /// D-NAME-ALIAS1=A: `input` is prelude-declared (no `use core.term` required).
 /// `print` and `input` remain the interactive I/O subset. Other `core.term`
@@ -371,6 +451,16 @@ pub const TYPE_UNION_SEP: &str = "|";
 /// indexes, aliases, and calls never narrow. `x == Val(v)` keeps S31 binding
 /// behavior. Sema records the proven unwrap as an S31 Present/`IfLet` fact;
 /// codegen performs no proof.
+///
+/// D-OPT-LIFT1=A (ratified 2026-09-28, card #3685) amends S32: a plain `T`
+/// fills a slot whose checked type is `T?` — returns (including `?? return`),
+/// call arguments, struct and enum payload fields, list and map items, typed
+/// bindings, and reassignment of a `T?` place. Callee and generic choices are
+/// fixed first; the lift then adds exactly one `Present`, so every tier lowers
+/// it as `Val(x)`. `x == 5` holds only when `x` holds 5 (`!=` is its
+/// opposite); only `x == Val(v)` binds. Nested optionals stay E0309, and
+/// `Val(x)` stays where nothing expects an optional (`limit := Val(10)`).
+/// `jet fmt --simplify` drops a redundant `Val(x)` in a `-> T?` return.
 pub const LIT_VALUE: &str = "Val";
 pub const LIT_NULL: &str = "None";
 
@@ -590,10 +680,10 @@ pub const TARGET_OS_MACOS: &str = "MacOS";
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
-/// `@build` and its `.os` field — the subject of an `@if @build.os == { }`
+/// `$build` and its `.os` field — the subject of an `prep if $build.os == { }`
 /// switch that folds to the arm matching the build's active OS. `build` is not
 /// a reserved keyword: it is recognized only in that syntactic position (an
-/// ordinary local named `build` is still fine); a `@build.os` anywhere else has
+/// ordinary local named `build` is still fine); a `$build.os` anywhere else has
 /// no compiler meaning.
 pub const BUILD_INFO: &str = "build";
 /// D-OSTARGET2=B: the `.os` field of the comptime `build` value.
@@ -603,17 +693,17 @@ pub const BUILD_INFO_SETTINGS: &str = "settings"; // D-CONF-KEY1
 
 /// D-CONF-READ1=A / D-CONF-KEY1=A / D-CONF-STAMP1=B: registered complete
 /// build-fact paths.
-pub const COMPILER_BUILD_FACT_PACKAGE_NAME: &str = "@build.package.name";
-pub const COMPILER_BUILD_FACT_PACKAGE_VERSION: &str = "@build.package.version";
-pub const COMPILER_BUILD_FACT_OS: &str = "@build.os";
-pub const COMPILER_BUILD_FACT_PROFILE_PATH: &str = "@build.profile";
+pub const COMPILER_BUILD_FACT_PACKAGE_NAME: &str = "$package.name";
+pub const COMPILER_BUILD_FACT_PACKAGE_VERSION: &str = "$package.version";
+pub const COMPILER_BUILD_FACT_OS: &str = "$build.os";
+pub const COMPILER_BUILD_FACT_PROFILE_PATH: &str = "$build.profile";
 /// D-CONF-MODULE1=A: declared settings are dynamic leaves of the same
 /// compiler-owned build-fact namespace.
-pub const COMPILER_BUILD_FACT_SETTINGS_PREFIX: &str = "@build.settings.";
-pub const COMPILER_BUILD_FACT_STAMP_GIT: &str = "@build.stamp.git";
-pub const COMPILER_BUILD_FACT_STAMP_DIRTY: &str = "@build.stamp.dirty";
-pub const COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: &str = "@build.stamp.toolchain";
-pub const COMPILER_BUILD_FACT_STAMP_AT: &str = "@build.stamp.at";
+pub const COMPILER_BUILD_FACT_SETTINGS_PREFIX: &str = "$build.settings.";
+pub const COMPILER_BUILD_FACT_STAMP_GIT: &str = "$build.stamp.git";
+pub const COMPILER_BUILD_FACT_STAMP_DIRTY: &str = "$build.stamp.dirty";
+pub const COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: &str = "$build.stamp.toolchain";
+pub const COMPILER_BUILD_FACT_STAMP_AT: &str = "$build.stamp.at";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
@@ -973,29 +1063,29 @@ pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";
 /// D-LAYOUT-FACTS1=B / D-ONCE-AT1=D: the compiler-owned type facts. The
 /// parser accepts these after `.` only in the contextual `@fact` form; they are
 /// not user-declarable member names.
-pub const COMPILER_FACT_LAYOUT: &str = "@layout";
-pub const COMPILER_FACT_NAME: &str = "@name";
-pub const COMPILER_FACT_FIELDS: &str = "@fields";
-pub const COMPILER_FACT_RANGE: &str = "@range";
-pub const COMPILER_FACT_DIMENSION: &str = "@dimension";
-pub const COMPILER_FACT_MEASURE: &str = "@measure";
-pub const COMPILER_FACT_EXACTNESS: &str = "@exactness";
-pub const COMPILER_FACT_CLASSIFICATION: &str = "@classification";
-pub const COMPILER_FACT_OBLIGATION: &str = "@obligation";
-pub const COMPILER_FACT_STATES: &str = "@states";
-pub const COMPILER_FACT_EFFECTS: &str = "@effects";
-pub const COMPILER_FACT_SENDABILITY: &str = "@sendability";
-pub const COMPILER_FACT_MOVEDNESS: &str = "@movedness";
-pub const COMPILER_FACT_ATTRIBUTION: &str = "@attribution";
+pub const COMPILER_FACT_LAYOUT: &str = "$layout";
+pub const COMPILER_FACT_NAME: &str = "$name";
+pub const COMPILER_FACT_FIELDS: &str = "$fields";
+pub const COMPILER_FACT_RANGE: &str = "$range";
+pub const COMPILER_FACT_DIMENSION: &str = "$dimension";
+pub const COMPILER_FACT_MEASURE: &str = "$measure";
+pub const COMPILER_FACT_EXACTNESS: &str = "$exactness";
+pub const COMPILER_FACT_CLASSIFICATION: &str = "$classification";
+pub const COMPILER_FACT_OBLIGATION: &str = "$obligation";
+pub const COMPILER_FACT_STATES: &str = "$states";
+pub const COMPILER_FACT_EFFECTS: &str = "$effects";
+pub const COMPILER_FACT_SENDABILITY: &str = "$sendability";
+pub const COMPILER_FACT_MOVEDNESS: &str = "$movedness";
+pub const COMPILER_FACT_ATTRIBUTION: &str = "$attribution";
 /// D-TRACK-ORIGIN1=A: the sole public read of the typed, optional `#Track`
 /// origin fact.
-pub const COMPILER_FACT_ORIGIN: &str = "@origin";
-pub const COMPILER_FACT_VIEW_PROVENANCE: &str = "@view_provenance";
-pub const COMPILER_FACT_UNIT_SCALE_PROVENANCE: &str = "@unit_scale_provenance";
-pub const COMPILER_FACT_MATURITY: &str = "@maturity";
+pub const COMPILER_FACT_ORIGIN: &str = "$origin";
+pub const COMPILER_FACT_VIEW_PROVENANCE: &str = "$view_provenance";
+pub const COMPILER_FACT_UNIT_SCALE_PROVENANCE: &str = "$unit_scale_provenance";
+pub const COMPILER_FACT_MATURITY: &str = "$maturity";
 /// The marked member used by the old TypeInfo reader. The complete build
 /// path is `COMPILER_BUILD_FACT_PROFILE_PATH` above.
-pub const COMPILER_BUILD_FACT_PROFILE: &str = "@profile";
+pub const COMPILER_BUILD_FACT_PROFILE: &str = "$profile";
 /// Each compiler fact and the `TypeInfo` member it projects.
 pub const COMPILER_FACTS: &[(&str, &str)] = &[
     (COMPILER_FACT_LAYOUT, "layout"),
@@ -1032,7 +1122,7 @@ pub fn is_layout_byte_fact(type_name: &str, field: &str) -> bool {
     )
 }
 
-/// Internal AST spelling for the typed selector in `T.@layout[.field]`.
+/// Internal AST spelling for the typed selector in `T.$layout[.field]`.
 /// Keeping the selector in an existing `Expr::Ident` avoids a second AST
 /// variant for a compile-time-only projection. It is never formatted as this
 /// sentinel and never appears in generated Jet source.

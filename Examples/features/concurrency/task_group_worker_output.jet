@@ -1,0 +1,12 @@
+// #3787: a task spawned inside `task.group` runs its body (its output appears
+// between the owner's lines) and the owner continues after the group closes.
+fn run() {
+    print("owner before")
+    task.group g {
+        worker :: task {
+            print("worker ran")
+        }
+        worker.join() ?? panic("worker failed")
+    }
+    print("owner after")
+}

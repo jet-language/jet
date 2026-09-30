@@ -14,6 +14,7 @@ use core.crypto as crypto
 use core.crypto.expert as expert
 use core.encoding as encoding
 use core.encoding.json as json
+use core.time as time
 // core.auth — closed token verification and session cookies.
 //
 // JWT verification is strict HS256 with exact NumericDate claims. Password
@@ -86,7 +87,7 @@ pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, cl
     aud_text :: json_audience_text(payload_tree, "aud") ?? return Err(AuthError.Malformed)
     sub :: json_optional_text(payload_tree, "sub") ?? return Err(AuthError.Malformed)
     if audience.len() > 0 && !json_audience_matches(payload_tree, "aud", audience) -> return Err(AuthError.Rejected)
-    now :: core.time.instant().unix_ns
+    now :: time.unix_ns()
     exp_ns :: unix_seconds_ns(exp) ?? return Err(AuthError.Malformed)
     if exp <= 0 -> return Err(AuthError.Expired)
     expiry :: add_leeway(exp_ns, clock_skew.ns) ?? return Err(AuthError.Malformed)
@@ -140,7 +141,7 @@ pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims
     iss :: json_optional_text(payload_tree, "iss") ?? return Err(AuthError.Malformed)
     sub :: json_optional_text(payload_tree, "sub") ?? return Err(AuthError.Malformed)
     if !json_audience_matches(payload_tree, "aud", audience) -> return Err(AuthError.Rejected)
-    now :: core.time.instant().unix_ns
+    now :: time.unix_ns()
     exp_ns :: unix_seconds_ns(exp) ?? return Err(AuthError.Malformed)
     if exp <= 0 || now >= exp_ns -> return Err(AuthError.Expired)
     if json_has(payload_tree, "nbf") {
@@ -253,12 +254,12 @@ fn session_id_from_cookie(cookie: String) -> String? {
 }
 
 
-pub fn session_user(session: Session) -> String { session.user_id }
+pub fn session_user(session: Session) -> String Never! { session.user_id }
 
-pub fn session_cookie(session: Session) -> String { session.cookie }
+pub fn session_cookie(session: Session) -> String Never! { session.cookie }
 
-pub fn session_id(session: Session) -> String { session.id }
-pub fn session_show(session: Session) -> String {
+pub fn session_id(session: Session) -> String Never! { session.id }
+pub fn session_show(session: Session) -> String Never! {
     cookie_len :: session.cookie.bytes().len()
     return "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={cookie_len})"
 }
@@ -291,7 +292,7 @@ fn decode_url_local(text: String) -> [U8]? {
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
-            &out.push(U8{(acc >> bits) & 255})
+            &out.push(to_u8(acc >> bits))
             if bits == 0 {
                 acc = 0
             } else {
@@ -568,7 +569,7 @@ fn ends(text: String, suffix: String) -> Bool Never! {
     }
     true
 }
-fn host_unix_s() -[Time]> Int Never! { core.time.instant().unix_ns /% 1000000000 }
+fn host_unix_s() -[Time]> Int Never! { time.unix_ns() /% 1000000000 }
 
 fn index_byte(bytes: [U8], needle: U8) -> Int Never! {
     loop i in 0..<bytes.len() {
@@ -594,7 +595,14 @@ fn paseto_pae_part(out: &[U8], bytes: [U8]) Never! {
 fn paseto_pae_len(out: &[U8], value: Int) Never! {
     n := value
     loop _ in 0..<8 {
-        &out.push(U8{n & 255})
+        &out.push(to_u8(n))
         n = n >> 8
     }
+}
+
+/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
+/// checked `U8{}` conversion.
+fn to_u8(n: Int) -> U8 Never! {
+    v :: n & 255
+    (U8{v})
 }

@@ -78,7 +78,7 @@ fn jet_rust_emit_partial_declare_node(ctx: &JetRustEmitContext, function: MirFun
         }
         nested_owner :: jet_rust_emit_partial_node_owner(ctx, function, base, child_prefix)
         if nested_owner == .Val(nested) {
-            jet_rust_emit_partial_declare_node(ctx, function, base, child_prefix, nested, seen, lines)
+            jet_rust_emit_partial_declare_node(&ctx, function, base, child_prefix, nested, &seen, &lines)
         }
     }
 }
@@ -101,7 +101,7 @@ fn jet_rust_emit_partial_declarations(ctx: &JetRustEmitContext, function: MirFun
             loop place in function.places { if place.id == id -> base = place.base }
             if base == {
                 .Static(_) -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR partial move targets static storage", "static places do not expose a checked split-storage ownership protocol", Val(function.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR partial move targets static storage", "static places do not expose a checked split-storage ownership protocol", Val(function.span))
                     next
                 }
                 else -> {}
@@ -112,7 +112,7 @@ fn jet_rust_emit_partial_declarations(ctx: &JetRustEmitContext, function: MirFun
             if already -> next
             &seen_roots.push(root)
             owner :: jet_rust_emit_partial_owner(ctx, path[0]) ?? MirTypeId{value: 0}
-            jet_rust_emit_partial_declare_node(ctx, function, base, [MirFieldId]{}, owner, seen_slots, lines)
+            jet_rust_emit_partial_declare_node(&ctx, function, base, [MirFieldId]{}, owner, &seen_slots, &lines)
         }
     }
     lines
@@ -192,12 +192,12 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
         }
     }
     if !found {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait default function is missing", "default trait methods must resolve to their checked MIR function row", Val(method.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait default function is missing", "default trait methods must resolve to their checked MIR function row", Val(method.span))
         &lines.push("    {jet_rust_emit_trait_method_signature(ctx, method)}")
         return
     }
     if !valid {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait default function ABI disagrees with its declaration", "default trait methods must preserve the checked trait, receiver, parameter, return, and failure facts", Val(method.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait default function ABI disagrees with its declaration", "default trait methods must preserve the checked trait, receiver, parameter, return, and failure facts", Val(method.span))
         &lines.push("    {jet_rust_emit_trait_method_signature(ctx, method)}")
         return
     }
@@ -214,7 +214,7 @@ fn jet_rust_emit_trait_definition(ctx: &JetRustEmitContext, definition: MirTrait
     visibility :: jet_rust_emit_visibility(definition.visibility)
     &lines.push("{visibility}trait {jet_rust_emit_trait_name(ctx, definition.id)} {{")
     loop associated in definition.associated_types -> &lines.push("    type {jet_rust_emit_sanitize(associated.name)};")
-    loop method in definition.methods -> jet_rust_emit_trait_method_definition(ctx, definition, method, lines)
+    loop method in definition.methods -> jet_rust_emit_trait_method_definition(&ctx, definition, method, &lines)
     &lines.push("}}")
 }
 
@@ -231,24 +231,24 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MirImplDe
             owner = Val(declared_owner)
             if implementation.trait_ref == .Val(expected_trait_ref) {
                 if declared_trait_ref.id != expected_trait_ref.id {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait impl method trait identity disagrees with its impl row", "trait wrappers must preserve the exact checked trait identity", Val(function.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait impl method trait identity disagrees with its impl row", "trait wrappers must preserve the exact checked trait identity", Val(function.span))
                     return
                 }
             }
         }
         .TopLevel -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR impl method is top-level", "impl rows must reference a checked method or trait-method function form", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR impl method is top-level", "impl rows must reference a checked method or trait-method function form", Val(function.span))
             return
         }
     }
     if owner != None && !mir_type_same_checked_type(owner ?? implementation.self_type, implementation.self_type) {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR impl method owner does not match its impl row", "impl dispatch must preserve the checked owner type identity", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR impl method owner does not match its impl row", "impl dispatch must preserve the checked owner type identity", Val(function.span))
         return
     }
     if implementation.trait_ref != None {
         if function.form == {
             .Method(_, _) -> {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl method has an inherent function form", "trait impl dispatch must use a checked trait-method function row", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl method has an inherent function form", "trait impl dispatch must use a checked trait-method function row", Val(function.span))
                 return
             }
             else -> {}
@@ -257,7 +257,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MirImplDe
     if implementation.trait_ref == None {
         if function.form == {
             .TraitMethod(_, _, _, _) -> {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "inherent impl method has a trait function form", "inherent impl dispatch must use a checked method function row", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "inherent impl method has a trait function form", "inherent impl dispatch must use a checked method function row", Val(function.span))
                 return
             }
             else -> {}
@@ -265,7 +265,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MirImplDe
     }
     local_generic_params := function.generic_params
     if implementation.trait_ref != None && local_generic_params.len() > 0 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl method carries undeclared generic parameters", "checked trait method rows must declare every method-level generic parameter in their trait ABI", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl method carries undeclared generic parameters", "checked trait method rows must declare every method-level generic parameter in their trait ABI", Val(function.span))
         return
     }
     access :: self_access ?? MirAccess.Move
@@ -319,11 +319,11 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MirImplDe
             }
         }
         if !found_method {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait impl method has no trait declaration", "trait wrappers must preserve the checked trait method name and ABI", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait impl method has no trait declaration", "trait wrappers must preserve the checked trait method name and ABI", Val(function.span))
             return
         }
         if !valid_signature {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait impl method ABI disagrees with its trait declaration", "trait wrappers must preserve receiver, parameter, return, and failure facts exactly", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait impl method ABI disagrees with its trait declaration", "trait wrappers must preserve receiver, parameter, return, and failure facts exactly", Val(function.span))
             return
         }
     }
@@ -331,13 +331,13 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MirImplDe
     unsafe_prefix := ""
     if function.is_unsafe {
         if implementation.trait_ref != None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl method carries an unsafe ABI without a trait declaration", "checked trait method rows must declare the unsafe boundary before source emission", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl method carries an unsafe ABI without a trait declaration", "checked trait method rows must declare the unsafe boundary before source emission", Val(function.span))
             return
         }
         unsafe_prefix = "unsafe "
     }
     method_visibility :: if implementation.trait_ref != None -> "" else -> jet_rust_emit_visibility(function)
-    generics :: if implementation.trait_ref == None -> jet_rust_emit_generic_params(ctx, local_generic_params) else -> ""
+    generics :: if implementation.trait_ref == None -> jet_rust_emit_generic_params(&ctx, local_generic_params) else -> ""
     direct_call :: "{jet_rust_emit_function_name(ctx, function.id)}({call_args.join(", ")})"
     call_expression :: if function.is_unsafe -> "unsafe {{ {direct_call} }}" else -> direct_call
     &lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {jet_rust_emit_type(ctx, function.return_type)} {{")
@@ -360,12 +360,12 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MirIm
                 loop required in definition.associated_types {
                     supplied := false
                     loop actual in implementation.associated_types { if actual.name == required.name -> supplied = true }
-                    if !supplied -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits an associated type", "every checked trait associated type must have one impl alias", Val(implementation.span))
+                    if !supplied -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits an associated type", "every checked trait associated type must have one impl alias", Val(implementation.span))
                 }
                 loop actual in implementation.associated_types {
                     declared := false
                     loop required in definition.associated_types { if required.name == actual.name -> declared = true }
-                    if !declared -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl declares an unknown associated type", "impl aliases must name only associated types declared by the checked trait", Val(actual.span))
+                    if !declared -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl declares an unknown associated type", "impl aliases must name only associated types declared by the checked trait", Val(actual.span))
                 }
                 loop required in definition.methods {
                     if required.default == None {
@@ -375,12 +375,12 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MirIm
                                 if function.id == method_id && function.name == required.name && (ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, function)) -> implemented = true
                             }
                         }
-                        if !implemented -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits a required method", "every checked trait method without a default must have one impl method row", Val(implementation.span))
+                        if !implemented -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits a required method", "every checked trait method without a default must have one impl method row", Val(implementation.span))
                     }
                 }
             }
         }
-        if !trait_found -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "trait impl references a missing trait", "checked impl dispatch must resolve its trait declaration before source emission", Val(implementation.span))
+        if !trait_found -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "trait impl references a missing trait", "checked impl dispatch must resolve its trait declaration before source emission", Val(implementation.span))
         &lines.push("impl{impl_generics} {jet_rust_emit_trait_name(ctx, trait_ref.id)} for {jet_rust_emit_type(ctx, implementation.self_type)} {{")
         }
         else -> {
@@ -395,12 +395,12 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MirIm
                 if ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, function) {
                     previous_method_params := ctx.current_generic_params
                     ctx.current_generic_params = jet_rust_emit_merge_generic_params(impl_scope, function.generic_params)
-                    jet_rust_emit_impl_method(ctx, implementation, function, impl_scope, lines)
+                    jet_rust_emit_impl_method(&ctx, implementation, function, impl_scope, &lines)
                     ctx.current_generic_params = previous_method_params
                 }
             }
         }
-        if !found -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR impl method is missing", "impl dispatch rows must resolve every checked method identity", Val(implementation.span))
+        if !found -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR impl method is missing", "impl dispatch rows must resolve every checked method identity", Val(implementation.span))
     }
     loop associated in implementation.associated_types -> &lines.push("    type {jet_rust_emit_sanitize(associated.name)} = {jet_rust_emit_type(ctx, associated.ty)};")
     &lines.push("}}")

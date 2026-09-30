@@ -7,7 +7,7 @@
 //! `require` remain allowed through their existing evaluator paths.
 
 use std::borrow::Borrow;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
@@ -395,63 +395,81 @@ pub(super) fn reachable_func_names<F>(init: &Expr, funcs: &HashMap<String, F>) -
 where
     F: Borrow<Func>,
 {
-    fn known_name<F>(name: &str, funcs: &HashMap<String, F>) -> Option<String> {
-        if funcs.contains_key(name) {
-            return Some(name.to_string());
-        }
-        name.split_once('.')
-            .map(|(module, symbol)| format!("{module}::{symbol}"))
-            .filter(|qualified| funcs.contains_key(qualified))
-    }
+    let mut roots = HashSet::new();
+    reachable_func_roots(init, funcs, &mut roots);
+    reachable_func_closure(roots, funcs)
+}
 
-    fn expression_func_name<F>(expr: &Expr, funcs: &HashMap<String, F>) -> Option<String> {
-        match expr {
-            Expr::Call(call) => known_name(&call.name, funcs),
-            Expr::Ident(name, _) => known_name(name, funcs),
-            Expr::MethodCall {
-                method,
-                recv_type: Some(owner),
-                ..
-            } => {
-                let qualified = format!("{owner}::{method}");
-                known_name(&qualified, funcs)
-            }
-            _ => None,
-        }
+fn known_func_name<F>(name: &str, funcs: &HashMap<String, F>) -> Option<String> {
+    if funcs.contains_key(name) {
+        return Some(name.to_string());
     }
+    name.split_once('.')
+        .map(|(module, symbol)| format!("{module}::{symbol}"))
+        .filter(|qualified| funcs.contains_key(qualified))
+}
 
-    let mut roots = BTreeSet::new();
+fn expression_func_name<F>(expr: &Expr, funcs: &HashMap<String, F>) -> Option<String> {
+    match expr {
+        Expr::Call(call) => known_func_name(&call.name, funcs),
+        Expr::Ident(name, _) => known_func_name(name, funcs),
+        Expr::MethodCall {
+            method,
+            recv_type: Some(owner),
+            ..
+        } => {
+            let qualified = format!("{owner}::{method}");
+            known_func_name(&qualified, funcs)
+        }
+        _ => None,
+    }
+}
+
+/// Add the functions `init` names directly to `roots`.
+pub(super) fn reachable_func_roots<F>(
+    init: &Expr,
+    funcs: &HashMap<String, F>,
+    roots: &mut HashSet<String>,
+) where
+    F: Borrow<Func>,
+{
     walk_expr_nodes(init, WalkOpts::REACHABLE, &mut |expr| {
         if let Some(name) = expression_func_name(expr, funcs) {
             roots.insert(name);
         }
     });
+}
 
-    let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
-    for (name, function) in funcs {
+/// `roots` plus every function their bodies reach.
+///
+/// The walk goes forward from the roots and reads only the bodies it reaches,
+/// so its cost follows the closure, not the whole function table. A comptime
+/// call site in a large unit therefore does not pay for every function in the
+/// unit, and callers with many roots take one closure over their union.
+pub(super) fn reachable_func_closure<F>(
+    roots: HashSet<String>,
+    funcs: &HashMap<String, F>,
+) -> HashSet<String>
+where
+    F: Borrow<Func>,
+{
+    let mut pending: Vec<String> = roots.iter().cloned().collect();
+    let mut reached = roots;
+    while let Some(name) = pending.pop() {
+        let Some(function) = funcs.get(&name) else {
+            continue;
+        };
         for statement in &function.borrow().body {
             walk_stmt_expr_nodes(statement, WalkOpts::REACHABLE, &mut |expr| {
                 if let Some(dependency) = expression_func_name(expr, funcs) {
-                    reverse.entry(dependency).or_default().insert(name.clone());
+                    if reached.insert(dependency.clone()) {
+                        pending.push(dependency);
+                    }
                 }
             });
         }
     }
-
-    let seeds = roots
-        .into_iter()
-        .map(|root| (root, BTreeSet::from(["reachable".to_string()])))
-        .collect();
-    jet_foundation::Facts::project_reachability(
-        &reverse,
-        [jet_foundation::Facts::ReachabilityRow::new(
-            "reachable",
-            seeds,
-        )],
-    )
-    .nodes_with("reachable", "reachable")
-    .into_iter()
-    .collect()
+    reached
 }
 
 fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {

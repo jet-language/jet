@@ -341,6 +341,15 @@ pub(crate) fn fold_typed_fact_enum_equality(op: BinOp, lhs: &Expr, rhs: &Expr) -
 /// binary expression. Fold that generated fact shape at the same typed boundary.
 pub(crate) fn fold_typed_fact_enum_pattern(subject: &Expr, pattern: &Pattern) -> Option<bool> {
     let (type_name, value_variant) = compiler_fact_enum_value(subject)?;
+    fold_fact_enum_variant_test(type_name, value_variant, pattern)
+}
+
+/// Test one compiler fact enum value against a binding-free variant pattern.
+pub(crate) fn fold_fact_enum_variant_test(
+    type_name: &str,
+    value_variant: &str,
+    pattern: &Pattern,
+) -> Option<bool> {
     let Pattern::Variant {
         variant, bindings, ..
     } = pattern
@@ -2104,7 +2113,7 @@ pub(crate) fn demand_core_source_generic_function(
     args: &[TCallArg],
     explicit_type_args: &[Type],
 ) -> Option<String> {
-    let module_identity = signature.module_identity.as_ref()?;
+    let module_identity = &signature.module_identity;
     let shape = generic_call_shape(args, explicit_type_args);
     let type_args = checked_core_source_generic_type_args(signature, &shape)?
         .iter()
@@ -2283,7 +2292,7 @@ fn checked_imported_core_source_signature<'a>(
     let source = jet_foundation::CoreModuleExports::core_source_module_by_alias(imported_alias)?;
     signatures
         .get(&(source.module.to_string(), method.to_string()))
-        .filter(|signature| signature.module_identity.as_deref() == Some(owner))
+        .filter(|signature| signature.module_identity == owner)
 }
 
 fn lower_checked_core_source_generic_instance(
@@ -2326,35 +2335,14 @@ fn lower_checked_core_source_generic_instance(
             format!("checked Core source generic target `{owner}::{method}` has inconsistent type parameters"),
         ));
     }
-    let substitutions = type_param_names
-        .iter()
-        .cloned()
-        .zip(type_args.iter().cloned())
-        .collect::<std::collections::HashMap<_, _>>();
     let emitted_name = generic_free_function_instance_key(method, type_args);
     let emitted_key = function_semantic_key(&owner, &emitted_name);
     if funcs.iter().any(|function| function.key == emitted_key) {
         return Ok(());
     }
 
-    let mut specialized = crate::Sema::specialize_function_types(template, &substitutions);
-    specialized.name = emitted_name.clone();
-    let residual_type_params = specialized
-        .type_params
-        .iter()
-        .map(|param| param.name.clone())
-        .collect::<std::collections::HashSet<_>>();
-    specialized.type_params.clear();
-    let previous_type_params = imported_cx.current_type_params.borrow().clone();
-    let mut function_type_params = previous_type_params.clone();
-    function_type_params.extend(residual_type_params);
-    imported_cx
-        .current_type_params
-        .replace(function_type_params);
-    let mut lowered = lower_func(&specialized, imported_cx);
-    imported_cx
-        .current_type_params
-        .replace(previous_type_params);
+    let (specialized, mut lowered) =
+        lower_core_source_generic_template(template, type_args, &emitted_name, imported_cx);
     let binders = qualification_binders(&[], Some(&specialized));
     for (_, ty, _) in &mut lowered.params {
         *ty = qualify_imported_type(bundle, module_idx, &owner, &binders, ty);
@@ -2371,6 +2359,38 @@ fn lower_checked_core_source_generic_instance(
     );
     funcs.push(lowered);
     Ok(())
+}
+
+/// Specialize one checked Core source generic template to concrete type
+/// arguments and lower it in its defining module's context. Callers own the
+/// emitted key, the emitted name and any boundary type qualification.
+fn lower_core_source_generic_template(
+    template: Func,
+    type_args: &[Type],
+    emitted_name: &str,
+    cx: &Cx,
+) -> (Func, TFunc) {
+    let substitutions = template
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .zip(type_args.iter().cloned())
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut specialized = crate::Sema::specialize_function_types(template, &substitutions);
+    specialized.name = emitted_name.to_string();
+    let residual_type_params = specialized
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<std::collections::HashSet<_>>();
+    specialized.type_params.clear();
+    let previous_type_params = cx.current_type_params.borrow().clone();
+    let mut function_type_params = previous_type_params.clone();
+    function_type_params.extend(residual_type_params);
+    cx.current_type_params.replace(function_type_params);
+    let lowered = lower_func(&specialized, cx);
+    cx.current_type_params.replace(previous_type_params);
+    (specialized, lowered)
 }
 
 fn specialize_checked_core_source_generics(
@@ -2595,6 +2615,8 @@ pub struct MirFragmentContext<'a> {
 enum FragmentCallable {
     Function(String),
     Method { owner: String, name: String },
+    /// A source-owned Core body, keyed by Core module path and function.
+    CoreSource { module: String, name: String },
 }
 
 fn fragment_function_key(name: &str, context: &MirFragmentContext<'_>) -> Option<String> {
@@ -2725,9 +2747,67 @@ fn collect_fragment_callable(
     }
 }
 
+/// Record a source-owned Core body the fragment reaches: `alias.member(...)`
+/// through a Core import, or, inside a Core body, a plain call to a function
+/// of the same Core module (private helpers included). A Core body's calls
+/// into its own module through an alias stay on the ordinary Core route, as
+/// they do in runtime lowering.
+fn collect_fragment_core_callable(
+    expr: &crate::AST::Expr,
+    context: &MirFragmentContext<'_>,
+    core_imports: &std::collections::HashMap<String, String>,
+    current_module: Option<&str>,
+    locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
+    out: &mut std::collections::BTreeSet<FragmentCallable>,
+) {
+    let Some(facts) = context.checked_nominals else {
+        return;
+    };
+    let is_local = |name: &str| locals.is_some_and(|locals| locals.contains_key(name));
+    let (module, name) = match expr {
+        crate::AST::Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else {
+                return;
+            };
+            if is_local(alias.as_str()) {
+                return;
+            }
+            let Some(module) = core_imports.get(alias) else {
+                return;
+            };
+            if current_module == Some(module.as_str())
+                || !jet_foundation::CoreModuleExports::core_source_owns(module, method)
+            {
+                return;
+            }
+            (module.as_str(), method.as_str())
+        }
+        crate::AST::Expr::Call(call) if !is_local(call.name.as_str()) => {
+            let Some(module) = current_module else {
+                return;
+            };
+            (module, call.name.as_str())
+        }
+        _ => return,
+    };
+    if facts
+        .core_source_bodies
+        .get(module)
+        .is_some_and(|source| source.functions.contains_key(name))
+    {
+        out.insert(FragmentCallable::CoreSource {
+            module: module.to_string(),
+            name: name.to_string(),
+        });
+    }
+}
+
 fn collect_fragment_function_dependencies(
     function: &crate::AST::Func,
     current_owner: Option<&str>,
+    core_scope: Option<(&str, &crate::Comptime::MirBridge::MirFragmentCoreSourceModule)>,
     context: &MirFragmentContext<'_>,
     out: &mut std::collections::BTreeSet<FragmentCallable>,
 ) {
@@ -2736,8 +2816,27 @@ fn collect_fragment_function_dependencies(
         .iter()
         .map(|param| (param.name.clone(), param.ty.clone()))
         .collect::<std::collections::HashMap<_, _>>();
-    let mut collect = |candidate: &crate::AST::Expr| {
-        collect_fragment_callable(candidate, context, current_owner, Some(&locals), out);
+    let mut collect = |candidate: &crate::AST::Expr| match core_scope {
+        // A Core body resolves names in its own module, never the caller's.
+        Some((module, source)) => collect_fragment_core_callable(
+            candidate,
+            context,
+            &source.core_imports,
+            Some(module),
+            Some(&locals),
+            out,
+        ),
+        None => {
+            collect_fragment_callable(candidate, context, current_owner, Some(&locals), out);
+            collect_fragment_core_callable(
+                candidate,
+                context,
+                context.core_imports,
+                None,
+                Some(&locals),
+                out,
+            );
+        }
     };
     for statement in &function.body {
         statement.for_each_expr(&mut collect);
@@ -2767,6 +2866,14 @@ fn fragment_callable_closure(
             Some(context.binding_types),
             &mut reachable,
         );
+        collect_fragment_core_callable(
+            candidate,
+            context,
+            context.core_imports,
+            None,
+            Some(context.binding_types),
+            &mut reachable,
+        );
     };
     expr.for_each_expr(&mut collect);
     for statement in stmts {
@@ -2776,6 +2883,7 @@ fn fragment_callable_closure(
     let mut pending = reachable.iter().cloned().collect::<Vec<_>>();
     while let Some(callable) = pending.pop() {
         let mut owner = None;
+        let mut core_scope = None;
         let (function, current_owner) = match &callable {
             FragmentCallable::Function(name) => {
                 let Some(function) = context.funcs.get(name).copied() else {
@@ -2797,9 +2905,28 @@ fn fragment_callable_closure(
                 owner = Some(method_owner.as_str());
                 (function, owner)
             }
+            FragmentCallable::CoreSource { module, name } => {
+                let Some(source) = context
+                    .checked_nominals
+                    .and_then(|facts| facts.core_source_bodies.get(module))
+                else {
+                    continue;
+                };
+                let Some(function) = source.functions.get(name) else {
+                    continue;
+                };
+                core_scope = Some((module.as_str(), source));
+                (function, owner)
+            }
         };
         let mut dependencies = std::collections::BTreeSet::new();
-        collect_fragment_function_dependencies(function, current_owner, context, &mut dependencies);
+        collect_fragment_function_dependencies(
+            function,
+            current_owner,
+            core_scope,
+            context,
+            &mut dependencies,
+        );
         for dependency in dependencies {
             if reachable.insert(dependency.clone()) {
                 pending.push(dependency);
@@ -2905,6 +3032,61 @@ fn fragment_host_field_type(owner: &str, field: &str) -> crate::AST::Type {
     }
 }
 
+/// D-CAP-RECEIVER1=D: sema lifts a written receiver mark (`&buf.push(x)`,
+/// `^buf.seal()`) off the place it marks before resolving the call
+/// (`Sema::ReceiverMarks`), so checked bodies carry the unmarked call. A
+/// module `prep` constant is evaluated at registration, before function bodies
+/// are checked, so its fragment still sees the marks; lift them the same way.
+/// A write window receiver (`&values[0..1].sort()`) keeps its mark.
+fn lift_receiver_mark(expr: &mut crate::AST::Expr) {
+    use crate::AST::{Expr, PlaceAccess};
+    let Expr::MethodCall { receiver, .. } = expr else {
+        return;
+    };
+    let place = match receiver.as_mut() {
+        Expr::Place(inner, PlaceAccess::Write | PlaceAccess::Take, span)
+            if !matches!(inner.as_ref(), Expr::Slice { .. }) =>
+        {
+            std::mem::replace(inner.as_mut(), Expr::Unit(*span))
+        }
+        _ => return,
+    };
+    **receiver = place;
+}
+
+fn lift_body_receiver_marks(body: &mut [crate::AST::Stmt]) {
+    for stmt in body {
+        stmt.for_each_expr_mut(lift_receiver_mark);
+    }
+}
+
+fn lift_func_receiver_marks(function: &crate::AST::Func) -> crate::AST::Func {
+    let mut function = function.clone();
+    lift_body_receiver_marks(&mut function.body);
+    function
+}
+
+fn lift_item_receiver_marks(item: &mut crate::AST::Item) {
+    use crate::AST::Item;
+    let (methods, trait_impls) = match item {
+        Item::Func(function) => {
+            lift_body_receiver_marks(&mut function.body);
+            return;
+        }
+        Item::Impl(implementation) => (&mut implementation.methods, None),
+        Item::Struct(structure) => (&mut structure.methods, Some(&mut structure.trait_impls)),
+        Item::Enum(enumeration) => (&mut enumeration.methods, Some(&mut enumeration.trait_impls)),
+        _ => return,
+    };
+    let trait_methods = trait_impls
+        .into_iter()
+        .flatten()
+        .flat_map(|block| block.methods.iter_mut());
+    for method in methods.iter_mut().chain(trait_methods) {
+        lift_body_receiver_marks(&mut method.body);
+    }
+}
+
 fn lower_mir_fragment(
     expr: &crate::AST::Expr,
     stmts: &[crate::AST::Stmt],
@@ -2916,6 +3098,11 @@ fn lower_mir_fragment(
     ),
     LowerError,
 > {
+    let mut expr = expr.clone();
+    expr.for_each_expr_mut(lift_receiver_mark);
+    let mut stmts = stmts.to_vec();
+    lift_body_receiver_marks(&mut stmts);
+    let (expr, stmts) = (&expr, stmts.as_slice());
     let module = "__comptime".to_string();
     let name = "__fragment".to_string();
     let file = module.clone();
@@ -3326,6 +3513,7 @@ fn lower_mir_fragment(
             os_target: None,
         }));
     }
+    items.iter_mut().for_each(lift_item_receiver_marks);
     let mut cx = build_cx_items(
         &items,
         "",
@@ -3345,19 +3533,22 @@ fn lower_mir_fragment(
             .iter()
             .map(|(identity, module)| (identity.clone(), crate::Codegen::mangle(module)))
             .collect();
+        // Each signature names the loaded module whose body the fragment
+        // lowers on demand, so the call keys the same target as at runtime.
         cx.core_source_sigs = facts
             .core_source_sigs
             .iter()
-            .map(|(key, signature)| {
-                (
+            .filter_map(|(key, signature)| {
+                let source = facts.core_source_bodies.get(&key.0)?;
+                Some((
                     key.clone(),
                     crate::Codegen::CoreSourceFunctionSignature {
-                        module_identity: None,
+                        module_identity: source.module_identity.clone(),
                         type_params: signature.type_params.clone(),
                         params: signature.params.clone(),
                         return_type: signature.return_type.clone(),
                     },
-                )
+                ))
             })
             .collect();
         cx.local_type_identities
@@ -3416,7 +3607,10 @@ fn lower_mir_fragment(
         {
             continue;
         }
-        extra_funcs.push(lower::lower_func(function, &cx));
+        extra_funcs.push(lower::lower_func(&lift_func_receiver_marks(function), &cx));
+    }
+    if let Some(facts) = context.checked_nominals {
+        lower_fragment_core_source_bodies(facts, &reachable, &cx, &mut extra_funcs)?;
     }
     let mut trait_method_traits = std::collections::HashMap::new();
     for ((owner, method_name), method) in context.methods {
@@ -3429,7 +3623,8 @@ fn lower_mir_fragment(
         if matches!(method_name.as_str(), "encode" | "decode") || !method.type_params.is_empty() {
             continue;
         }
-        let trait_name = fragment_trait_name(owner, method_name, method);
+        let method = lift_func_receiver_marks(method);
+        let trait_name = fragment_trait_name(owner, method_name, &method);
         let mut lowered = if let Some(trait_name) = trait_name.as_deref() {
             trait_method_traits
                 .insert((owner.clone(), method_name.clone()), trait_name.to_string());
@@ -3450,9 +3645,9 @@ fn lower_mir_fragment(
                     .map(|param| param.ty.clone())
             })
             .flatten();
-            lower::lower_trait_method(method, owner, &cx, trait_name, false, operator_rhs.as_ref())
+            lower::lower_trait_method(&method, owner, &cx, trait_name, false, operator_rhs.as_ref())
         } else {
-            lower::lower_method(method, owner, &cx)
+            lower::lower_method(&method, owner, &cx)
         };
         lowered.name = method_name.clone();
         extra_funcs.push(lowered);
@@ -3477,22 +3672,13 @@ fn lower_mir_fragment(
         lower::lower_expr(expr, &cx, &mut env)
     } else {
         let body = lower::lower_stmts(stmts, &cx, &mut env);
-        // S57 / D-META-STAGE1=B: `@ { … }` bindings are the same compile-time
-        // names outside the block. Incoming fragment params round-trip; names
-        // the block bound are exported with them so sema can fold later reads.
-        let incoming: std::collections::HashSet<&str> = params
-            .iter()
-            .map(|(binding, _, _)| binding.as_str())
-            .collect();
-        let extras = env
-            .typed_locals()
-            .into_iter()
-            .filter(|(binding, _)| !incoming.contains(binding.as_str()) && binding.starts_with('@'))
-            .collect::<Vec<_>>();
+        // S57 / D-PREP-SURFACE2=A: incoming fragment params round-trip. Names
+        // the `prep { … }` block binds stay inside it like any block local;
+        // a build-time value that outlives the block is bound explicitly as
+        // `name :: prep { value }` (owner ruling, 2026-09-30).
         let tuple_shape = params
             .iter()
             .map(|(binding, ty, _)| (binding.clone(), ty.clone()))
-            .chain(extras)
             .collect::<Vec<_>>();
         let tuple_ty = crate::AST::Type::Tuple(
             tuple_shape
@@ -3522,6 +3708,9 @@ fn lower_mir_fragment(
         })));
         lower_demanded_generic_methods(&items, &cx, &mut extra_funcs)?;
         specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
+        if let Some(facts) = context.checked_nominals {
+            specialize_fragment_core_source_generics(facts, &cx, &mut extra_funcs)?;
+        }
         return lower_mir_fragment_program(
             module,
             name,
@@ -3569,6 +3758,9 @@ fn lower_mir_fragment(
     })));
     lower_demanded_generic_methods(&items, &cx, &mut extra_funcs)?;
     specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
+    if let Some(facts) = context.checked_nominals {
+        specialize_fragment_core_source_generics(facts, &cx, &mut extra_funcs)?;
+    }
     lower_mir_fragment_program(
         module,
         name,
@@ -3582,6 +3774,154 @@ fn lower_mir_fragment(
         &trait_method_traits,
         context,
     )
+}
+
+/// Build the lowering context of one loaded Core source module for a comptime
+/// fragment, the way runtime lowering builds it for an imported Core module:
+/// the module's own functions and Core imports, its loader alias as the local
+/// call prefix and its checked identity as the owner of every lowered body.
+fn fragment_core_source_cx(
+    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    source: &crate::Comptime::MirBridge::MirFragmentCoreSourceModule,
+    fragment_cx: &Cx,
+) -> (Vec<Item>, Cx) {
+    let mut functions = source.functions.values().collect::<Vec<_>>();
+    functions.sort_by(|left, right| left.name.cmp(&right.name));
+    let items = functions
+        .into_iter()
+        .map(|function| Item::Func(lift_func_receiver_marks(function)))
+        .collect::<Vec<_>>();
+    let mut cx = build_cx_items(
+        &items,
+        "",
+        &source.module_identity,
+        None,
+        &std::collections::HashMap::new(),
+        "2026",
+    );
+    cx.module_alias = source.alias.clone();
+    cx.module_identity = source.module_identity.clone();
+    cx.jit_local_call_prefix = Some(format!("{}::", mangle(&source.alias)));
+    cx.core_source_sigs = fragment_cx.core_source_sigs.clone();
+    cx.core_source_modules = facts
+        .core_source_bodies
+        .iter()
+        .map(|(module, loaded)| (module.clone(), loaded.alias.clone()))
+        .collect();
+    cx.core_imports = source.core_imports.clone();
+    for (alias, module) in &source.core_imports {
+        if let Some(loaded) = facts.core_source_bodies.get(module) {
+            cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
+        }
+    }
+    (items, cx)
+}
+
+/// Lower the source-owned Core bodies a fragment reaches under the key and
+/// name runtime lowering gives them, so `prep` code calls the same Core
+/// function a runtime call reaches.
+fn lower_fragment_core_source_bodies(
+    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    reachable: &std::collections::BTreeSet<FragmentCallable>,
+    fragment_cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+) -> Result<(), LowerError> {
+    let mut demanded = std::collections::BTreeMap::<&str, Vec<&str>>::new();
+    for callable in reachable {
+        if let FragmentCallable::CoreSource { module, name } = callable {
+            demanded
+                .entry(module.as_str())
+                .or_default()
+                .push(name.as_str());
+        }
+    }
+    for (module, names) in demanded {
+        let Some(source) = facts.core_source_bodies.get(module) else {
+            continue;
+        };
+        let (items, cx) = fragment_core_source_cx(facts, source, fragment_cx);
+        for item in &items {
+            let Item::Func(function) = item else {
+                continue;
+            };
+            // Generic bodies are lowered per checked instantiation below;
+            // an inline-foreign function has no Jet body.
+            if !names.contains(&function.name.as_str())
+                || !function.type_params.is_empty()
+                || function.inline_foreign.is_some()
+            {
+                continue;
+            }
+            let mut lowered = lower_func(function, &cx);
+            lowered.name = format!("{}::{}", mangle(&source.alias), mangle(&function.name));
+            funcs.push(lowered);
+        }
+        lower_demanded_generic_methods(&items, &cx, funcs)?;
+        specialize_generic_free_functions(&items, &cx, funcs);
+        merge_core_source_generic_calls(fragment_cx, &cx);
+    }
+    Ok(())
+}
+
+/// Lower every checked instantiation of a source-owned Core generic function
+/// the fragment demanded, as runtime lowering does for imported Core modules.
+fn specialize_fragment_core_source_generics(
+    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    fragment_cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+) -> Result<(), LowerError> {
+    loop {
+        let calls = std::mem::take(&mut *fragment_cx.jit_core_source_generic_calls.borrow_mut());
+        if calls.is_empty() {
+            return Ok(());
+        }
+        for ((owner, method), mut instantiations) in calls {
+            instantiations.sort_by_key(|types| format!("{types:?}"));
+            instantiations.dedup();
+            let missing_target = || {
+                LowerError::new(
+                    crate::Diagnostics::Span::new(0, 0),
+                    format!("checked Core source generic target `{owner}::{method}` has no loaded template"),
+                )
+            };
+            let source = facts
+                .core_source_bodies
+                .values()
+                .find(|source| source.module_identity == owner)
+                .ok_or_else(missing_target)?;
+            let template = source
+                .functions
+                .get(&method)
+                .filter(|template| !template.type_params.is_empty())
+                .ok_or_else(missing_target)?;
+            let (items, cx) = fragment_core_source_cx(facts, source, fragment_cx);
+            for type_args in instantiations {
+                if type_args.len() != template.type_params.len() {
+                    return Err(LowerError::new(
+                        template.span,
+                        format!("checked Core source generic target `{owner}::{method}` has inconsistent type parameters"),
+                    ));
+                }
+                let emitted_name = generic_free_function_instance_key(&method, &type_args);
+                let emitted_key = function_semantic_key(&owner, &emitted_name);
+                if funcs.iter().any(|function| function.key == emitted_key) {
+                    continue;
+                }
+                let (_, mut lowered) = lower_core_source_generic_template(
+                    lift_func_receiver_marks(template),
+                    &type_args,
+                    &emitted_name,
+                    &cx,
+                );
+                lowered.key = emitted_key;
+                lowered.name = format!("{}::{}", mangle(&source.alias), mangle(&emitted_name));
+                funcs.push(lowered);
+            }
+            lower_demanded_generic_methods(&items, &cx, funcs)?;
+            specialize_generic_free_functions(&items, &cx, funcs);
+            merge_core_source_generic_calls(fragment_cx, &cx);
+        }
+    }
 }
 
 fn lower_mir_fragment_program(
@@ -3642,6 +3982,13 @@ fn lower_mir_fragment_program(
         package_version: "0.0.0".to_string(),
     };
     let artifact_key = "__comptime_fragment".to_string();
+    // Core source bodies lowered into the fragment keep their defining
+    // module as owner; each owner needs its module row.
+    let core_source_modules = extra_funcs
+        .iter()
+        .filter(|function| function.module != module)
+        .map(|function| (function.module.clone(), function.source_file.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let artifact_facts = artifact_plan::TirArtifactFacts {
         package_identity: "comptime-fragment".to_string(),
         package_version: "0.0.0".to_string(),
@@ -3655,14 +4002,25 @@ fn lower_mir_fragment_program(
             return_type: Some(ret.clone()),
             is_pure: false,
         }],
-        modules: vec![artifact_plan::TirModuleFact {
+        modules: std::iter::once(artifact_plan::TirModuleFact {
             key: module.clone(),
             name: module.clone(),
             path: file.clone(),
             source_path: file.clone(),
             imports: Vec::new(),
             item_order: vec![artifact_plan::TirItemRef::Function(key.clone())],
-        }],
+        })
+        .chain(core_source_modules.iter().map(|(owner, source)| {
+            artifact_plan::TirModuleFact {
+                key: owner.clone(),
+                name: owner.clone(),
+                path: source.clone(),
+                source_path: source.clone(),
+                imports: Vec::new(),
+                item_order: Vec::new(),
+            }
+        }))
+        .collect(),
         imports: Vec::new(),
         foreign: Vec::new(),
         links: Vec::new(),
@@ -3680,7 +4038,9 @@ fn lower_mir_fragment_program(
             kind: artifact_plan::TirArtifactKind::NativeExecutable,
             name: "comptime fragment".to_string(),
             target: artifact_plan::TirArtifactTarget::Interpreter,
-            modules: vec![module.clone()],
+            modules: std::iter::once(module.clone())
+                .chain(core_source_modules.keys().cloned())
+                .collect(),
             links: Vec::new(),
             jobs: Vec::new(),
             runtime_parts: std::collections::BTreeSet::new(),
@@ -6634,12 +6994,9 @@ pub enum TStmt {
         body: Vec<TStmt>,
     },
     /// D-SHAPE-RESOURCE2=A: one sema-checked `defer close(^resource)` action.
-    /// AOT emits a Drop guard; non-resident dev tiers use their named fallback.
-    DeferClose {
-        close: TExpr,
-        resource: String,
-        id: usize,
-    },
+    /// MIR lowering emits `close` inline on every exit edge of the enclosing
+    /// scope, where the consuming `^resource` is an ordinary move.
+    DeferClose { close: TExpr, resource: TLocal },
     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
     /// `cond` (c109 Phase 22) is a `TIfCond`: a plain boolean expr, an optional-binding
     /// `if let <pat> = <subj>` (an `x == value(b)`/`Ok(b)`/`Err(b)`/variant condition),
@@ -7039,20 +7396,24 @@ pub enum TPatternShape {
         leading_dot: bool,
         span: crate::Diagnostics::Span,
     },
+    /// `inner` is an S31 nested payload pattern (`.Val(.Rect(w, h))`).
     Present {
         binding: String,
         binding_span: crate::Diagnostics::Span,
+        inner: Option<Box<TPatternShape>>,
         span: crate::Diagnostics::Span,
     },
     Absent(crate::Diagnostics::Span),
     Ok {
         binding: String,
         binding_span: crate::Diagnostics::Span,
+        inner: Option<Box<TPatternShape>>,
         span: crate::Diagnostics::Span,
     },
     Err {
         binding: String,
         binding_span: crate::Diagnostics::Span,
+        inner: Option<Box<TPatternShape>>,
         span: crate::Diagnostics::Span,
     },
     Range {
@@ -7070,7 +7431,7 @@ pub enum TPatternShape {
     Binary(Vec<TBinaryPatternPart>, crate::Diagnostics::Span),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum TPatternBinding {
     Wildcard,
     Bind {
@@ -7081,6 +7442,8 @@ pub enum TPatternBinding {
         lo: i64,
         hi: i64,
     },
+    /// S31: a nested pattern tests this payload slot.
+    Nested(Box<TPatternShape>),
 }
 
 #[derive(Clone)]
@@ -7259,6 +7622,12 @@ impl TPattern {
                         crate::AST::PatSlot::Range { lo, hi } => {
                             TPatternBinding::Range { lo: *lo, hi: *hi }
                         }
+                        crate::AST::PatSlot::Nested(inner) => {
+                            TPatternBinding::Nested(Box::new(Self::shape_from_ast(inner)))
+                        }
+                        crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+                            unreachable!("sema places named payload entries (D-PAT-NAMED-NEST1)")
+                        }
                     })
                     .collect(),
                 leading_dot: *leading_dot,
@@ -7267,29 +7636,41 @@ impl TPattern {
             crate::AST::Pattern::Present {
                 binding,
                 binding_span,
+                inner,
                 span,
             } => TPatternShape::Present {
                 binding: binding.clone(),
                 binding_span: *binding_span,
+                inner: inner
+                    .as_deref()
+                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
                 span: *span,
             },
             crate::AST::Pattern::Absent(span) => TPatternShape::Absent(*span),
             crate::AST::Pattern::Ok {
                 binding,
                 binding_span,
+                inner,
                 span,
             } => TPatternShape::Ok {
                 binding: binding.clone(),
                 binding_span: *binding_span,
+                inner: inner
+                    .as_deref()
+                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
                 span: *span,
             },
             crate::AST::Pattern::Err {
                 binding,
                 binding_span,
+                inner,
                 span,
             } => TPatternShape::Err {
                 binding: binding.clone(),
                 binding_span: *binding_span,
+                inner: inner
+                    .as_deref()
+                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
                 span: *span,
             },
             crate::AST::Pattern::Range { lo, hi, span } => TPatternShape::Range {
@@ -8005,7 +8386,7 @@ fn is_outcome_constructor(kind: &TExprKind) -> bool {
         TExprKind::Absent
             | TExprKind::Present(_)
             | TExprKind::Ok(_)
-            | TExprKind::Err(_)
+            | TExprKind::Err(..)
             | TExprKind::Call { .. }
             | TExprKind::MethodCall { .. }
             | TExprKind::StaticCall { .. }
@@ -8471,7 +8852,7 @@ fn collect_cost_expr_with_state_and_context(
         | TExprKind::DistinctRaw(arg)
         | TExprKind::Present(arg)
         | TExprKind::Ok(arg)
-        | TExprKind::Err(arg)
+        | TExprKind::Err(arg, _)
         | TExprKind::Deref(arg)
         | TExprKind::RawOf(arg)
         | TExprKind::Clone(arg)
@@ -9431,9 +9812,7 @@ fn checked_core_source_signature<'a>(
     {
         return None;
     }
-    signatures
-        .get(&(module.to_string(), method.to_string()))
-        .filter(|signature| signature.module_identity.is_some())
+    signatures.get(&(module.to_string(), method.to_string()))
 }
 
 fn checked_local_function_declaration_span(
@@ -9529,9 +9908,7 @@ fn checked_core_source_call_edges(
                     ) else {
                         return;
                     };
-                    let Some(module_identity) = signature.module_identity.as_deref() else {
-                        return;
-                    };
+                    let module_identity = signature.module_identity.as_str();
                     if bundle
                         .name_ledger
                         .module_identity(callable.module)
@@ -9616,7 +9993,7 @@ mod checked_function_reference_tests {
         );
         let alias_receiver = Expr::Ident("provider".to_string(), alias_span);
         let signature = crate::Codegen::CoreSourceFunctionSignature {
-            module_identity: Some("<corelib>/Core/http::Core/http/client.jet".to_string()),
+            module_identity: "<corelib>/Core/http::Core/http/client.jet".to_string(),
             type_params: Vec::new(),
             params: Vec::new(),
             return_type: Some(Type::Named("HTTPRequest".to_string())),
@@ -9643,8 +10020,8 @@ mod checked_function_reference_tests {
             )
             .expect("loaded source-owned Core function");
             assert_eq!(
-                signature.module_identity.as_deref(),
-                Some("<corelib>/Core/http::Core/http/client.jet")
+                signature.module_identity,
+                "<corelib>/Core/http::Core/http/client.jet"
             );
         }
         assert!(checked_core_source_signature(
@@ -9693,7 +10070,7 @@ mod checked_function_reference_tests {
 
         let owner = "<corelib>/Core/data::Core/data/data.jet";
         let signature = crate::Codegen::CoreSourceFunctionSignature {
-            module_identity: Some(owner.to_string()),
+            module_identity: owner.to_string(),
             type_params: vec!["T".to_string()],
             params: Vec::new(),
             return_type: None,
@@ -9807,6 +10184,60 @@ fn collect_trait_impl_callable_groups(
     }
 }
 
+/// D-SHAPE-RESOURCE1=A: a Core `Close` implementation is reached implicitly by
+/// scope-end cleanup of a live value, never through a source reference, so
+/// reference reachability alone would prune it and leave the automatic close
+/// without a lowered target. Collect its methods so they stay rooted.
+fn collect_core_close_callables(
+    items: &[Item],
+    module: usize,
+    callables: &[TCostCallable],
+    out: &mut Vec<usize>,
+) {
+    fn push_close(
+        trait_name: &str,
+        methods: &[crate::AST::Func],
+        module: usize,
+        callables: &[TCostCallable],
+        out: &mut Vec<usize>,
+    ) {
+        if trait_name.rsplit('.').next() != Some(crate::Syntax::TRAIT_CLOSE) {
+            return;
+        }
+        out.extend(methods.iter().filter_map(|method| {
+            callables.iter().position(|callable| {
+                callable.module == module && callable.declaration_span == method.name_span
+            })
+        }));
+    }
+
+    for item in items {
+        match item {
+            Item::Struct(definition) => {
+                for implementation in &definition.trait_impls {
+                    push_close(&implementation.trait_name, &implementation.methods, module, callables, out);
+                }
+            }
+            Item::Enum(definition) => {
+                for implementation in &definition.trait_impls {
+                    push_close(&implementation.trait_name, &implementation.methods, module, callables, out);
+                }
+            }
+            Item::Impl(implementation) => {
+                if let Some(trait_name) = &implementation.trait_name {
+                    push_close(trait_name, &implementation.methods, module, callables, out);
+                }
+            }
+            Item::CodeModule(code_module) => {
+                if let Some(body) = &code_module.body {
+                    collect_core_close_callables(body, module, callables, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn reachable_core_source_callables(
     bundle: &ProgramBundle,
     callables: &[TCostCallable],
@@ -9890,6 +10321,7 @@ fn reachable_core_source_callables(
     // any explicit method is live, its siblings are required to keep that impl
     // complete; an otherwise unreachable implementation stays pruned.
     let mut trait_impl_groups = Vec::new();
+    let mut close_callables = Vec::new();
     for (module, data) in bundle.modules.iter().enumerate() {
         if core_modules.contains(&module) {
             collect_trait_impl_callable_groups(
@@ -9898,7 +10330,11 @@ fn reachable_core_source_callables(
                 &rooted,
                 &mut trait_impl_groups,
             );
+            collect_core_close_callables(&data.items, module, &rooted, &mut close_callables);
         }
+    }
+    for index in close_callables {
+        rooted[index].root = true;
     }
     let mut reachable = reachable_cost_callables(bundle, &rooted);
     loop {
@@ -11134,14 +11570,16 @@ pub enum TExprKind {
     Absent,
     /// c109 Phase 8: `Ok(x)` — a success value of `T !E` (`Ok(x)`).
     Ok(Box<TExpr>),
-    /// c109 Phase 8: `Err(e)` — a failure value of `T !E` (`Err(e)`).
-    Err(Box<TExpr>),
+    /// c109 Phase 8: `Err(e)` — a failure value of `T !E` (`Err(e)`). The
+    /// origin is set when the value is the function's own returned failure
+    /// (#3713): that `Err(...)` is where the failure's journey starts.
+    Err(Box<TExpr>, Option<TFailureOrigin>),
     /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
     /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a
     /// bare propagate or a declared typed conversion calls the declared
-    /// conversion. The frame-trace location (`file`, `line`, `fn_name`) is
-    /// resolved at lowering so the emitted `jet_trace_err(…)?` matches the AST path
-    /// byte-for-byte (the emitter never reads `cx.current_fn`/`cx.src`).
+    /// conversion. The frame-trace location (`file`, `line`, `column`,
+    /// `fn_name`) is resolved at lowering so every tier records the same hop
+    /// (the emitter never reads `cx.current_fn`/`cx.src`).
     Try {
         inner: Box<TExpr>,
         /// Optional D-FAIL-CTX1 note. Lowered as a closure/cold branch so its
@@ -11151,6 +11589,8 @@ pub enum TExprKind {
         /// Pre-escaped Rust string literal for the source file (`escape_rust_str`).
         file: String,
         line: usize,
+        /// 1-based character column of the propagating call.
+        column: usize,
         /// Pre-escaped Rust string literal for the enclosing function name.
         fn_name: String,
     },
@@ -11776,6 +12216,7 @@ impl TFailureCarrier {
         match contract {
             crate::AST::FailureContract::Default { success, error }
             | crate::AST::FailureContract::Explicit { success, error }
+            | crate::AST::FailureContract::Inferred { success, error }
             | crate::AST::FailureContract::Converted {
                 success,
                 target: error,
@@ -11790,7 +12231,8 @@ impl TFailureCarrier {
             crate::AST::FailureContract::DeclaredNever => Self::Diverges {
                 value: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
             },
-            crate::AST::FailureContract::ProvenUnreachable { success } => Self::Result {
+            crate::AST::FailureContract::ProvenUnreachable { success }
+            | crate::AST::FailureContract::InferredNever { success } => Self::Result {
                 success: success.clone(),
                 error: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
             },
@@ -11915,6 +12357,23 @@ pub(crate) fn function_failure_carrier(f: &crate::AST::Func) -> TFailureCarrier 
     TFailureCarrier::from_contract(&f.failure_contract())
 }
 
+/// #3740 (D-FAILURE-FOUNDATION1): a free function whose failure set is empty
+/// (`T Never!`, written or inferred by sema) returns its success value on
+/// every tier. Only the executable signature changes: the checked body and
+/// every call site keep the `Result<T, Never>` carrier, and MIR reconciles
+/// the two at returns, calls, `Try`, and function values. Contract scopes,
+/// GC returns, jobs, foreign bodies, and compiler-generated harness wrappers
+/// keep their carrier-shaped exits.
+pub(crate) fn function_has_plain_return(f: &crate::AST::Func) -> bool {
+    f.failure_contract().is_proven_unreachable()
+        && f.pre.is_empty()
+        && f.post.is_empty()
+        && f.inline_foreign.is_none()
+        && !f.gc_return
+        && !f.is_job
+        && !f.compiler_generated
+}
+
 pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetApplicability {
     let Some(foreign) = f.inline_foreign.as_ref() else {
         return TTargetApplicability {
@@ -12010,6 +12469,10 @@ pub struct TLambda {
     pub arc: bool,
     /// JIT capture pack: (enclosing Jet name, body place, type). Empty = non-capturing.
     pub captures: Vec<(String, String, Type)>,
+    /// Enclosing slot of each cloned/materialized capture whose body reads a
+    /// fresh slot, keyed by enclosing Jet name. A resource binding lives under
+    /// a generated slot, so the Jet name alone does not locate the value.
+    pub capture_origins: std::collections::BTreeMap<String, String>,
     /// D-MEM-COPYSEM1=A: source names whose capture slot is an owned
     /// materialization of a read-only view rather than a reference clone.
     pub materialized_captures: Vec<String>,
@@ -12027,6 +12490,17 @@ pub enum TLambdaBody {
     Block(Vec<TStmt>),
     /// A deferred body shared by the AOT closure representation and JIT lambda.
     SharedBlock(std::sync::Arc<[TStmt]>),
+}
+
+/// #3713: the source site of a function's own returned `Err(...)` — where its
+/// failure starts. `file` and `fn_name` use the same pre-escaped spelling as
+/// `TExprKind::Try`; `column` is 1-based in characters.
+#[derive(Clone)]
+pub struct TFailureOrigin {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+    pub fn_name: String,
 }
 
 /// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`
@@ -12627,7 +13101,9 @@ pub enum TBuiltinOp {
 impl TBuiltinOp {
     /// A resolved builtin with a write receiver must receive a live place.
     /// Keep this fact on the TIR op so lowering and every emitter agree; lazy
-    /// iterator adapters are value operations and are intentionally absent.
+    /// iterator adapters are value operations and are intentionally absent,
+    /// while `IterNext` pulls through the place so the source keeps its
+    /// remainder (D-ITER-RESUME1=A).
     pub(crate) fn needs_mut_receiver_place(&self) -> bool {
         match self {
             Self::Push
@@ -12676,7 +13152,8 @@ impl TBuiltinOp {
             | Self::DequeReverse
             | Self::DequeSplit
             | Self::SplitWrite { .. }
-            | Self::GetDisjointWrite => true,
+            | Self::GetDisjointWrite
+            | Self::IterNext => true,
             Self::ByteBufferMethod { method } => matches!(
                 method.as_str(),
                 "clear"

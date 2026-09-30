@@ -7,7 +7,7 @@ defaults, little ceremony, and diagnostics that explain what went wrong, why,
 and how to fix it. Experts get explicit control — down to audited unsafe
 regions — without that machinery leaking into everyday code.
 
-> **Pre-release.** Jet is at 0.1 and has no compatibility promise yet. The
+> **Pre-release.** Jet is at 0.0.1 and has no compatibility promise yet. The
 > language, standard library, and tools change in place, without deprecation
 > periods, until a 1.0 policy is declared. See the
 > [release policy](Docs/spec/release-policy.md).

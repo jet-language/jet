@@ -27,8 +27,13 @@ node has a logical subject, content-digest inputs, and a SHA-256 content key.
 Keys and ordering do not contain checkout-specific paths.
 
 Build execution records durations and cache reasons in the store under the
-content key. `jet inspect explain-build <file.jet>` reads the latest immutable
-and emits the nodes in graph order. The JSON form is
+content key. `jet inspect explain-build <file.jet>` reads the workspace's
+last recorded run of the program and emits the nodes in graph order, followed
+by one `package` row per package of the checked program. A package row
+carries the package check key's inputs and its reuse reason against the
+previous run: `green:key` (same check key), `red:source`,
+`red:dependency:<identity>`, `red:toolchain`, or `red:new`, with `+cutoff`
+when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
 owns node identity and dependencies, while the store owns run evidence.
 
@@ -549,21 +554,106 @@ three load/unload cycles, and a forked panic call whose parent continues.
 
 ### Incremental Compiler Service
 
-D-LSP1 makes editor tooling a client of the front end, not a second checker.
-`crates/jet-queries` is a std-only demand cache for file inputs and derived
-checked bundles and fix data through that cache. The bounded loader prepares
-multiple open or already-discovered disk sources with a bounded pool of at most
-eight workers, then consumes the results in stable module order. A changed root
-is reloaded through the canonical parser; sema reuses span-exact checked function
-bodies while the global environment and that module's interface are unchanged.
-An interface change invalidates the changed module and its reverse import
-closure; a body-only change leaves unrelated modules warm. Disk import checks
-conservatively revalidate their module closure. Warm-session timings are reported as
-observations; deterministic query/item counters and retained-byte totals are the
-regression gates. The server records cancellation concurrently with request
-execution and replaces a cancelled in-flight result with JSON-RPC `-32800`.
-D-LSP2 requires every advertised LSP feature to have named coverage in
-`tests/lsp.rs`; the server must not advertise speculative features.
+The package is the unit of incremental checking. This follows the owner
+ruling of 2026-09-30, which amends layer 2 of D-INCR-UNIT1 from the module to
+the package. A package is a directory with `package.jet` (recursive, minus
+nested packages) or a single file with a leading `package { … }` header. Its
+files share one namespace (D-MOD-CYCLE1=A), and packages form an acyclic
+graph. Design and prior art:
+[incremental-checking-design-2026-09-30](../research/incremental-checking-design-2026-09-30.md).
+
+**What a package check reads.** Only its own sources and manifest, the
+compiler and Core identity, the target facts sema reads, the interface
+records of its direct dependencies, and the inputs it discovers through the
+sealed reader. It never reads dependency bodies beyond the templates an
+interface publishes, and it never reads the root program's policy.
+
+**The interface record.** A check produces a versioned record containing:
+
+- exported declarations with bodies erased;
+- the inferred facts importers depend on: effect rows, failure sets,
+  ownership and memory summaries, OS and web facts, the trait and impl
+  table, and constant values;
+- templates (generic, inline, and comptime-evaluated bodies);
+- per-item fingerprints;
+- the usages it read from each dependency.
+
+Declaration locations are kept outside the interface digest, and importers
+refer to them symbolically.
+
+**Keys and reuse.** A package's check key covers:
+
+- its source digest;
+- the sema-visible target facts;
+- the compiler and Core identity;
+- its direct dependencies' interface digests.
+
+A package is green when a record exists for that key and its discovered
+inputs still verify. It is also green when every dependency item in its
+usages kept the same fingerprint. Otherwise it is rechecked. When the
+recheck yields the same interface digest, importers stay green: this is
+early cutoff. Inside a rechecked package, items reuse their previous results
+by red/green over recorded, ordered reads.
+
+**Program phase.** Facts that flow down the graph run once per program over
+package records, never bodies. These are:
+
+- outputs and the entry;
+- authority and effect budgets checked at dependency edges;
+- the web partition, app graph, and job graph;
+- unreachable exports;
+- the `used_core` closure;
+- diagnostic ordering.
+
+**Storage.** One `.jet/` folder at the workspace root holds all per-workspace
+state: the lock, last-run (priors) pointers, the stamp table, the records and
+receipts index, reports, build outputs, and logs. Packages never get their own
+`.jet/` folder, and code that creates `.jet/` paths resolves the workspace root
+first (owner ruling, 2026-09-30). The
+content-addressed records stay in the machine-wide `jet-store`, shared across
+workspaces (D-BUILD-STORE1=E; record kinds in `jet_store::records`), and use
+one std-only binary codec with a trailing SHA-256
+(`jet_foundation::RecordCodec`). A missing or corrupt record is a miss, never
+an error.
+
+**Sealed reads.** Every file, directory listing, and environment variable that
+loading, sema, or compile-time evaluation reads while checking goes through
+`jet_foundation::CheckReads`. A recorded result declares those reads with
+their digests and re-verifies them before reuse; a read that changed during
+the check, or a network input, leaves the result unrecorded. The read audit
+(`JET_CHECK_READS_AUDIT`) proves the declaration complete: a verified record
+does not replay, the program is checked fresh, and any read of the fresh
+check that the record does not declare with the same digest fails as an
+internal compiler error. `JET_CHECK_READS_INJECT` injects one undeclared read
+so tests can show the audit catches it.
+
+**Self-hosted compiler.** JetFoundation implements the same codec
+(`Record/RecordCodec.jet`) and key framing (`Record/PackageIdentity.jet`);
+`tests/record_conformance.rs` holds both implementations to identical bytes.
+JetDriver reaches the store only through the typed `JetDriverRecordStore`
+the host passes in the compile request. Without a store every lookup is a
+miss and the package is checked.
+
+**Diagnostic replay.** Diagnostics are stored typed and rendered for each
+invocation. Warm output, text and `--json`, is byte-identical to
+`--no-cache`. `--verify` recomputes and compares.
+
+**Build lenses.** They reuse per-package compiled output keyed by the
+package's body digest and its dependencies' interface digests.
+
+**Regression gates.** Deterministic counters are the gates: packages and
+items checked and reused, and records decoded. Timings are observations
+under the compiler-speed method below.
+
+**Editor tooling.** D-LSP1 makes editor tooling a client of the same front
+end, not a second checker. `crates/jet-queries` is a std-only demand cache
+for file inputs and derived query values. The bounded loader prepares open or
+discovered sources with at most eight workers and consumes them in stable
+order. The Rust checker's in-process item cache (`IncrementalSemaCache`)
+serves editor sessions. The server records cancellation concurrently with
+request execution and replaces a cancelled in-flight result with JSON-RPC
+`-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
+in `tests/lsp.rs`; the server must not advertise speculative features.
 
 ### Compiler-speed evidence boundary (#666)
 

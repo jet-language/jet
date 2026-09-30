@@ -26,22 +26,19 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
     LexicalEntry { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
     LexicalEntry { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
-    LexicalEntry { spelling: "@", meaning: "compile-time name or fact", decision: "D-ONCE-AT1" },
-    LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep { … }`; `@ { … }` is retired", decision: "D-PREP-SURFACE2=A" },
+    LexicalEntry { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
+    LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep { … }`; `NAME :: prep { value }` is the only compile-time binding; `@ { … }` is retired", decision: "D-PREP-SURFACE2=A" },
     LexicalEntry { spelling: "prep if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
     LexicalEntry { spelling: "prep loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
     LexicalEntry { spelling: "prep fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
     LexicalEntry { spelling: "<prep N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
-    LexicalEntry { spelling: META_QUERY_PHASE, meaning: "total evaluation-site phase query", decision: "D-PREP-SURFACE2=A" },
-    LexicalEntry { spelling: META_QUERY_TYPE, meaning: "checked type metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_FUNCTION, meaning: "checked function metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_METHOD, meaning: "checked method metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_CLOSURE, meaning: "checked closure metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_PROGRAM, meaning: "authorized checked-program metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_PACKAGE, meaning: "lexical package metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_VALUE, meaning: "retained runtime-value metadata query", decision: "D-META-REFLECT2=A" },
-    LexicalEntry { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
+    LexicalEntry { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`", decision: "D-BUILD-FACT3=A" },
+    LexicalEntry { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`", decision: "D-BUILD-FACT3=A; D-META-REFLECT2=A" },
+    LexicalEntry { spelling: "$phase", meaning: "total evaluation-site phase fact", decision: "D-PREP-SURFACE2=A; D-META-ROOT3=A" },
+    LexicalEntry { spelling: "$program", meaning: "authorized checked-program fact root", decision: "D-META-REFLECT2=A; D-META-ROOT3=A" },
+    LexicalEntry { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A" },
     LexicalEntry { spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items", decision: "D-META-PUBLISH2=A" },
     LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER, meaning: "explicit opt-in provider registration for declared targets", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
     LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER_EXPANSION, meaning: "explicit opt-in call-expansion provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
@@ -68,17 +65,11 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
 
 /// D-PREP-SURFACE2=A: a shared preparation block always has an explicit body.
 pub const KW_PREP: &str = "prep";
-/// D-PREP-SURFACE2=A: the total compiler-known evaluation-site phase query.
-pub const META_QUERY_PHASE: &str = "@PHASE";
-/// D-META-REFLECT2=A: checked compiler metadata query roots.
-pub const META_QUERY_TYPE: &str = "@TYPE";
-pub const META_QUERY_FUNCTION: &str = "@FUNCTION";
-pub const META_QUERY_METHOD: &str = "@METHOD";
-pub const META_QUERY_CLOSURE: &str = "@CLOSURE";
-pub const META_QUERY_PROGRAM: &str = "@PROGRAM";
-pub const META_QUERY_PACKAGE: &str = "@PACKAGE";
+/// D-META-REFLECT2=A: checked compiler metadata queries that D-META-ROOT3=A
+/// has not yet given a `$` root. `$phase`, `$program` and `$package` are the
+/// fact roots in `Syntax/core_surface.rs`; type, function, method, closure and
+/// value facts are `$` members of their subject (`T.$fields`).
 pub const META_QUERY_SOURCE: &str = "@SOURCE";
-pub const META_QUERY_VALUE: &str = "@VALUE";
 pub const META_QUERY_TYPES: &str = "@TYPES";
 /// D-META-PUBLISH2=A: publication remains explicit and uses the existing Generated value.
 pub const COMPILER_GENERATE: &str = "compiler.generate";
@@ -107,7 +98,7 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // a marker rule, a knowledge plane, a right, and a build fact are rows of the
 // same table, separated only by what they attach to. Facts about a rule ride the
 // declaration's own named-parameter list under the compile-time mark
-// (`@sites: [Site]`, `@repeatable: true`); no clause form and no second keyword
+// (`$sites: [Site]`, `$repeatable: true`); no clause form and no second keyword
 // enter the grammar. Every row states its safe direction and its gate words
 // (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
@@ -116,7 +107,7 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
 // D-TRACK-ORIGIN1=A (owner outcome): #Track origin is the typed compiler fact
-// `value.@origin`, with no runtime projection; its canonical constant lives in
+// `value.$origin`, with no runtime projection; its canonical constant lives in
 // `Syntax::COMPILER_FACT_ORIGIN`.
 // D-BOUND-UNDO1=A: MARKER_UNDO owns the `#Undo(inverse)` binding contract.
 // D-FFI-CAP1=A: MARKER_CLOSE owns the `#Close(close)` foreign-handle contract.
@@ -390,6 +381,10 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // to `T` for the proven branch and records an S31 Present unwrap for TIR.
 // Mutable locals, fields, indexes, aliases, and calls stay `?T`; bind with
 // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
+// D-OPT-LIFT1=A adds no token: a plain `T` fills any slot whose checked type
+// is `T?` (returns, arguments, fields, list/map items, typed bindings,
+// reassignment) and `x == 5` compares a `?T` with a present `T`; sema adds
+// one `Present`. The full rule lives on `LIT_VALUE` in `Syntax/core_surface.rs`.
 // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
 // position as TYPE_UNION_SEP. `T !(E1 | E2)` parses as `T !(E1 | E2)`.
 // D-BITOREXPR1=A (ratified 2026-08-28, card #2299) admits the same token in
@@ -790,6 +785,7 @@ pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
     ("message field", NameCase::Snake),
     ("method", NameCase::Snake),
     ("module", NameCase::Snake),
+    ("module variable", NameCase::Snake),
     ("module alias", NameCase::Snake),
     ("parameter", NameCase::Snake),
     ("pattern binding", NameCase::Snake),

@@ -1,4 +1,4 @@
-Error [E2404]: `?` can't turn the `Err` from `leaky` into `[FieldError]` here
+Error [E2404]: `leaky` fails with `Err`, which can't propagate into `[FieldError]` here
   --> tests/ui/validate_impure_rule.jet:9:22
     |
   9 |     validate { check(leaky(), at: email, "required") }
@@ -13,5 +13,5 @@ Error [E3401]: `validate` calls the impure function `leaky`
   9 |     validate { check(leaky(), at: email, "required") }
     |                      ^^^^^
  Why: `leaky` is impure, but `validate` declares `-[]>`
- Fix: Give `leaky` an explicit `-[]>` bound, or remove the call from `validate`
+ Fix: Remove the call from `validate`, or drop the `-[]>` bound from `validate` so its effects are inferred
 More: jet-lang.dev/e/E3401

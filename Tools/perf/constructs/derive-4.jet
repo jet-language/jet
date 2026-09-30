@@ -1,16 +1,16 @@
 derive T.FieldNames {
-    prep loop field in T.@fields {
-        method :: "field_{field.@name}"
-        fn @method(self) -> String { field.@name }
+    prep loop field in T.$fields {
+        method :: "field_{field.$name}"
+        fn $method(self) -> String { field.$name }
     }
 }
 
-marker AddMarkerFields(@sites: [.Type]) {
-    type_name :: target.@name
-    prep loop field in target.@fields {
-        method :: "marked_{field.@name}"
-        impl @type_name {
-            fn @method(self) -> String { field.@name }
+marker AddMarkerFields($sites: [.Type]) {
+    type_name :: target.$name
+    prep loop field in target.$fields {
+        method :: "marked_{field.$name}"
+        impl $type_name {
+            fn $method(self) -> String { field.$name }
         }
     }
 }

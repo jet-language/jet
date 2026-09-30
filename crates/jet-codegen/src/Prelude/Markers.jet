@@ -21,233 +21,233 @@
 // `@sites` is the only public legal-site declaration form. Ordinary names
 // are typed use-site arguments; every `@` name is fixed declaration metadata.
 //
-marker Policy(settings: ...PolicySetting, @sites: [.Package, .Module, .Function, .Method, .Block], @inherits: true, @resolution: .Tighten, @scopes: [.Package, .Module, .Function, .Block])
+marker Policy(settings: ...PolicySetting, $sites: [.Package, .Module, .Function, .Method, .Block], $inherits: true, $resolution: .Tighten, $scopes: [.Package, .Module, .Function, .Block])
 
-marker Arithmetic(mode: ArithmeticMode, @sites: [.Function, .Method, .Block])
+marker Arithmetic(mode: ArithmeticMode, $sites: [.Function, .Method, .Block])
 
-marker Unsafe(reason: String, obligations: ObligationMode{.None}, @sites: [.Function, .Method, .Block, .Operation])
+marker Unsafe(reason: String, obligations: ObligationMode{.None}, $sites: [.Function, .Method, .Block, .Operation])
 
-marker Scrub(tag: Ident, @sites: [.Function, .Method])
+marker Scrub(tag: Ident, $sites: [.Function, .Method])
 
-marker Pure(@sites: [.Function, .Method], @retired: "-[]>")
+marker Pure($sites: [.Function, .Method], $retired: "-[]>")
 
-marker Memo(bound: MemoBound{.Default}, @sites: [.Function, .Field])
+marker Memo(bound: MemoBound{.Default}, $sites: [.Function, .Field])
 
-marker Pre(condition: Value, message: String, @sites: [.Function, .Method], @repeatable: true)
+marker Pre(condition: Value, message: String, $sites: [.Function, .Method], $repeatable: true)
 
-marker Post(condition: Value, message: String, @sites: [.Function, .Method], @repeatable: true)
+marker Post(condition: Value, message: String, $sites: [.Function, .Method], $repeatable: true)
 
-marker Kernel(mode: KernelMode, @sites: [.Function])
+marker Kernel(mode: KernelMode, $sites: [.Function])
 
-marker Inline(mode: InlineMode{.Hint}, @sites: [.Function, .Method, .Constant])
+marker Inline(mode: InlineMode{.Hint}, $sites: [.Function, .Method, .Constant])
 
 // D-SIMD3=B: native auto-vectorization is the safe default; this explicit
 // function/method marker keeps scalar codegen available for reproducibility or
 // a workload whose measured result favors scalar execution.
-marker Scalar(@sites: [.Function, .Method])
+marker Scalar($sites: [.Function, .Method])
 // D-FOUND-OPMIX1=A: a typed Add/Mul impl may derive its reverse lookup.
-marker Commutative(@sites: [.Impl])
+marker Commutative($sites: [.Impl])
 
-marker Job(scope: JobScope{.Dev}, packages: Value{[]}, cwd: Value{none}, inputs: Value{[]}, outputs: Value{[]}, skip: Value{none}, cache: Value{.Uncached}, limits: Value{none}, after: Value{[]}, parallel: Value{none}, @sites: [.Function])
+marker Job(scope: JobScope{.Dev}, packages: Value{[]}, cwd: Value{none}, inputs: Value{[]}, outputs: Value{[]}, skip: Value{none}, cache: Value{.Uncached}, limits: Value{none}, after: Value{[]}, parallel: Value{none}, $sites: [.Function])
 
-marker Every(schedule: Duration | String, @sites: [.Function])
+marker Every(schedule: Duration | String, $sites: [.Function])
 
-marker Replayable(@sites: [.Function, .Method])
+marker Replayable($sites: [.Function, .Method])
 
-marker WasmExport(@sites: [.Function])
+marker WasmExport($sites: [.Function])
 
-marker State(state: State, @sites: [.Function, .Method])
+marker State(state: State, $sites: [.Function, .Method])
 
-marker Transition(from: State, to: State, @sites: [.Function, .Method])
+marker Transition(from: State, to: State, $sites: [.Function, .Method])
 
-marker FFI(language: FfiLanguage, @sites: [.Function], @owns_menu: true)
+marker FFI(language: FfiLanguage, $sites: [.Function], $owns_menu: true)
 
-marker Undo(inverse: Ident, @sites: [.Function])
+marker Undo(inverse: Ident, $sites: [.Function])
 
-marker Close(close: Ident, @sites: [.Function])
+marker Close(close: Ident, $sites: [.Function])
 
-marker ABI(name: ABI, @sites: [.Function])
+marker ABI(name: ABI, $sites: [.Function])
 
-marker MustUse(@sites: [.Function, .Method, .Type])
+marker MustUse($sites: [.Function, .Method, .Type])
 
-marker Error(@sites: [.Type])
+marker Error($sites: [.Type])
 
 // D-STRUCT-LIFE1=A: the one retiring lifecycle rung. `removed_in` is
 // optional until package editions own removal; before then it remains warn-only.
-marker Deprecated(since: String, use: String, removed_in: String{none}, @sites: [.Function, .Method, .Type])
+marker Deprecated(since: String, use: String, removed_in: String{none}, $sites: [.Function, .Method, .Type])
 
-marker Codable(@sites: [.Type])
+marker Codable($sites: [.Type])
 
 // D-FOUND-RECEIPT1: named typed receipt section declaration.
-marker Receipt(name: String, @sites: [.Type])
+marker Receipt(name: String, $sites: [.Type])
 
-marker Encode(@sites: [.Type])
+marker Encode($sites: [.Type])
 
-marker Decode(@sites: [.Type])
+marker Decode($sites: [.Type])
 
-marker PublishedSchema(@sites: [.Type])
+marker PublishedSchema($sites: [.Type])
 
-marker Comparable(@sites: [.Type])
+marker Comparable($sites: [.Type])
 
-marker Equatable(@sites: [.Type])
+marker Equatable($sites: [.Type])
 
-marker Debug(@sites: [.Type])
+marker Debug($sites: [.Type])
 
-marker Numeric(@sites: [.Type])
+marker Numeric($sites: [.Type])
 
-marker Printable(@sites: [.Type])
+marker Printable($sites: [.Type])
 
-marker CodableAsBase(@sites: [.Type])
+marker CodableAsBase($sites: [.Type])
 
-marker CLI(pack: Ident{none}, @sites: [.Type])
+marker CLI(pack: Ident{none}, $sites: [.Type])
 
-marker Patchable(@sites: [.Type])
+marker Patchable($sites: [.Type])
 
-marker UnitFamily(family: Ident, dimension: Value{nominal}, base: Ident{"first member when converting"}, @sites: [.Type])
+marker UnitFamily(family: Ident, dimension: Value{nominal}, base: Ident{"first member when converting"}, $sites: [.Type])
 
-marker SingleUse(@sites: [.Type])
+marker SingleUse($sites: [.Type])
 
-marker Invariant(condition: String, @sites: [.Type], @retired: "distinct Int(lo..hi)")
+marker Invariant(condition: String, $sites: [.Type], $retired: "distinct Int(lo..hi)")
 
 // D-PLACE1=A: structs use the second argument for `align(N)`; enums retain
 // the legacy bare tag-width argument in this same registry slot.
-marker Layout(kind: Layout, tag: Value{none}, @sites: [.Type])
+marker Layout(kind: Layout, tag: Value{none}, $sites: [.Type])
 
-marker RenameAll(case: NamingCase, @sites: [.Type], @owns_menu: true)
+marker RenameAll(case: NamingCase, $sites: [.Type], $owns_menu: true)
 
-marker DenyUnknownFields(@sites: [.Type])
+marker DenyUnknownFields($sites: [.Type])
 
-marker Discriminant(field: String, @sites: [.Type])
+marker Discriminant(field: String, $sites: [.Type])
 
-marker Untagged(@sites: [.Type])
+marker Untagged($sites: [.Type])
 
-marker Redact(@sites: [.Field])
+marker Redact($sites: [.Field])
 
-marker Rename(name: String, json: String{none}, cbor: String{none}, csv: String{none}, toml: String{none}, yaml: String{none}, xml: String{none}, args: String{none}, env: String{none}, db: String{none}, layout: String{none}, @sites: [.Field, .Variant])
+marker Rename(name: String, json: String{none}, cbor: String{none}, csv: String{none}, toml: String{none}, yaml: String{none}, xml: String{none}, args: String{none}, env: String{none}, db: String{none}, layout: String{none}, $sites: [.Field, .Variant])
 
-marker Skip(@sites: [.Field])
+marker Skip($sites: [.Field])
 
-marker Default(value: Value{T.default}, @sites: [.Field], @retired: "field: ...{{...}}")
+marker Default(value: Value{T.default}, $sites: [.Field], $retired: "field: ...{{...}}")
 
-marker Flatten(@sites: [.Field])
+marker Flatten($sites: [.Field])
 
-marker Doc(text: String, @sites: [.Field, .Type, .Variant, .Method], @companion: [Job, .Function])
+marker Doc(text: String, $sites: [.Field, .Type, .Variant, .Method], $companion: [Job, .Function])
 
-marker Flag(@sites: [.Field])
+marker Flag($sites: [.Field])
 
-marker Short(name: String, @sites: [.Field])
+marker Short(name: String, $sites: [.Field])
 
-marker Env(name: String, @sites: [.Field])
+marker Env(name: String, $sites: [.Field])
 
-marker Persist(@sites: [.Declaration])
+marker Persist($sites: [.Declaration])
 
-marker Track(@sites: [.Declaration])
+marker Track($sites: [.Declaration])
 
-marker Known(@sites: [], @retired: "@name :: ...")
+marker Known($sites: [], $retired: "@name :: ...")
 
-marker Local(@sites: [.Declaration])
+marker Local($sites: [.Declaration])
 
-marker Shared(@sites: [.Declaration])
+marker Shared($sites: [.Declaration])
 
-marker Meta(category: String{""}, tunable: Bool{false}, maturity: Maturity{.Tested}, @sites: [.Function, .Method, .Declaration, .Constant])
+marker Meta(category: String{""}, tunable: Bool{false}, maturity: Maturity{.Tested}, $sites: [.Function, .Method, .Declaration, .Constant])
 // D-DX-PLUGIN1=D: exported devtools panels are discovered from one typed
 // function marker; no startup registration call or second metadata surface.
-marker DevPanel(@sites: [.Function])
+marker DevPanel($sites: [.Function])
 
-marker Todo(@sites: [.Expression])
+marker Todo($sites: [.Expression])
 
-marker Shield(@sites: [.Block])
+marker Shield($sites: [.Block])
 
-marker Impure(reason: String{none}, @sites: [.Block])
+marker Impure(reason: String{none}, $sites: [.Block])
 
-marker FX(grant: ...Effect, @sites: [.Block])
+marker FX(grant: ...Effect, $sites: [.Block])
 
-marker Abilities(grant: ...Effect, @sites: [.Block], @retired: "#FX")
+marker Abilities(grant: ...Effect, $sites: [.Block], $retired: "#FX")
 
-marker Caps(grant: ...Effect, @sites: [.Block], @retired: "#FX")
+marker Caps(grant: ...Effect, $sites: [.Block], $retired: "#FX")
 
-marker Transact(name: Ident, @sites: [.Block])
+marker Transact(name: Ident, $sites: [.Block])
 
-marker Region(name: Ident, @sites: [.Block])
+marker Region(name: Ident, $sites: [.Block])
 
-marker Live(@sites: [.Block])
+marker Live($sites: [.Block])
 
-marker Nondeterministic(reason: String, @sites: [.Block])
+marker Nondeterministic(reason: String, $sites: [.Block])
 
-marker Context(allocator: Value{default}, logger: Value{default}, deadline: Int{default}, @sites: [.Block])
+marker Context(allocator: Value{default}, logger: Value{default}, deadline: Int{default}, $sites: [.Block])
 
-marker Reactive(@sites: [.Function, .Method, .Block])
+marker Reactive($sites: [.Function, .Method, .Block])
 
-marker Off(@sites: [.Statement, .Block])
+marker Off($sites: [.Statement, .Block])
 
-marker DebugOnly(@sites: [.Statement, .Block])
+marker DebugOnly($sites: [.Statement, .Block])
 
 // D-TESTFAULT1=A: test-only effect substitution is configured by one typed
 // marker argument; the harness owns fail-nth scheduling.
-marker Test(name: String{"function name"}, faults: [Effect]{[]}, expected_fail: Bool{false}, @sites: [.Test])
+marker Test(name: String{"function name"}, faults: [Effect]{[]}, expected_fail: Bool{false}, $sites: [.Test])
 
-marker Target(target: Target, @sites: [.File, .Module, .Function])
+marker Target(target: Target, $sites: [.File, .Module, .Function])
 // D-FOUND-EMBEDDED1 / #2793: target interrupt vector plus bounded effect row.
-marker Interrupt(vector: Ident, effects: [Effect], @sites: [.Function])
+marker Interrupt(vector: Ident, effects: [Effect], $sites: [.Function])
 
-marker Root(@sites: [.Parameter])
+marker Root($sites: [.Parameter])
 
-marker HTML(page: Path, @sites: [.File, .Block])
+marker HTML(page: Path, $sites: [.File, .Block])
 
-marker PubFile(@sites: [.File])
+marker PubFile($sites: [.File])
 
-marker NoPrelude(@sites: [.File])
+marker NoPrelude($sites: [.File])
 
-marker SQL(row: Type{none}, @sites: [.Block])
+marker SQL(row: Type{none}, $sites: [.Block])
 
-marker Extern(@sites: [.Module])
+marker Extern($sites: [.Module])
 
-marker Bindgen(@sites: [.Module])
+marker Bindgen($sites: [.Module])
 
-marker allow(lint: Ident, @sites: [.Declaration, .Field, .Statement], @repeatable: true)
+marker allow(lint: Ident, $sites: [.Declaration, .Field, .Statement], $repeatable: true)
 
-marker Static(@sites: [.Constant])
+marker Static($sites: [.Constant])
 
-marker wire(@sites: [.Field])
+marker wire($sites: [.Field])
 
-marker InlineAlways(@sites: [.Function], @retired: "#Inline(Always)")
+marker InlineAlways($sites: [.Function], $retired: "#Inline(Always)")
 
-marker static(@sites: [.Constant], @retired: "#Static")
+marker static($sites: [.Constant], $retired: "#Static")
 
-marker inline(@sites: [.Constant], @retired: "#Inline")
+marker inline($sites: [.Constant], $retired: "#Inline")
 
-marker Add(@sites: [.Expression], @retired: ".Add")
+marker Add($sites: [.Expression], $retired: ".Add")
 
-marker Mul(@sites: [.Expression], @retired: ".Mul")
+marker Mul($sites: [.Expression], $retired: ".Mul")
 
-marker Min(@sites: [.Expression], @retired: ".Min")
+marker Min($sites: [.Expression], $retired: ".Min")
 
-marker Max(@sites: [.Expression], @retired: ".Max")
+marker Max($sites: [.Expression], $retired: ".Max")
 
-marker Audit(reason: String, @sites: [.Function, .Method, .Block], @retired: "#Unsafe(reason)")
+marker Audit(reason: String, $sites: [.Function, .Method, .Block], $retired: "#Unsafe(reason)")
 
-marker Wasm(@sites: [.Function], @retired: "#Target(Wasm)")
+marker Wasm($sites: [.Function], $retired: "#Target(Wasm)")
 
-marker JS(@sites: [.Function], @retired: "#Target(JS)")
+marker JS($sites: [.Function], $retired: "#Target(JS)")
 
-marker Suppress(reason: String, @sites: [.Block], @retired: ".drop(\"reason\")")
+marker Suppress(reason: String, $sites: [.Block], $retired: ".drop(\"reason\")")
 
-marker Uninit(@sites: [.Field], @retired: "give the field a real initial value — stored uninitialized-sentinel fields were retired outright (D-UNINIT-SENTINEL1)")
+marker Uninit($sites: [.Field], $retired: "give the field a real initial value — stored uninitialized-sentinel fields were retired outright (D-UNINIT-SENTINEL1)")
 
-marker Cli(@sites: [.Type], @retired: "#CLI")
+marker Cli($sites: [.Type], $retired: "#CLI")
 
-marker Abi(name: ABI, @sites: [.Function], @retired: "#ABI")
+marker Abi(name: ABI, $sites: [.Function], $retired: "#ABI")
 
-marker Html(path: String, @sites: [.File], @retired: "#HTML")
+marker Html(path: String, $sites: [.File], $retired: "#HTML")
 
-marker Sql(@sites: [.Block], @retired: "#SQL")
+marker Sql($sites: [.Block], $retired: "#SQL")
 
-marker Ref(@sites: [.Field], @retired: "use an owned value")
+marker Ref($sites: [.Field], $retired: "use an owned value")
 
-marker Tainted(kind: TaintKind{.Input}, @sites: [.Expression, .Operation], @retired: "#Input")
+marker Tainted(kind: TaintKind{.Input}, $sites: [.Expression, .Operation], $retired: "#Input")
 
-marker Sanitizer(@sites: [.Function, .Method], @retired: "#Scrub(Tag)")
+marker Sanitizer($sites: [.Function, .Method], $retired: "#Scrub(Tag)")
 
-marker Task(@sites: [.Function], @retired: "#Job")
+marker Task($sites: [.Function], $retired: "#Job")
 
-marker Tag(field: String, @sites: [.Type], @retired: "#Discriminant")
+marker Tag(field: String, $sites: [.Type], $retired: "#Discriminant")

@@ -143,6 +143,13 @@ fn parser_parse_block(state: &JetParserState) -> ParsedBlock {
             parser_bump(&state)
         }
     }
+    if parser_current_kind(&state) == TOKEN_EOF {
+        // E0083 (#3719): a block cut off by the end of the file names its opener.
+        parser_report_unclosed(&state, open, "the end of the file", "block")
+        end :: parser_current(&state).span.start
+        &state.block_spans.push(Span{start: open.span.end, end: end})
+        return ParsedBlock{span: Span{start: open.span.start, end: end}, statements: statements, tail: None}
+    }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the block")
     inner :: Span{start: open.span.end, end: close.span.start}
     &state.block_spans.push(inner)
@@ -186,6 +193,12 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int) -> ParsedBlock {
             parser_add_error(&state, token.span, "the parser could not advance through this block", "block recovery stops infinite retries on malformed input", "remove or complete this statement")
             parser_bump(&state)
         }
+    }
+    if parser_current_kind(&state) == TOKEN_EOF {
+        parser_report_unclosed(&state, open, "the end of the file", "block")
+        end :: parser_current(&state).span.start
+        &state.block_spans.push(Span{start: open.span.end, end: end})
+        return ParsedBlock{span: Span{start: open.span.start, end: end}, statements: statements, tail: tail}
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the value block")
     inner :: Span{start: open.span.end, end: close.span.start}
@@ -353,12 +366,16 @@ fn parser_parse_break_statement(state: &JetParserState) -> Stmt {
     Stmt.Break{span: start.span}
 }
 
+// D-PREP-SURFACE2=A: `@ name :: value` is a retired constant. The mark always
+// meant compile time, so E0388 teaches `name :: prep { value }` and the parse
+// continues as that prepared binding.
 fn parser_parse_comptime_binding(state: &JetParserState) -> Stmt {
-    parser_bump(&state)
-    name :: parser_expect_name(&state, "after `@` in a compile-time binding")
-    sigil :: parser_expect(&state, TOKEN_COLON_COLON, "`::` after a compile-time binding name")
+    at :: parser_bump(&state)
+    name :: parser_expect_name(&state, "after `@` in a constant")
+    plain :: parser_retire_const_decl(&state, parser_cover(at.span, name.span), "@{name.payload.decoded}")
+    sigil :: parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
     value :: parser_parse_expression(&state, 1, 0)
-    binding := ast_binding(name.payload.decoded, name.span, false, value.expr, Val(sigil.span))
+    binding := ast_binding(plain, name.span, false, value.expr, Val(sigil.span))
     binding.is_comptime = true
     parser_finish_statement(&state)
     Stmt.Val{binding: binding}
@@ -482,6 +499,10 @@ fn parser_parse_prep_loop(state: &JetParserState) -> Stmt {
 
 fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     name :: parser_expect_name(&state, "in a binding")
+    if parser_current_kind(&state) == TOKEN_COLON {
+        retired :: parser_parse_retired_typed_binding(&state, name)
+        if retired == .Val(statement) -> return statement
+    }
     sigil :: parser_current(&state)
     mutable :: if {
         sigil.kind == TOKEN_COLON_EQ || sigil.kind == TOKEN_COLON_COLON -> {
@@ -493,10 +514,69 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
             false
         }
     }
+    // D-PREP-SURFACE2=A: `name :: prep { value }` is the prepared-value
+    // binding. A block holding only its final expression lowers to the one
+    // compile-time binding path; any other block keeps E0391.
+    if !mutable && parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
+        head :: parser_bump(&state)
+        block :: parser_parse_value_block(&state, 0)
+        span :: parser_cover(head.span, block.span)
+        if block.statements.len() == 0 && block.tail == .Val(tail) {
+            prepared := ast_binding(parser_retire_const_mark(&state, name), name.span, false, tail, Val(sigil.span))
+            prepared.is_comptime = true
+            parser_finish_statement(&state)
+            return Stmt.Val{binding: prepared}
+        }
+        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "D-PREP-SURFACE2=A makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
+        parser_finish_statement(&state)
+        return Stmt.Val{binding: ast_binding(name.payload.decoded, name.span, false, Expr.Unit{span: span}, Val(sigil.span))}
+    }
     value :: parser_parse_expression(&state, 1, 0)
-    binding :: ast_binding(name.payload.decoded, name.span, mutable, value.expr, Val(sigil.span))
+    // A retired `@name :: value` recovers as `name :: prep { value }`.
+    retired :: !mutable && name.payload.decoded.starts_with("@")
+    binding_name :: if retired -> parser_retire_const_decl(&state, name.span, name.payload.decoded) else -> parser_retire_const_mark(&state, name)
+    binding := ast_binding(binding_name, name.span, mutable, value.expr, Val(sigil.span))
+    binding.is_comptime = retired
     parser_finish_statement(&state)
     Stmt.Val{binding: binding}
+}
+
+// D-BIND-TYPE2=A: the retired `name: Type :: value` (or `:=`) teaches E0393
+// with a behavior-preserving edit to `name :: Type{value}`, then parses on as
+// the untyped binding so one mistake reports once. Returns None with the
+// cursor restored when the tokens after `:` are not a type and a sigil.
+fn parser_parse_retired_typed_binding(state: &JetParserState, name: Token) -> Stmt? Err! {
+    saved_position := state.position
+    saved_diagnostics := state.diagnostics.len()
+    saved_gt := state.pending_type_gt
+    saved_gt_span := state.pending_type_gt_span
+    colon :: parser_bump(&state)
+    type_start :: state.position
+    parsed :: parser_parse_type(&state, 0)
+    type_end :: state.position
+    sigil :: parser_current(&state)
+    if state.diagnostics.len() != saved_diagnostics || (sigil.kind != TOKEN_COLON_COLON && sigil.kind != TOKEN_COLON_EQ) {
+        state.position = saved_position
+        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
+        state.pending_type_gt = saved_gt
+        state.pending_type_gt_span = saved_gt_span
+        return None
+    }
+    parser_bump(&state)
+    mutable :: sigil.kind == TOKEN_COLON_EQ
+    value_start :: state.position
+    value :: parser_parse_expression(&state, 1, 0)
+    value_end :: state.position
+    binding_name :: name.payload.decoded
+    type_text :: parser_tokens_text(state, type_start, type_end)
+    value_text :: parser_tokens_text(state, value_start, value_end)
+    sigil_text :: if mutable -> ":=" else -> "::"
+    replacement :: "{binding_name} {sigil_text} {type_text}{{{value_text}}}"
+    diagnostic :: diagnostic_from_registry("E0393", Val(parser_cover(colon.span, parsed.span)), "`{binding_name}: {type_text}` puts a type after the binding name, which Jet does not accept.", "A binding carries no type of its own (D-BIND-BARE1); `Type{{ … }}` on the value states the type, checking the value or converting it the way a parameter of that type would.", "Write `{replacement}`.")
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: parser_cover(name.span, value.span), new_text: replacement}))
+    binding :: ast_binding(binding_name, name.span, mutable, value.expr, Val(sigil.span))
+    parser_finish_statement(&state)
+    Val(Stmt.Val{binding: binding})
 }
 
 fn parser_parse_defer_statement(state: &JetParserState) -> Stmt {

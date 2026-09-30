@@ -46,14 +46,14 @@ fn run() {
     scope :: conn.with_policy(policy, "owner")
     _created :: db.migrate(scope, "task-v1", [SQL{"CREATE TABLE task (id INTEGER PRIMARY KEY, status TEXT NOT NULL)"}]) ?? panic("migrate")
 
-    loop status in [Status]{Status.Pending, Status.Active, Status.Archived} {
+    loop status in [Status.Pending, Status.Active, Status.Archived] {
         name :: wire(status)
         _ :: scope.execute(SQL{"INSERT INTO task (status) VALUES ({name})"}) ?? panic("insert")
     }
     rows :: scope.query(SQL{"SELECT id, status FROM task ORDER BY id"}) ?? panic("query")
     loop row in rows {
         if db.decode<Task>(row) == {
-            .Ok(task) -> print("round trip {task.id}: {wire(task.status)}")
+            .Ok(item) -> print("round trip {item.id}: {wire(item.status)}")
             .Err(_) -> print("round trip: rejected")
         }
     }
@@ -67,7 +67,7 @@ fn run() {
         .Err(_) -> print("old reader on Blocked: rejected")
     }
     if db.decode<TaskV2>(newest) == {
-        .Ok(task) -> print("new reader on Blocked: id {task.id}")
+        .Ok(item) -> print("new reader on Blocked: id {item.id}")
         .Err(_) -> print("new reader on Blocked: rejected")
     }
 
@@ -88,16 +88,21 @@ fn run() {
     }
     print("ORDER BY status:{names}")
 
-    // A CHECK constraint lists the allowed names at the database.
-    _ :: db.migrate(scope, "task-v2", [SQL{"CREATE TABLE checked_task (id INTEGER PRIMARY KEY, status TEXT NOT NULL CHECK (status IN ('Pending', 'Active', 'Archived', 'Blocked')))"}]) ?? panic("migrate v2")
+    // A CHECK constraint lists the allowed names at the database. A policy
+    // scope admits statements over its own table only, so the checked table
+    // gets its own scope.
+    checked_policy :: db.policy("checked_task", "true") ?? panic("policy v2")
+    checked :: conn.with_policy(checked_policy, "owner")
+    _ :: db.migrate(checked, "task-v2", [SQL{"CREATE TABLE checked_task (id INTEGER PRIMARY KEY, status TEXT NOT NULL CHECK (status IN ('Pending', 'Active', 'Archived', 'Blocked')))"}]) ?? panic("migrate v2")
     good :: "Active"
-    if scope.execute(SQL{"INSERT INTO checked_task (status) VALUES ({good})"}) == {
+    if checked.execute(SQL{"INSERT INTO checked_task (status) VALUES ({good})"}) == {
         .Ok(_) -> print("CHECK accepts Active")
         .Err(_) -> print("CHECK rejects Active")
     }
-    if scope.execute(SQL{"INSERT INTO checked_task (status) VALUES ({unknown})"}) == {
+    if checked.execute(SQL{"INSERT INTO checked_task (status) VALUES ({unknown})"}) == {
         .Ok(_) -> print("CHECK accepts active")
         .Err(_) -> print("CHECK rejects active")
     }
+    _checked_closed :: checked.close()
     _closed :: scope.close()
 }

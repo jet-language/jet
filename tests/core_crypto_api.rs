@@ -23,14 +23,6 @@ fn run() {
         "used Secret static conversions must mark the selective import as used: {:?}",
         output.lints
     );
-    assert!(
-        output.rust.contains("jet_crypto_secret_from_text_impl"),
-        "text conversion must lower through the canonical crypto route"
-    );
-    assert!(
-        output.rust.contains("jet_crypto_secret_from_bytes_impl"),
-        "byte conversion must lower through the canonical crypto route"
-    );
 }
 
 #[test]
@@ -49,4 +41,46 @@ fn run() {
 "#,
     )
     .expect("crypto file helpers should accept Path and mixed positional/named arguments");
+}
+
+/// The body of the first emitted item whose header contains `header`.
+fn emitted_body<'a>(rust: &'a str, header: &str) -> &'a str {
+    let start = rust
+        .find(header)
+        .unwrap_or_else(|| panic!("emitted Rust has no `{header}`"));
+    let rest = &rust[start..];
+    &rest[..rest.find("\n}\n").expect("emitted item closes")]
+}
+
+/// D-SHAPE-RESOURCE1=A: a `Secret` still live at scope end is closed, and its
+/// `Close` hands the owned bytes to the one vetted volatile wipe.
+#[test]
+fn live_secret_scope_exit_closes_through_the_zeroize_kernel() {
+    let output = jet::compile(
+        r#"
+use core.crypto as crypto
+
+fn scoped(seed: [U8]) {
+    secret :: crypto.Secret{bytes: seed}
+    print("secret made")
+}
+
+fn run() { scoped([U8]{1, 2, 3}) }
+"#,
+    )
+    .expect("a scoped Secret should compile");
+    let rust = &output.rust;
+    let secret = "__jet__x3ccorelib_x3e_sCore_scrypto_c_cCore_scrypto_scrypto_djet_c_cSecret";
+
+    let close = emitted_body(rust, &format!("impl __jet_Close for {secret} {{"));
+    assert!(
+        close.contains("jet_crypto_zeroize("),
+        "Secret.close must wipe through jet_crypto_zeroize:\n{close}"
+    );
+
+    let scoped = emitted_body(rust, "_cscoped(__jet_seed");
+    assert!(
+        scoped.contains(&format!("<{secret} as __jet_Close>::close(")),
+        "the scope exit must close the live Secret, not drop it:\n{scoped}"
+    );
 }

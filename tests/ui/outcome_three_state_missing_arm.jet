@@ -1,0 +1,31 @@
+// D-OUTCOME-SHAPE1=A: an else-less table over `User? DBError!` covers its
+// three states `.Val`, `.None` and `.Err`; E0307 names the missing one.
+struct User {
+    name: String
+}
+
+#Error
+enum DBError {
+    Down
+}
+
+fn read_user(id: Int) -> User? DBError! {
+    if id == 0 -> return Err(DBError.Down)
+    if id == 7 -> return Ok(Val(User{name: "priya"}))
+    Ok(None)
+}
+
+fn describe(id: Int) -> String {
+    if read_user(id) == {
+        .None -> "no such user"
+        .Err(_) -> "database down"
+    }
+}
+
+fn run() {
+    if read_user(7) == {
+        .Val(user) -> print(user.name)
+        .Err(_) -> print("database down")
+    }
+    print(describe(3))
+}

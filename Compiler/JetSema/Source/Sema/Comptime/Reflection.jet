@@ -131,7 +131,7 @@ fn sema_comptime_reflection_marker_rule(registry: SemaScopeMembersMarkerRegistry
         params := [SemaComptimeReflectionMarkerParam]{}
         variadic_source_type := None
         loop parameter in rule.params {
-            if parameter.name.starts_with("@") -> next
+            if parameter.name.starts_with("$") -> next
             ty :: parameter.ty ?? Type.Named{name: "Value"}
             if parameter.variadic {
                 variadic_source_type = Val(type_name(ty))
@@ -176,7 +176,7 @@ fn sema_comptime_reflection_marker_path(expression: Expr) -> String? {
 }
 
 fn sema_comptime_reflection_marker_menu_candidate(path: String, menu: TAppliedRuleArgumentMenu) -> String Never! {
-    segments := path.split(".")
+    segments := path.split(".").to_list()
     start := 0
     loop index in 0..<segments.len() {
         if segments[index] == menu.name && index + 1 < segments.len() {
@@ -485,7 +485,7 @@ fn sema_comptime_reflection_type_fact_rows(path: String, ty: Type) -> [TComptime
                 detail = Val(sema_comptime_reflection_obligation(value))
             }
         }
-        fact_path_suffix :: if entry.path.len() == 0 -> "@{name}" else -> "{entry.path.join(".")}.@{name}"
+        fact_path_suffix :: if entry.path.len() == 0 -> "${name}" else -> "{entry.path.join(".")}.${name}"
         fact_value :: sema_comptime_reflection_fact_value(kind, name, fact_members, range, dimension, detail_name, detail)
         &result.push(sema_comptime_reflection_fact_info(kind, name, "{path}.{fact_path_suffix}", fact_value))
     }
@@ -846,103 +846,103 @@ fn sema_comptime_reflection_append_arithmetic_expr(expr: Expr, values: &[TCompti
         .Call(call) -> {
             loop argument in call.args {
                 if argument.flags.arithmetic_policy == .Val(fact) && fact.operation != None -> &values.push(sema_comptime_reflection_arithmetic_fact(fact))
-                sema_comptime_reflection_append_arithmetic_expr(argument.expr, values)
+                sema_comptime_reflection_append_arithmetic_expr(argument.expr, &values)
             }
         }
         .Str(parts, _) -> {
             loop part in parts {
-                if part == .Interp(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+                if part == .Interp(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
             }
         }
         .ListLit(elements, _) | .CompareChain(elements, _, _, _) -> {
             loop value in elements {
-                sema_comptime_reflection_append_arithmetic_expr(value, values)
+                sema_comptime_reflection_append_arithmetic_expr(value, &values)
             }
         }
-        .MemberSpread(base, _, _) | .Spread(base, _) | .Unary(_, base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) | .Field(base, _, _) | .OptField(base, _, _, _, _) | .Tainted(base, _, _) | .Present(base, _) | .Ok(base, _) | .Err(base, _) | .Try(base, _, _, _) | .Paren(base, _) -> sema_comptime_reflection_append_arithmetic_expr(base, values)
+        .MemberSpread(base, _, _) | .Spread(base, _) | .Unary(_, base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) | .Field(base, _, _) | .OptField(base, _, _, _, _) | .Tainted(base, _, _) | .Present(base, _) | .Ok(base, _) | .Err(base, _) | .Try(base, _, _, _) | .Paren(base, _) -> sema_comptime_reflection_append_arithmetic_expr(base, &values)
         .MapLit(entries, _) -> {
             loop entry in entries {
-                sema_comptime_reflection_append_arithmetic_expr(entry.key, values)
-                sema_comptime_reflection_append_arithmetic_expr(entry.value, values)
+                sema_comptime_reflection_append_arithmetic_expr(entry.key, &values)
+                sema_comptime_reflection_append_arithmetic_expr(entry.value, &values)
             }
         }
         .Index(base, index, _, _) -> {
-            sema_comptime_reflection_append_arithmetic_expr(base, values)
-            sema_comptime_reflection_append_arithmetic_expr(index, values)
+            sema_comptime_reflection_append_arithmetic_expr(base, &values)
+            sema_comptime_reflection_append_arithmetic_expr(index, &values)
         }
         .Slice(base, start, end, range, _) -> {
-            sema_comptime_reflection_append_arithmetic_expr(base, values)
-            sema_comptime_reflection_append_arithmetic_expr(start, values)
-            sema_comptime_reflection_append_arithmetic_expr(end, values)
-            if range == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+            sema_comptime_reflection_append_arithmetic_expr(base, &values)
+            sema_comptime_reflection_append_arithmetic_expr(start, &values)
+            sema_comptime_reflection_append_arithmetic_expr(end, &values)
+            if range == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
         }
         .Range(start, end, _, _) | .Binary(_, start, end, _) -> {
-            sema_comptime_reflection_append_arithmetic_expr(start, values)
-            sema_comptime_reflection_append_arithmetic_expr(end, values)
+            sema_comptime_reflection_append_arithmetic_expr(start, &values)
+            sema_comptime_reflection_append_arithmetic_expr(end, &values)
         }
         .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
-            sema_comptime_reflection_append_arithmetic_expr(receiver, values)
-            loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, values)
+            sema_comptime_reflection_append_arithmetic_expr(receiver, &values)
+            loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, &values)
         }
         .StructLit(_, _, _, _, fields, _, _) -> {
             loop field in fields {
-                sema_comptime_reflection_append_arithmetic_expr(field.value, values)
+                sema_comptime_reflection_append_arithmetic_expr(field.value, &values)
             }
         }
         .TypedLit(_, body, _) -> {
             if body == {
                 .Fields(fields) -> {
                     loop field in fields {
-                        sema_comptime_reflection_append_arithmetic_expr(field.value, values)
+                        sema_comptime_reflection_append_arithmetic_expr(field.value, &values)
                     }
                 }
                 .Elements(elements) -> {
                     loop value in elements {
-                        sema_comptime_reflection_append_arithmetic_expr(value, values)
+                        sema_comptime_reflection_append_arithmetic_expr(value, &values)
                     }
                 }
                 .Entries(entries) -> {
                     loop entry in entries {
-                        sema_comptime_reflection_append_arithmetic_expr(entry.key, values)
-                        sema_comptime_reflection_append_arithmetic_expr(entry.value, values)
+                        sema_comptime_reflection_append_arithmetic_expr(entry.key, &values)
+                        sema_comptime_reflection_append_arithmetic_expr(entry.value, &values)
                     }
                 }
-                .Value(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+                .Value(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
                 else -> {}
             }
         }
         .EnumLit(_, _, _, args, _, _) -> {
             loop argument in args {
                 if argument == {
-                    .Positional(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
-                    .Named(_, value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+                    .Positional(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
+                    .Named(_, value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
                 }
             }
         }
-        .OrFallback(value, _, _, _) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+        .OrFallback(value, _, _, _) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
         .If(condition, then_body, then_value, else_body, else_value, _) -> {
-            sema_comptime_reflection_append_arithmetic_expr(condition, values)
-            sema_comptime_reflection_append_arithmetic_stmts(then_body, values)
-            sema_comptime_reflection_append_arithmetic_expr(then_value, values)
-            sema_comptime_reflection_append_arithmetic_stmts(else_body, values)
-            sema_comptime_reflection_append_arithmetic_expr(else_value, values)
+            sema_comptime_reflection_append_arithmetic_expr(condition, &values)
+            sema_comptime_reflection_append_arithmetic_stmts(then_body, &values)
+            sema_comptime_reflection_append_arithmetic_expr(then_value, &values)
+            sema_comptime_reflection_append_arithmetic_stmts(else_body, &values)
+            sema_comptime_reflection_append_arithmetic_expr(else_value, &values)
         }
         .TupleLit(fields, _, _) -> {
             loop field in fields {
-                sema_comptime_reflection_append_arithmetic_expr(field.value, values)
+                sema_comptime_reflection_append_arithmetic_expr(field.value, &values)
             }
         }
         .Lambda(lambda) -> {
             if lambda.body == {
-                .Expr(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
-                .Block(body) -> sema_comptime_reflection_append_arithmetic_stmts(body, values)
+                .Expr(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
+                .Block(body) -> sema_comptime_reflection_append_arithmetic_stmts(body, &values)
             }
         }
         .CallValue(callee, args, _) -> {
-            sema_comptime_reflection_append_arithmetic_expr(callee, values)
-            loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, values)
+            sema_comptime_reflection_append_arithmetic_expr(callee, &values)
+            loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, &values)
         }
-        .PtrFromAddr(_, _, _, address, _) -> sema_comptime_reflection_append_arithmetic_expr(address, values)
+        .PtrFromAddr(_, _, _, address, _) -> sema_comptime_reflection_append_arithmetic_expr(address, &values)
         else -> {}
     }
 }
@@ -950,62 +950,62 @@ fn sema_comptime_reflection_append_arithmetic_expr(expr: Expr, values: &[TCompti
 fn sema_comptime_reflection_append_arithmetic_stmts(body: [Stmt], values: &[TComptimeValue]) {
     loop statement in body {
         if statement == {
-            .Expr(value) | .BreakValue(value, _) | .Yield(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
-            .Val(binding) -> sema_comptime_reflection_append_arithmetic_expr(binding.init, values)
+            .Expr(value) | .BreakValue(value, _) | .Yield(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
+            .Val(binding) -> sema_comptime_reflection_append_arithmetic_expr(binding.init, &values)
             .Assign(target, _, _, value) -> {
                 if target == {
                     .Index(base, index, _, _) -> {
-                        sema_comptime_reflection_append_arithmetic_expr(base, values)
-                        sema_comptime_reflection_append_arithmetic_expr(index, values)
+                        sema_comptime_reflection_append_arithmetic_expr(base, &values)
+                        sema_comptime_reflection_append_arithmetic_expr(index, &values)
                     }
-                    .Field(base, _, _) -> sema_comptime_reflection_append_arithmetic_expr(base, values)
+                    .Field(base, _, _) -> sema_comptime_reflection_append_arithmetic_expr(base, &values)
                     else -> {}
                 }
-                sema_comptime_reflection_append_arithmetic_expr(value, values)
+                sema_comptime_reflection_append_arithmetic_expr(value, &values)
             }
-            .Return(value, _) -> if value == .Val(expr) -> sema_comptime_reflection_append_arithmetic_expr(expr, values)
+            .Return(value, _) -> if value == .Val(expr) -> sema_comptime_reflection_append_arithmetic_expr(expr, &values)
             .While(condition, nested, _, _, _) -> {
-                sema_comptime_reflection_append_arithmetic_expr(condition, values)
-                sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+                sema_comptime_reflection_append_arithmetic_expr(condition, &values)
+                sema_comptime_reflection_append_arithmetic_stmts(nested, &values)
             }
             .For(_, _, _, kind, nested, _, _, _, _) -> {
                 if kind == {
                     .Range(start, end, step, _) -> {
-                        sema_comptime_reflection_append_arithmetic_expr(start, values)
-                        sema_comptime_reflection_append_arithmetic_expr(end, values)
-                        if step == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+                        sema_comptime_reflection_append_arithmetic_expr(start, &values)
+                        sema_comptime_reflection_append_arithmetic_expr(end, &values)
+                        if step == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
                     }
                     .In(collection, step) -> {
-                        sema_comptime_reflection_append_arithmetic_expr(collection, values)
-                        if step == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+                        sema_comptime_reflection_append_arithmetic_expr(collection, &values)
+                        if step == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
                     }
                 }
-                sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+                sema_comptime_reflection_append_arithmetic_stmts(nested, &values)
             }
             .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
-                sema_comptime_reflection_append_arithmetic_expr(subject, values)
+                sema_comptime_reflection_append_arithmetic_expr(subject, &values)
                 loop arm in arms {
-                    sema_comptime_reflection_append_arithmetic_expr(arm.cond, values)
-                    sema_comptime_reflection_append_arithmetic_stmts(arm.body, values)
+                    sema_comptime_reflection_append_arithmetic_expr(arm.cond, &values)
+                    sema_comptime_reflection_append_arithmetic_stmts(arm.body, &values)
                 }
-                if else_body == .Val(nested) -> sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+                if else_body == .Val(nested) -> sema_comptime_reflection_append_arithmetic_stmts(nested, &values)
             }
-            .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) | .Reactive(nested, _) | .Shield(nested, _) | .Switched(_, nested, _) | .Region(_, _, nested, _) | .Policy(_, nested, _) | .TaskGroup(_, _, _, nested, _) | .Layout(_, _, nested, _) | .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) | .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) | .Transact(_, _, nested, _, _) -> sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+            .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) | .Reactive(nested, _) | .Shield(nested, _) | .Switched(_, nested, _) | .Region(_, _, nested, _) | .Policy(_, nested, _) | .TaskGroup(_, _, _, nested, _) | .Layout(_, _, nested, _) | .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) | .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) | .Transact(_, _, nested, _, _) -> sema_comptime_reflection_append_arithmetic_stmts(nested, &values)
             .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
-                sema_comptime_reflection_append_arithmetic_expr(condition, values)
-                sema_comptime_reflection_append_arithmetic_stmts(then_body, values)
-                if else_body == .Val(nested) -> sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+                sema_comptime_reflection_append_arithmetic_expr(condition, &values)
+                sema_comptime_reflection_append_arithmetic_stmts(then_body, &values)
+                if else_body == .Val(nested) -> sema_comptime_reflection_append_arithmetic_stmts(nested, &values)
             }
             .CountedLoop(init, condition, step, nested, _, _, _) -> {
-                sema_comptime_reflection_append_arithmetic_expr(init.init, values)
-                sema_comptime_reflection_append_arithmetic_expr(condition, values)
-                if step == .Val(value) -> sema_comptime_reflection_append_arithmetic_stmts([Stmt]{value}, values)
-                sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+                sema_comptime_reflection_append_arithmetic_expr(init.init, &values)
+                sema_comptime_reflection_append_arithmetic_expr(condition, &values)
+                if step == .Val(value) -> sema_comptime_reflection_append_arithmetic_stmts([Stmt]{value}, &values)
+                sema_comptime_reflection_append_arithmetic_stmts(nested, &values)
             }
-            .DeferClose(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, values)
+            .DeferClose(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
             .ScopeMember(_, _, args, _, nested, _, _, _) -> {
-                loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument, values)
-                sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+                loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument, &values)
+                sema_comptime_reflection_append_arithmetic_stmts(nested, &values)
             }
             else -> {}
         }
@@ -1067,17 +1067,17 @@ fn sema_comptime_reflection_declared_function_facts(method: Func, path: String) 
         SemaComptimeReflectionField{name: "column", value: sema_comptime_reflection_none()},
         SemaComptimeReflectionField{name: "ambiguity", value: TComptimeValue.Bool{value: false}},
     })
-    &facts.push(sema_comptime_reflection_fact_info("Sendability", "sendability", "{path}.@sendability", sema_comptime_reflection_fact_value("Sendability", "sendability", [String]{}, None, None, "sendability", Val(sendability))))
-    &facts.push(sema_comptime_reflection_fact_info("Movedness", "movedness", "{path}.@movedness", sema_comptime_reflection_fact_value("Movedness", "movedness", [String]{}, None, None, "movedness", Val(movedness))))
-    &facts.push(sema_comptime_reflection_fact_info("Origin", "origin", "{path}.@origin", sema_comptime_reflection_fact_value("Origin", "origin", [String]{}, None, None, "origin", Val(origin))))
+    &facts.push(sema_comptime_reflection_fact_info("Sendability", "sendability", "{path}.$sendability", sema_comptime_reflection_fact_value("Sendability", "sendability", [String]{}, None, None, "sendability", Val(sendability))))
+    &facts.push(sema_comptime_reflection_fact_info("Movedness", "movedness", "{path}.$movedness", sema_comptime_reflection_fact_value("Movedness", "movedness", [String]{}, None, None, "movedness", Val(movedness))))
+    &facts.push(sema_comptime_reflection_fact_info("Origin", "origin", "{path}.$origin", sema_comptime_reflection_fact_value("Origin", "origin", [String]{}, None, None, "origin", Val(origin))))
     maturity :: sema_comptime_reflection_maturity(method)
-    &facts.push(sema_comptime_reflection_fact_info("Maturity", "maturity", "{path}.@maturity", sema_comptime_reflection_fact_value("Maturity", "maturity", [String]{}, None, None, "maturity", Val(maturity))))
+    &facts.push(sema_comptime_reflection_fact_info("Maturity", "maturity", "{path}.$maturity", sema_comptime_reflection_fact_value("Maturity", "maturity", [String]{}, None, None, "maturity", Val(maturity))))
     provenance := None
     if method.return_view_provenance == {
         .Val(value) -> {
             loop entry in value.entries {
                 slot_name :: if entry.slot.len() == 0 -> "return" else -> entry.slot.join(".")
-                &facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.@view_provenance.{slot_name}", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{slot_name}, None, None, "view_provenance", Val(sema_comptime_reflection_view_provenance(entry.value)))))
+                &facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.$view_provenance.{slot_name}", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{slot_name}, None, None, "view_provenance", Val(sema_comptime_reflection_view_provenance(entry.value)))))
             }
             if value.entries.len() == 0 -> provenance = Val(ViewProvenance{sources: [ViewSourcePath]{}, mutable: false})
         }
@@ -1085,7 +1085,7 @@ fn sema_comptime_reflection_declared_function_facts(method: Func, path: String) 
     }
     if provenance == .Val(value) {
         view :: sema_comptime_reflection_view_provenance(value)
-        &facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.@view_provenance.return", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{"return"}, None, None, "view_provenance", Val(view))))
+        &facts.push(sema_comptime_reflection_fact_info("ViewProvenance", "view_provenance", "{path}.$view_provenance.return", sema_comptime_reflection_fact_value("ViewProvenance", "view_provenance", [String]{"return"}, None, None, "view_provenance", Val(view))))
     }
     facts
 }
@@ -1162,7 +1162,7 @@ fn sema_comptime_reflection_type_fact_range(name: String, path: String, start: I
 fn sema_comptime_reflection_distinct_facts(definition: DistinctDef) -> [TComptimeValue] Never! {
     facts := [TComptimeValue]{}
     if definition.range == .Val(range) {
-        &facts.push(sema_comptime_reflection_type_fact_range("range", "{definition.name}.@range", range.lo, range.hi))
+        &facts.push(sema_comptime_reflection_type_fact_range("range", "{definition.name}.$range", range.lo, range.hi))
     }
     if definition.quantity == .Val(quantity) {
         kind :: if quantity.kind == {
@@ -1171,7 +1171,7 @@ fn sema_comptime_reflection_distinct_facts(definition: DistinctDef) -> [TComptim
             .Delta -> "Delta"
         }
         value :: sema_comptime_reflection_fact_value("Dimension", "dimension", [String]{kind}, None, Val(sema_comptime_reflection_dimension(quantity.dimension)), "", None)
-        &facts.push(sema_comptime_reflection_fact_info("Dimension", "dimension", "{definition.name}.@dimension", value))
+        &facts.push(sema_comptime_reflection_fact_info("Dimension", "dimension", "{definition.name}.$dimension", value))
     }
     facts
 }

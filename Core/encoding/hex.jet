@@ -222,14 +222,14 @@ pub fn a2b_uu(text: String) -> [U8] {
             b :: uu_value(raw[i + 1])
             c :: uu_value(raw[i + 2])
             d :: uu_value(raw[i + 3])
-            &out.push(U8{(a << 2) ~| (b >> 4)})
+            &out.push(to_u8((a << 2) ~| (b >> 4)))
             produced += 1
             if produced < count {
-                &out.push(U8{(b << 4) ~| (c >> 2)})
+                &out.push(to_u8((b << 4) ~| (c >> 2)))
                 produced += 1
             }
             if produced < count {
-                &out.push(U8{(c << 6) ~| d})
+                &out.push(to_u8((c << 6) ~| d))
                 produced += 1
             }
             i += 4
@@ -398,22 +398,22 @@ fn base64_decode(text: String) -> [U8] HexError! {
         c :: table[u8_int(raw[i + 2])]
         d :: table[u8_int(raw[i + 3])]
         n :: (a << 18) | (b << 12) | (c << 6) | d
-        &out.push(U8{(n >> 16) & 255})
-        &out.push(U8{(n >> 8) & 255})
-        &out.push(U8{n & 255})
+        &out.push(to_u8(n >> 16))
+        &out.push(to_u8(n >> 8))
+        &out.push(to_u8(n))
         i += 4
     }
     if rem == 2 {
         a :: table[u8_int(raw[i])]
         b :: table[u8_int(raw[i + 1])]
-        &out.push(U8{((a << 2) | (b >> 4)) & 255})
+        &out.push(to_u8((a << 2) | (b >> 4)))
     }
     if rem == 3 {
         a :: table[u8_int(raw[i])]
         b :: table[u8_int(raw[i + 1])]
         c :: table[u8_int(raw[i + 2])]
-        &out.push(U8{((a << 2) | (b >> 4)) & 255})
-        &out.push(U8{((b << 4) | (c >> 2)) & 255})
+        &out.push(to_u8((a << 2) | (b >> 4)))
+        &out.push(to_u8((b << 4) | (c >> 2)))
     }
     Ok(out)
 }
@@ -424,4 +424,11 @@ fn base64_decode_table() -> [Int] Never! {
     ab :: BASE64_ALPHABET.bytes()
     loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
     table
+}
+
+/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
+/// checked `U8{}` conversion.
+fn to_u8(n: Int) -> U8 Never! {
+    v :: n & 255
+    (U8{v})
 }

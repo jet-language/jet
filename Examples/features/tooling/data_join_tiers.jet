@@ -1,0 +1,79 @@
+package {
+    name: "tooling_data_join_tiers"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Panic] } }
+}
+
+// core.data joins agree on every tier: duplicate keys multiply in
+// left-major encounter order, a left join keeps unmatched rows with
+// `right = None`, and a reversed left join is the right-join layout.
+// The join row cap comes from the fixed DataLimits.safe() budget, and a
+// breach is rejected from per-key counts before any row is built.
+use core.data as data
+
+struct Order {
+    id: Int
+    team: String
+}
+
+struct Owner {
+    team: String
+    name: String
+}
+
+fn owner_name(owner: Owner?) -> String {
+    if owner == {
+        .Val(found) -> found.name
+        .None -> "<none>"
+    }
+}
+
+fn order_id(order: Order?) -> String {
+    if order == {
+        .Val(found) -> "{found.id}"
+        .None -> "<none>"
+    }
+}
+
+fn run() {
+    orders :: [Order]{
+        Order{id: 1, team: "core"},
+        Order{id: 2, team: "tools"},
+        Order{id: 3, team: "core"},
+        Order{id: 4, team: "docs"},
+    }
+    owners :: [Owner]{
+        Owner{team: "core", name: "Ada"},
+        Owner{team: "core", name: "Lin"},
+        Owner{team: "tools", name: "Grace"},
+        Owner{team: "ops", name: "Kay"},
+    }
+
+    inner :: data.inner_join<Order, Owner>(orders, owners, (o: Order) -> o.team, (w: Owner) -> w.team) ?? panic("inner")
+    print("inner rows: {inner.len()}")
+    loop row in inner -> print("inner: order {row.left.id} {row.left.team} -> {row.right.name}")
+
+    left :: data.left_join<Order, Owner>(orders, owners, (o: Order) -> o.team, (w: Owner) -> w.team) ?? panic("left")
+    print("left rows: {left.len()}")
+    loop row in left -> print("left: order {row.left.id} -> {owner_name(row.right)}")
+
+    reversed :: data.left_join<Owner, Order>(owners, orders, (w: Owner) -> w.team, (o: Order) -> o.team) ?? panic("reversed")
+    print("reversed rows: {reversed.len()}")
+    loop row in reversed -> print("reversed: {row.left.name} -> order {order_id(row.right)}")
+
+    print("max_join_rows: {data.DataLimits.safe().max_join_rows}")
+
+    // 1001 x 1000 matches under one key exceed the 1_000_000 row cap.
+    many_left := [Order]{}
+    loop index in 0..<1001 -> &many_left.push(Order{id: index, team: "k"})
+    many_right := [Owner]{}
+    loop index in 0..<1000 -> &many_right.push(Owner{team: "k", name: "n"})
+    if data.inner_join<Order, Owner>(many_left, many_right, (o: Order) -> o.team, (w: Owner) -> w.team) == {
+        .Ok(rows) -> print("unexpected ok {rows.len()}")
+        .Err(error) -> print("limit: {error.operation}: {error.reason}")
+    }
+    if data.left_join<Order, Owner>(many_left, many_right, (o: Order) -> o.team, (w: Owner) -> w.team) == {
+        .Ok(rows) -> print("unexpected ok {rows.len()}")
+        .Err(error) -> print("limit: {error.operation}: {error.reason}")
+    }
+}

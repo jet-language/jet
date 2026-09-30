@@ -155,6 +155,7 @@ pub(super) fn resolve_inline_module_imports(
                 let mut inserted_reexport_inline = Vec::new();
                 let mut inserted_reexport_file = Vec::new();
                 let mut inserted_reexport_core = Vec::new();
+                let mut pending_item_aliases = Vec::new();
                 for binding in bindings {
                     let orig = binding
                         .original
@@ -183,6 +184,11 @@ pub(super) fn resolve_inline_module_imports(
                         Core {
                             module: String,
                             item: Option<String>,
+                        },
+                        Item {
+                            target: String,
+                            module_idx: usize,
+                            span: crate::Diagnostics::Span,
                         },
                     }
                     let resolved = {
@@ -259,7 +265,19 @@ pub(super) fn resolve_inline_module_imports(
                         } else if let Some(&target_idx) = st.imports.get(module_alias) {
                             let target = &states[target_idx];
                             let visible = name_ledger.visible(idx, target_idx, &orig);
-                            if !target.funcs.contains_key(orig) {
+                            // D-MOD2: an inline body imports any top-level
+                            // declaration of a file module, like a file does.
+                            // Non-function items bind as NameLedger aliases,
+                            // the table nominal lookup already consults.
+                            let is_function = target.funcs.contains_key(orig);
+                            let is_other_item = !is_function
+                                && matches!(
+                                    name_ledger
+                                        .declaration(target_idx, orig)
+                                        .map(|declaration| declaration.kind.as_str()),
+                                    Some("type" | "trait" | "const" | "tag" | "protocol")
+                                );
+                            if !is_function && !is_other_item {
                                 diags.push(Diagnostic::error(
                                     "E0611",
                                     format!("`{orig}` is not defined in module `{module_alias}`"),
@@ -274,10 +292,39 @@ pub(super) fn resolve_inline_module_imports(
                                     format!("`{orig}` is private in module `{module_alias}`"),
                                     "only public items can be brought into scope with use"
                                         .to_string(),
-                                    format!("add pub before fn {orig} in the imported file"),
+                                    if is_function {
+                                        format!("add pub before fn {orig} in the imported file")
+                                    } else {
+                                        format!(
+                                            "add pub before the declaration of {orig} in the imported file"
+                                        )
+                                    },
                                     Some(module_alias_span),
                                 ));
                                 None
+                            } else if is_other_item {
+                                let item_target =
+                                    format!("{}.{}", bundle.modules[target_idx].alias, orig);
+                                if name_ledger
+                                    .alias(idx, &local)
+                                    .is_some_and(|existing| existing.target != item_target)
+                                {
+                                    diags.push(Diagnostic::error(
+                                        "E0105",
+                                        format!("the import name `{local}` is used twice"),
+                                        "each import needs a unique namespace name in this file"
+                                            .to_string(),
+                                        format!("rename one with `{} alias`", Syntax::KW_AS),
+                                        Some(imp.alias_span),
+                                    ));
+                                    None
+                                } else {
+                                    Some(Target::Item {
+                                        target: item_target,
+                                        module_idx: target_idx,
+                                        span: binding.local_span,
+                                    })
+                                }
                             } else {
                                 Some(Target::File {
                                     name: orig.to_string(),
@@ -336,9 +383,27 @@ pub(super) fn resolve_inline_module_imports(
                                 }
                             }
                         }
+                        Target::Item {
+                            target,
+                            module_idx,
+                            span,
+                        } => pending_item_aliases.push((local, target, module_idx, span)),
                     }
                 }
-                if diags.len() != group_diagnostics {
+                if diags.len() == group_diagnostics {
+                    // The ledger has no inline-module scope, so the alias
+                    // lives in the enclosing file and never exports from it.
+                    for (local, target, target_idx, span) in pending_item_aliases {
+                        name_ledger.record_alias(
+                            idx,
+                            local,
+                            target,
+                            Some(target_idx),
+                            span,
+                            jet_foundation::Names::NameVisibility::Private,
+                        );
+                    }
+                } else {
                     let st = &mut states[idx];
                     for key in inserted_inline {
                         st.inline_unqualified.remove(&key);

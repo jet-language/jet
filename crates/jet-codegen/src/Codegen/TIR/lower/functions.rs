@@ -403,13 +403,26 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     );
     note_stack_sentry_in_tir(&body, &env);
     let uses_stack_sentry = env.stack_sentry_needed();
+    // #3740: an empty failure set returns its success value directly. The body
+    // above keeps the checked carrier; MIR unwraps it at each return.
+    let plain_return = crate::Codegen::TIR::function_has_plain_return(f)
+        .then(|| match &return_type {
+            Type::Result { ok, err } if err.is_never() => Some(ok.as_ref().clone()),
+            _ => None,
+        })
+        .flatten();
+    let failure_carrier = if plain_return.is_some() {
+        TFailureCarrier::Infallible
+    } else {
+        function_failure_carrier(f)
+    };
     TFunc {
         name: f.name.clone(),
         module: cx.module_identity.clone(),
         key: function_semantic_key(&cx.module_identity, &f.name),
         source_file: cx.file.clone(),
         source_span: f.span,
-        failure_carrier: function_failure_carrier(f),
+        failure_carrier,
         effects: function_effect_facts(f),
         target_applicability: function_target_applicability(f),
         web_bucket: None,
@@ -418,7 +431,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         foreign: function_foreign_provenance(f),
         params,
         web_param_reconstructions,
-        ret: Some(return_type),
+        ret: Some(plain_return.unwrap_or(return_type)),
         gc_return: f.gc_return,
         gc_scope: f.gc_scope,
         return_view_provenance: f.return_view_provenance.clone(),

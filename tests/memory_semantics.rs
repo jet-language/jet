@@ -12,10 +12,10 @@ fn run() -[!Mem.Alloc]> {
 "#;
 
 const MEMORY_COMPTIME_SOURCE: &str = r#"
-@ANSWER :: "memory denial"
+ANSWER :: prep { "memory denial" }
 
 fn run() -[!Mem.Alloc]> {
-    print(@ANSWER)
+    print(ANSWER)
 }
 "#;
 

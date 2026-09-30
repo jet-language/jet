@@ -7,8 +7,8 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    edit_distance, is_cloneable, is_displayable, is_printable, owned_type_for_read_view, type_fix_hint,
-    type_is_copy, typed_text_mismatch,
+    edit_distance, is_cloneable, is_debuggable, is_displayable, is_printable,
+    owned_type_for_read_view, type_fix_hint, type_is_copy, typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
@@ -622,6 +622,91 @@ impl<'a> Checker<'a> {
         Some(ty)
     }
 
+    /// D-DBG1=A: check `debug(value)`. The trace has the value's own type
+    /// and adds no effect. Sema records the site text (`file.jet:LINE expr`)
+    /// once as a second argument and renames the call to the internal trace,
+    /// so every evaluator prints the same line. A shipped artifact or a
+    /// release-profile build rejects the trace with a `jet fix` edit that
+    /// keeps the traced expression.
+    fn check_debug_trace(&mut self, call: &mut Call) -> Option<Type> {
+        if call.name == Syntax::INTERNAL_DEBUG_TRACE {
+            return self.infer(&mut call.args.first_mut()?.expr);
+        }
+        if call.args.len() != 1 || call.args[0].label.is_some() || call.args[0].spread {
+            for arg in call.args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`{}` takes exactly one value", Syntax::BUILTIN_DEBUG),
+                "`debug(value)` shows one value and returns it unchanged".to_string(),
+                format!("write `{}(value)`", Syntax::BUILTIN_DEBUG),
+                Some(call.name_span),
+            ));
+            return None;
+        }
+        let ty = self.infer(&mut call.args[0].expr);
+        let value_span = call.args[0].expr.span();
+        if let Some(ty) = &ty {
+            if !is_debuggable(ty, self.registry, self.trait_reg) {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`{}` can't show {}", Syntax::BUILTIN_DEBUG, ty.show()),
+                    "`debug` writes the value's Debug form".to_string(),
+                    "implement `Debug`, or trace a debuggable part of the value".to_string(),
+                    Some(value_span),
+                ));
+            }
+        }
+        let source = self.source;
+        let value_text = source.get(value_span.start..value_span.end).unwrap_or_default();
+        let expr_text = value_text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let (line, _) = crate::Diagnostics::span_line_col(source, call.name_span.start);
+        let file = std::path::Path::new(self.module_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(self.module_path);
+        let site = format!("{file}:{line}");
+        let rejects = self
+            .modules
+            .and_then(|modules| modules.get(self.module_idx))
+            .is_some_and(|state| state.build_facts.rejects_debug_traces());
+        if rejects {
+            // The fix removes `debug(` and its closing `)`, keeping the
+            // traced expression exactly as written.
+            let close = source.get(value_span.end..).and_then(|rest| {
+                let offset = rest.find(|ch: char| !ch.is_whitespace() && ch != ',')?;
+                rest[offset..]
+                    .starts_with(')')
+                    .then_some(value_span.end + offset + 1)
+            });
+            let mut diagnostic =
+                Diagnostic::from_row("E3405", &[("site", site.as_str())], Some(call.name_span));
+            if let Some(end) = close {
+                diagnostic = diagnostic.with_edit(TextEdit {
+                    span: Span::new(call.name_span.start, end),
+                    new_text: value_text.to_string(),
+                });
+            }
+            self.diags.push(diagnostic);
+        }
+        call.name = Syntax::INTERNAL_DEBUG_TRACE.to_string();
+        call.args.push(crate::AST::CallArg {
+            convention: AccessConvention::Read,
+            expr: Expr::Str(vec![StrPart::Lit(format!("{site} {expr_text}"))], value_span),
+            span: value_span,
+            flags: Default::default(),
+            label: None,
+            spread: false,
+        });
+        ty
+    }
+
     /// D-TYPE2-UNCERT1=A: the one measured-value constructor. The
     /// uncertainty label is semantic, so every entry point sees the same
     /// checked call shape without a `core.units` module alias.
@@ -843,6 +928,20 @@ impl<'a> Checker<'a> {
         }
         if call.name == Syntax::BUILTIN_APPROX && !self.funcs.contains_key(&call.name) {
             return self.check_numeric_approx(call).map(Some);
+        }
+        // D-DBG1=A: `debug(value)` is the ambient development trace. It adds
+        // no effect, so it is legal in `-[]>`, `#Memo`, and comptime code.
+        // A user declaration, local, or import of the same name wins.
+        if call.name == Syntax::INTERNAL_DEBUG_TRACE
+            || (call.name == Syntax::BUILTIN_DEBUG
+                && !self.no_prelude
+                && !self.funcs.contains_key(&call.name)
+                && !self.core_item_imports.contains_key(&call.name)
+                && !self.unqualified.contains_key(&call.name)
+                && !self.unqualified_file.contains_key(&call.name)
+                && self.lookup(&call.name).is_none())
+        {
+            return Some(self.check_debug_trace(call));
         }
         // D-EFF1: an ambient prelude builtin (`print`/`input`) contributes the `IO`
         // effect, unless a user function of the same name shadows it (in which
@@ -2072,14 +2171,18 @@ impl<'a> Checker<'a> {
             if !sig.is_extern {
                 // A `&name` argument grants the named place itself, so it is a
                 // borrow position: the owning-slot copy below must never turn
-                // a `&` parameter passed onward into `~name` (E0202).
+                // a `&` parameter passed onward into `~name` (E0202). A write
+                // parameter is a borrow slot too: a bare name reaching it must
+                // stay a name so the missing `&` is reported, never copied.
                 if arg.convention == AccessConvention::Write {
                     self.borrow_ctx = true;
                 }
-                if let Some((AccessConvention::Read, pty)) = effective_params.get(i) {
-                    if !pty.is_scalar() {
+                match effective_params.get(i) {
+                    Some((AccessConvention::Write, _)) => self.borrow_ctx = true,
+                    Some((AccessConvention::Read, pty)) if !pty.is_scalar() => {
                         self.borrow_ctx = true;
                     }
+                    _ => {}
                 }
             } else if let Some((_, pty)) = effective_params.get(i) {
                 if !pty.is_scalar() {
@@ -2350,6 +2453,8 @@ impl<'a> Checker<'a> {
                     self.widen_numeric_expr(&mut arg.expr, &arg_ty, &param_ty);
                     arg_ty = param_ty.clone();
                 }
+                // D-OPT-LIFT1=A: a plain payload fills a `T?` parameter.
+                arg_ty = self.lift_optional_argument(&mut arg.expr, arg_ty, &param_ty, *param_conv);
                 let reads_expiring_secret_loan = arg.convention == AccessConvention::Read
                     && crate::Sema::Diagnostics::expiring_secret_loan_matches(&param_ty, &arg_ty);
                 // E0202 already told the writer this argument needs a name;

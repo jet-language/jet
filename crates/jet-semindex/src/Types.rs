@@ -192,7 +192,8 @@ impl CallableSignatureFact {
         match &self.failure_contract {
             CallableFactAvailability::Checked(contract) => {
                 match contract.effective_type() {
-                    AST::Type::Result { err, .. } => Some(vec![*err]),
+                    // `Never` is the empty failure set, written or inferred.
+                    AST::Type::Result { err, .. } if !err.is_never() => Some(vec![*err]),
                     _ => Some(Vec::new()),
                 }
             }

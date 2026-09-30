@@ -41,35 +41,35 @@ pub fn pack_i8(n: Int) -> [U8] BinaryError! {
 
 pub fn pack_u16le(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 65535 -> return Err(BinaryError.Range)
-    [U8]{U8{n & 255}, U8{(n >> 8) & 255}}
+    [U8]{to_u8(n), to_u8(n >> 8)}
 }
 
 pub fn pack_u16be(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 65535 -> return Err(BinaryError.Range)
-    [U8]{U8{(n >> 8) & 255}, U8{n & 255}}
+    [U8]{to_u8(n >> 8), to_u8(n)}
 }
 
 pub fn pack_u32le(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 4294967295 -> return Err(BinaryError.Range)
-    [U8]{U8{n & 255}, U8{(n >> 8) & 255}, U8{(n >> 16) & 255}, U8{(n >> 24) & 255}}
+    [U8]{to_u8(n), to_u8(n >> 8), to_u8(n >> 16), to_u8(n >> 24)}
 }
 
 pub fn pack_u32be(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 4294967295 -> return Err(BinaryError.Range)
-    [U8]{U8{(n >> 24) & 255}, U8{(n >> 16) & 255}, U8{(n >> 8) & 255}, U8{n & 255}}
+    [U8]{to_u8(n >> 24), to_u8(n >> 16), to_u8(n >> 8), to_u8(n)}
 }
 
 pub fn pack_u64le(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> &out.push(U8{(n >> (k * 8)) & 255})
+    loop k in 0..<8 -> &out.push(to_u8(n >> (k * 8)))
     out
 }
 
 pub fn pack_u64be(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> &out.push(U8{(n >> ((7 - k) * 8)) & 255})
+    loop k in 0..<8 -> &out.push(to_u8(n >> ((7 - k) * 8)))
     out
 }
 
@@ -364,4 +364,11 @@ fn unpack_one(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, v
     if little -> n = unpack_u64le(data, offset) ?? return Err(BinaryError.Buffer) else -> n = unpack_u64be(data, offset) ?? return Err(BinaryError.Buffer)
     if code == 113 -> n = sign_extend(n, 64)
     (value: n, next: offset + 8)
+}
+
+/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
+/// checked `U8{}` conversion.
+fn to_u8(n: Int) -> U8 Never! {
+    v :: n & 255
+    (U8{v})
 }

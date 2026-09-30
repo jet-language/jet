@@ -812,7 +812,7 @@ fn run() {
     assert!(out.rust.contains(").clone()"));
 }
 
-/// D-CONSTMARK1=A (syntax-decisions.md:1756): `@name :: value` is the marked
+/// D-CONSTMARK1=A (syntax-decisions.md:1756): `NAME :: value` is the marked
 /// compile-time binding, and `#Static @` emits a Rust `static` so the value
 /// gets one stable address. Ordinary `name :: value` and `name := value`
 /// are module globals; only the mutable form is writable.
@@ -826,14 +826,14 @@ fn run() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-#Static @LIMIT :: 10
+#Static LIMIT :: prep { 10 }
 
 fn show(n: Int) {
     print(n)
 }
 
 fn run() {
-    show(@LIMIT)
+    show(LIMIT)
 }
 "#;
     let out = jet::compile(src).expect("should compile");

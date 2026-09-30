@@ -201,9 +201,7 @@ fn jet_jit_sentry_check_fixed(
         true
     }
 }
-use std::sync::atomic::{
-    compiler_fence, AtomicBool, AtomicI64, AtomicU64, Ordering,
-};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 pub(crate) mod shared_protocol {
@@ -541,31 +539,29 @@ pub(crate) struct ExpiringState {
     value: i64,
     expires_at: i64,
     clock: i64,
-    secret: Option<SecretState>,
+    /// D-TTL-ZEROIZE1=A: the value is a Core secret record whose `bytes`
+    /// list is wiped in place when the entry expires.
+    secret: bool,
 }
 
-pub(crate) struct SecretState {
-    handle: i64,
-    bytes: Vec<u8>,
-}
-
-impl SecretState {
-    pub(crate) fn from_material(handle: i64, bytes: Vec<u8>) -> Self {
-        Self { handle, bytes }
-    }
-
-    fn zeroize(&mut self) {
-        for byte in self.bytes.iter_mut() {
-            // SAFETY: the pointer refers to this live, uniquely borrowed byte.
-            unsafe { std::ptr::write_volatile(byte, 0) };
+/// A Core secret (`Secret`, `SigningKey`, `X25519SecretKey`) is a record whose
+/// only field is its `bytes` list.
+fn expiring_secret_bytes(record: i64) -> Option<i64> {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.record_get(record, 0)? {
+        jet_rt::JetVal::Int(list) | jet_rt::JetVal::RecordRef(list)
+            if rt.heap.list_len(*list).is_some() =>
+        {
+            Some(*list)
         }
-        compiler_fence(Ordering::SeqCst);
-    }
+        _ => None,
+    })
 }
 
-impl Drop for SecretState {
-    fn drop(&mut self) {
-        self.zeroize();
+/// Wipe an expired secret's bytes through the same resident wipe
+/// `core.crypto.__zeroize` uses when the secret closes.
+fn wipe_expired_secret(record: i64) {
+    if let Some(bytes) = expiring_secret_bytes(record) {
+        crate::Crypto::jet_jit_crypto_zeroize(bytes);
     }
 }
 
@@ -706,14 +702,6 @@ mod tests {
         Concurrency::clear_http_shared_runtime();
     }
 
-
-
-    #[test]
-    fn secret_storage_zeroizes_the_owned_bytes() {
-        let mut secret = SecretState::from_material(1, vec![0x5a; 32]);
-        secret.zeroize();
-        assert_eq!(secret.bytes.as_slice(), &[0; 32]);
-    }
 
     #[test]
     fn resident_shared_wait_handoff_publishes_once_and_refreshes_after_reacquire() {
@@ -4476,21 +4464,13 @@ fn jet_jit_shared_txn_abort() {
 }
 
 fn jet_jit_expiring_new(value: i64, duration: i64, clock: i64, secret: i64) -> i64 {
-    // SigningKey / X25519 / Secret live in crypto_values (#1222). Claim a
-    // zeroize mirror here; keep the crypto handle live for `with` loans.
-    let owned_secret = if secret != 0 {
-        match crate::Crypto::claim_expiring_secret(value) {
-            Some(state) => Some(state),
-            None => {
-                Concurrency::with_runtime_mut(|rt| {
-                    rt.set_trap("secret key handle is invalid or already moved");
-                });
-                return 0;
-            }
-        }
-    } else {
-        None
-    };
+    let secret = secret != 0;
+    if secret && expiring_secret_bytes(value).is_none() {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("secret key handle is invalid or already moved");
+        });
+        return 0;
+    }
     Concurrency::with_runtime_mut(|rt| {
         let now = rt.clock_now(clock);
         // `Duration` is nanoseconds; resident clocks report milliseconds.
@@ -4505,14 +4485,14 @@ fn jet_jit_expiring_new(value: i64, duration: i64, clock: i64, secret: i64) -> i
             value,
             expires_at: now.saturating_add(duration_ms),
             clock,
-            secret: owned_secret,
+            secret,
         });
         rt.expirings.len() as i64
     })
 }
 
 fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
-    let (value, expired, drop_crypto) = Concurrency::with_runtime_mut(|rt| {
+    let (value, expired, wipe) = Concurrency::with_runtime_mut(|rt| {
         let stored_clock = rt
             .expirings
             .get((handle as usize).wrapping_sub(1))
@@ -4524,15 +4504,13 @@ fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
             return (0_i64, true, None);
         };
         if now > state.expires_at {
-            let crypto_handle = state.value;
-            state.secret.take();
-            state.value = 0;
-            return (0, true, (crypto_handle != 0).then_some(crypto_handle));
+            let expired = std::mem::take(&mut state.value);
+            return (0, true, (state.secret && expired != 0).then_some(expired));
         }
         (state.value, false, None)
     });
-    if let Some(crypto_handle) = drop_crypto {
-        crate::Crypto::drop_crypto_handle(crypto_handle);
+    if let Some(record) = wipe {
+        wipe_expired_secret(record);
     }
     Concurrency::with_runtime_mut(|rt| {
         crate::runtime_host::alloc_jit_result(rt, !expired, value as u64)
@@ -4546,7 +4524,7 @@ fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
     })
 }
 fn jet_jit_expiring_secret_with(handle: i64, callback: i64) -> i64 {
-    let (value, expired, drop_crypto) = Concurrency::with_runtime_mut(|rt| {
+    let (value, expired, wipe) = Concurrency::with_runtime_mut(|rt| {
         let index = (handle as usize).wrapping_sub(1);
         let stored_clock = rt.expirings.get(index).map(|state| state.clock).unwrap_or(0);
         let now = rt.clock_now(stored_clock);
@@ -4554,15 +4532,13 @@ fn jet_jit_expiring_secret_with(handle: i64, callback: i64) -> i64 {
             return (0, true, None);
         };
         if state.value == 0 || now > state.expires_at {
-            let drop = state.value;
-            state.secret.take();
-            state.value = 0;
-            return (0, true, (drop != 0).then_some(drop));
+            let expired = std::mem::take(&mut state.value);
+            return (0, true, (state.secret && expired != 0).then_some(expired));
         }
         (state.value, false, None)
     });
-    if let Some(crypto_handle) = drop_crypto {
-        crate::Crypto::drop_crypto_handle(crypto_handle);
+    if let Some(record) = wipe {
+        wipe_expired_secret(record);
     }
     if expired {
         return Concurrency::with_runtime_mut(|rt| {

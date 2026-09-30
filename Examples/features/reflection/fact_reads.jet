@@ -22,65 +22,65 @@ struct Order {
 fn send_report() {}
 
 fn sendability_for(cell: Cell<Int>) -> Bool {
-    @known :: cell.@sendability.known
-    return @known
+    known :: prep { cell.$sendability.known }
+    return known
 }
 
-@RANGE :: Severity.@range
+RANGE :: prep { Severity.$range }
 
-@EFFECTS :: send_report.@effects
+EFFECTS :: prep { send_report.$effects }
 
-@STATES :: Order.@states
+STATES :: prep { Order.$states }
 
-@DIMENSION :: Meter.@dimension
+DIMENSION :: prep { Meter.$dimension }
 
-@MEASURE :: PlaneFacts.@measure
+MEASURE :: prep { PlaneFacts.$measure }
 
-@EXACTNESS :: PlaneFacts.@exactness
+EXACTNESS :: prep { PlaneFacts.$exactness }
 
-@CLASSIFICATION :: PlaneFacts.@classification
+CLASSIFICATION :: prep { PlaneFacts.$classification }
 
-@OBLIGATION :: PlaneFacts.@obligation
+OBLIGATION :: prep { PlaneFacts.$obligation }
 
-@PACKAGE_NAME :: @build.package.name
+PACKAGE_NAME :: prep { $package.name }
 
-@PACKAGE_VERSION :: @build.package.version
+PACKAGE_VERSION :: prep { $package.version }
 
-@OS :: @build.os
+OS :: prep { $build.os }
 
-@PROFILE :: @build.profile
+PROFILE :: prep { $build.profile }
 
-@SENDABILITY :: Severity.@sendability
+SENDABILITY :: prep { Severity.$sendability }
 
-@MOVEDNESS :: Severity.@movedness
+MOVEDNESS :: prep { Severity.$movedness }
 
-@ATTRIBUTION :: report.@attribution
+ATTRIBUTION :: prep { report.$attribution }
 
-@ORIGIN :: Severity.@origin
+ORIGIN :: prep { Severity.$origin }
 
-@VIEW_PROVENANCE :: send_report.@view_provenance
+VIEW_PROVENANCE :: prep { send_report.$view_provenance }
 
-@UNIT_SCALE :: Meter.@unit_scale_provenance
+UNIT_SCALE :: prep { Meter.$unit_scale_provenance }
 
-@MATURITY :: send_report.@maturity
+MATURITY :: prep { send_report.$maturity }
 
 fn run() {
-    print(@RANGE.start)
-    print(@EFFECTS.values.len())
-    print(@STATES[0].name)
-    print(@DIMENSION.axes.len())
-    print(@MEASURE.kind == "length")
-    print(@EXACTNESS.kind == .Approximate)
-    print(@CLASSIFICATION.name)
-    print(@OBLIGATION.param_contract[0].zone == .Either)
-    print(@PACKAGE_NAME)
-    print(@PACKAGE_VERSION)
-    print(@PROFILE)
-    print(@SENDABILITY.known)
-    print(@MOVEDNESS.known)
-    print(@ATTRIBUTION.source)
-    print(@ORIGIN.tracked)
-    print(@VIEW_PROVENANCE.mutable)
+    print(RANGE.start)
+    print(EFFECTS.values.len())
+    print(STATES[0].name)
+    print(DIMENSION.axes.len())
+    print(MEASURE.kind == "length")
+    print(EXACTNESS.kind == .Approximate)
+    print(CLASSIFICATION.name)
+    print(OBLIGATION.param_contract[0].zone == .Either)
+    print(PACKAGE_NAME)
+    print(PACKAGE_VERSION)
+    print(PROFILE)
+    print(SENDABILITY.known)
+    print(MOVEDNESS.known)
+    print(ATTRIBUTION.source)
+    print(ORIGIN.tracked)
+    print(VIEW_PROVENANCE.mutable)
     cell :: Cell.new(1)
     print(sendability_for(cell))
 }

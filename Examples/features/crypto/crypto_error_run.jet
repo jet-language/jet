@@ -1,0 +1,31 @@
+// D-CRYPTO-ERRFAM1=A: `CryptoError` and `FileCryptoError` belong to the Core
+// error family, so a plain `fn run()` passes a crypto failure up without any
+// local handling. The program stops with a report naming the case and exits 1.
+use core.crypto as crypto
+use core.crypto.[FileCryptoError]
+
+// A typed step that names its failure, as `crypto.file_open` does.
+fn publish(ready: Bool) -> Bool FileCryptoError! {
+    if !ready -> return Err(FileCryptoError.PublishFailed)
+    Ok(true)
+}
+
+// Both crypto errors reach the default `Err` here with no declaration:
+// `from_bytes` can fail with `CryptoError`, `publish` with `FileCryptoError`.
+fn store(seed: [U8]) -> Bool {
+    key :: crypto.SigningKey.from_bytes(seed)
+    print(key.public_key().bytes.len())
+    publish(false)
+}
+
+fn run() {
+    key :: crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 1, 32)
+    print(key.len())
+    if store(key) == {
+        .Ok(_) -> print("stored")
+        .Err(e) -> print("store: {e.message}")
+    }
+    // Zero iterations is `CryptoError.Length`; it passes up out of `run`.
+    short :: crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 0, 32)
+    print(short.len())
+}

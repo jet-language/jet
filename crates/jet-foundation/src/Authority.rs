@@ -64,7 +64,7 @@ pub fn parse_right(right: &str) -> Option<String> {
 }
 /// True when the source-declared irreversible fact covers `right`.
 ///
-/// A root declaration such as `effect FFI @irreversible` covers every
+/// A root declaration such as `effect FFI $irreversible` covers every
 /// foreign leaf through the same ancestor relation used by authority rows.
 pub fn is_declared_irreversible(right: &str) -> bool {
     let canonical = parse_right(right).unwrap_or_else(|| right.trim().to_string());
@@ -465,6 +465,8 @@ impl ApplicationAuthority {
             "package.jet".to_string()
         } else if self.authority.starts_with("inline Package") {
             "this file's package block".to_string()
+        } else if self.authority.starts_with("jet repl") || self.authority.starts_with("REPL") {
+            "this REPL session".to_string()
         } else {
             format!("`{}`", self.authority)
         }
@@ -523,6 +525,23 @@ impl ApplicationAuthority {
 
 fn join_rights(rights: &Holds) -> String {
     rights.iter().map(String::as_str).collect::<Vec<_>>().join(", ")
+}
+
+/// #3718: the REPL's E1803 Why. The policy sentence leads, then the REPL's
+/// own reason, so the REPL and a program run read the same way. When the
+/// policy itself allows the right (a platform or confinement refusal), only
+/// the reason is stated.
+pub fn repl_refusal_why(authority: &ApplicationAuthority, reason: &str) -> String {
+    let mut chars = reason.chars();
+    let reason = match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        None => String::new(),
+    };
+    if authority.is_allowed() {
+        format!("{reason}, so the host operation did not run.")
+    } else {
+        format!("{} {reason}, so the host operation did not run.", authority.policy_why())
+    }
 }
 
 /// Plain words for what a program does when it uses `right`. Unlisted

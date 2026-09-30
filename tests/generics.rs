@@ -29,9 +29,9 @@ module cache<K>(capacity: Int) {
     pub struct Buffer { items: [K#capacity] }
     pub fn slots() -> Int -> capacity
 }
-@PROFILE_SLOTS :: @build.settings.cache_slots
-module tuned :: cache<Int>(@build.settings.cache_slots)
-module chained :: cache<Int>(@PROFILE_SLOTS)
+PROFILE_SLOTS :: prep { $build.settings.cache_slots }
+module tuned :: cache<Int>($build.settings.cache_slots)
+module chained :: cache<Int>(PROFILE_SLOTS)
 fn run() { print(tuned.slots()) }
 "#;
     let entry = root.join("main.jet");
@@ -247,12 +247,12 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
 #[test]
 fn generic_modules_canonical_spelling_keeps_comptime_bindings() {
     let source = r#"
-@BASE :: 40
+BASE :: prep { 40 }
 
 module cache<K>(capacity: Int) {
-    @COMPUTED_SIZE :: @BASE + capacity
+    COMPUTED_SIZE :: prep { BASE + capacity }
     pub struct Entry { items: [K#capacity] }
-    pub fn size() -> Int -> @COMPUTED_SIZE
+    pub fn size() -> Int -> COMPUTED_SIZE
 }
 
 module x :: cache<Int>(64)
@@ -324,8 +324,8 @@ fn run() {}
     let body_items = r#"
 module complete<T>(count: Int, label: String) {
     #Meta(category: label)
-    @VALUE :: count
-    @COMPTIME_VALUE :: count + 1
+    VALUE :: prep { count }
+    COMPTIME_VALUE :: prep { count + 1 }
     tag Marked { deny: [Net] }
     trait Reveal { fn reveal(self) -> T }
     struct Wrapped { value: T }
@@ -450,10 +450,10 @@ fn run() {}
 fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
 module box(capacity: Int) {
-    @BASE :: capacity
+    BASE :: prep { capacity }
     pub fn shadowed() -> Int {
-        @base :: 5
-        return @base
+        base :: prep { 5 }
+        return base
     }
     pub fn plain_shadowed() -> Int {
         capacity := 5

@@ -273,11 +273,27 @@ fn jet_jit_random_binomial(n: i64, p: f64) -> i64 {
 }
 
 
+/// Read one checked JIT `Int` word as the host kernel's `i64`. A value outside
+/// the host range stops with the same report AOT raises for a native argument.
+fn int_arg(raw: i64) -> i64 {
+    if let Some(value) = Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(raw)) {
+        return value;
+    }
+    let report = crate::runtime_host::contract_kernel::jet_c_int_range_report();
+    Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(report, 1));
+    std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
+}
+
+/// Box a host `i64` as a JIT `Int` word; values past the inline range spill.
+fn int_result(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value))
+}
+
 fn jet_jit_random_seed(n: i64) {
-    ambient_random_kernel::seed(n);
+    ambient_random_kernel::seed(int_arg(n));
 }
 fn jet_jit_random_getrandbits(k: i64) -> i64 {
-    ambient_random_kernel::getrandbits(k)
+    int_result(ambient_random_kernel::getrandbits(int_arg(k)))
 }
 
 fn jet_jit_random_randrange(start: i64, stop: i64) -> i64 {
@@ -340,7 +356,7 @@ fn jet_jit_random_shuffle(items: i64) {
 }
 
 fn jet_jit_random_split(seed: i64) -> i64 {
-    let state = ambient_random_kernel::split(seed).state;
+    let state = ambient_random_kernel::split(int_arg(seed)).state;
     Concurrency::with_runtime_mut(|rt| {
         rt.rngs.push(RngState { state });
         rt.rngs.len() as i64
@@ -430,6 +446,7 @@ fn with_rng<T: Default>(handle: i64, f: impl FnOnce(&mut RngState) -> T) -> T {
 }
 
 fn jet_jit_rng_new(seed: i64) -> i64 {
+    let seed = int_arg(seed);
     Concurrency::with_runtime_mut(|rt| {
         rt.rngs.push(RngState { state: seed as u64 });
         rt.rngs.len() as i64
@@ -437,14 +454,7 @@ fn jet_jit_rng_new(seed: i64) -> i64 {
 }
 
 fn jet_jit_rng_int(handle: i64, lo: i64, hi: i64) -> i64 {
-    let bounds = Concurrency::with_runtime_mut(|rt| {
-        Some((rt.heap.int_to_i64(lo)?, rt.heap.int_to_i64(hi)?))
-    });
-    let Some((lo, hi)) = bounds else {
-        let report = crate::runtime_host::contract_kernel::jet_c_int_range_report();
-        Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(report, 1));
-        std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
-    };
+    let (lo, hi) = (int_arg(lo), int_arg(hi));
     let result = Concurrency::with_runtime_mut(|rt| {
         let r = rt
             .rngs

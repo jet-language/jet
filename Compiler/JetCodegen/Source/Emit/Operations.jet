@@ -51,14 +51,14 @@ fn jet_rust_emit_core_symbol(ctx: &JetRustEmitContext, id: MirCoreCallId) -> Str
     loop row in ctx.program.core_calls {
         if row.id == id {
             if row.symbol == "" {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call has an empty source symbol", "checked Core calls must retain a canonical source-emission symbol", None)
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call has an empty source symbol", "checked Core calls must retain a canonical source-emission symbol", None)
                 return "__jet_missing_core"
             }
             if row.symbol.starts_with("jet_vault_") || row.symbol.starts_with("jet_crypto_") -> return "jet_ffi::{row.symbol}"
             return row.symbol
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call has no registry row", "checked Core calls must retain a canonical source-emission symbol", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call has no registry row", "checked Core calls must retain a canonical source-emission symbol", None)
     "__jet_missing_core"
 }
 
@@ -68,12 +68,12 @@ fn jet_rust_emit_route_call(ctx: &JetRustEmitContext, id: MirPreludeCallId, args
         if candidate.id == id -> row = Val(candidate)
     }
     if row == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude call has no registry row", "every route must be registered with its checked ABI before source emission", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude call has no registry row", "every route must be registered with its checked ABI before source emission", None)
         return "__jet_missing_prelude()"
     }
     route :: row ?? MirPreludeCall{id: id, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime{name: "__jet_missing_prelude"}, signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect_kind: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
     if args.len() < route.signature.arity || args.len() > route.signature.max_arity || route.signature.borrow_mask.len() != args.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude route arity does not match its emitted arguments", "the checked call ABI and operation payload must agree exactly", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude route arity does not match its emitted arguments", "the checked call ABI and operation payload must agree exactly", None)
         return "__jet_invalid_prelude_call()"
     }
     source :: jet_rust_emit_prelude_symbol(ctx, id)
@@ -95,7 +95,7 @@ fn jet_rust_emit_route_call(ctx: &JetRustEmitContext, id: MirPreludeCallId, args
 
 fn jet_rust_emit_call_arg(ctx: &JetRustEmitContext, function: MirFunction, arg: MirCallArg) -> String Never! {
     borrowed :: arg.access == MirAccess.Write || (arg.access == MirAccess.Read && jet_rust_emit_type_is_borrowed(jet_rust_emit_value_type(function, arg.value)))
-    jet_rust_emit_call_arg_with_borrow(ctx, function, arg, borrowed)
+    jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
 }
 
 fn jet_rust_emit_checked_trait_box_target(ctx: &JetRustEmitContext, id: MirTypeId, span: Span?) -> MirType? {
@@ -104,25 +104,25 @@ fn jet_rust_emit_checked_trait_box_target(ctx: &JetRustEmitContext, id: MirTypeI
             if row.kind == {
                 .TraitObject(bounds) -> {
                     if bounds.len() != 1 {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait coercion target does not name exactly one trait", "checked trait boxing targets carry one canonical trait bound", span)
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait coercion target does not name exactly one trait", "checked trait boxing targets carry one canonical trait bound", span)
                         return None
                     }
                 }
                 else -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait coercion target is not a trait object", "checked trait boxing must retain a canonical trait-object type instance", span)
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait coercion target is not a trait object", "checked trait boxing must retain a canonical trait-object type instance", span)
                     return None
                 }
             }
             return Val(row)
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait coercion target is missing", "checked trait boxing must retain a canonical trait-object type instance", span)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait coercion target is missing", "checked trait boxing must retain a canonical trait-object type instance", span)
     None
 }
 
 fn jet_rust_emit_trait_object_type(ctx: &JetRustEmitContext, id: MirTypeId) -> String Never! {
     row :: jet_rust_emit_checked_trait_box_target(ctx, id, None) ?? return "Box<dyn std::any::Any>"
-    jet_rust_emit_type(ctx, row)
+    jet_rust_emit_type(&ctx, row)
 }
 
 fn jet_rust_emit_trait_box_source_needs_box(ctx: &JetRustEmitContext, source_ty: MirType, target_ty: MirType, span: Span?) -> Bool? {
@@ -131,13 +131,13 @@ fn jet_rust_emit_trait_box_source_needs_box(ctx: &JetRustEmitContext, source_ty:
         else -> None
     }
     bound :: target_bound ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait coercion target has no canonical bound", "checked trait boxing targets carry exactly one declared trait identity", span)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait coercion target has no canonical bound", "checked trait boxing targets carry exactly one declared trait identity", span)
         return None
     }
     if source_ty.kind == {
         .TraitObject(_) -> {
             if !mir_type_same_checked_type(source_ty, target_ty) {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing attempts an unsupported trait-object upcast", "already dynamic values must match the exact canonical trait-object identity", span)
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing attempts an unsupported trait-object upcast", "already dynamic values must match the exact canonical trait-object identity", span)
                 return None
             }
             return Val(false)
@@ -148,7 +148,7 @@ fn jet_rust_emit_trait_box_source_needs_box(ctx: &JetRustEmitContext, source_ty:
                 loop candidate in ctx.current_generic_params {
                     if candidate.name == name.name && name.id == mir_type_id(candidate.name) {
                         if generic_param != None {
-                            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing generic parameter is ambiguous", "generic source identities must bind to one checked generic parameter", span)
+                            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing generic parameter is ambiguous", "generic source identities must bind to one checked generic parameter", span)
                             return None
                         }
                         generic_param = Val(candidate)
@@ -160,21 +160,21 @@ fn jet_rust_emit_trait_box_source_needs_box(ctx: &JetRustEmitContext, source_ty:
                 loop candidate in parameter.bounds {
                     if candidate.id == bound.id {
                         if candidate.name != bound.name {
-                            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR generic trait bound name disagrees with its identity", "checked generic TraitBox evidence must preserve the exact canonical trait reference", span)
+                            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR generic trait bound name disagrees with its identity", "checked generic TraitBox evidence must preserve the exact canonical trait reference", span)
                             return None
                         }
                         has_target_bound = true
                     }
                 }
                 if !has_target_bound {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR generic trait boxing lacks the target bound", "generic TraitBox sources require the matching checked generic bound", span)
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR generic trait boxing lacks the target bound", "generic TraitBox sources require the matching checked generic bound", span)
                     return None
                 }
             }
             return Val(true)
         }
         else -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing source is not nominal", "checked TraitBox sources are nominal values or bounded generic parameters", span)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing source is not nominal", "checked TraitBox sources are nominal values or bounded generic parameters", span)
             return None
         }
     }
@@ -196,7 +196,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MirFun
         borrowed && !has_coercion && arg.access == MirAccess.Read -> {
             already_borrowed = true
             if arg.place == {
-                .Val(place) -> jet_rust_emit_place_reference(ctx, function, place, MirAccess.Read)
+                .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MirAccess.Read)
                 else -> {
                     partial :: if jet_rust_emit_partial_projection_only(ctx, function, arg.value) -> jet_rust_emit_partial_value_reference(ctx, function, arg.value) else -> None
                     if partial == .Val(reference) -> reference else -> jet_rust_emit_value_reference(arg.value, false)
@@ -204,7 +204,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MirFun
             }
         }
         arg.access == MirAccess.Write -> {
-            if arg.place == .Val(place) -> jet_rust_emit_place_reference(ctx, function, place, MirAccess.Write) else -> jet_rust_emit_value_reference(arg.value, true)
+            if arg.place == .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MirAccess.Write) else -> jet_rust_emit_value_reference(arg.value, true)
         }
         arg.access == MirAccess.Move -> jet_rust_emit_value_move(arg.value)
         else -> jet_rust_emit_value_read(arg.value)
@@ -233,7 +233,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MirFun
 
 fn jet_rust_emit_call_arguments(ctx: &JetRustEmitContext, function: MirFunction, args: [MirCallArg], borrow_mask: [Bool]) -> String Never! {
     if borrow_mask.len() < args.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "call ABI borrow metadata does not cover its arguments", "checked call routes must provide one borrow convention for every emitted argument", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "call ABI borrow metadata does not cover its arguments", "checked call routes must provide one borrow convention for every emitted argument", Val(function.span))
         return ""
     }
     rendered := [String]{}
@@ -401,12 +401,12 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MirFunction, i
     row :: None
     loop candidate in ctx.program.prelude_calls { if candidate.id == id -> row = Val(candidate) }
     if row == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude route is missing", "checked Prelude calls require one canonical route row", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude route is missing", "checked Prelude calls require one canonical route row", Val(function.span))
         return "unreachable!(\"missing Prelude route\")"
     }
     route :: row ?? MirPreludeCall{id: id, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime{name: "__jet_missing_prelude"}, signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect_kind: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
     if args.len() < route.signature.arity || args.len() > route.signature.max_arity || route.signature.borrow_mask.len() != args.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude call arity does not match its checked ABI", "the checked Prelude route and call arguments must agree exactly", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude call arity does not match its checked ABI", "the checked Prelude route and call arguments must agree exactly", Val(function.span))
         return "unreachable!(\"Prelude call arity\")"
     }
     symbol :: jet_rust_emit_prelude_symbol(ctx, id)
@@ -428,7 +428,7 @@ fn jet_rust_emit_function_failure(ctx: &JetRustEmitContext, id: MirFunctionId) -
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callee function is missing from the emitter registry", "fallibility propagation requires the checked target function row", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callee function is missing from the emitter registry", "fallibility propagation requires the checked target function row", None)
     MirCallFallibility.Infallible
 }
 
@@ -531,7 +531,7 @@ fn jet_rust_emit_call_borrow_mask(ctx: &JetRustEmitContext, callee: MirCallee, f
         }
         else -> {}
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR function call target is missing", "checked direct calls must resolve to one canonical parameter ABI", Val(function.span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR function call target is missing", "checked direct calls must resolve to one canonical parameter ABI", Val(function.span))
     [Bool]{}
 }
 
@@ -846,7 +846,7 @@ fn jet_rust_emit_foreign_argument(ctx: &JetRustEmitContext, function: MirFunctio
         }
     }
     borrowed :: arg.access == MirAccess.Read && !mir_type_is_scalar(parameter.ty)
-    jet_rust_emit_call_arg_with_borrow(ctx, function, arg, borrowed)
+    jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
 }
 
 fn jet_rust_emit_callback_handler(ctx: &JetRustEmitContext, function: MirFunction, callback_id: MirCallbackId, lambda: MirValueId) -> String Never! {
@@ -855,7 +855,7 @@ fn jet_rust_emit_callback_handler(ctx: &JetRustEmitContext, function: MirFunctio
         if row.id == callback_id -> callback = Val(row)
     }
     if callback == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback adapter row is missing", "managed callback calls must resolve their checked callback adapter identity", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback adapter row is missing", "managed callback calls must resolve their checked callback adapter identity", Val(function.span))
         return "unreachable!(\"missing callback adapter\")"
     }
     callback_row :: callback ?? return "unreachable!(\"missing callback adapter\")"
@@ -875,51 +875,51 @@ fn jet_rust_emit_callback_handler(ctx: &JetRustEmitContext, function: MirFunctio
         }
     }
     if lambda_function == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback lambda has no closure producer", "checked callback registration requires a Closure operation for its lambda value", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback lambda has no closure producer", "checked callback registration requires a Closure operation for its lambda value", Val(function.span))
         return "unreachable!(\"missing callback lambda\")"
     }
     target_id :: lambda_function ?? callback_row.function
     if target_id != callback_row.function {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback lambda target disagrees with its adapter", "callback adapters must invoke the checked function identity carried by their closure row", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback lambda target disagrees with its adapter", "callback adapters must invoke the checked function identity carried by their closure row", Val(function.span))
         return "unreachable!(\"callback target mismatch\")"
     }
     target := None
     loop candidate in ctx.program.functions { if candidate.id == target_id -> target = Val(candidate) }
     if target == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback target function is missing", "callback adapters must resolve their checked target function before source emission", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback target function is missing", "callback adapters must resolve their checked target function before source emission", Val(function.span))
         return "unreachable!(\"missing callback target\")"
     }
     target_function :: target ?? return "unreachable!(\"missing callback target\")"
     if target_function.form == {
         .TopLevel -> {}
         else -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback target is not top-level", "callback adapters must invoke a checked top-level function ABI", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback target is not top-level", "callback adapters must invoke a checked top-level function ABI", Val(function.span))
             return "unreachable!(\"callback target form\")"
         }
     }
     if callback_row.params.len() != target_function.params.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback parameter arity is invalid", "callback adapter parameters must match the checked target function ABI", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback parameter arity is invalid", "callback adapter parameters must match the checked target function ABI", Val(function.span))
         return "unreachable!(\"callback parameter arity\")"
     }
     index := 0
     loop target_parameter in target_function.params {
         callback_parameter := callback_row.params[index]
         if callback_parameter.access != target_parameter.access || !mir_type_same_checked_type(callback_parameter.ty, target_parameter.ty) {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback parameter ABI disagrees with its target", "callback adapters must preserve checked parameter access and type facts", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback parameter ABI disagrees with its target", "callback adapters must preserve checked parameter access and type facts", Val(function.span))
             return "unreachable!(\"callback parameter ABI\")"
         }
         index += 1
     }
     if !callback_row.managed {
         if target_function.capture_params.len() > 0 {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unmanaged MIR callback target has captures", "unmanaged callback adapters cannot carry closure capture state across the foreign ABI", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unmanaged MIR callback target has captures", "unmanaged callback adapters cannot carry closure capture state across the foreign ABI", Val(function.span))
             return "unreachable!(\"unmanaged callback captures\")"
         }
         return callback_row.symbol
     }
 
     if captures.len() != target_function.capture_params.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback capture arity is invalid", "managed callback closures must preserve the checked capture ABI", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback capture arity is invalid", "managed callback closures must preserve the checked capture ABI", Val(function.span))
         return "unreachable!(\"callback capture arity\")"
     }
     setup := ""
@@ -928,9 +928,9 @@ fn jet_rust_emit_callback_handler(ctx: &JetRustEmitContext, function: MirFunctio
     loop operand in captures {
         capture := target_function.capture_params[index]
         captured :: if operand == {
-            .Place(place) -> jet_rust_emit_place_reference(ctx, function, place, MirAccess.Read)
+            .Place(place) -> jet_rust_emit_place_reference(&ctx, function, place, MirAccess.Read)
             .Value(_) -> {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "managed callback capture is not a place", "managed callback captures must preserve read-place ownership facts", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "managed callback capture is not a place", "managed callback captures must preserve read-place ownership facts", Val(function.span))
                 return "unreachable!(\"callback capture ownership\")"
             }
         }
@@ -940,7 +940,7 @@ fn jet_rust_emit_callback_handler(ctx: &JetRustEmitContext, function: MirFunctio
         index += 1
     }
     if target_function.params.len() == 0 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback target has no event parameter", "managed callback targets must accept the checked event carrier", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback target has no event parameter", "managed callback targets must accept the checked event carrier", Val(function.span))
         return "unreachable!(\"callback event parameter\")"
     }
     event_name :: "__jet_callback_event_value"
@@ -955,7 +955,7 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MirFun
     transport :: foreign.callback_transport ?? ""
     if transport == "managed-close" {
         if args.len() != 1 || args[0].access != MirAccess.Move {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback unsubscribe ABI is invalid", "managed callback unsubscribe must consume exactly one registration handle", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback unsubscribe ABI is invalid", "managed callback unsubscribe must consume exactly one registration handle", Val(foreign.span))
             return Val("unreachable!(\"managed callback unsubscribe ABI\")")
         }
         registration :: jet_rust_emit_value_move(args[0].value)
@@ -963,7 +963,7 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MirFun
     }
     if transport == "emit-task" {
         if args.len() != 1 || foreign.params.len() != 1 {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback emission ABI is invalid", "managed callback emission must receive exactly one payload", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback emission ABI is invalid", "managed callback emission must receive exactly one payload", Val(foreign.span))
             return Val("unreachable!(\"managed callback emission ABI\")")
         }
         native := None
@@ -971,7 +971,7 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MirFun
             if candidate.module_id == foreign.module_id && candidate.name == "__jet_native_emit_async" -> native = Val(candidate)
         }
         if native == None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "managed callback emission native function is missing", "managed callback emission must retain its checked native async adapter", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "managed callback emission native function is missing", "managed callback emission must retain its checked native async adapter", Val(foreign.span))
             return Val("unreachable!(\"managed callback emission adapter\")")
         }
         native_row :: native ?? return "unreachable!(\"managed callback emission adapter\")"
@@ -984,7 +984,7 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MirFun
     }
     if transport == "managed" {
         if args.len() != 1 || foreign.params.len() != 1 {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback registration ABI is invalid", "managed callback registration must receive exactly one callback value", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback registration ABI is invalid", "managed callback registration must receive exactly one callback value", Val(foreign.span))
             return Val("unreachable!(\"managed callback registration ABI\")")
         }
         callback_id := None
@@ -1009,7 +1009,7 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MirFun
             }
         }
         if callback_id == None || lambda == None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback argument lacks a C callback adapter", "managed callback registration must consume the checked CCallback operation result", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback argument lacks a C callback adapter", "managed callback registration must consume the checked CCallback operation result", Val(foreign.span))
             return Val("unreachable!(\"managed callback adapter operation\")")
         }
         callback_row := None
@@ -1017,7 +1017,7 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MirFun
             if row.id == (callback_id ?? MirCallbackId{value: 0}) -> callback_row = Val(row)
         }
         if callback_row == None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "managed callback adapter row is missing", "managed callback registration must resolve its checked callback adapter", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "managed callback adapter row is missing", "managed callback registration must resolve its checked callback adapter", Val(foreign.span))
             return Val("unreachable!(\"managed callback adapter row\")")
         }
         native_start := None
@@ -1028,13 +1028,13 @@ fn jet_rust_emit_managed_foreign_call(ctx: &JetRustEmitContext, function: MirFun
             if candidate.module_id == foreign.module_id && candidate.name == "__jet_native_unsubscribe" -> native_stop = Val(candidate)
         }
         if native_start == None || native_stop == None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "managed callback native lifecycle is incomplete", "managed callback registration must retain checked native start and stop adapters", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "managed callback native lifecycle is incomplete", "managed callback registration must retain checked native start and stop adapters", Val(foreign.span))
             return Val("unreachable!(\"managed callback native lifecycle\")")
         }
         identity :: foreign.callback_identity ?? ""
         digest :: foreign.callback_plan_digest ?? ""
         if identity == "" || digest == "" {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback identity facts are incomplete", "managed callback registration must preserve its checked identity and plan digest", Val(foreign.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed callback identity facts are incomplete", "managed callback registration must preserve its checked identity and plan digest", Val(foreign.span))
             return Val("unreachable!(\"managed callback identity\")")
         }
         handler :: jet_rust_emit_callback_handler(ctx, function, callback_id ?? MirCallbackId{value: 0}, lambda ?? MirValueId{value: 0})
@@ -1050,7 +1050,7 @@ fn jet_rust_emit_foreign_arguments(ctx: &JetRustEmitContext, function: MirFuncti
     loop foreign in ctx.program.foreign {
         if foreign.id == id {
             if args.len() != foreign.params.len() {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign call arity does not match its declaration", "foreign ABI calls must retain one checked parameter row per argument", Val(foreign.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign call arity does not match its declaration", "foreign ABI calls must retain one checked parameter row per argument", Val(foreign.span))
                 return ""
             }
             rendered := [String]{}
@@ -1058,7 +1058,7 @@ fn jet_rust_emit_foreign_arguments(ctx: &JetRustEmitContext, function: MirFuncti
             loop arg in args {
                 parameter := foreign.params[index]
                 if arg.access != parameter.access {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign call access does not match its declaration", "foreign ABI arguments must preserve checked read/write/move ownership", Val(arg.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign call access does not match its declaration", "foreign ABI arguments must preserve checked read/write/move ownership", Val(arg.span))
                     return ""
                 }
                 &rendered.push(jet_rust_emit_foreign_argument(ctx, function, foreign, arg, parameter))
@@ -1067,13 +1067,13 @@ fn jet_rust_emit_foreign_arguments(ctx: &JetRustEmitContext, function: MirFuncti
             return rendered.join(", ")
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR foreign call declaration is missing", "checked foreign calls must resolve to one canonical ABI row", Val(function.span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR foreign call declaration is missing", "checked foreign calls must resolve to one canonical ABI row", Val(function.span))
     ""
 }
 
 fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction, foreign: MirForeign, args: [MirCallArg]) -> String Never! {
     if args.len() != foreign.params.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "C foreign call arity does not match its declaration", "C ABI arguments must retain one checked parameter row per call operand", Val(foreign.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "C foreign call arity does not match its declaration", "C ABI arguments must retain one checked parameter row per call operand", Val(foreign.span))
         return "unreachable!(\"C foreign call arity\")"
     }
     body := [String]{"let mut __jet_c_strings: Vec<std::ffi::CString> = Vec::new();"}
@@ -1083,7 +1083,7 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
     loop arg in args {
         parameter := foreign.params[index]
         if arg.access != parameter.access {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "C foreign call access does not match its declaration", "C ABI arguments must preserve checked read/write/move ownership", Val(arg.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "C foreign call access does not match its declaration", "C ABI arguments must preserve checked read/write/move ownership", Val(arg.span))
             return "unreachable!(\"C foreign call access\")"
         }
         if jet_rust_emit_foreign_handle_type(ctx, foreign, parameter.ty) {
@@ -1093,13 +1093,13 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
         }
         visited := [MirTypeId]{}
         if !jet_rust_emit_c_abi_type_supported(ctx, parameter.ty, &visited) {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C parameter has no checked physical ABI representation", "direct C parameters require C-safe scalars, fixed arrays, repr(C) records, or tagged C enums", Val(arg.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C parameter has no checked physical ABI representation", "direct C parameters require C-safe scalars, fixed arrays, repr(C) records, or tagged C enums", Val(arg.span))
             return "unreachable!(\"unsupported C parameter\")"
         }
         if {
             arg.access == MirAccess.Write -> {
             if arg.place == None {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "C write argument has no checked place", "write-access C arguments require a stable MIR place for post-call writeback", Val(arg.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "C write argument has no checked place", "write-access C arguments require a stable MIR place for post-call writeback", Val(arg.span))
                 return "unreachable!(\"C write argument place\")"
             }
             place_id :: arg.place ?? MirPlaceId{value: 0}
@@ -1107,7 +1107,7 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
             &body.push("let {place_name} = {jet_rust_emit_place_reference(ctx, function, place_id, MirAccess.Write)};")
             encoded := jet_rust_emit_c_abi_encode(ctx, "&*{place_name}", parameter.ty, true, [MirTypeId]{})
             if encoded == None {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C write argument cannot be encoded", "the checked write-place type must have a complete C physical representation", Val(arg.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C write argument cannot be encoded", "the checked write-place type must have a complete C physical representation", Val(arg.span))
                 return "unreachable!(\"C write argument encoding\")"
             }
             arg_name :: "__jet_c_arg_{index}"
@@ -1115,7 +1115,7 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
             &rendered_args.push("&mut {arg_name}")
             decoded := jet_rust_emit_c_abi_decode(ctx, arg_name, parameter.ty, [MirTypeId]{})
             if decoded == None {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C write argument cannot be decoded", "C writeback requires a checked reverse conversion for the parameter type", Val(arg.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C write argument cannot be decoded", "C writeback requires a checked reverse conversion for the parameter type", Val(arg.span))
                 return "unreachable!(\"C write argument decoding\")"
             }
             &writebacks.push("*{place_name} = {decoded ?? ""};")
@@ -1123,15 +1123,15 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
             else -> {
             source :: if {
                 arg.access == MirAccess.Move -> {
-                if arg.place != None -> jet_rust_emit_place_move(ctx, function, arg.place ?? MirPlaceId{value: 0}) else -> jet_rust_emit_value_move(arg.value)
+                if arg.place != None -> jet_rust_emit_place_move(&ctx, function, arg.place ?? MirPlaceId{value: 0}) else -> jet_rust_emit_value_move(arg.value)
                 }
                 else -> {
-                if arg.place != None -> jet_rust_emit_place_reference(ctx, function, arg.place ?? MirPlaceId{value: 0}, MirAccess.Read) else -> jet_rust_emit_value_reference(arg.value, false)
+                if arg.place != None -> jet_rust_emit_place_reference(&ctx, function, arg.place ?? MirPlaceId{value: 0}, MirAccess.Read) else -> jet_rust_emit_value_reference(arg.value, false)
                 }
             }
             encoded := jet_rust_emit_c_abi_encode(ctx, source, parameter.ty, arg.access == MirAccess.Read, [MirTypeId]{})
             if encoded == None {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C argument cannot be encoded", "the checked argument type must have a complete C physical representation", Val(arg.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C argument cannot be encoded", "the checked argument type must have a complete C physical representation", Val(arg.span))
                 return "unreachable!(\"C argument encoding\")"
             }
             &rendered_args.push(encoded ?? "")
@@ -1145,13 +1145,13 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
         .Val(return_type) -> {
         &body.push("let __jet_c_return = {call};")
         if {
-            jet_rust_emit_foreign_handle_type(ctx, foreign, return_type) -> {
+            jet_rust_emit_foreign_handle_type(&ctx, foreign, return_type) -> {
             handle_return := None
             loop handle in ctx.program.handles {
                 if jet_rust_emit_same_handle_type(handle.ty, return_type) -> handle_return = Val(handle)
             }
             if handle_return == None {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "C foreign handle return has no lifecycle type", "C handle returns must identify the canonical owned handle type", Val(foreign.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "C foreign handle return has no lifecycle type", "C handle returns must identify the canonical owned handle type", Val(foreign.span))
                 return "unreachable!(\"C handle return type\")"
             }
             result = "{jet_rust_emit_type(ctx, return_type)}::from_raw(__jet_c_return)"
@@ -1159,12 +1159,12 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MirFunction,
             else -> {
             visited := [MirTypeId]{}
             if !jet_rust_emit_c_abi_type_supported(ctx, return_type, &visited) {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C return has no checked physical ABI representation", "direct C returns require C-safe scalars, fixed arrays, repr(C) records, or tagged C enums", Val(foreign.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C return has no checked physical ABI representation", "direct C returns require C-safe scalars, fixed arrays, repr(C) records, or tagged C enums", Val(foreign.span))
                 return "unreachable!(\"unsupported C return\")"
             }
             decoded := jet_rust_emit_c_abi_decode(ctx, "__jet_c_return", return_type, [MirTypeId]{})
             if decoded == None {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C return cannot be decoded", "the checked return type must have a complete reverse C ABI conversion", Val(foreign.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C return cannot be decoded", "the checked return type must have a complete reverse C ABI conversion", Val(foreign.span))
                 return "unreachable!(\"C return decoding\")"
             }
             result = decoded ?? "()"
@@ -1186,24 +1186,24 @@ fn jet_rust_emit_validate_function_dispatch(ctx: &JetRustEmitContext, id: MirFun
             if candidate.form == {
                 .Method(declared_owner, self_access) -> {
                     if !mir_type_same_checked_type(declared_owner, owner) || (instance && self_access == None) || (!instance && self_access != None) {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch owner/access disagrees with its callee form", "associated and instance calls must preserve the checked method owner and receiver ABI", Val(span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch owner/access disagrees with its callee form", "associated and instance calls must preserve the checked method owner and receiver ABI", Val(span))
                     }
                     return
                 }
                 .TraitMethod(declared_owner, _, self_access, _) -> {
                     if !mir_type_same_checked_type(declared_owner, owner) || (instance && self_access == None) || (!instance && self_access != None) {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait dispatch owner/access disagrees with its callee form", "associated and instance calls must preserve the checked trait owner and receiver ABI", Val(span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait dispatch owner/access disagrees with its callee form", "associated and instance calls must preserve the checked trait owner and receiver ABI", Val(span))
                     }
                     return
                 }
                 .TopLevel -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR associated/method call targets a top-level function", "checked associated dispatch requires a method or trait-method function form", Val(span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR associated/method call targets a top-level function", "checked associated dispatch requires a method or trait-method function form", Val(span))
                     return
                 }
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR associated/method target is missing", "checked dispatch must resolve its function identity before source emission", Val(span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR associated/method target is missing", "checked dispatch must resolve its function identity before source emission", Val(span))
 }
 
 fn jet_rust_emit_associated_dispatch(ctx: &JetRustEmitContext, id: MirFunctionId, owner: MirType, generic: String, rendered_args: String, span: Span) -> String Never! {
@@ -1212,26 +1212,26 @@ fn jet_rust_emit_associated_dispatch(ctx: &JetRustEmitContext, id: MirFunctionId
             if candidate.form == {
                 .Method(declared_owner, self_access) -> {
                     if self_access != None || !mir_type_same_checked_type(declared_owner, owner) {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR associated dispatch owner/access is invalid", "associated calls must target the checked inherent owner without a receiver", Val(span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR associated dispatch owner/access is invalid", "associated calls must target the checked inherent owner without a receiver", Val(span))
                         return "unreachable!(\"invalid associated dispatch\")"
                     }
                     return "{jet_rust_emit_type(ctx, owner)}::{jet_rust_emit_sanitize(candidate.name)}{generic}({rendered_args})"
                 }
                 .TraitMethod(declared_owner, trait_ref, self_access, _) -> {
                     if self_access != None || !mir_type_same_checked_type(declared_owner, owner) {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait-associated dispatch owner/access is invalid", "trait-associated calls must target the checked owner without a receiver", Val(span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait-associated dispatch owner/access is invalid", "trait-associated calls must target the checked owner without a receiver", Val(span))
                         return "unreachable!(\"invalid trait associated dispatch\")"
                     }
                     return "<{jet_rust_emit_type(ctx, owner)} as {jet_rust_emit_trait_name(ctx, trait_ref.id)}>::{jet_rust_emit_sanitize(candidate.name)}{generic}({rendered_args})"
                 }
                 .TopLevel -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR associated dispatch targets a top-level function", "associated calls require a checked method or trait-method function form", Val(span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR associated dispatch targets a top-level function", "associated calls require a checked method or trait-method function form", Val(span))
                     return "unreachable!(\"invalid associated dispatch\")"
                 }
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR associated dispatch target is missing", "associated calls must resolve to one checked function identity", Val(span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR associated dispatch target is missing", "associated calls must resolve to one checked function identity", Val(span))
     "unreachable!(\"missing associated dispatch\")"
 }
 
@@ -1241,16 +1241,16 @@ fn jet_rust_emit_method_dispatch(ctx: &JetRustEmitContext, function: MirFunction
             if candidate.form == {
                 .Method(declared_owner, self_access) -> {
                     if self_access == None || !mir_type_same_checked_type(declared_owner, owner) {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch owner/access is invalid", "instance calls must preserve the checked inherent owner and receiver access", Val(function.span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch owner/access is invalid", "instance calls must preserve the checked inherent owner and receiver access", Val(function.span))
                         return "unreachable!(\"invalid method dispatch\")"
                     }
                     if args.len() != candidate.params.len() || args.len() == 0 {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch arity is invalid", "instance calls must preserve the checked receiver and parameter ABI", Val(function.span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch arity is invalid", "instance calls must preserve the checked receiver and parameter ABI", Val(function.span))
                         return "unreachable!(\"method dispatch arity\")"
                     }
                     access :: self_access ?? MirAccess.Read
                     if args[0].access != access {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method receiver access is invalid", "instance calls must preserve checked read/write/move receiver ownership", Val(args[0].span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method receiver access is invalid", "instance calls must preserve checked read/write/move receiver ownership", Val(args[0].span))
                         return "unreachable!(\"method receiver access\")"
                     }
                     receiver :: jet_rust_emit_call_arg_with_borrow(ctx, function, args[0], access == MirAccess.Read)
@@ -1270,17 +1270,17 @@ fn jet_rust_emit_method_dispatch(ctx: &JetRustEmitContext, function: MirFunction
                     return "({receiver}).{jet_rust_emit_sanitize(candidate.name)}{generic}({rendered.join(", ")})"
                 }
                 .TraitMethod(_, _, _, _) -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch targets a trait-method function", "instance method calls must use the checked inherent method form", Val(function.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch targets a trait-method function", "instance method calls must use the checked inherent method form", Val(function.span))
                     return "unreachable!(\"trait method in inherent dispatch\")"
                 }
                 .TopLevel -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch targets a top-level function", "instance calls require a checked method function form", Val(function.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR method dispatch targets a top-level function", "instance calls require a checked method function form", Val(function.span))
                     return "unreachable!(\"top-level method dispatch\")"
                 }
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR method dispatch target is missing", "instance calls must resolve to one checked function identity", Val(function.span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR method dispatch target is missing", "instance calls must resolve to one checked function identity", Val(function.span))
     "unreachable!(\"missing method dispatch\")"
 }
 
@@ -1292,35 +1292,35 @@ fn jet_rust_emit_trait_method_call_row(ctx: &JetRustEmitContext, function: MirFu
                 if bound.id == trait_ref.id {
                     found = true
                     if bound.name != trait_ref.name {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver bound name disagrees with its identity", "trait-object dispatch uses the exact checked trait ID; the name is consistency data only", Val(function.span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver bound name disagrees with its identity", "trait-object dispatch uses the exact checked trait ID; the name is consistency data only", Val(function.span))
                     }
                 }
             }
             if !found {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver lacks its dispatched trait bound", "trait-object calls must retain the checked trait bound used for vtable dispatch", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver lacks its dispatched trait bound", "trait-object calls must retain the checked trait bound used for vtable dispatch", Val(function.span))
                 return "unreachable!(\"trait bound missing\")"
             }
         }
         else -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver is not a trait object", "trait-method calls require a checked trait-object receiver", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver is not a trait object", "trait-method calls require a checked trait-object receiver", Val(function.span))
             return "unreachable!(\"trait receiver is not a trait object\")"
         }
     }
     if method.self_access == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait method has no receiver", "dynamic trait dispatch requires a checked receiver access", Val(method.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait method has no receiver", "dynamic trait dispatch requires a checked receiver access", Val(method.span))
         return "unreachable!(\"trait method receiver missing\")"
     }
     if args.len() != method.params.len() + 1 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait call arity does not match its method row", "trait vtable dispatch must preserve the checked receiver plus parameter ABI", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait call arity does not match its method row", "trait vtable dispatch must preserve the checked receiver plus parameter ABI", Val(function.span))
         return "unreachable!(\"trait call arity\")"
     }
     access :: method.self_access ?? MirAccess.Read
     if args[0].access != access {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver access does not match its method row", "trait vtable dispatch must preserve checked read/write/move receiver ownership", Val(args[0].span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver access does not match its method row", "trait vtable dispatch must preserve checked read/write/move receiver ownership", Val(args[0].span))
         return "unreachable!(\"trait receiver access\")"
     }
     if type_args.len() > 0 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait method carries unsupported type arguments", "trait method rows currently have no generic parameter ABI", Val(method.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait method carries unsupported type arguments", "trait method rows currently have no generic parameter ABI", Val(method.span))
         return "unreachable!(\"trait method type arguments\")"
     }
     receiver_text :: jet_rust_emit_call_arg_with_borrow(ctx, function, args[0], access == MirAccess.Read)
@@ -1341,13 +1341,13 @@ fn jet_rust_emit_trait_method_call(ctx: &JetRustEmitContext, function: MirFuncti
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait method is missing", "trait vtable dispatch requires a checked method row in its trait registry", Val(function.span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait method is missing", "trait vtable dispatch requires a checked method row in its trait registry", Val(function.span))
     "unreachable!(\"missing trait method\")"
 }
 
 fn jet_rust_emit_foreign_call(ctx: &JetRustEmitContext, function: MirFunction, id: MirForeignId, args: [MirCallArg], type_args: [MirType]) -> String Never! {
     if type_args.len() > 0 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign call carries type arguments", "foreign ABI calls are monomorphic at the source boundary", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign call carries type arguments", "foreign ABI calls are monomorphic at the source boundary", Val(function.span))
         return "unreachable!(\"foreign call type arguments\")"
     }
     loop foreign in ctx.program.foreign {
@@ -1364,13 +1364,13 @@ fn jet_rust_emit_foreign_call(ctx: &JetRustEmitContext, function: MirFunction, i
                 loop handle in ctx.program.handles {
                     if jet_rust_emit_same_handle_type(handle.ty, return_type) -> return "{jet_rust_emit_type(ctx, return_type)}::from_raw({call})"
                 }
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign handle return has no lifecycle type", "foreign handle-return rows must identify the canonical owned handle type", Val(foreign.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign handle return has no lifecycle type", "foreign handle-return rows must identify the canonical owned handle type", Val(foreign.span))
                 return "unreachable!(\"foreign handle return type\")"
             }
             return call
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR foreign call declaration is missing", "checked foreign calls must resolve to one canonical ABI row", Val(function.span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR foreign call declaration is missing", "checked foreign calls must resolve to one canonical ABI row", Val(function.span))
     "unreachable!(\"missing foreign call\")"
 }
 
@@ -1394,12 +1394,12 @@ fn jet_rust_emit_call_failure(ctx: &JetRustEmitContext, callee: MirCallee) -> Mi
                     }
                 }
             }
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait method is missing from its trait registry", "trait call fallibility must come from the checked trait method row", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait method is missing from its trait registry", "trait call fallibility must come from the checked trait method row", None)
             return MirCallFallibility.Infallible
         }
         .Core(id) -> {
             loop row in ctx.program.core_calls { if row.id == id -> return row.fallibility }
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call fallibility row is missing", "checked Core calls must retain its canonical failure carrier", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call fallibility row is missing", "checked Core calls must retain its canonical failure carrier", None)
             return MirCallFallibility.Infallible
         }
         .Prelude(id) -> {
@@ -1417,7 +1417,7 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MirFunction, callee: M
             loop row in ctx.program.core_calls {
                 if row.id == id {
                     if args.len() < row.arity || args.len() > row.max_arity || row.borrow_mask.len() < row.arity {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core call arity does not match its checked ABI", "the checked Core route and operation payload must agree exactly", Val(function.span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core call arity does not match its checked ABI", "the checked Core route and operation payload must agree exactly", Val(function.span))
                     }
                     mask = row.borrow_mask
                 }
@@ -1425,38 +1425,38 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MirFunction, callee: M
             source := jet_rust_emit_core_symbol(ctx, id)
             target := jet_rust_emit_exact_adapter(ctx, Val(function), source, args)
             mask = jet_rust_emit_exact_adapter_mask(args, source, mask, target)
-            jet_rust_emit_call_arguments(ctx, function, args, mask)
+            jet_rust_emit_call_arguments(&ctx, function, args, mask)
         }
         .Prelude(id) -> {
             loop row in ctx.program.prelude_calls {
                 if row.id == id {
                     if args.len() < row.signature.arity || args.len() > row.signature.max_arity || row.signature.borrow_mask.len() != args.len() {
-                        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude call arity does not match its checked ABI", "the checked Prelude route and operation payload must agree exactly", Val(function.span))
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Prelude call arity does not match its checked ABI", "the checked Prelude route and operation payload must agree exactly", Val(function.span))
                     }
                     mask = row.signature.borrow_mask
                 }
             }
-            jet_rust_emit_call_arguments(ctx, function, args, mask)
+            jet_rust_emit_call_arguments(&ctx, function, args, mask)
         }
-        .Foreign(id) -> jet_rust_emit_foreign_arguments(ctx, function, id, args)
-        else -> jet_rust_emit_call_arguments(ctx, function, args, mask)
+        .Foreign(id) -> jet_rust_emit_foreign_arguments(&ctx, function, id, args)
+        else -> jet_rust_emit_call_arguments(&ctx, function, args, mask)
     }
     generic :: jet_rust_emit_generic_call_args(ctx, type_args)
     call := if callee == {
         .User(id) -> "{jet_rust_emit_function_name(ctx, id)}{generic}({rendered_args})"
         .Associated(id, owner) -> {
-            jet_rust_emit_validate_function_dispatch(ctx, id, owner, false, function.span)
-            jet_rust_emit_associated_dispatch(ctx, id, owner, generic, rendered_args, function.span)
+            jet_rust_emit_validate_function_dispatch(&ctx, id, owner, false, function.span)
+            jet_rust_emit_associated_dispatch(&ctx, id, owner, generic, rendered_args, function.span)
         }
-        .Method(id, owner) -> jet_rust_emit_method_dispatch(ctx, function, id, owner, args, type_args)
-        .TraitMethod(method, trait_ref, receiver) -> jet_rust_emit_trait_method_call(ctx, function, method, trait_ref, receiver, args, type_args)
+        .Method(id, owner) -> jet_rust_emit_method_dispatch(&ctx, function, id, owner, args, type_args)
+        .TraitMethod(method, trait_ref, receiver) -> jet_rust_emit_trait_method_call(&ctx, function, method, trait_ref, receiver, args, type_args)
         .Core(id) -> {
             source := jet_rust_emit_core_symbol(ctx, id)
             target := jet_rust_emit_exact_adapter(ctx, Val(function), source, args)
             "{target}{generic}({rendered_args})"
         }
-        .Prelude(id) -> jet_rust_emit_prelude_call(ctx, function, id, args, type_args)
-        .Foreign(id) -> jet_rust_emit_foreign_call(ctx, function, id, args, type_args)
+        .Prelude(id) -> jet_rust_emit_prelude_call(&ctx, function, id, args, type_args)
+        .Foreign(id) -> jet_rust_emit_foreign_call(&ctx, function, id, args, type_args)
         .Indirect(value) -> "({jet_rust_emit_value_read(value)})({rendered_args})"
     }
     if result == .Val(value) {
@@ -1471,7 +1471,7 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MirFunction, callee: M
             else -> jet_rust_emit_failure_needs_try(failure, result_ty)
         }
         if needs_try && function.failure == MirFailureCarrier.Infallible {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "fallible MIR call cannot propagate into an infallible function", "checked failure carriers must be represented by the caller signature before Rust source emission", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "fallible MIR call cannot propagate into an infallible function", "checked failure carriers must be represented by the caller signature before Rust source emission", Val(function.span))
         }
         if needs_try -> call = "({call})?"
     }
@@ -1482,7 +1482,7 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MirFu
     root := ctx.config.root_prefix
     if module_name == "core.db" && member == "decode" {
         if type_args.len() != 1 {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR core.db.decode has the wrong type-argument arity", "checked DB decoding requires exactly one target carrier type", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR core.db.decode has the wrong type-argument arity", "checked DB decoding requires exactly one target carrier type", Val(function.span))
             return Val("unreachable!(\"core.db.decode type arguments\")")
         }
         target_type := type_args[0]
@@ -1493,7 +1493,7 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MirFu
     }
     if module_name == "core.sys" && member == "decode" {
         if type_args.len() != 1 {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR core.sys.decode has the wrong type-argument arity", "checked environment decoding requires exactly one target carrier type", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR core.sys.decode has the wrong type-argument arity", "checked environment decoding requires exactly one target carrier type", Val(function.span))
             return Val("unreachable!(\"core.sys.decode type arguments\")")
         }
         target_type := type_args[0]
@@ -1515,26 +1515,26 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MirFunction,
             module_name = row.module_name
             member = row.member
             if args.len() < row.arity || args.len() > row.max_arity || row.borrow_mask.len() < row.arity {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core call arity does not match its checked ABI", "the checked Core route and operation payload must agree exactly", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core call arity does not match its checked ABI", "the checked Core route and operation payload must agree exactly", Val(function.span))
             }
         }
     }
     if !core_found {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call is missing from the canonical Core registry", "checked Core calls must retain their source-owned symbol and ABI row", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call is missing from the canonical Core registry", "checked Core calls must retain their source-owned symbol and ABI row", Val(function.span))
         return "unreachable!(\"missing MIR Core call\")"
     }
     route_row :: None
     loop row in ctx.program.prelude_calls { if row.id == route -> route_row = Val(row) }
     if route_row == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core route is missing from the Prelude registry", "Core calls carry a checked Prelude ABI row for argument marshalling", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core route is missing from the Prelude registry", "Core calls carry a checked Prelude ABI row for argument marshalling", Val(function.span))
         return "unreachable!(\"missing MIR Core route\")"
     }
     route_info :: route_row ?? MirPreludeCall{id: route, family: MirPreludeFamily.Host, module_name: "", member: "", symbol: MirSymbol.Runtime{name: "__jet_missing_route"}, signature: MirCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}}, effect_kind: None, fallibility: MirCallFallibility.Infallible, abi: MirPreludeAbi.Value, authority: None, db_metadata: None}
     if route_info.fallibility != fallibility {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core and Prelude route fallibility disagree", "Core operation failure propagation must retain one canonical checked carrier", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core and Prelude route fallibility disagree", "Core operation failure propagation must retain one canonical checked carrier", Val(function.span))
     }
     if route_info.signature.borrow_mask.len() != args.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core route borrow metadata does not match its arguments", "Core operation arguments must match the route Prelude signature exactly", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core route borrow metadata does not match its arguments", "Core operation arguments must match the route Prelude signature exactly", Val(function.span))
     }
     source :: jet_rust_emit_core_symbol(ctx, call)
     target :: jet_rust_emit_exact_adapter(ctx, Val(function), source, args)
@@ -1581,13 +1581,13 @@ fn jet_rust_emit_columnar_read(ctx: &JetRustEmitContext, function: MirFunction, 
         if candidate.id == accessor -> route = Val(candidate)
     }
     if route == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR columnar accessor route is missing", "columnar reads must retain their checked gather-cell Prelude route", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR columnar accessor route is missing", "columnar reads must retain their checked gather-cell Prelude route", Val(function.span))
         return "unreachable!(\"missing columnar accessor route\")"
     }
     row :: route ?? return "unreachable!(\"missing columnar accessor route\")"
     valid_mask :: row.signature.borrow_mask.len() == 3 && row.signature.borrow_mask[0] && !row.signature.borrow_mask[1] && !row.signature.borrow_mask[2]
     if row.family != MirPreludeFamily.ColumnarAccess || row.module_name != "core.columnar" || row.member != "jet_columns_gather_cell" || row.signature.arity != 3 || row.signature.max_arity != 3 || !valid_mask {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar accessor route is not canonical", "columnar reads must use core.columnar.jet_columns_gather_cell with its checked three-argument borrow ABI", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar accessor route is not canonical", "columnar reads must use core.columnar.jet_columns_gather_cell with its checked three-argument borrow ABI", Val(function.span))
         return "unreachable!(\"invalid columnar accessor route\")"
     }
     base_text :: jet_rust_emit_value_reference(base, false)
@@ -1601,7 +1601,7 @@ fn jet_rust_emit_index(ctx: &JetRustEmitContext, function: MirFunction, call: Mi
     index_text := jet_rust_emit_value_read(index)
     if kind == MirIndexKind.Map -> index_text = "&({index_text})"
     args := [String]{base_text, index_text, jet_rust_emit_source_path(ctx, location.file), "{location.line}u32"}
-    jet_rust_emit_route_call(ctx, call, args)
+    jet_rust_emit_route_call(&ctx, call, args)
 }
 
 fn jet_rust_emit_slice(ctx: &JetRustEmitContext, call: MirPreludeCallId, base: MirValueId, start: MirValueId, end: MirValueId, range: MirValueId?, location: MirPanicLoc) -> String Never! {
@@ -1612,7 +1612,7 @@ fn jet_rust_emit_slice(ctx: &JetRustEmitContext, call: MirPreludeCallId, base: M
     }
     &args.push(jet_rust_emit_source_path(ctx, location.file))
     &args.push("{location.line}u32")
-    jet_rust_emit_route_call(ctx, call, args)
+    jet_rust_emit_route_call(&ctx, call, args)
 }
 
 fn jet_rust_emit_enum_variant_name(ctx: &JetRustEmitContext, type_id: MirTypeId, variant: String) -> String Never! {
@@ -1701,7 +1701,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
     route := None
     loop candidate in ctx.program.prelude_calls { if candidate.id == call -> route = Val(candidate) }
     route_row :: route ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "unit conversion route is missing", "each checked unit conversion must retain its exact StaticPrelude kernel", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "unit conversion route is missing", "each checked unit conversion must retain its exact StaticPrelude kernel", Val(function.span))
         return "unreachable!(\"missing unit conversion route\")"
     }
     rounded :: route_row.member == "conversion_rounded" || route_row.member == "conversion_rounded_measurement"
@@ -1742,7 +1742,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
         &args.push("{location.line}u32")
         }
         args.len() != expected -> {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion ABI has an unexpected parameter count", "exact, measured, rounded, and measured-rounded routes use 5/6/7/8 arguments without source-location suffixes", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion ABI has an unexpected parameter count", "exact, measured, rounded, and measured-rounded routes use 5/6/7/8 arguments without source-location suffixes", Val(function.span))
         return "unreachable!(\"unit conversion ABI\")"
         }
     }
@@ -1752,7 +1752,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
         digit_ref :: jet_rust_emit_value_reference(digits, false)
         if target.kind == {
             .Result(_, error) -> {
-                if error.kind != MirTypeKind.String -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "rounded unit conversion uses a non-String error carrier", "the checked rounded conversion route reports conversion failures as String", Val(function.span))
+                if error.kind != MirTypeKind.String -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "rounded unit conversion uses a non-String error carrier", "the checked rounded conversion route reports conversion failures as String", Val(function.span))
                 digit_setup = "let __jet_unit_digits = {ctx.config.root_prefix}jet_std::jet_int_owned_to_i64(&({digit_ref})).map_err(|error| error.to_string())?;"
             }
             else -> digit_setup = "let __jet_unit_digits = {ctx.config.root_prefix}jet_std::jet_int_owned_to_i64(&({digit_ref})).unwrap_or_else(|error| panic!(\"unit conversion digits are out of range: {{}}\", error));"
@@ -1762,7 +1762,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
     if target.kind == {
         .Result(ok, error) -> {
             if error.kind != MirTypeKind.String {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion uses a non-String error carrier", "the checked unit conversion kernel reports failures as String", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "unit conversion uses a non-String error carrier", "the checked unit conversion kernel reports failures as String", Val(function.span))
                 return "unreachable!(\"unit conversion error carrier\")"
             }
             converted := jet_rust_emit_unit_wrap(ctx, ok, "value")
@@ -1784,7 +1784,7 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MirFunction
         return jet_rust_emit_unit_wrap(ctx, target, unwrapped)
     }
     unwrapped := "({result}).unwrap_or_else(|| panic!(\"unit conversion is not exactly representable\"))"
-    jet_rust_emit_unit_wrap(ctx, target, unwrapped)
+    jet_rust_emit_unit_wrap(&ctx, target, unwrapped)
 }
 
 fn jet_rust_emit_conversion(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId, parameters: [MirValueId], target: MirType, conversion: MirConversion) -> String Never! {
@@ -1815,7 +1815,7 @@ fn jet_rust_emit_conversion(ctx: &JetRustEmitContext, function: MirFunction, val
                 &args.push("{location.line}u32")
                 }
                 args.len() != route_arity -> {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR conversion arguments do not match the checked route", "location arguments are emitted only for routes whose ABI includes them", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR conversion arguments do not match the checked route", "location arguments are emitted only for routes whose ABI includes them", Val(function.span))
                 }
             }
             result :: jet_rust_emit_route_call(ctx, call, args)
@@ -1839,17 +1839,17 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MirTypeId, val
         if candidate.id == id -> definition = Val(candidate)
     }
     if definition == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "compiler-owned Err type row is missing", "the canonical default error constructor requires its checked field schema", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "compiler-owned Err type row is missing", "the canonical default error constructor requires its checked field schema", None)
         return "unreachable!(\"missing default Err type\")"
     }
     definition_row :: definition ?? panic("default Err type row disappeared")
     declared := [MirField]{}
     if definition_row.kind == {
         .Struct(fields, _) -> declared = fields
-        else -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err type is not a struct", "the canonical default error constructor has message/code/cause fields", None)
+        else -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err type is not a struct", "the canonical default error constructor has message/code/cause fields", None)
     }
     if declared.len() != 3 || values.len() != 3 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal has an invalid field set", "the default error carrier must contain exactly message, code, and cause", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal has an invalid field set", "the default error carrier must contain exactly message, code, and cause", None)
         return "unreachable!(\"invalid default Err literal\")"
     }
     message := None
@@ -1860,7 +1860,7 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MirTypeId, val
         loop value in values {
             if value.field == declared_field.id {
                 if matched != None {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal repeats a field", "each canonical error field must appear once", Val(declared_field.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal repeats a field", "each canonical error field must appear once", Val(declared_field.span))
                 }
                 matched = Val(value.value)
             }
@@ -1869,19 +1869,19 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MirTypeId, val
             "message" -> message = matched
             "code" -> code = matched
             "cause" -> cause = matched
-            else -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err has an unexpected field", "the canonical error carrier fields are message, code, and cause", Val(declared_field.span))
+            else -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err has an unexpected field", "the canonical error carrier fields are message, code, and cause", Val(declared_field.span))
         }
     }
     message_value :: message ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal omits message", "the default error constructor requires its checked message field", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal omits message", "the default error constructor requires its checked message field", None)
         return "unreachable!(\"missing default Err message\")"
     }
     code_value :: code ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal omits code", "the default error constructor requires its checked code field", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal omits code", "the default error constructor requires its checked code field", None)
         return "unreachable!(\"missing default Err code\")"
     }
     cause_value :: cause ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal omits cause", "the default error constructor requires its checked cause field", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "compiler-owned Err literal omits cause", "the default error constructor requires its checked cause field", None)
         return "unreachable!(\"missing default Err cause\")"
     }
     "{ctx.config.root_prefix}jet_err({jet_rust_emit_value_move(message_value)}, {jet_rust_emit_value_move(code_value)}, {jet_rust_emit_value_move(cause_value)})"
@@ -1903,7 +1903,7 @@ fn jet_rust_emit_scope_fact(scope: MirScope, key: String) -> String? {
 
 fn jet_rust_emit_scope_row(ctx: &JetRustEmitContext, function: MirFunction, id: MirScopeId) -> MirScope? {
     loop scope in function.scopes { if scope.id == id -> return Val(scope) }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR scope identity is missing from its function", "scope enter/exit operations must resolve to one checked scope row", Val(function.span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR scope identity is missing from its function", "scope enter/exit operations must resolve to one checked scope row", Val(function.span))
     None
 }
 
@@ -1993,12 +1993,12 @@ fn jet_rust_emit_scope_exit(ctx: &JetRustEmitContext, function: MirFunction, id:
             local :: None
             loop candidate in function.locals {
                 if candidate.name == local_name {
-                    if local != None -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR transaction local name is ambiguous", "each shared transaction scope must own one uniquely named STM local", Val(scope.span))
+                    if local != None -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR transaction local name is ambiguous", "each shared transaction scope must own one uniquely named STM local", Val(scope.span))
                     local = Val(candidate)
                 }
             }
             local_row :: local ?? {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR transaction scope has no STM local", "a Shared transaction scope must retain its generated transaction guard", Val(scope.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR transaction scope has no STM local", "a Shared transaction scope must retain its generated transaction guard", Val(scope.span))
                 return "unreachable!(\"missing MIR STM local\")"
             }
             return "{jet_rust_emit_local_slot(local_row.id)}.take().expect(\"MIR STM transaction\").commit()"
@@ -2038,7 +2038,7 @@ fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MirFunction, val
             loop handle in ctx.program.handles {
                 if jet_rust_emit_same_handle_type(handle.ty, ty) -> return jet_rust_emit_handle_drop(ctx, function, jet_rust_emit_value_move(value), function.span, handle)
             }
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign-handle drop has no lifecycle row", "checked foreign-handle values must retain the canonical close operation required by MIR", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR foreign-handle drop has no lifecycle row", "checked foreign-handle values must retain the canonical close operation required by MIR", Val(function.span))
             return "unreachable!(\"foreign handle lifecycle missing\")"
         }
         .NoDrop -> return "{{ let _ = {jet_rust_emit_value_move(value)}; () }}"
@@ -2051,11 +2051,11 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MirFunction, target_id
         if candidate.id == target_id -> target = Val(candidate)
     }
     target_function :: target ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR closure target function is missing", "checked closures must resolve their target function identity before source emission", Val(outer.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR closure target function is missing", "checked closures must resolve their target function identity before source emission", Val(outer.span))
         return "|| unreachable!(\"missing MIR closure target\")"
     }
     if captures.len() != target_function.capture_params.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR closure capture arity is invalid", "checked closure values must preserve the target capture ABI", Val(outer.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR closure capture arity is invalid", "checked closure values must preserve the target capture ABI", Val(outer.span))
         return "|| unreachable!(\"MIR closure capture arity\")"
     }
     setup := ""
@@ -2065,9 +2065,9 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MirFunction, target_id
         captured :: if operand == {
             .Place(place) -> {
                 if capture.access == {
-                    .Move -> jet_rust_emit_place_move(ctx, outer, place)
-                    .Read -> if jet_rust_emit_type_is_borrowed(capture.ty) -> jet_rust_emit_place_reference(ctx, outer, place, MirAccess.Read) else -> jet_rust_emit_place_read(ctx, outer, place)
-                    .Write -> jet_rust_emit_place_reference(ctx, outer, place, MirAccess.Write)
+                    .Move -> jet_rust_emit_place_move(&ctx, outer, place)
+                    .Read -> if jet_rust_emit_type_is_borrowed(capture.ty) -> jet_rust_emit_place_reference(&ctx, outer, place, MirAccess.Read) else -> jet_rust_emit_place_read(&ctx, outer, place)
+                    .Write -> jet_rust_emit_place_reference(&ctx, outer, place, MirAccess.Write)
                 }
             }
             .Value(value) -> if capture.access == MirAccess.Move -> jet_rust_emit_value_move(value) else -> jet_rust_emit_value_read(value)
@@ -2104,13 +2104,13 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MirFunction, target_id
 
 fn jet_rust_emit_shared_guard_map(ctx: &JetRustEmitContext, function: MirFunction, call: MirPreludeCallId, guard: MirValueId, path: [MirFieldId], editable: Bool) -> String Never! {
     if path.len() == 0 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shared guard path is empty", "checked guard projections must carry at least one field edge", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shared guard path is empty", "checked guard projections must carry at least one field edge", Val(function.span))
         return "unreachable!(\"empty shared guard path\")"
     }
     route := None
     loop candidate in ctx.program.prelude_calls { if candidate.id == call -> route = Val(candidate) }
     row :: route ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR shared guard route is missing", "checked guard projections must resolve their map Prelude route", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR shared guard route is missing", "checked guard projections must resolve their map Prelude route", Val(function.span))
         return "unreachable!(\"missing shared guard route\")"
     }
     method := row.member
@@ -2126,7 +2126,7 @@ fn jet_rust_emit_shared_guard_map(ctx: &JetRustEmitContext, function: MirFunctio
 
 fn jet_rust_emit_shared_guard_split(ctx: &JetRustEmitContext, function: MirFunction, call: MirPreludeCallId, map_call: MirPreludeCallId, guard: MirValueId, first: [MirFieldId], second: [MirFieldId], editable: Bool) -> String Never! {
     if first.len() == 0 || second.len() == 0 {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shared guard split path is empty", "checked guard splits must carry two non-empty field paths", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shared guard split path is empty", "checked guard splits must carry two non-empty field paths", Val(function.span))
         return "unreachable!(\"empty shared guard split path\")"
     }
     common := 0
@@ -2135,7 +2135,7 @@ fn jet_rust_emit_shared_guard_split(ctx: &JetRustEmitContext, function: MirFunct
         common += 1
     }
     if common == first.len() || common == second.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shared guard split paths overlap", "checked guard split paths must diverge below their common prefix", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shared guard split paths overlap", "checked guard split paths must diverge below their common prefix", Val(function.span))
         return "unreachable!(\"overlapping shared guard split paths\")"
     }
     prefix := [MirFieldId]{}
@@ -2148,7 +2148,7 @@ fn jet_rust_emit_shared_guard_split(ctx: &JetRustEmitContext, function: MirFunct
     split_route := None
     loop candidate in ctx.program.prelude_calls { if candidate.id == call -> split_route = Val(candidate) }
     row :: split_route ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR shared guard split route is missing", "checked guard splits must resolve their split Prelude route", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR shared guard split route is missing", "checked guard splits must resolve their split Prelude route", Val(function.span))
         return "unreachable!(\"missing shared guard split route\")"
     }
     method := row.member
@@ -2231,12 +2231,12 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MirFunction
         if candidate.id == call -> route = Val(candidate)
     }
     if route == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR semantic Prelude route is missing", "semantic operations must resolve their checked route identity before source emission", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR semantic Prelude route is missing", "semantic operations must resolve their checked route identity before source emission", Val(function.span))
         return "unreachable!(\"missing semantic Prelude route\")"
     }
     row :: route ?? return "unreachable!(\"missing semantic Prelude route\")"
     if values.len() < row.signature.arity || values.len() > row.signature.max_arity || row.signature.borrow_mask.len() != values.len() {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR semantic Prelude arity is invalid", "semantic operation values must match the checked route arity and borrow ABI", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR semantic Prelude arity is invalid", "semantic operation values must match the checked route arity and borrow ABI", Val(function.span))
         return "unreachable!(\"semantic Prelude arity\")"
     }
     rendered := [String]{}
@@ -2245,7 +2245,7 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MirFunction
         if row.signature.borrow_mask[index] -> &rendered.push(jet_rust_emit_value_reference(value, false)) else -> &rendered.push(jet_rust_emit_value_read(value))
         index += 1
     }
-    jet_rust_emit_route_call(ctx, call, rendered)
+    jet_rust_emit_route_call(&ctx, call, rendered)
 }
 
 fn jet_rust_emit_pattern_capture_descriptor(function: MirFunction, matched: MirValueId, index: Int) -> Bool Never! {
@@ -2288,11 +2288,11 @@ fn jet_rust_emit_pattern_capture_descriptor(function: MirFunction, matched: MirV
 
 fn jet_rust_emit_pattern_capture(ctx: &JetRustEmitContext, function: MirFunction, matched: MirValueId, index: Int, result: MirValueId?) -> String Never! {
     if result == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR pattern capture has no result value", "checked pattern captures must produce their typed tuple field", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR pattern capture has no result value", "checked pattern captures must produce their typed tuple field", Val(function.span))
         return "unreachable!(\"MIR pattern capture result missing\")"
     }
     if !jet_rust_emit_pattern_capture_descriptor(function, matched, index) {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR pattern capture index has no descriptor", "checked pattern captures must reference one typed hole or binary rest descriptor from their match producer", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR pattern capture index has no descriptor", "checked pattern captures must reference one typed hole or binary rest descriptor from their match producer", Val(function.span))
         return "unreachable!(\"MIR pattern capture descriptor missing\")"
     }
     "({jet_rust_emit_value_reference(matched, false)}).as_ref().unwrap_or_else(|_| unreachable!(\"MIR pattern capture unavailable\")).{index}.clone()"
@@ -2301,14 +2301,14 @@ fn jet_rust_emit_pattern_capture(ctx: &JetRustEmitContext, function: MirFunction
 fn jet_rust_emit_view_copy(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId, result: MirValueId?) -> String Never! {
     source :: jet_rust_emit_value_type(function, value)
     kind :: mir_view_copy_kind(source) ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR view materialization source has no canonical copy kernel", "checked MaterializeView sources must be String, View<T>, List<T>, or FixedList<T>", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR view materialization source has no canonical copy kernel", "checked MaterializeView sources must be String, View<T>, List<T>, or FixedList<T>", Val(function.span))
         return "unreachable!(\"invalid MIR view materialization source\")"
     }
     symbol :: mir_view_copy_symbol(kind)
     if result != None {
         target :: jet_rust_emit_value_type(function, result ?? value)
         if !mir_view_copy_target_matches(kind, target) {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR view materialization destination does not own the source window", "checked view materialization must target String or List<T> according to its source kernel", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR view materialization destination does not own the source window", "checked view materialization must target String or List<T> according to its source kernel", Val(function.span))
             return "unreachable!(\"invalid MIR view materialization destination\")"
         }
     }
@@ -2316,7 +2316,7 @@ fn jet_rust_emit_view_copy(ctx: &JetRustEmitContext, function: MirFunction, valu
 }
 
 fn jet_rust_emit_copy(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId, materialize_view: Bool, result: MirValueId?) -> String Never! {
-    if materialize_view -> jet_rust_emit_view_copy(ctx, function, value, result) else -> jet_rust_emit_value_read(value)
+    if materialize_view -> jet_rust_emit_view_copy(&ctx, function, value, result) else -> jet_rust_emit_value_read(value)
 }
 
 fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, operation: MirOperation, result: MirValueId?, location: MirPanicLoc?) -> String Never! {
@@ -2430,7 +2430,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, oper
             action := jet_rust_emit_trait_box_source_needs_box(ctx, source_ty, target_ty, Val(function.span))
             if action == None -> return "unreachable!(\"MIR trait boxing source is invalid\")"
             if action != (Val(true)) {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing source is already a trait object", "checked TraitBox operations consume concrete values and must not rebox an existing trait object", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait boxing source is already a trait object", "checked TraitBox operations consume concrete values and must not rebox an existing trait object", Val(function.span))
                 return "unreachable!(\"MIR trait boxing source is already dynamic\")"
             }
             return "Box::new({jet_rust_emit_value_move(value)}) as {jet_rust_emit_type(ctx, target_ty)}"
@@ -2534,16 +2534,16 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, oper
                     if paths.len() == 1 -> return jet_rust_emit_shared_guard_map(ctx, function, map_call, guard, paths[0], editable)
                     if paths.len() == 2 {
                         if editable && !disjoint {
-                            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR editable cell guard split paths overlap", "editable guard split paths must be disjoint by the checked guard contract", Val(function.span))
+                            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR editable cell guard split paths overlap", "editable guard split paths must be disjoint by the checked guard contract", Val(function.span))
                             return "unreachable!(\"overlapping cell guard paths\")"
                         }
                         if split_call == None {
-                            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR cell guard split route is missing", "checked two-path cell guards must carry their split Prelude route", Val(function.span))
+                            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR cell guard split route is missing", "checked two-path cell guards must carry their split Prelude route", Val(function.span))
                             return "unreachable!(\"missing cell guard split route\")"
                         }
                         return jet_rust_emit_shared_guard_split(ctx, function, split_call ?? MirPreludeCallId{value: 0}, map_call, guard, paths[0], paths[1], editable)
                     }
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR cell guard path count is invalid", "checked cell guard projections have exactly one or two paths", Val(function.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR cell guard path count is invalid", "checked cell guard projections have exactly one or two paths", Val(function.span))
                     return "unreachable!(\"invalid cell guard paths\")"
                 }
                 .SharedGuardMap(call, guard, path, editable) -> return jet_rust_emit_shared_guard_map(ctx, function, call, guard, path, editable)
@@ -2587,11 +2587,11 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MirFunction, oper
                 .CarrierFact(call, receiver, field, _) -> return "{jet_rust_emit_prelude_symbol(ctx, call)}(&({jet_rust_emit_value_read(receiver)}), |__jet_report| __jet_report.{jet_rust_emit_field_name(ctx, field)}.clone())"
                 else -> {}
             }
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR semantic operation has no Jet source adapter", "semantic operations must retain one checked source-emission adapter before Rust source generation", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR semantic operation has no Jet source adapter", "semantic operations must retain one checked source-emission adapter before Rust source generation", Val(function.span))
             return "unreachable!(\"unsupported MIR semantic operation\")"
         }
         .Todo(_, _, _) -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedOperation, "E0003", "MIR Todo cannot be emitted as source", "a checked operation route must be completed before the artifact can be emitted", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedOperation, "E0003", "MIR Todo cannot be emitted as source", "a checked operation route must be completed before the artifact can be emitted", Val(function.span))
             return "unreachable!(\"incomplete MIR operation\")"
         }
         .Never(reason) -> return "unreachable!({jet_rust_emit_quote(reason)})"

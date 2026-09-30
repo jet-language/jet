@@ -1,0 +1,17 @@
+// core.encoding.yaml — yaml.parse builds one untyped tree with the same shape
+// on every tier (#3754).
+use core.encoding.yaml as yaml
+
+fn show(text: String) {
+    tree :: yaml.parse(text) ?? {
+        print("rejected {err.reason}")
+        return
+    }
+    print("accepted {tree}")
+}
+
+fn run() {
+    show("a: 1\nb: two\n")
+    show("a: 1\nb: two\nc:\n  d: true\n")
+    show("- 1\n- x\n")
+}

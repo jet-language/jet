@@ -69,7 +69,7 @@ fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool {
+fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
     value :: diagnostic_byte_at(source, index)
     if {
         value < 0 -> false
@@ -82,7 +82,7 @@ fn diagnostic_is_sentence_digit(value: Int) -> Bool Never! {
     value >= 48 && value <= 57
 }
 
-fn diagnostic_sentence_case_line(value: String) -> String {
+fn diagnostic_sentence_case_line(value: String) -> String Never! {
     bytes := value.bytes()
     first := -1
     token_len := 0
@@ -136,15 +136,15 @@ fn diagnostic_sentence_case_line(value: String) -> String {
     String.from_bytes(bytes) ?? value
 }
 
-fn diagnostic_registry_row_in(rows: [DiagnosticRegistryRow], code: String) -> DiagnosticRegistryRow? {
+fn diagnostic_registry_row_in(rows: [DiagnosticRegistryRow], code: String) -> DiagnosticRegistryRow? Never! {
     loop row in rows {
         if row.code == code -> return Val(row)
     }
     None
 }
 
-pub fn diagnostic_registry_row(code: String) -> DiagnosticRegistryRow? {
-    diagnostic_registry_row_in(@DIAGNOSTIC_ROWS, code)
+pub fn diagnostic_registry_row(code: String) -> DiagnosticRegistryRow? Never! {
+    diagnostic_registry_row_in(DIAGNOSTIC_ROWS, code)
 }
 
 fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> TextEdit? {
@@ -182,7 +182,7 @@ fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegis
 
 // Canonical Source-side constructor. The raise site owns the filled prose and
 // span; the generated registry row owns protocol metadata and static edits.
-pub fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic {
+pub fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     diagnostic :: Diagnostic{
         moment: row.moment,

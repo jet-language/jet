@@ -3388,7 +3388,7 @@ derive T.Access {
     }
     fn marker() -> Int -> 17
     fn get_value(self) -> @param -> ~self.value
-    fn type_name(self) -> String -> T.@name
+    fn type_name(self) -> String -> T.$name
 }
 
 derive T.NumericAccess {
@@ -4547,20 +4547,20 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     }
 
     let source = r#"
-@F32_NAN :: F32.NAN
-@F32_INF :: F32.INFINITY
-@F32_NEG_INF :: F32.NEG_INFINITY
-@F64_NAN :: Float.NAN
-@F64_INF :: Float.INFINITY
-@F64_NEG_INF :: Float.NEG_INFINITY
+F32_NAN :: prep { F32.NAN }
+F32_INF :: prep { F32.INFINITY }
+F32_NEG_INF :: prep { F32.NEG_INFINITY }
+F64_NAN :: prep { Float.NAN }
+F64_INF :: prep { Float.INFINITY }
+F64_NEG_INF :: prep { Float.NEG_INFINITY }
 
 fn run() {
-    print(@F32_NAN)
-    print(@F32_INF)
-    print(@F32_NEG_INF)
-    print(@F64_NAN)
-    print(@F64_INF)
-    print(@F64_NEG_INF)
+    print(F32_NAN)
+    print(F32_INF)
+    print(F32_NEG_INF)
+    print(F64_NAN)
+    print(F64_INF)
+    print(F64_NEG_INF)
 }
 "#;
     let expected = ProgramOutput::ran("NaN\ninf\n-inf\nNaN\ninf\n-inf\n".into(), "".into(), 0);
@@ -7240,7 +7240,7 @@ fn tracked_origin_fact_matches_aot_in_default_dev() {
     let file = dir.join("origin_fact.jet");
     fs::write(
         &file,
-        "fn run() {\n    #Track speed :: Float{3.5}\n    plain :: Float{3.5}\n    copied :: speed\n    @speed_origin :: speed.@origin\n    @plain_origin :: plain.@origin\n    @copied_origin :: copied.@origin\n    print(@speed_origin?.tracked ?? false)\n    print(@speed_origin?.source ?? \"missing\")\n    print(@speed_origin?.line ?? 0)\n    print(@speed_origin?.column ?? 0)\n    print(@plain_origin == None)\n    print(@copied_origin == None)\n}\n",
+        "fn run() {\n    #Track speed :: Float{3.5}\n    plain :: Float{3.5}\n    copied :: speed\n    speed_origin :: prep { speed.$origin }\n    plain_origin :: prep { plain.$origin }\n    copied_origin :: prep { copied.$origin }\n    print(speed_origin?.tracked ?? false)\n    print(speed_origin?.source ?? \"missing\")\n    print(speed_origin?.line ?? 0)\n    print(speed_origin?.column ?? 0)\n    print(plain_origin == None)\n    print(copied_origin == None)\n}\n",
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();

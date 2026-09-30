@@ -214,7 +214,7 @@ fn sema_marker_rules_metadata_names(declaration: MarkerDecl, name: String, sites
     if found {
         return None
     }
-    if name == "@sites" {
+    if name == "$sites" {
         return None
     }
     Val([String]{})
@@ -222,7 +222,7 @@ fn sema_marker_rules_metadata_names(declaration: MarkerDecl, name: String, sites
 
 
 fn sema_marker_rules_companion(declaration: MarkerDecl) -> TAppliedRuleCompanionSite? {
-    value :: sema_marker_rules_metadata_expr(declaration, "@companion") ?? return Val(None)
+    value :: sema_marker_rules_metadata_expr(declaration, "$companion") ?? return Val(None)
     if value == .ListLit(values, _) {
         if values.len() != 2 {
             return None
@@ -235,7 +235,7 @@ fn sema_marker_rules_companion(declaration: MarkerDecl) -> TAppliedRuleCompanion
 }
 
 fn sema_marker_rules_resolution(declaration: MarkerDecl) -> String? {
-    value :: sema_marker_rules_metadata_expr(declaration, "@resolution") ?? return Val("SiteBound")
+    value :: sema_marker_rules_metadata_expr(declaration, "$resolution") ?? return Val("SiteBound")
     name :: sema_marker_rules_expr_name(value) ?? return None
     if name == "SiteBound" || name == "Override" || name == "Merge" || name == "Tighten" {
         return Val(name)
@@ -270,15 +270,15 @@ fn sema_marker_rules_applied_parameter(parameter: MarkerDeclParam, source: Strin
 }
 
 fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAppliedRule? {
-    sites :: sema_marker_rules_metadata_names(declaration, "@sites", true) ?? return None
-    scopes :: sema_marker_rules_metadata_names(declaration, "@scopes", false) ?? return None
-    repeatable :: sema_marker_rules_bool_fact(declaration, "@repeatable") ?? return None
-    owns_menu :: sema_marker_rules_bool_fact(declaration, "@owns_menu") ?? return None
-    inherits :: sema_marker_rules_bool_fact(declaration, "@inherits") ?? return None
+    sites :: sema_marker_rules_metadata_names(declaration, "$sites", true) ?? return None
+    scopes :: sema_marker_rules_metadata_names(declaration, "$scopes", false) ?? return None
+    repeatable :: sema_marker_rules_bool_fact(declaration, "$repeatable") ?? return None
+    owns_menu :: sema_marker_rules_bool_fact(declaration, "$owns_menu") ?? return None
+    inherits :: sema_marker_rules_bool_fact(declaration, "$inherits") ?? return None
     resolution :: sema_marker_rules_resolution(declaration) ?? return None
     companion :: sema_marker_rules_companion(declaration) ?? return None
     status := TAppliedRuleStatus.Active
-    retired_value_option := sema_marker_rules_metadata_expr(declaration, "@retired")
+    retired_value_option := sema_marker_rules_metadata_expr(declaration, "$retired")
     if retired_value_option != None {
         retired_value :: retired_value_option ?? return None
         replacement :: sema_marker_rules_string_value(retired_value) ?? return None
@@ -288,7 +288,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     variadic := None
     variadic_source_type := None
     loop parameter in declaration.params {
-        if parameter.name.starts_with("@") {
+        if parameter.name.starts_with("$") {
             next
         }
         ty :: parameter.ty ?? return None
@@ -372,7 +372,7 @@ pub fn sema_marker_rules_build_catalog(marker_source: Program, marker_source_tex
     loop rule in rows {
         loop parameter in rule.signature.params {
             menu_name :: sema_marker_rules_rule_requires_menu(rule, parameter.source_type, parameter.kind)
-            if menu_name != None && !sema_marker_rules_catalog_has_menu(menus, menu_name ?? "") {
+            if menu_name != None && !sema_marker_rules_catalog_has_menu(menus, menu_name) {
                 return None
             }
         }
@@ -380,7 +380,7 @@ pub fn sema_marker_rules_build_catalog(marker_source: Program, marker_source_tex
             source_type :: rule.signature.variadic_source_type ?? return None
             variadic_kind :: rule.signature.variadic ?? return None
             menu_name :: sema_marker_rules_rule_requires_menu(rule, source_type, variadic_kind)
-            if menu_name != None && !sema_marker_rules_catalog_has_menu(menus, menu_name ?? "") {
+            if menu_name != None && !sema_marker_rules_catalog_has_menu(menus, menu_name) {
                 return None
             }
         }
@@ -743,7 +743,7 @@ fn sema_marker_rules_append_comptime_requests(requests: &[SemaComptimeRequest], 
 
 
 fn sema_marker_rules_menu_candidate(path: String, menu: TAppliedRuleArgumentMenu) -> String Never! {
-    segments := path.split(".")
+    segments := path.split(".").to_list()
     start := 0
     loop index in 0..<segments.len() {
         if segments[index] == menu.name && index + 1 < segments.len() {
@@ -778,7 +778,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
             &diagnostics.push(sema_marker_rules_signature_error(marker, signature, declared))
             return false
         }
-        argument :: expression ?? return false
+        argument :: expression
         source_type := ""
         if binding.parameter_index == {
             .Val(index) -> {
@@ -899,7 +899,7 @@ fn sema_marker_rules_declared_signature(rule: SemaScopeMembersMarkerRule) -> (si
     variadic_source_type := None
     variadic_expected_type := None
     loop parameter in rule.params {
-        if parameter.name.starts_with("@") {
+        if parameter.name.starts_with("$") {
             next
         }
         ty := parameter.ty ?? Type.Named{name: "Value"}
@@ -930,7 +930,7 @@ fn sema_marker_rules_applied_site_error(marker: Marker, rule: TAppliedRule, site
         &legal.push("{sema_marker_rules_site_name(companion.site)} with companion `#{companion.rule}`")
     }
     allowed := if legal.len() == 0 -> "no active attachment sites" else -> legal.join(", ")
-    fix := if rule.companion_site == None && rule.sites.len() == 1 && rule.sites[0] == "Constant" -> "write `#{marker.name} @name :: value` — a constant is a marked compile-time binding" else -> "move `#{marker.name}` to one of its registered sites"
+    fix := if rule.companion_site == None && rule.sites.len() == 1 && rule.sites[0] == "Constant" -> "write `#{marker.name} NAME :: prep {{ value }}` — a storage marker precedes a module constant" else -> "move `#{marker.name}` to one of its registered sites"
     sema_error("E0355", marker.span, "`#{marker.name}` cannot attach at the {sema_marker_rules_site_name(site)} site", "the registry allows `#{marker.name}` only at: {allowed}", fix)
 }
 
@@ -1037,7 +1037,7 @@ fn sema_marker_rules_edit_distance(left: String, right: String) -> Int Never! {
 
 fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, marker: Marker, retired: String?) -> Diagnostic {
     if retired != None {
-        replacement :: retired ?? ""
+        replacement :: retired
         fix := if replacement.starts_with("#") || replacement.starts_with(".") -> "write `{replacement}` instead" else -> replacement
         return sema_error("E0927", marker.name_span, "`#{marker.name}` is retired", "the registry keeps this old spelling only to teach its replacement; it no longer applies a rule", fix)
     }

@@ -1,0 +1,13 @@
+// Card #3790: a sort key closure may write a captured `&` local through a
+// named function. The counter advances once per key call on every tier.
+fn key(n: Int, calls: &Int) -> Int {
+    calls += 1
+    n
+}
+
+fn run() {
+    values := [3, 1, 2]
+    calls := 0
+    &values.sort_by((n: Int) -> key(n, &calls))
+    print("{values} {calls}")
+}

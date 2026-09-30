@@ -1,0 +1,25 @@
+// L0303 stays quiet on an open set: range arms over `Int` never cover every
+// value, so the `else` in `size` can run. The `Light` table below is the one
+// report this snapshot expects.
+enum Light {
+    On
+    Off
+}
+
+fn size(n: Int) -> String {
+    if n == {
+        0..9 -> "small"
+        10..99 -> "medium"
+        else -> "large"
+    }
+}
+
+fn run() {
+    print(size(42))
+    light :: Light.On
+    if light == {
+        .On -> print("on")
+        .Off -> print("off")
+        else -> print("never")
+    }
+}

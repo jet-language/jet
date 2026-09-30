@@ -328,9 +328,11 @@ fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
                 .is_none_or(|span| seen_unknown.insert((span.start, span.end)));
         }
         // Resolution and marker materialization can report the same operation
-        // again. Keep distinct messages at one span, but collapse identical
-        // reports before the module joins the public diagnostic stream.
-        if matches!(diagnostic.code.as_str(), "E0119" | "E0302" | "E0354") {
+        // again, and a derived signature re-checks its target's declared type
+        // at the target's name (E0358). Keep distinct messages at one span,
+        // but collapse identical reports before the module joins the public
+        // diagnostic stream.
+        if matches!(diagnostic.code.as_str(), "E0119" | "E0302" | "E0354" | "E0358") {
             let Some(span) = diagnostic.span else {
                 return true;
             };
@@ -1514,7 +1516,7 @@ fn declare_item_names_scoped(
             scoped_path(path_prefix, &definition.name),
             "const",
             definition.name_span,
-            NameVisibility::Private,
+            NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
         ),
         Item::ExternRust(block) => {
             for function in &block.functions {

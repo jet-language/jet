@@ -234,6 +234,45 @@ fn argv_agrees_on_every_native_tier() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// An undrained `core.db` pool is released when the run ends, while the
+/// native connection table still exists. Before, both in-process tiers
+/// printed an internal error from thread-local teardown after the program
+/// had finished (exit code 0); AOT never did.
+#[test]
+fn undrained_db_pool_exits_cleanly_on_in_process_tiers() {
+    let dir = std::env::temp_dir().join(format!("jet_run_interpret_db_pool_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"run_interpret_db_pool\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [DB, IO, Mem.Alloc, Time.Wait] } }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.jet"),
+        "use core.db as db\n\nfn run() {\n    pool :: db.pool(\":memory:\", max: 1) ?? return\n    ready :: pool.ready() ?? false\n    print(\"ready {ready}\")\n}\n",
+    )
+    .unwrap();
+
+    for (label, extra) in [("default", &[][..]), ("interpret", &["--interpret"][..])] {
+        let output = Command::new(jet())
+            .arg("run")
+            .args(extra)
+            .arg("main.jet")
+            .current_dir(&dir)
+            .env("JET_RUN_CACHE_DIR", dir.join("cache").join(label))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{label} failed: {stderr}");
+        assert_eq!(output.stdout, b"ready true\n", "{label} stdout");
+        assert!(stderr.is_empty(), "{label} wrote stderr at exit: {stderr}");
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn run_interpret_keeps_unused_c_member_lists_runnable() {
     let dir =

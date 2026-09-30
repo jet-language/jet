@@ -168,6 +168,24 @@ fn jet_codegen_source_location_at(builder: &JetCodegenBuilder, span: Span, inclu
     location
 }
 
+// #3713: the 1-based character column of `span` in the function's source,
+// the same fact `Diagnostics::span_line_col` gives the host compiler.
+fn jet_codegen_source_column_at(builder: &JetCodegenBuilder, span: Span) -> Int Never! {
+    loop row in builder.source_files {
+        if row.path != builder.function.source_file -> next
+        bytes := row.source.bytes()
+        if span.start < 0 || span.start > bytes.len() -> panic("checked span falls outside its readonly source context")
+        column := 1
+        offset := span.start
+        loop offset > 0 && bytes[offset - 1] != (U8{10}) {
+            offset -= 1
+            if bytes[offset] < (U8{128}) || bytes[offset] >= (U8{192}) -> column += 1
+        }
+        return column
+    }
+    panic("checked function has no readonly source context")
+}
+
 fn jet_codegen_assignment_panic_location(builder: &JetCodegenBuilder, span: Span, include_source_line: Bool) -> TPanicLoc Never! {
     source := jet_codegen_source_location_at(&builder, span, include_source_line)
     source_line := if include_source_line -> source.source_line ?? panic("checked source context has no source line") else -> ""
@@ -702,7 +720,11 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, record: JetCodegen
     jet_codegen_terminate(&builder, MirTerminator.Branch{condition: live, then_target: drop_block, else_target: next_block})
     jet_codegen_switch_block(&builder, drop_block)
     value := jet_codegen_emit_value(&builder, record.span, record.ty, MirOperation.MovePlace{place: record.place})
-    _ := jet_codegen_emit(&builder, record.span, None, MirOperation.Drop{value: value, kind: record.kind})
+    scope_close := jet_codegen_scope_end_close_function(&builder, record.ty)
+    if scope_close == {
+        .Val(function) -> jet_codegen_emit_scope_end_close(&builder, function, record.ty, value, record.span)
+        .None -> _ := jet_codegen_emit(&builder, record.span, None, MirOperation.Drop{value: value, kind: record.kind})
+    }
     if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MirTerminator.Jump{target: next_block})
     jet_codegen_switch_block(&builder, next_block)
 }
@@ -715,14 +737,28 @@ fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, action: JetCodeg
     }
 }
 
+fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
+    if action == {
+        .DropPlace(_) -> true
+        .DeferredCall(_) -> false
+    }
+}
+
+/// D-SHAPE-RESOURCE1=A: explicit deferred actions run first in reverse
+/// registration order; the automatic safety net then closes or releases every
+/// still-live local in reverse declaration order.
 fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, frame_index: Int) Never! {
     if frame_index < 0 || frame_index >= builder.cleanup_frames.len() -> panic("MIR cleanup frame index is outside the active stack")
     frame := builder.cleanup_frames[frame_index]
-    index := frame.actions.len()
-    loop index > 0 {
-        index -= 1
-        jet_codegen_emit_cleanup_action(&builder, frame.actions[index])
-        if !jet_codegen_current_is_open(builder) -> return
+    loop automatic in [false, true] {
+        index := frame.actions.len()
+        loop index > 0 {
+            index -= 1
+            action := frame.actions[index]
+            if jet_codegen_cleanup_action_is_drop(action) != automatic -> next
+            jet_codegen_emit_cleanup_action(&builder, action)
+            if !jet_codegen_current_is_open(builder) -> return
+        }
     }
     if frame.owner != None && jet_codegen_current_is_open(builder) {
         scope :: frame.owner ?? panic("owned cleanup frame lost its MIR scope")

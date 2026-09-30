@@ -476,13 +476,13 @@ mod comptime_termination_tests {
             for (source, typed_array) in [
                 (
                     format!(
-                        "@CORE_MODULE_EXPORTS :: CoreModuleExportNames{{ name: \"core\" }}{suffix}"
+                        "CORE_MODULE_EXPORTS :: CoreModuleExportNames{{ name: \"core\" }}{suffix}"
                     ),
                     false,
                 ),
                 (
                     format!(
-                        "@CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{{ CoreModuleExportNames{{ name: \"core\" }} }}{suffix}"
+                        "CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{{ CoreModuleExportNames{{ name: \"core\" }} }}{suffix}"
                     ),
                     true,
                 ),
@@ -519,23 +519,23 @@ mod comptime_termination_tests {
     #[test]
     fn comptime_eof_termination_keeps_newline_item_boundaries() {
         let source =
-            "@FIRST :: CoreModuleExportNames{ name: \"first\" }\n@SECOND :: 2";
+            "FIRST :: CoreModuleExportNames{ name: \"first\" }\nSECOND :: 2";
         let program = parse_source(source).expect("newline separates comptime declarations");
         assert_eq!(program.items.len(), 2, "{source:?}");
         assert!(matches!(
             &program.items[0],
-            AST::Item::Const(def) if def.name == "@FIRST"
+            AST::Item::Const(def) if def.name == "FIRST"
         ));
         assert!(matches!(
             &program.items[1],
-            AST::Item::Const(def) if def.name == "@SECOND"
+            AST::Item::Const(def) if def.name == "SECOND"
         ));
     }
 
     #[test]
     fn comptime_eof_termination_still_rejects_incomplete_initializers() {
         let source =
-            "@CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{ CoreModuleExportNames{ name: \"core\" }";
+            "CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{ CoreModuleExportNames{ name: \"core\" }";
         let diagnostics =
             parse_source(source).expect_err("incomplete comptime initializer must fail");
         assert!(
@@ -552,8 +552,8 @@ mod comptime_termination_tests {
     #[test]
     fn comptime_eof_termination_still_rejects_unseparated_declarations() {
         let source =
-            "@FIRST :: CoreModuleExportNames{ name: \"first\" } @SECOND :: 2";
-        let second_start = source.find("@SECOND").expect("second declaration");
+            "FIRST :: CoreModuleExportNames{ name: \"first\" } SECOND :: 2";
+        let second_start = source.find("SECOND").expect("second declaration");
         let diagnostics =
             parse_source(source).expect_err("unseparated comptime declarations must fail");
         assert!(

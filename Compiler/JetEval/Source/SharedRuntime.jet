@@ -265,7 +265,7 @@ fn jet_eval_shared_runtime_same_shared_root(machine: &JetEvalMachine, left: Int,
     )
 }
 
-@JET_EVAL_SHARED_REVISION_MAX :: 0xffffffffffffffff
+JET_EVAL_SHARED_REVISION_MAX :: prep { 0xffffffffffffffff }
 
 fn jet_eval_shared_runtime_value_from_registry(runtime: JetEvalSharedRuntime, index: Int) -> JetEvalSharedValue? {
     permit :: runtime.storage.guard_read()
@@ -2652,7 +2652,7 @@ pub fn jet_eval_shared_runtime_guard_write(machine: &JetEvalMachine, frame_index
         jet_eval_drop_value(&machine, replacement, span)
         return false
     }
-    if revision == @JET_EVAL_SHARED_REVISION_MAX {
+    if revision == JET_EVAL_SHARED_REVISION_MAX {
         jet_eval_source_fail(&machine, span, "SharedRevisionError.GenerationExhausted")
         jet_eval_drop_value(&machine, replacement, span)
         return false
@@ -2789,7 +2789,7 @@ fn jet_eval_shared_runtime_revision_advance(machine: &JetEvalMachine, shared: In
         jet_eval_ownership_fail(&machine, span, "MIR Shared revision updated after owner release")
         return false
     }
-    if permit.value.revision == @JET_EVAL_SHARED_REVISION_MAX {
+    if permit.value.revision == JET_EVAL_SHARED_REVISION_MAX {
         jet_eval_source_fail(&machine, span, "SharedRevisionError.GenerationExhausted")
         return false
     }
@@ -2802,7 +2802,7 @@ fn jet_eval_shared_runtime_revision_can_advance(machine: &JetEvalMachine, shared
         jet_eval_ownership_fail(&machine, span, "MIR Shared revision root is unavailable")
         return false
     }
-    if revision == @JET_EVAL_SHARED_REVISION_MAX {
+    if revision == JET_EVAL_SHARED_REVISION_MAX {
         jet_eval_source_fail(&machine, span, "SharedRevisionError.GenerationExhausted")
         return false
     }
@@ -4061,7 +4061,7 @@ fn jet_eval_shared_runtime_transaction_capture(machine: &JetEvalMachine, frame_i
     }
     if jet_eval_shared_runtime_transaction_touch(&machine, transaction, shared, row, span) == None -> return None
     part :: jet_eval_shared_runtime_transaction_part(&machine, transaction, shared) ?? return None
-    if part.writes && part.base_revision == @JET_EVAL_SHARED_REVISION_MAX {
+    if part.writes && part.base_revision == JET_EVAL_SHARED_REVISION_MAX {
         jet_eval_source_fail(&machine, span, "SharedRevisionError.GenerationExhausted")
         return None
     }
@@ -4304,7 +4304,7 @@ fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, ro
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
         return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: false}}))
     }
-    if current_revision == @JET_EVAL_SHARED_REVISION_MAX {
+    if current_revision == JET_EVAL_SHARED_REVISION_MAX {
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
         return Val(jet_eval_shared_runtime_checked_result(
             false,
@@ -4402,7 +4402,7 @@ fn jet_eval_shared_runtime_transaction_commit(machine: &JetEvalMachine, state: J
             preflight_ok = false
             break
         }
-        if revision == @JET_EVAL_SHARED_REVISION_MAX {
+        if revision == JET_EVAL_SHARED_REVISION_MAX {
             jet_eval_source_fail(&machine, span, "SharedRevisionError.GenerationExhausted")
             preflight_ok = false
             break

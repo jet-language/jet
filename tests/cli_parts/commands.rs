@@ -1152,6 +1152,43 @@ fn duplicate_authority_right_is_e2102() {
     );
 }
 
+/// `--allow` is invocation authority, not a build or artifact flag: it keeps
+/// the JIT and interpreter engines, and the native build still reaches the
+/// project-owned `.jet/build` when run from a repository subdirectory.
+#[test]
+fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
+    let root = isolated_cwd("authority_allow_time_wait");
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let app = root.join("app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(
+        app.join("wait.jet"),
+        "use core.time as time\n\nfn run() {\n    time.sleep(1ms)\n    print(\"waited\")\n}\n",
+    )
+    .unwrap();
+    for (engine, flags) in [
+        ("jit", &["--trace-tiers"][..]),
+        ("interpreter", &["--interpret"][..]),
+        ("aot", &["--release"][..]),
+    ] {
+        let output = Command::new(jet())
+            .arg("run")
+            .args(flags)
+            .args(["--allow=Time.Wait", "wait.jet"])
+            .current_dir(&app)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{engine}: --allow=Time.Wait must run:\n{stderr}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "waited\n", "{engine}: {stderr}");
+        // Only the resident engines trace tiers; a forced AOT fallback is silent.
+        if engine == "jit" {
+            assert!(stderr.contains("tier1 native"), "--allow must keep the JIT:\n{stderr}");
+        }
+    }
+}
+
 #[test]
 fn fix_dry_run_does_not_write() {
     // A file with an autofixable diagnostic. S14 teaching fixes are paused, so
@@ -1439,7 +1476,7 @@ fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
 
     fs::write(
         dir.join("lambda_value.jet"),
-        "fn run() {\n @callback :: () -> print(\"not called\")\n print(\"ok\")\n}\n",
+        "fn run() {\n callback :: prep { () -> print(\"not called\") }\n print(\"ok\")\n}\n",
     )
     .unwrap();
     let lambda_value = Command::new(jet())

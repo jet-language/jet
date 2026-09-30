@@ -1,0 +1,83 @@
+//! D-SHAPE-RESOURCE1=A: automatic scope-end cleanup is the safety net. A
+//! still-live local whose type implements `Close` is closed exactly once when
+//! its scope ends: on success, an early return, a returned error, `break` and
+//! `next`. Deferred closes run first, then the automatic closes in reverse
+//! declaration order. A value moved to a new owner is closed by that owner,
+//! never twice.
+struct Resource {
+    name: String
+}
+
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+#Error
+enum StepFail {
+    Bad
+}
+
+fn success() {
+    first :: Resource{name: "success first"}
+    second :: Resource{name: "success second"}
+    print("success body: {first.name}, {second.name}")
+}
+
+fn early(stop: Bool) {
+    guard :: Resource{name: "early"}
+    if stop {
+        print("early return")
+        return
+    }
+    print("early fallthrough {guard.name}")
+}
+
+fn fallible(fail: Bool) -> Int StepFail! {
+    held :: Resource{name: "error path"}
+    if fail -> return Err(StepFail.Bad)
+    print("fallible body {held.name}")
+    Ok(1)
+}
+
+fn looped() {
+    loop n in [0, 1, 2] {
+        item :: Resource{name: "loop {n}"}
+        if n == 0 -> next
+        if n == 1 -> break
+        print("unreached {item.name}")
+    }
+}
+
+fn ordered() {
+    deferred :: Resource{name: "deferred"}
+    defer close(^deferred)
+    automatic :: Resource{name: "automatic"}
+    print("ordered body {automatic.name}")
+}
+
+fn consume(^resource: Resource) { print("consume {resource.name}") }
+
+fn make(name: String) -> Resource {
+    made :: Resource{name: name}
+    made
+}
+
+fn moved() {
+    given :: Resource{name: "given"}
+    consume(^given)
+    returned :: make("returned")
+    print("moved body {returned.name}")
+    explicit :: Resource{name: "explicit"}
+    close(^explicit)
+    print("moved end")
+}
+
+fn run() {
+    success()
+    early(true)
+    early(false)
+    print("fallible {fallible(true) ?? -1}")
+    looped()
+    ordered()
+    moved()
+}

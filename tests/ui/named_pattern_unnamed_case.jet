@@ -1,0 +1,16 @@
+#Error
+enum FetchError {
+    BadUrl(String)
+    Timeout(seconds: Int, retries: Int)
+}
+
+fn describe(error: FetchError) -> String {
+    if error == {
+        .BadUrl{reason} -> reason
+        .Timeout{seconds, ..} -> "after {seconds}s"
+    }
+}
+
+fn run() {
+    print(describe(FetchError.BadUrl("ftp")))
+}

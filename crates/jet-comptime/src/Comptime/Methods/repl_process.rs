@@ -7,22 +7,33 @@ use super::core_calls::{
 };
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtValue, Type};
-use jet_foundation::Authority::{answer, Holds, Verdict};
+use jet_foundation::Authority::{answer, ApplicationAuthority, Holds, Verdict};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 
-fn repl_effect_roles(required: &str, granted: &Holds, denied: &Holds, authority: &str) -> String {
-    let render = |effects: &Holds| {
-        if effects.is_empty() {
-            "none".to_string()
-        } else {
-            effects.iter().cloned().collect::<Vec<_>>().join(", ")
-        }
+/// #3718: the REPL's E1803 goes through the one application-authority
+/// renderer, so its Why is a sentence and the role rows ride as `--json` detail.
+fn repl_refusal(
+    what: String,
+    reason: &str,
+    fix: String,
+    required: &str,
+    granted: Holds,
+    span: Span,
+) -> Diagnostic {
+    let authority = ApplicationAuthority {
+        required_effects: Holds::from([required.to_string()]),
+        granted_effects: granted,
+        denied_effects: Holds::new(),
+        authority: "REPL lexical Authority".to_string(),
     };
-    format!(
-        "required_effects={required}; granted_effects={}; denied_effects={}; authority={authority}",
-        render(granted),
-        render(denied),
+    Diagnostic::error(
+        "E1803",
+        what,
+        jet_foundation::Authority::repl_refusal_why(&authority, reason),
+        fix,
+        Some(span),
     )
+    .with_detail(authority.policy_facts())
 }
 
 pub(super) fn repl_effect_request(
@@ -195,22 +206,19 @@ pub fn apply_repl_authorized_core_call_with_type(
             .filter_map(super::super::Builtins::authority_holds)
             .flatten()
             .collect::<Holds>();
-        let denied = Holds::new();
-        return Err(Diagnostic::error(
-            "E1803",
+        return Err(repl_refusal(
             format!(
                 "{}.{} for `{}` was denied",
                 request.root, request.operation, request.resource
             ),
-            format!(
-                "this REPL mode has no runtime authority provider; {}; the host operation did not run",
-                repl_effect_roles(&request.root, &granted, &denied, "REPL lexical Authority"),
-            ),
+            "this REPL mode has no runtime authority provider",
             format!(
                 "restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation",
                 request.root.to_ascii_lowercase()
             ),
-            Some(span),
+            &request.root,
+            granted,
+            span,
         ));
     };
     authorizer.preflight(&request, span)?;
@@ -236,22 +244,20 @@ pub fn apply_repl_authorized_core_call_with_type(
     let denied = Holds::new();
     let granted = answer(&held, &denied, &request.root) == Verdict::Allowed;
     if !granted {
-        return Err(Diagnostic::error(
-            "E1803",
+        return Err(repl_refusal(
             format!(
                 "{}.{} for `{}` has no REPL runtime authority",
                 request.root, request.operation, request.resource
             ),
-            format!(
-                "REPL host effects require both lexical `#FX` access and invocation policy; {}; no host operation ran",
-                repl_effect_roles(&request.root, &held, &denied, "REPL lexical Authority"),
-            ),
+            "REPL host effects require both lexical `#FX` access and invocation policy",
             format!(
                 "wrap this operation in `#FX(grant: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
                 request.root,
                 request.root.to_ascii_lowercase()
             ),
-            Some(span),
+            &request.root,
+            held,
+            span,
         ));
     }
     authorizer.authorize(&request, span)?;

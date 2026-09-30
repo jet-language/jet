@@ -1,0 +1,49 @@
+// `[U64]` and `[I64]` lists hold every 64-bit pattern. Words in [2^62, 2^63)
+// with aligned low bits share their bit pattern with a spilled exact `Int`
+// pointer; a list of fixed-width words must store, copy, slice and sort them
+// as plain words on every tier.
+fn show_u64(label: String, values: [U64]) {
+    text := ""
+    loop value in values -> text = "{text} {value}"
+    print("{label}:{text}")
+}
+
+fn show_i64(label: String, values: [I64]) {
+    text := ""
+    loop value in values -> text = "{text} {value}"
+    print("{label}:{text}")
+}
+
+fn fill_u64(values: &[U64]) {
+    loop i in 0..<values.len() -> values[i] = (values[i] << 4) | U64{8}
+}
+
+fn run() {
+    // 2^62, a 16-byte-aligned word just above it, the SHA-512 IV word
+    // 0x6a09e667f3bcc908, and words at and above 2^63.
+    tagged :: (U64{1} << 62) | U64{0x10}
+    words := [U64]{U64{0}, U64{1} << 62, tagged, U64{0x6a09e667f3bcc908}, U64{1} << 63, U64.MAX}
+    show_u64("literal", words)
+    &words.push((U64{0x6a09e667} << 32) | U64{0xf3bcc900})
+    &words.push(U64{0x4000000000000040})
+    show_u64("push", words)
+    words[0] = U64{0x7ffffffffffffff0}
+    show_u64("set", words)
+    copied := words.copy()
+    show_u64("copy", copied)
+    show_u64("slice", words[1..<4])
+    &copied.sort()
+    show_u64("sort", copied)
+    fill_u64(&words)
+    show_u64("borrowed set", words)
+    fixed :: [U64#3]{U64{1} << 62, tagged, U64.MAX}
+    print("fixed: {fixed[0]} {fixed[1]} {fixed[2]}")
+
+    signed := [I64]{I64.MIN, I64{-1}, I64{0}, I64{4611686018427387904}, I64.MAX}
+    &signed.push(I64{4611686018427387920})
+    signed[2] = I64{-4611686018427387904}
+    show_i64("i64", signed)
+    ordered := signed.copy()
+    &ordered.sort()
+    show_i64("i64 sort", ordered)
+}

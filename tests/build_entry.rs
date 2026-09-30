@@ -43,6 +43,7 @@ fn opts() -> BuildRunOptions {
         plugin_target: false,
         cross_target: None,
         profile: "dev".to_string(),
+        artifact_build: false,
         application_authority: None,
         setting_overrides: std::collections::BTreeMap::new(),
         remote: None,
@@ -82,51 +83,24 @@ fn copy_determinism_fixture(scratch: &Scratch) {
     );
 }
 
-fn normalize_receipt_output(bytes: &[u8], root: &Path) -> Vec<u8> {
-    let root = root.to_string_lossy();
-    String::from_utf8_lossy(bytes)
-        .replace(root.as_ref(), "<checkout>")
-        .into_bytes()
-}
-
-fn normalized_receipts(root: &Path) -> Vec<(
-    String,
-    i32,
-    Vec<(String, String)>,
-    Vec<u8>,
-    Vec<u8>,
-)> {
-    let store = jet::ReceiptStore::ReceiptStore::new(root.join(".jet/receipts"));
-    let mut receipts = store
-        .list()
+/// The store log of the newest build of `program`, without timings.
+fn normalized_build_log(
+    workspace: &Path,
+    store: &Path,
+    program: &str,
+) -> Vec<(String, String, String, String)> {
+    jet_store::Store::new(store)
         .unwrap()
-        .into_iter()
-        .map(|receipt| {
-            let inputs = receipt
-                .claim
-                .inputs
+        .last_build_record(workspace, program)
+        .unwrap()
+        .map(|record| {
+            record
+                .nodes
                 .into_iter()
-                .map(|input| {
-                    let path = input
-                        .path
-                        .strip_prefix(root)
-                        .unwrap_or(input.path.as_path())
-                        .to_string_lossy()
-                        .into_owned();
-                    (path, input.digest)
-                })
-                .collect();
-            (
-                receipt.claim.verb,
-                receipt.status,
-                inputs,
-                normalize_receipt_output(&receipt.stdout, root),
-                normalize_receipt_output(&receipt.stderr, root),
-            )
+                .map(|node| (node.kind, node.key, node.subject, node.why_ran))
+                .collect()
         })
-        .collect::<Vec<_>>();
-    receipts.sort();
-    receipts
+        .unwrap_or_default()
 }
 
 
@@ -834,12 +808,289 @@ fn two_builds_from_two_paths_are_byte_identical() {
     );
     assert_eq!(left_binary, right_binary, "native binary changed with checkout path");
 
-    let left_receipts = normalized_receipts(&left.path);
-    let right_receipts = normalized_receipts(&right.path);
-    assert!(!left_receipts.is_empty(), "build must publish a receipt");
+    let left_log = normalized_build_log(&left.path, &left.join("store"), "main.jet");
+    let right_log = normalized_build_log(&right.path, &right.join("store"), "main.jet");
+    assert!(!left_log.is_empty(), "build must publish its store log");
     assert_eq!(
-        left_receipts, right_receipts,
-        "build receipts differ beyond checkout paths"
+        left_log, right_log,
+        "build store logs differ beyond checkout paths"
+    );
+}
+
+/// D-BUILD-NOCHANGE1=A (#2517): a second identical `jet build` re-renders the
+/// recorded typed warnings for its own terminal mode, prints the up-to-date
+/// receipt line, and the store log shows that no Check executed.
+#[test]
+fn no_change_build_replays_diagnostics_and_skips_every_check() {
+    let scratch = Scratch::new("no-change-receipt");
+    write(
+        &scratch.join("main.jet"),
+        "fn helper_one() -> Int { 1 }\nfn helper_two() -> Int { 2 }\nfn run() { print(\"receipt\") }\n",
+    );
+    let build = |store: &str, json: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command
+            .args(["build", "main.jet"])
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", scratch.join(store))
+            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("NO_COLOR", "1");
+        if json {
+            command.arg("--json");
+        }
+        let output = command.output().expect("run jet build");
+        assert!(
+            output.status.success(),
+            "build failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    let warnings = |output: &std::process::Output| {
+        String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .filter(|line| line.starts_with("Warning [") || line.trim_start().starts_with("-->"))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let checks = |store: &str| {
+        normalized_build_log(&scratch.path, &scratch.join(store), "main.jet")
+            .into_iter()
+            .filter(|(kind, ..)| kind == "check")
+            .map(|(_, _, subject, why_ran)| (subject, why_ran))
+            .collect::<Vec<_>>()
+    };
+
+    let fresh = build("store", false);
+    let fresh_warnings = warnings(&fresh);
+    assert_eq!(
+        fresh_warnings
+            .iter()
+            .filter(|line| line.starts_with("Warning [L0104]"))
+            .count(),
+        2,
+        "{}",
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&fresh.stderr).contains("up to date: "));
+    let executed = checks("store");
+    assert!(
+        !executed.is_empty() && executed.iter().all(|(_, why)| why != "reused"),
+        "the first build checks every module: {executed:?}"
+    );
+
+    let replayed = build("store", false);
+    assert_eq!(warnings(&replayed), fresh_warnings);
+    assert_eq!(replayed.stdout, fresh.stdout);
+    assert!(
+        String::from_utf8_lossy(&replayed.stderr).contains("up to date: "),
+        "{}",
+        String::from_utf8_lossy(&replayed.stderr)
+    );
+    let reused = checks("store");
+    assert_eq!(reused.len(), executed.len());
+    assert!(
+        reused.iter().all(|(_, why)| why == "reused"),
+        "an unchanged build executes no Check: {reused:?}"
+    );
+
+    // The record is typed, not captured bytes: a `--json` replay of the
+    // text-mode record equals a fresh `--json` build byte for byte.
+    let fresh_json = build("store-json", true);
+    let replayed_json = build("store", true);
+    assert_eq!(
+        String::from_utf8_lossy(&replayed_json.stdout),
+        String::from_utf8_lossy(&fresh_json.stdout)
+    );
+    assert!(checks("store").iter().all(|(_, why)| why == "reused"));
+}
+
+/// #2517 criteria 2/6: every check-time read goes through the audited reader
+/// and is declared by the recorded check. For each corpus program the read
+/// audit (`JET_CHECK_READS_AUDIT`) re-checks against the verified record and
+/// finds no undeclared read; an injected read the record never declared fails
+/// the audit as a compiler defect; and changing an input the check read
+/// forces a fresh check, while an unchanged input replays.
+#[test]
+fn check_inputs_are_all_declared() {
+    let scratch = Scratch::new("check-inputs-declared");
+    fs::create_dir_all(scratch.join("assets/inputs/nested")).unwrap();
+    write(&scratch.join("assets/motd.txt"), "hello\n");
+    fs::write(scratch.join("assets/logo.bin"), [0x89u8, b'P', b'N', b'G', 0, 7]).unwrap();
+    write(&scratch.join("assets/inputs/alpha.txt"), "alpha\n");
+    write(&scratch.join("assets/inputs/nested/beta.txt"), "beta\n");
+    let corpus = [
+        ("plain.jet", "fn run() { print(\"plain\") }\n"),
+        (
+            "embed.jet",
+            "MOTD :: prep { embed_file(\"assets/motd.txt\") }\nfn run() { print(MOTD) }\n",
+        ),
+        (
+            "bytes.jet",
+            "LOGO :: prep { embed_bytes(\"assets/logo.bin\") }\nSIZE :: prep { byte_count(LOGO) }\nfn byte_count(bytes: [U8]) -> Int { bytes.len() }\nfn run() { print(\"{SIZE}\") }\n",
+        ),
+        (
+            "find.jet",
+            "PATHS :: prep { find(\"assets/inputs/**/*.txt\") }\nfn run() { print(PATHS.join(\"|\")) }\n",
+        ),
+    ];
+    for (name, source) in corpus {
+        write(&scratch.join(name), source);
+    }
+    let check = |program: &str, audit: bool, inject: Option<&Path>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command
+            .args(["check", program])
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("NO_COLOR", "1")
+            .env_remove("JET_CHECK_READS_AUDIT")
+            .env_remove("JET_CHECK_READS_INJECT");
+        if audit {
+            command.env("JET_CHECK_READS_AUDIT", "1");
+        }
+        if let Some(path) = inject {
+            command.env("JET_CHECK_READS_INJECT", path);
+        }
+        command.output().expect("run jet check")
+    };
+    let succeeded = |output: &std::process::Output| {
+        assert!(
+            output.status.success(),
+            "check failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let checks = |program: &str| {
+        normalized_build_log(&scratch.path, &scratch.join("store"), program)
+            .into_iter()
+            .filter(|(kind, ..)| kind == "check")
+            .map(|(_, _, _, why_ran)| why_ran)
+            .collect::<Vec<_>>()
+    };
+
+    for (program, _) in corpus {
+        succeeded(&check(program, false, None));
+        let fresh = checks(program);
+        assert!(!fresh.is_empty() && fresh.iter().all(|why| why != "reused"), "{program}: {fresh:?}");
+        // The audit re-checks against the verified record: every read of the
+        // fresh check is declared with the digest the record carries.
+        succeeded(&check(program, true, None));
+        succeeded(&check(program, false, None));
+        let replayed = checks(program);
+        assert!(replayed.iter().all(|why| why == "reused"), "{program}: {replayed:?}");
+    }
+
+    // An injected read the verified record never declared fails the audit.
+    let injected = scratch.join("undeclared.txt");
+    write(&injected, "not an input of embed.jet\n");
+    let audit = check("embed.jet", true, Some(&injected));
+    assert_eq!(audit.status.code(), Some(jet::ExitCodes::ICE));
+    let stderr = String::from_utf8_lossy(&audit.stderr);
+    assert!(
+        stderr.contains("check read audit") && stderr.contains("undeclared.txt"),
+        "{stderr}"
+    );
+
+    write(&scratch.join("assets/motd.txt"), "changed\n");
+    succeeded(&check("embed.jet", false, None));
+    let rechecked = checks("embed.jet");
+    assert!(
+        rechecked.iter().all(|why| why != "reused"),
+        "a changed embedded input must not replay: {rechecked:?}"
+    );
+    succeeded(&check("embed.jet", false, None));
+    let replayed = checks("embed.jet");
+    assert!(replayed.iter().all(|why| why == "reused"), "{replayed:?}");
+}
+
+/// #2517 S1: `jet inspect explain-build` reports one row per package with the
+/// reason it would be reused or rechecked against the previous run. A private
+/// body edit reddens only its own package and keeps its interface digest
+/// (early cutoff), so the importer stays green; a new `pub` function changes
+/// the interface and reddens the importer through its dependency.
+#[test]
+fn explain_build_reports_package_reuse_reasons() {
+    let root = project("explain-package-reasons");
+    let dep = root.join("deps/dep_b");
+    fs::create_dir_all(&dep).unwrap();
+    write(
+        &root.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep_b: ./deps/dep_b }\n",
+    );
+    write(&dep.join("package.jet"), "name: \"dep_b\"\nversion: \"0.1.0\"\n");
+    let dep_source = dep.join("dep_b.jet");
+    write(&dep_source, "pub fn value() -> Int { return 2 }\n");
+    write(&root.join("main.jet"), "use dep_b\n\nfn run() { print(dep_b.value()) }\n");
+    let store = root.join("store");
+    let check = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["check", "main.jet"])
+            .current_dir(&root)
+            .env("JET_STORE_DIR", &store)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run jet check");
+        assert!(
+            output.status.success(),
+            "check failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        normalized_build_log(&root, &store, "main.jet")
+            .into_iter()
+            .filter(|(kind, ..)| kind == "package")
+            .map(|(_, _, subject, why_ran)| (subject, why_ran))
+            .collect::<Vec<_>>()
+    };
+    let reason = |rows: &[(String, String)], needle: &str| {
+        rows.iter()
+            .find(|(subject, _)| subject.contains(needle))
+            .map(|(_, why)| why.clone())
+            .unwrap_or_else(|| panic!("no package row for {needle}: {rows:?}"))
+    };
+
+    let first = check();
+    assert!(first.len() >= 2, "{first:?}");
+    assert!(first.iter().all(|(_, why)| why == "first-run"), "{first:?}");
+
+    write(&dep_source, "pub fn value() -> Int { return 3 }\n");
+    let body = check();
+    assert_eq!(reason(&body, "dep_b"), "red:source+cutoff", "{body:?}");
+    assert!(
+        body.iter()
+            .filter(|(subject, _)| !subject.contains("dep_b"))
+            .all(|(_, why)| why == "green:key"),
+        "{body:?}"
+    );
+
+    write(
+        &dep_source,
+        "pub fn value() -> Int { return 3 }\npub fn unused() -> Int { return 4 }\n",
+    );
+    let interface = check();
+    assert_eq!(reason(&interface, "dep_b"), "red:source", "{interface:?}");
+    let (_, importer) = interface
+        .iter()
+        .find(|(subject, _)| subject.contains("main.jet") || subject == "pkg:.")
+        .unwrap_or_else(|| panic!("no importer row: {interface:?}"));
+    assert!(importer.starts_with("red:dependency:"), "{interface:?}");
+
+    let explain = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "explain-build", "main.jet"])
+        .current_dir(&root)
+        .env("JET_STORE_DIR", &store)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("jet inspect explain-build");
+    assert!(explain.status.success(), "{}", String::from_utf8_lossy(&explain.stderr));
+    let text = String::from_utf8_lossy(&explain.stdout);
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("package\t") && line.contains("red:dependency:")),
+        "{text}"
     );
 }
 

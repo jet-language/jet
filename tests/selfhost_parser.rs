@@ -135,6 +135,12 @@ fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) {
         }
         .None -> &facts.push(0)
     }
+    &facts.push(diagnostic.labels.len())
+    loop label in diagnostic.labels {
+        &facts.push(label.span.start)
+        &facts.push(label.span.end)
+        selfhost_parser_text(&facts, label.message)
+    }
 }
 
 pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
@@ -222,6 +228,20 @@ const CASES: &[(&str, &str)] = &[
     ("statement-marker-use-label", "#Off(use: x) {}"),
     ("optional-method-call", "f(a?.m(x))"),
     ("optional-method-chain", "f(a?.b?.m())"),
+    // E0082 (#3725): `&&` and `||` mixed without parentheses.
+    ("logic-or-then-and", "f(a || b && c)"),
+    ("logic-and-then-or", "f(a && b || c)"),
+    ("logic-grouped-and-chains", "f((a || b) && c, a || (b && c), a && b && c, a || b || c)"),
+    // E0083 (#3719): an unclosed delimiter is reported once, at its opener.
+    ("unclosed-paren-call-p16", "fn run() {\n    print(\"hello\"\n}\n"),
+    ("unclosed-bracket-list", "fn run() {\n    values :: [1, 2, 3\n    print(values.len())\n}\n"),
+    ("unclosed-brace-block", "fn run() {\n    print(\"hello\")\n"),
+    ("unclosed-brace-interpolation", "fn run() {\n    count :: 1\n    print(\"count {count\")\n}\n"),
+    // E0160 (#3727): `++` and `--` are retired.
+    ("retired-step-statement", "count++"),
+    ("retired-step-double-minus", "f(a--b)"),
+    // E0393 (#3743): the retired `name: Type :: value` binding.
+    ("retired-typed-binding", "fn run() {\n    limit: U8 :: 250\n    print(limit)\n}\n"),
 ];
 
 fn jet_byte_array_literal(source: &str) -> String {
@@ -275,8 +295,11 @@ fn parser_source(root: &Path) -> (String, usize) {
             continue;
         }
         let parser_input = path.starts_with("Compiler/JetLexer/Source/Lexer/")
+            || path == "Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet"
             || path == "Compiler/JetFoundation/Source/Types/Types.jet"
-            || path.starts_with("Compiler/JetAst/Source/AST/")
+            || path == "Compiler/JetFoundation/Source/Registry/Diagnostics.jet"
+            || path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
+            || path.starts_with("Compiler/JetFoundation/Source/AST/")
             || path.starts_with("Compiler/JetParser/Source/Parser/");
         if parser_input {
             source_file_count += 1;
@@ -339,7 +362,7 @@ impl Pass {
     fn evaluate(&self, source: &str) -> Vec<i64> {
         let bytes = source.bytes().map(|byte| MirValue::Int(i64::from(byte))).collect();
         let args = [MirValue::List(bytes)];
-        let config = MirEvalConfig { fuel: 50_000_000, ..MirEvalConfig::default() };
+        let config = MirEvalConfig { fuel: Some(50_000_000), ..MirEvalConfig::default() };
         let result = evaluate_mir_function_with_config(&self.mir, self.function, &args, &config)
             .unwrap_or_else(|error| panic!("generated Jet parser evaluation: {:?}", error.diagnostic));
         assert_eq!(result.status, MirExecutionStatus::Completed, "parser evaluator status");
@@ -384,6 +407,11 @@ fn push_diagnostic(facts: &mut Vec<i64>, diagnostic: &Diagnostic) {
         push_text(facts, &edit.new_text);
     } else {
         facts.push(0);
+    }
+    facts.push(diagnostic.labels.len() as i64);
+    for label in &diagnostic.labels {
+        facts.extend([label.span.start as i64, label.span.end as i64]);
+        push_text(facts, &label.message);
     }
 }
 
@@ -536,8 +564,14 @@ fn push_diagnostics(facts: &mut Vec<i64>, diagnostics: &[Diagnostic]) {
 
 fn native_facts(source: &str) -> Vec<i64> {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
-    assert!(lexer_diagnostics.is_empty(), "fixture lex diagnostics: {lexer_diagnostics:?}");
     let mut facts = Vec::new();
+    // A lexer error stops the native front end before parsing, so the Jet
+    // parser must report that one error and nothing after it.
+    if !lexer_diagnostics.is_empty() {
+        push_diagnostics(&mut facts, &lexer_diagnostics);
+        push_program(&mut facts, None, &lexer_diagnostics);
+        return facts;
+    }
     match jet::Parser::parse_for_check_with_source(&tokens, source) {
         Ok((program, diagnostics)) => {
             push_diagnostics(&mut facts, &diagnostics);
@@ -551,17 +585,62 @@ fn native_facts(source: &str) -> Vec<i64> {
     facts
 }
 
+/// Every human-readable string (what, why, fix, edit text, label message) in
+/// the diagnostic prefix of a parser fact vector.
+fn diagnostic_texts(facts: &[i64]) -> Vec<String> {
+    let mut cursor = 0usize;
+    let mut next = || {
+        cursor += 1;
+        facts[cursor - 1]
+    };
+    fn text(next: &mut impl FnMut() -> i64) -> String {
+        let len = next() as usize;
+        let bytes = (0..len).map(|_| next() as u8).collect::<Vec<_>>();
+        String::from_utf8(bytes).expect("diagnostic text is UTF-8")
+    }
+    let mut out = Vec::new();
+    for _ in 0..next() {
+        text(&mut next);
+        next();
+        for _ in 0..3 {
+            out.push(text(&mut next));
+        }
+        if next() == 1 {
+            next();
+            next();
+        }
+        if next() == 1 {
+            next();
+            next();
+            out.push(text(&mut next));
+        }
+        for _ in 0..next() {
+            next();
+            next();
+            out.push(text(&mut next));
+        }
+    }
+    out
+}
+
 #[test]
 fn generated_jet_call_arguments_match_native_parser_contract() {
     let pass = pass();
     assert_eq!(
-        pass.source_file_count, 29,
-        "source slice is 4 lexer + 1 foundation-types + 5 AST + 19 parser files"
+        pass.source_file_count, 35,
+        "source slice is 1 foundation-diagnostics + 4 lexer + 1 foundation-types + 2 diagnostic-registry + 5 AST + 22 parser files"
     );
     let candidate_facts = jet::run_compiler_work(|| {
         CASES.iter().map(|(_, source)| pass.evaluate(source)).collect::<Vec<_>>()
     });
     for ((name, source), actual) in CASES.iter().zip(candidate_facts) {
+        // #3719: the lexer's synthetic line terminator is never shown to a
+        // reader as `;`; a source without a `;` must never have one named.
+        if !source.contains(';') {
+            for text in diagnostic_texts(&actual) {
+                assert!(!text.contains("`;`"), "{name}: Jet parser diagnostic names the synthetic terminator: {text}");
+            }
+        }
         assert_eq!(actual, native_facts(source), "{name}: generated Jet parser parity");
     }
 

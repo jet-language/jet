@@ -15,23 +15,25 @@ struct PackageInput {
 
 fn package_input(root: &Path) -> PackageInput {
     let entry = find_project_entry(root);
-    let entry_raw = fs::read_to_string(&entry).unwrap_or_else(|error| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", entry.display(), error);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let inline = jet::Package::extract_inline_package(&entry_raw).unwrap_or_else(|error| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(
-                &entry.display().to_string(),
-                &entry_raw,
-                &[error.diagnostic()],
-            )
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
-    let facts = jet::Loader::package_facts_for_entry(&entry)
-        .unwrap_or_else(|diagnostics| {
+    // A project without its entry file still has a `package.jet`; the
+    // publish build gate reports the missing entry in its own step.
+    let facts = if entry.is_file() {
+        let entry_raw = fs::read_to_string(&entry).unwrap_or_else(|error| {
+            crate::cli_error!("E2105", "couldn't read {}: {}", entry.display(), error);
+            exit(ExitCodes::USER_ERROR);
+        });
+        let inline = jet::Package::extract_inline_package(&entry_raw).unwrap_or_else(|error| {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(
+                    &entry.display().to_string(),
+                    &entry_raw,
+                    &[error.diagnostic()],
+                )
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+        let facts = jet::Loader::package_facts_for_entry(&entry).unwrap_or_else(|diagnostics| {
             eprint!(
                 "{}",
                 jet::render_diagnostics(
@@ -41,22 +43,32 @@ fn package_input(root: &Path) -> PackageInput {
                 )
             );
             exit(ExitCodes::USER_ERROR);
-        })
-        .unwrap_or_else(|| {
-            crate::cli_error!("E2105", "couldn't resolve package facts for {}", entry.display());
-            exit(ExitCodes::USER_ERROR);
         });
-    if let Some(block) = inline {
-        let raw = block.body(&entry_raw).to_string();
-        let manifest = jet::Package::to_manifest(&facts, &raw).unwrap_or_else(|diagnostic| {
+        if let (Some(block), Some(facts)) = (inline, facts.as_ref()) {
+            let raw = block.body(&entry_raw).to_string();
+            let manifest = jet::Package::to_manifest(facts, &raw).unwrap_or_else(|diagnostic| {
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(&entry.display().to_string(), &raw, &[diagnostic])
+                );
+                exit(ExitCodes::USER_ERROR);
+            });
+            return PackageInput { raw, manifest };
+        }
+        facts
+    } else {
+        jet::Package::PackageFacts::load_checked(root).unwrap_or_else(|error| {
             eprint!(
                 "{}",
-                jet::render_diagnostics(&entry.display().to_string(), &raw, &[diagnostic])
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[error.diagnostic()])
             );
             exit(ExitCodes::USER_ERROR);
-        });
-        return PackageInput { raw, manifest };
-    }
+        })
+    };
+    let facts = facts.unwrap_or_else(|| {
+        crate::cli_error!("E2105", "couldn't resolve package facts for {}", root.display());
+        exit(ExitCodes::USER_ERROR);
+    });
     let path = jet::Loader::manifest_path(root).unwrap_or_else(|| {
         crate::cli_error!("E2105", "couldn't locate {}", jet::Syntax::PACKAGE_FILE);
         exit(ExitCodes::USER_ERROR);

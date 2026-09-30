@@ -651,74 +651,74 @@ fn jet_codegen_append_tuple_field_rows(ty: MirType, rows: &[MirFieldRow], seen: 
                             })
                             &seen.push(id)
                         }
-                        jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
+                        jet_codegen_append_tuple_field_rows(field.ty, &rows, &seen)
                     }
                 } else -> {
-                    loop field in fields -> jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
+                    loop field in fields -> jet_codegen_append_tuple_field_rows(field.ty, &rows, &seen)
                 }
             }
             ()
         }
         .List(inner) -> {
-            jet_codegen_append_tuple_field_rows(inner, rows, seen)
+            jet_codegen_append_tuple_field_rows(inner, &rows, &seen)
             ()
         }
         .Shared(inner) -> {
-            jet_codegen_append_tuple_field_rows(inner, rows, seen)
+            jet_codegen_append_tuple_field_rows(inner, &rows, &seen)
             ()
         }
         .Option(inner) -> {
-            jet_codegen_append_tuple_field_rows(inner, rows, seen)
+            jet_codegen_append_tuple_field_rows(inner, &rows, &seen)
             ()
         }
         .FixedList(inner, _) -> {
-            jet_codegen_append_tuple_field_rows(inner, rows, seen)
+            jet_codegen_append_tuple_field_rows(inner, &rows, &seen)
             ()
         }
         .InlineRange(inner, _, _) -> {
-            jet_codegen_append_tuple_field_rows(inner, rows, seen)
+            jet_codegen_append_tuple_field_rows(inner, &rows, &seen)
             ()
         }
         .Tagged(_, inner) -> {
-            jet_codegen_append_tuple_field_rows(inner, rows, seen)
+            jet_codegen_append_tuple_field_rows(inner, &rows, &seen)
             ()
         }
         .Quantity(inner, _) -> {
-            jet_codegen_append_tuple_field_rows(inner, rows, seen)
+            jet_codegen_append_tuple_field_rows(inner, &rows, &seen)
             ()
         }
         .Map(key, value) -> {
-            jet_codegen_append_tuple_field_rows(key, rows, seen)
-            jet_codegen_append_tuple_field_rows(value, rows, seen)
+            jet_codegen_append_tuple_field_rows(key, &rows, &seen)
+            jet_codegen_append_tuple_field_rows(value, &rows, &seen)
             ()
         }
         .Result(ok, error) -> {
-            jet_codegen_append_tuple_field_rows(ok, rows, seen)
-            jet_codegen_append_tuple_field_rows(error, rows, seen)
+            jet_codegen_append_tuple_field_rows(ok, &rows, &seen)
+            jet_codegen_append_tuple_field_rows(error, &rows, &seen)
             ()
         }
         .Fn(signature) -> {
-            loop param in signature.params -> jet_codegen_append_tuple_field_rows(param, rows, seen)
+            loop param in signature.params -> jet_codegen_append_tuple_field_rows(param, &rows, &seen)
             if signature.ret != None {
                 ret :: signature.ret ?? panic("function MIR signature lost its return type")
-                jet_codegen_append_tuple_field_rows(ret, rows, seen)
+                jet_codegen_append_tuple_field_rows(ret, &rows, &seen)
             }
             ()
         }
         .SendFn(params, ret, _) -> {
-            loop param in params -> jet_codegen_append_tuple_field_rows(param, rows, seen)
+            loop param in params -> jet_codegen_append_tuple_field_rows(param, &rows, &seen)
             if ret != None {
                 return_type :: ret ?? panic("send-function MIR signature lost its return type")
-                jet_codegen_append_tuple_field_rows(return_type, rows, seen)
+                jet_codegen_append_tuple_field_rows(return_type, &rows, &seen)
             }
             ()
         }
         .Apply(_, args) -> {
-            loop argument in args -> jet_codegen_append_tuple_field_rows(argument, rows, seen)
+            loop argument in args -> jet_codegen_append_tuple_field_rows(argument, &rows, &seen)
             ()
         }
         .Union(args) -> {
-            loop argument in args -> jet_codegen_append_tuple_field_rows(argument, rows, seen)
+            loop argument in args -> jet_codegen_append_tuple_field_rows(argument, &rows, &seen)
             ()
         }
         else -> ()
@@ -733,7 +733,7 @@ fn jet_codegen_append_type_definition_fields(definition: MirTypeDef, rows: &[Mir
                     &rows.push(MirFieldRow{id: field.id, owner: definition.id, field: field})
                     &seen.push(field.id)
                 }
-                jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
+                jet_codegen_append_tuple_field_rows(field.ty, &rows, &seen)
             }
             ()
         }
@@ -741,7 +741,7 @@ fn jet_codegen_append_type_definition_fields(definition: MirTypeDef, rows: &[Mir
             loop variant in variants {
                 _ := if variant.payload == {
                     .Single(value) -> {
-                        jet_codegen_append_tuple_field_rows(value, rows, seen)
+                        jet_codegen_append_tuple_field_rows(value, &rows, &seen)
                         ()
                     }
                     .Named(fields) -> {
@@ -750,7 +750,7 @@ fn jet_codegen_append_type_definition_fields(definition: MirTypeDef, rows: &[Mir
                                 &rows.push(MirFieldRow{id: field.id, owner: definition.id, field: field})
                                 &seen.push(field.id)
                             }
-                            jet_codegen_append_tuple_field_rows(field.ty, rows, seen)
+                            jet_codegen_append_tuple_field_rows(field.ty, &rows, &seen)
                         }
                         ()
                     }
@@ -760,11 +760,11 @@ fn jet_codegen_append_type_definition_fields(definition: MirTypeDef, rows: &[Mir
             ()
         }
         .Distinct(base, _) -> {
-            jet_codegen_append_tuple_field_rows(base, rows, seen)
+            jet_codegen_append_tuple_field_rows(base, &rows, &seen)
             ()
         }
         .Alias(target) -> {
-            jet_codegen_append_tuple_field_rows(target, rows, seen)
+            jet_codegen_append_tuple_field_rows(target, &rows, &seen)
             ()
         }
         .UnitFamily(_) -> ()
@@ -775,16 +775,16 @@ fn jet_codegen_append_failure_tuple_rows(failure: MirFailureCarrier, rows: &[Mir
     _ := if failure == {
         .Infallible -> ()
         .Result(success, error) -> {
-            jet_codegen_append_tuple_field_rows(success, rows, seen)
-            jet_codegen_append_tuple_field_rows(error, rows, seen)
+            jet_codegen_append_tuple_field_rows(success, &rows, &seen)
+            jet_codegen_append_tuple_field_rows(error, &rows, &seen)
             ()
         }
         .Optional(value) -> {
-            jet_codegen_append_tuple_field_rows(value, rows, seen)
+            jet_codegen_append_tuple_field_rows(value, &rows, &seen)
             ()
         }
         .Diverges(value) -> {
-            jet_codegen_append_tuple_field_rows(value, rows, seen)
+            jet_codegen_append_tuple_field_rows(value, &rows, &seen)
             ()
         }
     }
@@ -1024,7 +1024,7 @@ fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -
 fn jet_codegen_canonical_core_record(record: CoreCallRecord) -> CoreCallRecord Never! {
     key := core_call_key(record)
     found := None
-    loop candidate in @CORE_CALLS {
+    loop candidate in CORE_CALLS {
         if core_call_key(candidate) == key {
             if found != None -> panic("duplicate canonical Core-call key")
             found = Val(candidate)
@@ -2163,7 +2163,7 @@ fn jet_codegen_add_needed_derived_trait(id: MirTraitId, known: [MirTraitId], nee
     compiler_owned_name := jet_codegen_compiler_owned_trait_name_for_id(id)
     if compiler_owned_name != None {
         name :: compiler_owned_name ?? panic("compiler-owned derive identity disappeared")
-        jet_codegen_add_needed_trait(MirTraitRef{id: id, name: name}, known, needed)
+        jet_codegen_add_needed_trait(MirTraitRef{id: id, name: name}, known, &needed)
         return
     }
     if jet_codegen_is_checked_text_trait_id(id) -> return
@@ -2820,8 +2820,8 @@ fn jet_codegen_foreign_add_link_closure_id(closure: &[MirLinkUnitId], name: Stri
 
 fn jet_codegen_foreign_link_closure(direct: &[String], transitive: &[String], libraries: &[String]) -> [MirLinkUnitId] Never! {
     closure := [MirLinkUnitId]{}
-    loop name in direct -> jet_codegen_foreign_add_link_closure_id(&closure, name, libraries)
-    loop name in transitive -> jet_codegen_foreign_add_link_closure_id(&closure, name, libraries)
+    loop name in direct -> jet_codegen_foreign_add_link_closure_id(&closure, name, &libraries)
+    loop name in transitive -> jet_codegen_foreign_add_link_closure_id(&closure, name, &libraries)
     closure
 }
 
@@ -2891,7 +2891,6 @@ pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: 
     foreign := [MirForeign]{}
     loop semantic_module in modules {
         loop row in semantic_module.foreign_functions {
-            if row.owner == SemaCheckedForeignOwner.ExternRust && row.link_key == None -> panic("checked Rust foreign function has no link identity")
             if row.owner == SemaCheckedForeignOwner.CModule {
                 link_key :: row.link_key ?? panic("checked C foreign link key disappeared")
                 link_id := MirLinkUnitId{value: stable_id("mir-link", link_key)}

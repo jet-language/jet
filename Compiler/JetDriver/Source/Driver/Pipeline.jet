@@ -1287,7 +1287,7 @@ fn jet_driver_assemble_mir(
     }
     if assigned_functions != all_functions.len() || assigned_foreigns != foreign_artifacts.foreign.len() || assigned_types != lowered.types.len() || assigned_traits != lowered.traits.len() || assigned_impls != lowered.impls.len() || assigned_constants != lowered.constants.len() -> return None
     Val(MirProgram{
-        schema_version: @MIR_SCHEMA_VERSION,
+        schema_version: MIR_SCHEMA_VERSION,
         package_identity: load.package_identity,
         facts: facts,
         names: names,
@@ -1698,8 +1698,8 @@ fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleI
     }
     if unexpected_item || declaration_count == 0 -> return None
     source_file := "jet:canonical-prelude/Prelude/Effects.jet"
-    package_identity := @JET_CANONICAL_EFFECT_PACKAGE_IDENTITY
-    module_path := @JET_CANONICAL_EFFECT_MODULE_PATH
+    package_identity := JET_CANONICAL_EFFECT_PACKAGE_IDENTITY
+    module_path := JET_CANONICAL_EFFECT_MODULE_PATH
     module_identity := jet_driver_module_identity(package_identity, module_path)
     Val(SemaRegistrationModuleInput{
         package_identity: package_identity,
@@ -1767,6 +1767,9 @@ fn jet_driver_artifact_plan(
             })
         }
         is_web -> return None
+        // D4: a package with no entry (a `.Library` output) lowers as a
+        // library artifact, never as an executable without an entry.
+        else -> artifact_kind = MirArtifactKind.NativeLibrary
     }
     artifact_key := "{program.package_identity}::artifact::{artifact_target_name}"
     Val(MirArtifactPlan{
@@ -2208,7 +2211,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     if emitted == {
         .Complete(source, manifest) -> {
             if {
-                manifest.schema_version != @MIR_SCHEMA_VERSION || manifest.target != "rust_aot" || manifest.package_identity != load.package_identity || manifest.function_count != optimized_program.functions.len() || manifest.type_count != optimized_program.types.len() || manifest.foreign_count != optimized_program.foreign.len() -> {
+                manifest.schema_version != MIR_SCHEMA_VERSION || manifest.target != "rust_aot" || manifest.package_identity != load.package_identity || manifest.function_count != optimized_program.functions.len() || manifest.type_count != optimized_program.types.len() || manifest.foreign_count != optimized_program.foreign.len() -> {
                     &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "Rust emission returned a manifest inconsistent with the checked MIR artifact", "emitter output identity and row counts are bound to the optimized program", "preserve the manifest facts produced by the canonical Rust emitter"))
                 }
                 else -> {

@@ -254,16 +254,16 @@ build: {
         scratch.join("main.jet"),
         r#"
 fn dev() {
-    print(@build.profile)
-    print(@build.settings.marker)
+    print($build.profile)
+    print($build.settings.marker)
 }
 
 #Test("selected profile") {
-    assert_eq(@build.profile, "staging")
+    assert_eq($build.profile, "staging")
 }
 
 #Test("selected setting") {
-    assert_eq(@build.settings.marker, "cli")
+    assert_eq($build.settings.marker, "cli")
 }
 
 fn run() {}
@@ -530,7 +530,7 @@ fn expand_origin_projects_the_folded_origin_info_fact() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("speed.@origin"), "{text}");
+    assert!(text.contains("speed.$origin"), "{text}");
     assert!(text.contains("OriginInfo?"), "{text}");
     assert!(text.contains("tracked: true"), "{text}");
 
@@ -719,14 +719,14 @@ fn expand_layout_human_and_json_are_deterministic() {
     assert!(!human.contains('\u{1b}'), "NO_COLOR leaked ANSI: {human:?}");
     for type_name in ["PlainPacket", "CPacket", "ColumnPacket", "PacketState"] {
         assert!(
-            human.contains(&format!("{type_name}.@layout")),
+            human.contains(&format!("{type_name}.$layout")),
             "{type_name}: {human}"
         );
     }
-    assert!(human.contains("PlainPacket.@layout   kind=default size=unknown"));
-    assert!(human.contains("CPacket.@layout   kind=c size=8 alignment=4 stride=8"));
+    assert!(human.contains("PlainPacket.$layout   kind=default size=unknown"));
+    assert!(human.contains("CPacket.$layout   kind=c size=8 alignment=4 stride=8"));
     assert!(human.contains("fields=[count:U32(offset=0,size=4),flag:U8(offset=4,size=1)]"));
-    assert!(human.contains("ColumnPacket.@layout   kind=columnar size=32 alignment=8 stride=32"));
+    assert!(human.contains("ColumnPacket.$layout   kind=columnar size=32 alignment=8 stride=32"));
     assert!(human.contains("fields=[count:Int(offset=0,size=8),label:String(offset=8,size=24)]"));
     assert!(human.contains("byte_facts=unavailable") && human.contains("E0959"));
 
@@ -784,7 +784,7 @@ fn expand_effects_and_layout_report_checked_facts() {
     assert_eq!(layout.status.code(), Some(0));
     let layout_human = scrub_fixture(&String::from_utf8_lossy(&layout.stdout), &fixture);
     assert!(
-        layout_human.contains("AuditPacket.@layout"),
+        layout_human.contains("AuditPacket.$layout"),
         "{layout_human}"
     );
     assert!(

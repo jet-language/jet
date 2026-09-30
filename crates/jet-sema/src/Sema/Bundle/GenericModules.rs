@@ -1533,7 +1533,7 @@ fn resolve_args(
                             "generic module instances need one closed, deterministic Tier-0 value"
                                 .to_string(),
                             format!(
-                                "pass a literal, a `@build.*` fact, or a comptime `{}` value",
+                                "pass a literal, a `$build.*` fact, or a comptime `{}` value",
                                 type_name(ty)
                             ),
                             Some(arg.span()),
@@ -1803,6 +1803,8 @@ fn expand_alias(
             name: module_value_name(&alias.name, &source.name),
             name_span: source.name_span,
             value,
+            is_pub: source.is_pub,
+            is_package_pub: source.is_package_pub,
             meta,
             attrs: source.attrs.clone(),
             rust_kind: source.rust_kind,

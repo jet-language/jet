@@ -1320,7 +1320,7 @@ fn jet_new_creates_project() {
             "the starter test must pass:\n{tested}"
         );
         jet_ok_outside_core(&jet, &dir, &["build"]);
-        let binary = Command::new(dir.join("build/run")).output().unwrap();
+        let binary = Command::new(dir.join(".jet/build/run")).output().unwrap();
         assert!(binary.status.success());
         assert_eq!(String::from_utf8_lossy(&binary.stdout), "hello, world\n");
     }
@@ -1376,7 +1376,7 @@ fn jet_new_every_template_runs_and_tests() {
         assert!(tested.contains("1 passed"), "{template} starter test:\n{tested}");
         if template == "web" {
             jet_ok_outside_core(&jet, &dir, &["build", "--target", "web"]);
-            assert!(dir.join("build/app.wasm").is_file(), "web starter built no wasm");
+            assert!(dir.join(".jet/build/app.wasm").is_file(), "web starter built no wasm");
         } else {
             let stdout = jet_ok_outside_core(&jet, &dir, &["run"]);
             assert!(

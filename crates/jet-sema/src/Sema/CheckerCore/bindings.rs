@@ -560,10 +560,21 @@ pub(crate) fn checked_comptime_nominals_for_context(
         let source_module =
             jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
         if let Some(source) = source_module {
+            let mut body_module = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
+                alias: state.module_alias.clone(),
+                module_identity: name_ledger
+                    .module_identity(target)
+                    .unwrap_or_else(|| state.module_path.clone()),
+                core_imports: state.core_imports.clone(),
+                functions: HashMap::new(),
+            };
             for item in &state.items {
                 let crate::AST::Item::Func(function) = item else {
                     continue;
                 };
+                body_module
+                    .functions
+                    .insert(function.name.clone(), function.clone());
                 if !function.is_pub
                     || !jet_foundation::CoreModuleExports::core_source_owns(
                         source.module,
@@ -617,6 +628,8 @@ pub(crate) fn checked_comptime_nominals_for_context(
                     },
                 );
             }
+            std::sync::Arc::make_mut(&mut facts.core_source_bodies)
+                .insert(source.module.to_string(), body_module);
         }
         let source_leaf_visible = |name: &str| {
             source_module.map_or_else(
@@ -1059,57 +1072,41 @@ impl<'a> Checker<'a> {
             _ => true,
         }
     }
-    /// `#Memo` is result-pure but runtime-observable through `name.cache()`.
-    /// Implicitly baking a binding that reaches a memoized function would erase
-    /// that call from the one runtime store and make its counters tier-dependent.
-    fn implicit_fold_reaches_memoized_function(&self, init: &Expr) -> bool {
+    /// An implicit fold must not bake a call whose run-time behavior stays
+    /// observable:
+    ///
+    /// - `#Memo` is result-pure but runtime-observable through `name.cache()`.
+    ///   Baking a binding that reaches a memoized function would erase that
+    ///   call from the one runtime store and make its counters tier-dependent.
+    /// - D-PREPOST1: a `#Pre`/`#Post` clause is checked in every build, so a
+    ///   call that carries one cannot become literal data. The comptime
+    ///   interpreter models no contracts (there is no `contract` in
+    ///   `crates/jet-comptime/src/Comptime/Interpreter.rs`), so folding
+    ///   `_ :: checked(0)` would evaluate the body with the claim never asked
+    ///   and then drop the call itself — the program would exit 0 where AOT,
+    ///   the resident tier, and the interpreter all owe a `Stop [E3005]` (I9).
+    ///
+    /// One call-graph walk answers both. Callers ask only once a fold is
+    /// otherwise possible: the walk follows every reachable body, so running
+    /// it for every binding made checking quadratic in program size.
+    fn implicit_fold_reaches_observable_function(&self, init: &Expr) -> bool {
         crate::Comptime::walk_purity_expr(
             init,
             self.ct_funcs,
             &|name| {
                 self.ct_funcs.get(name).is_some_and(|function| {
                     crate::AST::memo_bound_from_markers(&function.markers).is_some()
+                        || !function.pre.is_empty()
+                        || !function.post.is_empty()
                 })
-            },
-            // The shared call-graph walker uses a diagnostic as its short-circuit
-            // carrier. This value is observed only through `is_err` below.
-            &|name, _, span| {
-                Diagnostic::error(
-                    "E0938",
-                    format!("`{name}` is memoized"),
-                    "memoized calls have runtime-observable cache state".to_string(),
-                    "leave this call for runtime evaluation".to_string(),
-                    Some(span),
-                )
-            },
-            crate::Comptime::PurityStage::BuildTime,
-        )
-        .is_err()
-    }
-
-    /// D-PREPOST1: a `#Pre`/`#Post` clause is checked in every build, so a call
-    /// that carries one cannot become literal data. The comptime interpreter
-    /// models no contracts (there is no `contract` in
-    /// `crates/jet-comptime/src/Comptime/Interpreter.rs`), so folding
-    /// `_ :: checked(0)` would evaluate the body with the claim never asked and
-    /// then drop the call itself — the program would exit 0 where AOT, the
-    /// resident tier, and the interpreter all owe a `Stop [E3005]` (I9).
-    fn implicit_fold_reaches_contracted_function(&self, init: &Expr) -> bool {
-        crate::Comptime::walk_purity_expr(
-            init,
-            self.ct_funcs,
-            &|name| {
-                self.ct_funcs
-                    .get(name)
-                    .is_some_and(|function| !function.pre.is_empty() || !function.post.is_empty())
             },
             // The shared call-graph walker carries its short-circuit as a
             // diagnostic; only `is_err` below observes this value.
             &|name, _, span| {
                 Diagnostic::error(
                     "E0938",
-                    format!("`{name}` carries a contract"),
-                    "a `#Pre`/`#Post` claim is checked at run time in every build".to_string(),
+                    format!("`{name}` is memoized or carries a contract"),
+                    "its run-time behavior is observable".to_string(),
                     "leave this call for runtime evaluation".to_string(),
                     Some(span),
                 )
@@ -1781,6 +1778,11 @@ impl<'a> Checker<'a> {
                 if annot != actual && self.implicitly_convert_unit(&mut b.init, &annot, &actual) {
                     actual = annot.clone();
                 }
+                // D-OPT-LIFT1=A: a written `T?` annotation is a slot; a plain
+                // payload fills it.
+                if let Some(lifted) = self.lift_optional_slot(&annot, &actual, &mut b.init) {
+                    actual = lifted;
+                }
                 // D-SG9: a fixed-width literal is range-checked and re-typed in
                 // `infer` (E1003), so it arrives matching `annot`. A non-literal
                 // width mismatch falls to E0108 below — no implicit narrowing or
@@ -1871,10 +1873,8 @@ impl<'a> Checker<'a> {
             }
             _ => false,
         };
-        let skip_ct_memo_fold =
-            !b.mutable && !b.is_comptime && self.implicit_fold_reaches_memoized_function(&b.init);
-        let skip_ct_contract_fold =
-            !b.mutable && !b.is_comptime && self.implicit_fold_reaches_contracted_function(&b.init);
+        // The call-graph walk for memoized or contracted callees runs only
+        // when an optional fold is otherwise eligible (below).
         // D-DECIMAL1: default-on float-money lint for money-like binding names.
         if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
             self.diags.push(Diagnostic::lint(
@@ -1946,8 +1946,6 @@ impl<'a> Checker<'a> {
             && !b.mutable
             && !skip_ct_view_bake
             && !skip_ct_field_read_bake
-            && !skip_ct_memo_fold
-            && !skip_ct_contract_fold
         {
             let is_patch_binding =
                 matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
@@ -1961,8 +1959,14 @@ impl<'a> Checker<'a> {
             // evaluate_constant, and any Expr::Paren-wrapped spelling —
             // one guard where the value is minted, not a syntactic
             // pattern match here that a stray `(...)` could dodge.)
-            let globals = self.current_ct_globals().into_owned();
-            if self.optional_comptime_fold_is_eligible(&b.init, &globals) {
+            // Eligibility reads the globals in place; the call-graph walk and
+            // the owned copy the evaluator needs follow only for an eligible
+            // fold, not for every binding.
+            let eligible = self
+                .optional_comptime_fold_is_eligible(&b.init, &self.current_ct_globals())
+                && !self.implicit_fold_reaches_observable_function(&b.init);
+            if eligible {
+                let globals = self.current_ct_globals().into_owned();
                 let binding_types = self.current_ct_binding_types(&globals);
                 let mut mutated = std::collections::HashMap::new();
                 let checked_nominals = self.checked_comptime_nominals();
@@ -2442,7 +2446,10 @@ impl<'a> Checker<'a> {
             }
             BindPattern::Tuple { elems, span } => {
                 if let Type::Apply { name, args } = &it {
-                    if name == "VjpRun" && args.len() == 1 && elems.len() == 2 {
+                    // The applied run is the reserved generic `VjpRun<T>` even
+                    // when resolution qualified its head through the
+                    // non-generic source-owned `core.compute` record.
+                    if Self::split_type_name(name).1 == "VjpRun" && args.len() == 1 && elems.len() == 2 {
                         let pull_ty = Type::Fn {
                             params: vec![Type::Named("Tensor".to_string())],
                             ret: Some(Box::new(args[0].clone())),

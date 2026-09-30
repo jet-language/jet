@@ -144,8 +144,26 @@ mod jet_std {
     // execution result is the ratified ProcessReceipt type.
     pub type ProcessResult = ProcessReceipt;
 
-    #[derive(Clone, Debug)]
+    /// The `core.net.url.URL` carrier: exactly the field layout declared in
+    /// `Core/net/url.jet`, so generated struct literals and field reads name
+    /// the same Rust fields (`port` is the native Int slot, -1 when absent).
+    #[derive(Clone, Debug, PartialEq)]
     pub struct JetURL {
+        pub scheme: String,
+        pub user: String,
+        pub password: String,
+        pub host: String,
+        pub port: i64,
+        pub path: String,
+        pub query: String,
+        pub fragment: String,
+        pub raw: String,
+    }
+
+    /// The Prelude URL kernel's working form (`UrlMime.rs`): optional
+    /// components, decoded query pairs, and typed-literal hole boundaries.
+    #[derive(Clone, Debug)]
+    pub struct JetURLParts {
         pub scheme: String,
         pub username: Option<String>,
         pub password: Option<String>,
@@ -156,6 +174,127 @@ mod jet_std {
         pub fragment: Option<String>,
         pub typed_host: Option<Vec<(String, bool)>>,
         pub typed_path: Option<Vec<(String, bool)>>,
+    }
+
+    impl JetURL {
+        /// Project kernel parts onto the Core layout. An absent port takes the
+        /// scheme default, as `core.net.url.parse` does.
+        pub fn from_url_parts(parts: JetURLParts) -> Self {
+            let raw = parts.to_string_value();
+            let port = parts
+                .port
+                .or_else(|| parts.default_port().ok())
+                .unwrap_or(-1);
+            JetURL {
+                query: jet_url_render_query(&parts.query),
+                scheme: parts.scheme,
+                user: parts.username.unwrap_or_default(),
+                password: parts.password.unwrap_or_default(),
+                host: parts.host.unwrap_or_default(),
+                port,
+                path: parts.path,
+                fragment: parts.fragment.unwrap_or_default(),
+                raw,
+            }
+        }
+
+        fn parts(&self) -> JetURLParts {
+            let some = |text: &String| (!text.is_empty()).then(|| text.clone());
+            let mut parts = JetURLParts {
+                scheme: self.scheme.clone(),
+                username: some(&self.user),
+                password: some(&self.password),
+                host: some(&self.host),
+                port: None,
+                path: self.path.clone(),
+                query: jet_url_parse_query(&self.query).unwrap_or_default(),
+                fragment: some(&self.fragment),
+                typed_host: None,
+                typed_path: None,
+            };
+            if self.port >= 0 && parts.default_port().ok() != Some(self.port) {
+                parts.port = Some(self.port);
+            }
+            parts
+        }
+
+        pub fn scheme(&self) -> String {
+            self.scheme.clone()
+        }
+        pub fn username(&self) -> String {
+            self.user.clone()
+        }
+        pub fn password(&self) -> String {
+            self.password.clone()
+        }
+        pub fn userinfo(&self) -> String {
+            self.parts().userinfo()
+        }
+        pub fn authority(&self) -> String {
+            self.parts().authority()
+        }
+        pub fn host(&self) -> JetOutcome<String, JetAbsent> {
+            self.parts().host()
+        }
+        pub fn port(&self) -> JetOutcome<i64, JetAbsent> {
+            self.parts().port()
+        }
+        pub fn default_port(&self) -> JetOutcome<i64, JetAbsent> {
+            self.parts().default_port()
+        }
+        pub fn path(&self) -> String {
+            self.path.clone()
+        }
+        pub fn path_segments(&self) -> Vec<String> {
+            self.parts().path_segments()
+        }
+        pub fn query(&self) -> String {
+            self.query.clone()
+        }
+        pub fn query_pairs(&self) -> Vec<Vec<String>> {
+            self.parts().query_pairs()
+        }
+        pub fn fragment(&self) -> JetOutcome<String, JetAbsent> {
+            self.parts().fragment()
+        }
+        pub fn normalize(&self) -> Self {
+            Self::from_url_parts(self.parts().normalize())
+        }
+        pub fn join(&self, rel: &String) -> Result<Self, String> {
+            self.parts().join(rel).map(Self::from_url_parts)
+        }
+        pub fn set_query(&self, key: &String, value: &String) -> Self {
+            Self::from_url_parts(self.parts().set_query(key, value))
+        }
+        pub fn add_query(&self, key: &String, value: &String) -> Self {
+            Self::from_url_parts(self.parts().add_query(key, value))
+        }
+        pub fn to_string_value(&self) -> String {
+            self.parts().to_string_value()
+        }
+    }
+
+    impl crate::JetShow for JetURL {
+        fn jet_show(&self) -> String {
+            self.to_string_value()
+        }
+    }
+
+    impl crate::JetDisplay for JetURL {
+        fn jet_display(&self) -> String {
+            self.to_string_value()
+        }
+    }
+
+    impl crate::JetDebug for JetURL {
+        fn jet_debug(&self) -> String {
+            self.to_string_value()
+        }
+    }
+
+    /// AOT typed `url"..."` heads build the Core carrier from the one kernel.
+    pub fn jet_typed_url_literal(literals: &[&str], holes: Vec<String>) -> JetURL {
+        JetURL::from_url_parts(jet_typed_url_parts_literal(literals, holes))
     }
 
     #[derive(Clone, Debug, PartialEq)]

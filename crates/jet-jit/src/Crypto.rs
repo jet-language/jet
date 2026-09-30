@@ -322,26 +322,6 @@ fn with_crypto_mut<R>(handle: i64, f: impl FnOnce(&mut CryptoValue) -> Option<R>
     })
 }
 
-/// Snapshot closed-family secret material for `ExpiringSecret` zeroize-on-expiry.
-/// Keeps the crypto handle live so `with` can loan it until expiry drops it.
-pub(crate) fn claim_expiring_secret(handle: i64) -> Option<crate::Memory::SecretState> {
-    let bytes = with_crypto(handle, |value| match value {
-        CryptoValue::SigningKey(key) => {
-            Some(runtime::jet_crypto_expert_signing_key_bytes_impl(key))
-        }
-        CryptoValue::X25519SecretKey(key) => {
-            Some(runtime::jet_crypto_expert_x25519_secret_bytes_impl(key))
-        }
-        CryptoValue::Secret(secret) => Some(runtime::jet_crypto_expert_secret_bytes_impl(secret)),
-        _ => None,
-    })?;
-    Some(crate::Memory::SecretState::from_material(handle, bytes))
-}
-
-pub(crate) fn drop_crypto_handle(handle: i64) {
-    let _ = take_crypto(handle);
-}
-
 /// D-EMAIL-SMTP-CONFIG1=A: sole SMTP extraction boundary used by JIT email hosts.
 pub(crate) fn secret_copy_for_smtp(handle: i64) -> Option<Vec<u8>> {
     with_crypto(handle, |value| match value {
@@ -658,9 +638,25 @@ fn jet_jit_crypto_secret_from_text(text: i64) -> i64 {
     ))
 }
 
+/// Packed Option ABI: 0 is a missing or rejected provider, otherwise the list
+/// handle plus one. The Jet wrapper reports `None` as `CryptoError.Unavailable`.
 fn jet_jit_crypto_random_bytes(count: i64) -> i64 {
     jet_codegen::scheduler::jet_scheduler_world_reject_uncontrolled("entropy");
-    alloc_bytes(&runtime::jet_std_crypto_random_bytes(count))
+    runtime::jet_crypto_entropy_bytes(count)
+        .map_or(0, |bytes| alloc_bytes(&bytes).wrapping_add(1))
+}
+
+/// D-SHAPE-RESOURCE1=A: `core.crypto.__zeroize` on the resident heap. The
+/// secret's bytes live in this list, so they are overwritten in place before
+/// the list is released; the host call boundary keeps the writes observable.
+pub(crate) fn jet_jit_crypto_zeroize(bytes_handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(bytes_handle).unwrap_or(0);
+        for index in 0..len {
+            let _ = rt.heap.list_set_int(bytes_handle, index, 0);
+        }
+    });
+    0
 }
 
 fn jet_jit_crypto_wrap(secret_handle: i64, recipient_handle: i64) -> i64 {
@@ -2182,6 +2178,21 @@ fn ambient_core_call(
                     type_name: type_name.to_string(),
                     fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
                 }))
+            }
+            "__zeroize" => {
+                let [bytes] = args.as_slice() else {
+                    return Some(Err(vault_diag(
+                        "core.crypto.__zeroize received malformed arguments",
+                        span,
+                    )));
+                };
+                match jet_as_bytes(bytes, span) {
+                    Ok(bytes) => {
+                        runtime::jet_crypto_zeroize(bytes);
+                        Some(Ok(CtValue::Unit))
+                    }
+                    Err(error) => Some(Err(error)),
+                }
             }
             "__x25519_generate" => Some(crypto_result(
                 runtime::jet_crypto_x25519_generate_impl(),
@@ -3765,6 +3776,7 @@ host_fns! {
     x25519_public_from_text: "jet_jit_crypto_x25519_public_from_text" => jet_jit_crypto_x25519_public_from_text: unary;
     secret_from_text: "jet_jit_crypto_secret_from_text" => jet_jit_crypto_secret_from_text: unary;
     random_bytes: "jet_jit_crypto_random_bytes" => jet_jit_crypto_random_bytes: unary;
+    zeroize: "jet_jit_crypto_zeroize" => jet_jit_crypto_zeroize: unary;
     seal: "jet_jit_crypto_seal" => jet_jit_crypto_seal: ternary;
     wrap: "jet_jit_crypto_wrap" => jet_jit_crypto_wrap: binary;
     unwrap: "jet_jit_crypto_unwrap" => jet_jit_crypto_unwrap: binary;

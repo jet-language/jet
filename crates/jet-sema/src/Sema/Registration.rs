@@ -937,7 +937,19 @@ impl<'a> Checker<'a> {
         if let Some(expected) = value_return.as_ref() {
             self.check_value_block(&mut f.body, expected, false, f.span);
         } else {
+            // D-DISCARD1=A: with no written return type the function returns
+            // nothing, so a value on its last line is lost (E0433).
+            let previous_lost_tail = self.lost_tail_span;
+            self.lost_tail_span = match f.body.last() {
+                Some(Stmt::Expr(tail))
+                    if f.return_type_span.is_none() && !is_generator && !f.compiler_generated =>
+                {
+                    Some(tail.span())
+                }
+                _ => None,
+            };
             self.check_block(&mut f.body, false);
+            self.lost_tail_span = previous_lost_tail;
         }
         // D-COPY-DEFAULT1=A: every use is known now, so each unmarked move
         // that a later use reached becomes an ordinary `~name` copy.

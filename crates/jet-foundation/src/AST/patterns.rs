@@ -11,6 +11,21 @@ pub enum PatSlot {
     Bind { name: String, span: Span },
     /// D-PATR: `lo..hi` range in payload slot (inclusive). Field type must be Int or Char.
     Range { lo: i64, hi: i64 },
+    /// S31: a nested pattern in payload position (`.Err(.Low)`,
+    /// `.Val(.Rect(w, h))`). Patterns nest to any depth.
+    Nested(Box<Pattern>),
+    /// D-PAT-NAMED-NEST1=A: one `field: slot` entry of the named payload form
+    /// `.Case{field: pat, …}`; a bare `field` is `field: field`. Sema maps
+    /// each entry onto the positional slot the field names, so every later
+    /// pass sees only positional slots.
+    Named {
+        field: String,
+        field_span: Span,
+        slot: Box<PatSlot>,
+    },
+    /// D-PAT-NAMED-NEST1=A: the trailing `..` of `.Case{field: pat, ..}`;
+    /// sema fills every unnamed field with a wildcard.
+    Rest(Span),
 }
 
 impl PatSlot {
@@ -44,22 +59,28 @@ pub enum Pattern {
         leading_dot: bool,
         span: Span,
     },
+    /// S31: `.Val(binding)` on `T?`. `inner` holds a nested payload pattern
+    /// (`.Val(.Rect(w, h))`); the binding is then `_`.
     Present {
         binding: String,
         binding_span: Span,
+        inner: Option<Box<Pattern>>,
         span: Span,
     },
     Absent(Span),
-    /// S34: `Ok(binding)` pattern on `T !E`.
+    /// S34: `Ok(binding)` pattern on `T !E`; `inner` as for `Present`.
     Ok {
         binding: String,
         binding_span: Span,
+        inner: Option<Box<Pattern>>,
         span: Span,
     },
-    /// S34: `Err(binding)` pattern on `T !E`.
+    /// S34: `Err(binding)` pattern on `T !E`; `inner` as for `Present`
+    /// (`.Err(.Low)`).
     Err {
         binding: String,
         binding_span: Span,
+        inner: Option<Box<Pattern>>,
         span: Span,
     },
     /// D-PATR (ratified 2026-06-19): range pattern at arm-head level (`0..59 -> "F"`).
@@ -302,22 +323,53 @@ impl Pattern {
         }
     }
 
+    /// S31: whether a payload is tested by a nested pattern (`.Err(.Low)`),
+    /// so this pattern covers only part of its head variant.
+    pub fn has_nested_pattern(&self) -> bool {
+        fn slot_nests(slot: &PatSlot) -> bool {
+            match slot {
+                PatSlot::Nested(_) => true,
+                PatSlot::Named { slot, .. } => slot_nests(slot),
+                _ => false,
+            }
+        }
+        match self {
+            Pattern::Variant { bindings, .. } => bindings.iter().any(slot_nests),
+            Pattern::Present { inner, .. }
+            | Pattern::Ok { inner, .. }
+            | Pattern::Err { inner, .. } => inner.is_some(),
+            Pattern::Or(alternatives, _) => alternatives.iter().any(Pattern::has_nested_pattern),
+            _ => false,
+        }
+    }
+
     /// Capture names introduced when this pattern succeeds. The parser uses
     /// this to turn a pattern test into a binding; sema remains authoritative
     /// for each capture's type and the codegen consumes the normalized pattern.
     pub fn binding_names(&self) -> Vec<BindName> {
+        fn slot_names(slot: &PatSlot) -> Vec<BindName> {
+            match slot {
+                PatSlot::Bind { name, span } => vec![BindName {
+                    name: name.clone(),
+                    span: *span,
+                    rename: None,
+                }],
+                PatSlot::Nested(inner) => inner.binding_names(),
+                PatSlot::Named { slot, .. } => slot_names(slot),
+                PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Rest(_) => Vec::new(),
+            }
+        }
         match self {
-            Pattern::Variant { bindings, .. } => bindings
-                .iter()
-                .filter_map(|slot| match slot {
-                    PatSlot::Bind { name, span } => Some(BindName {
-                        name: name.clone(),
-                        span: *span,
-                        rename: None,
-                    }),
-                    PatSlot::Wildcard | PatSlot::Range { .. } => None,
-                })
-                .collect(),
+            Pattern::Variant { bindings, .. } => bindings.iter().flat_map(slot_names).collect(),
+            Pattern::Present {
+                inner: Some(inner), ..
+            }
+            | Pattern::Ok {
+                inner: Some(inner), ..
+            }
+            | Pattern::Err {
+                inner: Some(inner), ..
+            } => inner.binding_names(),
             Pattern::Present {
                 binding,
                 binding_span,
@@ -410,6 +462,10 @@ pub struct ConstDef {
     pub name: String,
     pub name_span: Span,
     pub value: Expr,
+    /// 3A / D-PUBPKG1=A: `pub NAME :: v` exports the binding like any other
+    /// top-level item; `pub(package)` keeps it inside the package.
+    pub is_pub: bool,
+    pub is_package_pub: bool,
     /// D-CANVASMETA1=B: `#Meta(...)` facts for Canvas/tooling. Checked by sema;
     /// ignored by codegen.
     pub meta: Option<MetaAttr>,

@@ -79,8 +79,8 @@ const HOSTILE_CLOSEOUT_FINDINGS: &[CloseoutFinding] = &[
                 path: "tests/marker_declarations.rs",
                 markers: &[
                     "repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic",
-                    "fact Scheduler(@name: \"Scheduler\"",
-                    "fact TargetScheduler(@name: \"Target.Scheduler\"",
+                    "fact Scheduler($name: \"Scheduler\"",
+                    "fact TargetScheduler($name: \"Target.Scheduler\"",
                 ],
             },
         ],

@@ -305,9 +305,9 @@ fn curated(token: &str) -> &'static [Curated] {
         )],
         COMPTIME_MARK => &[(
             "Before a name",
-            "Marks a name whose value is worked out while compiling, not while the program runs. The mark is part of the name, so write it at every use.",
-            "@LIMIT :: 1000\nprint(\"{@LIMIT}\")",
-            "The value is fixed in the built program; reading it costs nothing at run time.",
+            "Marks a fact the compiler supplies: a `$` member of the thing it describes, or one of the roots `$build`, `$package`, `$phase` and `$program`. Programs read facts; they never declare a `$` name.",
+            "print(Point.$name)\nprep if $build.os == {\n    .Linux -> { print(\"linux\") }\n    else -> { print(\"other\") }\n}",
+            "A fact is known while building, so reading it costs nothing at run time. Marker and fact declarations mark their compiler metadata the same way: `$sites:`.",
             &[],
         )],
         SIGIL_FENCE_OPEN => &[(

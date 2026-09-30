@@ -596,13 +596,13 @@ fn comptime_float_and_string_constants_lower_to_typed_literals() {
     let lowered = lower_after_sema(
         r#"
 fn run() {
-    @narrow :: F32{16777217.0}
-    @wide :: Float{2.5}
-    @label :: "ready"
+    narrow :: prep { F32{16777217.0} }
+    wide :: prep { Float{2.5} }
+    label :: prep { "ready" }
 
-    print(@narrow)
-    print(@wide)
-    print(@label)
+    print(narrow)
+    print(wide)
+    print(label)
 }
 "#,
         "run",
@@ -3167,9 +3167,9 @@ fn covers_comptime_const_in_interpolation() {
     // c109 Phase 24 / S57: a marked comptime const carries its sema-evaluated
     // value into the interpolation operand, so this needs the full sema pass.
     let src = "\
-@HEADER :: \"<html>\"
+HEADER :: prep { \"<html>\" }
 fn wrap(s: String) -> String {
-    return \"{@HEADER}: {s}\"
+    return \"{HEADER}: {s}\"
 }
 fn run() {
     wrap(\"body\")
@@ -3180,7 +3180,7 @@ fn run() {
 
 #[test]
 fn covers_comptime_local_binding() {
-    // c109 (S57/M9.5): a comptime LOCAL `@name :: expr` in a function body
+    // c109 (S57/M9.5): a comptime LOCAL `NAME :: expr` in a function body
     // routes once sema fills `b.ct`. The runtime `init` (`build()`) is NOT in-subset
     // on its own merits, but the comptime path never emits it — it emits the
     // sema-evaluated literal — so the gate admits it on `b.ct.is_some()`. Needs the
@@ -3194,8 +3194,8 @@ fn build() -> [Int] {
     return xs
 }
 fn run() {
-    @xs :: build()
-    print(\"{@xs}\")
+    built :: prep { build() }
+    print(\"{built}\")
 }
 ";
     crate::Codegen::MIREval::install_mir_bridge();
@@ -3516,9 +3516,9 @@ fn run() {
 
 #[test]
 fn covers_field_read_and_eq_on_inlined_comptime_values() {
-    // c109: a FIELD READ off a comptime-const struct value (`@PAIR_VALUE ::
-    // Pair{…}`; then `@PAIR_VALUE.left`) and an `==` against a comptime-const enum value
-    // (`@LIGHT_VALUE :: Light.Green`; then `@LIGHT_VALUE == Light.Green`). The const inlines to
+    // c109: a FIELD READ off a comptime-const struct value (`PAIR_VALUE ::
+    // Pair{…}`; then `PAIR_VALUE.left`) and an `==` against a comptime-const enum value
+    // (`LIGHT_VALUE :: Light.Green`; then `LIGHT_VALUE == Light.Green`). The const inlines to
     // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
     // inlined struct / comparing the inlined enum is byte-identical to the AST path.
     // The Field gate now admits a non-local comptime-const receiver.
@@ -3534,13 +3534,13 @@ enum Light {
     Green
 }
 
-@PAIR_VALUE :: Pair{left: 7, right: "seven"}
-@LIGHT_VALUE :: Light.Green
+PAIR_VALUE :: prep { Pair{left: 7, right: "seven"} }
+LIGHT_VALUE :: prep { Light.Green }
 
 fn run() {
-    print("{@PAIR_VALUE.left}")
-    print("{@PAIR_VALUE.right}")
-    print("{@LIGHT_VALUE == Light.Green}")
+    print("{PAIR_VALUE.left}")
+    print("{PAIR_VALUE.right}")
+    print("{LIGHT_VALUE == Light.Green}")
 }
 "#;
     assert!(

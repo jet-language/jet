@@ -992,6 +992,32 @@ pub(crate) mod collection_semantics {
         jet_deque_pop_back_kernel(values).ok()
     }
 
+    pub(super) fn deque_push_front<T>(values: &mut std::collections::VecDeque<T>, value: T) {
+        jet_deque_push_front(values, value);
+    }
+
+    pub(super) fn deque_push_back<T>(values: &mut std::collections::VecDeque<T>, value: T) {
+        jet_deque_push_back(values, value);
+    }
+
+    pub(super) fn deque_delete<T: PartialEq>(
+        values: &mut std::collections::VecDeque<T>,
+        value: T,
+    ) {
+        jet_deque_delete(values, value);
+    }
+
+    pub(super) fn deque_reverse<T>(values: &mut std::collections::VecDeque<T>) {
+        jet_deque_reverse(values);
+    }
+
+    pub(super) fn deque_split<T>(
+        values: &mut std::collections::VecDeque<T>,
+        index: i64,
+    ) -> std::collections::VecDeque<T> {
+        jet_deque_split(values, index)
+    }
+
     pub(super) fn priority_queue_pop<T: Ord>(
         values: &mut std::collections::BinaryHeap<T>,
     ) -> Option<T> {
@@ -1076,6 +1102,14 @@ pub(crate) mod collection_semantics {
             |value| FloatOrderKey(*value),
             |min, max| (min, max),
         )
+    }
+
+    pub(super) fn list_min_float(xs: Vec<f64>) -> JetOutcome<f64, JetAbsent> {
+        jet_list_min_float(xs)
+    }
+
+    pub(super) fn list_max_float(xs: Vec<f64>) -> JetOutcome<f64, JetAbsent> {
+        jet_list_max_float(xs)
     }
 
     pub(super) fn list_min_max_string(xs: &[String]) -> JetOutcome<(String, String), JetAbsent> {
@@ -2223,8 +2257,19 @@ fn jet_jit_list_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list())
 }
 
+/// Empty `[I64]`/`[U64]` list: its cells are fixed-width words, never exact
+/// `Int` carriers, so no store route retains them as exact-integer pointers.
+fn jet_jit_list_new_words(unsigned: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_word_list(unsigned != 0))
+}
+
 fn jet_jit_list_uninit(len: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_uninit_list(len.max(0) as usize))
+}
+
+/// Fixed-length `[I64#N]`/`[U64#N]` carrier; see `jet_jit_list_new_words`.
+fn jet_jit_list_uninit_words(len: i64, unsigned: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_uninit_word_list(len.max(0) as usize, unsigned != 0))
 }
 
 /// `core.process.argv()` — List(String) matching AOT `jet_std_io_args`, fed by
@@ -2349,7 +2394,7 @@ fn jet_jit_list_concat(left: i64, right: i64) -> i64 {
             jet_foundation::ice!(None, "jit list concat: bad right handle");
         };
         collection_semantics::list_extend(&mut values, other);
-        rt.heap.alloc_list_values(values)
+        rt.heap.alloc_list_values_like(left, values)
     })
 }
 
@@ -5181,7 +5226,11 @@ fn jet_jit_list_sort_desc(list: i64) {
             .heap
             .clone_int_list(list)
             .expect("jit list sort_desc: bad handle");
-        collection_semantics::list_sort_desc(&mut values);
+        if matches!(rt.heap.int_cells(list), jet_rt::IntCells::Word { unsigned: true }) {
+            values.sort_unstable_by(|left, right| (*right as u64).cmp(&(*left as u64)));
+        } else {
+            collection_semantics::list_sort_desc(&mut values);
+        }
         for (index, value) in values.into_iter().enumerate() {
             rt.heap
                 .list_set_int(list, index as i64, value)
@@ -5298,7 +5347,8 @@ fn jet_jit_list_clone(list: i64) -> i64 {
 /// string ids a `[String]` holds.
 fn jet_jit_list_copy(list: i64) -> i64 {
     let values = clone_list_ints(list);
-    alloc_from_ints(&collection_semantics::list_copy(&values))
+    let copy = collection_semantics::list_copy(&values);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_int_list_like(list, copy))
 }
 
 /// `.copy()` on the boxed float carrier (`JetVal::List(Float…)`), which
@@ -6876,6 +6926,16 @@ fn jet_jit_list_min_i64(list: i64) -> i64 {
 fn jet_jit_list_max_i64(list: i64) -> i64 {
     let value = collection_semantics::list_max_i64(clone_list_ints(list)).ok();
     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+fn jet_jit_list_min_float(list: i64) -> i64 {
+    let value = collection_semantics::list_min_float(clone_list_floats(list)).ok();
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value.map(|v| v.to_bits() as i64)))
+}
+
+fn jet_jit_list_max_float(list: i64) -> i64 {
+    let value = collection_semantics::list_max_float(clone_list_floats(list)).ok();
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value.map(|v| v.to_bits() as i64)))
 }
 
 fn jet_jit_list_flatten(list: i64) -> i64 {
@@ -9192,7 +9252,7 @@ fn jet_jit_deque_new() -> i64 {
 fn jet_jit_deque_push_front(dq: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
-            d.push_front(v);
+            collection_semantics::deque_push_front(d, v);
         }
     });
 }
@@ -9200,7 +9260,7 @@ fn jet_jit_deque_push_front(dq: i64, v: i64) {
 fn jet_jit_deque_push_back(dq: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
-            d.push_back(v);
+            collection_semantics::deque_push_back(d, v);
         }
     });
 }
@@ -9305,9 +9365,7 @@ fn jet_jit_deque_get(dq: i64, idx: i64) -> i64 {
 fn jet_jit_deque_delete(dq: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
-            if let Some(i) = d.iter().position(|x| *x == v) {
-                d.remove(i);
-            }
+            collection_semantics::deque_delete(d, v);
         }
     });
 }
@@ -9344,7 +9402,7 @@ fn jet_jit_deque_join(dq: i64, sep_id: i64) -> i64 {
 fn jet_jit_deque_reverse(dq: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
-            d.make_contiguous().reverse();
+            collection_semantics::deque_reverse(d);
         }
         0
     })
@@ -9355,12 +9413,7 @@ fn jet_jit_deque_split(dq: i64, idx: i64) -> i64 {
         let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) else {
             return 0;
         };
-        let at = if idx < 0 {
-            0
-        } else {
-            (idx as usize).min(d.len())
-        };
-        let rest = d.split_off(at);
+        let rest = collection_semantics::deque_split(d, idx);
         deque_handle(rt, rest)
     })
 }
@@ -11293,6 +11346,7 @@ host_fns! {
     io_args: "jet_jit_io_args" => jet_jit_io_args: sig_new;
     io_process_args: "jet_jit_io_process_args" => jet_jit_io_process_args: sig_new;
     list_new: "jet_jit_list_new" => jet_jit_list_new: sig_new;
+    list_new_words: "jet_jit_list_new_words" => jet_jit_list_new_words: sig_len;
     list_try_new: "jet_jit_list_try_new" => jet_jit_list_try_new: sig_try_new;
     view_try_map: "jet_jit_view_try_map" => jet_jit_view_try_map: sig_view_map;
     view_try_filter: "jet_jit_view_try_filter" => jet_jit_view_try_filter: sig_view_map;
@@ -11324,6 +11378,7 @@ host_fns! {
     checked_iter_scan_typed: "jet_jit_checked_iter_scan" => checked_iter_scan_typed: sig_closure_fold;
     list_try_with_capacity: "jet_jit_list_try_with_capacity" => jet_jit_list_try_with_capacity: sig_try_with_capacity;
     list_uninit: "jet_jit_list_uninit" => jet_jit_list_uninit: sig_uninit;
+    list_uninit_words: "jet_jit_list_uninit_words" => jet_jit_list_uninit_words: sig_set_from;
     list_push: "jet_jit_list_push" => jet_jit_list_push: sig_push;
     list_push_f64: "jet_jit_list_push_f64" => jet_jit_list_push_f64: sig_push_f64;
     list_extend: "jet_jit_list_extend" => jet_jit_list_extend: sig_push;
@@ -11649,6 +11704,8 @@ host_fns! {
     list_max_i64: "jet_jit_list_max_i64" => jet_jit_list_max_i64: sig_len;
     checked_list_min: "jet_list_min" => jet_jit_list_min_i64: sig_len;
     checked_list_max: "jet_list_max" => jet_jit_list_max_i64: sig_len;
+    checked_list_min_float: "jet_list_min_float" => jet_jit_list_min_float: sig_len;
+    checked_list_max_float: "jet_list_max_float" => jet_jit_list_max_float: sig_len;
     list_flatten: "jet_list_flatten" => jet_jit_list_flatten: sig_len;
     iter_flatten: "jet_iter_flatten" => jet_jit_list_flatten: sig_len;
     iter_intersperse: "jet_iter_intersperse" => jet_jit_list_intersperse: sig_get_opt;

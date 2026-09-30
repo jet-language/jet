@@ -1,0 +1,22 @@
+// D-DBG1=A: `debug(value)` returns its value unchanged and writes one stderr
+// line with the file, line, expression text, and Debug form. It adds no
+// effect, so pure (`-[]>`) and memoized functions can use it; a memoized
+// function traces only when its body runs, never on a cache hit. `jet build`
+// and release-profile builds reject a leftover trace (E3405).
+#Memo
+fn score(word: String) -[]> Int {
+    total :: debug(word.len() * 3)
+    total + 1
+}
+
+fn label(name: String) -[]> String {
+    debug("<{name}>")
+}
+
+fn run() {
+    print(score("jet"))
+    print(score("jet"))
+    print(label("ok"))
+    words :: debug([String]{"a", "b"})
+    print(words.len())
+}

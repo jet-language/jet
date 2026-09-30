@@ -28,9 +28,12 @@
 //      a program can actually receive one; and
 //   3. showing it is not prohibited.
 //
+// D-CRYPTO-ERRFAM1=A: `CryptoError` and `FileCryptoError` are members. Both
+// are payload-free enums that name only which check failed, so reporting the
+// case carries no secret. The secret-bearing types (`Secret`, `SigningKey`,
+// `X25519SecretKey`, `SharedSecret`) keep their E0915 print ban.
+//
 // Deliberately outside the family:
-//   * `CryptoError` — a secret-bearing crypto type must never flatten into a
-//     user-visible message (E0915). Naming it stays explicit.
 //   * `TaskFailure` — D-FAIL-CARRIER1 gives cancellation and deadline their own
 //     carrier and report; it is not a library error family member.
 //   * `[FieldError]` — the Core decode surface returns a list, and a conversion
@@ -49,7 +52,9 @@ impl CBORError -> Err {
     return Err("{self}")
 }
 
-
+impl CryptoError -> Err {
+    return Err("{self}")
+}
 
 impl DBError -> Err {
     return Err("{self}")
@@ -68,6 +73,10 @@ impl EmailError -> Err {
 }
 
 impl EnvError -> Err {
+    return Err("{self}")
+}
+
+impl FileCryptoError -> Err {
     return Err("{self}")
 }
 
@@ -92,6 +101,10 @@ impl TextError -> Err {
 }
 
 impl UTF8Error -> Err {
+    return Err("{self}")
+}
+
+impl UUIDError -> Err {
     return Err("{self}")
 }
 impl XMLError -> Err {

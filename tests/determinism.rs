@@ -418,7 +418,7 @@ fn run() {
 use core.time as date
 
 fn run() {
-    @today :: date.today()
+    today :: prep { date.today() }
 }
 "#;
     let fold_diagnostics =
@@ -686,4 +686,76 @@ fn run() { print("{span_ms()}") }
         "Duration value ops should be pure: {:?}",
         res.err()
     );
+}
+
+fn run_fresh_draw_program(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(args)
+        .current_dir(dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run jet");
+    assert!(
+        output.status.success(),
+        "jet {args:?} failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("utf-8 stdout")
+}
+
+/// Ambient draws are never folded into the build: a random host call carries
+/// an effect row, and a call with an effect row does not run at compile time.
+/// A folded draw would print the same UUID on every run and would appear as a
+/// literal in the generated Rust; a folded seeded draw repeats one value.
+#[test]
+fn ambient_draws_are_never_folded_into_the_build() {
+    let dir = common::unique_tmp("jet_fresh_draws");
+    std::fs::write(
+        dir.join("uuid.jet"),
+        r#"package {
+    name: "fresh_uuid"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Rand] } }
+}
+use core.crypto.uuid as uuid
+
+fn run() -[Rand, IO]> {
+    id :: uuid.v4() ?? panic("uuid")
+    print(id)
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("seeded.jet"),
+        r#"package {
+    name: "fresh_seeded"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Rand] } }
+}
+use core.math.random as random
+
+fn run() -[Rand, IO]> {
+    random.seed(42)
+    first :: random.int(0, 1000000)
+    second :: random.int(0, 1000000)
+    print("{first != second}")
+}
+"#,
+    )
+    .unwrap();
+    let first = run_fresh_draw_program(&dir, &["run", "--interpret", "uuid.jet"]);
+    let second = run_fresh_draw_program(&dir, &["run", "--interpret", "uuid.jet"]);
+    assert_ne!(first.trim(), second.trim(), "uuid.v4 repeated across runs");
+    let rust = run_fresh_draw_program(&dir, &["emit", "--rust", "uuid.jet"]);
+    for id in [first.trim(), second.trim()] {
+        assert!(!rust.contains(id), "generated Rust contains the drawn UUID {id}");
+    }
+    for tier in [&["run", "seeded.jet"][..], &["run", "--interpret", "seeded.jet"]] {
+        assert_eq!(
+            run_fresh_draw_program(&dir, tier).trim(),
+            "true",
+            "two seeded draws repeated one folded value on {tier:?}"
+        );
+    }
 }

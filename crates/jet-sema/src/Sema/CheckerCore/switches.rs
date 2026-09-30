@@ -1,8 +1,11 @@
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-use crate::Sema::Diagnostics::{missing_arms_text, missing_pattern_coverage, pattern_variant_name};
+use crate::Sema::Diagnostics::{
+    missing_arms_text, missing_pattern_coverage, pattern_binding_types, pattern_variant_name,
+    suggest_field,
+};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
-use crate::AST::{BinOp, Expr, Pattern, Stmt, Type};
+use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 fn note_pattern_ranges(pattern: &Pattern, ranges: &mut Vec<(i64, i64)>) {
@@ -17,6 +20,84 @@ fn note_pattern_ranges(pattern: &Pattern, ranges: &mut Vec<(i64, i64)>) {
     }
 }
 
+/// L0303 (#3716): the authored `else` arm that follows a table's last pattern
+/// arm, which ends at `after`. Returns the arm (from `else` through its body)
+/// and the span deleting it removes, which also takes the line break and
+/// indentation before it. `body_end` is the end of the arm's last statement
+/// or value; a braced body extends to its matching `}`. Any unexpected source
+/// shape answers `None`, so the lint stays quiet rather than guess an edit.
+fn else_arm_extent(source: &str, after: usize, body_end: Option<usize>) -> Option<(Span, Span)> {
+    let bytes = source.as_bytes();
+    let skip_trivia = |mut at: usize| -> usize {
+        loop {
+            while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                at += 1;
+            }
+            if bytes.get(at) == Some(&b'/') && bytes.get(at + 1) == Some(&b'/') {
+                while bytes.get(at).is_some_and(|byte| *byte != b'\n') {
+                    at += 1;
+                }
+                continue;
+            }
+            return at;
+        }
+    };
+    // A braced value arm ends at its value; its closing `}` comes first.
+    let mut delete_start = after;
+    let mut at = skip_trivia(after);
+    if bytes.get(at) == Some(&b'}') {
+        delete_start = at + 1;
+        at = skip_trivia(at + 1);
+    }
+    let keyword = Syntax::KW_ELSE.as_bytes();
+    if !bytes.get(at..)?.starts_with(keyword)
+        || bytes
+            .get(at + keyword.len())
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        return None;
+    }
+    let arm_start = at;
+    at = skip_trivia(at + keyword.len());
+    let arrow = Syntax::OP_UNIFIED_ARROW.as_bytes();
+    if !bytes.get(at..)?.starts_with(arrow) {
+        return None;
+    }
+    at = skip_trivia(at + arrow.len());
+    let arm_end = if bytes.get(at) == Some(&b'{') {
+        let mut depth = 0usize;
+        let mut index = at;
+        loop {
+            match *bytes.get(index)? {
+                b'"' => {
+                    index += 1;
+                    while *bytes.get(index)? != b'"' {
+                        index += if bytes[index] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                    while bytes.get(index).is_some_and(|byte| *byte != b'\n') {
+                        index += 1;
+                    }
+                    continue;
+                }
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break index + 1;
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+    } else {
+        body_end.filter(|end| *end > at)?
+    };
+    Some((Span::new(arm_start, arm_end), Span::new(delete_start, arm_end)))
+}
+
 /// The variant keys one arm covers: every alternative of an or-pattern,
 /// recursing through nested or-patterns (mirrors Coverage.jet).
 fn collect_covered_variant_names(pattern: &Pattern, names: &mut Vec<String>) {
@@ -27,6 +108,176 @@ fn collect_covered_variant_names(pattern: &Pattern, names: &mut Vec<String>) {
             }
         }
         other => names.extend(pattern_variant_name(other)),
+    }
+}
+
+/// S31: head variants of the alternatives that test a payload with a nested
+/// pattern. They only partly cover their head, so they never enter the
+/// covered set; `nested_pattern_missing` proves their joint coverage.
+fn collect_partial_variant_names(pattern: &Pattern, names: &mut Vec<String>) {
+    match pattern {
+        Pattern::Or(alts, _) => {
+            for alt in alts {
+                collect_partial_variant_names(alt, names);
+            }
+        }
+        other if other.has_nested_pattern() => names.extend(cover_head(other).map(str::to_string)),
+        _ => {}
+    }
+}
+
+/// One column entry of the S31 nested-coverage matrix.
+#[derive(Clone, Copy)]
+enum CoverCell<'p> {
+    /// A binding or `_`: matches every value.
+    Any,
+    /// A pattern that tests the value.
+    Pat(&'p Pattern),
+    /// A range slot or another test that names no constructor.
+    Refutable,
+}
+
+fn slot_cover_cell(slot: &crate::AST::PatSlot) -> CoverCell<'_> {
+    match slot {
+        crate::AST::PatSlot::Bind { .. }
+        | crate::AST::PatSlot::Wildcard
+        | crate::AST::PatSlot::Rest(_) => CoverCell::Any,
+        crate::AST::PatSlot::Range { .. } => CoverCell::Refutable,
+        crate::AST::PatSlot::Nested(inner) => CoverCell::Pat(inner),
+        crate::AST::PatSlot::Named { slot, .. } => slot_cover_cell(slot),
+    }
+}
+
+/// D-PAT-NAMED-NEST1=A: what a case's payload fields are called.
+enum PayloadFieldNames {
+    /// Declared `Case(a: A, b: B)`: the field names in slot order.
+    Named(Vec<String>),
+    /// A positional payload of this many slots (`Case(T)`, `.Val(x)`, a unit case).
+    Positional(usize),
+    /// The case doesn't resolve on this subject; validation reports it.
+    Unknown,
+}
+
+/// D-PAT-NAMED-NEST1=A: the written entries of a named payload in source
+/// order, without their field names and `..`. Used where the case gives no
+/// names to place them by (an error has been or will be reported).
+fn strip_named_payload_slots(written: Vec<PatSlot>) -> Vec<PatSlot> {
+    written
+        .into_iter()
+        .filter_map(|slot| match slot {
+            PatSlot::Named { slot, .. } => Some(*slot),
+            PatSlot::Rest(_) => None,
+            slot => Some(slot),
+        })
+        .map(|mut slot| {
+            if let PatSlot::Nested(inner) = &mut slot {
+                strip_named_payload_pattern(inner);
+            }
+            slot
+        })
+        .collect()
+}
+
+/// `strip_named_payload_slots` over a whole nested pattern whose subject
+/// type is unknown.
+fn strip_named_payload_pattern(pattern: &mut Pattern) {
+    match pattern {
+        Pattern::Or(alts, _) => alts.iter_mut().for_each(strip_named_payload_pattern),
+        Pattern::Variant { bindings, .. } => {
+            let written = std::mem::take(bindings);
+            *bindings = strip_named_payload_slots(written);
+        }
+        _ => {}
+    }
+}
+
+/// The constructor a pattern tests, in the spelling of `pattern_constructors`.
+fn cover_head(pattern: &Pattern) -> Option<&str> {
+    match pattern {
+        Pattern::Variant { variant, .. } => Some(variant),
+        Pattern::Present { .. } => Some(Syntax::LIT_VALUE),
+        Pattern::Absent(_) => Some(Syntax::LIT_NULL),
+        Pattern::Ok { .. } => Some(Syntax::LIT_OK),
+        Pattern::Err { .. } => Some(Syntax::LIT_ERR),
+        _ => None,
+    }
+}
+
+/// The payload cells a constructor pattern tests, padded to `arity`.
+fn cover_args(pattern: &Pattern, arity: usize) -> Vec<CoverCell<'_>> {
+    let cells: Vec<CoverCell<'_>> = match pattern {
+        Pattern::Variant { bindings, .. } => bindings.iter().map(slot_cover_cell).collect(),
+        Pattern::Present { inner, .. } | Pattern::Ok { inner, .. } | Pattern::Err { inner, .. } => {
+            vec![inner.as_deref().map_or(CoverCell::Any, CoverCell::Pat)]
+        }
+        _ => Vec::new(),
+    };
+    cells
+        .into_iter()
+        .chain(std::iter::repeat(CoverCell::Any))
+        .take(arity)
+        .collect()
+}
+
+/// Split or-patterns in the first column into one row per alternative.
+fn expand_cover_rows<'p>(rows: &[Vec<CoverCell<'p>>]) -> Vec<Vec<CoverCell<'p>>> {
+    let mut out = Vec::with_capacity(rows.len());
+    let mut pending: Vec<Vec<CoverCell<'p>>> = rows.iter().rev().cloned().collect();
+    while let Some(row) = pending.pop() {
+        let alternatives = match row.first() {
+            Some(&CoverCell::Pat(Pattern::Or(alts, _))) => Some(alts),
+            _ => None,
+        };
+        match alternatives {
+            Some(alts) => {
+                for alt in alts.iter().rev() {
+                    let mut expanded = row.clone();
+                    expanded[0] = CoverCell::Pat(alt);
+                    pending.push(expanded);
+                }
+            }
+            None => out.push(row),
+        }
+    }
+    out
+}
+
+/// Rows that can match constructor `name`, with its `arity` payload cells in
+/// place of the first column. A group head covers each leaf beneath it.
+fn specialize_cover_rows<'p>(
+    rows: &[Vec<CoverCell<'p>>],
+    name: &str,
+    arity: usize,
+) -> Vec<Vec<CoverCell<'p>>> {
+    rows.iter()
+        .filter_map(|row| {
+            let (first, rest) = row.split_first()?;
+            let mut cells = match *first {
+                CoverCell::Any => vec![CoverCell::Any; arity],
+                CoverCell::Refutable => return None,
+                CoverCell::Pat(pattern) => {
+                    let head = cover_head(pattern)?;
+                    if head == name {
+                        cover_args(pattern, arity)
+                    } else if jet_foundation::Facts::fact_covers(head, name) {
+                        vec![CoverCell::Any; arity]
+                    } else {
+                        return None;
+                    }
+                }
+            };
+            cells.extend_from_slice(rest);
+            Some(cells)
+        })
+        .collect()
+}
+
+/// A nested witness for constructor `name` with payload witnesses `args`.
+fn cover_witness_text(name: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        format!(".{name}")
+    } else {
+        format!(".{name}({})", args.join(", "))
     }
 }
 
@@ -54,6 +305,18 @@ fn ranges_cover_interval(ranges: &[(i64, i64)], lo: i128, hi: i128) -> bool {
         }
     }
     false
+}
+
+/// The subject and pattern of a condition's leading pattern test, looking
+/// through `&&` guards (`.Val(u) && u.active`).
+fn leading_pattern_test(expr: &Expr) -> Option<(&Expr, &Pattern)> {
+    match expr {
+        Expr::PatternTest {
+            subject, pattern, ..
+        } => Some((subject.as_ref(), pattern)),
+        Expr::Binary(BinOp::And, left, _, _) => leading_pattern_test(left),
+        _ => None,
+    }
 }
 
 fn leading_guard_pattern_subject(expr: &Expr) -> Option<&Expr> {
@@ -193,15 +456,33 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
     else {
         return;
     };
-    let binding = || {
-        bindings.first().map(|slot| {
-            (
+    // S31: a nested payload pattern moves into `inner`; the carrier's own
+    // binding is then the wildcard. The inner pattern is normalized against
+    // the payload type in the same pass.
+    let binding = |bindings: &mut Vec<crate::AST::PatSlot>, payload_ty: Option<&Type>| {
+        let slot = bindings.pop()?;
+        Some(match slot {
+            crate::AST::PatSlot::Nested(mut inner) => {
+                if let Some(payload_ty) = payload_ty {
+                    normalize_contextual_pattern(&mut inner, payload_ty);
+                }
+                (Syntax::PAT_WILDCARD_SLOT.to_string(), inner.span(), Some(inner))
+            }
+            slot => (
                 slot.as_bind()
                     .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
                     .to_string(),
                 slot.binding_span().unwrap_or(*span),
-            )
+                None,
+            ),
         })
+    };
+    let three_state_payload = match subject_ty {
+        Type::Result { ok, .. } => match ok.as_ref() {
+            Type::Option(payload) => Some(payload.as_ref()),
+            _ => None,
+        },
+        _ => None,
     };
     let replacement = match (
         subject_ty,
@@ -209,30 +490,57 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
         *leading_dot,
         bindings.len(),
     ) {
+        // D-OUTCOME-SHAPE1=A: `T? E!` has three states. `.Val(x)` and
+        // `.None` name its success states directly; they reach validation
+        // and lowering as the carrier's `Ok` payload test.
+        (Type::Result { .. }, Some(ContextualLiteral::Null), _, 0)
+            if three_state_payload.is_some() =>
+        {
+            Some(three_state_success(Pattern::Absent(*span), *span))
+        }
+        (Type::Result { .. }, Some(ContextualLiteral::Value), _, 1)
+            if three_state_payload.is_some() =>
+        {
+            let (binding, binding_span, inner) = binding(bindings, three_state_payload).unwrap();
+            let present = Pattern::Present {
+                binding,
+                binding_span,
+                inner,
+                span: *span,
+            };
+            Some(three_state_success(present, *span))
+        }
         (_, Some(ContextualLiteral::Null), false, 0)
         | (Type::Option(_), Some(ContextualLiteral::Null), true, 0) => Some(Pattern::Absent(*span)),
         (_, Some(ContextualLiteral::Value), false, 1)
         | (Type::Option(_), Some(ContextualLiteral::Value), true, 1) => {
-            let (binding, binding_span) = binding().unwrap();
+            let payload_ty = match subject_ty {
+                Type::Option(inner) => Some(inner.as_ref()),
+                _ => None,
+            };
+            let (binding, binding_span, inner) = binding(bindings, payload_ty).unwrap();
             Some(Pattern::Present {
                 binding,
                 binding_span,
+                inner,
                 span: *span,
             })
         }
-        (Type::Result { .. }, Some(ContextualLiteral::Ok), _, 1) => {
-            let (binding, binding_span) = binding().unwrap();
+        (Type::Result { ok, .. }, Some(ContextualLiteral::Ok), _, 1) => {
+            let (binding, binding_span, inner) = binding(bindings, Some(ok.as_ref())).unwrap();
             Some(Pattern::Ok {
                 binding,
                 binding_span,
+                inner,
                 span: *span,
             })
         }
-        (Type::Result { .. }, Some(ContextualLiteral::Err), _, 1) => {
-            let (binding, binding_span) = binding().unwrap();
+        (Type::Result { err, .. }, Some(ContextualLiteral::Err), _, 1) => {
+            let (binding, binding_span, inner) = binding(bindings, Some(err.as_ref())).unwrap();
             Some(Pattern::Err {
                 binding,
                 binding_span,
+                inner,
                 span: *span,
             })
         }
@@ -240,6 +548,37 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
     };
     if let Some(replacement) = replacement {
         *pattern = replacement;
+    }
+}
+
+/// D-OUTCOME-SHAPE1=A: `T? E!` — a failure carrier around an optional.
+pub(crate) fn is_three_state(ty: &Type) -> bool {
+    matches!(ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Option(_)))
+}
+
+/// D-OUTCOME-SHAPE1=A: a `.Val(x)` / `.None` state of `T? E!` as the
+/// carrier's success test with that optional state as its payload pattern.
+fn three_state_success(state: Pattern, span: Span) -> Pattern {
+    Pattern::Ok {
+        binding: Syntax::PAT_WILDCARD_SLOT.to_string(),
+        binding_span: span,
+        inner: Some(Box::new(state)),
+        span,
+    }
+}
+
+/// D-OUTCOME-SHAPE1=A: true when `pattern` names only optional states
+/// (`.Val(…)`, `.None`, or an or-pattern of them) — the payload the retired
+/// nested `.Ok(…)` spelling wrapped.
+pub(crate) fn names_optional_state(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Present { .. } | Pattern::Absent(_) => true,
+        Pattern::Variant { variant, .. } => matches!(
+            contextual_literal(variant),
+            Some(ContextualLiteral::Value | ContextualLiteral::Null)
+        ),
+        Pattern::Or(alts, _) => alts.iter().all(names_optional_state),
+        _ => false,
     }
 }
 
@@ -391,6 +730,7 @@ impl<'a> Checker<'a> {
                     pattern: Pattern::Present {
                         binding: name.clone(),
                         binding_span: *name_span,
+                        inner: None,
                         span: *span,
                     },
                     span: *span,
@@ -489,6 +829,592 @@ impl<'a> Checker<'a> {
         bindings
     }
 
+    /// S31: contextual normalization of a whole pattern tree. A nested
+    /// payload pattern is normalized against its payload type, so
+    /// `.Err(.Low)` reaches validation as `Err { inner: Variant }`.
+    /// D-OUTCOME-SHAPE1=A: `.Val(x)` / `.None` on `T? E!` reach it as
+    /// `Ok { inner: Present | Absent }`; the retired nested `.Ok(.Val(x))`
+    /// spelling is refused first (E0392). D-PAT-NAMED-NEST1=A: named payload
+    /// entries (`.Case{field: pat, ..}`) are mapped onto positional slots
+    /// before either step, at every depth.
+    pub(crate) fn normalize_pattern_tree(&mut self, pattern: &mut Pattern, subject_ty: &Type) {
+        self.lift_flat_union_cases(pattern, subject_ty);
+        self.resolve_named_payload_slots(pattern, subject_ty);
+        self.report_retired_nested_outcome(pattern, subject_ty);
+        self.normalize_checked_pattern_tree(pattern, subject_ty);
+    }
+
+    /// D-ERR-CASES1=A: a case name that exactly one member of a union
+    /// declares may be matched flat (`.Err(.NotFound(w))` over
+    /// `FindError | ParseError`). The raw tree is rewritten onto the member
+    /// arm (`.FindError(.NotFound(w))`), so validation, coverage and every
+    /// lowering tier only see the member form.
+    fn lift_flat_union_cases(&self, pattern: &mut Pattern, subject_ty: &Type) {
+        match pattern {
+            Pattern::Or(alts, _) => {
+                for alt in alts {
+                    self.lift_flat_union_cases(alt, subject_ty);
+                }
+            }
+            Pattern::Variant {
+                variant,
+                bindings,
+                span,
+                ..
+            } => {
+                if let Some(owner) = self.flat_union_case_owner(subject_ty, variant) {
+                    let span = *span;
+                    let mut flat = std::mem::replace(pattern, Pattern::Absent(span));
+                    self.lift_flat_union_cases(&mut flat, &owner);
+                    *pattern = Pattern::Variant {
+                        variant: crate::AST::union_member_tag(&owner),
+                        bindings: vec![PatSlot::Nested(Box::new(flat))],
+                        leading_dot: true,
+                        span,
+                    };
+                    return;
+                }
+                let payload = self.raw_pattern_payload_types(subject_ty, variant);
+                for (index, slot) in bindings.iter_mut().enumerate() {
+                    if let (PatSlot::Nested(inner), Some(ty)) = (slot, payload.get(index)) {
+                        self.lift_flat_union_cases(inner, ty);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The one union member whose enum declares `variant`, when `variant` is
+    /// not itself a member tag. `None` for an unknown or ambiguous case name,
+    /// which then reaches the ordinary E0305 member check.
+    pub(crate) fn flat_union_case_owner(&self, subject_ty: &Type, variant: &str) -> Option<Type> {
+        let Type::Union(members) = subject_ty else {
+            return None;
+        };
+        if members
+            .iter()
+            .any(|member| crate::AST::union_member_tag(member) == variant)
+        {
+            return None;
+        }
+        let mut owners = members.iter().filter(|member| match member {
+            Type::Named(name) | Type::Apply { name, .. } => self
+                .resolve_enum_variants_cloned(name)
+                .is_some_and(|variants| variants.contains_key(variant)),
+            _ => false,
+        });
+        match (owners.next(), owners.next()) {
+            (Some(owner), None) => Some(owner.clone()),
+            _ => None,
+        }
+    }
+
+    /// D-PAT-NAMED-NEST1=A: rewrite every `.Case{field: pat, ..}` in a raw
+    /// pattern tree onto the case's positional payload slots, so checking,
+    /// exhaustiveness and lowering only ever see the positional form.
+    fn resolve_named_payload_slots(&mut self, pattern: &mut Pattern, subject_ty: &Type) {
+        match pattern {
+            Pattern::Or(alts, _) => {
+                for alt in alts {
+                    self.resolve_named_payload_slots(alt, subject_ty);
+                }
+            }
+            Pattern::Variant {
+                variant,
+                bindings,
+                span,
+                ..
+            } => {
+                if bindings
+                    .iter()
+                    .any(|slot| matches!(slot, PatSlot::Named { .. } | PatSlot::Rest(_)))
+                {
+                    let written = std::mem::take(bindings);
+                    *bindings = self.positional_payload_slots(subject_ty, variant, written, *span);
+                }
+                let payload = self.raw_pattern_payload_types(subject_ty, variant);
+                for (index, slot) in bindings.iter_mut().enumerate() {
+                    if let PatSlot::Nested(inner) = slot {
+                        match payload.get(index) {
+                            Some(ty) => self.resolve_named_payload_slots(inner, ty),
+                            None => strip_named_payload_pattern(inner),
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// D-PAT-NAMED-NEST1=A: place each `field: slot` entry at its field's
+    /// position. A field left out needs the trailing `..` (E0326) and then
+    /// matches anything; `..` after every field is redundant (E0327).
+    fn positional_payload_slots(
+        &mut self,
+        subject_ty: &Type,
+        variant: &str,
+        written: Vec<PatSlot>,
+        span: Span,
+    ) -> Vec<PatSlot> {
+        let fields = match self.payload_field_names(subject_ty, variant) {
+            PayloadFieldNames::Named(fields) => fields,
+            PayloadFieldNames::Positional(arity) => {
+                let positional = strip_named_payload_slots(written);
+                let fix = if arity == 0 {
+                    format!("write `.{variant}` with no payload")
+                } else {
+                    let parts: Vec<String> = if positional.is_empty() {
+                        vec![Syntax::PAT_WILDCARD_SLOT.to_string(); arity]
+                    } else {
+                        positional.iter().map(|slot| self.pat_slot_source(slot)).collect()
+                    };
+                    format!("match it by position: `.{variant}({})`", parts.join(", "))
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0303",
+                    format!("case `{variant}` has no field names to match"),
+                    "only a case declared with named fields can be matched with `{field: pattern}`; this case's payload is positional"
+                        .to_string(),
+                    fix,
+                    Some(span),
+                ));
+                return positional;
+            }
+            // An unknown case is reported by validation; keep the written
+            // entries in order so it still sees their bindings.
+            PayloadFieldNames::Unknown => return strip_named_payload_slots(written),
+        };
+        let mut placed: Vec<Option<PatSlot>> = vec![None; fields.len()];
+        let mut rest = None;
+        for entry in written {
+            match entry {
+                PatSlot::Named {
+                    field,
+                    field_span,
+                    slot,
+                } => match fields.iter().position(|name| *name == field) {
+                    Some(index) if placed[index].is_none() => placed[index] = Some(*slot),
+                    Some(_) => self.diags.push(Diagnostic::error(
+                        "E0303",
+                        format!("field `{field}` appears more than once"),
+                        "each payload field may be matched only once".to_string(),
+                        "remove the duplicate field".to_string(),
+                        Some(field_span),
+                    )),
+                    None => self.diags.push(Diagnostic::error(
+                        "E0302",
+                        format!("case `{variant}` has no field `{field}`"),
+                        format!("`{variant}` declares the fields {}", fields.join(", ")),
+                        suggest_field(&field, &fields)
+                            .map(|name| format!("did you mean `{name}`?"))
+                            .unwrap_or_else(|| "name one of the declared fields".to_string()),
+                        Some(field_span),
+                    )),
+                },
+                PatSlot::Rest(rest_span) => rest = Some(rest_span),
+                PatSlot::Wildcard
+                | PatSlot::Bind { .. }
+                | PatSlot::Range { .. }
+                | PatSlot::Nested(_) => {
+                    unreachable!("the parser admits only `field: pattern` entries and `..` inside `.Case{{…}}`")
+                }
+            }
+        }
+        let missing: Vec<&str> = fields
+            .iter()
+            .zip(&placed)
+            .filter(|(_, slot)| slot.is_none())
+            .map(|(name, _)| name.as_str())
+            .collect();
+        match rest {
+            None if !missing.is_empty() => self.diags.push(Diagnostic::error(
+                "E0326",
+                format!(
+                    "this pattern leaves out fields of `{variant}`: {}",
+                    missing.join(", ")
+                ),
+                "a pattern that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
+                format!(
+                    "add `, ..` before the closing `}}`, or name {}",
+                    missing.join(", ")
+                ),
+                Some(span),
+            )),
+            Some(rest_span) if missing.is_empty() => self.diags.push(Diagnostic::error(
+                "E0327",
+                "this `..` is redundant".to_string(),
+                format!("the pattern already names every field of `{variant}`"),
+                "remove `..` or leave out at least one field".to_string(),
+                Some(rest_span),
+            )),
+            _ => {}
+        }
+        placed
+            .into_iter()
+            .map(|slot| slot.unwrap_or(PatSlot::Wildcard))
+            .collect()
+    }
+
+    /// Whether a case's payload fields carry names a pattern can use.
+    fn payload_field_names(&self, subject_ty: &Type, variant: &str) -> PayloadFieldNames {
+        match (subject_ty, contextual_literal(variant)) {
+            (Type::Option(_) | Type::Result { .. }, Some(ContextualLiteral::Null)) => {
+                PayloadFieldNames::Positional(0)
+            }
+            (Type::Option(_) | Type::Result { .. }, Some(_)) => PayloadFieldNames::Positional(1),
+            (Type::Named(name) | Type::Apply { name, .. }, _) => match self
+                .resolve_enum_variants_cloned(name)
+                .and_then(|mut variants| variants.remove(variant))
+            {
+                Some((_, VariantPayload::Named(fields))) => {
+                    PayloadFieldNames::Named(fields.into_iter().map(|field| field.name).collect())
+                }
+                Some((_, VariantPayload::Single(..))) => PayloadFieldNames::Positional(1),
+                Some((_, VariantPayload::Unit)) => PayloadFieldNames::Positional(0),
+                None => PayloadFieldNames::Unknown,
+            },
+            (Type::Union(members), _)
+                if members
+                    .iter()
+                    .any(|member| crate::AST::union_member_tag(member) == variant) =>
+            {
+                PayloadFieldNames::Positional(1)
+            }
+            _ => PayloadFieldNames::Unknown,
+        }
+    }
+
+    /// The source spelling of a positional payload slot, for fix text.
+    fn pat_slot_source(&self, slot: &PatSlot) -> String {
+        match slot {
+            PatSlot::Bind { name, .. } => name.clone(),
+            PatSlot::Range { lo, hi } => format!("{lo}..{hi}"),
+            PatSlot::Nested(inner) => {
+                let span = inner.span();
+                self.source
+                    .get(span.start..span.end)
+                    .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
+                    .to_string()
+            }
+            PatSlot::Wildcard | PatSlot::Named { .. } | PatSlot::Rest(_) => {
+                Syntax::PAT_WILDCARD_SLOT.to_string()
+            }
+        }
+    }
+
+    /// The payload types a raw (not yet normalized) variant pattern's slots
+    /// test: contextual `.Val` / `.Ok` / `.Err` read the carrier's payload.
+    fn raw_pattern_payload_types(&self, subject_ty: &Type, variant: &str) -> Vec<Type> {
+        match (subject_ty, contextual_literal(variant)) {
+            (Type::Result { ok, .. }, Some(ContextualLiteral::Ok)) => vec![(**ok).clone()],
+            (Type::Result { ok, .. }, Some(ContextualLiteral::Value)) => match ok.as_ref() {
+                Type::Option(payload) => vec![(**payload).clone()],
+                _ => Vec::new(),
+            },
+            (Type::Result { err, .. }, Some(ContextualLiteral::Err)) => vec![(**err).clone()],
+            (Type::Option(payload), Some(ContextualLiteral::Value)) => vec![(**payload).clone()],
+            _ => self.pattern_payload_types(subject_ty, variant),
+        }
+    }
+
+    fn normalize_checked_pattern_tree(&self, pattern: &mut Pattern, subject_ty: &Type) {
+        normalize_contextual_pattern(pattern, subject_ty);
+        match pattern {
+            Pattern::Or(alts, _) => {
+                for alt in alts {
+                    self.normalize_checked_pattern_tree(alt, subject_ty);
+                }
+            }
+            Pattern::Present {
+                inner: Some(inner), ..
+            } => {
+                if let Type::Option(payload) = subject_ty {
+                    self.normalize_checked_pattern_tree(inner, payload);
+                }
+            }
+            Pattern::Ok {
+                inner: Some(inner), ..
+            } => {
+                if let Type::Result { ok, .. } = subject_ty {
+                    self.normalize_checked_pattern_tree(inner, ok);
+                }
+            }
+            Pattern::Err {
+                inner: Some(inner), ..
+            } => {
+                if let Type::Result { err, .. } = subject_ty {
+                    self.normalize_checked_pattern_tree(inner, err);
+                }
+            }
+            Pattern::Variant {
+                variant, bindings, ..
+            } => {
+                if !bindings
+                    .iter()
+                    .any(|slot| matches!(slot, crate::AST::PatSlot::Nested(_)))
+                {
+                    return;
+                }
+                let payload = self.pattern_payload_types(subject_ty, variant);
+                for (slot, ty) in bindings.iter_mut().zip(payload.iter()) {
+                    if let crate::AST::PatSlot::Nested(inner) = slot {
+                        self.normalize_checked_pattern_tree(inner, ty);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// D-OUTCOME-SHAPE1=A: `T? E!` names its three states directly, so a
+    /// source `.Ok(.Val(x))` / `.Ok(.None)` on such a value is the retired
+    /// nested spelling. Walks the raw (not yet normalized) tree; a pattern
+    /// that was already normalized reports nothing, so a re-check is silent.
+    fn report_retired_nested_outcome(&mut self, pattern: &Pattern, subject_ty: &Type) {
+        match pattern {
+            Pattern::Or(alts, _) => {
+                for alt in alts {
+                    self.report_retired_nested_outcome(alt, subject_ty);
+                }
+            }
+            Pattern::Variant {
+                variant,
+                bindings,
+                leading_dot,
+                span,
+            } => {
+                if !bindings
+                    .iter()
+                    .any(|slot| matches!(slot, crate::AST::PatSlot::Nested(_)))
+                {
+                    return;
+                }
+                if let (
+                    Type::Result { ok, .. },
+                    Some(ContextualLiteral::Ok),
+                    true,
+                    [crate::AST::PatSlot::Nested(state)],
+                ) = (
+                    subject_ty,
+                    contextual_literal(variant),
+                    *leading_dot,
+                    bindings.as_slice(),
+                ) {
+                    if matches!(ok.as_ref(), Type::Option(_)) && names_optional_state(state) {
+                        let diagnostic =
+                            self.retired_nested_outcome_diagnostic(*span, state, subject_ty);
+                        self.diags.push(diagnostic);
+                        return;
+                    }
+                }
+                let payload = self.raw_pattern_payload_types(subject_ty, variant);
+                for (slot, ty) in bindings.iter().zip(payload.iter()) {
+                    if let crate::AST::PatSlot::Nested(inner) = slot {
+                        self.report_retired_nested_outcome(inner, ty);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn retired_nested_outcome_diagnostic(
+        &self,
+        span: Span,
+        state: &Pattern,
+        subject_ty: &Type,
+    ) -> Diagnostic {
+        let written = self
+            .source
+            .get(span.start..span.end)
+            .unwrap_or(".Ok(…)")
+            .to_string();
+        let state_span = state.span();
+        let state_source = self
+            .source
+            .get(state_span.start..state_span.end)
+            .map(str::to_string);
+        let diagnostic = Diagnostic::error(
+            "E0392",
+            format!(
+                "`{written}` wraps a state that `{}` names directly",
+                subject_ty.show()
+            ),
+            "a `T? E!` value has three states, matched as `.Val(x)`, `.None` and `.Err(e)`; the nested `.Ok(…)` layer is retired (D-OUTCOME-SHAPE1=A)".to_string(),
+            format!(
+                "write `{}`",
+                state_source.as_deref().unwrap_or(".Val(…)` or `.None")
+            ),
+            Some(span),
+        );
+        match state_source {
+            Some(new_text) => diagnostic.with_edit(TextEdit { span, new_text }),
+            None => diagnostic,
+        }
+    }
+
+    /// The payload types a variant pattern's slots test, in slot order.
+    pub(crate) fn pattern_payload_types(&self, subject_ty: &Type, variant: &str) -> Vec<Type> {
+        match subject_ty {
+            Type::Named(name) | Type::Apply { name, .. } => self
+                .resolve_enum_variants_cloned(name)
+                .and_then(|variants| {
+                    variants
+                        .get(variant)
+                        .map(|(_, payload)| pattern_binding_types(payload))
+                })
+                .unwrap_or_default(),
+            Type::Union(members) => members
+                .iter()
+                .find(|member| crate::AST::union_member_tag(member) == variant)
+                .cloned()
+                .into_iter()
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// S31: the closed constructor set a nested-coverage column splits on,
+    /// each with its payload types. `None` for open types.
+    fn pattern_constructors(&self, ty: &Type) -> Option<Vec<(String, Vec<Type>)>> {
+        match ty {
+            Type::Option(inner) => Some(vec![
+                (Syntax::LIT_VALUE.to_string(), vec![(**inner).clone()]),
+                (Syntax::LIT_NULL.to_string(), Vec::new()),
+            ]),
+            Type::Result { ok, err } => Some(vec![
+                (Syntax::LIT_OK.to_string(), vec![(**ok).clone()]),
+                (Syntax::LIT_ERR.to_string(), vec![(**err).clone()]),
+            ]),
+            Type::Named(name) | Type::Apply { name, .. } => {
+                let variants = self.resolve_enum_variants_cloned(name)?;
+                let order = match self.registry.enum_variant_order(name) {
+                    Some(order) => order.to_vec(),
+                    None => {
+                        let mut names: Vec<String> = variants.keys().cloned().collect();
+                        names.sort();
+                        names
+                    }
+                };
+                Some(
+                    order
+                        .into_iter()
+                        .map(|variant| {
+                            let payload = variants
+                                .get(&variant)
+                                .map(|(_, payload)| pattern_binding_types(payload))
+                                .unwrap_or_default();
+                            (variant, payload)
+                        })
+                        .collect(),
+                )
+            }
+            // A union error domain is closed: each member is one constructor
+            // whose single payload is the member value (`.Err(.BadNumStr(_))`).
+            Type::Union(members) => Some(
+                members
+                    .iter()
+                    .map(|member| (crate::AST::union_member_tag(member), vec![member.clone()]))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// S31: nested coverage over the whole arm set. `None` when the subject
+    /// has no closed constructor set; otherwise the missing arm witnesses in
+    /// the flat spelling (`High`, `Ok(...)`) or nested (`Err(.High)`).
+    fn nested_pattern_missing(&self, st: &Type, arms: &[Pattern]) -> Option<Option<Vec<String>>> {
+        let ctors = self.pattern_constructors(st)?;
+        let rows: Vec<Vec<CoverCell<'_>>> = arms.iter().map(|arm| vec![CoverCell::Pat(arm)]).collect();
+        let rows = expand_cover_rows(&rows);
+        let mut missing = Vec::new();
+        for (name, payload) in &ctors {
+            let specialized = specialize_cover_rows(&rows, name, payload.len());
+            // D-OUTCOME-SHAPE1=A: a `T? E!` success names each optional
+            // state directly (`Val(...)`, `None`), never `Ok(.None)`.
+            if name == Syntax::LIT_OK && is_three_state(st) {
+                let state_rows = expand_cover_rows(&specialized);
+                for (state, state_payload) in self.pattern_constructors(&payload[0])? {
+                    let state_specialized =
+                        specialize_cover_rows(&state_rows, &state, state_payload.len());
+                    let Some(witness) =
+                        self.uncovered_witness(&state_payload, &state_specialized, 1)
+                    else {
+                        continue;
+                    };
+                    missing.push(if witness.is_empty() {
+                        state
+                    } else if witness.iter().all(|arg| arg == "_") {
+                        format!("{state}(...)")
+                    } else {
+                        format!("{state}({})", witness.join(", "))
+                    });
+                }
+                continue;
+            }
+            let Some(witness) = self.uncovered_witness(payload, &specialized, 0) else {
+                continue;
+            };
+            missing.push(if witness.iter().all(|arg| arg == "_") {
+                match st {
+                    Type::Result { .. } => format!("{name}(...)"),
+                    _ => name.clone(),
+                }
+            } else {
+                format!("{name}({})", witness.join(", "))
+            });
+        }
+        Some((!missing.is_empty()).then_some(missing))
+    }
+
+    /// S31: one value (one witness per column) that no row matches, or
+    /// `None` when the rows are exhaustive over `types`.
+    fn uncovered_witness<'p>(
+        &self,
+        types: &[Type],
+        rows: &[Vec<CoverCell<'p>>],
+        depth: usize,
+    ) -> Option<Vec<String>> {
+        if rows.is_empty() {
+            return Some(vec!["_".to_string(); types.len()]);
+        }
+        let (first, rest) = types.split_first()?;
+        let rows = expand_cover_rows(rows);
+        let tests_constructor = rows
+            .iter()
+            .any(|row| matches!(row.first(), Some(CoverCell::Pat(_))));
+        let ctors = if tests_constructor && depth < 64 {
+            self.pattern_constructors(first)
+        } else {
+            None
+        };
+        if let Some(ctors) = ctors.filter(|ctors| !ctors.is_empty()) {
+            for (name, payload) in &ctors {
+                let specialized = specialize_cover_rows(&rows, name, payload.len());
+                let mut sub_types = payload.clone();
+                sub_types.extend_from_slice(rest);
+                if let Some(witness) = self.uncovered_witness(&sub_types, &specialized, depth + 1) {
+                    let (args, tail) = witness.split_at(payload.len());
+                    let mut out = vec![cover_witness_text(name, args)];
+                    out.extend_from_slice(tail);
+                    return Some(out);
+                }
+            }
+            return None;
+        }
+        let default: Vec<Vec<CoverCell<'p>>> = rows
+            .iter()
+            .filter(|row| matches!(row.first(), Some(CoverCell::Any)))
+            .map(|row| row[1..].to_vec())
+            .collect();
+        let witness = self.uncovered_witness(rest, &default, depth + 1)?;
+        let mut out = vec!["_".to_string()];
+        out.extend(witness);
+        Some(out)
+    }
+
     /// One pattern arm's contribution to the covered set — shared by the
     /// statement table and the else-less value-dispatch chain (card #1440),
     /// so unreachable-arm policy (or-patterns, D-TAG1 subtree
@@ -504,9 +1430,18 @@ impl<'a> Checker<'a> {
         note_pattern_ranges(pattern, covered_ranges);
         let pspan = pattern.span();
         // Or-patterns cover every alternative, including a nested or-pattern.
+        // S31: a nested payload pattern only partly covers its head variant,
+        // so it never enters `covered`, but an earlier full arm still makes
+        // it unreachable.
         let mut covered_names = Vec::new();
         collect_covered_variant_names(pattern, &mut covered_names);
-        for variant in covered_names {
+        let mut partial_names = Vec::new();
+        collect_partial_variant_names(pattern, &mut partial_names);
+        let heads = covered_names
+            .into_iter()
+            .map(|name| (name, true))
+            .chain(partial_names.into_iter().map(|name| (name, false)));
+        for (variant, full) in heads {
             // D-TAG1: an earlier group arm already covers every leaf in
             // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
             // unreachable (ancestor-or-equal test on the dotted path).
@@ -542,7 +1477,7 @@ impl<'a> Checker<'a> {
                     self.diags
                         .push(Diagnostic::lint("L0301", what, why, fix, Some(pspan)));
                 }
-            } else {
+            } else if full {
                 covered.insert(variant);
             }
         }
@@ -557,6 +1492,7 @@ impl<'a> Checker<'a> {
         st: &Type,
         covered: &HashSet<String>,
         covered_ranges: &[(i64, i64)],
+        arms: &[Pattern],
         has_else: bool,
         span: Span,
         insert_at: Option<Span>,
@@ -618,7 +1554,13 @@ impl<'a> Checker<'a> {
             ));
             return;
         }
-        if let Some(missing) = missing_pattern_coverage(st, covered, self.registry) {
+        let missing = if is_three_state(st) || arms.iter().any(Pattern::has_nested_pattern) {
+            self.nested_pattern_missing(st, arms)
+                .unwrap_or_else(|| missing_pattern_coverage(st, covered, self.registry))
+        } else {
+            missing_pattern_coverage(st, covered, self.registry)
+        };
+        if let Some(missing) = missing {
             let mut diag = Diagnostic::error(
                 "E0307",
                 if multi_head {
@@ -657,6 +1599,50 @@ impl<'a> Checker<'a> {
             }
             self.diags.push(diag);
         }
+    }
+
+    /// L0303 (#3716): an `else` arm after pattern arms that already cover a
+    /// closed set (enum, variant group, `T?`, `T E!`, union) can never run.
+    /// Worse, a case added later would fall into it silently instead of
+    /// raising E0307, so the lint offers the Safe edit that deletes the arm.
+    /// Open sets (numbers, text, chars) never reach this check's verdict.
+    fn lint_unreachable_else(
+        &mut self,
+        st: &Type,
+        covered: &HashSet<String>,
+        arms: &[Pattern],
+        last_arm_end: usize,
+        else_body_end: Option<usize>,
+    ) {
+        let closed = match st {
+            Type::Named(name) => self.registry.enum_variant_order(name).is_some(),
+            Type::Option(_) | Type::Result { .. } | Type::Union(_) => true,
+            _ => false,
+        };
+        if !closed {
+            return;
+        }
+        let missing = if is_three_state(st) || arms.iter().any(Pattern::has_nested_pattern) {
+            self.nested_pattern_missing(st, arms)
+                .unwrap_or_else(|| missing_pattern_coverage(st, covered, self.registry))
+        } else {
+            missing_pattern_coverage(st, covered, self.registry)
+        };
+        if missing.is_some() {
+            return;
+        }
+        let Some((arm, delete)) = else_arm_extent(self.source, last_arm_end, else_body_end) else {
+            return;
+        };
+        let shown = st.show();
+        self.diags.push(
+            Diagnostic::from_row("L0303", &[("type", shown.as_str())], Some(arm)).with_edit(
+                TextEdit {
+                    span: delete,
+                    new_text: String::new(),
+                },
+            ),
+        );
     }
 
     /// D-PARSESTR1 / D-BINPAT1: text and byte patterns are refutable even
@@ -708,11 +1694,40 @@ impl<'a> Checker<'a> {
         false
     }
 
+    /// D-OUTCOME-SHAPE1=A: a value-form pattern chain over one subject that
+    /// handles the failure itself (an `.Ok`/`.Err` arm) keeps the `T? E!`
+    /// carrier for its `.Val`/`.None` levels too, exactly as the statement
+    /// table infers its subject once for every arm. Without an `.Err` arm the
+    /// failure passes up and `.Val`/`.None` test the optional.
+    pub(crate) fn note_carrier_chain_subject(&mut self, expr: &Expr) {
+        let mut subject_start = None;
+        let mut consumes_carrier = false;
+        let mut cur = expr;
+        while let Expr::If {
+            cond, else_value, ..
+        } = cur
+        {
+            let Some((subject, pattern)) = leading_pattern_test(cond) else {
+                return;
+            };
+            let start = subject.span().start;
+            if *subject_start.get_or_insert(start) != start {
+                return;
+            }
+            consumes_carrier |= pattern_consumes_result_carrier(pattern);
+            cur = else_value.as_ref();
+        }
+        if let (true, Some(start)) = (consumes_carrier, subject_start) {
+            self.carrier_chain_subjects.insert(start);
+        }
+    }
+
     /// Card #1440: an else-less all-pattern value dispatch arrives from the
     /// parser as a nested `Expr::If` chain terminated by `Expr::NoElse`.
     /// Prove the pattern arms cover the subject's whole type with the same
     /// policy the statement table uses above. Runs once per chain (every
     /// level shares one span; the outermost caller wins the dedup insert).
+    /// A table with a real `else` arm gets the L0303 check instead (#3716).
     pub(crate) fn check_noelse_dispatch_chain(&mut self, expr: &mut Expr) {
         let Expr::If { span, .. } = expr else { return };
         let span = *span;
@@ -723,13 +1738,17 @@ impl<'a> Checker<'a> {
         let mut subject_clone: Option<Expr> = None;
         let mut raw: Vec<Pattern> = Vec::new();
         let mut same_subject = true;
+        let mut every_level_pattern = true;
         let mut last_arm_end: Option<usize> = None;
+        // The end of an authored `else` arm's body; `None` for `NoElse`.
+        let mut else_end: Option<usize> = None;
         {
             let mut cur: &mut Expr = expr;
             loop {
                 let Expr::If {
                     cond,
                     then_value,
+                    else_body,
                     else_value,
                     ..
                 } = cur
@@ -748,12 +1767,27 @@ impl<'a> Checker<'a> {
                     }
                     raw.push(pattern.clone());
                     last_arm_end = Some(then_value.span().end);
+                } else {
+                    every_level_pattern = false;
                 }
                 match else_value.as_mut() {
-                    Expr::If { .. } => cur = else_value,
-                    _ => break,
+                    Expr::If { span: level, .. } if *level == span => cur = else_value,
+                    Expr::NoElse(_) if else_body.is_empty() => break,
+                    value => {
+                        let value_end = match value {
+                            Expr::NoElse(_) => 0,
+                            other => other.span().end,
+                        };
+                        let body_end = else_body.last().map_or(0, |stmt| stmt.span().end);
+                        else_end = Some(value_end.max(body_end));
+                        break;
+                    }
                 }
             }
+        }
+        let has_else = else_end.is_some();
+        if has_else && (!same_subject || !every_level_pattern) {
+            return;
         }
         let Some(mut subj) = subject_clone else {
             return;
@@ -761,19 +1795,20 @@ impl<'a> Checker<'a> {
         // D-RESULT-DECON2=B: the parser's fixed two-arm handler already proves
         // exhaustive Result coverage. Its receiver is checked by the real
         // condition walk below; probing this clone would move it a second time
-        // in sema.
+        // in sema. An arm that tests the payload (`.Err(.LookupError(_))`)
+        // covers only part of its side, so that table takes the probe.
         if same_subject
             && raw.len() == 2
             && raw.first().is_some_and(|pattern| {
-                matches!(pattern, Pattern::Ok { .. })
+                matches!(pattern, Pattern::Ok { inner: None, .. })
                     || matches!(pattern, Pattern::Variant { variant, bindings, .. }
-                        if bindings.len() == 1
+                        if matches!(bindings.as_slice(), [PatSlot::Bind { .. } | PatSlot::Wildcard])
                             && contextual_literal(variant) == Some(ContextualLiteral::Ok))
             })
             && raw.get(1).is_some_and(|pattern| {
-                matches!(pattern, Pattern::Err { .. })
+                matches!(pattern, Pattern::Err { inner: None, .. })
                     || matches!(pattern, Pattern::Variant { variant, bindings, .. }
-                        if bindings.len() == 1
+                        if matches!(bindings.as_slice(), [PatSlot::Bind { .. } | PatSlot::Wildcard])
                             && contextual_literal(variant) == Some(ContextualLiteral::Err))
             })
         {
@@ -793,6 +1828,9 @@ impl<'a> Checker<'a> {
         // probed parameter in `Expr::Copy` and the arm probe below loses the
         // subject name, silently skipping E0307 (card #3587).
         let saved_expected = self.expected_type.take();
+        // L0303 probes a table the ordinary per-level walk checks in full, so
+        // the probe leaves no diagnostics or flow facts behind.
+        let probe_start = has_else.then(|| (self.diags.len(), self.flow.clone()));
         if preserve_result_carrier {
             self.failure_auto_depth += 1;
         }
@@ -806,6 +1844,10 @@ impl<'a> Checker<'a> {
         }
         self.expected_type = saved_expected;
         let Some(st) = subj_ty else {
+            if let Some((len, flow)) = probe_start {
+                self.diags.truncate(len);
+                self.flow = flow;
+            }
             return;
         };
         // Probe without retaining recovery diagnostics — the ordinary
@@ -820,7 +1862,7 @@ impl<'a> Checker<'a> {
         let mut resolved: Vec<Pattern> = Vec::new();
         let mut all_pattern = !raw.is_empty();
         for mut p in raw {
-            normalize_contextual_pattern(&mut p, &st);
+            self.normalize_pattern_tree(&mut p, &st);
             let pspan = p.span();
             let cond = Expr::PatternTest {
                 subject: Box::new(subj.clone()),
@@ -833,6 +1875,23 @@ impl<'a> Checker<'a> {
             }
         }
         self.diags.truncate(diag_len);
+        if let Some((len, flow)) = probe_start {
+            self.diags.truncate(len);
+            self.flow = flow;
+            if !all_pattern {
+                return;
+            }
+            let mut covered = HashSet::new();
+            let mut covered_ranges = Vec::new();
+            for p in &resolved {
+                self.note_pattern_coverage(p, &st, &mut covered, &mut covered_ranges, false);
+            }
+            self.diags.truncate(len);
+            if let (Some(after), Some(body_end)) = (last_arm_end, else_end) {
+                self.lint_unreachable_else(&st, &covered, &resolved, after, Some(body_end));
+            }
+            return;
+        }
         if !all_pattern {
             self.report_refutable_pattern_without_else(has_str_match_arm, has_bin_match_arm, span);
             return;
@@ -847,6 +1906,7 @@ impl<'a> Checker<'a> {
             &st,
             &covered,
             &covered_ranges,
+            &resolved,
             false,
             span,
             insert_at,
@@ -893,6 +1953,7 @@ impl<'a> Checker<'a> {
                         pattern: Pattern::Present {
                             binding: name,
                             binding_span: name_span,
+                            inner: None,
                             span: cond_span,
                         },
                         span: cond_span,
@@ -955,10 +2016,13 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if let Some(st) = &subj_ty {
+        // A subjectless guard's arms test their own subjects; each such
+        // pattern is normalized against its own subject type when the
+        // condition is checked below, never against the guard placeholder.
+        if let Some(st) = subj_ty.as_ref().filter(|_| !subjectless_guard) {
             for arm in arms.iter_mut() {
                 if let Expr::PatternTest { pattern, .. } = &mut arm.cond {
-                    normalize_contextual_pattern(pattern, st);
+                    self.normalize_pattern_tree(pattern, st);
                 }
             }
         }
@@ -978,6 +2042,7 @@ impl<'a> Checker<'a> {
         };
         let mut covered = HashSet::new();
         let mut covered_ranges = Vec::new();
+        let mut arm_patterns = Vec::new();
         // D-FACT-FLOW1: one snapshot before the table, one store per arm,
         // and one shared join at the end. No plane keeps the last-walked arm.
         let before = self.flow.clone();
@@ -999,6 +2064,7 @@ impl<'a> Checker<'a> {
                         &mut covered_ranges,
                         subj_name.as_deref() == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT),
                     );
+                    arm_patterns.push(pattern.clone());
                     let bindings = self.validate_pattern(st, &pattern, pspan);
                     self.mark_pattern_subject_moved(subject, &bindings);
                     self.push_scope();
@@ -1068,12 +2134,19 @@ impl<'a> Checker<'a> {
                     &st,
                     &covered,
                     &covered_ranges,
+                    &arm_patterns,
                     else_body.is_some(),
                     span,
                     insert_at,
                     subj_name.as_deref(),
                 );
                 can_skip_every_arm = else_body.is_none() && self.diags.len() > reported;
+                if let (Some(else_stmts), Some(last)) = (else_body.as_ref(), arms.last()) {
+                    if !subjectless_guard && subj_name.as_deref() != Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT) {
+                        let body_end = else_stmts.last().map(|stmt| stmt.span().end);
+                        self.lint_unreachable_else(&st, &covered, &arm_patterns, last.span.end, body_end);
+                    }
+                }
             }
         } else if else_body.is_none() && !subjectless_guard {
             // D-PARSESTR1: a str-match pattern arm is always refutable — the

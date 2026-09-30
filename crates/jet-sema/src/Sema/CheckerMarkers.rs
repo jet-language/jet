@@ -604,7 +604,7 @@ pub(crate) fn resolve_static_rule_products(
     materialize_test_expected_fail(&mut module.items, &validated);
     // D-DEFAULT-SHAPE1=B: promote retired `#Default(expr)` into `field: T{expr}`.
     // Then sweep whatever retired spellings are left on the field: the field
-    // attachment point had no reader at all, so the registry's `@retired`
+    // attachment point had no reader at all, so the registry's `$retired`
     // column was true and silent there — `#Uninit label: String` parsed,
     // applied nothing, and said nothing (D-UNINIT-SENTINEL2=A: `uninit` is
     // legal only as the whole body of a `Type.{ }` head, "anywhere else it is
@@ -860,8 +860,10 @@ impl<'a> crate::Sema::Checker<'a> {
     }
 
     /// D-MEMO1=A: prove the marker's result-cache contract before TIR lowers
-    /// the function. The existing purity fact and collection hashability gate
-    /// are the only semantic sources; engines never repeat these checks.
+    /// the function. The collection hashability gate lives here; purity is
+    /// judged by the solved effect row (D-EFFECT-OMIT1=A), so a declared
+    /// `-[]>` and an inferred empty row are both accepted (E0938 in
+    /// `Effects::check_inferred_purity`). Engines never repeat these checks.
     pub(crate) fn check_memoized_function(&mut self, f: &crate::AST::Func) {
         let Some(marker) = f
             .markers
@@ -870,16 +872,6 @@ impl<'a> crate::Sema::Checker<'a> {
         else {
             return;
         };
-        if !f.is_pure {
-            self.diags.push(Diagnostic::error(
-                "E0938",
-                "`#Memo` requires a pure function".to_string(),
-                "memoization reuses a completed result, so the function must have the empty effect row".to_string(),
-                "declare the function with `-[]>` and keep `#Memo`".to_string(),
-                Some(marker.span),
-            ));
-            return;
-        }
         for parameter in &f.params {
             let ty = self.resolve_type(if parameter.variadic {
                 crate::AST::Type::List(Box::new(parameter.ty.clone()))
@@ -1466,7 +1458,7 @@ fn declared_rule_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Polic
     declaration
         .params
         .iter()
-        .find(|param| param.name == "@sites")
+        .find(|param| param.name == "$sites")
         .and_then(|param| param.value.as_deref())
         .and_then(|value| match value {
             crate::AST::Expr::ListLit(values, _) => Some(values.as_slice()),
@@ -1500,7 +1492,7 @@ fn declared_rule_repeatable(declaration: &crate::AST::MarkerDecl) -> bool {
     declaration
         .params
         .iter()
-        .find(|param| param.name == "@repeatable")
+        .find(|param| param.name == "$repeatable")
         .and_then(|param| param.value.as_deref())
         .is_some_and(|value| matches!(value, crate::AST::Expr::Bool(true, _)))
 }

@@ -274,7 +274,7 @@ struct ExactIntRow {
     large: Int
 }
 
-@LIMITED_TEXT :: "1{"0".repeat(1000000)}"
+LIMITED_TEXT :: prep { "1{"0".repeat(1000000)}" }
 
 fn run() {
     raw :: "{{\"amount\":12.340,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":9007199254740992,\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890,\"large_exp\":1e30}}"

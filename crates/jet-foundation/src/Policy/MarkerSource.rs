@@ -71,7 +71,7 @@ fn declaration(line: &str) -> AppliedRule {
                     assert_eq!(
                         parts.len(),
                         2,
-                        "`@companion` reads `[Rule, .Site]` in {line}"
+                        "`$companion` reads `[Rule, .Site]` in {line}"
                     );
                     companion_site = Some(CompanionSite {
                         rule: leak(parts[0]),

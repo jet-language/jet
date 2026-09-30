@@ -132,7 +132,7 @@ pub fn wait(rx: Receiver<Int>) -[Time]> Int { recv(rx) }
 
 
 fn host_sleep_ms(ms: Int) -[Time]> {
-    _ :: recv(core.tasks.after(Duration{ns: ms * 1000000}, 0))
+    _ :: recv(core.tasks.after(Duration.milliseconds(ms) ?? panic("sleep duration is outside Duration's range"), 0))
 }
 
 

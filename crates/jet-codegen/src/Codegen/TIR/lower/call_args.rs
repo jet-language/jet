@@ -121,9 +121,11 @@ fn template_never_expr(name: impl Into<String>) -> TExpr {
     }
 }
 
+/// D-NAME-SPLICE1=B: a template reference is `$name` (or a plain template
+/// binding); the local is the binding under either spelling.
 fn template_reference_expr(name: &str, env: &LowerEnv) -> TExpr {
-    let bare_name = name.trim_start_matches('@');
-    let marked_name = format!("@{bare_name}");
+    let bare_name = name.trim_start_matches('$');
+    let marked_name = format!("${bare_name}");
     let local_name = if env.locals.contains_key(name) {
         name
     } else if env.locals.contains_key(bare_name) {
@@ -162,19 +164,19 @@ fn lower_template_expr(
         }
         Expr::ComptimeName { value: Some(_), .. } => lower_expr(expr, cx, env),
         Expr::ComptimeName { name, .. } => template_reference_expr(name, env),
-        Expr::Ident(name, _) if name.starts_with('@') => template_reference_expr(name, env),
+        Expr::Ident(name, _) if name.starts_with('$') => template_reference_expr(name, env),
         Expr::Ident(name, _) if template_vars.contains(name) => template_reference_expr(name, env),
         Expr::Field(base, member, _)
-            if member.starts_with('@')
+            if member.starts_with('$')
                 || template_expr_root(base)
-                    .is_some_and(|name| template_vars.contains(name.trim_start_matches('@'))) =>
+                    .is_some_and(|name| template_vars.contains(name.trim_start_matches('$'))) =>
         {
             let recv = lower_template_expr(base, cx, env, template_vars);
             TExpr {
                 ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
                 kind: TExprKind::Field {
                     recv: Box::new(recv),
-                    field: member.trim_start_matches('@').to_string(),
+                    field: member.trim_start_matches('$').to_string(),
                     boxed: false,
                 },
             }
@@ -224,7 +226,7 @@ fn lower_template_loop_expr(
                 };
                 Some(TExpr {
                     ty: Type::String,
-                    kind: TExprKind::CtLit(CtValue::Str(name.trim_start_matches('@').to_string())),
+                    kind: TExprKind::CtLit(CtValue::Str(name.trim_start_matches('$').to_string())),
                 })
             })
             .collect::<Option<Vec<_>>>()
@@ -343,7 +345,7 @@ fn scan_template_markers(
                             let Some(&first) = bytes.get(field_start) else {
                                 break;
                             };
-                            if first == b'@' || !ident(first) {
+                            if first == b'$' || !ident(first) {
                                 break;
                             }
                             let mut field_end = field_start + 1;
@@ -367,21 +369,20 @@ fn scan_template_markers(
                     }
                     at = marker_end;
                 }
-                b'@' => {
+                // D-NAME-SPLICE1=B: `$name` may splice a template binding;
+                // `template_source` keeps only the splices of bound names.
+                b'$' => {
                     let start = at;
                     at += 1;
                     while at < bytes.len() && ident(bytes[at]) {
                         at += 1;
                     }
                     if at > start + 1 {
-                        let name = &bytes[start + 1..at];
-                        if name != b"loop" {
-                            out.push(TemplateMarker {
-                                start,
-                                end: at,
-                                value: value_context || !name_context(bytes, start),
-                            });
-                        }
+                        out.push(TemplateMarker {
+                            start,
+                            end: at,
+                            value: value_context || !name_context(bytes, start),
+                        });
                     }
                 }
                 _ => at += 1,
@@ -441,7 +442,7 @@ fn template_marker_base(source: &str, start: usize) -> Option<String> {
                 .then_some(index + character.len_utf8())
         })
         .unwrap_or(0);
-    (begin < end).then(|| before[begin..end].trim_start_matches('@').to_string())
+    (begin < end).then(|| before[begin..end].to_string())
 }
 
 fn template_path_expr(
@@ -451,24 +452,24 @@ fn template_path_expr(
 ) -> Option<TExpr> {
     let mut segments = path.split('.');
     let root_segment = segments.next()?;
-    let explicit_root = root_segment.starts_with('@');
-    let root = root_segment.trim_start_matches('@');
+    let explicit_root = root_segment.starts_with('$');
+    let root = root_segment.trim_start_matches('$');
     if root.is_empty()
         || (!explicit_root
             && !template_vars.contains(root)
             && !env.locals.contains_key(root)
-            && !env.locals.contains_key(&format!("@{root}")))
+            && !env.locals.contains_key(&format!("${root}")))
     {
         return None;
     }
     let root_name = if explicit_root {
-        format!("@{root}")
+        format!("${root}")
     } else {
         root.to_string()
     };
     let mut value = template_reference_expr(&root_name, env);
     for field in segments {
-        let field = field.trim_start_matches('@');
+        let field = field.trim_start_matches('$');
         if field.is_empty() {
             return None;
         }
@@ -497,12 +498,12 @@ fn template_marker_expr(
             return value;
         }
     }
-    let marker_name = marker_text.strip_prefix('@').unwrap_or(marker_text);
+    let marker_name = marker_text.strip_prefix('$').unwrap_or(marker_text);
     if template_vars.contains(marker_name) {
         return template_reference_expr(marker_name, env);
     }
     if let Some(base) = template_marker_base(source, marker.start) {
-        let marked_base = format!("@{base}");
+        let marked_base = format!("${base}");
         if template_vars.contains(&base)
             || env.locals.contains_key(&base)
             || env.locals.contains_key(&marked_base)
@@ -521,6 +522,23 @@ fn template_marker_expr(
     template_reference_expr(&source[marker.start..marker.end], env)
 }
 
+/// D-NAME-SPLICE1=B: `$name` splices a template binding. A `$` word naming
+/// no binding (`$build`), or read as a member of a bound value
+/// (`field.$name`), is a compiler fact and stays in the source.
+fn template_splice_is_bound(
+    source: &str,
+    marker: &TemplateMarker,
+    env: &LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> bool {
+    let Some(bare) = source[marker.start..marker.end].strip_prefix('$') else {
+        return true;
+    };
+    let bound = |name: &str| template_vars.contains(name) || env.locals.contains_key(name);
+    bound(bare)
+        && !template_marker_base(source, marker.start).is_some_and(|base| bound(base.as_str()))
+}
+
 fn template_source(
     span: Span,
     cx: &Cx,
@@ -530,6 +548,7 @@ fn template_source(
     let source = cx.src.get(span.start..span.end)?.to_string();
     let holes = scan_template_markers(&source, template_vars)
         .into_iter()
+        .filter(|marker| template_splice_is_bound(&source, marker, env, template_vars))
         .map(|marker| crate::Comptime::TemplateHole {
             start: marker.start,
             end: marker.end,
@@ -605,7 +624,7 @@ fn lower_template_stmt(
 ) -> Vec<Box<crate::Comptime::TemplateItem<TExpr>>> {
     match statement {
         Stmt::Val(binding) if !binding.name.is_empty() && binding.pattern.is_none() => {
-            let name = binding.name.trim_start_matches('@').to_string();
+            let name = binding.name.clone();
             let value = lower_template_expr(&binding.init, cx, env, template_vars);
             env.bind(&name, TLocal::user(name.clone()), Some(value.ty.clone()));
             vec![Box::new(crate::Comptime::TemplateItem::Statement(
@@ -1058,7 +1077,7 @@ pub(crate) fn lower_call_arg_value(
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
-    let value = match (&a.expr, &conv) {
+    let mut value = match (&a.expr, &conv) {
         (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
             TExpr {
                 ty: ty.clone(),
@@ -1129,6 +1148,12 @@ pub(crate) fn lower_call_arg_value(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
+    // `None` carries no payload to type it; the checked parameter does.
+    if matches!(value.kind, TExprKind::Absent) {
+        if let Some((_, want @ Type::Option(_))) = &conv {
+            value.ty = want.clone();
+        }
+    }
     env.fallback_subject = fallback_subject;
     env.binder_refs = saved_binder_refs;
     value

@@ -58,7 +58,7 @@ enum Case {{
 {cases}
 }}
 
-@ALL :: [{all}]
+ALL :: [{all}]
 
 fn dense(r: Int) -> Int {{
     x :: (r * 40503 + 12345) % 1000003
@@ -81,17 +81,17 @@ fn mk(mask: Int) -> Set<Case> {{
     out := Set.from([Case]{{}})
     i := 0
     loop i < {k} {{
-        if (mask >> i) & 1 == 1 -> &out.add(@ALL[i])
+        if (mask >> i) & 1 == 1 -> &out.add(ALL[i])
         i += 1
     }}
     return out
 }}
 
-fn has(s: Set<Case>, i: Int) -> Bool {{ s.has(@ALL[i]) }}
+fn has(s: Set<Case>, i: Int) -> Bool {{ s.has(ALL[i]) }}
 
-fn set_bit(s: &Set<Case>, i: Int) {{ &s.add(@ALL[i]) }}
+fn set_bit(s: &Set<Case>, i: Int) {{ &s.add(ALL[i]) }}
 
-fn clear_bit(s: &Set<Case>, i: Int) {{ &s.remove(@ALL[i]) }}
+fn clear_bit(s: &Set<Case>, i: Int) {{ &s.remove(ALL[i]) }}
 
 fn uni(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.union(b) }}
 

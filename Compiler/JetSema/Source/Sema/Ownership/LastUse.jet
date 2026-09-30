@@ -33,13 +33,13 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
         }
         .Try(value, _, _, context) -> {
             if sema_ownership_last_use_expr(value, name) -> return true
-            if context != None -> return sema_ownership_last_use_expr(context ?? Expr.Unit{span: Span{start: 0, end: 0}}, name)
+            if context != None -> return sema_ownership_last_use_expr(context, name)
         }
         .MemberSpread(base, _, _) -> return sema_ownership_last_use_expr(base, name)
         .Index(base, index, _, _) -> return sema_ownership_last_use_expr(base, name) || sema_ownership_last_use_expr(index, name)
         .Slice(base, start, end, range, _) -> {
             if sema_ownership_last_use_expr(base, name) || sema_ownership_last_use_expr(start, name) || sema_ownership_last_use_expr(end, name) -> return true
-            if range != None -> return sema_ownership_last_use_expr(range ?? Expr.Unit{span: Span{start: 0, end: 0}}, name)
+            if range != None -> return sema_ownership_last_use_expr(range, name)
         }
         .Range(start, end, _, _) -> return sema_ownership_last_use_expr(start, name) || sema_ownership_last_use_expr(end, name)
         .ListLit(elements, _) -> {
@@ -102,9 +102,9 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
                 .Value(fallback_value) -> return sema_ownership_last_use_expr(fallback_value, name)
                 .Block(body, fallback_value, _) -> {
                     if sema_ownership_last_use_statements(body, name) -> return true
-                    if fallback_value != None -> return sema_ownership_last_use_expr(fallback_value ?? Expr.Unit{span: Span{start: 0, end: 0}}, name)
+                    if fallback_value != None -> return sema_ownership_last_use_expr(fallback_value, name)
                 }
-                .Return(fallback_value, _) -> if fallback_value != None -> return sema_ownership_last_use_expr(fallback_value ?? Expr.Unit{span: Span{start: 0, end: 0}}, name)
+                .Return(fallback_value, _) -> if fallback_value != None -> return sema_ownership_last_use_expr(fallback_value, name)
                 .Panic(_, _) -> {}
                 else -> {}
             }
@@ -149,7 +149,7 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
         .Expr(value) | .Yield(value, _) | .DeferClose(value, _) -> return sema_ownership_last_use_expr(value, name)
         .Val(binding) -> return sema_ownership_last_use_expr(binding.init, name)
         .Assign(target, _, _, value) -> return sema_ownership_last_use_lvalue(target, name) || sema_ownership_last_use_expr(value, name)
-        .Return(value, _) -> if value != None -> return sema_ownership_last_use_expr(value ?? Expr.Unit{span: Span{start: 0, end: 0}}, name)
+        .Return(value, _) -> if value != None -> return sema_ownership_last_use_expr(value, name)
         .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> return sema_ownership_last_use_expr(value, name)
         .While(condition, body, _, _, _) -> return sema_ownership_last_use_expr(condition, name) || sema_ownership_last_use_statements(body, name)
         .For(_, _, _, kind, body, _, _, _, _) -> {
@@ -157,13 +157,13 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
                 .Range(start, end, step, _) -> {
                     if sema_ownership_last_use_expr(start, name) || sema_ownership_last_use_expr(end, name) -> return true
                     if step != None {
-                        if sema_ownership_last_use_expr(step ?? Expr.Unit{span: Span{start: 0, end: 0}}, name) -> return true
+                        if sema_ownership_last_use_expr(step, name) -> return true
                     }
                 }
                 .In(collection, step) -> {
                     if sema_ownership_last_use_expr(collection, name) -> return true
                     if step != None {
-                        if sema_ownership_last_use_expr(step ?? Expr.Unit{span: Span{start: 0, end: 0}}, name) -> return true
+                        if sema_ownership_last_use_expr(step, name) -> return true
                     }
                 }
             }
@@ -174,12 +174,12 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
             loop arm in arms {
                 if sema_ownership_last_use_expr(arm.cond, name) || sema_ownership_last_use_statements(arm.body, name) -> return true
             }
-            if else_body != None -> return sema_ownership_last_use_statements(else_body ?? [Stmt]{}, name)
+            if else_body != None -> return sema_ownership_last_use_statements(else_body, name)
         }
         .CountedLoop(init, condition, step, body, _, _, _) -> {
             if sema_ownership_last_use_expr(init.init, name) || sema_ownership_last_use_expr(condition, name) -> return true
             if step != None {
-                if sema_ownership_last_use_statement(step ?? Stmt.Break{span: Span{start: 0, end: 0}}, name) -> return true
+                if sema_ownership_last_use_statement(step, name) -> return true
             }
             return sema_ownership_last_use_statements(body, name)
         }
@@ -190,7 +190,7 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
         .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) -> return sema_ownership_last_use_statements(body, name)
         .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
             if sema_ownership_last_use_expr(condition, name) || sema_ownership_last_use_statements(then_body, name) -> return true
-            if else_body != None -> return sema_ownership_last_use_statements(else_body ?? [Stmt]{}, name)
+            if else_body != None -> return sema_ownership_last_use_statements(else_body, name)
         }
         .ContextBlock(fields, body, _) -> {
             loop field in fields { if sema_ownership_last_use_expr(field.value, name) -> return true }

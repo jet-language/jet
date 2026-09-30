@@ -165,7 +165,7 @@ fn the_parser_and_the_registry_read_the_same_rows() {
             .map(|param| param.name.as_str())
             .collect();
         assert!(
-            facts.contains(&"@sites"),
+            facts.contains(&"$sites"),
             "`{}` must say where it may be written",
             declaration.name
         );
@@ -221,7 +221,7 @@ fn the_parser_and_the_registry_read_the_same_rows() {
         let written_sites = declaration
             .params
             .iter()
-            .find(|parameter| parameter.name == "@sites")
+            .find(|parameter| parameter.name == "$sites")
             .and_then(|parameter| parameter.value.as_deref())
             .and_then(|value| match value {
                 Expr::ListLit(values, _) => Some(
@@ -247,7 +247,7 @@ fn the_parser_and_the_registry_read_the_same_rows() {
         let written_repeatable = declaration
             .params
             .iter()
-            .find(|parameter| parameter.name == "@repeatable")
+            .find(|parameter| parameter.name == "$repeatable")
             .and_then(|parameter| parameter.value.as_deref())
             .is_some_and(|value| matches!(value, Expr::Bool(true, _)));
         assert_eq!(
@@ -359,7 +359,7 @@ fn every_fact_row_carries_its_law_columns() {
         let written_name = parsed_declaration
             .params
             .iter()
-            .find(|param| param.name == "@name")
+            .find(|param| param.name == "$name")
             .and_then(|param| param.value.as_deref())
             .and_then(|value| match value {
                 Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {
@@ -398,11 +398,11 @@ fn every_fact_row_carries_its_law_columns() {
 #[test]
 fn source_rules_record_facts_and_add_checked_members() {
     let source = r#"
-marker Recorded(@sites: [.Type])
+marker Recorded($sites: [.Type])
 
-marker AddGreeting(@sites: [.Type]) {
+marker AddGreeting($sites: [.Type]) {
     tname :: target.name
-    impl @tname {
+    impl $tname {
         fn greeting(self) -> String -> "hello"
     }
 }
@@ -514,7 +514,7 @@ fn run() {
 #[test]
 fn source_rule_rejects_a_wrong_typed_argument() {
     let diagnostics = jet::compile(
-        "marker NeedsName(name: String, @sites: [.Type])\n#NeedsName(7)\nstruct Person { id: Int }\n",
+        "marker NeedsName(name: String, $sites: [.Type])\n#NeedsName(7)\nstruct Person { id: Int }\n",
     )
     .expect_err("a source rule must check its typed argument");
     assert!(
@@ -542,7 +542,7 @@ fn unknown_callable_rule_is_checked_against_the_bundle_registry() {
 #[test]
 fn source_rule_rejects_a_site_not_in_its_declared_facts() {
     let diagnostics =
-        jet::compile("marker TypeOnly(@sites: [.Type])\n#TypeOnly fn work() {}\nfn run() {}\n")
+        jet::compile("marker TypeOnly($sites: [.Type])\n#TypeOnly fn work() {}\nfn run() {}\n")
             .expect_err("a source rule must enforce its declared legal sites");
     assert!(
         diagnostics
@@ -555,7 +555,7 @@ fn source_rule_rejects_a_site_not_in_its_declared_facts() {
 #[test]
 fn source_rule_rejects_a_non_repeatable_duplicate() {
     let diagnostics =
-        jet::compile("marker Once(@sites: [.Type])\n#[Once, Once]\nstruct Person { id: Int }\n")
+        jet::compile("marker Once($sites: [.Type])\n#[Once, Once]\nstruct Person { id: Int }\n")
             .expect_err("a non-repeatable source rule must reject a duplicate");
     let duplicate = diagnostics
         .iter()
@@ -572,7 +572,7 @@ fn source_rule_rejects_a_non_repeatable_duplicate() {
 fn source_rule_body_can_reject_a_function_target() {
     let diagnostics = jet::compile(
         r#"
-marker RejectsFunction(@sites: [.Function]) {
+marker RejectsFunction($sites: [.Function]) {
     reject(
         code: "E0927",
         what: "the function is not allowed",
@@ -606,9 +606,9 @@ fn run() {}
 fn source_rule_collision_names_generated_and_written_spans() {
     let diagnostics = jet::compile(
         r#"
-marker AddGreeting(@sites: [.Type]) {
+marker AddGreeting($sites: [.Type]) {
     tname :: target.name
-    impl @tname {
+    impl $tname {
         fn greeting(self) -> String -> "generated"
     }
 }
@@ -641,7 +641,7 @@ impl Person {
 fn source_rule_rejection_keeps_the_registered_cause() {
     let diagnostics = jet::compile(
         r#"
-marker Rejects(@sites: [.Type]) {
+marker Rejects($sites: [.Type]) {
     reject(
         code: "E0927",
         what: "the rule rejected this type",
@@ -807,8 +807,8 @@ fn run() {
     );
 
     const DISTINCT_SOURCE: &str = r#"
-fact Scheduler(@name: "Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider], @decision: "D-FREESTAND-SCHED1")
-fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fact Scheduler($name: "Scheduler", $holds: .Build, $safe: .Gain, $gates: [provider], $decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler($name: "Target.Scheduler", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: "D-FREESTAND-SCHED1")
 fn run() {}
 "#;
     let distinct_outcome = std::panic::catch_unwind(|| jet::compile(DISTINCT_SOURCE))
@@ -819,8 +819,8 @@ fn run() {}
     );
 
     const DUPLICATE_SOURCE: &str = r#"
-fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
-fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler($name: "Target.Scheduler", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler($name: "Target.Scheduler", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: "D-FREESTAND-SCHED1")
 fn run() {}
 "#;
     let duplicate_shape = |source: &str, label: &str| {
@@ -862,8 +862,8 @@ fn run() {}
     }
 
     const ALIASED_DUPLICATE_SOURCE: &str = r#"
-fact Scheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
-fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fact Scheduler($name: "Target.Scheduler", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler($name: "Target.Scheduler", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: "D-FREESTAND-SCHED1")
 fn run() {}
 "#;
     duplicate_shape(
@@ -872,8 +872,8 @@ fn run() {}
     );
 
     const CONFLICT_SOURCE: &str = r#"
-fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
-fact TargetScheduler(@name: "Target.Scheduler", @holds: .Value, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler($name: "Target.Scheduler", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler($name: "Target.Scheduler", $holds: .Value, $safe: .Gain, $gates: [provider, digest], $decision: "D-FREESTAND-SCHED1")
 fn run() {}
 "#;
     let mut conflict_baseline = None;

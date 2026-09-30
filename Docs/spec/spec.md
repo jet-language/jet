@@ -88,7 +88,7 @@ vocabulary](vocabulary.md).
   changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
   D-UNIFYLIT1=A).
 - Marker declarations use one named parameter list:
-  `marker Name(args..., @sites: [...], @repeatable: ..., ...)`. Ordinary
+  `marker Name(args..., $sites: [...], $repeatable: ..., ...)`. Ordinary
   arguments and `@`-marked metadata share that list; checked-text marker
   declarations are retired, so typed text heads do not introduce a second
   marker form (D-META-FORM1, D-MARKER-SITES1, D-BOUND-SINK1=A).
@@ -238,7 +238,8 @@ reads in an initializer are E0622; computation belongs in an explicit function.
 Inside a function, the same spellings are local bindings. A top-level executable statement is
 rejected with E0621; Jet does not synthesize an implicit runtime function.
 The `const` keyword is retired and is recognized only to teach its replacement
-(E0146). Compile-time bindings use the `@name :: value` form described below.
+(E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME :: value`,
+described below.
 
 Names cannot shadow an existing name in the same scope (E0118), and definitions
 are unique (E0105). A name that would shadow a built-in is rejected with E0106;
@@ -256,7 +257,7 @@ not a list or destructure (D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1,
 D-FENCE2=A).
 
 `#Track name :: value` and `#Track name := value` attach the origin fact. Read
-that fact as `value.@origin -> ?OriginInfo`; there is no runtime origin
+that fact as `value.$origin -> ?OriginInfo`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
 Arithmetic `+`, `-`, `*`, and the numeric division operations use the registered
@@ -392,11 +393,17 @@ parentheses: `value ?? (next)`.
 
 ## Compile-time names and staged syntax
 
-`@name :: value` is the explicit compile-time-demand binding. Ordinary foldable
-expressions do not need the marker. At file scope, unmarked `name :: value` and
-`name := value` remain runtime module globals; they do not require `#Persist`.
-`#Static @name` requests a stable-address Rust static when the contract needs
-one. `#Persist name := value` additionally marks hot-reload state on a bare
+A compile-time constant is an ordinary ALL_CAPS name: an immutable module-level
+`::` binding such as `MAX_RETRIES :: 3` is evaluated while building and read as
+`MAX_RETRIES`; failure to compute it stops the build (D-PREP-SURFACE2=A). In a
+block, names stay snake_case (D-SHAPE-CASE1): `lanes :: prep { calculate() }`
+evaluates its single final expression while building, and names bound inside a
+`prep { … }` statement block stay readable after it. Ordinary foldable expressions need no constant. At file
+scope, other `name :: value` and `name := value` bindings remain runtime module
+globals; they do not require `#Persist`. `#Static NAME :: value` requests a
+stable-address Rust static when the contract needs one, and `#Inline NAME ::
+value` copies the value into use sites (D-CONSTMARK1). The retired `@NAME`
+spelling teaches E0388. `#Persist name := value` additionally marks hot-reload state on a bare
 binding (D-VERDICT-1308-1, D-PERSIST1).
 
 `embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]`
@@ -445,6 +452,17 @@ impl Circle {
     }
 }
 ```
+
+`Type{ body }` is the one typed-literal head for every type (D-DOTCTOR3): the
+body uses the type's literal notation, such as elements for `[U8]{42, 0}` and
+entries for `[String:Int]{"a": 1}`. A body of exactly one expression is decided
+by its type. When the expression is a value of the head type, or one that a
+parameter of that type accepts, the result is that whole value:
+`[Int]{[1, 2, 3].map(n -> n * 2)}` is a three-element list, `[String:Int]{m}`
+is the map `m`, and `Float{rows()}` widens an `Int` with the checked rule a
+`Float` parameter applies, stopping with E3010 when the number has no exact
+Float. Otherwise the head's notation applies, so `[[Int]]{xs}` is a one-element
+list when `xs: [Int]` (D-DOTCTOR3 amendment, 2026-09-28, #3739).
 
 `self` is the receiver and follows the same access law as any parameter. In an
 `&self` method, field assignment, compound assignment, and whole-receiver
@@ -531,7 +549,7 @@ spelling is not an alias (D-ONCE-AT1=D).
 `#Off <stmt>` parses and type-checks one statement but emits no code in any
 build. `#DebugOnly <stmt>` type-checks in every build and emits only in debug or
 dev builds. Names introduced inside either marker are scoped to that marker body.
-The registered build-profile fact is `@build.profile`; bare `build.profile` is
+The registered build-profile fact is `$build.profile`; bare `build.profile` is
 not a user-typeable comptime value (D-CANVASSTATE1).
 
 `#Meta(category: "Movement", tunable)` attaches checked tooling facts to a
@@ -547,7 +565,7 @@ uses the host OS by default. Ungated code can select the surviving implementatio
 with the compiler-known switch
 
 ```jet
-prep if @build.os == {
+prep if $build.os == {
     .Linux -> …
     .MacOS -> …
     .Windows -> …
@@ -556,7 +574,7 @@ prep if @build.os == {
 ```
 
 The switch folds before target-gating checks. Arms must cover each OS or provide
-`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `@build.os`
+`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `$build.os`
 (E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants
 (E-OSTARGET-DISPATCH-ARM) (D-OSTARGET1, D-OSTARGET2).
 
@@ -761,8 +779,16 @@ without writing a return annotation. Pin an entry to an application error with
 (D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
 
 Construct the two sides with `Ok(value)` and `Err(error)`. Pattern tests use
-`.Ok(value)` and `.Err(error)`, for example `result == .Ok(n)`. A failure
-conversion is one declared rail:
+`.Ok(value)` and `.Err(error)`, for example `result == .Ok(n)`. A value of an
+optional-success type such as `User? DBError!` has exactly three states, and
+its patterns name them directly: `.Val(user)`, `.None`, and `.Err(e)`. An
+else-less table over it must cover all three (E0307 names the missing state).
+The nested `.Ok(.Val(user))` / `.Ok(.None)` spelling is retired and refused
+with E0392, whose edit writes the flat state. A table with an `.Err` arm
+handles the failure itself; without one, the failure passes up and the
+`.Val`/`.None` arms test the optional. (D-OUTCOME-SHAPE1=A)
+
+A failure conversion is one declared rail:
 
 ```jet
 impl DiskError -> StoreError {
@@ -780,10 +806,12 @@ violation of the typed-target rule as E2406. (D-ERR-CONV, D-FAIL-CONV1,
 D-FAIL-CONV2)
 
 A fallible call propagates its failure automatically: success continues with
-its payload and failure returns from the current fallible context. Optional
-values propagate `None` in the same way. The postfix form `?(text)` is not a
-second propagation operator; it adds one failure-context frame to the report.
-Use it when a boundary needs a local explanation. (S7, D-FAIL-CTX1)
+its payload and failure returns from the current fallible context. A missing
+value never leaves a function by itself: it stays an ordinary `T?` value until
+the code handles it with `?.`, `??`, or a `.Val`/`.None` pattern, and reading a
+field of it directly is E0310 (D-OUTCOME-SHAPE1=A). The postfix form `?(text)`
+is not a second propagation operator; it adds one failure-context frame to the
+report. Use it when a boundary needs a local explanation. (S7, D-FAIL-CTX1)
 
 `??` is the fallback operator for an optional or fallible value. It yields the
 success payload or evaluates its right side. Its precedence is looser than
@@ -817,6 +845,18 @@ context (E0404), and a bad fallback (E0405). Handle the value, propagate it,
 or bind it. The sole intentional-discard spelling is
 `.drop("reason")`; the reason is part of the source-level audit trail.
 (D-IGNORERET2, D-MARK-DISCARD1)
+
+Two other lost values are errors (E0433, D-DISCARD1=A). A statement that
+calls a pure function and ignores a non-Unit result does nothing: the call is
+pure when its solved effect row is empty, it cannot fail, and it passes
+nothing with `&`. Calls with effects or `&` arguments may still drop their
+result. The last line of a named function with no written return type is
+the other case: the function returns nothing, so a non-Unit value there is
+lost, and the fix is the missing `-> T` or `.drop("reason")`. Lambdas are
+unaffected, because their result type comes from the body. When a return type
+is written and the last line does not match it, E0113 reports the value's
+type or shape and names the conversion or wrap; the declared return type is
+the contract and is never the suggested fix.
 
 ## Physical dimensions
 
@@ -1652,6 +1692,15 @@ kind takes precedence. A single-file `jet run` or `jet build` still requires
 an executable entry point and reports **E0101** when it has no `run` function
 (U10, U17, D-LIB-USE, D-ILE1).
 
+A dependency package is checked as its own package. An importing check never
+repeats a dependency's reports; when the dependency has errors, the importer
+reports one **E0626** naming the dependency and the `jet check` that owns
+them. A path dependency declared by a dependency must stay below that
+dependency's directory (**E1206**) unless the root package declares the same
+directory itself, which lets sibling packages such as `Compiler/JetLexer` and
+`Compiler/JetFoundation` share a dependency (D-MOD-CYCLE1). The UI fixture is
+`tests/ui/dependency_package_errors/`.
+
 Cross-file access is qualified:
 
 ```jet
@@ -1726,6 +1775,17 @@ access across files reports **E0605**. An unknown `pub(...)` qualifier is
 **E0411**. Inline-module bodies are type-checked in their defining scope, so a
 private sibling can call another sibling without exporting it
 (D-MOD3, D-PUBPKG1).
+
+A member import names any public top-level declaration: a function, type,
+enum, trait, tag, protocol, or constant. A constant is exported the same way
+as any other item, `pub MAX_ITEMS :: 8`, and is read qualified
+(`limits.MAX_ITEMS`) or by name after `use limits.[MAX_ITEMS]` (3A). A `use`
+inside an inline-module body follows the same rule.
+
+An `impl` head that names a declaration through a module alias binds the alias
+to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
+`impl Local.types.Named { ... }` implements `types.Named` for `Local`
+(D-IMPLDOT1).
 
 A directory module exposes a child only through an explicit Rust-style
 re-export:
@@ -3507,6 +3567,18 @@ while retaining the last build time and diagnostic. A renewed lease reveals
 that retained state, and recovery reloads even if a restarted server reuses a
 previous numeric version (D-FE-DEVSRV1).
 
+Revisions are numbered: `/__jet_dev_version` serves the last accepted build.
+The watcher takes its baseline before the first build, so a save made the
+moment the server reports ready still rebuilds, and a save is compiled only
+after its content stops changing (an in-place save that briefly reads empty is
+not compiled as an empty file). While a build is in flight or rejected,
+`/__jet_dev_status` reports `candidate`, the revision that build would publish.
+A rejected build's diagnostic carries `diagnostic_revision` (that candidate),
+and `accepted_revision` and `last_good_revision` equal the revision still
+served. Recovery publishes the candidate. With `--json`, every watch-cycle build
+emits one `jet.status/v1` record with action `dev.rebuild`, its `jet.report/v3`
+diagnostics and the same revision fields.
+
 ## Canvas visual editor
 
 The web development server serves Canvas at `/canvas`; its versioned JSON
@@ -4093,7 +4165,7 @@ and may have `panic`. A locked package requires `name`, `version`, `source_kind`
 `content_hash`, `layer`, and `inferred_layer`. Empty collections remain empty
 lists. Optional source fields remain optional strings. Git sources redact
 credentials, URL queries, and fragments. Current package identity remains
-available through `@build.package.name` and `@build.package.version`, not as a
+available through `$package.name` and `$package.version`, not as a
 repeated field in each view.
 
 Each operation returns a compile-time `Result`. The Rust facade reports

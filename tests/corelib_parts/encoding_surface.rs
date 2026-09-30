@@ -265,7 +265,7 @@ use core.math.random as random
 
 fn run() {
     values := [1, 2, 3]
-    @folded :: random.shuffle(&values)
+    folded :: prep { random.shuffle(&values) }
 }
 "#;
     let fold_diagnostics = jet::compile(fold_src).expect_err("ambient shuffle must not fold");
@@ -278,7 +278,7 @@ use core.math.random as random
 
 fn run() {
     #Impure("the gate must not authorize nondeterministic folding") {
-        @folded :: random.int(1, 6)
+        folded :: prep { random.int(1, 6) }
     }
 }
 "#;
@@ -708,10 +708,10 @@ fn summarize() -> String {
     return "unreachable"
 }
 
-@EXPECTED :: summarize()
+EXPECTED :: prep { summarize() }
 
 fn run() {
-    print(@EXPECTED)
+    print(EXPECTED)
     print(summarize())
 }
 "#;
@@ -758,17 +758,17 @@ fn show(result: DataTree XMLError!) -> String {
     return "unreachable"
 }
 
-@NUMERIC :: show(xml.parse("<r>&#0;</r>"))
-@ATTRIBUTE :: show(xml.parse("<r a='&#0;'/>"))
-@NAMESPACE :: show(xml.parse("<r xmlns='&#0;'/>"))
+NUMERIC :: prep { show(xml.parse("<r>&#0;</r>")) }
+ATTRIBUTE :: prep { show(xml.parse("<r a='&#0;'/>")) }
+NAMESPACE :: prep { show(xml.parse("<r xmlns='&#0;'/>")) }
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
     runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
     runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
-    print("{@NUMERIC}|{runtime_numeric}")
-    print("{@ATTRIBUTE}|{runtime_attribute}")
-    print("{@NAMESPACE}|{runtime_namespace}")
+    print("{NUMERIC}|{runtime_numeric}")
+    print("{ATTRIBUTE}|{runtime_attribute}")
+    print("{NAMESPACE}|{runtime_namespace}")
 }
 "#;
     let expected = concat!(
@@ -821,14 +821,14 @@ fn summarize(source: String) -> String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-@CR :: String.from_bytes([13]) ?? panic("CR")
-@CLOSE :: "/>"
-@SOURCE :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{@CR}\nD{@CR}E' b='&#xD;&#xA;&#x9;'{@CLOSE}"
-@NORMALIZED :: summarize(@SOURCE)
+CR :: prep { String.from_bytes([13]) ?? panic("CR") }
+CLOSE :: prep { "/>" }
+SOURCE :: prep { "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{CR}\nD{CR}E' b='&#xD;&#xA;&#x9;'{CLOSE}" }
+NORMALIZED :: prep { summarize(SOURCE) }
 
 fn run() {
-    runtime := summarize(@SOURCE)
-    print("{@NORMALIZED}|{runtime}")
+    runtime := summarize(SOURCE)
+    print("{NORMALIZED}|{runtime}")
 }
 "#;
     let expected = "true|true|3|true|true|true|3|true\n";
@@ -901,24 +901,24 @@ fn show32(text: String) -> String {
     return "unreachable"
 }
 
-@STANDARD_WS :: show64("Z g = =\n")
-@STANDARD_UNPADDED :: show64("Zg")
-@STANDARD_INTERIOR :: show64("Zg=A")
-@STANDARD_EXCESS :: show64("Zg====")
-@STANDARD_BITS :: show64("Zh==")
-@STANDARD_PADDING :: show64("=AAA")
-@STANDARD_ALPHABET :: show64("Zg-=")
-@STANDARD_SIZE :: show64("A")
-@URL_OUTER_WS :: show64url(" \tZg==\n")
-@URL_INTERIOR :: show64url("Zg=A")
-@URL_STANDARD_ALPHABET :: show64url("+w")
-@URL_BITS :: show64url("Zh")
-@URL_PADDING :: show64url("=AAA")
-@URL_SIZE :: show64url("A")
-@BASE32_LOOSE :: show32("m=y======\n")
-@BASE32_BITS :: show32("MZ======")
-@BASE32_SHORT :: show32("A")
-@BASE32_ALPHABET :: show32("M0======")
+STANDARD_WS :: prep { show64("Z g = =\n") }
+STANDARD_UNPADDED :: prep { show64("Zg") }
+STANDARD_INTERIOR :: prep { show64("Zg=A") }
+STANDARD_EXCESS :: prep { show64("Zg====") }
+STANDARD_BITS :: prep { show64("Zh==") }
+STANDARD_PADDING :: prep { show64("=AAA") }
+STANDARD_ALPHABET :: prep { show64("Zg-=") }
+STANDARD_SIZE :: prep { show64("A") }
+URL_OUTER_WS :: prep { show64url(" \tZg==\n") }
+URL_INTERIOR :: prep { show64url("Zg=A") }
+URL_STANDARD_ALPHABET :: prep { show64url("+w") }
+URL_BITS :: prep { show64url("Zh") }
+URL_PADDING :: prep { show64url("=AAA") }
+URL_SIZE :: prep { show64url("A") }
+BASE32_LOOSE :: prep { show32("m=y======\n") }
+BASE32_BITS :: prep { show32("MZ======") }
+BASE32_SHORT :: prep { show32("A") }
+BASE32_ALPHABET :: prep { show32("M0======") }
 
 fn run() {
     r_standard_ws := show64("Z g = =\n")
@@ -939,24 +939,24 @@ fn run() {
     r_base32_bits := show32("MZ======")
     r_base32_short := show32("A")
     r_base32_alphabet := show32("M0======")
-    print("{@STANDARD_WS}|{r_standard_ws}")
-    print("{@STANDARD_UNPADDED}|{r_standard_unpadded}")
-    print("{@STANDARD_INTERIOR}|{r_standard_interior}")
-    print("{@STANDARD_EXCESS}|{r_standard_excess}")
-    print("{@STANDARD_BITS}|{r_standard_bits}")
-    print("{@STANDARD_PADDING}|{r_standard_padding}")
-    print("{@STANDARD_ALPHABET}|{r_standard_alphabet}")
-    print("{@STANDARD_SIZE}|{r_standard_size}")
-    print("{@URL_OUTER_WS}|{r_url_outer_ws}")
-    print("{@URL_INTERIOR}|{r_url_interior}")
-    print("{@URL_STANDARD_ALPHABET}|{r_url_standard_alphabet}")
-    print("{@URL_BITS}|{r_url_bits}")
-    print("{@URL_PADDING}|{r_url_padding}")
-    print("{@URL_SIZE}|{r_url_size}")
-    print("{@BASE32_LOOSE}|{r_base32_loose}")
-    print("{@BASE32_BITS}|{r_base32_bits}")
-    print("{@BASE32_SHORT}|{r_base32_short}")
-    print("{@BASE32_ALPHABET}|{r_base32_alphabet}")
+    print("{STANDARD_WS}|{r_standard_ws}")
+    print("{STANDARD_UNPADDED}|{r_standard_unpadded}")
+    print("{STANDARD_INTERIOR}|{r_standard_interior}")
+    print("{STANDARD_EXCESS}|{r_standard_excess}")
+    print("{STANDARD_BITS}|{r_standard_bits}")
+    print("{STANDARD_PADDING}|{r_standard_padding}")
+    print("{STANDARD_ALPHABET}|{r_standard_alphabet}")
+    print("{STANDARD_SIZE}|{r_standard_size}")
+    print("{URL_OUTER_WS}|{r_url_outer_ws}")
+    print("{URL_INTERIOR}|{r_url_interior}")
+    print("{URL_STANDARD_ALPHABET}|{r_url_standard_alphabet}")
+    print("{URL_BITS}|{r_url_bits}")
+    print("{URL_PADDING}|{r_url_padding}")
+    print("{URL_SIZE}|{r_url_size}")
+    print("{BASE32_LOOSE}|{r_base32_loose}")
+    print("{BASE32_BITS}|{r_base32_bits}")
+    print("{BASE32_SHORT}|{r_base32_short}")
+    print("{BASE32_ALPHABET}|{r_base32_alphabet}")
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);

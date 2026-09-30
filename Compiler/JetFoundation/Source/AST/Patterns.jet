@@ -1,0 +1,86 @@
+// Rust-shaped pattern and destructuring nodes. Span is shared with JetLexer;
+// semantic types are the canonical JetFoundation::Type.
+
+pub enum Pattern {
+    Variant(variant: String, bindings: [PatSlot], leading_dot: Bool, span: Span)
+    // S31: `inner` holds a nested payload pattern (`.Val(.Rect(w, h))`,
+    // `.Err(.Low)`); the binding is then `_`.
+    Present(binding: String, binding_span: Span, inner: Pattern?, span: Span)
+    Absent(span: Span)
+    Ok(binding: String, binding_span: Span, inner: Pattern?, span: Span)
+    Err(binding: String, binding_span: Span, inner: Pattern?, span: Span)
+    Range(lo: Int, hi: Int, span: Span)
+    Or(alternatives: [Pattern], span: Span)
+    Struct(fields: [StructPatField], rest: Span?, span: Span)
+    StrMatch(parts: [StrMatchPart], span: Span)
+    BinMatch(parts: [BinMatchPart], span: Span)
+}
+
+pub enum PatSlot {
+    Wildcard
+    Bind(name: String, span: Span)
+    Range(lo: Int, hi: Int)
+    // S31: a nested pattern tests this payload slot.
+    Nested(pattern: Pattern)
+    // D-PAT-NAMED-NEST1=A: one `field: slot` entry of `.Case{field: pat, …}`;
+    // a bare `field` is `field: field`. Sema places each entry at the
+    // positional slot its field names.
+    Named(field: String, field_span: Span, slot: PatSlot)
+    // D-PAT-NAMED-NEST1=A: the trailing `..` of `.Case{field: pat, ..}`.
+    Rest(span: Span)
+}
+
+pub enum BinMatchPart {
+    Lit(bytes: [U8])
+    Hole(name: String, spec: BinSpec, span: Span)
+}
+
+pub enum BinSpec {
+    Bits(width: Int, endian: BinEndian)
+    Rest
+}
+
+pub enum BinEndian {
+    Unspecified
+    Big
+    Little
+}
+
+pub enum StrMatchPart {
+    Lit(text: String)
+    Hole(name: String, ty: Type?, span: Span)
+}
+
+pub enum StructPatField {
+    Bind(field: String, field_span: Span, local: String, local_span: Span)
+    Value(field: String, field_span: Span, value: Expr)
+}
+
+pub struct BindName {
+    pub name: String
+    pub span: Span
+    pub rename: BindNameRename?
+}
+
+pub struct BindNameRename {
+    pub name: String
+    pub span: Span
+}
+
+pub enum BindPattern {
+    Struct(type_name: String, type_span: Span, fields: [BindName], rest: Span?, span: Span)
+    List(elems: [BindName], span: Span)
+    Tuple(elems: [BindName], span: Span)
+    Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span)
+}
+
+pub enum OrFallback {
+    Value(value: Expr)
+    Block(body: [Stmt], value: Expr?, span: Span)
+    Return(value: Expr?, span: Span)
+    Panic(name_span: Span, args: [CallArg])
+    Break(span: Span)
+    Continue(span: Span)
+    BreakLabel(name: String, span: Span)
+    ContinueLabel(name: String, span: Span)
+}

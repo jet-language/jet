@@ -168,9 +168,11 @@ impl<'a> Checker<'a> {
             let Some(depth) = self.flow.bindings.depth_of(name) else {
                 return false;
             };
-            let Some(local_value) = self
-                .ct_scopes
-                .get(depth)
+            // Flow depth counts open scopes, so the function scope is depth 1
+            // while its compile-time frame is `ct_scopes[0]`.
+            let Some(local_value) = depth
+                .checked_sub(1)
+                .and_then(|index| self.ct_scopes.get(index))
                 .and_then(|scope| scope.get(name))
             else {
                 // This lexical local shadows any same-named outer value, but

@@ -43,7 +43,7 @@ fn run() {
 
 const OPTIONAL_FOLD_ELIGIBILITY_SOURCE: &str = r#"
 use core.encoding.base64 as api
-@TEXT :: "Zg=="
+TEXT :: prep { "Zg==" }
 
 fn report_shadowed_local(text: String) {
     input :: ~text
@@ -62,7 +62,7 @@ fn report_reader_progress() {
 }
 
 fn run() {
-    print(@TEXT)
+    print(TEXT)
     report_shadowed_local("a?==")
     report_reader_progress()
 }

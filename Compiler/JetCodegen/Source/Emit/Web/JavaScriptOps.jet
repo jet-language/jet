@@ -10,7 +10,7 @@ fn jet_web_js_move(value: MirValueId) -> String Never! {
 
 fn jet_web_js_field_name(ctx: &JetWebEmitContext, field: MirFieldId) -> String Never! {
     if jet_web_find_field_name(ctx.program, field) == .Val(name) -> return name
-    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR field identity is missing", "checked field projections must resolve through the canonical field table", None)
+    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR field identity is missing", "checked field projections must resolve through the canonical field table", None)
     ""
 }
 
@@ -124,12 +124,12 @@ fn jet_web_js_symbol(ctx: &JetWebEmitContext, symbol: MirSymbol) -> String Never
         .Prelude(name) -> {
             if jet_web_js_symbol_alias(name) == .Val(alias) -> return alias
             if jet_web_js_valid_identifier(name) -> return name
-            jet_web_fail(ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude symbol has no direct Web binding", name, None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude symbol has no direct Web binding", name, None)
             return "__jet_missing_prelude"
         }
         .Runtime(name) -> {
             if jet_web_js_symbol_alias(name) == .Val(alias) -> return alias
-            jet_web_fail(ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Web runtime symbol has no explicit binding", name, None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Web runtime symbol has no explicit binding", name, None)
             return "__jet_missing_runtime"
         }
     }
@@ -320,13 +320,13 @@ fn jet_web_js_copy_bindings(ctx: &JetWebEmitContext, ty: MirType, parent: JetWeb
             definition := jet_web_js_copy_definition(ctx, ty)
             if definition == None {
                 if args.len() != 0 {
-                    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR generic nominal definition is missing", "checked generic instances resolve through a canonical type definition", None)
+                    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR generic nominal definition is missing", "checked generic instances resolve through a canonical type definition", None)
                 }
                 return child
             }
             row :: definition ?? return child
             if row.generic_params.len() != args.len() {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR generic nominal arity is inconsistent", "checked nominal instances retain exactly one argument per declaration parameter", Val(row.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR generic nominal arity is inconsistent", "checked nominal instances retain exactly one argument per declaration parameter", Val(row.span))
                 return child
             }
             loop index in 0..args.len() {
@@ -348,7 +348,7 @@ fn jet_web_js_copy_schema_for_type(ctx: &JetWebEmitContext, ty: MirType, binding
         }
         else -> {}
     }
-    jet_web_js_copy_collect_type(ctx, ty, bindings, &keys, &rows)
+    jet_web_js_copy_collect_type(&ctx, ty, bindings, &keys, &rows)
     jet_web_js_copy_schema_key(ty, bindings)
 }
 
@@ -426,7 +426,7 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MirType, bindings: JetWebC
             if leaf == "DataTree" -> return "kind: \"data\""
             definition := jet_web_js_copy_definition(ctx, ty)
             if definition == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR nominal copy schema definition is missing", "checked copy facts require every nominal type instance to resolve to a canonical definition", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR nominal copy schema definition is missing", "checked copy facts require every nominal type instance to resolve to a canonical definition", None)
                 return "kind: \"opaque\""
             }
             row :: definition ?? return "kind: \"opaque\""
@@ -491,16 +491,16 @@ fn jet_web_js_copy_type_facts(ctx: &JetWebEmitContext) -> String Never! {
     keys := [String]{}
     rows := [String]{}
     bindings :: JetWebCopyBindings{names: [String]{}, keys: [String]{}}
-    loop ty in ctx.program.type_instances -> jet_web_js_copy_collect_type(ctx, ty, bindings, &keys, &rows)
-    loop constant in ctx.program.constants -> jet_web_js_copy_collect_type(ctx, constant.ty, bindings, &keys, &rows)
+    loop ty in ctx.program.type_instances -> jet_web_js_copy_collect_type(&ctx, ty, bindings, &keys, &rows)
+    loop constant in ctx.program.constants -> jet_web_js_copy_collect_type(&ctx, constant.ty, bindings, &keys, &rows)
     loop function in ctx.program.functions {
-        jet_web_js_copy_collect_type(ctx, function.return_type, bindings, &keys, &rows)
-        loop parameter in function.params -> jet_web_js_copy_collect_type(ctx, parameter.ty, bindings, &keys, &rows)
-        loop capture in function.capture_params -> jet_web_js_copy_collect_type(ctx, capture.ty, bindings, &keys, &rows)
-        loop value in function.values -> jet_web_js_copy_collect_type(ctx, value.ty, bindings, &keys, &rows)
-        loop place in function.places -> jet_web_js_copy_collect_type(ctx, place.ty, bindings, &keys, &rows)
+        jet_web_js_copy_collect_type(&ctx, function.return_type, bindings, &keys, &rows)
+        loop parameter in function.params -> jet_web_js_copy_collect_type(&ctx, parameter.ty, bindings, &keys, &rows)
+        loop capture in function.capture_params -> jet_web_js_copy_collect_type(&ctx, capture.ty, bindings, &keys, &rows)
+        loop value in function.values -> jet_web_js_copy_collect_type(&ctx, value.ty, bindings, &keys, &rows)
+        loop place in function.places -> jet_web_js_copy_collect_type(&ctx, place.ty, bindings, &keys, &rows)
     }
-    loop handle in ctx.program.handles -> jet_web_js_copy_collect_type(ctx, handle.ty, bindings, &keys, &rows)
+    loop handle in ctx.program.handles -> jet_web_js_copy_collect_type(&ctx, handle.ty, bindings, &keys, &rows)
     lines := [String]{"const __jet_copy_type_facts = new Map(["}
     loop row in rows -> &lines.push("  {row},")
     &lines.push("]);")
@@ -517,7 +517,7 @@ fn jet_web_js_base_expression(ctx: &JetWebEmitContext, function: MirFunction, ba
             place := None
             loop row in function.locals { if row.id == local -> place = Val(row.place) }
             if place == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR local place is missing", "checked local bases must resolve to their canonical place row", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR local place is missing", "checked local bases must resolve to their canonical place row", Val(function.span))
                 return "undefined"
             }
             return "__jet_places.get({(place ?? MirPlaceId{value: 0}).value}).value"
@@ -531,7 +531,7 @@ fn jet_web_js_place_expression(ctx: &JetWebEmitContext, function: MirFunction, p
     row := None
     loop candidate in function.places { if candidate.id == place -> row = Val(candidate) }
     if row == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before JavaScript emission", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before JavaScript emission", Val(function.span))
         return "undefined"
     }
     place_row :: row ?? return "undefined"
@@ -550,7 +550,7 @@ fn jet_web_js_place_cell(ctx: &JetWebEmitContext, function: MirFunction, place: 
     row := None
     loop candidate in function.places { if candidate.id == place -> row = Val(candidate) }
     if row == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before JavaScript emission", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before JavaScript emission", Val(function.span))
         return "{{ value: undefined }}"
     }
     place_row :: row ?? return "{{ value: undefined }}"
@@ -560,7 +560,7 @@ fn jet_web_js_place_cell(ctx: &JetWebEmitContext, function: MirFunction, place: 
                 local_place := None
                 loop row in function.locals { if row.id == local -> local_place = Val(row.place) }
                 if local_place == None {
-                    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR local place is missing", "checked local bases must resolve to their canonical place row", Val(function.span))
+                    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR local place is missing", "checked local bases must resolve to their canonical place row", Val(function.span))
                     return "{{ value: undefined }}"
                 }
                 return "__jet_places.get({(local_place ?? MirPlaceId{value: 0}).value})"
@@ -577,12 +577,12 @@ fn jet_web_js_move_place(ctx: &JetWebEmitContext, function: MirFunction, place: 
     row := None
     loop candidate in function.places { if candidate.id == place -> row = Val(candidate) }
     if row == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before move emission", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before move emission", Val(function.span))
         return "undefined"
     }
     place_row :: row ?? return "undefined"
     if place_row.access != MirAccess.Move {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR MovePlace has non-move access", "checked MovePlace operations retain move-access place facts", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR MovePlace has non-move access", "checked MovePlace operations retain move-access place facts", Val(function.span))
         return "undefined"
     }
     cell := jet_web_js_place_cell(ctx, function, place)
@@ -593,11 +593,11 @@ fn jet_web_js_read_place(ctx: &JetWebEmitContext, function: MirFunction, place: 
     row := None
     loop candidate in function.places { if candidate.id == place -> row = Val(candidate) }
     if row == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before read emission", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web MIR place is missing", "checked place identities must resolve before read emission", Val(function.span))
         return "undefined"
     }
     place_row :: row ?? return "undefined"
-    jet_web_js_copy(ctx, place_row.ty, jet_web_js_place_expression(ctx, function, place))
+    jet_web_js_copy(&ctx, place_row.ty, jet_web_js_place_expression(ctx, function, place))
 }
 
 fn jet_web_js_write_place(ctx: &JetWebEmitContext, function: MirFunction, place: MirPlaceId, value: String) -> String Never! {
@@ -681,7 +681,7 @@ fn jet_web_js_string_part(ctx: &JetWebEmitContext, part: MirStringPart) -> Strin
 fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg: MirCallArg, write_alias: Bool) -> String Never! {
     ty := jet_web_find_value_type(function, arg.value)
     if ty == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument type is missing", "checked call arguments must retain their value type facts", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument type is missing", "checked call arguments must retain their value type facts", Val(function.span))
         return "undefined"
     }
     argument_ty :: ty ?? return "undefined"
@@ -689,7 +689,7 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
         target := None
         loop candidate in ctx.program.type_instances { if candidate.identity == Val(trait_id) -> target = Val(candidate) }
         if target == None {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing target is missing", "checked trait coercions name a canonical TraitObject type instance", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing target is missing", "checked trait coercions name a canonical TraitObject type instance", Val(function.span))
             return "undefined"
         }
         target_ty :: target ?? return "undefined"
@@ -698,7 +698,7 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
             else -> false
         }
         if !single_trait_target {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing target is not a single-bound TraitObject", "checked trait coercions target exactly one declared trait", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing target is not a single-bound TraitObject", "checked trait coercions target exactly one declared trait", Val(function.span))
             return "undefined"
         }
         target_bound := if target_ty.kind == {
@@ -711,7 +711,7 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
             if trait_row.id == bound.id -> declared = true
         }
         if !declared {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing target is undeclared", "checked trait coercions name a declared trait bound", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing target is undeclared", "checked trait coercions name a declared trait bound", Val(function.span))
             return "undefined"
         }
         generic_source := false
@@ -732,7 +732,7 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
             else -> {}
         }
         if generic_source && !generic_has_bound {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR generic trait boxing source lacks the checked bound", "generic trait coercions require a declared matching generic parameter bound", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR generic trait boxing source lacks the checked bound", "generic trait coercions require a declared matching generic parameter bound", Val(function.span))
             return "undefined"
         }
         source_is_nominal :: if argument_ty.kind == {
@@ -740,7 +740,7 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
             else -> false
         }
         if !source_is_nominal {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing source is not nominal", "checked trait coercions box only declared nominal values", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait boxing source is not nominal", "checked trait coercions box only declared nominal values", Val(function.span))
             return "undefined"
         }
         argument_is_trait :: if argument_ty.kind == {
@@ -748,7 +748,7 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
             else -> false
         }
         if argument_is_trait && argument_ty.identity != target_ty.identity {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait upcast does not match the checked target", "Web emission cannot reinterpret one TraitObject ABI as another", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait upcast does not match the checked target", "Web emission cannot reinterpret one TraitObject ABI as another", Val(function.span))
             return "undefined"
         }
     }
@@ -756,15 +756,15 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
         .Move -> jet_web_js_move(arg.value)
         .Read -> {
             if arg.place == {
-                .Val(place) -> jet_web_js_place_expression(ctx, function, place)
+                .Val(place) -> jet_web_js_place_expression(&ctx, function, place)
                 else -> jet_web_js_value(arg.value)
             }
         }
         .Write -> {
             if arg.place == {
-                .Val(place) -> if write_alias -> "jet_web_write_arg({jet_web_js_place_cell(ctx, function, place)})" else -> jet_web_js_place_expression(ctx, function, place)
+                .Val(place) -> if write_alias -> "jet_web_write_arg({jet_web_js_place_cell(ctx, function, place)})" else -> jet_web_js_place_expression(&ctx, function, place)
                 else -> {
-                    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Web write call argument has no place", "checked write arguments retain their writable place", Val(function.span))
+                    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Web write call argument has no place", "checked write arguments retain their writable place", Val(function.span))
                     "undefined"
                 }
             }
@@ -786,12 +786,12 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
         union_found := false
         loop candidate in ctx.program.type_instances { if candidate.identity == (Val(coercion.union)) -> union_found = true }
         if !union_found {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument widens to a missing union instance", "checked union coercions resolve to an instantiated enum type", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument widens to a missing union instance", "checked union coercions resolve to an instantiated enum type", Val(function.span))
             return "undefined"
         }
         definition := jet_web_find_type(ctx.program, coercion.union)
         if definition == None {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument widens to a missing union", "checked union coercions resolve to an enum definition", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument widens to a missing union", "checked union coercions resolve to an enum definition", Val(function.span))
             return "undefined"
         }
         valid := false
@@ -801,7 +801,7 @@ fn jet_web_js_call_arg_value(ctx: &JetWebEmitContext, function: MirFunction, arg
             else -> {}
         }
         if !valid {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument widens to an unknown union variant", "checked union coercions name a canonical enum variant", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call argument widens to an unknown union variant", "checked union coercions name a canonical enum variant", Val(function.span))
             return "undefined"
         }
         value = "{{ tag: {jet_web_js_quote(coercion.variant)}, values: [{value}] }}"
@@ -819,12 +819,12 @@ fn jet_web_js_call_values(ctx: &JetWebEmitContext, function: MirFunction, args: 
 fn jet_web_js_route_call(ctx: &JetWebEmitContext, route: MirPreludeCallId, args: [String]) -> String Never! {
     row := jet_web_find_prelude(ctx.program, route)
     if row == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude call has no registry row", "checked Web routes must preserve a canonical Prelude ABI row", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude call has no registry row", "checked Web routes must preserve a canonical Prelude ABI row", None)
         return "__jet_missing_prelude()"
     }
     route_row :: row ?? return "__jet_missing_prelude()"
     if args.len() < route_row.signature.arity || args.len() > route_row.signature.max_arity || route_row.signature.borrow_mask.len() != args.len() {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Prelude call arity does not match its checked ABI", "the route signature and Web operation payload must agree exactly", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Prelude call arity does not match its checked ABI", "the route signature and Web operation payload must agree exactly", None)
         return "__jet_invalid_prelude_call()"
     }
     symbol :: jet_web_js_symbol(ctx, route_row.symbol)
@@ -886,14 +886,14 @@ fn jet_web_js_codec_descriptor(ctx: &JetWebEmitContext, value: MirType) -> Strin
         .FixedList(elem, length) -> {
             count :: mir_measure_literal_value(length)
             if count < 0 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec fixed-list length is invalid", "checked codec fixed lists retain a literal non-negative length", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec fixed-list length is invalid", "checked codec fixed lists retain a literal non-negative length", None)
                 return "{{}}"
             }
             return "{{ kind: \"fixed_list\", element: {jet_web_js_codec_descriptor(ctx, elem)}, length: BigInt({count}) }}"
         }
         .Map(key, item) -> {
             if key.kind != MirTypeKind.String {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec map key is not String", "checked codec maps use String keys", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec map key is not String", "checked codec maps use String keys", None)
                 return "{{}}"
             }
             return "{{ kind: \"map\", key: {jet_web_js_codec_descriptor(ctx, key)}, value: {jet_web_js_codec_descriptor(ctx, item)} }}"
@@ -910,7 +910,7 @@ fn jet_web_js_codec_descriptor(ctx: &JetWebEmitContext, value: MirType) -> Strin
         }
         else -> {}
     }
-    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec type is unsupported", "checked Web codec calls retain a supported canonical codec descriptor", None)
+    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec type is unsupported", "checked Web codec calls retain a supported canonical codec descriptor", None)
     "{{}}"
 }
 
@@ -922,33 +922,33 @@ fn jet_web_js_codec_call(ctx: &JetWebEmitContext, function: MirFunction, call: M
     member := route.member
     if member == "decode_typed" {
         if rendered.len() != 1 || type_args.len() != 1 || route.signature.arity != 1 || route.signature.max_arity != 1 {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR typed codec decode has an invalid ABI", "checked decode_typed calls take one tree and one target type", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR typed codec decode has an invalid ABI", "checked decode_typed calls take one tree and one target type", None)
             return "undefined"
         }
         if mir_symbol_name(route.symbol) != "jet_codec_decode_typed" {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR typed codec decode has an unexpected symbol", "checked codec routes preserve the canonical decode symbol", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR typed codec decode has an unexpected symbol", "checked codec routes preserve the canonical decode symbol", None)
             return "undefined"
         }
         return "jet_codec_decode_typed({rendered[0]}, {jet_web_js_codec_descriptor(ctx, type_args[0])})"
     }
     if member != "encode" && member != "decode" {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec Prelude member is unsupported", "checked Web codec routes are encode, decode, or decode_typed", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec Prelude member is unsupported", "checked Web codec routes are encode, decode, or decode_typed", None)
         return "undefined"
     }
     if rendered.len() != 2 || type_args.len() != 1 || route.signature.arity != 2 || route.signature.max_arity != 2 {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec call has an invalid ABI", "checked codec calls take kind and value plus one codec type", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec call has an invalid ABI", "checked codec calls take kind and value plus one codec type", None)
         return "undefined"
     }
     descriptor :: jet_web_js_codec_descriptor(ctx, type_args[0])
     if member == "encode" {
         if mir_symbol_name(route.symbol) != "jet_codec_encode" && mir_symbol_name(route.symbol) != "jet_codec_encode_typed" {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec encode has an unexpected symbol", "checked codec routes preserve the canonical encode symbol", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec encode has an unexpected symbol", "checked codec routes preserve the canonical encode symbol", None)
             return "undefined"
         }
         return "jet_codec_encode_typed({rendered[1]}, {descriptor})"
     }
     if mir_symbol_name(route.symbol) != "jet_codec_decode" && mir_symbol_name(route.symbol) != "jet_codec_decode_typed" {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec decode has an unexpected symbol", "checked codec routes preserve the canonical decode symbol", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR codec decode has an unexpected symbol", "checked codec routes preserve the canonical decode symbol", None)
         return "undefined"
     }
     "jet_codec_decode_typed({rendered[1]}, {descriptor})"
@@ -960,7 +960,7 @@ fn jet_web_js_index_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, base: 
     if row == None -> return jet_web_js_route_call(ctx, call, [base, index])
     route :: row ?? return jet_web_js_route_call(ctx, call, [base, index])
     if route.signature.max_arity != route.signature.arity {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR index Prelude call has a variable ABI", "checked index routes use one exact diagnostic arity", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR index Prelude call has a variable ABI", "checked index routes use one exact diagnostic arity", None)
         return "undefined"
     }
     args := [String]{
@@ -978,16 +978,16 @@ fn jet_web_js_index_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, base: 
         &args.push("{context.caret}")
     }
     if route.signature.arity != 4 && route.signature.arity != 6 && route.signature.arity != 8 {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR index Prelude call has unsupported ABI arity", "checked index routes use arity four, six, or eight", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR index Prelude call has unsupported ABI arity", "checked index routes use arity four, six, or eight", None)
         return "undefined"
     }
-    jet_web_js_route_call(ctx, call, args)
+    jet_web_js_route_call(&ctx, call, args)
 }
 
 fn jet_web_js_slice_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, base: String, start: String, end: String, range: String?, location: MirPanicLoc) -> String Never! {
     route :: jet_web_find_prelude(ctx.program, call) ?? return jet_web_js_route_call(ctx, call, [base])
     if route.signature.max_arity != route.signature.arity {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR slice Prelude call has a variable ABI", "checked slice routes use one exact diagnostic arity", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR slice Prelude call has a variable ABI", "checked slice routes use one exact diagnostic arity", None)
         return "undefined"
     }
     args := [String]{base}
@@ -998,13 +998,13 @@ fn jet_web_js_slice_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, base: 
             &args.push(end)
         }
         else -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR slice Prelude call has incompatible ABI arity", "checked slice routes use arity four for ranges or five for direct bounds", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR slice Prelude call has incompatible ABI arity", "checked slice routes use arity four for ranges or five for direct bounds", None)
             return "undefined"
         }
     }
     &args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, location.file) ?? ""))
     &args.push("{location.line}")
-    jet_web_js_route_call(ctx, call, args)
+    jet_web_js_route_call(&ctx, call, args)
 }
 
 fn jet_web_js_layout_compare_code(op: MirLayoutCompareOp) -> String Never! {
@@ -1023,41 +1023,41 @@ fn jet_web_js_gc_edit_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, root
     if kind == {
         .Clear | .Pop | .Plain -> {
             if index != None || edges.len() != 0 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC edit operands are inconsistent", "checked clear/pop/plain edits have no index or edge operands", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC edit operands are inconsistent", "checked clear/pop/plain edits have no index or edge operands", None)
                 return "undefined"
             }
             args = [String]{jet_web_js_value(root), jet_web_js_value(edit)}
         }
         .RemoveIndex -> {
             if index == None || edges.len() != 0 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC remove-index operands are inconsistent", "checked remove-index edits have one index and no edges", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC remove-index operands are inconsistent", "checked remove-index edits have one index and no edges", None)
                 return "undefined"
             }
             args = [String]{jet_web_js_value(root), jet_web_js_value(edit), jet_web_js_value(index ?? MirValueId{value: 0})}
         }
         .InsertIndex -> {
             if index == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC insert-index edit has no index", "checked insert-index edits retain their index operand", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC insert-index edit has no index", "checked insert-index edits retain their index operand", None)
                 return "undefined"
             }
             args = [String]{jet_web_js_value(root), jet_web_js_value(edit), jet_web_js_value(index ?? MirValueId{value: 0}), "[{edge_values_text}]"}
         }
         .Prepend | .Additive -> {
             if index != None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC edge edit has an unexpected index", "checked prepend/additive edits have no index operand", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC edge edit has an unexpected index", "checked prepend/additive edits have no index operand", None)
                 return "undefined"
             }
             args = [String]{jet_web_js_value(root), "[{edge_values_text}]", jet_web_js_value(edit)}
         }
         .EdgeSlot -> {
             if index != None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC edge-slot edit has an unexpected index", "checked edge-slot edits have no index operand", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR GC edge-slot edit has an unexpected index", "checked edge-slot edits have no index operand", None)
                 return "undefined"
             }
             args = [String]{jet_web_js_value(root), "[{edge_values_text}]", jet_web_js_value(edit), "{site.value}"}
         }
     }
-    jet_web_js_route_call(ctx, call, args)
+    jet_web_js_route_call(&ctx, call, args)
 }
 
 fn jet_web_js_db_metadata(value: MirDbQueryMetadata) -> String Never! {
@@ -1161,7 +1161,7 @@ fn jet_web_js_datatree_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, rec
         else -> 0
     }
     if arity == 0 || args.len() + 1 != arity || route.signature.arity != arity || route.signature.max_arity != arity {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR DataTree call has an invalid signature", "checked DataTree routes preserve their exact receiver and argument ABI", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR DataTree call has an invalid signature", "checked DataTree routes preserve their exact receiver and argument ABI", None)
         return "undefined"
     }
     expected :: if route.member == {
@@ -1176,12 +1176,12 @@ fn jet_web_js_datatree_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, rec
         else -> ""
     }
     if mir_symbol_name(route.symbol) != expected {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR DataTree call has an unexpected symbol", "checked DataTree routes preserve their canonical runtime symbol", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR DataTree call has an unexpected symbol", "checked DataTree routes preserve their canonical runtime symbol", None)
         return "undefined"
     }
     values := [String]{receiver}
     loop arg in args -> &values.push(arg)
-    jet_web_js_route_call(ctx, call, values)
+    jet_web_js_route_call(&ctx, call, values)
 }
 
 fn jet_web_js_handle_method_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, receiver: String, args: [MirValueId], frame_schedule: MirFrameSchedule?, frame_schedule_derivation: MirDerivationRef?) -> String Never! {
@@ -1194,7 +1194,7 @@ fn jet_web_js_handle_method_call(ctx: &JetWebEmitContext, call: MirPreludeCallId
     route :: row ?? return jet_web_js_route_call(ctx, call, [receiver])
     if route.module_name == "core.tasks" && route.member == "join" {
         if args.len() != 0 {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR task join route has arguments", "checked task join is receiver-only", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR task join route has arguments", "checked task join is receiver-only", None)
             return "undefined"
         }
         return "await ({jet_web_js_route_call(ctx, call, [receiver])})"
@@ -1213,7 +1213,7 @@ fn jet_web_js_handle_method_call(ctx: &JetWebEmitContext, call: MirPreludeCallId
     }
     if route.module_name == "core.handle" && route.member == "duration.ns_value" {
         if args.len() != 0 {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Duration projection has arguments", "checked duration projections are receiver-only", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Duration projection has arguments", "checked duration projections are receiver-only", None)
             return "undefined"
         }
         return "jet_web_duration_ns({receiver})"
@@ -1242,7 +1242,7 @@ fn jet_web_js_handle_method_call(ctx: &JetWebEmitContext, call: MirPreludeCallId
         }
         if frame_schedule_derivation == None -> &values.push("null") else -> &values.push(jet_web_js_quote((frame_schedule_derivation ?? MirDerivationRef{id: ""}).id))
     }
-    jet_web_js_route_call(ctx, call, values)
+    jet_web_js_route_call(&ctx, call, values)
 }
 
 fn jet_web_js_validate_type_args(ctx: &JetWebEmitContext, type_args: [MirType]) -> Bool Never! {
@@ -1251,7 +1251,7 @@ fn jet_web_js_validate_type_args(ctx: &JetWebEmitContext, type_args: [MirType]) 
             found := false
             loop candidate in ctx.program.type_instances { if candidate.identity == ty.identity -> found = true }
             if !found {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call type argument is missing", "checked generic calls name canonical type instances", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR call type argument is missing", "checked generic calls name canonical type instances", None)
                 return false
             }
         }
@@ -1271,7 +1271,7 @@ fn jet_web_js_validate_owner_type_args(ctx: &JetWebEmitContext, type_args: [MirP
 
 fn jet_web_js_type_instance_valid(ctx: &JetWebEmitContext, type_id: MirTypeId) -> Bool Never! {
     loop candidate in ctx.program.type_instances { if candidate.identity == Val(type_id) -> return true }
-    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR type instance is missing", "checked Web operations name canonical type instances", None)
+    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR type instance is missing", "checked Web operations name canonical type instances", None)
     false
 }
 
@@ -1342,22 +1342,22 @@ fn jet_web_js_model_prefix(value: String) -> String Never! {
 fn jet_web_js_closure_expression(ctx: &JetWebEmitContext, enclosing: MirFunction, function_id: MirFunctionId, captures: [MirCaptureOperand]) -> String Never! {
     target := jet_web_find_function(ctx.program, function_id)
     if target == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.MissingUserFunction, "E0003", "MIR closure references a missing function", "checked closure targets must resolve to a Web function", Val(enclosing.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.MissingUserFunction, "E0003", "MIR closure references a missing function", "checked closure targets must resolve to a Web function", Val(enclosing.span))
         return "undefined"
     }
     function :: target ?? return "undefined"
     if !function.target_applicability.web || !jet_web_function_in_bucket(function, MirWebBucket.JS) {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "MIR closure target is not in the JavaScript partition", "checked closures capture only Web-JavaScript functions", Val(enclosing.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "MIR closure target is not in the JavaScript partition", "checked closures capture only Web-JavaScript functions", Val(enclosing.span))
         return "undefined"
     }
     if function.capture_params.len() != captures.len() {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure capture count is inconsistent", "checked closures retain one operand for every capture parameter", Val(enclosing.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure capture count is inconsistent", "checked closures retain one operand for every capture parameter", Val(enclosing.span))
         return "undefined"
     }
     index := 0
     loop parameter in function.capture_params {
         if parameter.slot != index {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure capture slots are out of order", "checked closure environments use contiguous capture slots", Val(enclosing.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure capture slots are out of order", "checked closure environments use contiguous capture slots", Val(enclosing.span))
             return "undefined"
         }
         if !jet_web_js_validate_type_args(ctx, [MirType]{parameter.ty}) -> return "undefined"
@@ -1372,7 +1372,7 @@ fn jet_web_js_closure_expression(ctx: &JetWebEmitContext, enclosing: MirFunction
                     parameter.access == MirAccess.Move -> &captured.push(jet_web_js_move(value))
                     parameter.ownership.mode == MirOwnershipMode.Owned && (parameter.access == MirAccess.Read || parameter.access == MirAccess.Write) -> &captured.push("{{ value: {jet_web_js_move(value)} }}")
                     else -> {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure value capture access is inconsistent", "checked borrowed captures must carry an owned cell", Val(enclosing.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure value capture access is inconsistent", "checked borrowed captures must carry an owned cell", Val(enclosing.span))
                         &captured.push("undefined")
                     }
                 }
@@ -1384,7 +1384,7 @@ fn jet_web_js_closure_expression(ctx: &JetWebEmitContext, enclosing: MirFunction
                     &captured.push(jet_web_js_place_cell(ctx, enclosing, place))
                     }
                     else -> {
-                    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure move capture carries a place", "checked Move captures consume a value operand", Val(enclosing.span))
+                    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure move capture carries a place", "checked Move captures consume a value operand", Val(enclosing.span))
                     &captured.push("undefined")
                     }
                 }
@@ -1396,7 +1396,7 @@ fn jet_web_js_closure_expression(ctx: &JetWebEmitContext, enclosing: MirFunction
     capture_values := [String]{}
     loop parameter in function.capture_params {
         if parameter.slot < 0 || parameter.slot >= captures.len() {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure capture slot is out of range", "checked capture slots index the emitted closure environment", Val(enclosing.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR closure capture slot is out of range", "checked capture slots index the emitted closure environment", Val(enclosing.span))
             next
         }
         schema :: jet_web_js_copy_collect_type(ctx, parameter.ty, JetWebCopyBindings{names: [String]{}, keys: [String]{}}, &keys, &rows)
@@ -1417,13 +1417,13 @@ fn jet_web_js_callee(ctx: &JetWebEmitContext, caller: MirFunction, callee: MirCa
         .User(function) | .Associated(function, _) | .Method(function, _) | .TraitMethod(function, _, _) -> {
             target := jet_web_find_function(ctx.program, function)
             if target == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.MissingUserFunction, "E0003", "MIR user call references a missing function", "checked Web call edges must resolve to an emitted function", Val(caller.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.MissingUserFunction, "E0003", "MIR user call references a missing function", "checked Web call edges must resolve to an emitted function", Val(caller.span))
                 return "__jet_missing_function()"
             }
             function_row :: target ?? return "__jet_missing_function()"
             if jet_web_function_in_bucket(function_row, MirWebBucket.Wasm) {
                 if !jet_web_is_wasm_export(function_row) {
-                    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "JS code calls a non-exported Wasm function", "cross-partition calls must use checked WasmExport functions", Val(caller.span))
+                    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "JS code calls a non-exported Wasm function", "cross-partition calls must use checked WasmExport functions", Val(caller.span))
                     return "__jet_invalid_partition()"
                 }
                 return "await {jet_web_wasm_bridge_name(function_row)}({values.join(", ")})"
@@ -1431,7 +1431,7 @@ fn jet_web_js_callee(ctx: &JetWebEmitContext, caller: MirFunction, callee: MirCa
             model := jet_web_js_model_trait_for_function(ctx, function)
             if model != None {
                 if args.len() != 2 {
-                    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR model embed has an invalid value count", "checked model embed calls take receiver and documents", Val(caller.span))
+                    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR model embed has an invalid value count", "checked model embed calls take receiver and documents", Val(caller.span))
                     return "undefined"
                 }
                 definition :: model ?? return "undefined"
@@ -1445,13 +1445,13 @@ fn jet_web_js_callee(ctx: &JetWebEmitContext, caller: MirFunction, callee: MirCa
         .Prelude(call) -> {
             row := jet_web_find_prelude(ctx.program, call)
             if row == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude call has no registry row", "checked Web calls must resolve to a canonical Prelude route", Val(caller.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude call has no registry row", "checked Web calls must resolve to a canonical Prelude route", Val(caller.span))
                 return "__jet_missing_prelude()"
             }
             prelude :: row ?? return "__jet_missing_prelude()"
             if mir_symbol_name(prelude.symbol) == "jet_transaction_commit" {
                 if values.len() != 1 {
-                    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR transaction commit has an invalid value count", "checked transaction commits take exactly one transaction handle", Val(caller.span))
+                    jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR transaction commit has an invalid value count", "checked transaction commits take exactly one transaction handle", Val(caller.span))
                     return "undefined"
                 }
                 return "await ({values[0]}.commit())"
@@ -1459,7 +1459,7 @@ fn jet_web_js_callee(ctx: &JetWebEmitContext, caller: MirFunction, callee: MirCa
             return jet_web_js_route_call(ctx, call, values)
         }
         .Foreign(id) -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web JavaScript cannot call a foreign function directly", "foreign ABI calls require a checked Wasm export or a canonical Prelude route", Val(caller.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web JavaScript cannot call a foreign function directly", "foreign ABI calls require a checked Wasm export or a canonical Prelude route", Val(caller.span))
             return "__jet_invalid_foreign_call()"
         }
         .Indirect(value) -> return "({jet_web_js_value(value)})({values.join(", ")})"
@@ -1475,7 +1475,7 @@ fn jet_web_js_values(values: [MirValueId]) -> String Never! {
 fn jet_web_js_semantic_call(ctx: &JetWebEmitContext, route: MirPreludeCallId, values: [MirValueId]) -> String Never! {
     args := [String]{}
     loop value in values -> &args.push(jet_web_js_value(value))
-    jet_web_js_route_call(ctx, route, args)
+    jet_web_js_route_call(&ctx, route, args)
 }
 
 fn jet_web_js_text_hole_kind(kind: MirTextHoleKind) -> String Never! {
@@ -1515,7 +1515,7 @@ fn jet_web_js_binary_pattern_parts(parts: [MirBinaryPatternPart]) -> String Neve
 
 fn jet_web_js_cursor_take_pattern(ctx: &JetWebEmitContext, function: MirFunction, receiver_place: MirPlaceId, parts: [MirTextPatternPart], result_ty: MirType?) -> String Never! {
     if result_ty == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cursor.take_pattern has no result type", "checked cursor pattern operations retain their Result tuple type", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cursor.take_pattern has no result type", "checked cursor pattern operations retain their Result tuple type", Val(function.span))
         return "undefined"
     }
     result :: result_ty ?? MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}
@@ -1524,7 +1524,7 @@ fn jet_web_js_cursor_take_pattern(ctx: &JetWebEmitContext, function: MirFunction
         else -> None
     }
     if ok == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cursor.take_pattern result is not a Result", "checked cursor pattern operations return Result", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cursor.take_pattern result is not a Result", "checked cursor pattern operations return Result", Val(function.span))
         return "undefined"
     }
     tuple :: ok ?? result
@@ -1533,7 +1533,7 @@ fn jet_web_js_cursor_take_pattern(ctx: &JetWebEmitContext, function: MirFunction
         else -> false
     }
     if !is_tuple {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cursor.take_pattern result is not a typed tuple", "checked cursor pattern operations return a typed tuple on success", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cursor.take_pattern result is not a typed tuple", "checked cursor pattern operations return a typed tuple on success", Val(function.span))
         return "undefined"
     }
     fields := [String]{}
@@ -1590,13 +1590,13 @@ fn jet_web_js_http_handler_valid(ctx: &JetWebEmitContext, function: MirFunction,
         }
     }
     if parameter_count < 0 || parameter_count != names.len() {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR HTTP route handler metadata is inconsistent", "checked route handlers must carry callable type and one name per parameter", Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR HTTP route handler metadata is inconsistent", "checked route handlers must carry callable type and one name per parameter", Val(function.span))
         return false
     }
 
     loop name in names {
         if name == "" {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR HTTP route handler metadata contains an empty parameter name", "checked route handler parameter names must be non-empty", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR HTTP route handler metadata contains an empty parameter name", "checked route handler parameter names must be non-empty", Val(function.span))
             return false
         }
     }
@@ -1608,7 +1608,7 @@ fn jet_web_js_select_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, kind:
     if row == .Val(route) {
         if route.module_name == "core.tasks" && (route.member == "select_wait_tagged" || route.member == "select_try_wait_tagged") {
             if values.len() != 2 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR channel select has an invalid value count", "checked channel select routes take receiver and timer lists", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR channel select has an invalid value count", "checked channel select routes take receiver and timer lists", None)
                 return "undefined"
             }
             expression :: jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), jet_web_js_value(values[1])])
@@ -1618,7 +1618,7 @@ fn jet_web_js_select_call(ctx: &JetWebEmitContext, call: MirPreludeCallId, kind:
     }
     rendered := [String]{jet_web_js_select_kind(kind)}
     loop value in values -> &rendered.push(jet_web_js_value(value))
-    jet_web_js_route_call(ctx, call, rendered)
+    jet_web_js_route_call(&ctx, call, rendered)
 }
 
 fn jet_web_js_typed_text_kind_valid(kind: MirTypedHeadKind, trusted_html: [Bool]) -> Bool Never! {
@@ -1635,7 +1635,7 @@ fn jet_web_js_core_closure_call(ctx: &JetWebEmitContext, call: MirPreludeCallId,
         if kind == {
             .OnInterrupt -> {}
             else -> {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR CoreClosureCall has no closure operand", "checked closure-bearing operations must retain their closure value", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR CoreClosureCall has no closure operand", "checked closure-bearing operations must retain their closure value", None)
                 return "undefined"
             }
         }
@@ -1648,54 +1648,54 @@ fn jet_web_js_core_closure_call(ctx: &JetWebEmitContext, call: MirPreludeCallId,
         .Spawn -> {
             if values.len() == 0 -> return jet_web_js_route_call(ctx, call, ["{site.value}", jet_web_js_quote(label), required])
             if values.len() == 1 -> return jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), "{site.value}", jet_web_js_quote(label), required])
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Spawn closure has invalid value arity", "checked Spawn accepts no values or one grouped task value", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Spawn closure has invalid value arity", "checked Spawn accepts no values or one grouped task value", None)
             return "undefined"
         }
         .Realtime -> {
             if values.len() != 2 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Realtime closure has invalid value arity", "checked Realtime accepts rate and frame values", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Realtime closure has invalid value arity", "checked Realtime accepts rate and frame values", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), jet_web_js_value(values[1]), required])
         }
         .Serve -> {
             if values.len() != 1 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Serve closure has invalid value arity", "checked Serve accepts one address value", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Serve closure has invalid value arity", "checked Serve accepts one address value", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), required])
         }
         .OnInterrupt -> {
             if closure != None || values.len() != 1 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR interrupt closure has invalid operands", "checked interrupt registration accepts one callback and no closure", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR interrupt closure has invalid operands", "checked interrupt registration accepts one callback and no closure", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0])])
         }
         .Guard -> {
             if values.len() != 0 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Guard closure has invalid value arity", "checked Guard accepts no value operands", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Guard closure has invalid value arity", "checked Guard accepts no value operands", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [required])
         }
         .OnCommit | .OnRollback -> {
             if values.len() != 1 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR transaction closure has invalid value arity", "checked transaction callbacks accept one handle", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR transaction closure has invalid value arity", "checked transaction callbacks accept one handle", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), required])
         }
         .ReactiveDerived | .ReactiveEffect | .UiMount -> {
             if values.len() != 0 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR reactive closure has invalid value arity", "checked reactive registration accepts no value operands", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR reactive closure has invalid value arity", "checked reactive registration accepts no value operands", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [required])
         }
         .UiPreview(_, source_file, _, start_line, start_column, end_line, end_column, build_id, revision) -> {
             if values.len() != 2 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR UI preview closure has invalid value arity", "checked UI preview accepts name and viewport values", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR UI preview closure has invalid value arity", "checked UI preview accepts name and viewport values", None)
                 return "undefined"
             }
             expression :: jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), jet_web_js_value(values[1]), required])
@@ -1703,14 +1703,14 @@ fn jet_web_js_core_closure_call(ctx: &JetWebEmitContext, call: MirPreludeCallId,
         }
         .UiAction -> {
             if values.len() != 3 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR UI action closure has invalid value arity", "checked UI action accepts display, shortcut, and accessible-label values", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR UI action closure has invalid value arity", "checked UI action accepts display, shortcut, and accessible-label values", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), jet_web_js_value(values[1]), jet_web_js_value(values[2]), required])
         }
         .UiTextInputOnDrop -> {
             if values.len() != 2 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR UI text-input closure has invalid value arity", "checked UI text-input drop accepts state and IME values", None)
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR UI text-input closure has invalid value arity", "checked UI text-input drop accepts state and IME values", None)
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_value(values[0]), jet_web_js_value(values[1]), required])
@@ -1724,7 +1724,7 @@ fn jet_web_js_panic_locals(ctx: &JetWebEmitContext, function: MirFunction, conte
         place := None
         loop row in function.locals { if row.id == local.local -> place = Val(row.place) }
         if place == None {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR panic context local is missing", "checked panic locals must resolve to function local places", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR panic context local is missing", "checked panic locals must resolve to function local places", Val(function.span))
             next
         }
         value :: jet_web_js_read_place(ctx, function, place ?? MirPlaceId{value: 0})
@@ -1737,7 +1737,7 @@ fn jet_web_js_panic_locals(ctx: &JetWebEmitContext, function: MirFunction, conte
 
 fn jet_web_js_guard_map(ctx: &JetWebEmitContext, call: MirPreludeCallId, guard: String, path: [MirFieldId], editable: Bool, shared_path: Bool, start: Int, end: Int) -> String Never! {
     if start < 0 || end < start || end > path.len() {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard path bounds are invalid", "checked guard paths must be sliced at valid field boundaries", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard path bounds are invalid", "checked guard paths must be sliced at valid field boundaries", None)
         return "undefined"
     }
     expression := guard
@@ -1753,17 +1753,17 @@ fn jet_web_js_guard_map(ctx: &JetWebEmitContext, call: MirPreludeCallId, guard: 
 
 fn jet_web_js_guard_pair(ctx: &JetWebEmitContext, result_ty: MirType?, split: String, first_guard: String, second_guard: String, binding: String) -> String Never! {
     if result_ty == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split has no result type", "checked guard splits preserve a two-field result type", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split has no result type", "checked guard splits preserve a two-field result type", None)
         return "undefined"
     }
     result :: result_ty ?? return "undefined"
     if result.identity == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split result has no type identity", "checked guard split results must name their canonical record type", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split result has no type identity", "checked guard split results must name their canonical record type", None)
         return "undefined"
     }
     definition := jet_web_find_type(ctx.program, result.identity ?? MirTypeId{value: 0})
     if definition == None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split result type is missing", "checked guard split results must resolve to a canonical type definition", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split result type is missing", "checked guard split results must resolve to a canonical type definition", None)
         return "undefined"
     }
     row :: definition ?? return "undefined"
@@ -1773,7 +1773,7 @@ fn jet_web_js_guard_pair(ctx: &JetWebEmitContext, result_ty: MirType?, split: St
         else -> {}
     }
     if fields.len() != 2 {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split result is not a two-field struct", "checked guard splits return exactly two named guard fields", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR guard split result is not a two-field struct", "checked guard splits return exactly two named guard fields", None)
         return "undefined"
     }
     first_name :: jet_web_js_quote(jet_web_js_field_name(ctx, fields[0].id))
@@ -1783,22 +1783,22 @@ fn jet_web_js_guard_pair(ctx: &JetWebEmitContext, result_ty: MirType?, split: St
 
 fn jet_web_js_cell_guard_project(ctx: &JetWebEmitContext, result_ty: MirType?, map_call: MirPreludeCallId, split_call: MirPreludeCallId?, guard: String, paths: [[MirFieldId]], editable: Bool, disjoint: Bool) -> String Never! {
     if paths.len() < 1 || paths.len() > 2 {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard projection has invalid path count", "checked Cell guards have one path or two split paths", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard projection has invalid path count", "checked Cell guards have one path or two split paths", None)
         return "undefined"
     }
     loop path in paths {
         if path.len() == 0 {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard projection has an empty path", "checked Cell guard paths contain at least one field", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard projection has an empty path", "checked Cell guard paths contain at least one field", None)
             return "undefined"
         }
     }
     split := paths.len() == 2
     if (split_call != None) != split {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard projection path arity disagrees with split metadata", "checked Cell guard split rows match the number of projected paths", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard projection path arity disagrees with split metadata", "checked Cell guard split rows match the number of projected paths", None)
         return "undefined"
     }
     if (disjoint && (!editable || !split)) || (editable && split && !disjoint) {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard edit disjointness metadata is invalid", "editable split Cell guards carry an exact disjointness proof", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard edit disjointness metadata is invalid", "editable split Cell guards carry an exact disjointness proof", None)
         return "undefined"
     }
     if !split -> return jet_web_js_guard_map(ctx, map_call, guard, paths[0], editable, false, 0, paths[0].len())
@@ -1810,7 +1810,7 @@ fn jet_web_js_cell_guard_project(ctx: &JetWebEmitContext, result_ty: MirType?, m
         common += 1
     }
     if common == first.len() || common == second.len() {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard split paths are identical or prefix-related", "checked split paths diverge at exactly one field boundary", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Cell guard split paths are identical or prefix-related", "checked split paths diverge at exactly one field boundary", None)
         return "undefined"
     }
     mapped :: jet_web_js_guard_map(ctx, map_call, guard, first, editable, false, 0, common)
@@ -1819,12 +1819,12 @@ fn jet_web_js_cell_guard_project(ctx: &JetWebEmitContext, result_ty: MirType?, m
     split_expression :: jet_web_js_route_call(ctx, split_row, split_args)
     first_guard :: jet_web_js_guard_map(ctx, map_call, "__jet_cell_split[0]", first, editable, false, common + 1, first.len())
     second_guard :: jet_web_js_guard_map(ctx, map_call, "__jet_cell_split[1]", second, editable, false, common + 1, second.len())
-    jet_web_js_guard_pair(ctx, result_ty, split_expression, first_guard, second_guard, "__jet_cell_split")
+    jet_web_js_guard_pair(&ctx, result_ty, split_expression, first_guard, second_guard, "__jet_cell_split")
 }
 
 fn jet_web_js_shared_guard_split(ctx: &JetWebEmitContext, result_ty: MirType?, map_call: MirPreludeCallId, split_call: MirPreludeCallId, guard: String, first: [MirFieldId], second: [MirFieldId], editable: Bool) -> String Never! {
     if first.len() == 0 || second.len() == 0 {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR shared guard split has an empty path", "checked shared guard split paths contain at least one field", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR shared guard split has an empty path", "checked shared guard split paths contain at least one field", None)
         return "undefined"
     }
     common := 0
@@ -1833,7 +1833,7 @@ fn jet_web_js_shared_guard_split(ctx: &JetWebEmitContext, result_ty: MirType?, m
         common += 1
     }
     if common == first.len() || common == second.len() {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR shared guard split paths are identical or prefix-related", "checked shared split paths diverge at exactly one field boundary", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR shared guard split paths are identical or prefix-related", "checked shared split paths diverge at exactly one field boundary", None)
         return "undefined"
     }
     mapped :: jet_web_js_guard_map(ctx, map_call, guard, first, editable, true, 0, common)
@@ -1841,7 +1841,7 @@ fn jet_web_js_shared_guard_split(ctx: &JetWebEmitContext, result_ty: MirType?, m
     split_expression :: jet_web_js_route_call(ctx, split_call, split_args)
     first_guard :: jet_web_js_guard_map(ctx, map_call, "__jet_shared_split[0]", first, editable, true, common + 1, first.len())
     second_guard :: jet_web_js_guard_map(ctx, map_call, "__jet_shared_split[1]", second, editable, true, common + 1, second.len())
-    jet_web_js_guard_pair(ctx, result_ty, split_expression, first_guard, second_guard, "__jet_shared_split")
+    jet_web_js_guard_pair(&ctx, result_ty, split_expression, first_guard, second_guard, "__jet_shared_split")
 }
 
 fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction, operation: MirSemanticOp, result_ty: MirType?) -> String {
@@ -1850,7 +1850,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
             place := None
             loop row in function.locals { if row.id == local -> place = Val(row.place) }
             if place == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR data-entry local is missing", "checked DataEntriesToMap locals must resolve to a place", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR data-entry local is missing", "checked DataEntriesToMap locals must resolve to a place", Val(function.span))
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_read_place(ctx, function, place ?? MirPlaceId{value: 0})])
@@ -1866,7 +1866,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         .Print(call, value) -> {
             ty := jet_web_find_value_type(function, value)
             if ty == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR print value type is missing", "checked print operations retain the canonical value type", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR print value type is missing", "checked print operations retain the canonical value type", Val(function.span))
                 return "undefined"
             }
             rendered := jet_web_js_value(value)
@@ -1892,14 +1892,14 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
             if kind == {
                 .Require -> {
                     if condition == None {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR require stop has no checked condition", "checked require stops carry a condition value", Val(function.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR require stop has no checked condition", "checked require stops carry a condition value", Val(function.span))
                         return "undefined"
                     }
                     message := ""
                     if values.len() == 0 -> message = jet_web_js_quote("condition failed")
                     if values.len() == 1 -> message = jet_web_js_value(values[0])
                     if values.len() > 1 {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR require stop has too many values", "checked require stops carry an optional message", Val(function.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR require stop has too many values", "checked require stops carry an optional message", Val(function.span))
                         return "undefined"
                     }
                     args := [String]{jet_web_js_value(condition ?? MirValueId{value: 0}), message}
@@ -1909,7 +1909,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
                 }
                 .RequireEq -> {
                     if condition == None || values.len() != 2 {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR require_eq stop metadata is inconsistent", "checked require_eq stops carry a condition and two comparison values", Val(function.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR require_eq stop metadata is inconsistent", "checked require_eq stops carry a condition and two comparison values", Val(function.span))
                         return "undefined"
                     }
                     args := [String]{jet_web_js_value(condition ?? MirValueId{value: 0}), jet_web_js_value(values[0]), jet_web_js_value(values[1])}
@@ -1919,7 +1919,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
                 }
                 .Panic -> {
                     if condition != None || values.len() != 1 {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR panic stop metadata is inconsistent", "checked panic stops carry only one message value", Val(function.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR panic stop metadata is inconsistent", "checked panic stops carry only one message value", Val(function.span))
                         return "undefined"
                     }
                     args := [String]{}
@@ -1941,7 +1941,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> return jet_web_js_cell_guard_project(ctx, result_ty, map_call, split_call, jet_web_js_value(guard), paths, editable, disjoint)
         .SharedGuardMap(call, guard, path, editable) -> {
             if path.len() == 0 {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR shared guard map has an empty path", "checked shared guard maps contain at least one field", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR shared guard map has an empty path", "checked shared guard maps contain at least one field", Val(function.span))
                 return "undefined"
             }
             return jet_web_js_guard_map(ctx, call, jet_web_js_value(guard), path, editable, true, 0, path.len())
@@ -1954,7 +1954,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         }
         .ColumnarRead(base, index, column, column_index, accessor) -> {
             if jet_web_find_field_name(ctx.program, column) == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR columnar read field is missing", "checked columnar reads resolve through the canonical field table", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR columnar read field is missing", "checked columnar reads resolve through the canonical field table", Val(function.span))
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, accessor, [jet_web_js_value(base), "{column_index}", jet_web_js_value(index)])
@@ -1967,13 +1967,13 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
                 if row.module_name == "core.encoding.codec" -> return jet_web_js_codec_call(ctx, function, call, args, type_args)
                 if row.module_name == "::jet_std::JetShared" && row.member == "new" {
                     if owner_type_args.len() != 1 {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Shared.new has no payload type argument", "checked Shared.new calls carry one owner type argument", Val(function.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Shared.new has no payload type argument", "checked Shared.new calls carry one owner type argument", Val(function.span))
                         return "undefined"
                     }
                     if owner_type_args[0] == {
                         .Type(payload) -> &rendered.push(jet_web_js_quote(jet_web_js_copy_key(payload)))
                         else -> {
-                            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Shared.new owner type argument is not a type", "checked Shared.new calls carry one owner type argument", Val(function.span))
+                            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Shared.new owner type argument is not a type", "checked Shared.new calls carry one owner type argument", Val(function.span))
                             return "undefined"
                         }
                     }
@@ -1982,7 +1982,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
             if route == .Val(row) {
                 if mir_symbol_name(row.symbol) == "jet_transaction_commit" {
                     if rendered.len() != 1 {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR transaction commit has an invalid value count", "checked transaction commits take exactly one transaction handle", Val(function.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR transaction commit has an invalid value count", "checked transaction commits take exactly one transaction handle", Val(function.span))
                         return "undefined"
                     }
                     return "await ({rendered[0]}.commit())"
@@ -1992,7 +1992,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         }
         .DecodeUnder(call, segment, inner) -> return jet_web_js_semantic_call(ctx, call, [segment, inner])
         .HardwareCall(call, _, receiver, args) -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "hardware operation reached the Web JavaScript emitter", "checked hardware operations require a native target and cannot be represented by browser JavaScript", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "hardware operation reached the Web JavaScript emitter", "checked hardware operations require a native target and cannot be represented by browser JavaScript", Val(function.span))
             return "undefined"
         }
         .BuiltinMethod(call, receiver, receiver_place, args, _) -> {
@@ -2019,7 +2019,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
                 if is_zip_pad && (index == 1 || index == 2) {
                     ty := jet_web_find_value_type(function, arg.value)
                     if ty == None {
-                        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR zip_pad argument type is missing", "checked closure arguments retain their canonical copy schema", Val(function.span))
+                        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR zip_pad argument type is missing", "checked closure arguments retain their canonical copy schema", Val(function.span))
                         return "undefined"
                     }
                     value = "jet_copy_value_register({value}, {jet_web_js_quote(jet_web_js_copy_key(ty ?? MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}))}, __jet_copy_type_facts)"
@@ -2033,7 +2033,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         .BinaryPatternMatch(call, subject, parts) -> return jet_web_js_route_call(ctx, call, [jet_web_js_value(subject), jet_web_js_binary_pattern_parts(parts)])
         .CursorTakePattern(_, receiver_place, parts) -> return jet_web_js_cursor_take_pattern(ctx, function, receiver_place, parts, result_ty)
         .ReaderTakePattern(receiver, _, _) -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "reader pattern operation is not Web-applicable", "checked reader pattern operations require a native reader target", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "reader pattern operation is not Web-applicable", "checked reader pattern operations require a native reader target", Val(function.span))
             return "undefined"
         }
         .NumericMethod(call, receiver) -> return jet_web_js_semantic_call(ctx, call, [receiver])
@@ -2048,7 +2048,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         }
         .HandleMethod(call, receiver, args, frame_schedule, frame_schedule_derivation) -> return jet_web_js_handle_method_call(ctx, call, jet_web_js_value(receiver), args, frame_schedule, frame_schedule_derivation)
         .PluginInvoke(call, handle, export_name, _, args) -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E3306", "Web target has no Component Model plugin host boundary", export_name, Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E3306", "Web target has no Component Model plugin host boundary", export_name, Val(function.span))
             return "undefined"
         }
 .HttpRouterRegister(call, receiver, path, handler, method, handler_param_names, contract_json, location) -> {
@@ -2070,7 +2070,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         .InterruptFunction(interrupt, values) -> return "({jet_web_js_value(interrupt)})({jet_web_js_values(values)})"
         .CarrierFact(call, receiver, field, notes) -> {
             if jet_web_find_field_name(ctx.program, field) == None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR carrier fact field is missing", "checked carrier facts resolve through the canonical field table", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR carrier fact field is missing", "checked carrier facts resolve through the canonical field table", Val(function.span))
                 return "undefined"
             }
             return jet_web_js_route_call(ctx, call, [jet_web_js_value(receiver)])
@@ -2078,7 +2078,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
         .GcEdit(call, root, edges, edit, index, kind, site) -> return jet_web_js_gc_edit_call(ctx, call, root, edges, edit, index, kind, site)
 .TypedTextInterp(call, kind, literals, holes, trusted_html) -> {
             if literals.len() != holes.len() + 1 || trusted_html.len() != holes.len() || !jet_web_js_typed_text_kind_valid(kind, trusted_html) {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR typed text interpolation metadata is inconsistent", "checked interpolation requires one more literal than holes and HTML-only trust metadata", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR typed text interpolation metadata is inconsistent", "checked interpolation requires one more literal than holes and HTML-only trust metadata", Val(function.span))
                 return "undefined"
             }
             literal_values := [String]{}
@@ -2094,7 +2094,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MirFunction
             return jet_web_js_route_call(ctx, call, rendered)
         }
         .CCallback(call, _, _) -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR C callback is not applicable to the Web target", "browser JavaScript cannot expose a checked native C callback adapter", Val(function.span))
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR C callback is not applicable to the Web target", "browser JavaScript cannot expose a checked native C callback adapter", Val(function.span))
             return "undefined"
         }
         .HostCall(call, args) -> return jet_web_js_route_call(ctx, call, jet_web_js_call_values(ctx, function, args, false))

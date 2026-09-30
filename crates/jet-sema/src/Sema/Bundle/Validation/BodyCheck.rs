@@ -148,6 +148,7 @@ pub(crate) fn checker_for_module<'a>(
         fx_memory_unbounded_control: Vec::new(),
         fx_memory_calls: Vec::new(),
         fx_discarded_results: Vec::new(),
+        lost_tail_span: None,
         memory_control_multiplier: Some(1),
         txn_depth: 0,
         txn_wall_depth: 0,
@@ -181,6 +182,7 @@ pub(crate) fn checker_for_module<'a>(
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
         result_handler_subject_types: HashMap::new(),
+        carrier_chain_subjects: HashSet::new(),
         lending_view_loop_vars: HashSet::new(),
         return_view_provenance: None,
         views_used_in_stmt: Default::default(),
@@ -198,6 +200,8 @@ pub(crate) fn checker_for_module<'a>(
         receiver_mark_frames: Vec::new(),
         is_task_spawn: false,
         task_body_propagates: false,
+        failure_direct_source: false,
+        failure_union_probe: None,
         failure_carrier_inference: false,
         failure_carrier: None,
         ordinary_binding_root_depth: None,
@@ -481,38 +485,42 @@ fn check_func_body_bundle_scoped_with_mode(
     inline_module: Option<&str>,
 ) -> (Vec<Diagnostic>, bool) {
     let st = &states[module_idx];
-    let mut scoped_imports = st.imports.clone();
-    let mut scoped_core_imports = st.core_imports.clone();
-    let mut scoped_unqualified = st.unqualified.clone();
-    let mut scoped_unqualified_file = st.unqualified_file.clone();
-    let mut scoped_core_item_imports = st.core_item_imports.clone();
-    if let Some(inline_module) = inline_module {
+    // D-NAME-WALK1=A: an inline-module body overlays its own imports on the
+    // file's maps. A top-level body reads the file's maps directly; copying
+    // them per body made body checking quadratic in the file's import count.
+    let scoped = inline_module.map(|inline_module| {
+        let mut imports = st.imports.clone();
+        let mut core_imports = st.core_imports.clone();
+        let mut unqualified = st.unqualified.clone();
+        let mut unqualified_file = st.unqualified_file.clone();
+        let mut core_item_imports = st.core_item_imports.clone();
         for ((scope, name), target) in &st.inline_foreign_imports {
             if scope == inline_module {
-                scoped_imports.insert(name.clone(), *target);
+                imports.insert(name.clone(), *target);
             }
         }
         for ((scope, name), module) in &st.inline_core_imports {
             if scope == inline_module {
-                scoped_core_imports.insert(name.clone(), module.clone());
+                core_imports.insert(name.clone(), module.clone());
             }
         }
         for ((scope, name), item) in &st.inline_core_items {
             if scope == inline_module {
-                scoped_core_item_imports.insert(name.clone(), item.clone());
+                core_item_imports.insert(name.clone(), item.clone());
             }
         }
         for ((scope, name), mangled) in &st.inline_unqualified {
             if scope == inline_module {
-                scoped_unqualified.insert(name.clone(), mangled.clone());
+                unqualified.insert(name.clone(), mangled.clone());
             }
         }
         for ((scope, name), target) in &st.inline_unqualified_file {
             if scope == inline_module {
-                scoped_unqualified_file.insert(name.clone(), target.clone());
+                unqualified_file.insert(name.clone(), target.clone());
             }
         }
-    }
+        (imports, core_imports, unqualified, unqualified_file, core_item_imports)
+    });
     let mut ck = checker_for_module(
         module_idx,
         states,
@@ -533,11 +541,24 @@ fn check_func_body_bundle_scoped_with_mode(
         raw_protocol_return,
         defer_ct_evaluation,
     );
-    ck.imports = &scoped_imports;
-    ck.core_imports = &scoped_core_imports;
-    ck.unqualified = &scoped_unqualified;
-    ck.unqualified_file = &scoped_unqualified_file;
-    ck.core_item_imports = &scoped_core_item_imports;
+    let (scoped_imports, scoped_core_imports, scoped_unqualified, scoped_unqualified_file, scoped_core_item_imports) =
+        match &scoped {
+            Some((imports, core_imports, unqualified, unqualified_file, core_item_imports)) => {
+                (imports, core_imports, unqualified, unqualified_file, core_item_imports)
+            }
+            None => (
+                &st.imports,
+                &st.core_imports,
+                &st.unqualified,
+                &st.unqualified_file,
+                &st.core_item_imports,
+            ),
+        };
+    ck.imports = scoped_imports;
+    ck.core_imports = scoped_core_imports;
+    ck.unqualified = scoped_unqualified;
+    ck.unqualified_file = scoped_unqualified_file;
+    ck.core_item_imports = scoped_core_item_imports;
     ck.inline_module = inline_module.map(str::to_owned);
     // Canonicalize the declaration before the shared body checker projects
     // the implicit failure carrier. This keeps alias-backed returns from
@@ -818,6 +839,7 @@ fn check_func_body_bundle_scoped_with_mode(
                 calls: std::mem::take(&mut ck.fx_memory_calls),
             },
             discarded_results: std::mem::take(&mut ck.fx_discarded_results),
+            failure_direct: ck.failure_direct_source,
         },
     );
     let uses_exact_int = ck.uses_exact_int;
@@ -953,14 +975,19 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
 }
 
 impl<'a> Checker<'a> {
+    /// A function read as a value publishes the same resolved nominals a
+    /// direct call checks against: its parameters and its declared return.
     pub(crate) fn checked_func_sig_to_fn_type(&mut self, sig: &FuncSig) -> Type {
         let mut function_type = func_sig_to_fn_type(sig);
-        if let Type::Fn {
-            ret: Some(ret), ..
-        } = &mut function_type
-        {
-            let (_, effective) = self.checked_return_types(sig.return_type.clone(), sig.is_extern);
-            *ret = Box::new(effective);
+        if let Type::Fn { params, ret, .. } = &mut function_type {
+            for param in params.iter_mut() {
+                *param = self.resolve_type(param.clone());
+            }
+            if let Some(ret) = ret {
+                let (_, effective) =
+                    self.checked_return_types(sig.return_type.clone(), sig.is_extern);
+                **ret = effective;
+            }
         }
         function_type
     }

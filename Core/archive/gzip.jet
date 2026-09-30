@@ -105,11 +105,11 @@ pub fn decompress(data: [U8]) -> [U8] GzipFileError! {
     Ok(body)
 }
 
-pub fn is_gzip(data: [U8]) -> Bool {
+pub fn is_gzip(data: [U8]) -> Bool Never! {
     data.len() >= 3 && data[0] == (U8{31}) && data[1] == (U8{139}) && data[2] == (U8{8})
 }
 
-pub fn isize(data: [U8]) -> Int {
+pub fn isize(data: [U8]) -> Int Never! {
     if data.len() < 8 -> return 0
     n := 0
     i := data.len() - 4
@@ -121,9 +121,9 @@ pub fn isize(data: [U8]) -> Int {
     n
 }
 
-pub fn magic() -> [U8] { [U8]{(U8{31}), (U8{139}), (U8{8})} }
+pub fn magic() -> [U8] Never! { [U8]{(U8{31}), (U8{139}), (U8{8})} }
 
-pub fn crc(data: [U8]) -> Int { crc32(data) }
+pub fn crc(data: [U8]) -> Int Never! { crc32(data) }
 
 pub fn compress_text(text: String) -> [U8] GzipFileError! { compress(text.bytes()) }
 pub fn decompress_text(data: [U8]) -> String GzipFileError! {
@@ -131,7 +131,7 @@ pub fn decompress_text(data: [U8]) -> String GzipFileError! {
     String.from_bytes(body) ?? return Err(GzipFileError.Malformed)
 }
 
-pub fn peek_isize(data: [U8]) -> Int { isize(data) }
+pub fn peek_isize(data: [U8]) -> Int Never! { isize(data) }
 
 fn host_read_bytes(path: String) -[FS]> [U8] GzipFileError! {
     core.files.read_bytes(path) ?? return Err(GzipFileError.Read)

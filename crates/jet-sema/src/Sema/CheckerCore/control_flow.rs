@@ -100,8 +100,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0989",
                     "this `prep if` condition can't be known at compile time".to_string(),
-                    "a `prep if` condition must be a known-time expression — an `@` binding, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
-                    "use an `@` binding: `@flag :: …; prep if flag { … }`"
+                    "a `prep if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
+                    "prepare the value first: `flag :: prep { … }`, then write `prep if flag { … }`"
                         .to_string(),
                     Some(*cond_span),
                 ));

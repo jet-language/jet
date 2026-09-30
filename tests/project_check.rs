@@ -414,6 +414,17 @@ fn explicit_file_without_owning_project_context_teaches_missing_context() {
 }
 
 #[test]
+fn library_package_check_needs_no_run_entry() {
+    let check = run_uncached("library_only", &["check", "."]);
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(
+        check.status.success(),
+        "a .Library package check must pass without `fn run`:\n{stderr}"
+    );
+    assert!(!stderr.contains("E0101"), "library check demanded `fn run`:\n{stderr}");
+}
+
+#[test]
 fn clean_project_check_then_default_run_and_aot_build_stay_clean() {
     for name in [
         "frozen_dogfood",

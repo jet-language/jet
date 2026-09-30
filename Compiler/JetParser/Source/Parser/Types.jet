@@ -113,6 +113,10 @@ fn parser_suffix_contract_ahead(state: &JetParserState) -> Int Never! {
         if next_index < 0 -> return -1
         kind :: state.tokens[next_index].kind
         if kind == TOKEN_BANG {
+            // The retired infix contract `T ! E` (the `!` followed by one type
+            // name and then `{`, `,`, `)` or `=`) is not a suffix `T!`; its
+            // `!` is left for parser_parse_retired_prefix_error.
+            if parser_retired_infix_contract_at(state, next_index) -> return -1
             if members > 1 -> return 1
             return 0
         }
@@ -120,6 +124,18 @@ fn parser_suffix_contract_ahead(state: &JetParserState) -> Int Never! {
         index = next_index + 1
     }
     -1
+}
+
+// Does the `!` at `bang` open the retired infix `T ! E` error type?
+fn parser_retired_infix_contract_at(state: JetParserState, bang: Int) -> Bool Never! {
+    name :: parser_next_code_index(state, bang + 1)
+    if name < 0 || state.tokens[name].kind != TOKEN_IDENT -> return false
+    end :: parser_scan_contract_member(state, name)
+    if end < 0 -> return false
+    after :: parser_next_code_index(state, end)
+    if after < 0 -> return false
+    kind :: state.tokens[after].kind
+    kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || kind == TOKEN_EQ
 }
 
 // D-TYPE-SUFFIX1=A: the error half of a contract and its `!`. A union needs

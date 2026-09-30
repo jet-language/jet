@@ -59,7 +59,7 @@ fn parser_expression_form_loop_separator(state: &JetParserState) {
         parser_expression_form_error(&state, "E0383", token.span, "a loop source needs `in`", "the source separator names the collection or range after the loop variable", "write `in` between the variable and source")
         return
     }
-    parser_expect(&state, TOKEN_KW_IN, "between the loop binding and source")
+    parser_expect(&state, TOKEN_KW_IN, "between the loop binding and source").drop("parser_expect records the missing-token diagnostic")
 }
 
 fn parser_expression_form_loop_header_separator(state: &JetParserState, message: String) {
@@ -67,7 +67,7 @@ fn parser_expression_form_loop_header_separator(state: &JetParserState, message:
         parser_bump(&state)
         return
     }
-    parser_expect(&state, TOKEN_COMMA, message)
+    parser_expect(&state, TOKEN_COMMA, message).drop("parser_expect records the missing-token diagnostic")
 }
 
 fn parser_expression_form_loop_step(state: &JetParserState, depth: Int) -> Stmt? Err! {

@@ -207,19 +207,16 @@ impl ReplAuthorization<'_> {
         why: &str,
         span: crate::Diagnostics::Span,
     ) -> Diagnostic {
-        let granted: Holds = self.policy.flags.allow.iter().cloned().collect();
-        let denied: Holds = self.policy.flags.deny.iter().cloned().collect();
-        let render = |effects: &Holds| {
-            if effects.is_empty() {
-                "none".to_string()
+        let authority = jet_foundation::Authority::ApplicationAuthority {
+            required_effects: Holds::from([request.root.clone()]),
+            granted_effects: self.policy.flags.allow.iter().cloned().collect(),
+            denied_effects: self.policy.flags.deny.iter().cloned().collect(),
+            authority: if self.policy.session.contains(request) {
+                "REPL session Authority"
             } else {
-                effects.iter().cloned().collect::<Vec<_>>().join(", ")
+                "jet repl invocation policy"
             }
-        };
-        let authority = if self.policy.session.contains(request) {
-            "REPL session Authority"
-        } else {
-            "jet repl invocation policy"
+            .to_string(),
         };
         Diagnostic::error(
             "E1803",
@@ -227,18 +224,14 @@ impl ReplAuthorization<'_> {
                 "{}.{} for `{}` was denied",
                 request.root, request.operation, request.resource
             ),
-            format!(
-                "{why}; required_effects={}; granted_effects={}; denied_effects={}; authority={authority}; the host operation did not run",
-                request.root,
-                render(&granted),
-                render(&denied),
-            ),
+            jet_foundation::Authority::repl_refusal_why(&authority, why),
             format!(
                 "approve this exact operation interactively, or restart with `jet repl --allow-{}`",
                 request.root.to_ascii_lowercase()
             ),
             Some(span),
         )
+        .with_detail(authority.policy_facts())
     }
 
     fn validate_file_target(
@@ -1885,15 +1878,9 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     // `use …` import line (S16). Carry it across the session so a later input
     // can resolve through its alias (D-REPL10).
     if looks_like_import(trimmed) {
-        // The parser wants a trailing `;`; REPL inputs may omit it.
-        let normalized = {
-            let t = trimmed.trim_end();
-            if t.ends_with(';') {
-                t.to_string()
-            } else {
-                format!("{};", t)
-            }
-        };
+        // Imports are line-terminated; an authored `;` stays for the parser to
+        // report (E0373), and none is added.
+        let normalized = trimmed.trim_end().to_string();
         let full = format!("// repl:{}\n{}\n", step, normalized);
         let (toks, lex_diags) = crate::Lexer::lex(&full);
         if !lex_diags.is_empty() {

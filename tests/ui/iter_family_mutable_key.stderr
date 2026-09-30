@@ -1,0 +1,26 @@
+Error [E0111]: `k` was made with `::`, so it can't change
+  --> iter_family_mutable_key.jet:7:9
+    |
+  7 |         k = "z"
+    |         ^
+ Why: Only `:=` bindings and parameters marked with the write-access marker `&` can be changed
+ Fix: Declare it with `k := ...` instead
+More: jet-lang.dev/e/E0111
+
+Error [E0225]: This call only reads its receiver, so it takes no `&` mark
+  --> iter_family_mutable_key.jet:9:15
+    |
+  9 |     loop k in &m.keys() {
+    |               ^
+ Why: A mark shows that a call writes (`&`) or takes (`^`) the named place; a read call leaves the place unmarked
+ Fix: Remove `&`
+More: jet-lang.dev/e/E0225
+
+Error [E0111]: `n` was made with `::`, so it can't change
+  --> iter_family_mutable_key.jet:14:9
+    |
+ 14 |         n += 10
+    |         ^
+ Why: Only `:=` bindings and parameters marked with the write-access marker `&` can be changed
+ Fix: Declare it with `n := ...` instead
+More: jet-lang.dev/e/E0111

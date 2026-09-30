@@ -376,6 +376,9 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0068"
             | "E0070"
             | "E0080"
+            // E0082 (D-ARMHEAD-PAREN1 amendment): the AST keeps the grouping
+            // precedence implies, and fmt prints it with parentheses.
+            | "E0082"
             | "E0077"
             | "E0146"
             | "E0154"
@@ -656,6 +659,30 @@ impl<'a> Parser<'a> {
             "an environment read needs a plain name after `$`".to_string(),
             "config-surface environment access has the typed form `$NAME`".to_string(),
             "write a name such as `$HOME` in `env.jet` or a deploy/config file".to_string(),
+            Some(span),
+        )
+    }
+
+    /// D-COMPILER-NS1=A / D-META-ROOT3=A: `$` marks compiler facts. A `$`
+    /// word in expression position must be one of the subjectless roots; a
+    /// program never declares one, and other facts are `$` members of their
+    /// subject. An ALL_CAPS `$NAME` is the config-only environment read.
+    pub(super) fn unknown_fact_root(&self, name: &str, span: Span) -> Diagnostic {
+        let body = name.strip_prefix(Syntax::COMPTIME_MARK).unwrap_or(name);
+        if !body.is_empty() && Syntax::is_constant_name(body) {
+            return self.environment_read_outside_config(span);
+        }
+        Diagnostic::error(
+            "E0003",
+            format!("`{name}` is not a compiler fact"),
+            format!(
+                "`$` marks facts the compiler supplies: the roots `{}`, `{}`, `{}` and `{}`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)",
+                Syntax::FACT_ROOT_BUILD,
+                Syntax::FACT_ROOT_PACKAGE,
+                Syntax::FACT_ROOT_PHASE,
+                Syntax::FACT_ROOT_PROGRAM,
+            ),
+            "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`".to_string(),
             Some(span),
         )
     }
@@ -1293,11 +1320,12 @@ fn pat_span(pat: &Pattern) -> Span {
 }
 
 /// D-DOTSCOPE1/leading-dot patterns share one head classifier: an uppercase
-/// ident, a derive-template `@` hole, or `null` may follow a leading `.`.
+/// ident, a derive-template `$` name splice (D-NAME-SPLICE1=B), or `null` may
+/// follow a leading `.`.
 fn leading_dot_variant(kind: &TokKind) -> Option<String> {
     match kind {
         TokKind::Ident(name)
-            if name.starts_with('@')
+            if Syntax::is_comptime_name(name)
                 || name.chars().next().is_some_and(char::is_uppercase) =>
         {
             Some(name.clone())
@@ -1595,7 +1623,7 @@ derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
     fn get_value(self) -> @param -> ~self.value
-    fn type_name(self) -> String -> T.@name
+    fn type_name(self) -> String -> T.$name
 }
 "#,
         );

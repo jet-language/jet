@@ -252,9 +252,9 @@ fn run() {
 fn command_action(argv: [Int]) -> Int Never! {
     return argv.get(0) ?? 1
 }
-@ACTION :: command_action([0])
+ACTION :: prep { command_action([0]) }
 fn run() {
-    print(@ACTION)
+    print(ACTION)
 }
 "#,
     );

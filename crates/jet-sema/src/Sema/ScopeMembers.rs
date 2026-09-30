@@ -572,7 +572,7 @@ fn check_dsl_body(
                             "E0927",
                             format!("`#{name}` is not a declared checked text block"),
                             "checked text blocks come from the one library rule registry".to_string(),
-                            format!("declare `marker {name}(…)` with `@sites: [.Block]` before using `#{name} {{ … }}`"),
+                            format!("declare `marker {name}(…)` with `$sites: [.Block]` before using `#{name} {{ … }}`"),
                             Some(at),
                         ));
                     }
@@ -603,7 +603,7 @@ fn declared_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Policy::Ru
     declaration
         .params
         .iter()
-        .find(|parameter| parameter.name == "@sites")
+        .find(|parameter| parameter.name == "$sites")
         .and_then(|parameter| parameter.value.as_deref())
         .and_then(|value| match value {
             Expr::ListLit(values, _) => Some(values.as_slice()),

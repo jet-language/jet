@@ -23,7 +23,8 @@ become part of a program. The boundary is visible in source:
   implemented yet: `name :: prep { ... }` is rejected with E0391. The retired
   `@ { ... }` spelling teaches `prep { ... }` (E0388).
 - `@name :: expression` binds a value evaluated during compilation.
-- Metadata roots such as `@TYPE(...)` query checked facts; they do not replace
+- Compiler facts carry `$`: members of their subject such as `T.$fields`, or
+  the roots `$build`, `$package`, `$phase` and `$program`. They do not replace
   preparation or compile-time bindings.
 - `@if` selects a compile-time branch.
 - `@loop` repeats a typed body over a compile-time collection.
@@ -65,15 +66,19 @@ emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See
 [`comptime_if.jet`](../../../Examples/features/comptime/comptime_if.jet).
 
-`@loop` is the one typed compile-time repetition mechanism used by derive and
-marker bodies. [`derive_loop.jet`](../../../Examples/features/reflection/derive_loop.jet)
-uses it to create methods from `T.@fields`, to emit an `impl` for each type,
-and to create measured test declarations from `@CASES`.
+`prep loop` is the one typed compile-time repetition mechanism used by derive
+and marker bodies. [`derive_loop.jet`](../../../Examples/features/reflection/derive_loop.jet)
+uses it to create methods from `T.$fields`, to emit an `impl` for each type,
+and to create measured test declarations from `CASES`.
 
-The compile-time mark is `@`. The former `comptime` keyword is not a second
-spelling for it; the syntax registry retains that word only for a teaching
-diagnostic. Keep the mark attached to the name, as in `@LIMIT`; a block opens
-with `prep { ... }`.
+Inside a template the fact sigil also splices a template binding
+(D-NAME-SPLICE1=B). `fn $method(self)` and `impl $type_name` name a
+declaration from the binding's text, `self.$field` reads the member a loop
+value names, `.$left` matches the variant it names, and `{$count}` or a bare
+`$count` reads the binding's build-time value. A `$` word that names no
+template binding, or that is read on a bound value such as `field.$name`,
+stays a compiler fact. The retired `@` splice teaches E0388 with the `$`
+respelling; prefix `@` in code marks only a live link.
 
 ## Effect tiers and reproducibility
 
@@ -181,8 +186,8 @@ This is the `D-META-CODE1` / `D-META-BODY1` rule in [`Syntax.rs`](../../../crate
 Jet has two related reflection paths:
 
 1. A compile-time fact read uses the `@` member form. Examples include
-   `Severity.@range`, `send_report.@effects`, `T.@layout`, and
-   `@build.package.name`. These reads produce typed fact records that can be
+   `Severity.$range`, `send_report.$effects`, `T.$layout`, and
+   `$package.name`. These reads produce typed fact records that can be
    used in a compile-time binding or a derive body.
 2. `T.reflect()` returns aggregate type information for a derive body, while
    `reflect.of(value)` returns the runtime reflection floor for a value.
@@ -225,14 +230,17 @@ record rather than infer a fact from a string. `fact_reads.jet` and
 
 ## The metadata contract
 
-The owner-controlled lexical ledger names these ratified metadata roots:
+The owner-controlled lexical ledger names these ratified fact roots
+(D-META-ROOT3=A, D-BUILD-FACT3=A). Facts about a type, function, method,
+closure or value are `$` members of that subject, such as `T.$fields`, so no
+query root exists for them. `@SOURCE` and `@TYPES` keep their registry
+spelling until a ballot names their `$` root.
 
 ```text
-@PHASE  @TYPE  @FUNCTION  @METHOD  @CLOSURE
-@PROGRAM  @PACKAGE  @SOURCE  @VALUE  @TYPES
+$build  $package  $phase  $program
 ```
 
-`@PHASE()` reports the evaluation-site `Phase` value. The shared AST contract
+`$phase` reports the evaluation-site `Phase` value. The shared AST contract
 contains exactly `Preparation`, `Build`, and `Runtime`. Do not confuse that
 language phase with `CompilerStage`, which contains `Parsed`, `Resolved`,
 `Typed`, `Prepared`, and `Emitted` and describes when a checked fact becomes

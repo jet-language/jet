@@ -6,30 +6,34 @@
 
 // D-FAIL-CONV2=A: the standard library's own error family, exactly the
 // `impl <member> -> Err` declarations of the embedded Prelude/Errors.jet (the
-// Rust reference's `is_core_error_family_type`). `CryptoError`, `TaskFailure`,
+// Rust reference's `is_core_error_family_type`). D-CRYPTO-ERRFAM1=A adds the
+// payload-free `CryptoError` and `FileCryptoError`. `TaskFailure`,
 // `[FieldError]` and component types stay outside on purpose.
-@JET_CORE_ERROR_FAMILY :: [String]{
-    "BuildError", "BrowserError", "CBORError", "DBError", "DataError", "EncodingError", "EmailError", "EnvError",
-    "HTTPError", "IOError", "NetError", "RangeError", "TextError", "UTF8Error", "WsError", "XMLError",
-}
+JET_CORE_ERROR_FAMILY :: prep { [String]{
+    "BuildError", "BrowserError", "CBORError", "CryptoError", "DBError", "DataError", "EncodingError", "EmailError", "EnvError",
+    "FileCryptoError", "HTTPError", "IOError", "NetError", "RangeError", "TextError", "UTF8Error", "UUIDError", "WsError", "XMLError",
+} }
 
 // D-FAILURE-FOUNDATION1=A: every Core type that may be named as the error side
 // of an explicit `!` contract (the Rust reference's `is_core_error_type`).
-@JET_CORE_ERROR_TYPES :: [String]{
+JET_CORE_ERROR_TYPES :: prep { [String]{
     "AllocError", "AuthError", "BuildError", "BrowserError", "CBORError", "Closed", "CompilerError", "ComputeError",
     "CryptoError", "DBError", "DataError", "EmailError", "EncodingError", "EnvError", "EventConfigError", "Expired",
     "FileCryptoError", "HTTPError", "IOError", "UiHostError", "KeyWrapError", "NetError", "RangeError", "ServiceError",
     "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
-}
+} }
 
+// A canonical owner identity (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`)
+// reduces to its `::` leaf; a qualified spelling to its `.` leaf.
 fn sema_error_conversion_leaf(name: String) -> String Never! {
-    parts :: name.split(".")
+    owned :: name.split("::")
+    parts :: owned[owned.len() - 1].split(".")
     parts[parts.len() - 1]
 }
 
 pub fn sema_core_error_family_member(name: String) -> Bool Never! {
     leaf :: sema_error_conversion_leaf(name)
-    loop member in @JET_CORE_ERROR_FAMILY {
+    loop member in JET_CORE_ERROR_FAMILY {
         if member == leaf -> return true
     }
     false
@@ -37,7 +41,7 @@ pub fn sema_core_error_family_member(name: String) -> Bool Never! {
 
 fn sema_core_error_type(name: String) -> Bool Never! {
     leaf :: sema_error_conversion_leaf(name)
-    loop member in @JET_CORE_ERROR_TYPES {
+    loop member in JET_CORE_ERROR_TYPES {
         if member == leaf -> return true
     }
     false
@@ -388,7 +392,9 @@ pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, g
                     if generic_name == name -> generic = true
                 }
             }
-            if !generic && !sema_failure_domain_is_error(error, [String]{}, environment) {
+            hole :: error == (Type.Named{name: "_"})
+            if hole -> &diagnostics.push(sema_type_hole(span))
+            if !hole && !generic && !sema_failure_domain_is_error(error, [String]{}, environment) {
                 &diagnostics.push(sema_error("E2417", span, "Explicit failure domain `{type_name(error)}` is not an Error type", "A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.", "use a Core error, add `#Error` to a local error type, or remove the explicit error contract."))
             }
         }
@@ -400,6 +406,12 @@ pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, g
         .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, &diagnostics)
         else -> {}
     }
+}
+
+// D9: `_` is a pattern wildcard, never a type hole. The Rust reference reports
+// the same E0119 from its declared-type walk.
+fn sema_type_hole(span: Span) -> Diagnostic {
+    sema_error("E0119", span, "`_` isn't a type", "a signature names every type; `_` is only a pattern wildcard", "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`")
 }
 
 // Checks one named callable's declared signature (E2417/E2422).

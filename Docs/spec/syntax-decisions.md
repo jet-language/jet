@@ -26,22 +26,19 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
 | `#Align` | retired standalone alignment marker | `D-PLACE1=A` |
 | `Atomic<T>` | safe lock-free scalar cell | `D-PLACE1=A; D-ATOMIC-WIDTH1=A` |
-| `@` | compile-time name or fact | `D-ONCE-AT1` |
-| `prep` | explicit shared-preparation block `prep { … }`; `@ { … }` is retired | `D-PREP-SURFACE2=A` |
+| `@` | live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$` | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
+| `prep` | explicit shared-preparation block `prep { … }`; `NAME :: prep { value }` is the only compile-time binding; `@ { … }` is retired | `D-PREP-SURFACE2=A` |
 | `prep if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
 | `prep loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
 | `prep fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
 | `<prep N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
-| `@PHASE` | total evaluation-site phase query | `D-PREP-SURFACE2=A` |
-| `@TYPE` | checked type metadata query | `D-META-REFLECT2=A` |
-| `@FUNCTION` | checked function metadata query | `D-META-REFLECT2=A` |
-| `@METHOD` | checked method metadata query | `D-META-REFLECT2=A` |
-| `@CLOSURE` | checked closure metadata query | `D-META-REFLECT2=A` |
-| `@PROGRAM` | authorized checked-program metadata query | `D-META-REFLECT2=A` |
-| `@PACKAGE` | lexical package metadata query | `D-META-REFLECT2=A` |
-| `@SOURCE` | lexical source-snapshot metadata query | `D-META-REFLECT2=A` |
-| `@VALUE` | retained runtime-value metadata query | `D-META-REFLECT2=A` |
-| `@TYPES` | retained runtime type-catalog query | `D-META-REFLECT2=A` |
+| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
+| `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*` | `D-BUILD-FACT3=A` |
+| `$package` | package fact root: `$package.name`, `.version` | `D-BUILD-FACT3=A; D-META-REFLECT2=A` |
+| `$phase` | total evaluation-site phase fact | `D-PREP-SURFACE2=A; D-META-ROOT3=A` |
+| `$program` | authorized checked-program fact root | `D-META-REFLECT2=A; D-META-ROOT3=A` |
+| `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) | `D-META-REFLECT2=A` |
+| `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) | `D-META-REFLECT2=A` |
 | `compiler.generate` | explicit shared-preparation publication of Generated items | `D-META-PUBLISH2=A` |
 | `compiler.advanced.register` | explicit opt-in provider registration for declared targets | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
 | `compiler.advanced.register_expansion` | explicit opt-in call-expansion provider registration | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
@@ -52,7 +49,6 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `?` | optional type mark after its type (`T?`) | `D-TYPE-SUFFIX1=A` |
 | `??` | fallback | `D-RESULT-DECON2` |
 | `&place.method(…) / ^place.method(…)` | receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement | `D-CAP-RECEIVER1=D` |
-| `^place` | optional exact move of a named place in any value position; an unmarked last use moves too; later use is E0121 | `D-COPY-DEFAULT1=A` |
 | `T{expr}` | field default | `D-DEFAULT-SHAPE1` |
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
 | `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
@@ -90,6 +86,17 @@ instruction, card #3584)*: the latest owner instruction changes only the
 constant role above: module-global constants use ALL_CAPS
 (SCREAMING_SNAKE_CASE). It does not change the July rule for type-like or
 other value-like names; local `@` bindings remain snake_case.
+
+**Owner ruling — casing and explicit compile time** *(2026-09-30, card #3662;
+replaces the same-day "ALL_CAPS implies compile time" rule)*: in the owner's
+words, "module/file-level immutable bindings are ALL_CAPS (`MAX_ROWS :: 100`);
+function locals stay snake_case; mutable bindings are never ALL_CAPS", and
+"compile time is ALWAYS explicit and never implied by casing:
+`NAME :: prep { value }`, so `:: prep` is greppable. A binding without `prep`
+is an ordinary runtime value, even if ALL_CAPS." `#Static` and `#Inline`
+precede either form (`#Static NAME :: prep { value }`). Names bound inside a
+`prep { … }` block stay inside it; a build-time value that outlives the block
+is bound as `name :: prep { value }`. See D-PREP-SURFACE2=A.
 
 **S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1; applied by
 D-ACRO-CASE1=A + D-ACRO-LEX1=A)*: initials-formed names stay all-caps inside
@@ -181,7 +188,12 @@ name = expr             // reassignment of an existing := binding
 Types never ride the binding name. Put the type on the value
 (`U8{ 250 }`, `Color{ r: 64, g: 128, b: 200 }`) or on signatures and fields
 (`name: Type`). The retired forms `name: Type :: expr` and `name: Type := expr`
-are ordinary parse errors (D-BIND-BARE1; amends D-BIND4).
+never open a binding (D-BIND-BARE1; amends D-BIND4). **D-BIND-TYPE2=A**
+*(ratified 2026-09-29, card #3743)* keeps that rule and teaches the retired form:
+it reports E0393 with a behavior-preserving `jet fix` edit to
+`name :: Type{expr}` (or `name := Type{expr}`). A list or map type uses the
+D-DOTCTOR3 whole-value reading, so `evens: [Int] :: xs.map(f)` becomes
+`evens :: [Int]{xs.map(f)}`.
 
 **S4 — Type annotations**: `name: Type` after the name on signatures and fields.
 Never on a local binding. Never `Type name`.
@@ -704,6 +716,21 @@ depth (`r == .Ok(.Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
 in scope for the rest of the same condition. No `is`, no Rust `match`. Bare
 variant names without a leading `.` are E0367 (D-ENUMDOT1).
 
+**D-PAT-NAMED-NEST1=A — Named payload patterns** *(ratified 2026-09-30, card
+#3838)*: a case declared with named fields is matched by those names, at any
+depth: `.Err(.FailedToFetch{url, cause: .BadUrl(why)})`. A bare `url` binds
+`url`; `field:` takes any payload pattern (binding, `_`, range, nested
+pattern); entries may come in any order. A pattern that leaves fields out ends
+with `..` (E0326); `..` after every field is E0327; an unknown field is E0302
+and a repeated one E0303. One pattern uses one form: a positional entry inside
+the braces is E0003, and braces on a case with a positional payload
+(`BadUrl(String)`, `.Val(x)`) are E0303 with the positional form as the fix.
+Sema places each entry on the positional payload slot its field names, so
+checking, exhaustiveness, and lowering are those of the positional form. In an
+`if` condition, where `{` opens the body, the braces start the pattern only
+when the first entry is `..`, `field:`, `field,`, or a lone `field}` followed
+by the body.
+
 **D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
 2026-07-24, card #746)*: for a direct immutable local or parameter of type
 `?T`, `x != None` refines `x` to `T` in the true branch; `x == None` refines
@@ -714,6 +741,21 @@ field paths, indexes, aliases, and calls never narrow — bind with
 binding for typed IR; codegen stays mechanical. Documentation teaches the
 `None` check for a direct stable name and the binding pattern for every other
 case.
+
+**D-OPT-LIFT1=A — A plain value fills an optional slot** *(ratified
+2026-09-28, card #3685; amends S32 and E0108)*: a value of checked type `T`
+fills a slot whose checked type is `T?`: returns (including `?? return`), call
+arguments, struct fields and enum payloads, list and map items, typed
+bindings, and reassignment of a `T?` place. Callee and generic choices happen
+first; the lift then adds exactly one `Present`, so it never picks a callee or
+infers a generic, and every tier lowers it exactly like a written `Val(x)`.
+`x == 5` holds only when `x` holds 5 and `x != 5` is its opposite; only
+`x == Val(v)` binds (S31). Narrowing and `??` are unchanged, nested optionals
+stay E0309, and `Val(x)` stays where nothing expects an optional
+(`limit := Val(10)`). E0108 keeps its real mismatch rows; its "wrap it with
+`Val(...)`" row is retired. `jet fmt --simplify` drops a redundant `Val(x)` in
+a `-> T?` return when the payload is a name, field path, or `Bool`/`Char`
+literal.
 
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns require a
 leading dot (`.Circle(r)`, `.Empty`); bare `Circle(r)` / `Empty` is E0367.
@@ -920,8 +962,9 @@ exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH).
 `Type{ body }` head is
 universal for every type. The body uses that type's own literal notation —
 elements for lists, entries for maps, one value for scalars — and elaborates
-against the head exactly like an expected-type position. It never converts; a
-mismatched body is the ordinary type error (teach `from_*` when a conversion
+against the head exactly like an expected-type position. A one-expression body
+follows the 2026-09-28 amendment below; any other mismatched body is the
+ordinary type error (teach `from_*` when a conversion
 was intended). Scalar literal bodies keep comptime range checks in the E0135 /
 E1003 family (D-RANGETYPE1 / D-SG9). Nested list bodies may be bare `.{ … }` or
 plain `[ … ]`; both elaborate against the element type. Examples:
@@ -931,6 +974,21 @@ plain `[ … ]`; both elaborate against the element type. Examples:
 unannotated binding its optional type).
 Amends D-EMPTYLIT1: `[T]{}` / `[K:V]{}` is the explicit empty collection;
 bare `[]` stays contextual.
+
+**D-DOTCTOR3 amendment — a one-expression body is decided by its type**
+*(owner decision 2026-09-28, report F13 question 1 = A and question 2 =
+conversion is fine; card #3739)*: when the body of `Type{ body }` is exactly one
+expression, its type decides the reading, for every head including lists and
+maps. If the expression is a value of the head type, or one that a parameter of
+that type accepts, the result is that whole value. That acceptance includes the
+checked `Int` to `Float` widening, which stops with E3010 when the whole number
+has no exact Float, the same as passing it to a `Float` parameter. Otherwise
+the head's literal notation applies, so a list head reads the expression as its
+single element. The rule is deterministic: `[Int]{[1, 2, 3].map(n -> n * 2)}`
+is the three-element list; `[[Int]]{xs}` is a one-element list when
+`xs: [Int]` and the whole value when `xs: [[Int]]`; `[String:Int]{m}` is the
+map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`, `.{ … }`) always
+use element notation.
 
 **S30 — Enums**:
 
@@ -1566,11 +1624,19 @@ declarations; sema injects only the conversions a module's fallible calls
 actually exercise, so unused members never enter the module. Family membership
 is derived: the Prelude registers the type printable, a Core signature returns
 it in the error position of a `T !E` result, and showing it is not prohibited.
-`CryptoError` and `TaskFailure` are outside the family. This amends
+`TaskFailure` is outside the family. This amends
 D-FAIL-CONV1 for the library's own types only; a program's own error type still
 needs its own declaration, and naming the failure
 (`fn run() !JSONError`) stays correct. The accepted cost is that one conversion
 is invisible in the program text.
+
+**D-CRYPTO-ERRFAM1=A — crypto failures join the family** *(ratified
+2026-09-30, card #3824)*: `Prelude/Errors.jet` ships `impl CryptoError -> Err`
+and `impl FileCryptoError -> Err`. Both are payload-free enums, so a failing
+crypto call in `fn run()` passes up and ends the program with exit 1 and a
+report naming the case. The secret-bearing types (`Secret`, `SigningKey`,
+`X25519SecretKey`, `SharedSecret`) keep their E0915 print ban. Local handling
+with `??` stays available.
 
 **D-FAIL-CTX1=A — notes ride `?` and the journey is automatic** *(ratified
 2026-08-06, card #1532)*: contextual `?(text)` may carry a lazy string note.
@@ -1999,8 +2065,9 @@ const` copies the value into use sites. Retired lowercase `#static` and
 `#inline` fix to those registry-backed forms.
 The `const` keyword this outcome was written against was retired later the same
 milestone by D-CONST-RETIRE1 (E0146). The constant these rules attach to is now
-the marked compile-time binding, so the two spellings are `#Static @name ::
-value` and `#Inline @name :: value` — see spec.md § compile-time bindings. The
+an ordinary ALL_CAPS constant binding (D-PREP-SURFACE2=A), so the two
+spellings are `#Static NAME :: value` and `#Inline NAME :: value` — see spec.md
+§ compile-time names. The
 outcome itself is unchanged: `#Static` gives the constant an address, `#Inline`
 copies it into use sites.
 
@@ -3866,6 +3933,10 @@ index, not a substitute for that law.
   redraws one line; non-TTY output appends one line per update. `NO_COLOR` removes
   ANSI sequences from custom formats.
   D-TERM1's `core.term` remains the direct raw-key bridge.
+  *Note (D-CORE-TREE1=A, D-CORE-IO-BUF1=A)*: `core.io` is retired. The stream
+  handles, `Reader`, `Writer`, and terminal capabilities named above live in
+  `core.term` (`use core.term as io` keeps the `io.` spellings); there is no
+  `core.io` module.
 - **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
   same spec dynamically for subcommands, env fallbacks, completions, and tests.
@@ -3908,6 +3979,24 @@ index, not a substitute for that law.
   `LocalDate`, `LocalTime`, `Duration`, and `Zone` types, with easy beginner
   constructors plus expert control over timezone data, monotonic clocks, fake
   clocks, and schedulers.
+- **D-TIME-INSTANT1=A** *(ratified 2026-09-30, card #3841)*: `time.instant()`
+  returns the compiler-owned monotonic Time point on every compiler and tier;
+  Core/time has no source `Instant` struct. `t + 5min` is an `Instant`,
+  `b - a` and `t.elapsed()` are `Duration`s, and `t.unix_ns` is E0302 pointing
+  at `time.unix_ns() -[Time]> Int`, the one wall-clock Unix-nanosecond read.
+- **D-CORE-IO-BUF1=A** *(ratified 2026-09-30, card #3281)*: `core.io` stays
+  retired; there are no `StringBuf`/`BytesBuf` buffers. The built-in `Bytes`
+  is the one in-memory byte buffer: `Bytes.with_capacity(n)`, in-place
+  `&buf.write(bytes)` and typed writes, cursor reads through `position()`,
+  `seek(n)`, `rewind()`, `read_bytes(n)`, `read_string(n)`, `read_byte()`, and
+  `eof()`, and `to_string()`/`to_bytes()`/`lines()` conversion. Text is built
+  with interpolation or a joined list of lines; `Cursor.over(text)` reads text
+  in pieces.
+- **D-DEQUE-QUEUE1=A** *(ratified 2026-09-30, card #3281)*: the built-in
+  `Queue<T>` is the only double-ended queue; `core.collections` has no
+  `Deque` or deque functions. A rotate is `pop_back` then `push_front`; an
+  extend is a loop of `push_back`. `Deque` stays the retired D-COLLNAME1=A
+  spelling.
 - **D-URL1=A**: `core.url` and `core.mime` are separate typed modules. `Url`
   owns parse/build/join/normalize, typed repeated query pairs, component
   percent-encoding, IDNA host handling, and `file:`/`data:` URLs. `Mime` owns
@@ -4104,8 +4193,9 @@ index, not a substitute for that law.
   UTF-8 helpers project over those bytes. UDP remains packet-oriented and
   reports source, original length, and truncation. Half-close is explicit;
   close is idempotent; later misuse returns `.Closed`.
-- **D-NETIO-CONTRACT1=A / D-NETIO-CONTRACT2=B**: `core.io.Reader` and
-  `core.io.Writer` are the one nominal byte-stream contract. Both use write
+- **D-NETIO-CONTRACT1=A / D-NETIO-CONTRACT2=B**: `core.term.Reader` and
+  `core.term.Writer` are the one nominal byte-stream contract (D-CORE-TREE1=A
+  retired `core.io`; D-CORE-IO-BUF1=A keeps it retired). Both use write
   receivers and return `IOError`; `read(limit)` requires a positive limit,
   returns at most that many bytes, and reserves an empty success for clean EOF.
   `write(bytes)` may report a positive prefix; zero for nonempty input is an
@@ -4114,7 +4204,7 @@ index, not a substitute for that law.
   adapters convert their native failures into the closed `IOError` tree. TLS
   byte and lifecycle methods expose that shared tree directly; other native
   byte methods keep their network-specific result types.
-- **D-IOERROR-TREE1=A**: every `core.io.Reader`/`Writer` adapter returns one
+- **D-IOERROR-TREE1=A**: every `core.term.Reader`/`Writer` adapter returns one
   closed `IOError` tree: `InvalidInput(IOContext)`, `NotFound(IOContext)`,
   `PermissionDenied(IOContext)`, `TimedOut(IOContext)`,
   `Cancelled(IOContext)`, `Closed(IOContext)`, `Protocol(IOContext)`, or
@@ -6871,6 +6961,8 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-FENCE-GLYPH1=A** *(card #1516; spelling superseded by D-FENCE2=A)* — expression fences accept expression entries. It spelled fences `@[ … ]@`, superseding `$[ … ]$` under the D-ONCE-AT1 prefix migration; the retired `$` spelling has no compatibility path.
 - **D-FENCE-RANGE1=A** *(card #1516)* — inside an expression fence, an ascending integer-literal range `0..3` expands to the four entries `0`, `1`, `2`, and `3`. Descending ranges and ranges with non-integer-literal endpoints remain one ordinary Range value and add no diagnostic. Binding-name ranges keep their existing numbered-name rule.
 - **D-FENCE2=A** *(ratified 2026-09-28, card #3662; shipped 2026-09-28)* — the statement-expansion fence is spelled `<: … :>`: `<: t1..t8 :> :: task transfer(from, to, 100)`, `print(<: "a", total(1, 2) :>)`. Statement repetition, lock-step fences, numbered names, and D-FENCE-RANGE1 are unchanged; `print(<: (0..3) :>)` prints one range. `<:` and `:>` are longest-match lexer tokens; `<`, `<=`, `<=>`, `>`, and generic `<T>` never form them. `:>` is reclaimed from the D-ARROW-RESPELL1 retired arrow: a `:>` with no opening `<:` teaches `->` through E0070. The old `@[` / `]@` digraphs teach the new spelling through E-FENCE-SPELLING with a formatting-safe edit; they are not aliases.
+- **D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — compiler facts carry `$`. A fact is a `$` member of its subject (`T.$layout`, `T.$fields`, `field.$name`, `Severity.$range`, `send_report.$effects`, `value.$origin`); build facts hang off `$build` (`$build.os`, `.profile`, `.settings.*`, `.stamp.*`) and package facts off `$package` (`$package.name`, `$package.version`); `$phase` and `$program` are the other subjectless roots. Marker and fact declarations mark compiler metadata the same way: `marker Audited($sites: [.Type], $repeatable: false)`, `fact Flow($holds: .Value, $safe: .Gain, $gates: [])`, `migration … $irreversible`. `@TYPE(T)`, `@FUNCTION(f)`, `@METHOD`, `@CLOSURE` and `@VALUE(v)` are removed in favour of subject members; `@SOURCE()` and `@TYPES()` keep their registry spelling until a ballot names a `$` root. The lexer reads `$name` as one word; programs never declare a `$` name (E0003), and config surfaces read the same word as the `$NAME` environment read (D-ONCE-DOLLAR1=B). Every retired `@` fact spelling (`T.@layout`, `@build.os`, `@build.package.name`, `@sites:`, `@PHASE()`) teaches E0003 with a machine-applicable `$` respelling (retirement row `fact-mark`). Template name splices carry `$` too (D-NAME-SPLICE1=B, below); `@run.jet` filenames and `pkg@provider#v` references are unchanged (D-AT-INFIX1=A).
+- **D-NAME-SPLICE1=B** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — inside a derive or marker template the fact sigil also splices a template binding: `fn $method(self)` and `impl $type_name` name a declaration from text, `self.$field` and `rhs.$field` read the member named by a loop value, `.$left` matches the variant it names, and `{$count}` or a bare `$count` reads the binding's build-time value. A `$` word that names no template binding, or that is read on a bound value (`field.$name`), stays a compiler fact. The retired `@` splice (`fn @method`, `self.@field`, `.@left`, `{@count}`) teaches E0388 with a machine-applicable `$` respelling, which completes the #3662 cutover: prefix `@` in code marks only a live link.
 - **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
 - **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
 - **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
@@ -7172,6 +7264,16 @@ the one assertion family in code, tests, and scripts. `require` and
 `require_eq` migrate to these spellings and are deleted; the rich diff and the
 one stop family remain. This amends S43, the D-PRELUDE-LAW1=A ambient registry,
 and the D-FAIL-BREACH1=A wording.
+
+**2026-09-30 — D-DBG1=A** *(card c0ek5f9z; owner: spelled `debug`, not
+`dbg`)*: `debug(value)` is an ambient prelude builtin that returns `value`
+unchanged and adds no effect, so it is legal in `-[]>`, `#Memo`, and comptime
+code. In development compiles (`jet run`, `jet dev`, `jet test`,
+`--interpret`, and `--profile=debug`) it writes one stderr line,
+`[debug] file.jet:LINE expr = <Debug form>`; comptime code prints while
+compiling. A shipped artifact (`jet build`, `-o`, a library) or a
+release-profile compile (`--release`, `hardened`) rejects any remaining trace
+with E3405, whose `jet fix` edit removes the wrapper and keeps the expression.
 
 **2026-08-07 — D-CLAIM-BENCH1=A** *(card #1641; shipped in card #2082)*:
 `.measure` is a `#Test` member and `jet test --measure` is measurement mode.
@@ -7504,6 +7606,17 @@ formatter emits only `prep { … }`. The ratified value form
 either compiler yet, so it is rejected with E0391 rather than accepted
 silently. Other `@` uses are unchanged.
 
+**2026-09-30 — D-PREP-SURFACE2=A constants shipped** *(card #3662; amended
+the same day by the owner ruling under D-SHAPE-CASE1)*: compile time is always
+explicit. A build-time constant is `NAME :: prep { value }` at module scope and
+`name :: prep { value }` in a block (a block holding one final expression);
+casing never implies compile time, so an ALL_CAPS `NAME :: value` is an
+ordinary runtime constant. `#Static NAME :: prep { value }` and
+`#Inline NAME :: prep { value }` keep D-CONSTMARK1. The retired `@NAME :: value`
+declaration teaches E0388 with the behavior-preserving edit
+`NAME :: prep { value }`, and a retired `@NAME` read teaches `NAME` (retirement
+row `comptime-constant-mark`); prefix `@` in code now marks a D-MEMREF1 link.
+
 **2026-09-28 — D-PREP-BRANCH1=A, D-PREP-FN1=A, D-CONSTGEN2=A shipped**
 *(card #3662)*: `prep if` and `prep loop` replace `@if` and `@loop` in
 statements, derive and marker bodies, root declaration templates, and test
@@ -7529,6 +7642,18 @@ with a machine-applicable fix, never an alias. Effect denials
 (`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
+
+**2026-09-30 — D-OUTCOME-SHAPE1=A shipped** *(card #3838; parent #3742;
+ratified 2026-09-29)*: a `T? E!` value has exactly three states and patterns
+name them directly: `.Val(user)`, `.None`, `.Err(e)`. An else-less table checks
+exhaustiveness over the three and E0307 names a missing state (`None`,
+`Val(...)`). The nested `.Ok(.Val(x))` / `.Ok(.None)` spelling is retired: E0392
+refuses it with a behavior-preserving edit to the flat state, never an alias.
+`.Ok(value)` binding the whole optional success stays valid. A table with an
+`.Err` arm handles the failure; without one the failure passes up automatically
+and `.Val`/`.None` test the optional. Absence never leaves a function by
+itself: a field read on `T?` is E0310, which teaches `?.`, `??`, or a pattern.
+The carrier layout and runtime are unchanged.
 
 **2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21; amended by
 D-ERRSUFFIX1=B and superseded by D-FAILURE-FOUNDATION1=A)*: `?` has one
@@ -7867,6 +7992,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-DBG-DIAG1` | A | `c144` |
 | `D-DBG-EDITOR1` | A | `c144` |
 | `D-DBG-NATIVE1` | A | `c144` |
+| `D-DBG1` | A | `c0ek5f9z` |
 | `D-DBPOLICY-BIND1` | A | `c0ht1m5j` |
 | `D-DBPOLICY1` | A | `c0n6vj96` |
 | `D-DEFAULT-SHAPE1` | B | `c0an426i` |

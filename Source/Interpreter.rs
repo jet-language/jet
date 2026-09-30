@@ -183,7 +183,7 @@ pub fn run_checked(
         Vec::new(),
         Some(decision_ledger),
     );
-    let config = mir_eval_config(program, try_anyway, release_devtools_policy);
+    let config = mir_eval_config(program, try_anyway, invocation, release_devtools_policy);
     append_parked_task_report(mir_eval_outcome(
         crate::Codegen::MIREval::evaluate_mir_program_with_config(program, artifact, &config),
     ))
@@ -192,14 +192,23 @@ pub fn run_checked(
 fn mir_eval_config(
     program: &jet_foundation::MIR::MirProgram,
     try_anyway: bool,
+    invocation: InterpreterInvocation,
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> crate::Codegen::MIREval::MirEvalConfig {
+    let defaults = crate::Codegen::MIREval::MirEvalConfig::default();
+    // D-INTERP-BUDGET1: `jet run` (including `--interpret`) has no step
+    // limit, like a built binary; `jet dev` keeps its budget.
+    let fuel = match invocation {
+        InterpreterInvocation::RunInterpret | InterpreterInvocation::RunDefault => None,
+        InterpreterInvocation::DevInterpret | InterpreterInvocation::DevDefault => defaults.fuel,
+    };
     crate::Codegen::MIREval::MirEvalConfig {
         base_dir: std::path::PathBuf::from(&program.facts.project_root),
         runtime_execution: true,
         try_anyway,
+        fuel,
         release_devtools_policy: release_devtools_policy.clone(),
-        ..Default::default()
+        ..defaults
     }
 }
 

@@ -1,0 +1,33 @@
+// D-MODULE-VALUE1: a literal `@` table may build rows through helpers whose
+// bodies set optional fields with `Val(...)`. The compile-time evaluator runs
+// the same Option carrier as the compiled program.
+pub struct Marker { pub member: String }
+
+pub struct Row {
+    pub name: String
+    pub marker: Marker?
+}
+
+fn row(name: String) -> Row Never! {
+    Row{name: name, marker: None}
+}
+
+fn with_marker(value: ^Row, marker: Marker) -> Row Never! {
+    updated := value
+    updated.marker = Val(marker)
+    updated
+}
+
+ROWS :: prep { [Row]{
+    row("plain"),
+    with_marker(row("marked"), Marker{member: "since"})
+} }
+
+fn run() {
+    loop value in ROWS {
+        if value.marker == {
+            Val(marker) -> print("{value.name}: {marker.member}")
+            None -> print("{value.name}: none")
+        }
+    }
+}

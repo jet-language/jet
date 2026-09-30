@@ -137,7 +137,7 @@ separate meanings:
 | View | Shape | Ordering and scope |
 | --- | --- | --- |
 | `manifest()` | `CompilerManifest` | The uncomposed `package.jet` or inline package carrier. `dependencies` and `outputs` use manifest map-key order; `packages` and `build_profiles` keep declaration order. |
-| `package()` | `CompilerPackage` | The package after declared Config files compose successfully. It uses the manifest fields and the canonical current-package identity; `name` and `version` remain the `@build.package` values. |
+| `package()` | `CompilerPackage` | The package after declared Config files compose successfully. It uses the manifest fields and the canonical current-package identity; `name` and `version` remain the `$build.package` values. |
 | `lock()` | `CompilerLock` | `schema_version`, `file`, `version`, `root_dependencies`, and locked package records. Root dependencies and locked packages retain lock-model order. |
 | `profiles()` | `CompilerProfileSet` | `schema_version`, `file`, and named profiles. Profile and collision maps use key order; `extends`, `packages`, and `sources` retain declaration order. |
 
@@ -230,8 +230,8 @@ fn load() -> String AppErr! {
 
 Conversions into a typed target require ownership of the source or target
 error. An application error still needs an explicit conversion before it can
-propagate into `Err`. `CryptoError` and `TaskFailure` are outside Core's
-automatic conversion family; handle them explicitly or declare an allowed
+propagate into `Err`. `TaskFailure` is outside Core's automatic conversion
+family; handle it explicitly or declare an allowed
 conversion. The mechanism is the same `impl Source -> Target` declaration in
 all cases (D-ERR-CONV, D-FAIL-CONV1, D-FAIL-CONV2).
 
@@ -318,7 +318,10 @@ to the existing names under D-ITER-DECLINE1.
 D-ITER-DECLINE1 for `next` only). It needs exclusive access to a writable
 binding, written `&items.next()`, pulls exactly one item, and leaves the
 remainder in the same source: after two pulls from `[1, 2, 3].lazy()`,
-`to_list()` returns `[3]`. The end is `None`. A moved source cannot be pulled.
+`to_list()` returns `[3]`. The end is `None`. A moved source cannot be pulled,
+and a loop that drives a source holds it for its whole body, so pulling from
+the same source inside that body is rejected (E0507). A helper that pulls from
+a caller's source names it as `&Iter<T>`.
 `first()` is different: it consumes the whole iterator and returns only its
 first item. Adapter callbacks run only when an item is pulled through them, and
 the item that ends a `take_while` is consumed and not yielded. User types that
@@ -2022,7 +2025,9 @@ fn run() {
 | `time.parse_rfc3339(text)` | `DateTime !TimeError` | Parse an RFC3339 timestamp through the zoned parser. |
 | `time.parse_zoned(text)` | `ZonedDateTime !TimeError` | Parse an RFC9557 date-time with a bracketed IANA zone and a matching UTC offset. |
 | `time.zoned_local(date, local_time, zone, disambiguation)` | `ZonedDateTime !TimeError` | Resolve local time in a zone with `compatible`, `earlier`, `later`, or `reject` policy. |
-| `time.now()` / `now_utc()` / `today()` / `instant()` / `start()` | time value `-[Time]>` | Read the host clock. |
+| `time.now()` / `now_utc()` / `today()` / `start()` | time value `-[Time]>` | Read the host wall clock. |
+| `time.instant()` | `Instant -[Time]>` | Read the monotonic clock as a Time point: `t + 5min` is an `Instant`, `b - a` and `t.elapsed()` are `Duration`s. An `Instant` has no epoch and no fields (D-TIME-INSTANT1=A). |
+| `time.unix_ns()` | `Int -[Time]>` | Wall-clock Unix nanoseconds, for timestamps, nonces, and expiry checks. |
 | `time.sleep(duration)` / `sleep_until(deadline)` | `Unit -[Time]>` | Wait on the host clock. |
 | `time.add_days(date, days)` | `LocalDate` | Add calendar days. |
 | `time.compare_date(a, b)` / `date_equals(a, b)` | ordering / `Bool` | Compare dates. |
@@ -3451,7 +3456,6 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.http`
 - `core.http.client`
 - `core.http.server`
-- `core.io`
 - `core.jobs`
 - `core.log`
 - `core.math`

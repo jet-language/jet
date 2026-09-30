@@ -10,12 +10,6 @@ enum SemaNameCase {
     Screaming
 }
 
-// D-META-STAGE1=B: `@name` keeps its compile-time mark in diagnostics. The
-// parser stores the bare name, and the mark is the byte just before it.
-fn sema_casing_marked_span(name_span: Span) -> Span Never! {
-    Span{start: name_span.start - 1, end: name_span.end}
-}
-
 fn sema_casing_ascii_code(scalar: String) -> Int Never! {
     bytes :: scalar.bytes()
     if bytes.len() != 1 -> return -1
@@ -65,10 +59,7 @@ fn sema_casing_join(scalars: [String], start: Int, end: Int) -> String Never! {
 
 fn sema_casing_has_case(name: String, case: SemaNameCase) -> Bool {
     if name == "_" -> return true
-    // D-META-STAGE1=B: the compile-time mark is part of the name; case policy
-    // reads the name under the mark.
     body := name
-    if body.starts_with("@") -> body = sema_casing_drop_first_byte(body)
     if body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
     if body == "" || body.starts_with("_") || body.ends_with("_") || body.contains("__") -> return false
     scalars :: unicode.scalars(body)
@@ -169,8 +160,6 @@ fn sema_casing_pascal_words(name: String) -> String {
 }
 
 fn sema_casing_canonical(name: String, case: SemaNameCase) -> String {
-    // D-META-STAGE1=B: keep the compile-time mark, re-case the name under it.
-    if name.starts_with("@") -> return "@{sema_casing_canonical(sema_casing_drop_first_byte(name), case)}"
     leading :: if name.starts_with("_") -> "_" else -> ""
     body :: sema_casing_trim_leading_underscores(name)
     out :: if case == {
@@ -199,8 +188,91 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
     ))
 }
 
+// D-ACRO-LEX1=A applied acronym lexicon: every initials-formed word in current
+// Jet names, in canonical caps. Mirrors `ACRONYMS` in
+// crates/jet-foundation/src/Syntax/acronyms.rs.
+SEMA_CASING_ACRONYMS :: prep { [String]{
+    "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
+    "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DKIM", "DMA", "DNS",
+    "DSL", "DTD", "EOF", "FFI", "FS", "GC", "GPIO", "GPU", "HLL", "HMAC", "HSM", "HTML", "HTTP",
+    "ID", "IME", "IO", "IP", "IR", "JIT", "JS", "JSON", "JSONL", "JVM", "KDF", "KMS", "LRU",
+    "LSP", "LTO", "LWW", "MCP", "MIME", "MIR", "MMIO", "OCI", "OS", "PEM", "PID", "PM", "PNG",
+    "RGA", "RGB", "RNG", "RPC", "RSA", "SDK", "SHA", "SMTP", "SPSC", "SQL", "SRI", "SRV", "SSG",
+    "SSH", "SSR", "SVD", "SVG", "TCP", "TIR", "TLS", "TOML", "TTY", "TUF", "TUI", "UART", "UDP",
+    "UI", "URI", "URL", "UTF", "UUID", "VJP", "VM", "XML", "YAML",
+} }
+
+fn sema_casing_is_digit(scalar: String) -> Bool {
+    code :: sema_casing_ascii_code(scalar)
+    code >= 48 && code <= 57
+}
+
+// One PascalCase word: a lexicon acronym (plus trailing digits) in caps, a
+// fixed compound spelling, or the word unchanged. Coined contractions stay.
+fn sema_casing_acronym_word(word: String) -> String {
+    if word == "Wasm" || word == "Bindgen" -> return ~word
+    lower :: unicode.lower(word)
+    if lower == "macos" -> return "MacOS"
+    if lower == "ipv4" -> return "IPv4"
+    if lower == "ipv6" -> return "IPv6"
+    scalars :: unicode.scalars(word)
+    letters := scalars.len()
+    loop letters > 0 && sema_casing_is_digit(scalars[letters - 1]) -> letters -= 1
+    if letters == 0 -> return ~word
+    head :: unicode.upper(sema_casing_join(scalars, 0, letters))
+    loop acronym in SEMA_CASING_ACRONYMS {
+        if acronym == head -> return "{head}{sema_casing_join(scalars, letters, scalars.len())}"
+    }
+    ~word
+}
+
+// Respell every word of a PascalCase name (`MirTypeId` -> `MIRTypeID`).
+// ALL_CAPS and snake_case names are value-like and stay unchanged.
+fn sema_casing_acronym_name(name: String) -> String {
+    scalars :: unicode.scalars(name)
+    if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return ~name
+    has_lower := false
+    loop scalar in scalars {
+        if sema_casing_is_lower(scalar) -> has_lower = true
+    }
+    if !has_lower -> return ~name
+    segments := [String]{}
+    loop segment in name.split("_") {
+        out := ""
+        loop word in sema_casing_split_words(segment) -> out = "{out}{sema_casing_acronym_word(word)}"
+        &segments.push(out)
+    }
+    segments.join("_")
+}
+
+// D-ACRO-LEX1=A (E0358): a type-like declaration keeps every lexicon acronym
+// in caps. The edit replaces the whole written name when the span covers it.
+fn sema_casing_acronyms(name: String, span: Span, diagnostics: &[Diagnostic]) {
+    if span.start == span.end -> return
+    parts := [String]{}
+    loop segment in name.split(".") {
+        if !sema_casing_has_case(segment, SemaNameCase.Pascal) -> return
+        &parts.push(sema_casing_acronym_name(segment))
+    }
+    canonical :: parts.join(".")
+    if canonical == name -> return
+    diagnostic :: sema_error(
+        "E0358",
+        span,
+        "`{name}` is spelled `{canonical}`",
+        "Jet keeps acronyms fully capitalized inside PascalCase names (D-ACRO-CASE1=A, D-ACRO-LEX1=A)",
+        "write `{canonical}` instead of `{name}`",
+    )
+    if span.end - span.start != name.bytes().len() {
+        &diagnostics.push(diagnostic)
+        return
+    }
+    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: canonical}))
+}
+
 fn sema_casing_pascal(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
     loop segment in name.split(".") -> sema_casing_check(segment, span, category, SemaNameCase.Pascal, &diagnostics)
+    sema_casing_acronyms(name, span, &diagnostics)
 }
 
 fn sema_casing_snake(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
@@ -301,8 +373,10 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
             loop method in definition.methods -> sema_casing_function(method, "method", &diagnostics)
         }
         .Const(definition) -> {
+            // Owner ruling (2026-09-30): an immutable module binding is
+            // ALL_CAPS; a mutable one is never ALL_CAPS.
             if {
-                definition.is_comptime -> sema_casing_screaming("@{definition.name}", sema_casing_marked_span(definition.name_span), "constant", &diagnostics)
+                definition.mutable -> sema_casing_snake(definition.name, definition.name_span, "module variable", &diagnostics)
                 else -> sema_casing_screaming(definition.name, definition.name_span, "constant", &diagnostics)
             }
             sema_casing_expr(definition.value, &diagnostics)
@@ -382,7 +456,7 @@ fn sema_casing_binding(binding: Binding, diagnostics: &[Diagnostic]) {
         loop entry in sema_casing_bind_names(pattern) -> sema_casing_bind_name(entry, &diagnostics)
         return
     }
-    if binding.is_comptime -> return sema_casing_snake("@{binding.name}", sema_casing_marked_span(binding.name_span), "local constant", &diagnostics)
+    if binding.is_comptime -> return sema_casing_snake(binding.name, binding.name_span, "local constant", &diagnostics)
     sema_casing_snake(binding.name, binding.name_span, "local", &diagnostics)
 }
 
@@ -511,11 +585,15 @@ fn sema_casing_bin_match_holes(parts: [BinMatchPart], diagnostics: &[Diagnostic]
 fn sema_casing_pattern(pattern: Pattern, diagnostics: &[Diagnostic]) {
     if pattern == {
         .Variant(_, bindings, _, _) -> {
-            loop slot in bindings {
-                if slot == .Bind(name, span) -> sema_casing_snake(name, span, "pattern binding", &diagnostics)
+            loop slot in bindings -> sema_casing_pattern_slot(slot, &diagnostics)
+        }
+        .Present(binding, binding_span, inner, _) | .Ok(binding, binding_span, inner, _) | .Err(binding, binding_span, inner, _) -> {
+            if inner == .Val(nested) {
+                sema_casing_pattern(nested, &diagnostics)
+            } else {
+                sema_casing_snake(binding, binding_span, "pattern binding", &diagnostics)
             }
         }
-        .Present(binding, binding_span, _) | .Ok(binding, binding_span, _) | .Err(binding, binding_span, _) -> sema_casing_snake(binding, binding_span, "pattern binding", &diagnostics)
         .Or(alternatives, _) -> {
             loop alternative in alternatives -> sema_casing_pattern(alternative, &diagnostics)
         }
@@ -530,6 +608,16 @@ fn sema_casing_pattern(pattern: Pattern, diagnostics: &[Diagnostic]) {
         .StrMatch(parts, _) -> sema_casing_str_match_holes(parts, &diagnostics)
         .BinMatch(parts, _) -> sema_casing_bin_match_holes(parts, &diagnostics)
         else -> {}
+    }
+}
+
+fn sema_casing_pattern_slot(slot: PatSlot, diagnostics: &[Diagnostic]) {
+    if slot == {
+        .Bind(name, span) -> sema_casing_snake(name, span, "pattern binding", &diagnostics)
+        .Nested(nested) -> sema_casing_pattern(nested, &diagnostics)
+        // D-PAT-NAMED-NEST1=A: `field: slot` binds what its slot binds.
+        .Named(_, _, inner) -> sema_casing_pattern_slot(inner, &diagnostics)
+        .Wildcard | .Range(_, _) | .Rest(_) -> {}
     }
 }
 
@@ -681,7 +769,10 @@ pub fn sema_casing_program(program: Program, diagnostics: &[Diagnostic]) {
     loop statement in program.script_body {
         if statement == .Val(binding) {
             if binding.pattern == None {
-                sema_casing_screaming(binding.name, binding.name_span, "constant", &diagnostics)
+                if {
+                    binding.mutable -> sema_casing_snake(binding.name, binding.name_span, "module variable", &diagnostics)
+                    else -> sema_casing_screaming(binding.name, binding.name_span, "constant", &diagnostics)
+                }
                 sema_casing_expr(binding.init, &diagnostics)
             }
         }

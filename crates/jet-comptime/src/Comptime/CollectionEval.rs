@@ -2049,50 +2049,10 @@ fn collection_counter_value(counter: &collection_semantics::JetCounter) -> CtVal
     }
 }
 
-fn collection_deque(
-    value: &CtValue,
-    span: Span,
-) -> Result<collection_semantics::JetDeque, Diagnostic> {
-    let fields = collection_struct_fields(value, "Deque", "Deque value", span)?;
-    let items = collection_string_list(
-        collection_field(fields, "items", "Deque items", span)?,
-        "Deque items",
-        span,
-    )?;
-    let head = as_int(collection_field(fields, "head", "Deque head", span)?, span)?;
-    Ok(collection_semantics::JetDeque { items, head })
-}
-
-fn collection_deque_value(deque: &collection_semantics::JetDeque) -> CtValue {
-    CtValue::Struct {
-        type_name: "Deque".to_string(),
-        fields: vec![
-            (
-                "items".to_string(),
-                CtValue::List(deque.items.iter().cloned().map(CtValue::Str).collect()),
-            ),
-            ("head".to_string(), CtValue::Int(deque.head)),
-        ],
-    }
-}
-
 fn collection_optional_string(value: Option<String>) -> CtValue {
     value
         .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
         .unwrap_or_else(|| CtValue::absent(Type::String))
-}
-
-fn collection_deque_pair(
-    deque: &collection_semantics::JetDeque,
-    value: Option<String>,
-) -> CtValue {
-    CtValue::Struct {
-        type_name: String::new(),
-        fields: vec![
-            ("deque".to_string(), collection_deque_value(deque)),
-            ("value".to_string(), collection_optional_string(value)),
-        ],
-    }
 }
 
 fn collection_ordered_map(
@@ -2324,79 +2284,6 @@ pub fn apply_core_collections(
             let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
             Ok(collection_counter_value(&native::jet_coll_counter_clear(
                 &counter,
-            )))
-        }
-        "deque" => Ok(collection_deque_value(&native::jet_coll_deque())),
-        "deque_from" => {
-            let items = collection_string_list(
-                collection_arg(args, 0, method, span)?,
-                "core.collections.deque_from items",
-                span,
-            )?;
-            Ok(collection_deque_value(&native::jet_coll_deque_from(&items)))
-        }
-        "deque_len" | "deque_is_empty" | "deque_items" => {
-            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
-            match method {
-                "deque_len" => Ok(CtValue::Int(native::jet_coll_deque_len(&deque))),
-                "deque_is_empty" => Ok(CtValue::Bool(native::jet_coll_deque_is_empty(
-                    &deque,
-                ))),
-                _ => Ok(CtValue::List(
-                    native::jet_coll_deque_items(&deque)
-                        .into_iter()
-                        .map(CtValue::Str)
-                        .collect(),
-                )),
-            }
-        }
-        "append" | "appendleft" => {
-            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
-            let value = as_string(collection_arg(args, 1, method, span)?, span)?;
-            let next = if method == "append" {
-                native::jet_coll_deque_append(&deque, &value)
-            } else {
-                native::jet_coll_deque_appendleft(&deque, &value)
-            };
-            Ok(collection_deque_value(&next))
-        }
-        "pop" | "popleft" => {
-            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
-            let (next, value) = if method == "pop" {
-                native::jet_coll_deque_pop(&deque)
-            } else {
-                native::jet_coll_deque_popleft(&deque)
-            };
-            Ok(collection_deque_pair(&next, value.ok()))
-        }
-        "peek" | "peekleft" => {
-            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
-            let value = if method == "peek" {
-                native::jet_coll_deque_peek(&deque)
-            } else {
-                native::jet_coll_deque_peekleft(&deque)
-            };
-            Ok(collection_optional_string(value))
-        }
-        "extend" | "extendleft" => {
-            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
-            let values = collection_string_list(
-                collection_arg(args, 1, method, span)?,
-                "core.collections.extend values",
-                span,
-            )?;
-            let next = if method == "extend" {
-                native::jet_coll_deque_extend(&deque, &values)
-            } else {
-                native::jet_coll_deque_extendleft(&deque, &values)
-            };
-            Ok(collection_deque_value(&next))
-        }
-        "rotate" => {
-            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
-            let amount = as_int(collection_arg(args, 1, method, span)?, span)?;
-            Ok(collection_deque_value(&native::jet_coll_deque_rotate(
-                &deque, amount,
             )))
         }
         "ordered_map" => Ok(collection_ordered_map_value(&native::jet_coll_ordered_map())),

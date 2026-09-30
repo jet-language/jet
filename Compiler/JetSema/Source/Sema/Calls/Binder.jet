@@ -359,17 +359,43 @@ pub fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[Call
                     loop next_positional < params.len() && !params[next_positional].variadic && slots[next_positional].len() > 0 {
                         next_positional += 1
                     }
-                    if next_positional >= params.len() -> skip_arg = true
-                }
-                if !skip_arg {
-                    parameter_index = next_positional
-                    if params[parameter_index].zone == ParamZone.LabelOnly {
-                        &diagnostics.push(sema_call_diag_required_label(callee, params[parameter_index].label, arg.span))
-                        failed = true
-                        if !params[parameter_index].variadic -> next_positional += 1
+                    // A label-only parameter is never a positional slot: a bare
+                    // argument fills the next parameter that accepts a position,
+                    // so `f(name, body, viewport: v)` binds `body` past a
+                    // label-only `viewport`. E0769 names a label-only parameter
+                    // only when no position-accepting parameter remains.
+                    target := next_positional
+                    loop target < params.len() && (params[target].zone == ParamZone.LabelOnly || (!params[target].variadic && slots[target].len() > 0)) {
+                        target += 1
+                    }
+                    if target < params.len() {
+                        parameter_index = target
+                        next_positional = target
+                        if !params[target].variadic -> next_positional += 1
+                    }
+                    if target >= params.len() {
+                        // Wrap to an earlier skipped label-only parameter only
+                        // for the call's first failure, so recovery never
+                        // repeats a report. Past every parameter, arity is
+                        // reported by the caller's own check.
+                        skipped := -1
+                        probe := next_positional
+                        loop skipped < 0 && probe < params.len() {
+                            if params[probe].zone == ParamZone.LabelOnly && slots[probe].len() == 0 -> skipped = probe
+                            probe += 1
+                        }
+                        probe = 0
+                        loop skipped < 0 && !failed && probe < next_positional {
+                            if params[probe].zone == ParamZone.LabelOnly && slots[probe].len() == 0 -> skipped = probe
+                            probe += 1
+                        }
+                        if skipped >= 0 {
+                            &diagnostics.push(sema_call_diag_required_label(callee, params[skipped].label, arg.span))
+                            failed = true
+                            if !params[skipped].variadic && next_positional < skipped + 1 -> next_positional = skipped + 1
+                        }
                         skip_arg = true
                     }
-                    if !skip_arg && !params[parameter_index].variadic -> next_positional += 1
                 }
             }
             else -> {
@@ -446,7 +472,7 @@ pub fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[Call
 
     // Rewrite only after all shape diagnostics have passed. This guarantees
     // that a failed bind leaves the caller's source AST untouched.
-    binding := sema_call_rewrite_args(params, args, slots, call_span)
+    binding := sema_call_rewrite_args(params, &args, slots, call_span)
     binding.slots = source_slots
     binding.rewrote = false
     if binding.sources.len() != args.len() -> binding.rewrote = true
@@ -460,20 +486,20 @@ pub fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[Call
 
 pub fn sema_call_bind_signature(callee: String, signature: Type, parameter_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     params :: sema_call_params_from_type_after(signature, parameter_offset) ?? return None
-    sema_call_bind_args(callee, params, args, call_span, &diagnostics)
+    sema_call_bind_args(callee, params, &args, call_span, &diagnostics)
 }
 
 pub fn sema_call_bind_direct(callee: String, signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
-    sema_call_bind_signature(callee, signature, 0, args, call_span, &diagnostics)
+    sema_call_bind_signature(callee, signature, 0, &args, call_span, &diagnostics)
 }
 
 pub fn sema_call_bind_value(signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     params :: sema_call_params_from_value_type(signature) ?? return None
-    sema_call_bind_args("this function value", params, args, call_span, &diagnostics)
+    sema_call_bind_args("this function value", params, &args, call_span, &diagnostics)
 }
 
 pub fn sema_call_bind_method(method: String, signature: Type, receiver_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
-    sema_call_bind_signature(method, signature, receiver_offset, args, call_span, &diagnostics)
+    sema_call_bind_signature(method, signature, receiver_offset, &args, call_span, &diagnostics)
 }
 
 pub fn sema_call_binding_has_default_refs(binding: SemaCallBinding) -> Bool Never! {

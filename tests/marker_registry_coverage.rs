@@ -149,7 +149,7 @@ fn program_at(marker: &str, row: &AppliedRule, site: RuleSite) -> Option<String>
         ),
         // D-CONSTMARK1=A / spec.md:718-720: the Constant site is the marked
         // compile-time binding, for every row that declares it.
-        RuleSite::Constant => format!("{marker} @VALUE :: 1\n\nfn run() {{\n}}\n"),
+        RuleSite::Constant => format!("{marker} VALUE :: prep {{ 1 }}\n\nfn run() {{\n}}\n"),
         RuleSite::Parameter => {
             format!("fn helper({marker} a: Int) {{\n}}\n\nfn run() {{\n}}\n")
         }

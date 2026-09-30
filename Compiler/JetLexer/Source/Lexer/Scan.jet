@@ -44,22 +44,22 @@ fn ascii_digit(value: Int) -> Bool Never! {
     value >= 48 && value <= 57
 }
 
-fn is_identifier_start(source: [U8], index: Int) -> Bool {
+fn is_identifier_start(source: [U8], index: Int) -> Bool Never! {
     value :: byte_at(source, index)
     value == 95 || ascii_alpha(value) || unicode.is_alphabetic(scalar_at(source, index))
 }
 
-fn is_identifier_continue(source: [U8], index: Int) -> Bool {
+fn is_identifier_continue(source: [U8], index: Int) -> Bool Never! {
     value :: byte_at(source, index)
     value == 95 || ascii_alpha(value) || ascii_digit(value) || unicode.is_alphabetic(scalar_at(source, index)) || unicode.is_numeric(scalar_at(source, index))
 }
 
-fn first_char_is_upper(source: [U8], start: Int) -> Bool {
+fn first_char_is_upper(source: [U8], start: Int) -> Bool Never! {
     scalar := scalar_at(source, start)
     unicode.is_alphabetic(scalar) && unicode.upper(scalar) == scalar && unicode.lower(scalar) != scalar
 }
 
-fn is_whitespace_at(source: [U8], index: Int) -> Bool {
+fn is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
     value :: byte_at(source, index)
     if value < 0 -> return false
     if value < 128 {
@@ -588,8 +588,20 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if value == 36 {
-            last_code = push_code(&facts, K_DOLLAR, start, start + 1, false)
-            i += 1
+            // D-COMPILER-NS1=A: prefix `$name` is one compiler-fact word
+            // (`$build`, `T.$layout`, `$sites:`); config surfaces read the same
+            // word as a `$NAME` environment read. A lone `$` keeps its token.
+            if {
+                is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
+                    end :: scan_identifier_end(source, i + 1)
+                    last_code = push_code(&facts, K_IDENT, start, end, false)
+                    i = end
+                }
+                else -> {
+                    last_code = push_code(&facts, K_DOLLAR, start, start + 1, false)
+                    i += 1
+                }
+            }
             next
         }
         if value == 63 {

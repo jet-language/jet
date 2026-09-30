@@ -179,7 +179,7 @@ pub mod jet_std {
     }
 
     #[derive(Clone, Debug)]
-    pub struct JetURL {
+    pub struct JetURLParts {
         pub scheme: String,
         pub username: Option<String>,
         pub password: Option<String>,

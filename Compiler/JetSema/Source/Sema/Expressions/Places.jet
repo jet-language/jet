@@ -97,7 +97,7 @@ fn sema_expression_deref(value: Expr, span: Span, expected: Type?, environment: 
     checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if checked.ty == .Apply(name, args) {
         if name == "Ptr" && args.len() == 1 {
-            if !sema_expr_require_unsafe("pointer dereference", span, context, &diagnostics) -> return None
+            if !sema_expr_require_unsafe("pointer dereference", span, &context, &diagnostics) -> return None
             result :: sema_tir_expr(args[0], TExprKind.Deref{value: checked}, span)
             return sema_expr_expected(result, expected, environment, &diagnostics)
         }
@@ -141,7 +141,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         else -> [Type]{}
     }
     if owner_name != "" {
-        owner :: sema_expression_type_symbol(scopes, owner_name)
+        owner :: sema_expression_type_symbol(&scopes, owner_name)
         if owner == .Val(owner_symbol) {
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
             declaration :: sema_scope_resolve_declaration(environment, owner_symbol.id)
@@ -165,6 +165,19 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
                 }
             }
         }
+    }
+    // D-TIME-INSTANT1=A: the compiler-owned `Instant` is a monotonic Time
+    // point with no epoch and no fields; the wall clock is its own read.
+    if owner_name == "Instant" && member == "unix_ns" {
+        &diagnostics.push(sema_error("E0302", span, "`Instant` has no field `unix_ns`", "`Instant` is a monotonic Time point with no epoch; wall-clock Unix nanoseconds are a separate clock read", "call `time.unix_ns()` for wall-clock Unix nanoseconds"))
+        return None
+    }
+    // D-OUTCOME-SHAPE1=A: a missing value never leaves the function by
+    // itself, so a field read on `T?` is refused with the ways to handle
+    // absence rather than unwrapping or returning early.
+    if sema_expr_unwrap_tag(base.ty) == .Option(inner) {
+        &diagnostics.push(sema_error("E0310", span, "`.{member}` needs a `{type_name(inner)}`, but this value is `{type_name(base.ty)}` and might be missing", "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it (D-OUTCOME-SHAPE1=A)", "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"))
+        return None
     }
     &diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
     None

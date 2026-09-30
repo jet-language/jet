@@ -106,9 +106,10 @@ pub(crate) fn run(args: &[String], mode: OutputMode) {
     }
 }
 
+/// The workspace root, whose one `.jet/` holds the trace.
 fn project_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd)
+    jet::Loader::selected_project_root(&cwd).unwrap_or(cwd)
 }
 
 fn trace_path(root: &Path) -> PathBuf {

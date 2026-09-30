@@ -1,8 +1,17 @@
-Warning [L2510] (hidden_cost_in_loop): This copy of `String (text)` view into an owned slot repeats inside a loop.
-  --> tests/ui_lint/cost_hidden_in_loop.jet:12:33
+Warning [L0530] (redundant_final_return): An explicit `return` is used on the final value line
+  --> cost_hidden_in_loop.jet:5:5
     |
- 12 |     loop _ in 0..<3 -> out.push(view)
-    |                                 ^^^^
+  5 |     return Val(0)
+    |     ^^^^^^
+ Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
+
+Warning [L2510] (hidden_cost_in_loop): This copy of `String (text)` view into an owned slot repeats inside a loop.
+  --> cost_hidden_in_loop.jet:12:34
+    |
+ 12 |     loop _ in 0..<3 -> &out.push(view)
+    |                                  ^^^^
  Why: A repeated copy or representation fallback can make a growing value's cost super-linear.
- Fix: Bind the copy once outside the loop, or keep views with `[View<str>]`
+ Fix: Insert `~` before the highlighted expression to make the copy explicit.
 More: jet-lang.dev/e/L2510

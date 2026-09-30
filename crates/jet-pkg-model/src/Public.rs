@@ -4,7 +4,7 @@
 //! projections are deliberately narrower than [`crate::Package::PackageFacts`]
 //! and [`crate::Lock::LockFile`]: they expose declarations and resolved lock
 //! entries without exposing authority material, provenance internals, or
-//! current-package scalar facts that already have a canonical `@build.*`
+//! current-package scalar facts that already have a canonical `$build.*`
 //! spelling.
 
 use crate::Lock::{LockFile, LockSource};

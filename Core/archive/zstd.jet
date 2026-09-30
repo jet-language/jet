@@ -234,11 +234,11 @@ fn xxh64_low32(data: [U8]) -> Int Never! {
     Int.from_u64(xxh64(data) & U64{4294967295})
 }
 
-pub fn is_zstd(data: [U8]) -> Bool {
+pub fn is_zstd(data: [U8]) -> Bool Never! {
     data.len() >= 4 && data[0] == (U8{40}) && data[1] == (U8{181}) && data[2] == (U8{47}) && data[3] == (U8{253})
 }
 
-pub fn magic() -> [U8] { [U8]{(U8{40}), (U8{181}), (U8{47}), (U8{253})} }
+pub fn magic() -> [U8] Never! { [U8]{(U8{40}), (U8{181}), (U8{47}), (U8{253})} }
 
 pub fn compress_text(text: String) -> [U8] ZstdFileError! { compress(text.bytes()) }
 

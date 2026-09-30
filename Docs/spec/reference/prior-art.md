@@ -402,6 +402,13 @@ source of the honest versus dishonest framing used by D-HONEST-SIG1.
 - https://docs.convex.dev/functions/runtimes
 - https://docs.deno.com/runtime/fundamentals/security/
 
+### Roc and Skip/Hack talks (mined 2026-09-30)
+
+Report: [mine-for-jet-2026-09-30-roc-skip](../../research/mine-for-jet-2026-09-30-roc-skip.md).
+
+- https://www.youtube.com/watch?v=12yVcgQHAK0
+- https://www.youtube.com/watch?v=J31LlAUtoos
+
 ## Developer experience (e14)
 
 Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths remain provenance records.

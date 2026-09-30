@@ -1,5 +1,24 @@
-// E0433 (P7) stays quiet when a dropped call can still matter: an impure
-// callee, a Unit result, a callback argument, or an explicit `.drop`.
+// E0433 (D-DISCARD1=A) stays quiet when a dropped call can still matter: an
+// impure callee, a Unit result, a callback argument, a callee whose effects
+// depend on a trait bound (its row is not proven empty), a call that writes
+// through a `&` argument, a callee that can fail, or an explicit `.drop`.
+trait Shape {
+    fn area(self) -> Int
+}
+
+struct Square {
+    side: Int
+}
+
+impl Square.Shape {
+    fn area(self) -> Int {
+        print("measuring")
+        self.side * self.side
+    }
+}
+
+fn measure<T: Shape>(shape: T) -> Int { shape.area() }
+
 fn logged_double(n: Int) -> Int {
     print(n)
     n * 2
@@ -10,6 +29,16 @@ fn announce(n: Int) {
 }
 
 fn apply(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+
+fn bump(counter: &Int) -> Int {
+    counter += 1
+    counter
+}
+
+fn checked_half(n: Int) -> Int Err! {
+    if n % 2 != 0 -> return Err("odd")
+    n /% 2
+}
 
 fn double(n: Int) -> Int { n * 2 }
 
@@ -23,6 +52,14 @@ fn run() {
         print(x)
         x
     }, 4)
+    // A generic callee's effects come from the trait bound it dispatches.
+    measure(Square{side: 2})
+    // Writing through `&` changes the caller's value, so the call is not pure.
+    count := 0
+    bump(&count)
+    print(count)
+    // A failure from the callee still propagates out of `run`.
+    checked_half(4)
     // An explicit discard documents the intent.
     double(5).drop("warms the path for the benchmark")
 }

@@ -87,6 +87,11 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             pattern: Pattern::Absent(_),
             ..
         } => expr_in_subset(subject, cx, locals),
+        // S31: a nested payload pattern in expression position lowers to one
+        // structural `PatternMatches` test.
+        Expr::PatternTest {
+            subject, pattern, ..
+        } if pattern.has_nested_pattern() => expr_in_subset(subject, cx, locals),
         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
         // Bool `matches!` (`TExprKind::PatternMatches`). Only user enums whose
@@ -241,6 +246,11 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 return c.args.len() == 1
                     && c.args[0].label.is_none()
                     && expr_in_subset(&c.args[0].expr, cx, locals);
+            }
+            // D-DBG1=A: the checked `debug(value)` trace; its second argument is
+            // the sema-recorded site literal.
+            if c.name == Syntax::INTERNAL_DEBUG_TRACE {
+                return c.args.len() == 2 && expr_in_subset(&c.args[0].expr, cx, locals);
             }
             // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
             // `checked(e)` (D-NUMOPS1), plus the sema-only checked-policy wrapper. The

@@ -1418,7 +1418,7 @@ fn report_source_excerpts(
     report: &JetErrorReport,
 ) -> Result<Vec<WebErrorSourceExcerpt>, WebErrorPageError> {
     let mut excerpts = Vec::new();
-    for frame in &report.source_journey {
+    for frame in report.origin.iter().chain(&report.source_journey) {
         excerpts.push(source_excerpt_from_journey(frame)?);
     }
     for frame in &report.context_frames {
@@ -1432,7 +1432,10 @@ fn source_excerpt_from_journey(
 ) -> Result<WebErrorSourceExcerpt, WebErrorPageError> {
     let excerpt = (!frame.note.is_empty()).then(|| frame.note.clone());
     WebErrorSourceExcerpt::without_span(frame.file.clone(), frame.fn_name.clone(), excerpt)?
-        .with_location((frame.line > 0).then_some(frame.line), None)
+        .with_location(
+            (frame.line > 0).then_some(frame.line),
+            (frame.column > 0).then_some(frame.column),
+        )
 }
 
 fn source_excerpt_from_context(

@@ -331,23 +331,13 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     )],
                 },
             };
-            let thunk =
-                ctx.lower_defer_thunk(&close, &group.name, format!("task-group-{}", scope.0))?;
-            ctx.register_defer(thunk)?;
+            ctx.register_defer_close(close, group)?;
             lower_stmts(ctx, body)?;
             ctx.exit_scope(scope)?;
             Ok(())
         }
 
-        TStmt::DeferClose {
-            close,
-            resource,
-            id,
-        } => {
-            let thunk = ctx.lower_defer_thunk(close, resource, *id)?;
-            ctx.register_defer(thunk)?;
-            Ok(())
-        }
+        TStmt::DeferClose { close, resource } => ctx.register_defer_close(close.clone(), resource),
 
         TStmt::If {
             cond,
@@ -1534,11 +1524,11 @@ fn lower_loop_with_exit(
     ctx.switch_to(header);
     ctx.terminate(MirTerminator::Jump { target: body_block });
     ctx.switch_to(body_block);
-    ctx.push_lexical_frame();
     ctx.push_loop(label.map(str::to_string), exit, header);
+    ctx.push_lexical_frame();
     lower_stmts(ctx, body)?;
-    ctx.pop_loop();
     ctx.pop_lexical_frame()?;
+    ctx.pop_loop();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: header });
     }
@@ -1564,11 +1554,11 @@ fn lower_while(
         else_target: exit,
     });
     ctx.switch_to(body_block);
-    ctx.push_lexical_frame();
     ctx.push_loop(label.map(str::to_string), exit, header);
+    ctx.push_lexical_frame();
     lower_stmts(ctx, body)?;
-    ctx.pop_loop();
     ctx.pop_lexical_frame()?;
+    ctx.pop_loop();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: header });
     }
@@ -1603,11 +1593,11 @@ fn lower_counted_loop(
         else_target: exit,
     });
     ctx.switch_to(body_block);
-    ctx.push_lexical_frame();
     ctx.push_loop(label.map(str::to_string), exit, step_block);
+    ctx.push_lexical_frame();
     lower_stmts(ctx, body)?;
-    ctx.pop_loop();
     ctx.pop_lexical_frame()?;
+    ctx.pop_loop();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: step_block });
     }
@@ -1743,11 +1733,11 @@ fn lower_range_loop(
         )?
     };
     bind_value(ctx, var, item, item_ty, false)?;
-    ctx.push_lexical_frame();
     ctx.push_loop(label.map(str::to_string), exit, advance);
+    ctx.push_lexical_frame();
     lower_stmts(ctx, body)?;
-    ctx.pop_loop();
     ctx.pop_lexical_frame()?;
+    ctx.pop_loop();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: advance });
     }
@@ -1975,11 +1965,11 @@ fn lower_for_in(
     } else {
         bind_value(ctx, var, item, item_ty, false)?;
     }
-    ctx.push_lexical_frame();
     ctx.push_loop(label.map(str::to_string), exit, advance);
+    ctx.push_lexical_frame();
     lower_stmts(ctx, body)?;
-    ctx.pop_loop();
     ctx.pop_lexical_frame()?;
+    ctx.pop_loop();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: advance });
     }
@@ -2076,9 +2066,13 @@ fn for_item_type(
             ("key".to_string(), key.clone()),
             ("value".to_string(), value.clone()),
         ]),
+        // A generator loop binds each yielded item, not the Stream carrier.
         Type::Apply { name, args }
             if args.len() == 1
-                && matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
+                && matches!(
+                    name.as_str(),
+                    "View" | "ViewMut" | "ComputeViewMut" | crate::Syntax::TYPE_STREAM
+                ) =>
         {
             args[0].clone()
         }
@@ -2701,6 +2695,7 @@ fn lower_transaction(
                                 convert: TTryConvert::None,
                                 file: ctx.function.source_file.clone(),
                                 line: ctx.source_line() as usize,
+                                column: ctx.source_column() as usize,
                                 fn_name: ctx.function.name.clone(),
                             },
                         },

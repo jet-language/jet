@@ -12,7 +12,7 @@ use jet::AST::{Dimension, Item, KnowledgeFact, Measure, Type};
 use jet_foundation::Registry;
 
 const SOURCE: &str = r#"
-fact Exactness(@holds: .Value, @safe: .Gain, @gates: [approx, raw], @decision: "D-TEST")
+fact Exactness($holds: .Value, $safe: .Gain, $gates: [approx, raw], $decision: "D-TEST")
 
 fn run() {
     print("fact declaration")
@@ -20,11 +20,11 @@ fn run() {
 "#;
 
 const COMPTIME_SOURCE: &str = r#"
-fact Flow(@holds: .Value, @safe: .Gain, @gates: [], @decision: "D-TEST")
-@ANSWER :: "fact declaration"
+fact Flow($holds: .Value, $safe: .Gain, $gates: [], $decision: "D-TEST")
+ANSWER :: prep { "fact declaration" }
 
 fn run() {
-    print(@ANSWER)
+    print(ANSWER)
 }
 "#;
 
@@ -97,9 +97,9 @@ fn sema_accepts_the_fixture() {
 fn tir_erases_the_declaration() {
     let out = jet::compile(SOURCE).expect("fact fixture compiles");
     assert!(out.rust.contains("fact declaration"));
-    assert!(!out.rust.contains("@holds"));
+    assert!(!out.rust.contains("$holds"));
     assert!(!out.rust.contains(
-        r#"fact Exactness(@holds: .Value, @safe: .Gain, @gates: [approx, raw], @decision: "D-TEST")"#
+        r#"fact Exactness($holds: .Value, $safe: .Gain, $gates: [approx, raw], $decision: "D-TEST")"#
     ));
 }
 
@@ -187,7 +187,7 @@ fn comptime_accepts_the_fixture() {
 fn repl_accepts_the_fixture() {
     let transcript = jet::REPL::run_transcript(
         &[
-            "fact Flow(@holds: .Value, @safe: .Gain, @gates: [], @decision: \"D-TEST\")",
+            "fact Flow($holds: .Value, $safe: .Gain, $gates: [], $decision: \"D-TEST\")",
             "print(\"fact declaration\")",
         ],
         None,

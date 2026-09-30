@@ -233,8 +233,9 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
             return true
         }
         .TraitBox(inner, target_type) -> {
-            if !sema_call_static_rewrite_value(&inner, target) -> return false
-            value.kind = TExprKind.TraitBox{value: inner, target: target_type}
+            updated_inner := inner
+            if !sema_call_static_rewrite_value(&updated_inner, target) -> return false
+            value.kind = TExprKind.TraitBox{value: updated_inner, target: target_type}
             return true
         }
         .InlineBlock(statements) -> {
@@ -242,8 +243,9 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
             last :: statements.len() - 1
             if statements[last] == {
                 .ExprStmt(call, statement_span) -> {
-                    if !sema_call_static_rewrite_value(&call, target) -> return false
-                    statements[last] = TStmt.ExprStmt{value: call, span: statement_span}
+                    updated_call := call
+                    if !sema_call_static_rewrite_value(&updated_call, target) -> return false
+                    statements[last] = TStmt.ExprStmt{value: updated_call, span: statement_span}
                     value.kind = TExprKind.InlineBlock{body: statements}
                     return true
                 }

@@ -106,7 +106,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::DistinctRaw(arg)
             | TExprKind::Present(arg)
             | TExprKind::Ok(arg)
-            | TExprKind::Err(arg)
+            | TExprKind::Err(arg, _)
             | TExprKind::OptField { base: arg, .. }
             | TExprKind::PatternMatches { subj: arg, .. }
             | TExprKind::NumericMethod { recv: arg, .. } => walk_expr(arg),
@@ -1355,6 +1355,16 @@ impl<'a> LowerStmtPlan<'a> {
             finish: Box::new(move |_| stmt),
         }
     }
+
+    /// Rewrite the finished statement, e.g. to bind a table subject once
+    /// before the chain that tests it.
+    pub(super) fn map_stmt(self, map: impl FnOnce(TStmt) -> TStmt + 'a) -> Self {
+        let finish = self.finish;
+        Self {
+            bodies: self.bodies,
+            finish: Box::new(move |lowered| map(finish(lowered))),
+        }
+    }
 }
 
 pub(crate) fn deferred_stmt<'a>(
@@ -1826,13 +1836,25 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
             // Restore the enclosing callable's Result carrier exactly once,
             // matching sema's implicit `Ok` for ordinary source returns.
             if matches!(want, Type::Result { .. }) {
-                if matches!(value.kind, TExprKind::Ok(_) | TExprKind::Err(_)) {
+                if matches!(value.kind, TExprKind::Ok(_) | TExprKind::Err(..)) {
                     value.ty = want.clone();
                 } else if !matches!(value.ty, Type::Result { .. }) {
                     value = TExpr {
                         ty: want.clone(),
                         kind: TExprKind::Ok(Box::new(value)),
                     };
+                }
+                // #3713: the `Err(...)` a function returns is where its
+                // failure starts; every tier records that site as the origin.
+                if let TExprKind::Err(_, origin) = &mut value.kind {
+                    let (line, column) =
+                        crate::Diagnostics::span_line_col(&cx.src, return_expr.span().start);
+                    *origin = Some(crate::Codegen::TIR::TFailureOrigin {
+                        file: crate::Codegen::escape_rust_str(&cx.file),
+                        line,
+                        column,
+                        fn_name: crate::Codegen::escape_rust_str(&env.fn_name),
+                    });
                 }
             }
         }
@@ -2329,6 +2351,9 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
 }
 
 fn is_refutable_unwrap_pattern(pattern: &Pattern) -> bool {
+    if pattern.has_nested_pattern() {
+        return false;
+    }
     match pattern {
         Pattern::Ok { .. } | Pattern::Present { .. } => true,
         Pattern::Variant {
@@ -3043,6 +3068,22 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // serialization preserves the Jet dotted variant (`Fire.Burn`) but
                     // does not know the flat Rust variant spelling.
                     let skip_ct_enum_bake = matches!(b.ct, Some(crate::AST::CtValue::Enum { .. }));
+                    // D-SHAPE-RESOURCE1=A: a `Close` value is a tracked resource even
+                    // when its initializer folds; baking it would drop the ownership
+                    // transfer facts that keep scope-end cleanup from closing it twice.
+                    let skip_ct_resource_bake = binding_ty
+                        .and_then(|ty| match ty {
+                            Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                            _ => None,
+                        })
+                        .or(match &b.ct {
+                            Some(crate::AST::CtValue::Struct { type_name, .. }) => Some(type_name.as_str()),
+                            _ => None,
+                        })
+                        .is_some_and(|name| {
+                            cx.has_close_type(name)
+                                || cx.has_close_type(name.rsplit("::").next().unwrap_or(name))
+                        });
                     if b.ct.is_some()
                         && !matches!(b.ty.as_ref(), Some(Type::Result { .. }))
                         && !skip_ct_list_bake
@@ -3051,6 +3092,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         && !skip_ct_typed_literal_bake
                         && !skip_ct_enum_bake
                         && !skip_ct_ptr_bake
+                        && !skip_ct_resource_bake
                     {
                         return in_own_frame(|| {
                             let let_ty =
@@ -3820,7 +3862,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         }
         // D-SHAPE-RESOURCE2=A: lower the sema-checked consuming close into the
         // existing TIR cleanup node; the engines keep the same LIFO behavior.
-        Stmt::DeferClose { close, span } => {
+        Stmt::DeferClose { close, .. } => {
             return in_own_frame(|| {
                 LowerStmtPlan::ready({
                     let Expr::Call(close_call) = close else {
@@ -3831,8 +3873,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     };
                     TStmt::DeferClose {
                         close: lower_expr(close, cx, env),
-                        resource: env.rust_name_of(resource),
-                        id: span.start,
+                        resource: env.local_of(resource),
                     }
                 })
             });

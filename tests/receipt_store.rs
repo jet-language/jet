@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -8,10 +8,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn participating_verbs_are_explicit_and_bounded() {
-    assert_eq!(
-        PARTICIPATING_VERBS,
-        &["check", "build", "test", "prove", "budget check"]
-    );
+    assert_eq!(PARTICIPATING_VERBS, &["test", "prove", "budget check"]);
     for verb in PARTICIPATING_VERBS {
         let argv = verb
             .split_whitespace()
@@ -24,6 +21,27 @@ fn participating_verbs_are_explicit_and_bounded() {
         None
     );
     assert_eq!(participating_verb(&["run".into()]), None);
+    // D-BUILD-NOCHANGE1=A: `check` and `build` answer from their typed
+    // Receipt node.
+    assert_eq!(participating_verb(&["check".into()]), None);
+    assert_eq!(participating_verb(&["build".into()]), None);
+}
+
+/// `(subject, why_ran)` for every Check node in the newest store log entry.
+fn check_nodes(workspace: &Path, store: &Path, program: &str) -> Vec<(String, String)> {
+    jet_store::Store::new(store)
+        .unwrap()
+        .last_build_record(workspace, program)
+        .unwrap()
+        .map(|record| {
+            record
+                .nodes
+                .into_iter()
+                .filter(|node| node.kind == "check")
+                .map(|node| (node.subject, node.why_ran))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn temp_root(label: &str) -> PathBuf {
@@ -77,42 +95,39 @@ fn content_keys_reuse_without_timestamps_and_invalidate_only_dependents() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// D-BUILD-NOCHANGE1=A: an unchanged `jet check` answers from its Receipt,
+/// prints exactly the fresh output, and the store log shows no Check ran.
 #[test]
 fn check_reuses_receipt_at_the_cli_boundary() {
     let root = temp_root("cli");
     let source = root.join("main.jet");
-    let receipt_dir = root.join(".jet").join("receipts");
+    let store = root.join("store");
     std::fs::write(&source, "fn run() {}\n").unwrap();
     let jet = env!("CARGO_BIN_EXE_jet");
+    let check = || {
+        Command::new(jet)
+            .current_dir(&root)
+            .args(["check", source.to_str().unwrap()])
+            .env("JET_STORE_DIR", &store)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let program = "main.jet";
 
-    let first = Command::new(&jet)
-        .current_dir(&root)
-        .args(["check", "--verbose", source.to_str().unwrap()])
-        .env("JET_RECEIPT_DIR", &receipt_dir)
-        .output()
-        .unwrap();
-    assert!(
-        first.status.success(),
-        "{}",
-        String::from_utf8_lossy(&first.stderr)
-    );
+    let first = check();
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    let fresh = check_nodes(&root, &store, &program);
+    assert!(!fresh.is_empty(), "a fresh check must log its Check nodes");
+    assert!(fresh.iter().all(|(_, why)| why != "reused"), "{fresh:?}");
 
-    let second = Command::new(&jet)
-        .current_dir(&root)
-        .args(["check", "--verbose", source.to_str().unwrap()])
-        .env("JET_RECEIPT_DIR", &receipt_dir)
-        .output()
-        .unwrap();
-    assert!(
-        second.status.success(),
-        "{}",
-        String::from_utf8_lossy(&second.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&second.stderr).contains("ok: check current"),
-        "{}",
-        String::from_utf8_lossy(&second.stderr)
-    );
+    let second = check();
+    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
+    assert_eq!(second.stdout, first.stdout);
+    assert_eq!(second.stderr, first.stderr);
+    let replayed = check_nodes(&root, &store, &program);
+    assert_eq!(replayed.len(), fresh.len());
+    assert!(replayed.iter().all(|(_, why)| why == "reused"), "{replayed:?}");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -121,7 +136,7 @@ fn check_reuses_receipt_at_the_cli_boundary() {
 fn project_check_does_not_replay_after_higher_priority_entry_appears() {
     let root = temp_root("stale-entry");
     let source_dir = root.join("src");
-    let receipt_dir = root.join(".jet").join("receipts");
+    let store = root.join("store");
     std::fs::create_dir_all(&source_dir).unwrap();
     std::fs::write(
         root.join("package.jet"),
@@ -130,13 +145,16 @@ fn project_check_does_not_replay_after_higher_priority_entry_appears() {
     .unwrap();
     std::fs::write(source_dir.join("run.jet"), "fn run() {}\n").unwrap();
     let jet = env!("CARGO_BIN_EXE_jet");
+    let check = || {
+        Command::new(jet)
+            .args(["check", "--verbose"])
+            .current_dir(&root)
+            .env("JET_STORE_DIR", &store)
+            .output()
+            .unwrap()
+    };
 
-    let first = Command::new(jet)
-        .args(["check", "--verbose"])
-        .current_dir(&root)
-        .env("JET_RECEIPT_DIR", &receipt_dir)
-        .output()
-        .unwrap();
+    let first = check();
     assert!(
         first.status.success(),
         "initial project check failed:\n{}",
@@ -144,21 +162,16 @@ fn project_check_does_not_replay_after_higher_priority_entry_appears() {
     );
 
     std::fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
-    let second = Command::new(jet)
-        .args(["check", "--verbose"])
-        .current_dir(&root)
-        .env("JET_RECEIPT_DIR", &receipt_dir)
-        .output()
-        .unwrap();
+    let second = check();
     assert!(
         second.status.success(),
         "project check after entry creation failed:\n{}",
         String::from_utf8_lossy(&second.stderr)
     );
+    let nodes = check_nodes(&root, &store, "run.jet");
     assert!(
-        !String::from_utf8_lossy(&second.stderr).contains("ok: check current"),
-        "new higher-priority entry incorrectly replayed the old receipt:\n{}",
-        String::from_utf8_lossy(&second.stderr)
+        !nodes.is_empty() && nodes.iter().all(|(_, why)| why != "reused"),
+        "new higher-priority entry must check fresh, not replay the old receipt: {nodes:?}"
     );
 
     let _ = std::fs::remove_dir_all(root);

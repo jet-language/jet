@@ -105,7 +105,7 @@ fn decode_with_alphabet(text: String, alphabet: String) -> [U8] Base32Error! {
         bits += 5
         if bits >= 8 {
             bits -= 8
-            &out.push(U8{(acc >> bits) & 255})
+            &out.push(to_u8(acc >> bits))
         }
     }
     Ok(out)
@@ -120,3 +120,10 @@ pub fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
 
 pub fn b32hexencode(data: [U8]) -> String { encode_with_alphabet(data, C_HEX_ALPHABET) }
 pub fn b32hexdecode(text: String) -> [U8] Base32Error! { decode_with_alphabet(text, C_HEX_ALPHABET) }
+
+/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
+/// checked `U8{}` conversion.
+fn to_u8(n: Int) -> U8 Never! {
+    v :: n & 255
+    (U8{v})
+}

@@ -112,12 +112,13 @@ fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallPa
 
 
 pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    updated_args := args
     if method == "zip" || method == "zip_short" || method == "zip_pad" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" -> return SemaMethodSpecialCheck{handled: false, value: None}
     contract :: sema_collection_method_contract(receiver_value.ty, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    labels_valid := sema_call_collections_check_labels(method, args, &diagnostics)
-    if args.len() < contract.minimum_arity || args.len() > contract.maximum_arity {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_collections_arity_error(method, contract, args.len(), span))
+    labels_valid := sema_call_collections_check_labels(method, updated_args, &diagnostics)
+    if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_call_collections_arity_error(method, contract, updated_args.len(), span))
         _ := sema_ownership_check_call_receiver(&state, receiver, contract.receiver_access, scopes, span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -130,8 +131,8 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
 
     is_map := sema_collection_is_map(receiver_value.ty)
     comparator := false
-    if contract.accepts_comparator && args.len() == 1 {
-        comparator = if args[0].expr == {
+    if contract.accepts_comparator && updated_args.len() == 1 {
+        comparator = if updated_args[0].expr == {
             .Lambda(lambda) -> lambda.params.len() == 2
             else -> false
         }
@@ -141,22 +142,22 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     seed := None
     callback_return := None
     callback_mutable := false
-    loop index in 0..<args.len() {
+    loop index in 0..<updated_args.len() {
         callback := contract.callback_indices.contains(index)
         seed_argument := contract.seed_indices.contains(index)
         required := if {
             seed_argument -> Type.Named{name: "Unit"}
             else -> sema_collection_method_argument_type(contract, index, seed, comparator) ?? {
-                &diagnostics.push(sema_error("E0112", args[index].span, "the Source collection contract for `{method}` is incomplete", "a checked collection method needs one argument type for each written argument", "complete the canonical collection method contract"))
+                &diagnostics.push(sema_error("E0112", updated_args[index].span, "the Source collection contract for `{method}` is incomplete", "a checked collection method needs one argument type for each written argument", "complete the canonical collection method contract"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         value :: if {
             seed_argument -> {
-                sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                sema_check_expression(updated_args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
             else -> {
-                sema_call_collections_check_argument(args[index], required, callback, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                sema_call_collections_check_argument(updated_args[index], required, callback, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         if seed_argument {
@@ -192,11 +193,11 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     }
     tuple_struct := sema_call_collections_tuple_struct(result_type)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
-    operation := sema_collection_method_operation(contract, args.len(), line, callback_return, callback_mutable, comparator, tuple_struct)
-    ownership := sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &args, scopes, span, &diagnostics)
+    operation := sema_collection_method_operation(contract, updated_args.len(), line, callback_return, callback_mutable, comparator, tuple_struct)
+    ownership := sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := sema_collection_method_effect_row(contract, span)
-    if !sema_effect_record_intrinsic_effects(environment, scopes, context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
 
     value := if operation == {
         .Builtin(builtin) -> sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: builtin, args: typed}, span)
@@ -212,8 +213,8 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
             if {
                 closure == TClosureOp.FlatMap -> {
                     inner :: if result_type == {
-                        .Apply(name, args) -> {
-                            if name == "Iter" && args.len() == 1 -> args[0] else -> Type.Int
+                        .Apply(name, updated_args) -> {
+                            if name == "Iter" && updated_args.len() == 1 -> updated_args[0] else -> Type.Int
                         }
                         else -> Type.Int
                     }

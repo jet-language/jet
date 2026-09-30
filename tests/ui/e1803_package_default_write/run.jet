@@ -1,0 +1,12 @@
+// @run_cli
+// #3718: a package.jet with no authority block does not grant `FS`, so a
+// file write is refused before the program runs.
+use core.files
+
+fn run() {
+    files.write("e1803-package-write-must-not-exist.txt", "never") ?? {
+        print("write failed")
+        return
+    }
+    print("wrote")
+}

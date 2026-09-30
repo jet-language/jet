@@ -821,6 +821,39 @@ fn jet_deque_from<T>(values: Vec<T>) -> std::collections::VecDeque<T> {
     values.into_iter().collect()
 }
 
+#[inline(always)]
+fn jet_deque_push_front<T>(queue: &mut std::collections::VecDeque<T>, value: T) {
+    queue.push_front(value);
+}
+
+#[inline(always)]
+fn jet_deque_push_back<T>(queue: &mut std::collections::VecDeque<T>, value: T) {
+    queue.push_back(value);
+}
+
+/// Remove the first element equal to `value`; a missing value is a no-op.
+#[inline(always)]
+fn jet_deque_delete<T: PartialEq>(queue: &mut std::collections::VecDeque<T>, value: T) {
+    if let Some(index) = queue.iter().position(|candidate| *candidate == value) {
+        queue.remove(index);
+    }
+}
+
+#[inline(always)]
+fn jet_deque_reverse<T>(queue: &mut std::collections::VecDeque<T>) {
+    queue.make_contiguous().reverse();
+}
+
+/// Keep `[0, index)` in `queue` and return the tail; the index clamps to the
+/// queue bounds.
+#[inline(always)]
+fn jet_deque_split<T>(
+    queue: &mut std::collections::VecDeque<T>,
+    index: i64,
+) -> std::collections::VecDeque<T> {
+    let at = usize::try_from(index).unwrap_or(0).min(queue.len());
+    queue.split_off(at)
+}
 
 #[inline(always)]
 fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
@@ -948,6 +981,33 @@ where
     I: IntoIterator<Item = T>,
 {
     jet_outcome_of(xs.into_iter().max())
+}
+/// D-FLOATSORT1: Float extrema follow the collection sort order, so NaN is the
+/// greatest item. Ties keep the first minimum and the last maximum, the same
+/// choice the interpreter's list reducer makes.
+fn jet_list_min_float<T: Copy + Into<f64>, I>(xs: I) -> JetOutcome<T, JetAbsent>
+where
+    I: IntoIterator<Item = T>,
+{
+    jet_outcome_of(xs.into_iter().reduce(|best, item| {
+        if jet_collection_float_sort_cmp(best.into(), item.into()) == std::cmp::Ordering::Greater {
+            item
+        } else {
+            best
+        }
+    }))
+}
+fn jet_list_max_float<T: Copy + Into<f64>, I>(xs: I) -> JetOutcome<T, JetAbsent>
+where
+    I: IntoIterator<Item = T>,
+{
+    jet_outcome_of(xs.into_iter().reduce(|best, item| {
+        if jet_collection_float_sort_cmp(best.into(), item.into()) == std::cmp::Ordering::Greater {
+            best
+        } else {
+            item
+        }
+    }))
 }
 fn jet_list_flatten<T>(xs: Vec<Vec<T>>) -> Vec<T> {
     xs.into_iter().flatten().collect()
@@ -3110,17 +3170,11 @@ fn jet_priority_queue_remove_slot_kernel<T: Ord>(
 // D-CORE-COLLECTIONS1=A: nominal string containers share one target-neutral
 // kernel.  AOT calls these symbols directly; the comptime adapter below
 // marshals the same values through this module rather than reimplementing
-// Counter, Deque, OrderedMap, or Chain semantics.
+// Counter, OrderedMap, or Chain semantics.
 #[derive(Clone, Debug)]
 pub(crate) struct JetCounter {
     pub keys: Vec<String>,
     pub counts: Vec<i64>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct JetDeque {
-    pub items: Vec<String>,
-    pub head: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -3149,14 +3203,6 @@ fn jet_coll_counter_text(counter: &JetCounter) -> String {
         "Counter{{keys: {}, counts: {}}}",
         counter.keys.jet_show(),
         counter.counts.jet_show()
-    )
-}
-
-fn jet_coll_deque_text(deque: &JetDeque) -> String {
-    format!(
-        "Deque{{items: {}, head: {}}}",
-        deque.items.jet_show(),
-        deque.head
     )
 }
 
@@ -3199,22 +3245,6 @@ impl JetDisplay for JetCounter {
 impl JetDebug for JetCounter {
     fn jet_debug(&self) -> String {
         jet_coll_counter_text(self)
-    }
-}
-
-impl JetShow for JetDeque {
-    fn jet_show(&self) -> String {
-        jet_coll_deque_text(self)
-    }
-}
-impl JetDisplay for JetDeque {
-    fn jet_display(&self) -> String {
-        jet_coll_deque_text(self)
-    }
-}
-impl JetDebug for JetDeque {
-    fn jet_debug(&self) -> String {
-        jet_coll_deque_text(self)
     }
 }
 
@@ -3417,162 +3447,6 @@ pub(crate) fn jet_coll_counter_merge_add(left: &JetCounter, right: &JetCounter) 
 
 pub(crate) fn jet_coll_counter_clear(_counter: &JetCounter) -> JetCounter {
     jet_coll_counter()
-}
-
-pub(crate) fn jet_coll_deque() -> JetDeque {
-    JetDeque {
-        items: Vec::new(),
-        head: 0,
-    }
-}
-
-pub(crate) fn jet_coll_deque_from(items: &[String]) -> JetDeque {
-    JetDeque {
-        items: items.to_vec(),
-        head: 0,
-    }
-}
-
-fn jet_coll_deque_live_len(deque: &JetDeque) -> usize {
-    if deque.head <= 0 {
-        deque.items.len()
-    } else {
-        deque.items.len().saturating_sub(deque.head as usize)
-    }
-}
-
-fn jet_coll_deque_compact(deque: &JetDeque) -> JetDeque {
-    if deque.head <= 0 {
-        return deque.clone();
-    }
-    let start = (deque.head as usize).min(deque.items.len());
-    JetDeque {
-        items: deque.items[start..].to_vec(),
-        head: 0,
-    }
-}
-
-fn jet_coll_deque_maybe_compact(deque: &JetDeque) -> JetDeque {
-    if deque.head >= 32 && deque.head.saturating_mul(2) >= deque.items.len() as i64 {
-        jet_coll_deque_compact(deque)
-    } else {
-        deque.clone()
-    }
-}
-
-pub(crate) fn jet_coll_deque_len(deque: &JetDeque) -> i64 {
-    jet_coll_deque_live_len(deque) as i64
-}
-
-pub(crate) fn jet_coll_deque_is_empty(deque: &JetDeque) -> bool {
-    jet_coll_deque_live_len(deque) == 0
-}
-
-pub(crate) fn jet_coll_deque_append(deque: &JetDeque, value: &String) -> JetDeque {
-    let mut out = deque.clone();
-    out.items.push(value.clone());
-    out
-}
-
-pub(crate) fn jet_coll_deque_appendleft(deque: &JetDeque, value: &String) -> JetDeque {
-    let deque = jet_coll_deque_compact(deque);
-    let mut items = Vec::with_capacity(deque.items.len() + 1);
-    items.push(value.clone());
-    items.extend(deque.items);
-    JetDeque { items, head: 0 }
-}
-
-pub(crate) fn jet_coll_deque_pop(
-    deque: &JetDeque,
-) -> (JetDeque, JetOutcome<String, JetAbsent>) {
-    if jet_coll_deque_live_len(deque) == 0 {
-        return (deque.clone(), Err(JetAbsent));
-    }
-    let last = deque.items.len() - 1;
-    let value = deque.items[last].clone();
-    let start = (deque.head.max(0) as usize).min(last);
-    (
-        JetDeque {
-            items: deque.items[start..last].to_vec(),
-            head: 0,
-        },
-        Ok(value),
-    )
-}
-
-pub(crate) fn jet_coll_deque_popleft(
-    deque: &JetDeque,
-) -> (JetDeque, JetOutcome<String, JetAbsent>) {
-    if jet_coll_deque_live_len(deque) == 0 {
-        return (deque.clone(), Err(JetAbsent));
-    }
-    let head = deque.head.max(0) as usize;
-    let value = deque.items[head].clone();
-    let next = JetDeque {
-        items: deque.items.clone(),
-        head: deque.head + 1,
-    };
-    (jet_coll_deque_maybe_compact(&next), Ok(value))
-}
-
-pub(crate) fn jet_coll_deque_peek(deque: &JetDeque) -> Option<String> {
-    if jet_coll_deque_live_len(deque) == 0 {
-        None
-    } else {
-        Some(deque.items[deque.items.len() - 1].clone())
-    }
-}
-
-pub(crate) fn jet_coll_deque_peekleft(deque: &JetDeque) -> Option<String> {
-    if jet_coll_deque_live_len(deque) == 0 {
-        None
-    } else {
-        Some(deque.items[deque.head.max(0) as usize].clone())
-    }
-}
-
-pub(crate) fn jet_coll_deque_extend(deque: &JetDeque, values: &[String]) -> JetDeque {
-    let mut out = deque.clone();
-    out.items.extend(values.iter().cloned());
-    out
-}
-
-pub(crate) fn jet_coll_deque_extendleft(deque: &JetDeque, values: &[String]) -> JetDeque {
-    let mut out = deque.clone();
-    for value in values.iter().rev() {
-        out = jet_coll_deque_appendleft(&out, value);
-    }
-    out
-}
-
-pub(crate) fn jet_coll_deque_rotate(deque: &JetDeque, amount: i64) -> JetDeque {
-    let len = jet_coll_deque_live_len(deque);
-    if len == 0 {
-        return deque.clone();
-    }
-    let mut out = deque.clone();
-    if amount >= 0 {
-        for _ in 0..amount.rem_euclid(len as i64) {
-            let (next, value) = jet_coll_deque_pop(&out);
-            let Ok(value) = value else {
-                return out;
-            };
-            out = jet_coll_deque_appendleft(&next, &value);
-        }
-    } else {
-        for _ in 0..amount.wrapping_neg().rem_euclid(len as i64) {
-            let (next, value) = jet_coll_deque_popleft(&out);
-            let Ok(value) = value else {
-                return out;
-            };
-            out = jet_coll_deque_append(&next, &value);
-        }
-    }
-    out
-}
-
-pub(crate) fn jet_coll_deque_items(deque: &JetDeque) -> Vec<String> {
-    jet_coll_deque_compact(deque).items
 }
 
 pub(crate) fn jet_coll_ordered_map() -> JetOrderedMap {

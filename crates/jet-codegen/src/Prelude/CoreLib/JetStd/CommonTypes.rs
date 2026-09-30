@@ -312,6 +312,56 @@ impl CBOROptions {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CBORErrorKind {
+    Syntax,
+    Truncated,
+    Unsupported,
+    Limit,
+    TypeMismatch,
+    TrailingData,
+    NonCanonical,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CBORError {
+    pub kind: CBORErrorKind,
+    pub byte_offset: i64,
+    pub path: String,
+    pub reason: String,
+}
+impl CBORError {
+    fn display_text(&self) -> String {
+        super::jet_encoding_error_kernel_show(
+            "CBOR",
+            &format!("{:?}", self.kind),
+            self.byte_offset,
+            None,
+            None,
+            &self.path,
+            &self.reason,
+        )
+    }
+}
+impl std::fmt::Display for CBORError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.display_text())
+    }
+}
+impl super::JetShow for CBORError {
+    fn jet_show(&self) -> String {
+        self.display_text()
+    }
+}
+impl super::JetDisplay for CBORError {
+    fn jet_display(&self) -> String {
+        self.display_text()
+    }
+}
+impl super::JetDebug for CBORError {
+    fn jet_debug(&self) -> String {
+        self.display_text()
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum XMLCanonicalMode {
     Inclusive11,
     Exclusive10,
@@ -4159,7 +4209,7 @@ pub fn jet_int_to_f64(value: i64) -> f64 {
 pub fn jet_int_checked_widen(value: i64, target_f32: bool, file: &str, line: u32) -> f64 {
     jet_int_value(value)
         .checked_widen(target_f32)
-        .unwrap_or_else(|| crate::jet_panic(file, line, crate::JET_NUMERIC_WIDEN_TRAP))
+        .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, crate::JET_NUMERIC_WIDEN_TRAP))
 }
 
 pub fn jet_int_bit_count(value: i64, width: u32, method: &str) -> i64 {

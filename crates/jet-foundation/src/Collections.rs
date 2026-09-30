@@ -768,47 +768,11 @@ pub fn builtin_method_return(
         }
         Type::Named(n) if n == Syntax::TYPE_BITS => bit_set_method_return(method, arg_count),
         Type::Named(n) if n == Syntax::TYPE_BYTES => byte_buffer_method_return(method, arg_count),
-        Type::Named(n) if n == "SigningKey" && method == "public_key" && arg_count == 0 => {
-            Some(Some(Type::Named("VerifyKey".into())))
-        }
-        Type::Named(n) if n == "X25519SecretKey" && method == "public_key" && arg_count == 0 => {
-            Some(Some(Type::Named("X25519PublicKey".into())))
-        }
-        Type::Named(n)
-            if matches!(
-                n.as_str(),
-                "VerifyKey"
-                    | "X25519PublicKey"
-                    | "Signature"
-                    | "Sealed"
-                    | "WrappedKey"
-                    | "WrappedVaultKey"
-                    | "Digest256"
-                    | "Digest512"
-            ) && method == "bytes"
-                && arg_count == 0 =>
-        {
+        Type::Named(n) if n == "WrappedVaultKey" && method == "bytes" && arg_count == 0 => {
             Some(Some(Type::List(Box::new(Type::IntN {
                 signed: false,
                 bits: 8,
             }))))
-        }
-        Type::Named(n)
-            if matches!(n.as_str(), "Digest256" | "Digest512")
-                && method == "hex"
-                && arg_count == 0 =>
-        {
-            Some(Some(Type::String))
-        }
-        Type::Named(n) if n == "Hasher" && method == "update" && arg_count == 1 => Some(None),
-        Type::Named(n) if n == "Hasher" && method == "digest" && arg_count == 0 => {
-            Some(Some(Type::String))
-        }
-        Type::Named(n) if n == "X25519PublicKey" && method == "text" && arg_count == 0 => {
-            Some(Some(Type::String))
-        }
-        Type::Named(n) if n == "PasswordHash" && method == "text" && arg_count == 0 => {
-            Some(Some(Type::String))
         }
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
         Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
@@ -1368,9 +1332,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_CONDITION => {
             Some(Some(Type::Named(crate::Syntax::TYPE_CONDITION.to_string())))
         }
-        (Type::Named(n), "new", 0) if n == "Hasher" => {
-            Some(Some(Type::Named("Hasher".to_string())))
-        }
         (Type::Named(n), "new", 1) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())))
         }
@@ -1405,31 +1366,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
                 )),
             }))
         }
-        (Type::Named(n), "from_text", 1) if n == "Secret" => {
-            Some(Some(Type::Named("Secret".into())))
-        }
-        (Type::Named(n), "from_bytes", 1) if n == "Secret" => {
-            Some(Some(Type::Named("Secret".into())))
-        }
-        (Type::Named(n), "new_random", 0)
-            if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") =>
-        {
-            Some(Some(Type::Result {
-                ok: Box::new(Type::Named(n.clone())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            }))
-        }
-        (Type::Named(n), "from_bytes", 1)
-            if matches!(
-                n.as_str(),
-                "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey"
-            ) =>
-        {
-            Some(Some(Type::Result {
-                ok: Box::new(Type::Named(n.clone())),
-                err: Box::new(Type::Named("CryptoError".into())),
-            }))
-        }
         (Type::Named(n), "from_bytes", 1) if n == "WrappedVaultKey" => Some(Some(Type::Result {
             ok: Box::new(Type::Named(n.clone())),
             err: Box::new(Type::Named("KeyWrapError".into())),
@@ -1440,14 +1376,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "Passphrase", 1) if n == "KeyUnlock" => {
             Some(Some(Type::Named("KeyUnlock".into())))
         }
-        (Type::Named(n), "from_text", 1) if n == "X25519PublicKey" => Some(Some(Type::Result {
-            ok: Box::new(Type::Named(n.clone())),
-            err: Box::new(Type::Named("CryptoError".into())),
-        })),
-        (Type::Named(n), "parse", 1) if n == "PasswordHash" => Some(Some(Type::Result {
-            ok: Box::new(Type::Named("PasswordHash".into())),
-            err: Box::new(Type::Named("CryptoError".into())),
-        })),
         (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_BYTES => {
             Some(Some(Type::Named(crate::Syntax::TYPE_BYTES.to_string())))
         }
@@ -2810,6 +2738,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             method,
             "push"
                 | "append"
+                | "try_push"
                 | "try_reserve"
                 | "pop"
                 | "insert"
@@ -2950,7 +2879,6 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
             matches!(method, "name" | "email" | "host" | "address")
         }
-        Type::Named(n) if n == "Hasher" => method == "update",
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
         _ => false,
     }
@@ -2999,19 +2927,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => None,
         },
         Type::Named(n) if n == Syntax::TYPE_RANGE && method == "contains" => Some(vec![Type::Int]),
-        Type::Named(n) if n == "Secret" && method == "from_text" => Some(vec![Type::String]),
-        Type::Named(n)
-            if matches!(
-                n.as_str(),
-                "Secret"
-                    | "VerifyKey"
-                    | "X25519PublicKey"
-                    | "Signature"
-                    | "Sealed"
-                    | "WrappedKey"
-                    | "WrappedVaultKey"
-            ) && method == "from_bytes" =>
-        {
+        Type::Named(n) if n == "WrappedVaultKey" && method == "from_bytes" => {
             Some(vec![Type::List(Box::new(Type::IntN {
                 signed: false,
                 bits: 8,
@@ -3023,14 +2939,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if n == "KeyUnlock" && method == "Passphrase" => {
             Some(vec![Type::Named("Secret".into())])
         }
-        Type::Named(n) if n == "PasswordHash" && method == "parse" => Some(vec![Type::String]),
-        Type::Named(n) if n == "Hasher" && method == "update" => {
-            Some(vec![Type::List(Box::new(Type::IntN {
-                signed: false,
-                bits: 8,
-            }))])
-        }
-        Type::Named(n) if n == "Hasher" && method == "digest" => Some(vec![]),
         Type::Named(n)
             if n == crate::Syntax::DURATION_TYPE && method == crate::Syntax::METHOD_DURATION_IN =>
         {
@@ -3047,32 +2955,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "round" => {
             Some(vec![Type::String, Type::Int, Type::String])
         }
-        Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => {
-            Some(vec![Type::String])
-        }
-        Type::Named(n)
-            if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "new_random" =>
-        {
-            Some(vec![])
-        }
-        Type::Named(n)
-            if matches!(
-                n.as_str(),
-                "SigningKey"
-                    | "X25519SecretKey"
-                    | "VerifyKey"
-                    | "X25519PublicKey"
-                    | "Signature"
-                    | "Sealed"
-                    | "WrappedKey"
-                    | "WrappedVaultKey"
-                    | "Digest256"
-                    | "Digest512"
-                    | "PasswordHash"
-            ) =>
-        {
-            Some(vec![])
-        }
+        Type::Named(n) if n == "WrappedVaultKey" => Some(vec![]),
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
             // D-META-BODY1=A: the typed item block is AST metadata, not a value arg.
             "generate" => Some(vec![Type::String]),
@@ -4006,7 +3889,14 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
     }
 
     if is_iter_type(recv_ty) {
-        BuiltinReceiverBorrow::Move
+        // D-ITER-RESUME1=A / D-CAP-RECEIVER1=D: `next` pulls one item through
+        // `jet_iter_next(&mut it)` and leaves the remainder in the same
+        // source (`&it.next()`); every other one-pass operation takes it.
+        if method == "next" {
+            BuiltinReceiverBorrow::EagerWrite
+        } else {
+            BuiltinReceiverBorrow::Move
+        }
     } else if !builtin_method_mutates(recv_ty, method) {
         BuiltinReceiverBorrow::Read
     } else if (is_list_receiver(recv_ty)

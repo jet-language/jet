@@ -233,6 +233,7 @@ impl<'a> Checker<'a> {
                 self.widen_numeric_expr(&mut arg.expr, &got, param_ty);
                 got = param_ty.clone();
             }
+            got = self.lift_optional_argument(&mut arg.expr, got, param_ty, arg.convention);
             let reads_expiring_secret_loan = !consumes
                 && arg.convention == AccessConvention::Read
                 && crate::Sema::Diagnostics::expiring_secret_loan_matches(param_ty, &got);

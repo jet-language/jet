@@ -475,6 +475,7 @@ fn write_rail(out: &mut Vec<u8>, rail: &EntryRail) {
         Some(EntryErrorType::Default) => 1,
         Some(EntryErrorType::Io) => 2,
         Some(EntryErrorType::Uninhabited) => 3,
+        Some(EntryErrorType::FieldErrors) => 4,
         Some(EntryErrorType::Descriptor(_)) => {
             unreachable!("capture_rail excludes entries requiring an absent schema registry")
         }
@@ -514,6 +515,7 @@ fn read_rail(data: &[u8], i: &mut usize) -> Option<EntryRail> {
         1 => Some(EntryErrorType::Default),
         2 => Some(EntryErrorType::Io),
         3 => Some(EntryErrorType::Uninhabited),
+        4 => Some(EntryErrorType::FieldErrors),
         _ => return None,
     };
     let default_error_type = if read_bool(data, i)? {

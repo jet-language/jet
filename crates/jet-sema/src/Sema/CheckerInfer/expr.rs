@@ -474,12 +474,18 @@ impl<'a> Checker<'a> {
         {
             return None;
         }
+        // `process.argv()` is fallible, so the checked receiver carries its
+        // implicit propagation node around the call.
+        let argv_call = match receiver.without_parens() {
+            Expr::Try(inner, _, _, None) => inner.without_parens(),
+            other => other,
+        };
         let Expr::MethodCall {
             receiver: argv_receiver,
             method: argv_method,
             args: argv_args,
             ..
-        } = receiver.without_parens()
+        } = argv_call
         else {
             return None;
         };
@@ -861,7 +867,7 @@ impl<'a> Checker<'a> {
                 let Some(value) = crate::Comptime::build_setting_value(snapshot, key) else {
                     self.diags.push(Diagnostic::error(
                         "E0302",
-                        format!("`@build.settings.{key}` is undeclared"),
+                        format!("`$build.settings.{key}` is undeclared"),
                         "a setting must be declared with a type and default in the package manifest before it can be read"
                             .to_string(),
                         format!("add `{key}: Type = default` to the package `settings: {{ … }}` block"),
@@ -891,7 +897,7 @@ impl<'a> Checker<'a> {
                         format!("`{path}` has no registered value"),
                         "fact reads answer typed values from the registered build snapshot"
                             .to_string(),
-                        "read a registered `@build.*` fact".to_string(),
+                        "read a registered `$build.*` fact".to_string(),
                         Some(*span),
                     ));
                     return Some(None);
@@ -906,10 +912,10 @@ impl<'a> Checker<'a> {
             }
         }
         let is_build_subject =
-            matches!(&**inner, Expr::ComptimeName { name, .. } if name == "@build");
+            matches!(&**inner, Expr::ComptimeName { name, .. } if name == "$build");
         let read = if member == Syntax::BUILD_INFO_PROFILE {
             if !is_build_subject {
-                // `profile` is a fact member only on `@build`. Any other
+                // `profile` is a fact member only on `$build`. Any other
                 // receiver (`identity.profile`, generated encoders over a
                 // `profile` field) is an ordinary field read; only an unbound
                 // bare `build.profile` is the unmarked build-fact spelling.
@@ -920,9 +926,9 @@ impl<'a> Checker<'a> {
                 }
                 self.diags.push(Diagnostic::error(
                     "E0302",
-                    format!("`{member}` belongs to the `@build` subject"),
+                    format!("`{member}` belongs to the `$build` subject"),
                     "build facts describe the selected build, not an ordinary value".to_string(),
-                    "write `@build.profile`".to_string(),
+                    "write `$build.profile`".to_string(),
                     Some(*span),
                 ));
                 return Some(None);
@@ -940,10 +946,10 @@ impl<'a> Checker<'a> {
                     .to_string(),
                 path.as_ref()
                     .map(|path| {
-                        format!("Write `@fact :: {path}`, then use `@fact` in this expression")
+                        format!("Write `FACT :: {} {{ {path} }}`, then use `FACT` in this expression", Syntax::KW_PREP)
                     })
                     .unwrap_or_else(|| {
-                        "Move the read into an `@` binding or a compile-time block".to_string()
+                        "Move the read into a prepared value `NAME :: prep { … }` or a `prep { … }` block".to_string()
                     }),
                 Some(*span),
             ));
@@ -1227,7 +1233,7 @@ impl<'a> Checker<'a> {
                 "E0302",
                 format!("`{member}` has no registered value for this subject"),
                 "fact reads answer typed values from the subject's registered plane".to_string(),
-                "read the fact on a matching type, function, or the `@build` subject".to_string(),
+                "read the fact on a matching type, function, or the `$build` subject".to_string(),
                 Some(*span),
             ));
             return Some(None);
@@ -1629,9 +1635,12 @@ impl<'a> Checker<'a> {
                 .map(|module| module.items.as_slice())
                 .unwrap_or(self.items)
         };
-        let (owned_funcs, owned_globals, core_imports) = if owner == self.module_idx {
+        // The current module's function table is borrowed; cloning it for
+        // every checked-text literal cost the whole module each time (#3661).
+        let foreign_funcs;
+        let (context_funcs, owned_globals, core_imports) = if owner == self.module_idx {
             (
-                self.ct_funcs.clone(),
+                self.ct_funcs,
                 self.ct_globals.clone(),
                 self.core_imports.clone(),
             )
@@ -1643,9 +1652,10 @@ impl<'a> Checker<'a> {
                 .and_then(|modules| modules.get(owner))
                 .map(|module| module.core_imports.clone())
                 .unwrap_or_else(|| self.core_imports.clone());
-            (funcs, globals, imports)
+            foreign_funcs = funcs;
+            (&foreign_funcs, globals, imports)
         };
-        let funcs = owned_funcs
+        let funcs = context_funcs
             .iter()
             .map(|(name, function)| (name.clone(), function))
             .collect::<std::collections::HashMap<_, _>>();
@@ -1748,7 +1758,6 @@ impl<'a> Checker<'a> {
         drop(methods);
         drop(structs);
         drop(distinct_bases);
-        drop(owned_funcs);
         drop(owned_globals);
         drop(core_imports);
         for part in &mut parts {
@@ -2048,7 +2057,16 @@ impl<'a> Checker<'a> {
                 .is_some_and(|root| self.source_nesting > root)
             && (self.failure_carrier_inference
                 || matches!(self.ret.as_ref(), Some(Type::Result { .. })));
+        // A `Never` failure is not a callback failure row: an open callback
+        // that reaches a `T Never!` callee still produces plain `T`, so the
+        // call falls through to the `Try` below, which unwraps it directly
+        // (`TryConvert::Never`) wherever it sits in the callback body.
+        let never_carrier = matches!(
+            propagation_result.as_ref(),
+            Some(Type::Result { err, .. }) if err.is_never()
+        );
         if self.failure_carrier_inference
+            && !never_carrier
             && matches!(propagation_result, Some(Type::Result { .. }))
             && (!matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
                 || nested_statement_value)
@@ -2153,9 +2171,15 @@ impl<'a> Checker<'a> {
                 self.expected_type = Some((**ok).clone());
             }
         }
+        if matches!(e, Expr::If { .. }) {
+            self.note_carrier_chain_subject(e);
+        }
         // Card #1440: an else-less all-pattern dispatch chain proves coverage
-        // once (E0307) before ordinary per-level inference walks its arms.
-        if matches!(e, Expr::If { .. }) && noelse_terminated(e) {
+        // once (E0307) before ordinary per-level inference walks its arms. A
+        // pattern table with an `else` arm gets the L0303 check (#3716).
+        if matches!(e, Expr::If { cond, .. } if matches!(cond.as_ref(), Expr::PatternTest { .. }))
+            || (matches!(e, Expr::If { .. }) && noelse_terminated(e))
+        {
             self.check_noelse_dispatch_chain(e);
         }
         let result = if let Some(result) = self.fold_reflect_call(e) {
@@ -3398,6 +3422,7 @@ impl<'a> Checker<'a> {
                             pattern: crate::AST::Pattern::Present {
                                 binding: name,
                                 binding_span: name_span,
+                                inner: None,
                                 span: cond_span,
                             },
                             span: cond_span,
@@ -4352,6 +4377,30 @@ impl<'a> Checker<'a> {
                     self.record_const_reference(name, *span);
                     return Some(t);
                 }
+                // 3A: a constant brought in by `use m.[NAME]` reads through its
+                // NameLedger alias; codegen resolves the same alias.
+                let imported_const = self
+                    .name_ledger
+                    .alias(self.module_idx, name)
+                    .and_then(|alias| {
+                        let owner = alias.target_module?;
+                        let leaf = alias
+                            .target
+                            .rsplit_once('.')
+                            .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+                        let declaration = self
+                            .name_ledger
+                            .declaration(owner, leaf)
+                            .filter(|declaration| declaration.kind == "const")?;
+                        let ty = self.modules?.get(owner)?.consts.get(leaf)?.clone();
+                        let path = self.name_ledger.module_path(owner)?.to_string();
+                        Some((ty, path, declaration.span))
+                    });
+                if let Some((ty, target_path, definition_span)) = imported_const {
+                    self.record_import_alias_reference(name, *span);
+                    self.record_reference_anchor(*span, &target_path, "const", definition_span);
+                    return Some(ty);
+                }
                 if let Some(item) = self.core_item_imports.get(name).cloned() {
                     if let Some(module) = self.core_imports.get(name).cloned() {
                         return self.infer_core_field(name, &module, &item, *span, *span);
@@ -4615,6 +4664,19 @@ impl<'a> Checker<'a> {
                         }
                         *width = Some((true, bits));
                         return Some(Type::IntN { signed: true, bits });
+                    }
+                    // D-TYPE2-DEFAULT1: `-1.5` is one exact Decimal literal,
+                    // so the sign folds into its spelling before the operand
+                    // is inferred. A Float context keeps the machine path.
+                    if let Expr::Float(_, _, _, raw) = inner.as_mut() {
+                        if raw.is_some()
+                            && !matches!(self.expected_type, Some(Type::Float | Type::Float32))
+                        {
+                            let text = raw.take().expect("decimal literal spelling");
+                            let whole = *span;
+                            *e = super::exact_decimal_literal(format!("-{text}"), whole);
+                            return self.infer(e);
+                        }
                     }
                 }
                 let t = self.infer(inner)?;
@@ -4997,8 +5059,10 @@ impl<'a> Checker<'a> {
                 // D-TAG1: fold a dotted variant path (`Damage.Fire.Burn`) into an
                 // enum literal so codegen sees one EnumLit node. Single-segment
                 // `Enum.Variant` keeps its existing Field route (unchanged Rust).
+                // D-MOD2: an alias-qualified enum (`types.Kind.Alpha`) always
+                // folds, because the Field route has no module-alias hop.
                 if let Some((type_name, variant)) = self.fold_enum_variant_path(e) {
-                    if variant.contains('.') {
+                    if variant.contains('.') || (type_name.contains("::") && !variant.is_empty()) {
                         let ty = self.check_enum_lit(&type_name, &variant, &mut [], span, None);
                         *e = Expr::EnumLit {
                             type_name,
@@ -5162,12 +5226,17 @@ impl<'a> Checker<'a> {
                 // enum literal (single-segment `Enum.Variant(args)` keeps its
                 // existing MethodCall route — receiver is a bare Ident there,
                 // which `fold_enum_variant_path` deliberately does not fold).
+                // D-MOD2: `types.Kind.Beta(3)` folds with an empty prefix.
                 if recv_type.is_none()
                     && type_args.is_empty()
                     && args.iter().all(|a| a.label.is_none())
                 {
                     if let Some((type_name, prefix)) = self.fold_enum_variant_path(receiver) {
-                        let variant = format!("{prefix}.{}", method);
+                        let variant = if prefix.is_empty() {
+                            method.clone()
+                        } else {
+                            format!("{prefix}.{}", method)
+                        };
                         let span = Span::new(
                             receiver.span().start,
                             args.last()
@@ -5443,12 +5512,21 @@ impl<'a> Checker<'a> {
                                 Type::Named(n) => Some(n.clone()),
                                 _ => None,
                             },
+                            // D-ERR-CASES1=A: a case that exactly one union
+                            // member declares builds that member.
+                            Type::Union(_) => match self.flat_union_case_owner(&et, variant) {
+                                Some(Type::Named(n)) => Some(n),
+                                Some(Type::Apply { name, .. }) => Some(name),
+                                _ => None,
+                            },
                             _ => None,
                         };
                         name.filter(|n| self.resolve_enum_variants_cloned(n).is_some())
                     });
                     match resolved {
-                        Some(tn) => *type_name = tn,
+                        // D-MOD2: an alias-qualified expected type (`types.Kind`)
+                        // takes the imported enum's canonical identity.
+                        Some(tn) => *type_name = self.import_qualified_nominal(&tn).unwrap_or(tn),
                         None => {
                             self.diags.push(Diagnostic::error(
                                 "E0330",
@@ -5702,6 +5780,36 @@ impl<'a> Checker<'a> {
         )
     }
 
+    /// #3739: probe whether a one-expression list body is a whole value of
+    /// `head`. The probe checks the body where a `head` parameter would, then
+    /// discards its diagnostics and flow facts; the caller re-checks the chosen
+    /// reading so every diagnostic is reported once. Spreads and inferred-head
+    /// literals (`{…}`, `.{…}`) always use element notation.
+    fn typed_lit_whole_value(&mut self, head: &Type, body: &Expr) -> bool {
+        match body {
+            Expr::Spread(..) => return false,
+            Expr::TypedLit { head: None, .. } => return false,
+            Expr::StructLit { inferred: true, .. } => return false,
+            _ => {}
+        }
+        let saved_expected = self.expected_type.replace(head.clone());
+        let diagnostics_start = self.diags.len();
+        let flow = self.flow.clone();
+        let mut probe = body.clone();
+        let whole = match self.infer(&mut probe) {
+            Some(got) => {
+                self.diags.len() == diagnostics_start
+                    && self.check_type_assignable(head, &got, probe.span())
+                    && self.diags.len() == diagnostics_start
+            }
+            None => false,
+        };
+        self.diags.truncate(diagnostics_start);
+        self.flow = flow;
+        self.expected_type = saved_expected;
+        whole
+    }
+
     /// D-DOTCTOR3=A: elaborate `Type.{ body }` / inferred `.{ body }` against the
     /// head (or expected type), rewrite to ListLit / MapLit / StructLit / value,
     /// then re-infer. Runtime exact-Int fixed-width scalar construction records
@@ -5779,11 +5887,28 @@ impl<'a> Checker<'a> {
                 *e = Expr::ListLit(Vec::new(), span);
                 keep_head = true;
             }
+            // #3739 (amends D-DOTCTOR3=A): a lone expression that is already a
+            // value of the head type, or that the head accepts the way a
+            // parameter of that type would, is the whole value. Otherwise it
+            // is the literal's single element.
+            (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(mut elems))
+                if elems.len() == 1 && self.typed_lit_whole_value(&head, &elems[0]) =>
+            {
+                *e = elems.pop().expect("guard saw one element");
+            }
             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
                 *e = Expr::ListLit(elems, span);
             }
             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {
-                *e = Expr::ListLit(vec![*inner], span);
+                *e = if self.typed_lit_whole_value(&head, &inner) {
+                    *inner
+                } else {
+                    Expr::ListLit(vec![*inner], span)
+                };
+            }
+            // A map body without `:` can only be the whole value.
+            (Type::Map { .. }, TypedLitBody::Value(inner)) => {
+                *e = *inner;
             }
             (Type::Map { .. }, TypedLitBody::Empty) => {
                 *e = Expr::MapLit(Vec::new(), span);
@@ -5951,7 +6076,72 @@ impl<'a> Checker<'a> {
                         };
                         return Some(head);
                     }
-                    self.check_type_assignable(&head, &got, e.span());
+                    // D-OPT-LIFT1=A: a `T?{value}` head is an optional slot.
+                    if self.lift_optional_slot(&head, &got, e).is_some() {
+                        return Some(head);
+                    }
+                    // A numeric head over a numeric body is the checked scalar
+                    // retag; any other mismatch is an error, never a silent
+                    // re-typing of the body.
+                    let numeric = |ty: &Type| {
+                        matches!(
+                            ty.without_user_tags(),
+                            Type::Int
+                                | Type::IntN { .. }
+                                | Type::Float
+                                | Type::Float32
+                                | Type::InlineRange { .. }
+                        )
+                    };
+                    if !self.check_type_assignable(&head, &got, e.span())
+                        && !(numeric(&head) && numeric(&got))
+                    {
+                        let distinct = match &head {
+                            Type::Named(name) if self.registry.is_distinct(name) => {
+                                Some(name.clone())
+                            }
+                            _ => None,
+                        };
+                        if let Some(name) = distinct {
+                            // D-DIST1/D-DIST3 (E0128): a distinct head never
+                            // re-types its base value; the destination owns
+                            // the explicit conversion.
+                            self.diags.push(Diagnostic::error(
+                                "E0128",
+                                format!(
+                                    "a `{}` can't be used where a `{name}` is expected",
+                                    got.name()
+                                ),
+                                format!(
+                                    "`{name}` and `{}` are different types — even though `{name}` is built on `{}`, one is never accepted in place of the other",
+                                    got.name(),
+                                    self.registry
+                                        .distinct_base(&name)
+                                        .map(|base| base.name())
+                                        .unwrap_or_default()
+                                ),
+                                format!(
+                                    "convert explicitly: `{name}.{}(expr)`",
+                                    Syntax::conversion_method_for_source(&got.name())
+                                ),
+                                Some(e.span()),
+                            ));
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0108",
+                                format!(
+                                    "this needs {}, but the value is {}",
+                                    head.show(),
+                                    got.show()
+                                ),
+                                "the value here does not have the type required by this declaration"
+                                    .to_string(),
+                                "use a value of the required type or convert it explicitly"
+                                    .to_string(),
+                                Some(e.span()),
+                            ));
+                        }
+                    }
                 }
                 Some(head)
             }
@@ -6018,6 +6208,8 @@ impl<'a> Checker<'a> {
     fn list_elem_needs_expected_type(elem: &Expr) -> bool {
         match elem {
             Expr::StructLit { inferred: true, .. } | Expr::TypedLit { head: None, .. } => true,
+            // `[["41"], [], ["x"]]`: an empty item takes its type from a sibling.
+            Expr::ListLit(elems, _) => elems.is_empty(),
             Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
                 Self::list_elem_needs_expected_type(inner)
             }
@@ -6042,7 +6234,7 @@ impl<'a> Checker<'a> {
                 "E0501",
                 "an empty list needs a type".to_string(),
                 "write `[]` only where the list type is already known from around it".to_string(),
-                "name the element type on the literal: `[Int].{}`".to_string(),
+                "name the element type on the literal, such as `[Int]{}`".to_string(),
                 Some(span),
             ));
             return None;
@@ -6177,6 +6369,8 @@ impl<'a> Checker<'a> {
                     }
                     _ => {
                         if let Some(t) = self.infer_owned_list_element(e) {
+                            // D-OPT-LIFT1=A: a plain payload fills a `[T?]` item.
+                            let t = self.lift_optional_slot(&expected_inner, &t, e).unwrap_or(t);
                             if plain_used_where_result_expected(&expected_inner, &t)
                                 && !matches!(e.without_parens(), Expr::Ok(..) | Expr::Err(..))
                             {
@@ -6431,6 +6625,13 @@ impl<'a> Checker<'a> {
             if copy_owned_value && self.is_cloneable_type(&vt) {
                 self.insert_implicit_copy(v, &vt, &vt);
             }
+            // D-OPT-LIFT1=A: a plain payload fills a `[K: V?]` value slot.
+            let vt = match expected_map.as_ref() {
+                Some((_, expected_value)) => {
+                    self.lift_optional_slot(expected_value, &vt, v).unwrap_or(vt)
+                }
+                None => vt,
+            };
             if !self.map_key_type_eligible(&kt) {
                 self.diags.push(Diagnostic::error(
                 "E0502",
@@ -6552,8 +6753,8 @@ impl<'a> Checker<'a> {
                             "layout field selector `.{field}` needs a `{}` value",
                             crate::Syntax::TYPE_LAYOUT_INFO
                         ),
-                        "typed `[.field]` selection is only defined on `T.@layout`".to_string(),
-                        "use `T.@layout[.field]` for a reflected field fact".to_string(),
+                        "typed `[.field]` selection is only defined on `T.$layout`".to_string(),
+                        "use `T.$layout[.field]` for a reflected field fact".to_string(),
                         Some(*selector_span),
                     ));
                 }
@@ -7128,7 +7329,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned facts a
-            // type carries. `T.@layout`, `T.@name` and `T.@fields` are one
+            // type carries. `T.$layout`, `T.$name` and `T.$fields` are one
             // spelling, and each projects the matching `TypeInfo` member, so
             // the fact answers the same type reflection already answers.
             if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
@@ -7189,7 +7390,7 @@ impl<'a> Checker<'a> {
         // D-ONCE-AT1=D / D-META-CODE1=A: compiler facts are typed
         // projections on every reflected value, not only on the root
         // `TypeInfo` value.  A derive loop commonly binds one `FieldInfo`
-        // and then reads `field.@name`.
+        // and then reads `field.$name`.
         if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
             if let Type::Named(type_name) = &t {
                 if let Some(fty) = core_struct_field(type_name, projected) {
@@ -7421,10 +7622,34 @@ impl<'a> Checker<'a> {
             if let Some(fty) = core_struct_field(type_name, member) {
                 return Some(fty);
             }
+            // D-TIME-INSTANT1=A: the compiler-owned `Instant` is a monotonic
+            // Time point with no epoch and no fields; the wall clock is its
+            // own read.
+            if type_name == "Instant" && member == "unix_ns" {
+                self.diags.push(Diagnostic::error(
+                    "E0302",
+                    "`Instant` has no field `unix_ns`".to_string(),
+                    "`Instant` is a monotonic Time point with no epoch; wall-clock Unix nanoseconds are a separate clock read".to_string(),
+                    "call `time.unix_ns()` for wall-clock Unix nanoseconds".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
         }
         if let Type::Apply { name, args } = t {
             let (owner_import_ns, leaf) = Self::split_type_name(name);
-            if let Some(owner_mod) = self.struct_owner_module(leaf, owner_import_ns) {
+            // An applied type names a declaration with that many type
+            // parameters: the reserved generic `VjpRun<T>` is not the
+            // non-generic source-owned `core.compute` record of the same leaf.
+            let owner = self.struct_owner_module(leaf, owner_import_ns);
+            if owner_import_ns.is_none()
+                && owner.is_some_and(|owner| self.struct_type_param_count(owner, leaf) != args.len())
+            {
+                if let Some(fty) = core_generic_struct_field(leaf, member, args) {
+                    return Some(fty);
+                }
+            }
+            if let Some(owner_mod) = owner {
                 if let Some(fields) = self.struct_fields_of(owner_mod, leaf) {
                     let subst = self.struct_subst_for_owner(owner_mod, leaf, args);
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
@@ -7507,6 +7732,25 @@ impl<'a> Checker<'a> {
                 });
             }
             self.diags.push(diagnostic);
+            return None;
+        }
+        // D-OUTCOME-SHAPE1=A: a missing value never leaves the function by
+        // itself, so a field read on `T?` is refused with the ways to handle
+        // absence rather than unwrapping or returning early.
+        if let Type::Option(inner) = t {
+            self.diags.push(Diagnostic::error(
+                "E0310",
+                format!(
+                    "`.{member}` needs a `{}`, but this value is `{}` and might be missing",
+                    inner.show(),
+                    t.show()
+                ),
+                "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it (D-OUTCOME-SHAPE1=A)".to_string(),
+                format!(
+                    "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"
+                ),
+                Some(span),
+            ));
             return None;
         }
         self.diags.push(Diagnostic::error(

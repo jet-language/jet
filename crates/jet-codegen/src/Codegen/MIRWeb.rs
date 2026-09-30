@@ -6380,6 +6380,7 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
 const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_web_error_wire", "jet_web_error_wire"),
     ("jet_journey_reset", "jet_journey_reset"),
+    ("jet_journey_origin", "jet_journey_origin"),
     ("jet_journey_frame_text", "jet_journey_frame_text"),
     ("jet_err_from_message", "jet_err_from_message"),
     ("jet_err_with_context_frame", "jet_err_with_context_frame"),
@@ -6894,7 +6895,9 @@ fn emit_js_terminator(
             }
             None => out.push_str("        return undefined;\n"),
         },
-        MirTerminator::Yield { value, resume } => {
+        // Web generators end at the consumer's `return()`; the MIR cancel edge
+        // has no JS counterpart here.
+        MirTerminator::Yield { value, resume, .. } => {
             let Some(generator) = &function.generator else {
                 return Err(MirWebError::InvalidMir {
                     message: format!(

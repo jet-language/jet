@@ -72,7 +72,7 @@ fn lint_names(diagnostics: &[Diagnostic]) -> Vec<&str> {
 #[test]
 fn comptime_qualified_import_shadowed_by_lambda_parameter_stays_unused() {
     let diagnostics = check(
-        "use core.compiler as compiler\n@SHADOWED :: ((compiler: String) -> compiler.len())(\"x\")\nfn run() {}\n",
+        "use core.compiler as compiler\nSHADOWED :: prep { ((compiler: String) -> compiler.len())(\"x\") }\nfn run() {}\n",
     );
     assert_eq!(
         lint_names(&diagnostics),
@@ -84,7 +84,7 @@ fn comptime_qualified_import_shadowed_by_lambda_parameter_stays_unused() {
 #[test]
 fn failed_comptime_qualified_import_stays_unused() {
     let diagnostics = check(
-        "use core.compiler as compiler\n@FAILED :: compiler.not_a_real_call()\nfn run() {}\n",
+        "use core.compiler as compiler\nFAILED :: prep { compiler.not_a_real_call() }\nfn run() {}\n",
     );
     assert!(
         lint_names(&diagnostics).contains(&"compiler"),

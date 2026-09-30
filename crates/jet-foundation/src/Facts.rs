@@ -226,6 +226,10 @@ pub struct BuildFactSnapshot {
     /// source closure. This is folded into artifact/cache keys.
     pub target_dossier: TargetDossier,
     pub profile: String,
+    /// D-DBG1=A: true when this compile produces a shipped artifact
+    /// (`jet build`). Together with a release profile it is the one fact
+    /// sema reads to reject a leftover `debug(...)` trace.
+    pub artifact_build: bool,
     pub stamp: BuildStamp,
     /// Resolved contribution chains used by `jet explain`; fact readers still
     /// consume the folded fields above.
@@ -256,6 +260,7 @@ impl Default for BuildFactSnapshot {
             target_triple: crate::Layout::TargetLayout::host_triple(),
             target_dossier: TargetDossier::default(),
             profile: "dev".to_string(),
+            artifact_build: false,
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),
             settings: BTreeMap::new(),
@@ -281,6 +286,7 @@ impl BuildFactSnapshot {
             target_triple: crate::Layout::TargetLayout::host_triple(),
             target_dossier: TargetDossier::default(),
             profile: profile.to_string(),
+            artifact_build: false,
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),
             settings: BTreeMap::new(),
@@ -298,8 +304,17 @@ impl BuildFactSnapshot {
         self.target_dossier
             .append_cache_bytes(&self.target_triple, bytes);
         append_cache_frame(bytes, self.profile.as_bytes());
+        append_cache_frame(bytes, &[u8::from(self.artifact_build)]);
         let layout = crate::Layout::TargetLayout::from_build_facts(self);
         append_cache_frame(bytes, layout.layout_facts.cache_identity().as_bytes());
+    }
+
+    /// D-DBG1=A: `debug(...)` traces are development-only. A shipped artifact
+    /// (`jet build`) or a release-profile compile rejects any that remain.
+    pub fn rejects_debug_traces(&self) -> bool {
+        self.artifact_build
+            || self.profile == crate::Syntax::BUILD_PROFILE_RELEASE
+            || self.profile == crate::Syntax::BUILD_PROFILE_HARDENED
     }
 
     /// Canonical target identity bytes for artifact and runtime cache keys.

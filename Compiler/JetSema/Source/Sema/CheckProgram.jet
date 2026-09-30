@@ -268,7 +268,7 @@ fn sema_function_return_view_provenance(func: Func, inferred: ViewProvenanceMap?
     if declared_option == None -> return inferred
     declared :: declared_option ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
     if inferred != None {
-        inferred_map :: inferred ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+        inferred_map :: inferred
         span :: func.return_type_span ?? func.name_span
         loop inferred_entry in inferred_map.entries {
             declared_entry := sema_function_view_contract_for_slot(declared, inferred_entry.slot)
@@ -337,8 +337,8 @@ fn sema_function_view_source_path_equal(left: ViewSourcePath, right: ViewSourceP
 fn sema_function_view_maps_equal(left: ViewProvenanceMap?, right: ViewProvenanceMap?) -> Bool Never! {
     if left == None -> return right == None
     if right == None -> return false
-    left_map :: left ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
-    right_map :: right ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+    left_map :: left
+    right_map :: right
     if left_map.entries.len() != right_map.entries.len() -> return false
     loop left_entry in left_map.entries {
         right_entry := None
@@ -437,7 +437,7 @@ fn sema_named_type_symbol(module_name: String, name: String, span: Span, is_pub:
 
 fn sema_failure_carrier(return_type: Type?) -> TFailureCarrier Never! {
     if return_type == None -> return TFailureCarrier.Result{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
-    ty :: return_type ?? Type.Named{name: "Unit"}
+    ty :: return_type
     if ty == {
         .Named(name) -> {
             if name == "Never" -> return TFailureCarrier.Diverges{value: ty}
@@ -473,7 +473,7 @@ fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?
                 bound_index += 1
                 next
             }
-            graph :: graph_option ?? {
+            graph :: graph_option
                 complete = false
                 bound_index += 1
                 next
@@ -770,7 +770,13 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFunc
     if !contract.complete -> complete = false
 
 
+    // D-DISCARD1=A: with no written return type the function returns
+    // nothing, so a value on its last line is lost (E0433).
+    if func.return_type_span == None && !func.compiler_generated && func.body.len() > 0 {
+        if func.body[func.body.len() - 1] == .Expr(tail) -> context.lost_tail_span = Val(expr_span(tail))
+    }
     statements :: sema_check_statements(func.body, Val(effective_return), updated, &scopes, &state, &tail_store, &context, &diagnostics, 0)
+    context.lost_tail_span = None
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, scopes, &diagnostics) -> complete = false
@@ -888,6 +894,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
         complete = false
     }
     environment := sema_scope_environment_init(None, module_name, "", module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, [TTypeDef]{}, local_declarations)
+    environment.else_arms = program.else_arms
 
     item_index = 0
     loop item_index < program.items.len() {
@@ -1111,7 +1118,7 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
             loop event in checked_function.copy_events -> &copy_events.push(event)
             loop source in checked_function.comptime_body_sources -> &comptime_body_sources.push(source)
             &compute_facts.push(checked_function.compute_facts)
-            return sema_comptime_append_checked_function(checked_function, functions, call_facts, comptime_requests, name_references)
+            return sema_comptime_append_checked_function(checked_function, &functions, &call_facts, &comptime_requests, &name_references)
         }
         .None -> {}
     }
@@ -1137,7 +1144,7 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
     if environment.registration_graph == {
         .Val(graph) -> {
             normalized_owner_type = sema_function_normalize_owner_type(graph, owner_type, source_module.module_identity)
-            method_environment.generic_params = sema_function_owner_generic_params(graph, normalized_owner_type, source_module.module_identity, diagnostics, &owner_generic_complete)
+            method_environment.generic_params = sema_function_owner_generic_params(graph, normalized_owner_type, source_module.module_identity, &diagnostics, &owner_generic_complete)
         }
         else -> {
             if owner_type == {
@@ -1149,7 +1156,7 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
         }
     }
     function_kind := sema_comptime_method_kind(memory_func, normalized_owner_type, trait_symbol)
-    checked := sema_function_check(memory_func, registered.symbol.id, function_kind, ^method_environment, scopes, diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+    checked := sema_function_check(memory_func, registered.symbol.id, function_kind, ^method_environment, scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
     exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
     sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
     loop event in checked.copy_events -> &copy_events.push(event)
@@ -1158,7 +1165,7 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
     loop source in checked.comptime_body_sources -> &comptime_body_sources.push(source)
     &compute_facts.push(checked.compute_facts)
     loop reference in function_name_references -> &name_references.push(reference)
-    memory_complete && owner_generic_complete && checked.complete && sema_append_function(functions, checked)
+    memory_complete && owner_generic_complete && checked.complete && sema_append_function(&functions, checked)
 }
 fn sema_check_registered_tfunc_key(module_row: SemaRegistrationModule, name: String) -> String? {
     loop function in module_row.functions {
@@ -1202,6 +1209,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
     if diagnostics.len() > declarations_diagnostic_count -> complete = false
     environment := sema_scope_environment_init(Val(graph), source_module.module_identity, source_module.package_identity, source_module.module_name, source_module.source_file, source_module.source_origin, source_module.source_segments, checked_types, [SemaScopeDeclaration]{})
     environment.comptime_body_values = sema_comptime_body_values_from_items(values)
+    environment.else_arms = source_module.program.else_arms
 
     program := source_module.program
     if program.script_body.len() > 0 || program.block_spans.len() > 0 || program.fenced_statements.len() > 0 || program.web_target_ceiling != None || program.pub_file || program.no_prelude || program.default_target != None || program.html_path != None || sema_function_memory_has_unsupported_policies(program.policy_declarations) || program.user_policy_declarations.len() > 0 || program.applied_rules.len() > 0 || program.rule_facts.len() > 0 -> complete = false
@@ -1772,12 +1780,13 @@ fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [SemaCo
         loop item_index < resolved.modules[module_index].program.items.len() {
             if resolved.modules[module_index].program.items[item_index] == {
                 .Const(definition) -> {
-                    key := symbol_id(SymbolKind.Constant, module_identity, "", definition.name).key
+                    updated_definition := definition
+                    key := symbol_id(SymbolKind.Constant, module_identity, "", updated_definition.name).key
                     value := sema_comptime_value_for_symbol(values, module_identity, key)
                     if value != None {
                         checked_value :: value ?? return resolved
-                        if definition.ty == None -> definition.ty = Val(checked_value.ty)
-                        resolved.modules[module_index].program.items[item_index] = Item.Const{value: definition}
+                        if updated_definition.ty == None -> updated_definition.ty = Val(checked_value.ty)
+                        resolved.modules[module_index].program.items[item_index] = Item.Const{value: updated_definition}
                     }
                 }
                 else -> {}
@@ -1942,7 +1951,7 @@ fn sema_comptime_add_marker_source(sources: &[SemaComptimeItemSource], graph: Se
 
 fn sema_comptime_add_meta_sources(sources: &[SemaComptimeItemSource], graph: SemaRegistrationGraph, module_identity: String, owner_key: String, meta: MetaAttr?) {
     if meta == None -> return
-    value :: meta ?? return
+    value :: meta
     loop field in value.fields {
         if field == {
             .Category(expression, span) -> {
@@ -2145,7 +2154,7 @@ pub fn sema_check_comptime_item(graph: SemaRegistrationGraph, source: SemaCompti
     source_module := resolved_graph.modules[module_index]
     scopes := sema_scope_init(source_module.module_identity)
     scopes.comptime_execution_depth = 1
-    // S57: `@name :: expr` fails the build when evaluation cannot complete.
+    // S57: `NAME :: expr` fails the build when evaluation cannot complete.
     // The build edge carries the implicit `!Err` rail of `fn run()`
     // (D-FAIL-EXIT1), so a fallible call here propagates to the build.
     scopes.failure_carrier = Val(sema_failure_carrier(None))
@@ -2316,7 +2325,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
                         registration_index :: sema_name_module_index(resolved_graph, modules[module_index].module_identity)
                         if {
                             registration_index != None -> {
-                                registration :: resolved_graph.modules[registration_index ?? 0]
+                                registration :: resolved_graph.modules[registration_index]
                                 located := [Diagnostic]{diagnostic}
                                 sema_attach_diagnostic_source_locations(&located, 0, registration.source_segments)
                                 &diagnostics.push(located[0])

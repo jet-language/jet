@@ -179,15 +179,22 @@ pub struct TNamedEnumArg {
 
 pub enum TPatternShape {
     Variant(variant: String, bindings: [TPatternBinding], leading_dot: Bool, span: Span)
-    Present(binding: String, binding_span: Span, span: Span)
+    // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
+    Present(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
     Absent(span: Span)
-    Ok(binding: String, binding_span: Span, span: Span)
-    Err(binding: String, binding_span: Span, span: Span)
+    Ok(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
+    Err(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
     Range(lo: Int, hi: Int, span: Span)
     Or(alternatives: [TPatternShape], span: Span)
     Struct(fields: [TPatternField], rest: Span?, span: Span)
     Text(parts: [TTextPatternPart], span: Span)
     Binary(parts: [TBinaryPatternPart], span: Span)
+}
+
+// S31: a checked nested payload pattern with the payload type's owner.
+pub struct TNestedPattern {
+    pub shape: TPatternShape
+    pub enum_type: SymbolId?
 }
 
 pub enum TPatternPosition {
@@ -219,6 +226,7 @@ pub enum TPatternBinding {
     Wildcard
     Bind(name: String, span: Span)
     Range(lo: Int, hi: Int)
+    Nested(pattern: TNestedPattern)
 }
 
 pub enum TPatternField {

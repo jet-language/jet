@@ -8,10 +8,10 @@ use jet::Sema::EffectSet;
 use jetpack::EffectBudget::{self, PackageEffects};
 
 const FFI_LEAF_SOURCE: &str = r#"
-@MESSAGE :: "ffi leaf"
+MESSAGE :: prep { "ffi leaf" }
 
 fn run() -[FFI.Py, IO]> {
-    print(@MESSAGE)
+    print(MESSAGE)
 }
 "#;
 

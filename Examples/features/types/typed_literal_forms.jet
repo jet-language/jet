@@ -1,5 +1,7 @@
 // D-DOTCTOR3=A: universal typed-literal Type{ body } form.
-// Body elaborates against the type; it never converts.
+// The body elaborates against the type. A one-expression body is a whole value
+// of the type and converts only the way a parameter of that type would, such as
+// the checked `Int` to `Float` widening (#3739).
 // Run with `jet run Examples/features/types/typed_literal_forms.jet`.
 fn fetch_rows() -> Int { 7 }
 
@@ -17,7 +19,7 @@ fn run() {
     scores := [String:Int]{}
     scores["a"] = 1
     print("{scores["a"]}")
-    // One-expression assertion — body must already be Int.
+    // One-expression body: already an Int, so it is the whole value.
     count :: Int{fetch_rows()}
     print("{count}")
     // Nested list: inner bodies may be typed or plain list forms.

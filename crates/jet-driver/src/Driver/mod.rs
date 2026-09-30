@@ -1833,8 +1833,11 @@ pub struct BuildRunOptions {
     pub plugin_target: bool,
     pub cross_target: Option<String>,
     /// D-CONF-WORD1=A: the selected optimization bundle, exposed as the
-    /// compile-time `@build.profile` fact.
+    /// compile-time `$build.profile` fact.
     pub profile: String,
+    /// D-DBG1=A: this compile produces a shipped artifact (`jet build`),
+    /// folded into the build-fact snapshot sema reads.
+    pub artifact_build: bool,
     /// Invocation-local policy merged into the checked runtime before codegen.
     pub application_authority: Option<jet_foundation::Authority::ApplicationAuthority>,
     /// D-CONF-KEY1: command-line contributions to declared package settings.
@@ -1868,6 +1871,7 @@ impl Default for BuildRunOptions {
             plugin_target: false,
             cross_target: None,
             profile: "dev".to_string(),
+            artifact_build: false,
             application_authority: None,
             setting_overrides: BTreeMap::new(),
             remote: None,
@@ -2235,12 +2239,14 @@ fn seed_build_facts_from_stamp(
         )]);
     }
     let target_dossier = bundle.build_facts.target_dossier.clone();
+    let artifact_build = bundle.build_facts.artifact_build;
     bundle.build_facts = jet_foundation::Facts::BuildFactSnapshot {
         package_name,
         package_version,
         os: bundle.active_os,
         target_triple,
         profile: resolved_profile,
+        artifact_build,
         stamp: stamp.clone(),
         contributions,
         settings,
@@ -2362,7 +2368,7 @@ fn resolve_build_fact(
 fn undeclared_setting_diagnostic(key: &str, why: &str, declaration_site: &str) -> Diagnostic {
     Diagnostic::error(
         "E0302",
-        format!("`@build.settings.{key}` is undeclared"),
+        format!("`$build.settings.{key}` is undeclared"),
         why.to_string(),
         format!(
             "add `{key}: Type = default` to the `settings: {{ … }}` block in `{declaration_site}`"
@@ -2810,6 +2816,7 @@ fn build_query_options() -> BuildRunOptions {
         plugin_target: false,
         cross_target: None,
         profile: "dev".to_string(),
+        artifact_build: false,
         application_authority: None,
         setting_overrides: BTreeMap::new(),
         remote: None,
@@ -3081,6 +3088,8 @@ fn graph_file_json(file: &crate::Comptime::Build::BuildGraphFile) -> String {
 pub struct FrontEndInputs {
     pub file: String,
     pub profile: String,
+    /// D-DBG1=A: `jet build` artifact fact (see `BuildRunOptions`).
+    pub artifact_build: bool,
     pub setting_overrides: BTreeMap<String, String>,
     pub locked: bool,
     pub web_target: bool,
@@ -3100,6 +3109,7 @@ impl FrontEndInputs {
         Self {
             file: file.to_string(),
             profile: options.profile.clone(),
+            artifact_build: options.artifact_build,
             setting_overrides: options.setting_overrides.clone(),
             locked: options.locked,
             web_target: options.web_target,
@@ -3589,6 +3599,7 @@ fn prepare_build_front_end_on_compiler_stack(
         &[],
         &build_stamp,
     )?;
+    bundle.build_facts.artifact_build = inputs.artifact_build;
     bundle.web_partition_enforced = inputs.web_target;
     let local_build_indices = if inputs.build_override {
         bundle.modules[bundle.entry]
@@ -3662,6 +3673,7 @@ fn prepare_build_front_end_on_compiler_stack(
                 &[],
                 &build_stamp,
             )?;
+            bundle.build_facts.artifact_build = inputs.artifact_build;
             bundle.web_partition_enforced = inputs.web_target;
         }
     }
@@ -4011,6 +4023,7 @@ fn compile_build_from_front_end(
             evaluated.plan.fact_contributions(),
             &build_stamp,
         )?;
+        bundle.build_facts.artifact_build = options.artifact_build;
 
         let dependency_name = dependency_boundary.map(build_package_name).transpose()?;
         validate_build_authority(
@@ -4289,7 +4302,7 @@ fn compile_build_from_front_end(
                         // holds unfolded fact reads.
                         Some(runtime) => Ok(runtime),
                         // The build entry and the runtime program share one file.
-                        // The pre-build check already folded every `@build.*` read
+                        // The pre-build check already folded every `$build.*` read
                         // against the snapshot that had no `fn build` contribution,
                         // and a fact read is replaced in place, so that AST can no
                         // longer answer the final snapshot. Re-parse the entry and
@@ -4328,6 +4341,7 @@ fn compile_build_from_front_end(
             build_run.plan.fact_contributions(),
             &build_stamp,
         )?;
+        bundle.build_facts.artifact_build = options.artifact_build;
         bundle.web_partition_enforced = options.web_target;
         if let Some(entry_fn) = options.entry_fn.as_deref() {
             swap_entry_point(&mut bundle, entry_fn);
@@ -4789,7 +4803,7 @@ fn load_planned_runtime_bundle(
     // selected target never needs it, and the caller must hand over a freshly
     // parsed bundle. Every fact read has to still be foldable, because the one
     // complete front-end pass after this reload is what folds the final
-    // `@build.*` snapshot.
+    // `$build.*` snapshot.
     // A package build may list generated roots before its runtime source after
     // materialization. Keep the canonical `fn run` source as the bundle entry;
     // every other selected root is promoted below.
@@ -5414,7 +5428,7 @@ fn build_entry_resolution_diagnostic(error: &str) -> Diagnostic {
 /// A selected build entry contributes computed facts (D-CONF-SPLIT1), may
 /// generate modules, and records both in `.jet/lock`. A lane that cannot stage
 /// it must therefore hand the program to the build pipeline instead of folding
-/// `@build.*` from manifest declarations alone: otherwise one tier runs a
+/// `$build.*` from manifest declarations alone: otherwise one tier runs a
 /// program built from the declared default while another runs the contributed
 /// value, which is the tier split I9 forbids.
 ///
@@ -6653,6 +6667,8 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
     // The sema build facts and MIR adapter share this target resolution.
     set_bundle_target(&mut bundle, cross_target);
     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
+    // D-DBG1=A: an explicit output file or a library is a shipped artifact.
+    bundle.build_facts.artifact_build = explicit_output.is_some() || library_target;
     let has_target_dossier = target_dossier.is_some();
     if let Some(dossier) = target_dossier {
         bundle.build_facts.target_dossier = dossier;

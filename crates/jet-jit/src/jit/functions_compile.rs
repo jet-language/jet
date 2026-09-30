@@ -5173,7 +5173,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .kind()
                     .clone();
                 let slot = self.slot(builder, &place_row)?;
-                if let MirTypeKind::FixedList { len, .. } = fixed_len {
+                if let MirTypeKind::FixedList { len, elem } = fixed_len {
                     let len = len
                         .literal_value()
                         .and_then(|len| i64::try_from(len).ok())
@@ -5184,8 +5184,14 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             )
                         })?;
                     let length = builder.ins().iconst(types::I64, len);
-                    let carrier = self
-                        .call_host(builder, self.host.coll.list_uninit, &[length])?
+                    let results = match element_word_cells(&elem) {
+                        Some(unsigned) => {
+                            let unsigned = builder.ins().iconst(types::I64, i64::from(unsigned));
+                            self.call_host(builder, self.host.coll.list_uninit_words, &[length, unsigned])?
+                        }
+                        None => self.call_host(builder, self.host.coll.list_uninit, &[length])?,
+                    };
+                    let carrier = results
                         .first()
                         .copied()
                         .ok_or_else(|| "MIR fixed-list initializer returned no carrier".to_string())?;
@@ -5307,6 +5313,14 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .ok_or_else(|| "MIR trait boxing host returned no record".to_string())?,
                 )
             }
+            MirOperation::Constant(MirConstant::List(values)) => {
+                let words = instruction
+                    .ty
+                    .as_ref()
+                    .and_then(list_word_cells)
+                    .or_else(|| constant_list_word_cells(values));
+                Some(self.constant_list(builder, values, words)?)
+            }
             MirOperation::Constant(constant) => Some(self.constant(builder, constant, expected)?),
             MirOperation::Unary { op, value } => {
                 let operand_ty = self.mir_value_type(*value)?;
@@ -5367,7 +5381,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirOperation::BuildList {
                 values,
                 trait_coercion,
-            } => Some(self.build_list(builder, values, *trait_coercion)?),
+            } => {
+                let words = match instruction.ty.as_ref() {
+                    Some(list_ty) => list_word_cells(list_ty),
+                    None => match values.first() {
+                        Some(first) => element_word_cells(&self.mir_value_type(*first)?),
+                        None => None,
+                    },
+                };
+                Some(self.build_list(builder, values, *trait_coercion, words)?)
+            }
             MirOperation::BuildMap { entries } => Some(self.build_map(builder, entries)?),
             MirOperation::ProjectMembers { base, members } => {
                 Some(self.project_members(builder, *base, members)?)
@@ -6163,7 +6186,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     builder.ins().return_(&values);
                 }
             }
-            MirTerminator::Yield { value, resume } => {
+            MirTerminator::Yield {
+                value,
+                resume,
+                cancel,
+            } => {
                 let sender = self
                     .yield_sender
                     .ok_or_else(|| "MIR yield occurs outside a generator body".to_string())?;
@@ -6179,24 +6206,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 let ready = builder.create_block();
                 builder.ins().brif(interrupted, cancelled, &[], ready, &[]);
                 builder.switch_to_block(cancelled);
-                // AOT cancel unwinds the Rust generator and runs return-path
-                // defers. JIT converted the unwind at the host, so jump to the
-                // unique Return block when it is phi-free (the defer thunk is
-                // defined before the first yield).
-                // Cleanup runs while the producer is still cancelled. Print and
-                // other wait points inside `defer` would unwind again; enter
-                // `#Shield` for the jump into the Return block (D-CANCELMODEL1).
+                // The host converted the cancel unwind into this status, so
+                // take the MIR cancel edge: it runs the generator's lexical
+                // cleanup and then returns. Cleanup runs while the producer is
+                // still cancelled; print and other wait points inside it would
+                // unwind again, so enter `#Shield` first (D-CANCELMODEL1=C).
                 let _ = self.call_host(builder, self.host.conc.shield_enter, &[])?;
-                if let Some(target) = self.generator_cancel_return_block() {
-                    let target_block = self.block(target)?;
-                    if builder.block_params(target_block).is_empty() {
-                        builder.ins().jump(target_block, &[]);
-                    } else {
-                        self.emit_cancelled_sender_close(builder, sender, zero)?;
-                    }
-                } else {
-                    self.emit_cancelled_sender_close(builder, sender, zero)?;
-                }
+                let cancel_block = self.block(*cancel)?;
+                let cancel_args = self.edge_args(*cancel, block.id)?;
+                builder.ins().jump(cancel_block, &cancel_args);
                 builder.switch_to_block(ready);
                 let target_block = self.block(*resume)?;
                 let args = self.edge_args(*resume, block.id)?;
@@ -6924,38 +6942,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
 
     fn emit_stack_leave(&mut self, builder: &mut FunctionBuilder<'_>) -> Result<(), String> {
         let _ = self.call_host_unchecked(builder, self.host.stack_leave, &[])?;
-        Ok(())
-    }
-
-    fn generator_cancel_return_block(&self) -> Option<jet_foundation::MIR::MirBlockId> {
-        let mut found = None;
-        for block in &self.function.blocks {
-            if let jet_foundation::MIR::MirTerminator::Return { .. } = block.terminator {
-                if found.is_some() {
-                    return None;
-                }
-                found = Some(block.id);
-            }
-        }
-        found
-    }
-
-    fn emit_cancelled_sender_close(
-        &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        sender: Value,
-        zero: Value,
-    ) -> Result<(), String> {
-        let failed = builder.ins().iconst(types::I64, 0);
-        let _ = self.call_host(
-            builder,
-            self.host.conc.sender_close,
-            &[sender, failed],
-        )?;
-        self.emit_cell_frame_drop(builder)?;
-        self.emit_sentry_function_exit(builder)?;
-        self.emit_stack_leave(builder)?;
-        builder.ins().return_(&[zero]);
         Ok(())
     }
 
@@ -8065,11 +8051,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         if matches!(
             ty.kind(),
             MirTypeKind::Apply { name, args }
-                if args.is_empty() && name.name == "EnvError"
+                if args.is_empty() && matches!(name.name.as_str(), "EnvError" | "DBError")
         ) {
-            // `core.sys` host failures use `Marshal::result_err_msg`, so the
-            // resident EnvError carrier is already the Prelude's canonical
-            // display text as a String handle.
+            // `core.sys` and `core.db` host failures use
+            // `Marshal::result_err_msg`, so the resident EnvError/DBError
+            // carrier is already the Prelude's canonical display text as a
+            // String handle.
             return Ok(self.cast(builder, value, types::I64)?);
         }
         if matches!(
@@ -8335,6 +8322,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirTypeKind::Apply { name, args } if args.is_empty() => Some(name.name.as_str()),
             _ => ty.nominal_name(),
         };
+        if db_display == Some("DBError") {
+            // `core.db` host failures use `Marshal::result_err_msg`, so the
+            // resident DBError carrier is already the driver message that
+            // AOT's `JetDisplay for DBError` renders, as a String handle.
+            return Ok(self.cast(builder, value, types::I64)?);
+        }
         if let Some(host) = match db_display {
             Some("DBValue") => Some(self.host.dbvalue_display),
             Some("DBLease") => Some(self.host.dblease_display),
@@ -10610,7 +10603,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .map_err(|error| format!("MIR BigInt constant is invalid: {error}"))?;
                 builder.ins().iconst(types::I64, value)
             }
-            MirConstant::List(values) => self.constant_list(builder, values)?,
+            MirConstant::List(values) => {
+                self.constant_list(builder, values, constant_list_word_cells(values))?
+            }
             MirConstant::Map(values) => self.constant_map(builder, values)?,
             MirConstant::Struct { type_name, fields } => {
                 self.constant_struct(builder, type_name, fields)?
@@ -10639,12 +10634,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         values: &[MirConstant],
+        words: Option<bool>,
     ) -> Result<Value, String> {
-        let list = self
-            .call_host(builder, self.host.coll.list_new, &[])?
-            .first()
-            .copied()
-            .ok_or_else(|| "MIR constant list host returned no list".to_string())?;
+        let list = self.new_list(builder, words)?;
         for value in values {
             let value = self.constant(builder, value, None)?;
             let value_type = self.value_type(builder, value);
@@ -11065,6 +11057,30 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             if op.is_comparison() {
                 return Ok(self.compare(builder, op, left, right));
             }
+        }
+        // D-TIME-INSTANT1=A: an Instant is a resident time handle and a
+        // Duration is its raw nanosecond carrier. Point arithmetic runs through
+        // the time hosts, never as integer arithmetic on the handle.
+        let left_instant = is_named_type(left_ty, "Instant");
+        let right_instant = is_named_type(right_ty, "Instant");
+        if left_instant || right_instant {
+            let (host, args) = match (op, left_instant, right_instant) {
+                (MirBinaryOp::Add, true, false) => (self.host.time.instant_add_duration, [left, right]),
+                (MirBinaryOp::Add, false, true) => (self.host.time.instant_add_duration, [right, left]),
+                (MirBinaryOp::Sub, true, false) => (self.host.time.instant_sub_duration, [left, right]),
+                (MirBinaryOp::Sub, true, true) => (self.host.time.instant_difference, [left, right]),
+                _ => {
+                    return Err(format!(
+                        "MIR Instant arithmetic cannot implement `{}`",
+                        op.spell()
+                    ))
+                }
+            };
+            return self
+                .call_host(builder, host, &args)?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR Instant arithmetic host returned no value".to_string());
         }
         if ty == types::F64 || ty == types::F32 {
             return match op {
@@ -12212,11 +12228,32 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
     }
 
+    /// Allocate an empty list carrier. `words` is `Some(unsigned)` for a list
+    /// of fixed-width 64-bit integers (see `list_word_cells`).
+    fn new_list(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        words: Option<bool>,
+    ) -> Result<Value, String> {
+        let results = match words {
+            Some(unsigned) => {
+                let unsigned = builder.ins().iconst(types::I64, i64::from(unsigned));
+                self.call_host(builder, self.host.coll.list_new_words, &[unsigned])?
+            }
+            None => self.call_host(builder, self.host.coll.list_new, &[])?,
+        };
+        results
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list host returned no list".to_string())
+    }
+
     fn build_list(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         values: &[MirValueId],
         trait_coercion: Option<jet_foundation::MIR::MirTypeId>,
+        words: Option<bool>,
     ) -> Result<Value, String> {
         if let Some(type_id) = trait_coercion {
             let target = self
@@ -12234,11 +12271,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 ));
             }
         }
-        let list = self
-            .call_host(builder, self.host.coll.list_new, &[])?
-            .first()
-            .copied()
-            .ok_or_else(|| "MIR list host returned no value".to_string())?;
+        let list = self.new_list(builder, words)?;
         for id in values {
             let source_ty = self.mir_value_type(*id)?;
             let mut value = self.value(*id)?;
@@ -21053,19 +21086,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         values.push(self.value(
                             index.ok_or_else(|| "MIR GC insert edit has no index".to_string())?,
                         )?);
-                        values.push(self.build_list(builder, edges, None)?);
+                        values.push(self.build_list(builder, edges, None, None)?);
                     }
                     MirGcEditKind::Prepend | MirGcEditKind::Additive => {
                         if index.is_some() {
                             return Err("MIR GC edge edit carries an unused index".to_string());
                         }
-                        values.push(self.build_list(builder, edges, None)?);
+                        values.push(self.build_list(builder, edges, None, None)?);
                     }
                     MirGcEditKind::EdgeSlot => {
                         if index.is_some() {
                             return Err("MIR GC edge-slot edit carries an unused index".to_string());
                         }
-                        values.push(self.build_list(builder, edges, None)?);
+                        values.push(self.build_list(builder, edges, None, None)?);
                     }
                 }
                 values.push(self.value(*edit)?);
@@ -21223,7 +21256,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     types::I64,
                     self.runtime.heap.alloc_string(export_name.clone()),
                 );
-                let params = self.build_list(builder, args, None)?;
+                let params = self.build_list(builder, args, None, None)?;
                 let descriptor = builder
                     .ins()
                     .iconst(types::I64, self.runtime.heap.alloc_string(signature.wire()));
@@ -21735,6 +21768,42 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             Ok(builder.ins().icmp_imm(IntCC::NotEqual, value, 0))
         }
     }
+}
+
+/// `Some(unsigned)` when `element` is a fixed-width 64-bit integer. Such cells
+/// use every bit pattern, so they live in a word list that never treats a cell
+/// as an exact `Int` pointer; narrower widths cannot reach the pointer tag.
+fn element_word_cells(element: &MirType) -> Option<bool> {
+    match element.kind() {
+        MirTypeKind::IntN { signed, bits: 64 } => Some(!*signed),
+        MirTypeKind::Tagged { inner, .. } | MirTypeKind::Quantity { base: inner, .. } => {
+            element_word_cells(inner)
+        }
+        MirTypeKind::InlineRange { base, .. } => element_word_cells(base),
+        _ => None,
+    }
+}
+
+/// Word-cell kind of a list type's elements (see `element_word_cells`).
+fn list_word_cells(list_ty: &MirType) -> Option<bool> {
+    match list_ty.kind() {
+        MirTypeKind::List(element) | MirTypeKind::FixedList { elem: element, .. } => {
+            element_word_cells(element)
+        }
+        MirTypeKind::Tagged { inner, .. } => list_word_cells(inner),
+        _ => None,
+    }
+}
+
+/// Word-cell kind of a constant list, read from its fixed-width elements.
+fn constant_list_word_cells(values: &[MirConstant]) -> Option<bool> {
+    values.iter().find_map(|value| match value {
+        MirConstant::Int {
+            width: Some((signed, 64)),
+            ..
+        } => Some(!*signed),
+        _ => None,
+    })
 }
 
 #[cfg(test)]

@@ -45,29 +45,19 @@ pub const COMPILER_METADATA_SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompilerMetadataQuery {
     Phase,
-    Type,
-    Function,
-    Method,
-    Closure,
     Program,
     Package,
     Source,
-    Value,
     Types,
 }
 
 impl CompilerMetadataQuery {
     pub const fn spelling(self) -> &'static str {
         match self {
-            Self::Phase => crate::Syntax::META_QUERY_PHASE,
-            Self::Type => crate::Syntax::META_QUERY_TYPE,
-            Self::Function => crate::Syntax::META_QUERY_FUNCTION,
-            Self::Method => crate::Syntax::META_QUERY_METHOD,
-            Self::Closure => crate::Syntax::META_QUERY_CLOSURE,
-            Self::Program => crate::Syntax::META_QUERY_PROGRAM,
-            Self::Package => crate::Syntax::META_QUERY_PACKAGE,
+            Self::Phase => crate::Syntax::FACT_ROOT_PHASE,
+            Self::Program => crate::Syntax::FACT_ROOT_PROGRAM,
+            Self::Package => crate::Syntax::FACT_ROOT_PACKAGE,
             Self::Source => crate::Syntax::META_QUERY_SOURCE,
-            Self::Value => crate::Syntax::META_QUERY_VALUE,
             Self::Types => crate::Syntax::META_QUERY_TYPES,
         }
     }
@@ -96,10 +86,6 @@ const ROOT_LIMIT_ARGUMENT: &[MetadataRootArgument] = &[MetadataRootArgument {
 const ROOT_NO_OVERLOADS: &[MetadataRootOverload] = &[];
 const ROOT_AUTHORIZED_HANDLE_OVERLOAD: &[MetadataRootOverload] =
     &[MetadataRootOverload::AuthorizedSnapshotHandle];
-const ROOT_METHOD_HANDLE_OVERLOAD: &[MetadataRootOverload] = &[
-    MetadataRootOverload::AuthorizedSnapshotHandle,
-    MetadataRootOverload::TypedMethodHandle,
-];
 
 pub const COMPILER_METADATA_ROOTS: &[CompilerMetadataRoot] = &[
     CompilerMetadataRoot {
@@ -113,86 +99,6 @@ pub const COMPILER_METADATA_ROOTS: &[CompilerMetadataRoot] = &[
         },
         scope: MetadataRootScope::EvaluationSite,
         availability: MetadataAvailability::EvaluationSite,
-        producer: MetadataProducerStatus::NotImplemented,
-    },
-    CompilerMetadataRoot {
-        query: CompilerMetadataQuery::Type,
-        arguments: &[MetadataRootArgument {
-            name: "T",
-            input_type: MetadataRootInputType::TypeExpression,
-            cardinality: MetadataFieldCardinality::One,
-            mode: MetadataArgumentMode::Positional,
-        }],
-        optional_arguments: ROOT_LIMIT_ARGUMENT,
-        overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
-        result: MetadataRootResult {
-            success: MetadataValueType::Record(MetadataRecord::TypeInfo),
-            error: Some(MetadataRecord::MetadataError),
-        },
-        scope: MetadataRootScope::LexicalSnapshot,
-        availability: MetadataAvailability::CheckedSnapshot,
-        producer: MetadataProducerStatus::NotImplemented,
-    },
-    CompilerMetadataRoot {
-        query: CompilerMetadataQuery::Function,
-        arguments: &[MetadataRootArgument {
-            name: "f",
-            input_type: MetadataRootInputType::CallableSelection,
-            cardinality: MetadataFieldCardinality::One,
-            mode: MetadataArgumentMode::Positional,
-        }],
-        optional_arguments: ROOT_LIMIT_ARGUMENT,
-        overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
-        result: MetadataRootResult {
-            success: MetadataValueType::Record(MetadataRecord::FunctionInfo),
-            error: Some(MetadataRecord::MetadataError),
-        },
-        scope: MetadataRootScope::LexicalSnapshot,
-        availability: MetadataAvailability::CheckedSnapshot,
-        producer: MetadataProducerStatus::NotImplemented,
-    },
-    CompilerMetadataRoot {
-        query: CompilerMetadataQuery::Method,
-        arguments: &[
-            MetadataRootArgument {
-                name: "T",
-                input_type: MetadataRootInputType::TypeExpression,
-                cardinality: MetadataFieldCardinality::One,
-                mode: MetadataArgumentMode::Positional,
-            },
-            MetadataRootArgument {
-                name: "name",
-                input_type: MetadataRootInputType::MethodName,
-                cardinality: MetadataFieldCardinality::One,
-                mode: MetadataArgumentMode::Positional,
-            },
-        ],
-        optional_arguments: ROOT_LIMIT_ARGUMENT,
-        overloads: ROOT_METHOD_HANDLE_OVERLOAD,
-        result: MetadataRootResult {
-            success: MetadataValueType::Record(MetadataRecord::MethodInfo),
-            error: Some(MetadataRecord::MetadataError),
-        },
-        scope: MetadataRootScope::LexicalSnapshot,
-        availability: MetadataAvailability::CheckedSnapshot,
-        producer: MetadataProducerStatus::NotImplemented,
-    },
-    CompilerMetadataRoot {
-        query: CompilerMetadataQuery::Closure,
-        arguments: &[MetadataRootArgument {
-            name: "value",
-            input_type: MetadataRootInputType::RuntimeValue,
-            cardinality: MetadataFieldCardinality::One,
-            mode: MetadataArgumentMode::Positional,
-        }],
-        optional_arguments: ROOT_LIMIT_ARGUMENT,
-        overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
-        result: MetadataRootResult {
-            success: MetadataValueType::Record(MetadataRecord::ClosureInfo),
-            error: Some(MetadataRecord::MetadataError),
-        },
-        scope: MetadataRootScope::RuntimeValue,
-        availability: MetadataAvailability::RuntimeRetained,
         producer: MetadataProducerStatus::NotImplemented,
     },
     CompilerMetadataRoot {
@@ -232,24 +138,6 @@ pub const COMPILER_METADATA_ROOTS: &[CompilerMetadataRoot] = &[
         },
         scope: MetadataRootScope::LexicalSource,
         availability: MetadataAvailability::CheckedSnapshot,
-        producer: MetadataProducerStatus::NotImplemented,
-    },
-    CompilerMetadataRoot {
-        query: CompilerMetadataQuery::Value,
-        arguments: &[MetadataRootArgument {
-            name: "value",
-            input_type: MetadataRootInputType::RuntimeValue,
-            cardinality: MetadataFieldCardinality::One,
-            mode: MetadataArgumentMode::Positional,
-        }],
-        optional_arguments: ROOT_LIMIT_ARGUMENT,
-        overloads: ROOT_AUTHORIZED_HANDLE_OVERLOAD,
-        result: MetadataRootResult {
-            success: MetadataValueType::Record(MetadataRecord::ValueInfo),
-            error: Some(MetadataRecord::MetadataError),
-        },
-        scope: MetadataRootScope::RuntimeValue,
-        availability: MetadataAvailability::RuntimeRetained,
         producer: MetadataProducerStatus::NotImplemented,
     },
     CompilerMetadataRoot {
@@ -2765,7 +2653,7 @@ pub fn registered_fact_read(name: &str) -> Option<FactRead> {
         .or(Some(FactRead::RegisteredPlane(registered.name)))
 }
 
-/// D-CONF-READ1=A / D-CONF-STAMP1=B: resolve one complete `@build.*` path
+/// D-CONF-READ1=A / D-CONF-STAMP1=B: resolve one complete `$build.*` path
 /// through the same registered fact table used by every other plane.
 pub fn build_fact_read(path: &str) -> Option<FactRead> {
     let (row_name, read) = match path {
@@ -3217,13 +3105,13 @@ fn fact_declaration(line: &str) -> FactDeclaration {
             .unwrap_or_else(|| crate::ice!(None, "fact parameter without `:` in {line}: {entry}"));
         let (label, value) = (label.trim(), value.trim());
         match label {
-            "@holds" => target = Some(fact_target(value, line)),
-            "@safe" => safe_direction = Some(fact_direction(value, line)),
-            "@gates" => gates = Some(fact_gates(value, line)),
-            "@proved_by" => published_by = Some(leak(value)),
-            "@name" => name = leak(&unquote(value, line)),
-            "@identity" => identity_bearing = fact_bool(value, line),
-            "@decision" => decision = Some(leak(&unquote(value, line))),
+            "$holds" => target = Some(fact_target(value, line)),
+            "$safe" => safe_direction = Some(fact_direction(value, line)),
+            "$gates" => gates = Some(fact_gates(value, line)),
+            "$proved_by" => published_by = Some(leak(value)),
+            "$name" => name = leak(&unquote(value, line)),
+            "$identity" => identity_bearing = fact_bool(value, line),
+            "$decision" => decision = Some(leak(&unquote(value, line))),
             other => crate::ice!(None, "unknown fact column `{other}` in {line}"),
         }
     }
@@ -3232,14 +3120,14 @@ fn fact_declaration(line: &str) -> FactDeclaration {
         source_name,
         name,
         target: target
-            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@holds`: {line}")),
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `$holds`: {line}")),
         safe_direction: safe_direction
-            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@safe`: {line}")),
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `$safe`: {line}")),
         gates: gates
-            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@gates`: {line}")),
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `$gates`: {line}")),
         published_by,
         decision: decision
-            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@decision`: {line}")),
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `$decision`: {line}")),
         identity_bearing,
     }
 }

@@ -1253,7 +1253,9 @@ fn lower_foreign(
         callback_transport: None,
         callback_plan_digest: None,
         callback_identity: None,
-        link_key: Some(key(module, crate_spec)),
+        // A Rust crate is resolved by the foreign-crate build, not by a MIR
+        // link unit; only C providers own link rows (see `lower_links`).
+        link_key: None,
         callback_key: None,
         handle_key: None,
         close_function_key: function.close.as_ref().map(|(name, _)| key(module, name)),

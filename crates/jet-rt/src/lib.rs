@@ -205,12 +205,26 @@ pub enum JetVal {
     ExactInt(jet_foundation::Numeric::CtBigInt),
 }
 
+/// Cell representation of an integer-backed list. Exact `Int` cells may hold
+/// a tagged pointer to a spilled exact integer, so storing one retains it.
+/// Fixed-width 64-bit words (`I64`, `U64`) use every bit pattern: they are
+/// never read as exact-integer pointers, and `U64` words order unsigned.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IntCells {
+    #[default]
+    Exact,
+    Word { unsigned: bool },
+}
+
 #[derive(Clone, Debug)]
 pub struct JetArena {
     values: Vec<JetVal>,
     /// Roots for spilled exact words stored in erased i64 carriers. The
     /// arena owns these until reset; atomic cells clone before publication.
     exact_roots: Vec<jet_foundation::Numeric::JetInt>,
+    /// Cell kind per list handle, chosen from the checked element type when
+    /// the list is created; handles past the end are `IntCells::Exact`.
+    int_cells: Vec<IntCells>,
 }
 
 impl Default for JetArena {
@@ -218,6 +232,7 @@ impl Default for JetArena {
         Self {
             values: Vec::new(),
             exact_roots: Vec::new(),
+            int_cells: Vec::new(),
         }
     }
 }
@@ -371,6 +386,7 @@ impl JetArena {
     pub fn clear(&mut self) {
         self.values.clear();
         self.exact_roots.clear();
+        self.int_cells.clear();
     }
 
     /// Indices of `String` values allocated during JIT lowering (baked into code as handles).
@@ -455,12 +471,73 @@ impl JetArena {
         id
     }
 
+    /// Allocate an empty list of fixed-width 64-bit words. Its cells are never
+    /// retained as exact-integer pointers, whichever route stores them.
+    pub fn alloc_word_list(&mut self, unsigned: bool) -> i64 {
+        let id = self.alloc_empty_list();
+        self.set_int_cells(id, IntCells::Word { unsigned });
+        id
+    }
+
+    /// Allocate a dense list derived from `source` (copy, slice, reorder),
+    /// keeping the source's cell kind.
+    pub fn alloc_int_list_like(&mut self, source: i64, values: Vec<i64>) -> i64 {
+        let cells = self.int_cells(source);
+        if cells == IntCells::Exact {
+            return self.alloc_int_list(values);
+        }
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::IntList(values));
+        self.set_int_cells(id, cells);
+        id
+    }
+
+    pub fn int_cells(&self, list: i64) -> IntCells {
+        usize::try_from(list)
+            .ok()
+            .and_then(|index| self.int_cells.get(index))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn set_int_cells(&mut self, list: i64, cells: IntCells) {
+        if cells == IntCells::Exact {
+            return;
+        }
+        let index = list as usize;
+        if self.int_cells.len() <= index {
+            self.int_cells.resize(index + 1, IntCells::Exact);
+        }
+        self.int_cells[index] = cells;
+    }
+
     pub fn alloc_uninit_list(&mut self, len: usize) -> i64 {
         let id = self.values.len() as i64;
         self.values.push(JetVal::UninitList {
             values: vec![JetVal::Int(0); len],
             initialized: uninit_semantics::jet_uninit_bitmap(len),
         });
+        id
+    }
+
+    /// Fixed-length uninitialized carrier for 64-bit words (see
+    /// `alloc_word_list`).
+    pub fn alloc_uninit_word_list(&mut self, len: usize, unsigned: bool) -> i64 {
+        let id = self.alloc_uninit_list(len);
+        self.set_int_cells(id, IntCells::Word { unsigned });
+        id
+    }
+
+    /// Allocate a list carrier derived from `source` (concatenation and other
+    /// element-preserving results), keeping the source's cell kind.
+    pub fn alloc_list_values_like(&mut self, source: i64, values: Vec<JetVal>) -> i64 {
+        let cells = self.int_cells(source);
+        if cells == IntCells::Exact {
+            return self.alloc_list_values(values);
+        }
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::List(values));
+        self.set_int_cells(id, cells);
         id
     }
 
@@ -647,9 +724,12 @@ impl JetArena {
     }
 
     pub fn list_push_int(&mut self, list: i64, value: i64) -> Option<()> {
+        let exact = self.int_cells(list) == IntCells::Exact;
         match self.values.get_mut(list as usize) {
             Some(JetVal::IntList(values)) => {
-                Self::retain_exact_raw(&mut self.exact_roots, value);
+                if exact {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
                 values.push(value);
                 Some(())
             }
@@ -661,7 +741,9 @@ impl JetArena {
                     JetVal::List(values) => values.is_empty(),
                     _ => return None,
                 };
-                Self::retain_exact_raw(&mut self.exact_roots, value);
+                if exact {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
                 if empty {
                     *slot = JetVal::IntList(vec![value]);
                 } else if let JetVal::List(values) = slot {
@@ -690,8 +772,10 @@ impl JetArena {
         ) {
             return None;
         }
-        for raw in &values {
-            Self::retain_exact_raw(&mut self.exact_roots, *raw);
+        if self.int_cells(list) == IntCells::Exact {
+            for raw in &values {
+                Self::retain_exact_raw(&mut self.exact_roots, *raw);
+            }
         }
         match self.values.get_mut(list as usize) {
             Some(slot @ JetVal::List(_)) => {
@@ -1017,16 +1101,21 @@ impl JetArena {
         if index < 0 {
             return None;
         }
+        let exact = self.int_cells(list) == IntCells::Exact;
         match self.values.get_mut(list as usize) {
             Some(JetVal::IntList(values)) => {
                 let slot = values.get_mut(index as usize)?;
-                Self::retain_exact_raw(&mut self.exact_roots, value);
+                if exact {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
                 *slot = value;
                 Some(())
             }
             Some(JetVal::List(values)) => match values.get_mut(index as usize) {
                 Some(slot @ JetVal::Int(_)) => {
-                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                    if exact {
+                        Self::retain_exact_raw(&mut self.exact_roots, value);
+                    }
                     *slot = JetVal::Int(value);
                     Some(())
                 }
@@ -1038,7 +1127,9 @@ impl JetArena {
             }) => {
                 let (index, _) =
                     uninit_semantics::jet_uninit_write(initialized, index as usize).ok()?;
-                Self::retain_exact_raw(&mut self.exact_roots, value);
+                if exact {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
                 values[index] = JetVal::Int(value);
                 Some(())
             }
@@ -1072,9 +1163,14 @@ impl JetArena {
     }
 
     pub fn list_sort_int(&mut self, list: i64) -> Option<()> {
+        let unsigned = self.int_cells(list) == IntCells::Word { unsigned: true };
         match self.values.get_mut(list as usize) {
             Some(JetVal::IntList(values)) => {
-                values.sort_unstable();
+                if unsigned {
+                    values.sort_unstable_by_key(|value| *value as u64);
+                } else {
+                    values.sort_unstable();
+                }
                 Some(())
             }
             Some(JetVal::List(values)) => {
@@ -1085,7 +1181,11 @@ impl JetArena {
                     };
                     ints.push(*value);
                 }
-                ints.sort_unstable();
+                if unsigned {
+                    ints.sort_unstable_by_key(|value| *value as u64);
+                } else {
+                    ints.sort_unstable();
+                }
                 *values = ints.into_iter().map(JetVal::Int).collect();
                 Some(())
             }
@@ -1106,9 +1206,13 @@ impl JetArena {
             }
             _ => return None,
         };
-        Self::retain_value_roots(&mut self.exact_roots, &slice);
+        let cells = self.int_cells(list);
+        if cells == IntCells::Exact {
+            Self::retain_value_roots(&mut self.exact_roots, &slice);
+        }
         let id = self.values.len() as i64;
         self.values.push(slice);
+        self.set_int_cells(id, cells);
         Some(id)
     }
 
@@ -1166,9 +1270,13 @@ impl JetArena {
             },
             _ => return None,
         };
-        Self::retain_value_roots(&mut self.exact_roots, &value);
+        let cells = self.int_cells(list);
+        if cells == IntCells::Exact {
+            Self::retain_value_roots(&mut self.exact_roots, &value);
+        }
         let id = self.values.len() as i64;
         self.values.push(value);
+        self.set_int_cells(id, cells);
         Some(id)
     }
 

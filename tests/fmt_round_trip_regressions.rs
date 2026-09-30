@@ -46,7 +46,7 @@ fn derive_template_bodies_round_trip_retired_signatures() {
     let source = include_str!("../Examples/features/reflection/derive_loop.jet");
     let formatted = jet::format_source(source).expect("derive template should format");
     assert!(
-        formatted.contains("fn @method(self) -> String -> field.@name"),
+        formatted.contains("fn $method(self) -> String -> field.$name"),
         "derive callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(

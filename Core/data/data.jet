@@ -744,13 +744,22 @@ pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_
         key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "inner_join"))
         &right_keys.push(key)
     }
+    // The output cardinality is known from per-key counts before any row is
+    // built, so a limit breach costs O(left + right) rather than one push per
+    // row up to max_join_rows.
+    right_counts :: join_key_counts(right_keys)
+    total := 0
+    loop key in left_keys {
+        total += right_counts.get(key) ?? 0
+        if total > limits.max_join_rows {
+            return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "inner_join"))
+        }
+    }
     out := [DataJoin<T, U>]{}
     loop left_index in 0..<left.len() {
+        if (right_counts.get(left_keys[left_index]) ?? 0) == 0 -> next
         loop right_index in 0..<right.len() {
-            if text_compare(~left_keys[left_index], ~right_keys[right_index]) != 0 -> next
-            if out.len() >= limits.max_join_rows {
-                return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "inner_join"))
-            }
+            if left_keys[left_index] != right_keys[right_index] -> next
             &out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index]})
         }
     }
@@ -772,28 +781,41 @@ pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_k
         key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "left_join"))
         &right_keys.push(key)
     }
+    // Every left row yields at least one output row; see inner_join.
+    right_counts :: join_key_counts(right_keys)
+    total := 0
+    loop key in left_keys {
+        matches := right_counts.get(key) ?? 0
+        if matches == 0 -> matches = 1
+        total += matches
+        if total > limits.max_join_rows {
+            return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
+        }
+    }
     out := [DataJoin<T, U?>]{}
     loop left_index in 0..<left.len() {
-        matched := false
-        loop right_index in 0..<right.len() {
-            if text_compare(~left_keys[left_index], ~right_keys[right_index]) != 0 -> next
-            matched = true
-            if out.len() >= limits.max_join_rows {
-                return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
-            }
-            &out.push(DataJoin<T, U?>{left: left[left_index], right: Val(right[right_index])})
-        }
-        if !matched {
-            if out.len() >= limits.max_join_rows {
-                return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
-            }
+        if (right_counts.get(left_keys[left_index]) ?? 0) == 0 {
             &out.push(DataJoin<T, U?>{left: left[left_index], right: None})
+            next
+        }
+        loop right_index in 0..<right.len() {
+            if left_keys[left_index] != right_keys[right_index] -> next
+            &out.push(DataJoin<T, U?>{left: left[left_index], right: Val(right[right_index])})
         }
     }
     if out.len() > limits.max_output_rows {
         return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "left_join"))
     }
     Ok(out)
+}
+
+fn join_key_counts(keys: [String]) -> [String:Int] Never! {
+    counts := [String:Int]{}
+    loop key in keys {
+        seen :: counts.get(key) ?? 0
+        _ :: &counts.add(key, seen + 1)
+    }
+    counts
 }
 
 pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {

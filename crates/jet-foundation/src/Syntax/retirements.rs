@@ -28,9 +28,10 @@
 use super::{
     COMPTIME_MARK, DEFAULT_ENTRY_FILE, INTERPOLATION_SELECTOR_EXAMPLE, JETPACK_TOML,
     LEGACY_ENTRY_FILE, PACKAGE_FILE, PAYLOAD_FILE, RETIRED_COMPTIME_MARK,
-    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE, RETIRED_TARGET_PLUGIN, RETIRED_TYPE_BITS,
-    RETIRED_TYPE_BYTES, RETIRED_TYPE_QUEUE, RETIRED_TYPE_RANK, RETIRED_TYPE_TALLY, TARGET_SANDBOX,
-    TYPE_BITS, TYPE_BYTES, TYPE_QUEUE, TYPE_RANK, TYPE_TALLY,
+    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE, RETIRED_OP_MINUS_MINUS, RETIRED_OP_PLUS_PLUS,
+    RETIRED_TARGET_PLUGIN, RETIRED_TYPE_BITS, RETIRED_TYPE_BYTES, RETIRED_TYPE_QUEUE,
+    RETIRED_TYPE_RANK, RETIRED_TYPE_TALLY, TARGET_SANDBOX, TYPE_BITS, TYPE_BYTES, TYPE_QUEUE,
+    TYPE_RANK, TYPE_TALLY,
 };
 use crate::Diagnostics::{Diagnostic, Span};
 
@@ -203,13 +204,18 @@ pub const RETIREMENTS: &[Retirement] = &[
         since: "2026-08-08",
         code: None,
     },
+    // D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A:
+    // compiler facts and declaration metadata carry `$` (`T.$layout`,
+    // `$build.os`, `$package.version`, `$sites:`). The `@` spelling is refused
+    // with E0003 and a machine-applicable respelling; prefix `@` in code now
+    // means a D-MEMREF1 link.
     Retirement {
-        id: "comptime-mark",
+        id: "fact-mark",
         retired: RETIRED_COMPTIME_MARK,
         canonical: COMPTIME_MARK,
         kind: RetirementKind::Semantic,
-        decision: "D-ONCE-DOLLAR1=B",
-        since: "2026-08-07",
+        decision: "D-COMPILER-NS1=A",
+        since: "2026-09-30",
         code: Some("E0003"),
     },
     Retirement {
@@ -625,6 +631,62 @@ pub const RETIREMENTS: &[Retirement] = &[
         decision: "D-ONCE-LAYER1",
         since: "2026-08-08",
         code: None,
+    },
+    Retirement {
+        id: "operator-plus-plus",
+        retired: RETIRED_OP_PLUS_PLUS,
+        canonical: "x += 1",
+        kind: RetirementKind::Semantic,
+        decision: "D-INCR1",
+        since: "2026-09-28",
+        code: Some("E0160"),
+    },
+    Retirement {
+        id: "operator-minus-minus",
+        retired: RETIRED_OP_MINUS_MINUS,
+        canonical: "x -= 1",
+        kind: RetirementKind::Semantic,
+        decision: "D-INCR1",
+        since: "2026-09-28",
+        code: Some("E0160"),
+    },
+    // D-OUTCOME-SHAPE1=A: `T? E!` matches its three states directly; the
+    // nested `.Ok(…)` layer around an optional state is refused with a
+    // behavior-preserving edit to the flat state.
+    Retirement {
+        id: "outcome-nested-ok-pattern",
+        retired: ".Ok(.Val(x)) / .Ok(.None)",
+        canonical: ".Val(x) / .None",
+        kind: RetirementKind::Semantic,
+        decision: "D-OUTCOME-SHAPE1=A",
+        since: "2026-09-29",
+        code: Some("E0392"),
+    },
+    // D-PREP-SURFACE2=A + owner ruling (2026-09-30): compile time is always
+    // explicit, `NAME :: prep { value }`; casing never implies it. The `@`
+    // mark on a constant is refused with E0388 and that behavior-preserving
+    // edit; prefix `@` in code now means a D-MEMREF1 link.
+    Retirement {
+        id: "comptime-constant-mark",
+        retired: "@NAME :: value",
+        canonical: "NAME :: prep { value }",
+        kind: RetirementKind::Semantic,
+        decision: "D-PREP-SURFACE2=A",
+        since: "2026-09-30",
+        code: Some("E0388"),
+    },
+    // D-NAME-SPLICE1=B: a template name splice carries the fact sigil
+    // (`fn $method`, `self.$field`, `.$left`). The `@` splice is refused with
+    // E0388 and a machine-applicable `$` respelling; prefix `@` in code now
+    // means only a D-MEMREF1 link.
+    Retirement {
+        id: "template-name-splice-mark",
+        retired: "fn @method / self.@field / .@left",
+        canonical: "fn $method / self.$field / .$left",
+        kind: RetirementKind::Semantic,
+        decision: "D-NAME-SPLICE1=B",
+        since: "2026-09-30",
+        code: Some("E0388"),
     },
 ];
 

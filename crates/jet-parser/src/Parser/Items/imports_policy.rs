@@ -1395,7 +1395,7 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(n) if n == Syntax::KW_MARKER && self.at_marker_decl() => {
                     self.marker_decl().map(Item::MarkerDecl)
                 }
-                // D-FACTDECL1=A: `fact Name(@holds: …, @safe: …, …)` — a
+                // D-FACTDECL1=A: `fact Name($holds: …, $safe: …, …)` — a
                 // non-code registry declaration with the shared parameter shape.
                 TokKind::Ident(n) if n == Syntax::KW_FACT && self.at_fact_decl() => {
                     self.fact_decl().map(Item::FactDecl)
@@ -1451,11 +1451,12 @@ impl<'a> Parser<'a> {
                 // D-PERSIST1: `#Persist name (:: | :=) expr` — module-level
                 // bare binding that survives a `jet dev` hot reload.
                 TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
-                // D-CONSTMARK1: `#Static` / `#Inline` before `comptime`.
+                // D-CONSTMARK1: `#Static` / `#Inline` before a constant.
                 TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
                 TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),
-                // D-META-STAGE1=B: a top-level `@name :: expr` binding.
-                TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {
+                // D-PREP-SURFACE2=A: a retired top-level `@NAME :: expr`
+                // teaches E0388 and recovers as `NAME :: prep { expr }`.
+                TokKind::Ident(ref n) if n.starts_with(Syntax::RETIRED_COMPTIME_MARK) => {
                     self.comptime_def().map(Item::Const)
                 }
                 TokKind::Dollar => {
@@ -1692,7 +1693,7 @@ impl<'a> Parser<'a> {
             self.expect_effect_path_name("after the `effect` declaration keyword")?;
         let (irreversible, declaration_end) = if matches!(
             &self.peek().kind,
-            TokKind::Ident(fact) if fact == "@irreversible"
+            TokKind::Ident(fact) if fact == "$irreversible"
         ) {
             let fact_span = self.bump().span;
             (true, fact_span.end)

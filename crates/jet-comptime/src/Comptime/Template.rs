@@ -116,7 +116,7 @@ where
                 TemplateStatement::Binding { name, value, .. } => {
                     let value = eval(value, scope)?;
                     scope.insert(name.clone(), value.clone());
-                    scope.insert(format!("@{name}"), value);
+                    scope.insert(format!("${name}"), value);
                 }
                 TemplateStatement::Expr { value, .. } => {
                     let _ = eval(value, scope)?;
@@ -137,7 +137,7 @@ where
                         *span,
                     ));
                 };
-                let marked_var = format!("@{var}");
+                let marked_var = format!("${var}");
                 let previous = scope.get(var).cloned();
                 let previous_marked = scope.get(&marked_var).cloned();
                 for value in values {

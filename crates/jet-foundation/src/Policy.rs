@@ -1142,7 +1142,7 @@ impl RuleSite {
     }
 }
 
-/// D-META-FORM1=A / D-MARKER-SITES1=B: `@sites` on a `marker` declaration takes `[Site]`, so the
+/// D-META-FORM1=A / D-MARKER-SITES1=B: `$sites` on a `marker` declaration takes `[Site]`, so the
 /// eighteen attachment points are published as an ordinary `core.compiler.lang` enum
 /// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
 /// stays the one source; `site_variants_match_the_enum` proves this list is it.
@@ -1328,7 +1328,7 @@ fn rule_arg_needs_core_declaration(name: &str) -> bool {
 /// Generated from the active/retired applied-rule signatures. `Track` is the
 /// compatibility reflection enum retained by D-RULEARG-TYPES1.
 pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::new(|| {
-    // `Site` is published for `@sites` on a `marker` declaration (D-META-FORM1=A)
+    // `Site` is published for `$sites` on a `marker` declaration (D-META-FORM1=A)
     // and `Track` for reflection; neither appears in a marker signature, so both
     // are seeded rather than found.
     let mut names = std::collections::BTreeSet::from(["Site", "Track"]);
@@ -1722,15 +1722,14 @@ pub fn marker_wrong_site_error(
             .collect::<Vec<_>>()
             .join(", ")
     };
-    // D-CONSTMARK1=A + D-META-STAGE1=B: a row whose only site is `.Constant`
-    // has exactly one legal spelling — the marked compile-time binding
-    // `@name :: value` (spec.md:718-720). "Move it to a registered site"
-    // cannot lead there, because an unmarked `name :: value` is not a
-    // declaration at file or module scope at all.
+    // D-CONSTMARK1=A + D-PREP-SURFACE2=A: a row whose only site is
+    // `.Constant` attaches to a module constant, `NAME :: value`, evaluated
+    // while building when written `NAME :: prep { value }`. "Move it to a
+    // registered site" cannot lead there, so the fix names the form directly.
     let fix = if row.is_some_and(|row| {
         row.companion_site.is_none() && matches!(row.sites, [RuleSite::Constant])
     }) {
-        format!("write `#{name} @name :: value` — a constant is a marked compile-time binding")
+        format!("write `#{name} NAME :: prep {{ value }}` — a storage marker precedes a module constant")
     } else {
         format!("move `#{name}` to one of its registered sites")
     };

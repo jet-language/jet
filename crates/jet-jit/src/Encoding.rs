@@ -4249,23 +4249,27 @@ fn jet_jit_encoding_error_show(handle: i64) -> i64 {
 
 
 
-/// Resident `[FieldError]` rendering for `print(errors)` and `"{errors}"`.
-/// Marshals each record out of the heap and calls the one Prelude projection
-/// (`jet_field_error_kernel_show`); the `[a, b]` wrapper matches AOT's
-/// `impl<T: JetDisplay> JetDisplay for Vec<T>` (Prelude/Core/Values.rs).
+/// Resident `[FieldError]` rendering for `print(errors)`, `"{errors}"` and an
+/// uncaught `[FieldError]` entry failure. Marshals each record out of the heap
+/// and calls the one Prelude projection (`jet_field_error_kernel_show`); the
+/// `[a, b]` wrapper matches AOT's `impl<T: JetShow> JetShow for Vec<T>`
+/// (Prelude/Core/Values.rs).
+pub(crate) fn field_error_list_show_text(heap: &jet_rt::JetArena, handle: i64) -> String {
+    let len = heap.list_len(handle).unwrap_or(0);
+    let shown = (0..len)
+        .map(|i| {
+            let error = heap.list_get_int(handle, i).unwrap_or(0);
+            let path = heap.record_clone_string(error, 0).unwrap_or_default();
+            let reason = heap.record_clone_string(error, 1).unwrap_or_default();
+            field_error_rt::jet_field_error_kernel_show(&path, &reason)
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", shown.join(", "))
+}
+
 fn jet_jit_decode_error_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let mut shown = Vec::new();
-        let len = rt.heap.list_len(handle).unwrap_or(0);
-        for i in 0..len {
-            let error = rt.heap.list_get_int(handle, i).unwrap_or(0);
-            let path_id = rt.heap.record_get_string(error, 0).unwrap_or(0);
-            let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
-            let path = rt.heap.clone_string(path_id).unwrap_or_default();
-            let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
-            shown.push(field_error_rt::jet_field_error_kernel_show(&path, &reason));
-        }
-        let shown = format!("[{}]", shown.join(", "));
+        let shown = field_error_list_show_text(&rt.heap, handle);
         rt.heap.alloc_string(shown)
     })
 }

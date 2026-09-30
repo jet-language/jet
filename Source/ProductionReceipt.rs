@@ -11,6 +11,7 @@ use jet::RecordIndex::RecordIdentity;
 const TARGET: &str = "native";
 
 pub(crate) struct Context {
+    project_root: PathBuf,
     directory: PathBuf,
     source_file: PathBuf,
     entry: String,
@@ -66,6 +67,7 @@ pub(crate) fn prepare(file: &str, source: &str, program_args: &[&String]) -> Con
         .join("reports")
         .join(format!("production-{}", &receipt_id[7..23]));
     Context {
+        project_root,
         directory,
         source_file,
         entry,
@@ -110,6 +112,12 @@ impl Context {
             receipt::JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV,
             &self.target_digest,
         );
+    }
+    /// The project whose `.jet/reports` directory holds this receipt. The
+    /// record index is rooted here, not at a root re-derived from the receipt
+    /// path (which resolves to `.jet/reports/...` for a standalone file).
+    pub(crate) fn project_root(&self) -> &Path {
+        &self.project_root
     }
     /// Project this production receipt's target inputs onto the shared
     /// record-index identity without exposing source or argument values.

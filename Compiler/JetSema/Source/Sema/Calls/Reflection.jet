@@ -3,9 +3,9 @@
 // same semantic predicate as display interpolation.
 
 fn sema_call_reflection_leaf_name(name: String) -> String Never! {
-    parts := name.split("::")
+    parts := name.split("::").to_list()
     canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
-    dotted := canonical.split(".")
+    dotted := canonical.split(".").to_list()
     if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical
 }
 
@@ -43,7 +43,7 @@ fn sema_call_reflection_one_pass(ty: Type) -> Bool Never! {
 
 fn sema_call_reflection_core_shown(name: String) -> Bool Never! {
     leaf :: sema_call_reflection_leaf_name(name)
-    leaf == "Decimal" || leaf == "Fraction" || leaf == "MIME" || leaf == "ServiceUpgradeReceipt" || leaf == "ServiceWorkflow" || leaf == "TaskOutcome" || leaf == "TaskStatus" || leaf == "Complex" || leaf == "URL" || leaf == "Path" || leaf == "Date" || leaf == "Duration" || leaf == "LocalDate" || leaf == "LocalTime" || leaf == "DateTime" || leaf == "Instant" || leaf == "Period" || leaf == "Zone" || leaf == "ZonedDateTime" || leaf == "DataTracked" || leaf == "DataWatch" || leaf == "DataWatchStatus" || leaf == "DBValue" || leaf == "DBLease" || leaf == "DBPoolReceipt" || leaf == "BuildError" || leaf == "BrowserError" || leaf == "CBORError" || leaf == "DBError" || leaf == "DataError" || leaf == "EncodingError" || leaf == "EmailError" || leaf == "EnvError" || leaf == "HTTPError" || leaf == "IOError" || leaf == "NetError" || leaf == "RangeError" || leaf == "TextError" || leaf == "UTF8Error" || leaf == "WsError" || leaf == "XMLError"
+    leaf == "Decimal" || leaf == "Fraction" || leaf == "MIME" || leaf == "ServiceUpgradeReceipt" || leaf == "ServiceWorkflow" || leaf == "TaskOutcome" || leaf == "TaskStatus" || leaf == "Complex" || leaf == "URL" || leaf == "Path" || leaf == "Date" || leaf == "Duration" || leaf == "LocalDate" || leaf == "LocalTime" || leaf == "DateTime" || leaf == "Instant" || leaf == "Period" || leaf == "Zone" || leaf == "ZonedDateTime" || leaf == "DataTracked" || leaf == "DataWatch" || leaf == "DataWatchStatus" || leaf == "DBValue" || leaf == "DBLease" || leaf == "DBPoolReceipt" || sema_core_error_family_member(name)
 }
 
 fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment) -> Bool Never! {
@@ -52,7 +52,8 @@ fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnv
 }
 
 fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
-    if sema_call_reflection_core_shown(name) -> return true
+    // S80 / D-FAIL-ERROR1=A: the Prelude-owned default error shows its message.
+    if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
     sema_call_reflection_bound(ty, "Display", environment) || sema_call_reflection_bound(ty, "Printable", environment)
 }
 
@@ -185,7 +186,7 @@ pub fn sema_call_try_reflection_metadata_method(
     typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_effect_record_intrinsic_effects(environment, scopes, context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type :: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
@@ -237,6 +238,6 @@ pub fn sema_call_try_reflection_handle_method(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type :: sema_call_reflection_method_return(owner, method, [Type]{}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation ?? THandleOp.ReflectValueTypeName, args: [TExpr]{}}, span)
+    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

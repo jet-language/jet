@@ -629,9 +629,9 @@ pub fn apply_impure_core_call_with_type_args(
         }
         ("core.sys", "get") => {
             let key = as_string(one(0)?, span)?;
-            match std::env::var(key) {
-                Ok(v) => Ok(CtValue::Present(Box::new(CtValue::Str(v)))),
-                Err(_) => Ok(CtValue::absent(crate::AST::Type::String)),
+            match jet_foundation::CheckReads::env_var(&key) {
+                Some(v) => Ok(CtValue::Present(Box::new(CtValue::Str(v)))),
+                None => Ok(CtValue::absent(crate::AST::Type::String)),
             }
         }
         ("core.sys", "set") => {
@@ -651,9 +651,8 @@ pub fn apply_impure_core_call_with_type_args(
             )))),
         },
         ("core.sys", "home_dir") => Ok(
-            match std::env::var("HOME")
-                .ok()
-                .or_else(|| std::env::var("USERPROFILE").ok())
+            match jet_foundation::CheckReads::env_var("HOME")
+                .or_else(|| jet_foundation::CheckReads::env_var("USERPROFILE"))
             {
                 Some(v) => CtValue::Present(Box::new(CtValue::Str(v))),
                 None => CtValue::absent(crate::AST::Type::String),

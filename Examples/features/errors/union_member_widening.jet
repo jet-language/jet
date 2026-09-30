@@ -1,0 +1,93 @@
+// D-UNIONTYPE1=A: a member error widens into its `(A | B)!` contract at every
+// site that leaves the function: implicit propagation, a tail value, an
+// explicit `return Err(...)`, and a `?("note")` hop. The union is closed, so a
+// match over its members is exhaustive, and `{e}` / `{e:Debug}` render the
+// member the union holds.
+#Error
+enum ParseError {
+    Bad(String)
+}
+
+impl ParseError.Display {
+    fn display(self) -> String {
+        if self == {
+            .Bad(why) -> "bad input: {why}"
+        }
+    }
+}
+
+#Error
+enum LookupError {
+    Missing(String)
+}
+
+impl LookupError.Display {
+    fn display(self) -> String {
+        if self == {
+            .Missing(who) -> "no entry for {who}"
+        }
+    }
+}
+
+fn parse(raw: String) -> Int ParseError! {
+    if raw == "" -> return Err(ParseError.Bad("empty"))
+    Ok(raw.len())
+}
+
+fn lookup(name: String) -> String LookupError! {
+    if name == "zed" -> return Err(LookupError.Missing(~name))
+    if name == "bob" -> return Ok("")
+    Ok("abc")
+}
+
+// Implicit propagation: `lookup` fails with one member of the union.
+fn implicit(name: String) -> Int (ParseError | LookupError)! {
+    raw :: lookup(name)
+    parse(raw)
+}
+
+// Tail value: the member error is the function's last expression.
+fn tail(flag: Bool) -> Int (ParseError | LookupError)! {
+    if flag -> return Ok(1)
+    Err(LookupError.Missing("tail"))
+}
+
+// Explicit `return Err(member)`.
+fn explicit(flag: Bool) -> Int (ParseError | LookupError)! {
+    if flag -> return Err(ParseError.Bad("explicit"))
+    Ok(2)
+}
+
+// A `?("note")` hop from a member, then a union-to-union hop.
+fn hop(name: String) -> Int (ParseError | LookupError)! {
+    raw :: lookup(name)?("hop lookup")
+    n :: implicit(raw)
+    Ok(n)
+}
+
+fn describe(result: Int (ParseError | LookupError)!) -> String {
+    if result == {
+        .Ok(n) -> "ok {n}"
+        .Err(.ParseError(.Bad(why))) -> "parse: {why}"
+        .Err(.LookupError(.Missing(who))) -> "lookup: {who}"
+    }
+}
+
+fn run() {
+    print(describe(implicit("ada")))
+    print(describe(implicit("bob")))
+    print(describe(implicit("zed")))
+    print(describe(tail(true)))
+    print(describe(tail(false)))
+    print(describe(explicit(false)))
+    print(describe(explicit(true)))
+    print(describe(hop("ada")))
+    print(describe(hop("zed")))
+    if implicit("zed") == {
+        .Ok(_) -> print("unexpected")
+        .Err(e) -> {
+            print("display: {e}")
+            print("debug: {e:Debug}")
+        }
+    }
+}

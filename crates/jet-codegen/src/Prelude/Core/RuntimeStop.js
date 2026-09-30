@@ -248,6 +248,7 @@ function jet_web_error_wire(error) {
   const code = jet_web_option_value(source?.code);
   const contextFrames = source?.context_frames ?? source?.contextFrames
     ?? metadata?.context_frames ?? metadata?.contextFrames;
+  const origin = jet_web_option_value(source?.origin ?? metadata?.origin);
   const sourceJourney = source?.source_journey ?? source?.sourceJourney
     ?? metadata?.source_journey ?? metadata?.sourceJourney;
   const conversionHistory = source?.conversion_history ?? source?.conversionHistory
@@ -271,14 +272,17 @@ function jet_web_error_wire(error) {
       line: Number(frame?.line ?? 0),
     }));
   }
+  const journeyFrame = (frame) => ({
+    fn_name: String(frame?.fn_name ?? frame?.fnName ?? ""),
+    file: String(frame?.file ?? ""),
+    line: Number(frame?.line ?? 0),
+    column: Number(frame?.column ?? 0),
+    note: String(frame?.note ?? ""),
+    hops: Number(frame?.hops ?? 1),
+  });
+  if (origin && typeof origin === "object") wire.origin = journeyFrame(origin);
   if (Array.isArray(sourceJourney) && sourceJourney.length) {
-    wire.source_journey = sourceJourney.map((frame) => ({
-      fn_name: String(frame?.fn_name ?? frame?.fnName ?? ""),
-      file: String(frame?.file ?? ""),
-      line: Number(frame?.line ?? 0),
-      note: String(frame?.note ?? ""),
-      hops: Number(frame?.hops ?? 1),
-    }));
+    wire.source_journey = sourceJourney.map(journeyFrame);
   }
   if (Array.isArray(conversionHistory) && conversionHistory.length) {
     wire.conversion_history = conversionHistory.map((conversion) => ({
@@ -305,6 +309,7 @@ function jet_web_carrier_from_wire(wire) {
   if (typeof wire.typed_identity === "string") metadata.typed_identity =
     jet_option_some(wire.typed_identity);
   if (Array.isArray(wire.context_frames)) metadata.context_frames = wire.context_frames;
+  if (wire.origin) metadata.origin = wire.origin;
   if (Array.isArray(wire.source_journey)) metadata.source_journey = wire.source_journey;
   if (Array.isArray(wire.conversion_history)) {
     metadata.conversion_history = wire.conversion_history;
@@ -351,6 +356,7 @@ export class JetError extends Error {
     this.cause = cause;
     this.typedIdentity = wire.typed_identity ?? null;
     this.contextFrames = wire.context_frames ?? [];
+    this.origin = wire.origin ?? null;
     this.sourceJourney = wire.source_journey ?? [];
     this.conversionHistory = wire.conversion_history ?? [];
     this.details = wire.details ?? null;
@@ -416,7 +422,31 @@ function jet_journey_reset() {
   });
 }
 
-function jet_journey_frame_text(file, line, fnName, note) {
+function jet_journey_origin(file, line, column, fnName) {
+  jet_error_wasm_with_inputs(
+    [
+      { slot: JET_ERROR_WASM_FILE_SLOT, value: String(file), label: "source file" },
+      { slot: JET_ERROR_WASM_FUNCTION_SLOT, value: String(fnName), label: "function" },
+    ],
+    (wasm, handles) => {
+      const operation = jet_error_wasm_operation(wasm, "jet_error_wasm_journey_origin");
+      jet_error_wasm_status(
+        wasm,
+        operation(
+          handles[0].pointer,
+          handles[0].length,
+          jet_error_wasm_number(line, "source line"),
+          jet_error_wasm_number(column, "source column"),
+          handles[1].pointer,
+          handles[1].length,
+        ),
+        "journey origin",
+      );
+    },
+  );
+}
+
+function jet_journey_frame_text(file, line, column, fnName, note) {
   jet_error_wasm_with_inputs(
     [
       { slot: JET_ERROR_WASM_FILE_SLOT, value: String(file), label: "source file" },
@@ -431,6 +461,7 @@ function jet_journey_frame_text(file, line, fnName, note) {
           handles[0].pointer,
           handles[0].length,
           jet_error_wasm_number(line, "source line"),
+          jet_error_wasm_number(column, "source column"),
           handles[1].pointer,
           handles[1].length,
           handles[2].pointer,
@@ -457,7 +488,7 @@ function jet_err_from_message(message) {
   );
 }
 
-function jet_err_with_context_frame(error, file, line, fnName, note) {
+function jet_err_with_context_frame(error, file, line, column, fnName, note) {
   const encoded = jet_web_json_stringify(jet_web_error_wire(error));
   return jet_error_wasm_with_inputs(
     [
@@ -476,6 +507,7 @@ function jet_err_with_context_frame(error, file, line, fnName, note) {
           handles[1].pointer,
           handles[1].length,
           jet_error_wasm_number(line, "source line"),
+          jet_error_wasm_number(column, "source column"),
           handles[2].pointer,
           handles[2].length,
           handles[3].pointer,
@@ -538,14 +570,14 @@ function jet_entry_error_exit_jet(error) {
 // A `?` carries a typed propagation until the enclosing fallible function
 // returns its Err carrier. The final edge turns that carrier into the native
 // Web error object. Rust owns the one journey and report policy.
-function jet_web_try(valueOrThunk, file, line, fnName, note = null, convert = null, addContext = false) {
+function jet_web_try(valueOrThunk, file, line, fnName, note = null, convert = null, addContext = false, column = 0) {
   const appendHop = (carrier) => {
     const noteText = typeof note === "function" ? String(note() ?? "") : "";
     let next;
     if (addContext) {
-      next = jet_err_with_context_frame(carrier?.wire ?? carrier, file, line, fnName, noteText);
+      next = jet_err_with_context_frame(carrier?.wire ?? carrier, file, line, column, fnName, noteText);
     } else {
-      jet_journey_frame_text(file, line, fnName, noteText);
+      jet_journey_frame_text(file, line, column, fnName, noteText);
       next = carrier?.wire ?? carrier;
     }
     throw new JetWebPropagation(next);

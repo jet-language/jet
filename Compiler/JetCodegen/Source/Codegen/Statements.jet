@@ -1894,6 +1894,14 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
         .Return(value, span) -> {
             result := None
             if value != None -> result = Val(jet_codegen_lower_expr(&builder, value ?? TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.Unit, span: span, integer_bounds: None, cost: None}))
+            // #3713: the `Err(...)` a function returns is where its failure
+            // starts; every tier records that site as the origin.
+            if value == .Val(returned) && jet_codegen_current_is_open(builder) {
+                if returned.kind == {
+                    .Err(_) -> jet_codegen_lower_journey_origin(&builder, returned.span)
+                    else -> {}
+                }
+            }
             if {
                 builder.contract_scopes.len() > 0 -> {
                     jet_codegen_lower_contract_return(&builder, result, span)
@@ -1973,7 +1981,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
             target := jet_codegen_find_loop_target(builder, label, true)
             terminator := MirTerminator.Break{target: target, value: None}
             if jet_codegen_terminate_with_owned_cleanup(&builder, terminator, jet_codegen_find_loop_scope_depth(builder, label, true)) {
-                jet_codegen_mark_loop_break(builder, label)
+                jet_codegen_mark_loop_break(&builder, label)
             }
         }
         .BreakValue(label, value, _) -> {
@@ -1981,7 +1989,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
             target := jet_codegen_find_loop_target(builder, label, true)
             terminator := MirTerminator.Break{target: target, value: Val(payload)}
             if jet_codegen_terminate_with_owned_cleanup(&builder, terminator, jet_codegen_find_loop_scope_depth(builder, label, true)) {
-                jet_codegen_mark_loop_break(builder, label)
+                jet_codegen_mark_loop_break(&builder, label)
             }
         }
         .Continue(label, _) -> {
@@ -2012,7 +2020,7 @@ fn jet_codegen_fallback_join_value(builder: &JetCodegenBuilder, expression: TExp
     if type_identity_key(source_type) == type_identity_key(expression.ty) -> return value
     if expression.ty == {
         .TraitObject(_) -> {
-            jet_codegen_require_trait_box_target(expression.ty, builder)
+            jet_codegen_require_trait_box_target(expression.ty, &builder)
             target := jet_codegen_lower_type_for_function(expression.ty, builder)
             target_id :: target.identity ?? panic("checked fallback trait result has no MIR identity")
             return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.TraitBox{value: value, target: target_id})
@@ -2252,7 +2260,7 @@ fn jet_codegen_lower_option_lift2(builder: &JetCodegenBuilder, expression: TExpr
     if type_identity_key(called_type) != type_identity_key(result_type) {
         if result_type == {
             .TraitObject(_) -> {
-                jet_codegen_require_trait_box_target(result_type, builder)
+                jet_codegen_require_trait_box_target(result_type, &builder)
                 target := jet_codegen_lower_type_for_function(result_type, builder)
                 target_id :: target.identity ?? panic("checked Option.lift2 trait result has no MIR identity")
                 called = jet_codegen_emit_value(&builder, expression.span, result_type, MirOperation.TraitBox{value: called, target: target_id})

@@ -2,7 +2,7 @@
 // The program hands JSON text to SQLite's `jsonb()`, stores the blob, reads it
 // back through `json(col)`, and decodes that text with the stock typed JSON
 // codec. Jet adds no JSONB codec. The blob layout belongs to the SQLite build
-// printed first; it is SQLite's internal storage format, not a general
+// whose version is printed; it is SQLite's internal storage format, not a general
 // interchange standard, and not PostgreSQL `jsonb`.
 use core.db as db
 use core.encoding.json as json
@@ -24,14 +24,15 @@ fn run() {
     scoped :: conn.with_policy(policy, "owner")
     db.migrate(scoped, "jsonb-v1", [SQL{"CREATE TABLE readings (id INTEGER PRIMARY KEY, body BLOB)"}]) ?? panic("create failed")
 
-    version_row :: scoped.query_one(SQL{"SELECT sqlite_version() AS v"}) ?? panic("version failed")
-    version :: (version_row.get("v") ?? panic("missing v")).text() ?? panic("v is not text")
-    print("sqlite_version: {version}")
-
     original :: Reading{sensor: "ünit-7", count: 2, big: 9007199254740993, ratio: 0.1, ok: true, tags: ["a", "b"], note: None}
     text :: json.to_string(original)
     print("json in:  {text}")
     scoped.execute(SQL{"INSERT INTO readings (body) VALUES (jsonb({text}))"}) ?? panic("insert failed")
+    // A row-policy scope admits only statements over its table, so every
+    // probe below reads through `readings` (one row).
+    version_row :: scoped.query_one(SQL{"SELECT sqlite_version() AS v FROM readings"}) ?? panic("version failed")
+    version :: (version_row.get("v") ?? panic("missing v")).text() ?? panic("v is not text")
+    print("sqlite_version: {version}")
 
     row :: scoped.query_one(SQL{"SELECT typeof(body) AS kind, hex(body) AS bytes, json(body) AS back FROM readings"}) ?? panic("select failed")
     kind :: (row.get("kind") ?? panic("missing kind")).text() ?? panic("kind is not text")
@@ -50,7 +51,7 @@ fn run() {
     // hands it JSON text and prints what SQLite stored and gives back.
     categories :: [String]{"null", "true", "false", "0.1", "-17", "9007199254740993", "123456789012345678901234567890", "\"tab\\tquote\\\"é\"", "[1,[2,{{\"k\":null}}]]", "{{\"a\":{{\"b\":[true,false]}}}}"}
     loop category in categories {
-        cell :: scoped.query_one(SQL{"SELECT hex(jsonb({category})) AS h, json(jsonb({category})) AS j"}) ?? panic("category failed")
+        cell :: scoped.query_one(SQL{"SELECT hex(jsonb({category})) AS h, json(jsonb({category})) AS j FROM readings"}) ?? panic("category failed")
         cell_hex :: (cell.get("h") ?? panic("missing h")).text() ?? panic("h is not text")
         cell_json :: (cell.get("j") ?? panic("missing j")).text() ?? panic("j is not text")
         print("{category} -> {cell_hex} -> {cell_json} same: {cell_json == category}")
@@ -58,7 +59,7 @@ fn run() {
 
     // An external buffer: the published JSONB bytes for {"count":2}, handed to
     // SQLite for conversion rather than parsed by Jet.
-    external :: scoped.query_one(SQL{"SELECT json(X'8c57636f756e741332') AS t"}) ?? panic("external failed")
+    external :: scoped.query_one(SQL{"SELECT json(X'8c57636f756e741332') AS t FROM readings"}) ?? panic("external failed")
     external_text :: (external.get("t") ?? panic("missing t")).text() ?? panic("t is not text")
     print("external blob: {external_text}")
     _closed :: scoped.close()

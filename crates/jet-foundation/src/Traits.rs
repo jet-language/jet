@@ -253,62 +253,36 @@ impl TraitRegistry {
                 break;
             }
         }
-        let snapshot = registries.clone();
-        for (module_idx, module) in bundle.modules.iter().enumerate() {
-            for import in &module.imports {
-                let Some(target) = name_ledger.import_target(module_idx, import.span) else {
-                    continue;
-                };
-                let identity = |leaf: &String| name_ledger.nominal_identity(target, leaf);
-                registries[module_idx]
-                    .auto_printable
-                    .extend(snapshot[target].auto_printable.iter().filter_map(identity));
-                registries[module_idx]
-                    .auto_debug
-                    .extend(snapshot[target].auto_debug.iter().filter_map(identity));
-                registries[module_idx]
-                    .auto_equatable
-                    .extend(snapshot[target].auto_equatable.iter().filter_map(identity));
-                registries[module_idx]
-                    .auto_comparable
-                    .extend(snapshot[target].auto_comparable.iter().filter_map(identity));
-                registries[module_idx]
-                    .auto_encode
-                    .extend(snapshot[target].auto_encode.iter().filter_map(identity));
-                registries[module_idx]
-                    .auto_decode
-                    .extend(snapshot[target].auto_decode.iter().filter_map(identity));
-            }
-            for selected in selective_imports[module_idx].values().flatten() {
-                let (target, leaf) = selected;
-                let Some(identity) = name_ledger.nominal_identity(*target, leaf) else {
-                    continue;
-                };
-                if snapshot[*target].auto_printable.contains(leaf) {
-                    registries[module_idx]
-                        .auto_printable
-                        .insert(identity.clone());
-                }
-                if snapshot[*target].auto_debug.contains(leaf) {
-                    registries[module_idx].auto_debug.insert(identity.clone());
-                }
-                if snapshot[*target].auto_equatable.contains(leaf) {
-                    registries[module_idx]
-                        .auto_equatable
-                        .insert(identity.clone());
-                }
-                if snapshot[*target].auto_comparable.contains(leaf) {
-                    registries[module_idx]
-                        .auto_comparable
-                        .insert(identity.clone());
-                }
-                if snapshot[*target].auto_encode.contains(leaf) {
-                    registries[module_idx].auto_encode.insert(identity.clone());
-                }
-                if snapshot[*target].auto_decode.contains(leaf) {
-                    registries[module_idx].auto_decode.insert(identity);
-                }
-            }
+        // Auto-derive facts belong to the declaration, not to the import that
+        // happens to name it: a Core error enum reaches a caller through a
+        // `core.*` import (which has no ledger import target) or through a
+        // signature of another module. Publish every declaration's facts under
+        // its unique nominal identity to every module; bare leaf names stay
+        // local, so visibility and shadowing are unaffected.
+        let mut published = TraitRegistry::default();
+        for (target, registry) in registries.iter().enumerate() {
+            let identity = |leaf: &String| name_ledger.nominal_identity(target, leaf);
+            published
+                .auto_printable
+                .extend(registry.auto_printable.iter().filter_map(identity));
+            published
+                .auto_debug
+                .extend(registry.auto_debug.iter().filter_map(identity));
+            published
+                .auto_equatable
+                .extend(registry.auto_equatable.iter().filter_map(identity));
+            published
+                .auto_comparable
+                .extend(registry.auto_comparable.iter().filter_map(identity));
+            published
+                .auto_encode
+                .extend(registry.auto_encode.iter().filter_map(identity));
+            published
+                .auto_decode
+                .extend(registry.auto_decode.iter().filter_map(identity));
+        }
+        for registry in &mut registries {
+            registry.merge_auto_derives(&published);
         }
         registries
     }
@@ -989,6 +963,31 @@ impl TraitRegistry {
         );
     }
 
+    /// D-MOD2: make a trait selected by a member import known under its local
+    /// name, so impls of it validate against the declared methods. `local`
+    /// is true when the trait comes from another file of the same package
+    /// (D-MOD-CYCLE1=A: the package is the orphan unit).
+    pub fn register_imported_trait(&mut self, name: &str, t: &TraitDef, local: bool) {
+        if self.traits.contains_key(name) {
+            return;
+        }
+        if local {
+            self.local_traits.insert(name.to_string());
+        }
+        self.traits.insert(
+            name.to_string(),
+            TraitInfo {
+                methods: t
+                    .methods
+                    .iter()
+                    .map(|m| (m.name.clone(), m.clone()))
+                    .collect(),
+                assoc_types: t.assoc_types.iter().map(|(n, _)| n.clone()).collect(),
+                span: t.name_span,
+            },
+        );
+    }
+
     fn register_struct_meta(&mut self, s: &StructDef) {
         self.local_types.insert(s.name.clone());
         if !s.type_params.is_empty() {
@@ -1375,7 +1374,7 @@ impl TraitRegistry {
                 _ => owner_name.clone(),
             };
             let expected = format!(
-                "`fn {expected_method}(self, rhs: {rhs_name}) {expected_result}`"
+                "`fn {expected_method}(self, rhs: {rhs_name}) -> {expected_result}`"
             );
             let Some(method) = methods.iter().find(|method| method.name == expected_method) else {
                 diags.push(e0906(trait_name, &[expected_method.to_string()], span));
@@ -3230,9 +3229,9 @@ impl TraitRegistry {
         };
         let is_data = |ty: &Type| matches!(ty, Type::Named(n) if Syntax::is_data_type_name(n));
         let expected = if trait_name == ENCODE {
-            "`fn encode(self) DataTree`".to_string()
+            "`fn encode(self) -> DataTree`".to_string()
         } else {
-            format!("`fn decode(tree: DataTree) {type_name} ![FieldError]`")
+            format!("`fn decode(tree: DataTree) -> {type_name} [FieldError]!`")
         };
         let mut saw_verb = false;
         for m in methods {

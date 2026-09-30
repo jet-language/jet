@@ -1,0 +1,76 @@
+// A value-producing dispatch table evaluates a call subject once. Each helper
+// below prints when it runs, so every table prints exactly one trace line
+// before its result: as a function tail or a bound value, with flat arms or
+// patterns nested inside a variant.
+#Error
+enum Fault {
+    Empty
+    Busy
+}
+
+enum Tone {
+    Warm
+    Cool
+    Neutral
+}
+
+fn read(n: Int) -> Int Fault! {
+    print("read {n}")
+    if n == 0 -> return Err(.Empty)
+    if n < 0 -> return Err(.Busy)
+    Ok(n)
+}
+
+fn tone(n: Int) -> Tone {
+    print("tone {n}")
+    if n > 10 -> return Tone.Warm
+    if n < 0 -> return Tone.Cool
+    Tone.Neutral
+}
+
+fn size(n: Int) -> Int {
+    print("size {n}")
+    n * 2
+}
+
+// Function tail with nested patterns.
+fn describe(n: Int) -> String {
+    if read(n) == {
+        .Ok(v) -> "value {v}"
+        .Err(.Empty) -> "empty"
+        .Err(.Busy) -> "busy"
+    }
+}
+
+// Function tail with flat variant arms.
+fn label(n: Int) -> String {
+    if tone(n) == {
+        .Warm -> "warm"
+        .Cool -> "cool"
+        .Neutral -> "neutral"
+    }
+}
+
+fn run() {
+    loop n in [3, 0, -1] -> print(describe(n))
+    loop n in [20, -5, 4] -> print(label(n))
+    loop n in [1, 2, 5, 9] {
+        // Bound value with flat value arms.
+        bucket :: if size(n) == {
+            2 -> "two"
+            4 -> "four"
+            10 -> "ten"
+            else -> "other"
+        }
+        print(bucket)
+    }
+    loop n in [-2, 0, 7] {
+        // Bound value with nested patterns.
+        outcome :: if read(n) == {
+            .Err(.Busy) -> "busy"
+            .Err(.Empty) -> "empty"
+            .Ok(v) -> "got {v}"
+        }
+        print(outcome)
+    }
+}

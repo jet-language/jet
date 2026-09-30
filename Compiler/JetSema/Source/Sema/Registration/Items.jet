@@ -4,8 +4,8 @@
 // Foundation-owned; callable signatures are projected by Declarations.jet and
 // defaults remain AST references keyed by FunctionDefaultRef.
 
-@JET_CANONICAL_EFFECT_PACKAGE_IDENTITY :: "jet:canonical-prelude"
-@JET_CANONICAL_EFFECT_MODULE_PATH :: "Prelude/Effects.jet"
+JET_CANONICAL_EFFECT_PACKAGE_IDENTITY :: prep { "jet:canonical-prelude" }
+JET_CANONICAL_EFFECT_MODULE_PATH :: prep { "Prelude/Effects.jet" }
 
 pub enum SemaRegistrationNominalKind {
     Struct
@@ -77,7 +77,7 @@ fn sema_registration_unit_leaf_name(ty: Type) -> String? {
         else -> None
     }
     name_value :: name ?? return None
-    parts :: name_value.split("::")
+    parts :: name_value.split("::").to_list()
     if parts.len() == 0 -> return None
     Val(parts[parts.len() - 1])
 }
@@ -1097,7 +1097,7 @@ fn sema_registration_root_symbol(item: Item, module_identity: String, source_fil
         .Trait(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Trait, None, value.is_pub, value.is_package_pub))
         .Tag(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Type, Val(Type.Named{name: value.name}), value.is_pub, value.is_package_pub))
         .UnitFamily(value) -> Val(sema_registration_named_symbol(module_identity, value.family, value.family_span, SymbolKind.Type, Val(Type.Named{name: value.family}), value.is_pub, value.is_package_pub))
-        .Const(value) -> Val(Symbol{id: symbol_id(SymbolKind.Constant, module_identity, "", value.name), kind: SymbolKind.Constant, name: value.name, module_name: module_identity, owner: None, span: value.name_span, ty: value.ty, visibility: 0})
+        .Const(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Constant, value.ty, value.is_pub, value.is_package_pub))
         .Module(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Module, None, false, false))
         .CodeModule(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
         .GenericModule(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
@@ -1140,12 +1140,12 @@ fn sema_registration_add_foreign_functions(module_row: &[SemaRegistrationModule]
 fn sema_registration_add_root(module_row: &[SemaRegistrationModule], item: Item, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Bool {
     if item == {
         .ExternRust(block) -> {
-            complete :: sema_registration_add_foreign_functions(module_row, block.functions, SemaRegistrationForeignOwner.ExternRust, block.crate_spec, block.crate_span, &diagnostics)
+            complete :: sema_registration_add_foreign_functions(&module_row, block.functions, SemaRegistrationForeignOwner.ExternRust, block.crate_spec, block.crate_span, &diagnostics)
             &module_row[0].declarations.push(item)
             return complete
         }
         .CModule(block) -> {
-            complete :: sema_registration_add_foreign_functions(module_row, block.functions, SemaRegistrationForeignOwner.CModule, block.lib, block.path_span, &diagnostics)
+            complete :: sema_registration_add_foreign_functions(&module_row, block.functions, SemaRegistrationForeignOwner.CModule, block.lib, block.path_span, &diagnostics)
             &module_row[0].declarations.push(item)
             return complete
         }
@@ -1352,8 +1352,9 @@ pub fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> S
         nominal := module_row.nominals[nominal_index]
         if nominal.source == {
             .ForeignHandle(facts) -> {
-                facts.close_function_key = sema_registration_foreign_handle_close_key(module_row, facts)
-                nominal.source = SemaRegistrationNominalSource.ForeignHandle{value: facts}
+                updated_facts := facts
+                updated_facts.close_function_key = sema_registration_foreign_handle_close_key(module_row, updated_facts)
+                nominal.source = SemaRegistrationNominalSource.ForeignHandle{value: updated_facts}
                 module_row.nominals[nominal_index] = nominal
             }
             else -> {}
@@ -1462,7 +1463,7 @@ fn sema_registration_add_import(graph: &[SemaRegistrationGraph], source_index: I
         if existing.declaration.span.start == declaration.span.start && existing.declaration.span.end == declaration.span.end -> break true
     } ?? false
     if duplicate {
-        sema_registration_push_graph_diagnostic(graph, source_index, sema_defined_twice(declaration.alias, "an import declaration must be registered once", declaration.span))
+        sema_registration_push_graph_diagnostic(&graph, source_index, sema_defined_twice(declaration.alias, "an import declaration must be registered once", declaration.span))
         return
     }
     if !sema_registration_import_is_unqualified(declaration) {
@@ -1470,11 +1471,11 @@ fn sema_registration_add_import(graph: &[SemaRegistrationGraph], source_index: I
             if !sema_registration_import_is_unqualified(existing.declaration) && existing.declaration.alias == declaration.alias -> break true
         } ?? false
         if alias_collision {
-            sema_registration_push_graph_diagnostic(graph, source_index, sema_defined_twice(declaration.alias, "module imports share one namespace alias", declaration.alias_span))
+            sema_registration_push_graph_diagnostic(&graph, source_index, sema_defined_twice(declaration.alias, "module imports share one namespace alias", declaration.alias_span))
             return
         }
         if sema_registration_module_has_name(graph[0].modules[source_index], declaration.alias) {
-            sema_registration_push_graph_diagnostic(graph, source_index, sema_defined_twice(declaration.alias, "an import alias shares the module namespace", declaration.alias_span))
+            sema_registration_push_graph_diagnostic(&graph, source_index, sema_defined_twice(declaration.alias, "an import alias shares the module namespace", declaration.alias_span))
             return
         }
     }
@@ -1489,7 +1490,7 @@ fn sema_registration_populate_imports(graph: &[SemaRegistrationGraph], module_in
         declaration := graph[0].modules[module_index].imports[import_index].declaration
         target_identity := graph[0].modules[module_index].imports[import_index].target_module_identity
         target_index :: sema_registration_module_index(graph[0], target_identity) ?? {
-            sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0003", declaration.span, "the import target is not in the declaration graph", "qualified imports resolve through the exact loaded module identity", "retain the loader's source and module identity for this import"))
+            sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0003", declaration.span, "the import target is not in the declaration graph", "qualified imports resolve through the exact loaded module identity", "retain the loader's source and module identity for this import"))
             next
         }
         target :: graph[0].modules[target_index]
@@ -1501,7 +1502,7 @@ fn sema_registration_populate_imports(graph: &[SemaRegistrationGraph], module_in
                     .Val(export) -> {
                         duplicate :: sema_registration_module_has_name(graph[0].modules[module_index], local) || sema_registration_module_has_import_name(graph[0].modules[module_index], local)
                         if {
-                            duplicate -> sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                            duplicate -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
                             else -> {
                                 imported_symbol := export.symbol
                                 imported_symbol.name = local
@@ -1515,8 +1516,8 @@ fn sema_registration_populate_imports(graph: &[SemaRegistrationGraph], module_in
                     .None -> {
                         direct :: sema_registration_direct_symbol(target, item.original)
                         if {
-                            direct != None -> sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
-                            else -> sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target.module_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
+                            direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
+                            else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target.module_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
                         }
                     }
                 }
@@ -1524,7 +1525,7 @@ fn sema_registration_populate_imports(graph: &[SemaRegistrationGraph], module_in
             else -> {
                 duplicate :: sema_registration_module_has_name(graph[0].modules[module_index], declaration.alias) || sema_registration_module_has_import_name(graph[0].modules[module_index], declaration.alias)
                 if {
-                    duplicate -> sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(declaration.alias, "imported names share the module namespace", declaration.alias_span))
+                    duplicate -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(declaration.alias, "imported names share the module namespace", declaration.alias_span))
                     else -> {
                         module_symbol :: Symbol{id: symbol_id(SymbolKind.Import, source_identity, target_identity, declaration.alias), kind: SymbolKind.Import, name: declaration.alias, module_name: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: graph[0].modules[module_index].imports[import_index].visibility}
                         &graph[0].modules[module_index].imports[import_index].bindings.push(SemaRegistrationImportBinding{original: target.module_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, visibility: graph[0].modules[module_index].imports[import_index].visibility})

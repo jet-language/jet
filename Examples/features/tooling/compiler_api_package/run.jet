@@ -3,31 +3,31 @@
 // resulting constants; it never receives a filesystem capability.
 use core.compiler as compiler
 
-@MANIFEST :: compiler.manifest() ?? panic("manifest view failed")
-@PACKAGE :: compiler.package() ?? panic("package view failed")
-@LOCK :: compiler.lock() ?? panic("lock view failed")
-@PROFILES :: compiler.profiles() ?? panic("profile view failed")
+MANIFEST :: prep { compiler.manifest() ?? panic("manifest view failed") }
+PACKAGE :: prep { compiler.package() ?? panic("package view failed") }
+LOCK :: prep { compiler.lock() ?? panic("lock view failed") }
+PROFILES :: prep { compiler.profiles() ?? panic("profile view failed") }
 
-@MANIFEST_OUTPUTS :: @MANIFEST.outputs().len()
-@PACKAGE_OUTPUTS :: @PACKAGE.outputs().len()
-@LOCK_VERSION :: @LOCK.version()
-@LOCK_PACKAGES :: @LOCK.packages().len()
-@PROFILE_COUNT :: @PROFILES.profiles().len()
-@PACKAGE_NAME :: @build.package.name
-@PACKAGE_VERSION :: @build.package.version
+MANIFEST_OUTPUTS :: prep { MANIFEST.outputs().len() }
+PACKAGE_OUTPUTS :: prep { PACKAGE.outputs().len() }
+LOCK_VERSION :: prep { LOCK.version() }
+LOCK_PACKAGES :: prep { LOCK.packages().len() }
+PROFILE_COUNT :: prep { PROFILES.profiles().len() }
+PACKAGE_NAME :: prep { $package.name }
+PACKAGE_VERSION :: prep { $package.version }
 
 fn build(b: BuildContext) -> BuildPlan {
-    if @MANIFEST_OUTPUTS != 0 -> panic("manifest view must stay uncomposed")
-    if @PACKAGE_OUTPUTS != 1 -> panic("package view must include Config output")
-    if @LOCK_PACKAGES != 1 -> panic("lock view lost its package")
-    if @PROFILE_COUNT != 2 -> panic("profile view lost its profiles")
+    if MANIFEST_OUTPUTS != 0 -> panic("manifest view must stay uncomposed")
+    if PACKAGE_OUTPUTS != 1 -> panic("package view must include Config output")
+    if LOCK_PACKAGES != 1 -> panic("lock view lost its package")
+    if PROFILE_COUNT != 2 -> panic("profile view lost its profiles")
     app :: b.add_executable("compiler_api_package", ["run.jet"], [])
     return b.plan(app)
 }
 
 fn run() {
-    print("identity: {@PACKAGE_NAME}@{@PACKAGE_VERSION}")
-    print("outputs: {@MANIFEST_OUTPUTS}->{@PACKAGE_OUTPUTS}")
-    print("lock: v{@LOCK_VERSION} ({@LOCK_PACKAGES})")
-    print("profiles: {@PROFILE_COUNT}")
+    print("identity: {PACKAGE_NAME}@{PACKAGE_VERSION}")
+    print("outputs: {MANIFEST_OUTPUTS}->{PACKAGE_OUTPUTS}")
+    print("lock: v{LOCK_VERSION} ({LOCK_PACKAGES})")
+    print("profiles: {PROFILE_COUNT}")
 }

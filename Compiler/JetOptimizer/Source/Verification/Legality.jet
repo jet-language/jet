@@ -1,6 +1,6 @@
 // Structural and semantic legality checks for canonical MIR.
 fn mir_pass_validate_program(program: MirProgram, pass: MirOptimizationPassId) -> MirOptimizationError? {
-    if program.schema_version != @MIR_SCHEMA_VERSION -> return Val(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
+    if program.schema_version != MIR_SCHEMA_VERSION -> return Val(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
     seen_functions := [MirFunctionId]{}
     loop function in program.functions {
         if function.id.value == 0 -> return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))

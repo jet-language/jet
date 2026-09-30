@@ -4234,20 +4234,25 @@ pub enum MirPatternShape {
         leading_dot: bool,
         span: Span,
     },
+    /// `inner` is an S31 nested payload pattern (`.Val(.Rect(w, h))`); its
+    /// owner is the payload type's canonical MIR owner.
     Present {
         binding: String,
         binding_span: Span,
+        inner: Option<Box<MirPatternShape>>,
         span: Span,
     },
     Absent(Span),
     Ok {
         binding: String,
         binding_span: Span,
+        inner: Option<Box<MirPatternShape>>,
         span: Span,
     },
     Err {
         binding: String,
         binding_span: Span,
+        inner: Option<Box<MirPatternShape>>,
         span: Span,
     },
     Range {
@@ -4279,6 +4284,8 @@ pub enum MirPatternBinding {
         lo: i64,
         hi: i64,
     },
+    /// S31: a nested pattern tests this payload slot.
+    Nested(Box<MirPatternShape>),
 }
 
 #[derive(Debug, Clone)]
@@ -6709,7 +6716,10 @@ pub enum MirTerminator {
     Branch { condition: MirValueId, then_target: MirBlockId, else_target: MirBlockId },
     Switch { subject: MirValueId, arms: Vec<MirSwitchArm>, otherwise: MirBlockId },
     Return { value: Option<MirValueId> },
-    Yield { value: MirValueId, resume: MirBlockId },
+    /// Generator `yield`. `resume` continues after the consumer pulls again;
+    /// `cancel` is taken when the consumer stops pulling (D-CANCELMODEL1=C)
+    /// and runs the generator's lexical cleanup before it returns.
+    Yield { value: MirValueId, resume: MirBlockId, cancel: MirBlockId },
     Break { target: MirBlockId, value: Option<MirValueId> },
     Continue { target: MirBlockId },
     Unreachable { reason: String },
@@ -6718,9 +6728,8 @@ pub enum MirTerminator {
 impl MirTerminator {
     pub fn targets(&self) -> Vec<MirBlockId> {
         match self {
-            Self::Jump { target }
-            | Self::Continue { target }
-            | Self::Yield { resume: target, .. } => vec![*target],
+            Self::Jump { target } | Self::Continue { target } => vec![*target],
+            Self::Yield { resume, cancel, .. } => vec![*resume, *cancel],
             Self::Branch { then_target, else_target, .. } => vec![*then_target, *else_target],
             Self::Switch { arms, otherwise, .. } => arms
                 .iter()

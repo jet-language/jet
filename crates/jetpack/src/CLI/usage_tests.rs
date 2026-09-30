@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn both_cli_help_surfaces_apply_the_case_law() {
         let jetpack = usage_with_color(false);
-        let jet = jet_cli::CLI::usage_page("test");
+        let jet = jet_cli::CLI::usage_page("test", jet_cli::CLI::HelpOrder::Frequency);
 
         for header in [
             "Environments:",

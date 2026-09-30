@@ -789,7 +789,7 @@ impl<'a> Fmt<'a> {
                     self.end_block();
                 }
             }
-            // D-OSTARGET2=B (ratified 2026-07-03): `prep if @build.os == { … }`
+            // D-OSTARGET2=B (ratified 2026-07-03): `prep if $build.os == { … }`
             // — the OS-dispatch switch. Formats exactly like a `Stmt::Switch`
             // (D-IF3 arm grammar) with a `prep if` lead (D-PREP-BRANCH1=A).
             Stmt::ComptimeSwitch {
@@ -1499,11 +1499,12 @@ impl<'a> Fmt<'a> {
         for marker in &b.markers {
             self.write(&format!("#{} ", marker.name));
         }
-        // D-VERDICT-1308-1: explicit compile-time demand is marker-led.
+        // D-PREP-SURFACE2=A: compile time is always the explicit
+        // `name :: prep { value }`.
         if b.is_comptime {
             self.write(&b.name);
             self.write(" :: ");
-            self.fmt_expr(&b.init, Prec::OrFallback);
+            self.fmt_prepared_value(&b.init);
             return;
         }
         if let Some(BindPattern::Refutable {
@@ -1555,6 +1556,14 @@ impl<'a> Fmt<'a> {
         } else {
             self.fmt_expr(&b.init, Prec::OrFallback);
         }
+    }
+
+    /// D-PREP-SURFACE2=A: the prepared value of a compile-time binding,
+    /// `prep { value }`.
+    pub(super) fn fmt_prepared_value(&mut self, value: &Expr) {
+        self.write(&format!("{} {{ ", Syntax::KW_PREP));
+        self.fmt_expr(value, Prec::OrFallback);
+        self.write(" }");
     }
 
     fn fmt_bind_pattern(&mut self, pat: &BindPattern) {

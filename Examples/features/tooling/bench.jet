@@ -14,9 +14,10 @@ fn fib(n: Int) -> Int {
 
 fn work(i: Int) -> Int { return (i * 17 + 3) % 101 }
 
-// The baseline drops every loop value. An optimizing build may erase its work.
+// The baseline drops every loop value on purpose. An optimizing build may
+// erase its work.
 fn elided_baseline(n: Int) -> Int {
-    loop i in 0..<n -> work(i)
+    loop i in 0..<n -> work(i).drop("baseline: measure a loop whose values nobody reads")
     return 0
 }
 

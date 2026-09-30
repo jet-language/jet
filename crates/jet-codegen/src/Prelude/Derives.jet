@@ -11,19 +11,19 @@
 // and orders different variants by ordinal before comparing payloads.
 derive T.Equatable {
     fn equal(self, rhs: T) -> Bool {
-        prep if T.@kind == "enum" {
-            prep loop left in T.@fields {
+        prep if T.$kind == "enum" {
+            prep loop left in T.$fields {
                 if self == {
-                    .@left -> {
-                        prep loop right in T.@fields {
-                            prep if left.@index == right.@index {
+                    .$left -> {
+                        prep loop right in T.$fields {
+                            prep if left.$index == right.$index {
                                 if rhs == {
-                                    .@right -> {
-                                        prep loop field in left.@fields {
-                                            prep if field.@ty == T.@name {
-                                                if self.@field.equal(rhs.@field) == false -> return false
+                                    .$right -> {
+                                        prep loop field in left.$fields {
+                                            prep if field.$ty == T.$name {
+                                                if self.$field.equal(rhs.$field) == false -> return false
                                             } else {
-                                                if self.@field != rhs.@field -> return false
+                                                if self.$field != rhs.$field -> return false
                                             }
                                         }
                                         return true
@@ -39,13 +39,13 @@ derive T.Equatable {
             }
             return false
         } else {
-            prep if T.@kind == "struct" {
-                prep loop field in T.@fields {
-                    if self.@field != rhs.@field -> return false
+            prep if T.$kind == "struct" {
+                prep loop field in T.$fields {
+                    if self.$field != rhs.$field -> return false
                 }
                 return true
             } else {
-                prep if T.@base == "Float" || T.@base == "Float32" {
+                prep if T.$base == "Float" || T.$base == "Float32" {
                     return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
                 } else {
                     return self.raw() == rhs.raw()
@@ -57,33 +57,33 @@ derive T.Equatable {
 
 derive T.Comparable {
     fn compare(self, rhs: T) -> Ordering {
-        prep if T.@kind == "enum" {
+        prep if T.$kind == "enum" {
             jet_rhs_variant_index := 0
-            prep loop right in T.@fields {
+            prep loop right in T.$fields {
                 if rhs == {
-                    .@right -> { jet_rhs_variant_index = right.@index }
+                    .$right -> { jet_rhs_variant_index = right.$index }
                     else -> {}
                 }
             }
-            prep loop left in T.@fields {
+            prep loop left in T.$fields {
                 if self == {
-                    .@left -> {
-                        if jet_rhs_variant_index > left.@index -> return .Less
-                        if jet_rhs_variant_index < left.@index -> return .Greater
-                        prep loop right in T.@fields {
-                            prep if left.@index == right.@index {
+                    .$left -> {
+                        if jet_rhs_variant_index > left.$index -> return .Less
+                        if jet_rhs_variant_index < left.$index -> return .Greater
+                        prep loop right in T.$fields {
+                            prep if left.$index == right.$index {
                                 if rhs == {
-                                    .@right -> {
-                                        prep loop field in left.@fields {
-                                            prep if field.@ty == T.@name {
-                                                if self.@field.compare(rhs.@field) == {
+                                    .$right -> {
+                                        prep loop field in left.$fields {
+                                            prep if field.$ty == T.$name {
+                                                if self.$field.compare(rhs.$field) == {
                                                     .Less -> return .Less
                                                     .Greater -> return .Greater
                                                     .Equal -> {}
                                                 }
                                             } else {
-                                                if self.@field < rhs.@field -> return .Less
-                                                if self.@field > rhs.@field -> return .Greater
+                                                if self.$field < rhs.$field -> return .Less
+                                                if self.$field > rhs.$field -> return .Greater
                                             }
                                         }
                                         return .Equal
@@ -99,10 +99,10 @@ derive T.Comparable {
             }
             return .Equal
         } else {
-            prep if T.@kind == "struct" {
-                prep loop field in T.@fields {
-                    if self.@field < rhs.@field -> return .Less
-                    if self.@field > rhs.@field -> return .Greater
+            prep if T.$kind == "struct" {
+                prep loop field in T.$fields {
+                    if self.$field < rhs.$field -> return .Less
+                    if self.$field > rhs.$field -> return .Greater
                 }
                 return .Equal
             } else {

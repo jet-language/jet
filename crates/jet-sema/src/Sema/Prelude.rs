@@ -7,7 +7,7 @@ use crate::AST::{
 };
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 const INTERNAL_PREFIX: &str = "__jet_prelude_";
 
@@ -29,7 +29,11 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
     if shipped.is_empty() {
         return diagnostics;
     }
-    let mut needed: HashSet<(String, String)> = HashSet::new();
+    // Keyed by the exercised source name. A source-owned Core error arrives
+    // under its canonical identity; its conversion is the shipped declaration
+    // for its leaf, bound to that identity so sema and codegen name one
+    // conversion function.
+    let mut needed: HashMap<(String, String), ErrorConvDef> = HashMap::new();
     for item in &mut module.items {
         walk_item_exprs(item, &mut |expr| {
             let Expr::Try(_, _, TryConvert::Typed { source, target, .. }, _) = expr else {
@@ -37,18 +41,19 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
             };
             let source = source.name();
             let target = target.name();
+            let leaf = crate::Sema::Diagnostics::core_error_family_leaf(&source);
             for conversion in &shipped {
-                if source == conversion.from_ty && target == conversion.to_ty {
-                    needed.insert((conversion.from_ty.clone(), conversion.to_ty.clone()));
+                if leaf == conversion.from_ty && target == conversion.to_ty {
+                    let mut bound = conversion.clone();
+                    bound.from_ty = source.clone();
+                    needed.insert((source.clone(), target.clone()), bound);
                 }
             }
         });
     }
-    for conversion in shipped {
-        let key = (conversion.from_ty.clone(), conversion.to_ty.clone());
-        if !needed.contains(&key) {
-            continue;
-        }
+    let mut needed: Vec<_> = needed.into_values().collect();
+    needed.sort_by(|a, b| (&a.from_ty, &a.to_ty).cmp(&(&b.from_ty, &b.to_ty)));
+    for conversion in needed {
         let declared_locally = module.items.iter().any(|item| {
             matches!(
                 item,

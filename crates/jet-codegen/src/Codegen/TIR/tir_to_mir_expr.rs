@@ -127,6 +127,7 @@ fn zip_callback(
         rc: false,
         arc: false,
         captures: Vec::new(),
+        capture_origins: Default::default(),
         materialized_captures: Vec::new(),
         frozen_captures: Vec::new(),
         uses_stack_sentry: false,
@@ -901,12 +902,9 @@ fn lower_local_place(
     if local.is_persistent() {
         lower_persistent_place(ctx, local, access)
     } else {
-        let mangled_name = crate::Codegen::mangle(&local.name);
-        if !local.generated
-            && mangled_name != local.name
-            && ctx.local_places.contains_key(&mangled_name)
-        {
-            return ctx.place_for_local(&TLocal::user(mangled_name), access);
+        let name = ctx.resolved_local_name(local);
+        if name != local.name {
+            return ctx.place_for_local(&TLocal::user(name), access);
         }
         ctx.place_for_local(local, access)
     }
@@ -1428,15 +1426,16 @@ pub(super) fn lower_expr(
                 .map_err(|message| ctx.error(ctx.span(), message))?
                 .unwrap_or_else(|| expr.ty.clone());
             let type_args = lower_mir_types(ctx, type_args)?;
-            ctx.emit(
+            let value = ctx.emit(
                 "call",
-                Some(call_return_type),
+                Some(call_return_type.clone()),
                 MirOperation::Call {
                     callee: MirCallee::User(function),
                     args,
                     type_args,
                 },
-            )
+            )?;
+            ctx.reconcile_plain_call_return(expr, value, &call_return_type)
         }
         TExprKind::DistinctCtor { name, arg, base } => {
             let value = ctx.lower_child(arg)?;
@@ -1739,8 +1738,37 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
+            // D-DBDRIVER1: a connection or scope is a host handle with no
+            // source `Close` impl; its consuming close is the provider's own
+            // `db.close` handle operation. The provider's Bool report is
+            // discarded, since `close(^value)` is a Unit statement.
+            if matches!(inner.ty.name().as_str(), "DBConnection" | "DBScope") {
+                let receiver = ctx.lower_child(inner)?;
+                let call = ctx
+                    .intern_prelude_route(THandleOp::DBClose.prelude_route(&inner.ty, &carrier)?)?;
+                ctx.emit(
+                    "db-close",
+                    Some(Type::Bool),
+                    MirOperation::Semantic(MirSemanticOp::HandleMethod {
+                        frame_schedule: None,
+                        frame_schedule_derivation: None,
+                        call,
+                        receiver,
+                        args: Vec::new(),
+                    }),
+                )?;
+                return ctx.emit(
+                    "db-close-unit",
+                    Some(expr.ty.clone()),
+                    MirOperation::Constant(MirConstant::Unit),
+                );
+            }
+            // `Close.close(^self)` is a receiver method: every tier dispatches
+            // it through the owner's implementation, exactly like any other
+            // method call.
             let function_name = format!("{}::close", inner.ty.name());
             let function = ctx.function_id_for(&function_name)?;
+            let owner = ctx.mir_type(&inner.ty)?;
             let call_return_type = ctx
                 .function_registry
                 .method_call_return_type_for(function, &[], &inner.ty)
@@ -1752,7 +1780,7 @@ pub(super) fn lower_expr(
                 "close",
                 Some(call_return_type),
                 MirOperation::Call {
-                    callee: MirCallee::User(function),
+                    callee: MirCallee::Method { function, owner },
                     args: vec![arg],
                     type_args: Vec::new(),
                 },
@@ -1946,6 +1974,23 @@ pub(super) fn lower_expr(
             boxed: _,
         } => {
             let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
+            // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an
+            // i64 nanosecond carrier, not a record. `d.ns` reads that carrier
+            // through the canonical scalar projection on every tier.
+            if field == "ns"
+                && matches!(recv.ty.without_user_tags(), Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
+                && !ctx.has_field_owner(&recv.ty)
+            {
+                let carrier = TExpr {
+                    ty: Type::Int,
+                    kind: TExprKind::HandleMethod {
+                        recv: recv.clone(),
+                        op: THandleOp::DurationNsValue,
+                        args: Vec::new(),
+                    },
+                };
+                return ctx.lower_child(&carrier);
+            }
             if recv.ty.without_user_tags() == &Type::Named("HTTPShutdownReport".to_string()) {
                 return lower_http_shutdown_report_field(ctx, expr, recv, field);
             }
@@ -2174,8 +2219,11 @@ pub(super) fn lower_expr(
             variant,
             payload,
         } => {
-            let type_id = ctx.type_id_for(enum_type)?;
             let args = lower_enum_payload(ctx, enum_type, &expr.ty, variant, payload)?;
+            if matches!(expr.ty.without_user_tags(), Type::Union(_)) {
+                return lower_union_widening(ctx, &expr.ty, variant, args);
+            }
+            let type_id = ctx.type_id_for(enum_type)?;
             ctx.emit(
                 "enum-payload",
                 Some(expr.ty.clone()),
@@ -2743,16 +2791,19 @@ pub(super) fn lower_expr(
                     type_args,
                 },
             )?;
-            // Sema types a trait-object call by the method's declared success
-            // value; the trait ABI returns the method's effective failure
-            // carrier. Propagate that carrier here, as module calls do.
+            // Sema types every trait-owned call (a boxed trait object, or a
+            // bounded generic whose specialized receiver dispatches directly
+            // to the concrete impl) by the method's declared success value,
+            // while the trait ABI returns the method's effective failure
+            // carrier. Propagate that carrier here, as module calls do, so no
+            // tier sees the carrier where the success value belongs.
             let carrier_differs = match (&call_return_type, &expr.ty) {
                 (Type::Result { .. }, Type::Result { .. }) => false,
                 (Type::Option(_), Type::Option(_)) => false,
                 (Type::Result { .. } | Type::Option(_), _) => true,
                 _ => false,
             };
-            if trait_dispatch && carrier_differs {
+            if method.trait_owner.is_some() && carrier_differs {
                 lower_try_value(
                     ctx,
                     value,
@@ -3561,7 +3612,7 @@ pub(super) fn lower_expr(
                 MirOperation::ResultOk { value },
             )
         }
-        TExprKind::Err(inner) => {
+        TExprKind::Err(inner, origin) => {
             let expected = match expr.ty.without_user_tags() {
                 Type::Result { err, .. } => Some(err.as_ref()),
                 _ => None,
@@ -3569,6 +3620,18 @@ pub(super) fn lower_expr(
             let value = lower_carrier_payload(ctx, inner, expected)?;
             if ctx.is_terminated() {
                 return Ok(value);
+            }
+            if let Some(origin) = origin {
+                let values = lower_try_context_values(
+                    ctx,
+                    &origin.file,
+                    origin.line,
+                    origin.column,
+                    &origin.fn_name,
+                )?;
+                let route = super::journey_origin_route()?;
+                let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+                let _ = emit_static_call(ctx, &unit_ty, route, values)?;
             }
             ctx.emit(
                 "result-err",
@@ -3582,10 +3645,19 @@ pub(super) fn lower_expr(
             convert,
             file,
             line,
+            column,
             fn_name,
         } => {
-            let input = ctx.lower_child(inner)?;
-            if try_child_already_propagated(inner) {
+            // #3740: a plain-return call directly under this `Try` hands
+            // over its success value; there is no carrier to test.
+            let previous_operand =
+                std::mem::replace(&mut ctx.plain_try_operand, plain_try_call_root(inner));
+            let previous_taken = std::mem::replace(&mut ctx.plain_try_taken, false);
+            let input = ctx.lower_child(inner);
+            let taken = std::mem::replace(&mut ctx.plain_try_taken, previous_taken);
+            ctx.plain_try_operand = previous_operand;
+            let input = input?;
+            if taken || try_child_already_propagated(inner) {
                 Ok(input)
             } else {
                 let input_type = ctx.value_source_type(input)?;
@@ -3596,7 +3668,13 @@ pub(super) fn lower_expr(
                     &input_type,
                     note.as_deref(),
                     convert,
-                    Some((file, *line, fn_name)),
+                    Some(TryJourneySite {
+                        file,
+                        line: *line,
+                        column: *column,
+                        fn_name,
+                        fresh_failure: try_operand_starts_failure(inner),
+                    }),
                 )
             }
         }
@@ -4298,22 +4376,49 @@ pub(super) fn lower_expr(
             };
             let function = ctx.function_id_for(&name)?;
             let args = lower_call_args(ctx, args)?;
+            // #3740: the registry holds the callee's executable return. A
+            // plain-return callee (`T Never!`, written or inferred after this
+            // call was checked) is reconciled exactly like a direct call. A
+            // `??` or `?` subject has its adapter cleared
+            // (`suppress_module_call_target_return`) and names the checked
+            // carrier on the expression itself.
+            let plain_return = ctx
+                .function_registry
+                .call_return_type_for(function, type_args)
+                .ok()
+                .flatten()
+                .filter(|returned| {
+                    super::mir::is_plain_return(returned)
+                        && target_return.as_ref().map_or_else(
+                            || super::mir::is_result_carrier(&expr.ty),
+                            |target| !super::mir::is_plain_return(target),
+                        )
+                });
             let type_args = lower_mir_types(ctx, type_args)?;
             let value = ctx.emit(
                 "module-call",
-                Some(target_return.as_ref().unwrap_or(&expr.ty).clone()),
+                Some(
+                    plain_return
+                        .clone()
+                        .or_else(|| target_return.clone())
+                        .unwrap_or_else(|| expr.ty.clone()),
+                ),
                 MirOperation::Call {
                     callee: MirCallee::User(function),
                     args,
                     type_args,
                 },
             )?;
-            match target_return {
-                Some(target @ (Type::Result { .. } | Type::Option(_))) if target != &expr.ty => {
-                    lower_try_value(ctx, value, &expr.ty, target, None, &TTryConvert::None, None)
+            if let Some(returned) = plain_return {
+                ctx.reconcile_plain_call_return(expr, value, &returned)
+            } else {
+                match target_return {
+                    Some(target @ (Type::Result { .. } | Type::Option(_))) if target != &expr.ty => {
+                        lower_try_value(ctx, value, &expr.ty, target, None, &TTryConvert::None, None)
+                    }
+                    Some(target) => ctx.trait_box_value(value, target, &expr.ty),
+                    None => Ok(value),
                 }
-                Some(target) => ctx.trait_box_value(value, target, &expr.ty),
-                None => Ok(value),
             }
         }
         TExprKind::ExternCall { symbol, args, .. } => {
@@ -4531,7 +4636,7 @@ fn lower_require_stop(
         line: loc.line,
         column: loc.col,
     };
-    let context = MirPanicContext {
+    let mut context = MirPanicContext {
         function: loc.fn_name.clone(),
         source_line: loc.src_line.clone(),
         caret: loc.caret,
@@ -4541,6 +4646,53 @@ fn lower_require_stop(
             .filter_map(|(name, local)| ctx.local_id_for(local).ok().map(|id| (name.clone(), id)))
             .collect(),
     };
+    // D-SHAPE-RESOURCE1=A: a stop still runs every active deferred close and
+    // automatic scope-end close first. A conditional stop branches so only
+    // its failure edge runs them; the success edge keeps them for its own
+    // scope exits. The stop report never reads a local those cleanups moved.
+    let stop_cleanups = ctx.has_stop_path_cleanups();
+    if stop_cleanups {
+        let moved = ctx.stop_path_moved_locals();
+        context.locals.retain(|(_, local)| !moved.contains(local));
+    }
+    if !always_stops && stop_cleanups {
+        if let Some(condition) = condition {
+            let success = ctx.new_block(ctx.span(), "require.success")?;
+            let failure = ctx.new_block(ctx.span(), "require.failure")?;
+            ctx.terminate(MirTerminator::Branch {
+                condition,
+                then_target: success,
+                else_target: failure,
+            });
+            ctx.switch_to(failure);
+            ctx.emit_stop_path_cleanups()?;
+            ctx.emit(
+                "require-stop",
+                Some(expr.ty.clone()),
+                MirOperation::Semantic(MirSemanticOp::RequireStop {
+                    call,
+                    kind,
+                    condition: Some(condition),
+                    location,
+                    context,
+                    values,
+                    always_stops: true,
+                }),
+            )?;
+            ctx.terminate(MirTerminator::Unreachable {
+                reason: "checked conditional stop".to_string(),
+            });
+            ctx.switch_to(success);
+            return ctx.emit(
+                "require-pass",
+                Some(expr.ty.clone()),
+                MirOperation::Constant(MirConstant::Unit),
+            );
+        }
+    }
+    if always_stops && stop_cleanups {
+        ctx.emit_stop_path_cleanups()?;
+    }
     let value = ctx.emit(
         "require-stop",
         Some(expr.ty.clone()),
@@ -5156,6 +5308,67 @@ fn lower_compare_chain_hook(
     }
 }
 
+/// A Decimal relation in a comparison chain orders values through the Prelude
+/// decimal compare kernel on every tier, then tests the resulting `Ordering`.
+/// A primitive relation would order the runtime carrier instead of the number.
+fn lower_decimal_relation(
+    ctx: &mut LowerCtx,
+    op: BinOp,
+    left: MirValueId,
+    right: MirValueId,
+    carrier: &super::TFailureCarrier,
+) -> Result<MirValueId, LowerError> {
+    let ordering_ty = Type::Named(crate::Syntax::TYPE_ORDERING.to_string());
+    let type_id = ctx.nominal_type_id(crate::Syntax::TYPE_DECIMAL)?;
+    let call = ctx.intern_prelude_route(super::precise_builtin_route(
+        crate::Syntax::TYPE_DECIMAL,
+        "compare",
+        2,
+        &ordering_ty,
+        carrier,
+    )?)?;
+    let ordering = ctx.emit(
+        "compare-chain-decimal",
+        Some(ordering_ty),
+        MirOperation::Semantic(MirSemanticOp::PreciseBuiltin {
+            type_id,
+            call,
+            args: vec![left, right],
+        }),
+    )?;
+    let variant = match op {
+        BinOp::Lt | BinOp::Ge => "Less",
+        BinOp::Gt | BinOp::Le => "Greater",
+        _ => {
+            return Err(ctx.error(
+                ctx.span(),
+                "checked Decimal chain contains a non-relational operator",
+            ));
+        }
+    };
+    let matches = ctx.emit(
+        "compare-chain-decimal-test",
+        Some(Type::Bool),
+        MirOperation::EnumIs {
+            subject: ordering,
+            owner: ctx.type_id_for(crate::Syntax::TYPE_ORDERING)?,
+            variant: variant.to_string(),
+        },
+    )?;
+    if matches!(op, BinOp::Le | BinOp::Ge) {
+        ctx.emit(
+            "compare-chain-decimal-invert",
+            Some(Type::Bool),
+            MirOperation::Unary {
+                op: jet_foundation::MIR::MirUnaryOp::Not,
+                value: matches,
+            },
+        )
+    } else {
+        Ok(matches)
+    }
+}
+
 fn lower_compare_chain(
     ctx: &mut LowerCtx,
     expr: &TExpr,
@@ -5184,6 +5397,9 @@ fn lower_compare_chain(
                 left,
                 right,
             )?
+        } else if matches!(&operands[index].ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL)
+        {
+            lower_decimal_relation(ctx, *op, left, right, &carrier)?
         } else {
             match super::compare_chain_route(*op, false, &operands[index].ty, &expr.ty, &carrier)? {
                 super::TRoutePlan::Primitive => ctx.emit(
@@ -5396,6 +5612,53 @@ fn lower_result_handler(
     ctx.emit("result-handler.phi", Some(expr.ty.clone()), MirOperation::Phi { incoming })
 }
 
+/// #3740: the call whose value a `Try` consumes when its operand names a
+/// `T Never!` carrier — the operand itself, or the tail of the inline block
+/// that orders its arguments. The address identifies it while lowering.
+fn plain_try_call_root(inner: &TExpr) -> Option<usize> {
+    if !super::mir::is_result_carrier(&inner.ty) {
+        return None;
+    }
+    let mut expr = inner;
+    loop {
+        match &expr.kind {
+            TExprKind::Call { .. } | TExprKind::ModuleCall { .. } => {
+                return Some(expr as *const TExpr as usize);
+            }
+            TExprKind::InlineBlock(stmts) => match stmts.last() {
+                Some(super::TStmt::ExprStmt(tail)) => expr = tail,
+                _ => return None,
+            },
+            _ => return None,
+        }
+    }
+}
+
+/// #3740: a plain-return function hands back its success value. Its checked
+/// body still returns the `T Never!` carrier — the implicit `Ok(v)` or a
+/// carrier-typed value — so the executable return unwraps it here, once.
+/// `None` when the function keeps a carrier-shaped return.
+pub(super) fn lower_plain_return_value(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    expected: &Type,
+) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
+    if !super::mir::is_plain_return(expected)
+        || !super::mir::is_result_carrier(&expr.ty)
+    {
+        return Ok(None);
+    }
+    if let TExprKind::Ok(inner) = &expr.kind {
+        return lower_carrier_payload(ctx, inner, Some(expected)).map(Some);
+    }
+    let value = ctx.lower_child(expr)?;
+    if ctx.is_terminated() {
+        return Ok(Some(value));
+    }
+    let carrier = expr.ty.without_user_tags().clone();
+    lower_try_value(ctx, value, expected, &carrier, None, &TTryConvert::Never, None).map(Some)
+}
+
 fn try_child_already_propagated(inner: &TExpr) -> bool {
     match &inner.kind {
         TExprKind::ModuleCall {
@@ -5485,6 +5748,44 @@ fn lower_if_cond(
     Ok(())
 }
 
+/// One `?` site (written or automatic) on a failure's way out (#3713).
+#[derive(Clone, Copy)]
+struct TryJourneySite<'a> {
+    /// Pre-escaped source file, as `TExprKind::Try` carries it.
+    file: &'a str,
+    line: usize,
+    column: usize,
+    /// Pre-escaped enclosing function name.
+    fn_name: &'a str,
+    /// The operand is a Core call: its failure begins at this site, so any
+    /// journey left over from an earlier, handled failure is dropped first.
+    fresh_failure: bool,
+}
+
+/// A Core call runs no program code of its own, so when it fails the failure
+/// starts at the call. A Core call that takes a callback can carry a failure
+/// out of program code, so it keeps the journey that callback started.
+fn try_operand_starts_failure(operand: &TExpr) -> bool {
+    match &operand.kind {
+        TExprKind::CoreCall { args, .. } => {
+            !args.iter().any(|arg| matches!(arg.ty, Type::Fn { .. }))
+        }
+        _ => false,
+    }
+}
+
+fn lower_fresh_failure(
+    ctx: &mut LowerCtx,
+    location: Option<TryJourneySite<'_>>,
+) -> Result<(), LowerError> {
+    if location.is_some_and(|site| site.fresh_failure) {
+        let reset_route = super::journey_reset_route()?;
+        let unit_ty = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+        let _ = emit_static_call(ctx, &unit_ty, reset_route, Vec::new())?;
+    }
+    Ok(())
+}
+
 fn lower_try_value(
     ctx: &mut LowerCtx,
     input: jet_foundation::MIR::MirValueId,
@@ -5492,13 +5793,22 @@ fn lower_try_value(
     input_ty: &Type,
     note: Option<&TExpr>,
     convert: &TTryConvert,
-    location: Option<(&str, usize, &str)>,
+    location: Option<TryJourneySite<'_>>,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let is_result = matches!(input_ty, crate::AST::Type::Result { .. });
     let is_option = matches!(input_ty, crate::AST::Type::Option(_));
     if !is_result && !is_option {
         return unsupported_expr(ctx, "TExprKind::Try (non-carrier operand)");
     }
+    // #3740: a `T Never!` operand has no failure value. A caller checked
+    // before the failure solve still names a propagating conversion, but the
+    // executable operand proves the failure edge dead.
+    let never_convert = TTryConvert::Never;
+    let convert = if matches!(input_ty, Type::Result { err, .. } if err.is_never()) {
+        &never_convert
+    } else {
+        convert
+    };
     let success_block = ctx.new_block(ctx.span(), "try-success")?;
     let failure_block = ctx.new_block(ctx.span(), "try-failure")?;
     let join = ctx.new_block(ctx.span(), "try-join")?;
@@ -5595,6 +5905,7 @@ fn lower_try_value(
                         reason: "protocol error exit diverges".to_string(),
                     });
                 } else {
+                    lower_fresh_failure(ctx, location)?;
                     let note_value = note.map(|value| ctx.lower_child(value)).transpose()?;
                     let converted = lower_try_failure(
                         ctx, error, input_ty, convert, note_value, result, location, &carrier,
@@ -5625,9 +5936,10 @@ fn lower_try_value(
             } else if !matches!(convert, TTryConvert::None) {
                 return unsupported_expr(ctx, "TExprKind::Try (optional conversion)");
             } else {
+                lower_fresh_failure(ctx, location)?;
                 let note_value = note.map(|value| ctx.lower_child(value)).transpose()?;
-                if let Some((file, line, fn_name)) = location {
-                    lower_try_journey(ctx, result, &carrier, note_value, file, line, fn_name)?;
+                if let Some(site) = location {
+                    lower_try_journey(ctx, result, &carrier, note_value, site)?;
                 }
                 let return_ty = checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
                     ctx.error(ctx.span(), "checked try has no optional return type")
@@ -5718,14 +6030,19 @@ fn decode_try_location(value: &str) -> String {
     decoded
 }
 
+/// The source-site arguments every journey route takes, in ABI order: file,
+/// line, column, function.
 fn lower_try_context_values(
     ctx: &mut LowerCtx,
     file: &str,
     line: usize,
+    column: usize,
     fn_name: &str,
 ) -> Result<Vec<jet_foundation::MIR::MirValueId>, LowerError> {
     let line = u32::try_from(line)
         .map_err(|_| ctx.error(ctx.span(), "checked try source line does not fit u32"))?;
+    let column = u32::try_from(column)
+        .map_err(|_| ctx.error(ctx.span(), "checked try source column does not fit u32"))?;
     let file_value = ctx.emit(
         "try-context-file",
         Some(Type::String),
@@ -5743,12 +6060,24 @@ fn lower_try_context_values(
             spelling: None,
         }),
     )?;
+    let column_value = ctx.emit(
+        "try-context-column",
+        Some(Type::IntN {
+            signed: false,
+            bits: 32,
+        }),
+        MirOperation::Constant(MirConstant::Int {
+            value: i64::from(column),
+            width: Some((false, 32)),
+            spelling: None,
+        }),
+    )?;
     let fn_value = ctx.emit(
         "try-context-function",
         Some(Type::String),
         MirOperation::Constant(MirConstant::String(decode_try_location(fn_name))),
     )?;
-    Ok(vec![file_value, line_value, fn_value])
+    Ok(vec![file_value, line_value, column_value, fn_value])
 }
 
 fn lower_try_journey(
@@ -5756,11 +6085,10 @@ fn lower_try_journey(
     result: &Type,
     carrier: &super::TFailureCarrier,
     note: Option<jet_foundation::MIR::MirValueId>,
-    file: &str,
-    line: usize,
-    fn_name: &str,
+    site: TryJourneySite<'_>,
 ) -> Result<(), LowerError> {
-    let mut values = lower_try_context_values(ctx, file, line, fn_name)?;
+    let mut values =
+        lower_try_context_values(ctx, site.file, site.line, site.column, site.fn_name)?;
     let note = match note {
         Some(note) => note,
         None => ctx.emit(
@@ -5776,6 +6104,41 @@ fn lower_try_journey(
     Ok(())
 }
 
+/// D-UNIONTYPE1=A: the one member-to-union widening. Every site that turns a
+/// member value into its anonymous union (binding, argument, explicit return,
+/// tail value, and the implicit or `?(note)` failure hop) builds the union
+/// here. The value is typed by the union itself, so it and its constructor
+/// name the same canonical carrier row on every tier.
+fn lower_union_widening(
+    ctx: &mut LowerCtx,
+    union: &Type,
+    tag: &str,
+    args: Vec<MirEnumArg>,
+) -> Result<MirValueId, LowerError> {
+    let Type::Union(members) = union.without_user_tags() else {
+        return Err(ctx.error(ctx.span(), "checked union widening has no union target"));
+    };
+    if !members
+        .iter()
+        .any(|member| crate::AST::union_member_tag(member) == tag)
+    {
+        return Err(ctx.error(
+            ctx.span(),
+            format!("checked union widening names no member `{tag}`"),
+        ));
+    }
+    let type_id = ctx.type_id_for(&crate::AST::union_enum_name(members))?;
+    ctx.emit(
+        "union-widening",
+        Some(union.clone()),
+        MirOperation::Enum {
+            type_id,
+            variant: tag.to_string(),
+            args,
+        },
+    )
+}
+
 fn lower_try_failure(
     ctx: &mut LowerCtx,
     error: jet_foundation::MIR::MirValueId,
@@ -5783,7 +6146,7 @@ fn lower_try_failure(
     convert: &TTryConvert,
     note: Option<jet_foundation::MIR::MirValueId>,
     result: &Type,
-    location: Option<(&str, usize, &str)>,
+    location: Option<TryJourneySite<'_>>,
     carrier: &super::TFailureCarrier,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let converted = match convert {
@@ -5817,10 +6180,14 @@ fn lower_try_failure(
                 target,
                 Type::Named(name) if name == crate::Syntax::TYPE_ERR
             ) {
+                // A source-owned Core error reports under its user spelling
+                // (`CryptoError`), never its canonical owner identity.
                 let source_value = ctx.emit(
                     "try-conversion-source",
                     Some(Type::String),
-                    MirOperation::Constant(MirConstant::String(source.name())),
+                    MirOperation::Constant(MirConstant::String(
+                        crate::Codegen::core_source_type_leaf(&source.name()).to_string(),
+                    )),
                 )?;
                 let target_value = ctx.emit(
                     "try-conversion-target",
@@ -5838,20 +6205,24 @@ fn lower_try_failure(
                 converted
             }
         }
-        TTryConvert::WidenUnion { enum_name, tag } => {
-            let type_id = ctx.type_id_for(enum_name)?;
-            ctx.emit(
-                "try-union-error-conversion",
-                Some(Type::Named(enum_name.clone())),
-                MirOperation::Enum {
-                    type_id,
-                    variant: tag.clone(),
-                    args: vec![MirEnumArg {
-                        field: None,
-                        value: error,
-                        boxed: false,
-                    }],
-                },
+        TTryConvert::WidenUnion { tag, .. } => {
+            // The caller's failure carrier names the union the member error
+            // widens into (the Jet compiler reads the same carrier).
+            let super::TFailureCarrier::Result { error: union, .. } = carrier else {
+                return Err(ctx.error(
+                    ctx.span(),
+                    "checked union error widening has no Result failure carrier",
+                ));
+            };
+            lower_union_widening(
+                ctx,
+                union,
+                tag,
+                vec![MirEnumArg {
+                    field: None,
+                    value: error,
+                    boxed: false,
+                }],
             )?
         }
         TTryConvert::Never | TTryConvert::ProtocolExit => {
@@ -5859,20 +6230,26 @@ fn lower_try_failure(
         }
     };
 
-    let Some((file, line, fn_name)) = location else {
+    let Some(site) = location else {
         return Ok(converted);
     };
     if super::try_target_is_default_error(input_ty, convert) {
         if let Some(note) = note {
             let mut values = vec![converted];
-            values.extend(lower_try_context_values(ctx, file, line, fn_name)?);
+            values.extend(lower_try_context_values(
+                ctx,
+                site.file,
+                site.line,
+                site.column,
+                site.fn_name,
+            )?);
             values.push(note);
             let route = super::failure_context_route(result, carrier)?;
             let target = Type::Named(crate::Syntax::TYPE_ERR.to_string());
             return emit_static_call(ctx, &target, route, values);
         }
     }
-    lower_try_journey(ctx, result, carrier, note, file, line, fn_name)?;
+    lower_try_journey(ctx, result, carrier, note, site)?;
     Ok(converted)
 }
 
@@ -6071,16 +6448,11 @@ fn lower_fallback_block(
             Ok(Some(ctx.trait_box_value(value, &source_ty, &expr.ty)?))
         }
         super::TOrFallback::Return(value) => {
-            let expected = ctx.function.ret.clone().unwrap_or_else(|| expr.ty.clone());
-            let value = value
-                .as_deref()
-                .map(|value| {
-                    let source_ty = value.ty.clone();
-                    let value = ctx.lower_child(value)?;
-                    ctx.trait_box_value(value, &source_ty, &expected)
-                })
-                .transpose()?;
-            ctx.terminate_with_cleanup(MirTerminator::Return { value }, 0)?;
+            // The fallback's `return` is an ordinary function return: a
+            // plain-return function (#3740) unwraps its `T Never!` carrier
+            // and a contract scope checks its postconditions, exactly as for
+            // a `return` statement.
+            ctx.lower_return(value.as_deref())?;
             Ok(None)
         }
         super::TOrFallback::Panic { msg, loc } => {
@@ -6417,11 +6789,14 @@ fn lower_select_builder(
     }
 }
 
+/// A readiness wait yields `(arm, value: T?)`; every receiver in its table
+/// carries the bare element type `T`, not that tagged result.
 fn select_payload_type(ty: &Type) -> Type {
     match ty.without_user_tags() {
-        Type::Result { ok, .. } => select_payload_type(ok),
-        Type::Option(inner) => select_payload_type(inner),
-        Type::Apply { name, args } if name == "Task" && args.len() == 1 => args[0].clone(),
+        Type::Tuple(fields) if fields.len() == 2 => match fields[1].1.without_user_tags() {
+            Type::Option(inner) => (**inner).clone(),
+            other => other.clone(),
+        },
         _ => ty.clone(),
     }
 }
@@ -6797,6 +7172,7 @@ fn gc_edit_callback(ctx: &LowerCtx, edit: &TExpr, root_ty: Type) -> TLambda {
         rc: false,
         arc: false,
         captures: Vec::new(),
+        capture_origins: Default::default(),
         materialized_captures: Vec::new(),
         frozen_captures: Vec::new(),
         uses_stack_sentry: false,
@@ -6901,6 +7277,9 @@ fn lower_host_call(
         }
         THostCall::FnName(name) => {
             let function = ctx.function_id_for(name)?;
+            if let Some(adapted) = ctx.plain_named_fn_value(name, function, &expr.ty, false)? {
+                return Ok(adapted);
+            }
             ctx.emit(
                 "host-function-value",
                 Some(expr.ty.clone()),
@@ -7198,7 +7577,17 @@ fn lower_host_call(
         THostCall::YieldSend { value } => {
             let value = ctx.lower_child(value)?;
             let resume = ctx.new_block(ctx.span(), "yield.resume")?;
-            ctx.terminate(MirTerminator::Yield { value, resume });
+            let cancel = ctx.new_block(ctx.span(), "yield.cancel")?;
+            ctx.terminate(MirTerminator::Yield {
+                value,
+                resume,
+                cancel,
+            });
+            // D-CANCELMODEL1=C: a consumer that stops pulling cancels the
+            // producer at this yield. The cancel edge runs every active
+            // cleanup, exactly as a `return` from this point would.
+            ctx.switch_to(cancel);
+            ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
             ctx.switch_to(resume);
             ctx.emit(
                 "yield.unit",
@@ -8468,6 +8857,70 @@ fn emit_concat_list(
     emit_static_call(ctx, result, route, vec![left, right])
 }
 
+/// D-UNIONTYPE1=A: a union value renders as the member it holds, for both
+/// `{value}` and `{value:Debug}`. The lowering branches on the member tag and
+/// formats that member with its own checked rendering, so every tier shares
+/// one render and the union needs no display carrier of its own.
+fn lower_union_string_format(
+    ctx: &mut LowerCtx,
+    value: MirValueId,
+    members: &[Type],
+    format: &crate::AST::StrFormat,
+    result: &Type,
+) -> Result<MirValueId, LowerError> {
+    let owner = ctx.type_id_for(&crate::AST::union_enum_name(members))?;
+    let join = ctx.new_block(ctx.span(), "union-format-join")?;
+    let mut incoming = Vec::with_capacity(members.len());
+    for (index, member) in members.iter().enumerate() {
+        let variant = crate::AST::union_member_tag(member);
+        // The last member needs no test: the union is closed.
+        let next = if index + 1 < members.len() {
+            let test = ctx.emit(
+                "union-format-test",
+                Some(Type::Bool),
+                MirOperation::EnumIs {
+                    subject: value,
+                    owner,
+                    variant: variant.clone(),
+                },
+            )?;
+            let arm = ctx.new_block(ctx.span(), "union-format-arm")?;
+            let next = ctx.new_block(ctx.span(), "union-format-next")?;
+            ctx.terminate(MirTerminator::Branch {
+                condition: test,
+                then_target: arm,
+                else_target: next,
+            });
+            ctx.switch_to(arm);
+            Some(next)
+        } else {
+            None
+        };
+        let payload = ctx.emit(
+            "union-format-member",
+            Some(member.clone()),
+            MirOperation::EnumPayload {
+                subject: value,
+                owner,
+                variant,
+                index: 0,
+            },
+        )?;
+        let rendered = lower_direct_string_format(ctx, payload, member, format, result)?;
+        incoming.push((ctx.current_block(), rendered));
+        ctx.terminate(MirTerminator::Jump { target: join });
+        if let Some(next) = next {
+            ctx.switch_to(next);
+        }
+    }
+    ctx.switch_to(join);
+    ctx.emit(
+        "union-format-phi",
+        Some(result.clone()),
+        MirOperation::Phi { incoming },
+    )
+}
+
 fn lower_direct_string_format(
     ctx: &mut LowerCtx,
     value: jet_foundation::MIR::MirValueId,
@@ -8487,6 +8940,9 @@ fn lower_direct_string_format(
                 type_args: Vec::new(),
             },
         );
+    }
+    if let Type::Union(members) = value_ty.without_user_tags() {
+        return lower_union_string_format(ctx, value, members, format, result);
     }
     let (trait_name, suffix) = match format {
         crate::AST::StrFormat::Display => ("Display", "display"),
@@ -8513,12 +8969,21 @@ fn lower_direct_string_format(
             .method_call_return_type_for(function, &[], value_ty)
             .map_err(|message| ctx.error(ctx.span(), message))?
             .unwrap_or_else(|| result.clone());
+        // The user render is a method on the value's type: every backend
+        // (AOT emits it inside the type's impl) reaches it through its owner.
+        let access = ctx
+            .function_registry
+            .receiver_access
+            .get(&function)
+            .copied()
+            .ok_or_else(|| ctx.error(ctx.span(), "checked render method has no receiver convention"))?;
+        let owner = ctx.mir_type(value_ty)?;
         return ctx.emit(
             "string-format-user-call",
             Some(call_return_type),
             MirOperation::Call {
-                callee: MirCallee::User(function),
-                args: vec![mir_value_arg(ctx, value)],
+                callee: MirCallee::Method { function, owner },
+                args: vec![mir_value_arg_with_access(ctx, value, access)],
                 type_args: Vec::new(),
             },
         );
@@ -8952,6 +9417,9 @@ fn lower_fn_value(
             ..
         } => {
             let function = ctx.function_id_for(name)?;
+            if let Some(adapted) = ctx.plain_named_fn_value(name, function, &expr.ty, false)? {
+                return Ok(adapted);
+            }
             ctx.emit(
                 "named-function-value",
                 Some(expr.ty.clone()),
@@ -9065,6 +9533,7 @@ fn lower_fn_value(
                 rc: false,
                 arc: false,
                 captures: captures.clone(),
+                capture_origins: Default::default(),
                 materialized_captures: Vec::new(),
                 frozen_captures: Vec::new(),
                 uses_stack_sentry: false,
@@ -10009,8 +10478,8 @@ fn lower_pattern_shape(
         } => {
             let bindings = bindings
                 .iter()
-                .map(lower_pattern_binding)
-                .collect::<Vec<_>>();
+                .map(|binding| lower_pattern_binding(ctx, binding))
+                .collect::<Result<Vec<_>, _>>()?;
             if bindings.is_empty() {
                 if let Some(leaves) = owner.and_then(|owner| ctx.enum_group_leaves(owner, variant))
                 {
@@ -10046,29 +10515,35 @@ fn lower_pattern_shape(
         TPatternShape::Present {
             binding,
             binding_span,
+            inner,
             span,
         } => MirPatternShape::Present {
             binding: binding.clone(),
             binding_span: *binding_span,
+            inner: lower_nested_pattern_shape(ctx, inner.as_deref())?,
             span: *span,
         },
         TPatternShape::Absent(span) => MirPatternShape::Absent(*span),
         TPatternShape::Ok {
             binding,
             binding_span,
+            inner,
             span,
         } => MirPatternShape::Ok {
             binding: binding.clone(),
             binding_span: *binding_span,
+            inner: lower_nested_pattern_shape(ctx, inner.as_deref())?,
             span: *span,
         },
         TPatternShape::Err {
             binding,
             binding_span,
+            inner,
             span,
         } => MirPatternShape::Err {
             binding: binding.clone(),
             binding_span: *binding_span,
+            inner: lower_nested_pattern_shape(ctx, inner.as_deref())?,
             span: *span,
         },
         TPatternShape::Range { lo, hi, span } => MirPatternShape::Range {
@@ -10172,15 +10647,32 @@ fn lower_text_hole_kind(
     })
 }
 
-fn lower_pattern_binding(binding: &TPatternBinding) -> MirPatternBinding {
-    match binding {
+/// S31: a nested payload pattern. Its owner comes from the payload type when
+/// MIR lowers the test, so it is lowered here without one.
+fn lower_nested_pattern_shape(
+    ctx: &mut LowerCtx,
+    inner: Option<&TPatternShape>,
+) -> Result<Option<Box<MirPatternShape>>, LowerError> {
+    inner
+        .map(|inner| lower_pattern_shape(ctx, inner, None).map(Box::new))
+        .transpose()
+}
+
+fn lower_pattern_binding(
+    ctx: &mut LowerCtx,
+    binding: &TPatternBinding,
+) -> Result<MirPatternBinding, LowerError> {
+    Ok(match binding {
         TPatternBinding::Wildcard => MirPatternBinding::Wildcard,
         TPatternBinding::Bind { name, span } => MirPatternBinding::Bind {
             name: name.clone(),
             span: *span,
         },
         TPatternBinding::Range { lo, hi } => MirPatternBinding::Range { lo: *lo, hi: *hi },
-    }
+        TPatternBinding::Nested(inner) => {
+            MirPatternBinding::Nested(Box::new(lower_pattern_shape(ctx, inner, None)?))
+        }
+    })
 }
 
 fn default_constant(ty: &crate::AST::Type) -> crate::AST::CtValue {

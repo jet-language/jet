@@ -1,11 +1,12 @@
-// E0433 (P7): a method call with no effect whose result is thrown away.
+// E0433 (D-DISCARD1=A): a pure method call whose result is thrown away. The
+// method declares that it cannot fail, so the line has no outcome at all.
 struct Point {
     x: Int
     y: Int
 }
 
 impl Point {
-    fn sum(self) -> Int { self.x + self.y }
+    fn sum(self) -> Int Never! { self.x + self.y }
 }
 
 fn run() {

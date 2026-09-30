@@ -196,9 +196,15 @@ impl<'a> Checker<'a> {
         if self.compiler_generated || return_span.end > self.source.len() {
             return;
         }
+        // Remove the keyword together with the blanks that separated it from
+        // the value, so `return r` becomes `r` at the statement's indent.
+        let keyword_gap = self.source[return_span.end..]
+            .bytes()
+            .take_while(|byte| matches!(byte, b' ' | b'\t'))
+            .count();
         let mut diagnostic = Diagnostic::from_row("L0530", &[], Some(return_span))
             .with_edit(TextEdit {
-                span: return_span,
+                span: Span::new(return_span.start, return_span.end + keyword_gap),
                 new_text: String::new(),
             });
         if let Some(semicolon) = find_authored_semicolon(self.source, return_span.end) {
@@ -467,16 +473,16 @@ impl<'a> Checker<'a> {
                         && collect(right, source, subject, values)
                 }
                 Expr::Binary(BinOp::Eq, left, right, _) => {
-                    let left_subject = Checker::dispatch_subject(left, source);
-                    let right_subject = Checker::dispatch_subject(right, source);
-                    let (subject_expr, value_expr) =
-                        match (left_subject.is_some(), right_subject.is_some()) {
-                            (true, false) => (left, right),
-                            (false, true) => (right, left),
-                            _ => return false,
-                        };
-                    let Some(current) = Checker::dispatch_subject(subject_expr, source) else {
-                        return false;
+                    // Each side is classified once: a non-path subject key
+                    // lexes its own source text, so recomputing it per
+                    // comparison would repeat that work.
+                    let (current, value_expr) = match (
+                        Checker::dispatch_subject(left, source),
+                        Checker::dispatch_subject(right, source),
+                    ) {
+                        (Some(current), None) => (current, right),
+                        (None, Some(current)) => (current, left),
+                        _ => return false,
                     };
                     let Some(value) = Checker::dispatch_literal(value_expr) else {
                         return false;
@@ -565,13 +571,14 @@ impl<'a> Checker<'a> {
         call_free
     }
 
+    /// Identity of a non-path subject such as `items[index]`: its token kinds.
+    /// Lex only the subject's own text. Lexing the whole unit here made every
+    /// such guard cost O(unit size), which is quadratic on a large unit.
     fn dispatch_subject_key(source: &str, span: Span) -> Option<String> {
-        let (tokens, _) = crate::Lexer::lex(source);
+        let text = source.get(span.start..span.end)?;
+        let (tokens, _) = crate::Lexer::lex(text);
         let mut key = String::new();
         for token in tokens {
-            if token.span.start < span.start || token.span.end > span.end {
-                continue;
-            }
             if matches!(
                 &token.kind,
                 crate::Lexer::TokKind::LineComment(_)
@@ -1239,23 +1246,95 @@ fn source_if_extent(
     })
 }
 
+/// Source end of an arrow guard body that starts at `start`. Lexing the whole
+/// unit tail per guard was O(unit size) (#3661), so this lexes growing windows
+/// of whole lines, starting with the lines through `fallback` (the last body
+/// statement's end). A window's answer is final once `settled_statement_semi`
+/// shows the rest of the source cannot change it; after a few growth rounds
+/// the full tail is lexed.
 fn statement_source_end(source: &str, start: usize, fallback: usize) -> Option<usize> {
-    let (tokens, _) = crate::Lexer::lex(source);
+    let Some(tail) = source.get(start..) else {
+        return Some(fallback.max(start));
+    };
+    let body_end = fallback.max(start) - start;
+    for extra_lines in [0, 2, 8, 32] {
+        let Some(len) = end_of_lines(tail, body_end, extra_lines + 1) else {
+            break;
+        };
+        if let Some(end) = settled_statement_semi(&tail[..len]) {
+            return Some(start + end);
+        }
+    }
+    let (tokens, _) = crate::Lexer::lex(tail);
+    Some(
+        statement_semi_index(&tokens)
+            .map_or(fallback.max(start), |index| start + tokens[index].span.start),
+    )
+}
+
+/// Offset just past the `count`-th newline at or after `from` in `text`.
+fn end_of_lines(text: &str, from: usize, count: usize) -> Option<usize> {
+    text.as_bytes()
+        .get(from..)?
+        .iter()
+        .enumerate()
+        .filter(|(_, byte)| **byte == b'\n')
+        .nth(count - 1)
+        .map(|(offset, _)| from + offset + 1)
+}
+
+/// The first depth-zero `;` of `window` (a prefix of a longer source that
+/// ends with a newline), when lexing the longer source would find the same
+/// one. Tokens that end before the window's final newline lex the same either
+/// way, so an authored `;` is settled. A synthetic terminator is decided by
+/// the code token it precedes plus at most two more raw tokens. The one
+/// exception is a decider that can continue a leading-dot arm or scope-member
+/// head from the line before (`.`, `(`, `|`): those heads scan ahead without
+/// bound. Otherwise the terminator is settled once the decider and the two
+/// tokens after it end before the final newline. Terminators before it were
+/// decided inside the window too: at a depth-zero `;` every delimiter those
+/// scans balance has already closed.
+fn settled_statement_semi(window: &str) -> Option<usize> {
+    use crate::Lexer::TokKind;
+    let (tokens, _) = crate::Lexer::lex(window);
+    let index = statement_semi_index(&tokens)?;
+    let semi = &tokens[index];
+    if semi.span.end > semi.span.start {
+        return Some(semi.span.start);
+    }
+    let final_newline = window.len().checked_sub(1)?;
+    let mut following = tokens[index + 1..]
+        .iter()
+        .filter(|token| {
+            !(matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end)
+        })
+        .skip_while(|token| crate::Lexer::is_comment(&token.kind));
+    let decider = following.next()?;
+    if matches!(decider.kind, TokKind::Dot | TokKind::LParen | TokKind::Pipe) {
+        return None;
+    }
+    let settled = std::iter::once(decider)
+        .chain(following.take(2))
+        .filter(|token| !matches!(token.kind, TokKind::Eof) && token.span.end <= final_newline)
+        .count()
+        == 3;
+    settled.then_some(semi.span.start)
+}
+
+/// Index of the first depth-zero `;` after some statement text in `tokens`.
+fn statement_semi_index(tokens: &[crate::Lexer::Token]) -> Option<usize> {
     let mut parens = 0usize;
     let mut brackets = 0usize;
     let mut braces = 0usize;
     let mut saw_body = false;
 
-    for token in tokens {
-        if token.span.end <= start {
-            continue;
-        }
+    for (index, token) in tokens.iter().enumerate() {
         match token.kind {
             crate::Lexer::TokKind::LineComment(_) | crate::Lexer::TokKind::BlockComment(_) => {}
             crate::Lexer::TokKind::Semi
                 if saw_body && parens == 0 && brackets == 0 && braces == 0 =>
             {
-                return Some(token.span.start);
+                return Some(index);
             }
             crate::Lexer::TokKind::LParen => {
                 parens += 1;
@@ -1276,7 +1355,7 @@ fn statement_source_end(source: &str, start: usize, fallback: usize) -> Option<u
             _ => saw_body = true,
         }
     }
-    Some(fallback.max(start))
+    None
 }
 
 fn source_line_indent(source: &str, start: usize) -> String {

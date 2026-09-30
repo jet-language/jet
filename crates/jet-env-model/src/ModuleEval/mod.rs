@@ -407,7 +407,7 @@ module dev {
     #[test]
     fn computed_module_fields_consume_top_level_known_values() {
         let src = r#"
-@BASE :: 8000
+BASE :: prep { 8000 }
 module dev {
     env.dev: Env{
         port: BASE + 1,
@@ -1151,7 +1151,7 @@ module installer {
     #[test]
     fn computed_system_service_fields_consume_top_level_known_values() {
         let src = r#"
-@ENABLED :: true
+ENABLED :: prep { true }
 module system.host {
     target: linux.x64,
     services: { ssh: { enable: ENABLED } },
@@ -1415,7 +1415,7 @@ module image.server {
     fn computed_image_fields_consume_top_level_known_values() {
         let dir = oci_base_dir("computed-fields");
         let src = r#"
-@PORT :: 8080
+PORT :: prep { 8080 }
 module image.server {
     from: packages.app,
     expose: [PORT],

@@ -98,7 +98,7 @@ fn web_stdout(name: &str, source: &str, source_path: &str) -> Option<String> {
 #[test]
 fn runtime_fact_reads_are_refused_before_codegen() {
     let diags = diagnostics(
-        "#Numeric Severity :: distinct Int(0..10)\n\nfn run() {\n    print(Severity.@range.start)\n}\n",
+        "#Numeric Severity :: distinct Int(0..10)\n\nfn run() {\n    print(Severity.$range.start)\n}\n",
     );
     let diagnostic = diags
         .iter()
@@ -118,7 +118,7 @@ fn runtime_fact_reads_are_refused_before_codegen() {
 #[test]
 fn fact_reads_do_not_enter_type_position() {
     let diags = diagnostics(
-        "#Numeric Severity :: distinct Int(0..10)\n\nfn takes(value: Severity.@range) {}\nfn run() {}\n",
+        "#Numeric Severity :: distinct Int(0..10)\n\nfn takes(value: Severity.$range) {}\nfn run() {}\n",
     );
     let diagnostic = diags
         .iter()
@@ -134,7 +134,7 @@ fn fact_reads_do_not_enter_type_position() {
 #[test]
 fn folded_fact_reads_emit_values_without_runtime_dispatch() {
     let output = jet::compile(
-        "#Numeric Severity :: distinct Int(0..10)\n\n@RANGE :: Severity.@range\n\nfn run() {\n    print(@RANGE.start)\n}\n",
+        "#Numeric Severity :: distinct Int(0..10)\n\nRANGE :: prep { Severity.$range }\n\nfn run() {\n    print(RANGE.start)\n}\n",
     )
     .expect("a comptime fact read should compile");
     assert!(
@@ -177,7 +177,7 @@ fn every_registered_plane_has_a_source_fact_read() {
 
 #[test]
 fn registry_derived_plane_reads_are_typed_and_folded() {
-    let source = "@FLOW :: Flow.@flow\n@TAINT :: Taint.@taint\n@DUTY :: Duty.@duty\n\nfn run() {\n    print(@FLOW.kind == .Flow)\n    print(@TAINT.kind == .Taint)\n    print(@DUTY.kind == .Duty)\n}\n";
+    let source = "FLOW :: prep { Flow.$flow }\nTAINT :: prep { Taint.$taint }\nDUTY :: prep { Duty.$duty }\n\nfn run() {\n    print(FLOW.kind == .Flow)\n    print(TAINT.kind == .Taint)\n    print(DUTY.kind == .Duty)\n}\n";
     tir_support::assert_tiers_agree("registry-derived-plane-reads", source, "true\ntrue\ntrue\n");
     let output = jet::compile(source).expect("registry-derived plane reads should compile");
     assert!(!has_runtime_fact_dispatch(&output.rust));
@@ -185,7 +185,7 @@ fn registry_derived_plane_reads_are_typed_and_folded() {
 
 #[test]
 fn tracked_binding_origin_reads_the_track_marker() {
-    let source = "fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@origin\n    print(@origin?.tracked ?? false)\n    print(@origin?.source ?? \"missing\")\n    print(@origin?.line ?? 0)\n    print(@origin?.column ?? 0)\n    print(@origin?.ambiguity ?? false)\n}\n";
+    let source = "fn run() {\n    #Track tracked :: 1.0\n    origin :: prep { tracked.$origin }\n    print(origin?.tracked ?? false)\n    print(origin?.source ?? \"missing\")\n    print(origin?.line ?? 0)\n    print(origin?.column ?? 0)\n    print(origin?.ambiguity ?? false)\n}\n";
     tir_support::assert_tiers_agree(
         "tracked-binding-origin",
         source,
@@ -198,10 +198,10 @@ fn tracked_binding_origin_reads_the_track_marker() {
 #[test]
 fn origin_fact_uses_the_stable_origin_info_schema() {
     let output =
-        jet::compile("fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@origin\n}\n")
+        jet::compile("fn run() {\n    #Track tracked :: 1.0\n    origin :: prep { tracked.$origin }\n}\n")
             .expect("origin fact should compile");
     assert_eq!(
-        jet::Syntax::fact_read_kind("@origin"),
+        jet::Syntax::fact_read_kind("origin"),
         Some(jet_foundation::Registry::FactRead::Origin)
     );
     for field in ["tracked", "source", "line", "column", "ambiguity"] {
@@ -226,7 +226,7 @@ fn retired_origin_method_is_rejected_for_every_tracked_value_type() {
     assert!(diags.iter().all(|diagnostic| {
         diagnostic.code != "E0311"
             || (diagnostic.what == "`.origin()` is retired for tracked values"
-                && diagnostic.fix == "read `value.@origin` in comptime code")
+                && diagnostic.fix == "read `value.$origin` in comptime code")
     }));
 }
 
@@ -244,7 +244,7 @@ fn retired_origin_method_preempts_root_dispatch() {
     assert!(diags.iter().any(|diagnostic| {
         diagnostic.code == "E0311"
             && diagnostic.what == "`.origin()` is retired for tracked values"
-            && diagnostic.fix == "read `value.@origin` in comptime code"
+            && diagnostic.fix == "read `value.$origin` in comptime code"
     }));
 }
 
@@ -303,7 +303,7 @@ fn typed_fact_fixture_matches_aot_default_and_interpreter() {
 #[test]
 fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
     let transcript = jet::REPL::run_transcript(
-        &["@answer :: report.@attribution.source", "print(@answer)"],
+        &["ANSWER :: prep { report.$attribution.source }", "print(ANSWER)"],
         None,
     );
     assert!(
@@ -328,7 +328,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
 #[test]
 fn derive_bodies_read_the_same_typed_fact() {
     let output = jet::compile(
-        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() -> String -> \"ok\"\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n",
+        "derive T.Debug {\n    states :: T.$states\n    fn derived_fact_read() -> String -> \"ok\"\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n",
     )
     .expect("derive fact read should compile");
     assert!(output.rust.contains("derived_fact_read"));
@@ -337,7 +337,7 @@ fn derive_bodies_read_the_same_typed_fact() {
 #[test]
 fn registered_build_facts_are_folded_in_value_position() {
     let output = jet::compile(
-        "fn run() {\n    print(@build.package.name)\n    print(@build.package.version)\n    print(@build.profile)\n}\n",
+        "fn run() {\n    print($package.name)\n    print($package.version)\n    print($build.profile)\n}\n",
     )
     .expect("registered build facts are values, not runtime readers");
     assert!(
@@ -353,14 +353,14 @@ fn registered_build_facts_are_folded_in_value_position() {
         "default profile was not folded"
     );
     assert!(
-        !output.rust.contains("@build") && !has_runtime_fact_dispatch(&output.rust),
+        !output.rust.contains("$build") && !has_runtime_fact_dispatch(&output.rust),
         "a build fact must not reach generated runtime code"
     );
 }
 
 #[test]
 fn build_fact_reads_do_not_enter_type_position() {
-    let diags = diagnostics("fn takes(value: @build.os) {}\nfn run() {}\n");
+    let diags = diagnostics("fn takes(value: $build.os) {}\nfn run() {}\n");
     let diagnostic = diags
         .iter()
         .find(|diagnostic| diagnostic.code == "E0119")
@@ -383,7 +383,7 @@ fn package_facts_seed_build_identity() {
     let entry = scratch.join("main.jet");
     fs::write(
         &entry,
-        "fn run() {\n    print(@build.package.name)\n    print(@build.package.version)\n}\n",
+        "fn run() {\n    print($package.name)\n    print($package.version)\n}\n",
     )
     .unwrap();
 
@@ -399,7 +399,7 @@ fn bare_script_facts_have_filename_and_zero_version() {
     let entry = scratch.join("hello.jet");
     fs::write(
         &entry,
-        "print(@build.package.name)\nprint(@build.package.version)\n",
+        "print($package.name)\nprint($package.version)\n",
     )
     .unwrap();
     let output = jet::compile_with_path("", entry.to_str().unwrap())
@@ -414,7 +414,7 @@ fn aot_default_and_interpreter_fold_the_same_build_facts() {
     let entry = scratch.join("main.jet");
     fs::write(
         &entry,
-        "fn run() {\n    print(@build.package.name)\n    print(@build.package.version)\n    print(@build.os)\n    print(@build.profile)\n}\n",
+        "fn run() {\n    print($package.name)\n    print($package.version)\n    print($build.os)\n    print($build.profile)\n}\n",
     )
     .unwrap();
     let path = entry.to_str().unwrap();
@@ -464,7 +464,7 @@ fn registered_build_stamp_facts_fold_from_the_lock() {
     let entry = scratch.join("main.jet");
     fs::write(
         &entry,
-        "fn run() {\n    print(@build.stamp.git ?? \"none\")\n    print(@build.stamp.dirty)\n    print(@build.stamp.toolchain)\n    print(@build.stamp.at)\n}\n",
+        "fn run() {\n    print($build.stamp.git ?? \"none\")\n    print($build.stamp.dirty)\n    print($build.stamp.toolchain)\n    print($build.stamp.at)\n}\n",
     )
     .unwrap();
 
@@ -481,7 +481,7 @@ fn registered_build_stamp_facts_fold_from_the_lock() {
             "folded stamp is missing {value}"
         );
     }
-    assert!(!output.rust.contains("@build"));
+    assert!(!output.rust.contains("$build"));
 
     let path = entry.to_str().unwrap();
     let expected = "abc123-dirty\ntrue\n1.0.0\n2026-08-13T12:34:56.000000000Z\n";

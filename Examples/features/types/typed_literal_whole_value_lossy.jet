@@ -1,0 +1,11 @@
+// #3739: `Float{n}` widens an `Int` with the same checked rule a `Float`
+// parameter applies. A whole number that a Float cannot hold exactly stops
+// with E3010 on every tier instead of silently rounding.
+fn huge() -> Int { 9007199254740993 }
+
+fn run() {
+    exact :: Float{huge() - 1}
+    print("exact: {exact}")
+    lossy :: Float{huge()}
+    print("lossy: {lossy}")
+}

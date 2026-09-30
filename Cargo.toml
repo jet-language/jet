@@ -31,7 +31,12 @@ members = [
 # thin root-package shims). Jetpack's binary-only package keeps host-only
 # dependencies out of its compiler-linked library; default build still ships
 # all three binaries.
-default-members = [".", "crates/jet-driver", "crates/jetpack-bin", "crates/jetos"]
+default-members = [
+    ".",
+    "crates/jet-driver",
+    "crates/jetpack-bin",
+    "crates/jetos",
+]
 resolver = "2"
 
 # Dev builds must not turn content-addressed hashing into the product's
@@ -67,7 +72,7 @@ opt-level = 1
 
 [package]
 name = "jet"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 [lib]
@@ -119,7 +124,11 @@ jet-store = { path = "crates/jet-store" }
 [dev-dependencies]
 jetpack = { path = "crates/jetpack", features = ["test-seam"] }
 # D-DEP1: lifecycle HTTPS e2e (real rustls Server.bind/serve/shutdown) — test-only.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+] }
 # D-DEP1: PEM load for the same test-only lifecycle HTTPS e2e peer.
 rustls-pemfile = "2"
 # D-DEP1 / D-DX5-HOOK1: hostile plugin component fixtures are parsed at test
@@ -129,3 +138,8 @@ wat = "1"
 
 [patch.crates-io]
 cranelift-jit = { path = "crates/vendor/cranelift-jit-0.112.3" }
+
+# D-RUST-EDITION1=A: the Rust bootstrap crates use Rust edition 2021;
+# Jet itself is edition 2026.
+[workspace.metadata.jet]
+edition = "2026"

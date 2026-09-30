@@ -1,26 +1,17 @@
 Error [E0907]: `encode` doesn't match the `Encode` contract
   --> tests/ui/hand_serde_bad_signature.jet:12:8
     |
- 12 |     fn encode(self) String -> ~self.addr
+ 12 |     fn encode(self) -> String { ~self.addr }
     |        ^^^^^^
  Why: A trait implementation must use the trait method's receiver, parameters, return type, and effects
- Fix: Write `fn encode(self) DataTree`, matching the `Encode` declaration exactly, including `self`, types, labels, return type, and effects
+ Fix: Write `fn encode(self) -> DataTree`, matching the `Encode` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907
 
 Error [E0907]: `decode` doesn't match the `Decode` contract
   --> tests/ui/hand_serde_bad_signature.jet:17:8
     |
- 17 |     fn decode(self, tree: DataTree) Email ![FieldError] -> { return Ok(Email{addr: "x"}) }
+ 17 |     fn decode(self, tree: DataTree) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
     |        ^^^^^^
  Why: A trait implementation must use the trait method's receiver, parameters, return type, and effects
- Fix: Write `fn decode(tree: DataTree) Email ![FieldError]`, matching the `Decode` declaration exactly, including `self`, types, labels, return type, and effects
+ Fix: Write `fn decode(tree: DataTree) -> Email [FieldError]!`, matching the `Decode` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907
-
-Warning [L0102] (unused_parameter): Parameter `tree` is never used.
-  --> tests/ui/hand_serde_bad_signature.jet:17:21
-    |
- 17 |     fn decode(self, tree: DataTree) Email ![FieldError] -> { return Ok(Email{addr: "x"}) }
-    |                     ^^^^
- Why: An unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
- Fix: Use `tree`, rename it to `_tree` when it is intentionally unused, or remove it from the function contract.
-More: jet-lang.dev/e/L0102

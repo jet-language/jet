@@ -64,10 +64,10 @@ pub(crate) enum CheckScope {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CheckProofRow {
     output: String,
-    name: &'static str,
-    status: &'static str,
+    name: String,
+    status: String,
     detail: String,
-    diagnostic: &'static str,
+    diagnostic: String,
 }
 
 #[derive(Clone, Debug)]
@@ -80,8 +80,8 @@ struct ProjectOutputSpec {
 pub(crate) struct CheckResult {
     source: String,
     profile: String,
-    front_end: &'static str,
-    programmable_build: &'static str,
+    front_end: String,
+    programmable_build: String,
     diagnostics: usize,
     scope: CheckScope,
     elapsed_ms: u64,
@@ -307,7 +307,7 @@ fn check_projection_with_options_and_preflight(
             facts,
             "Driver::check_project_build_for_tier",
         )
-    } else if scope == CheckScope::Project {
+    } else if scope == CheckScope::Project && !package_is_library_only(path) {
         let (diagnostics, bundle, facts) =
             jet::Driver::check_file_with_effect_facts_for_run_and_entry(
                 &entry,
@@ -412,8 +412,8 @@ fn check_projection_with_options_and_preflight(
     let check = CheckResult {
         source: entry,
         profile: profile.to_string(),
-        front_end,
-        programmable_build,
+        front_end: front_end.to_string(),
+        programmable_build: programmable_build.to_string(),
         diagnostics: diagnostics.len(),
         scope,
         elapsed_ms: started.elapsed().as_millis() as u64,
@@ -433,6 +433,30 @@ fn scope_name(scope: CheckScope) -> &'static str {
         CheckScope::Project => "project",
         CheckScope::ExplicitFile => "explicit-file",
     }
+}
+
+/// D4: a library package has no program entry, so a project check validates
+/// it in Check mode and never demands `fn run`. A package is a library when
+/// every declared output is `.Library`, or when it declares no output and no
+/// file of the package defines a top-level `fn run` (one `fn run` per package).
+fn package_is_library_only(entry: &Path) -> bool {
+    let Some(facts) = jet::Loader::package_facts_for_entry(entry).ok().flatten() else {
+        return false;
+    };
+    if !facts.outputs.is_empty() {
+        return facts
+            .outputs
+            .values()
+            .all(|output| output.kind == jet::Package::PackageOutputKind::Library);
+    }
+    let folder = entry
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let Some(root) = jet::Loader::find_manifest_root(folder) else {
+        return false;
+    };
+    jet::Loader::package_run_member(&root).is_none()
 }
 
 pub(crate) fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnostic> {
@@ -509,41 +533,37 @@ pub(crate) fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnost
 }
 
 fn explicit_file_proof_rows() -> Vec<CheckProofRow> {
-    vec![
-        CheckProofRow {
-            output: "not-applicable".to_string(),
-            name: "entry resolution",
-            status: "not applicable",
-            detail: "explicit-file checks resolve only the named source file".to_string(),
-            diagnostic: "E2389",
-        },
-        CheckProofRow {
-            output: "not-applicable".to_string(),
-            name: "module graph",
-            status: "not applicable",
-            detail: "explicit-file checks keep semantic scope and do not promise a project graph"
-                .to_string(),
-            diagnostic: "E2390",
-        },
-        CheckProofRow {
-            output: "not-applicable".to_string(),
-            name: "Core closure",
-            status: "not applicable",
-            detail:
-                "explicit-file checks keep semantic scope and do not promise project Core closure"
-                    .to_string(),
-            diagnostic: "E2391",
-        },
-        CheckProofRow {
-            output: "not-applicable".to_string(),
-            name: "tier lowering",
-            status: "not applicable",
-            detail:
-                "explicit-file checks keep semantic scope and do not promise project tier lowering"
-                    .to_string(),
-            diagnostic: "E2392",
-        },
+    [
+        (
+            "entry resolution",
+            "explicit-file checks resolve only the named source file",
+            "E2389",
+        ),
+        (
+            "module graph",
+            "explicit-file checks keep semantic scope and do not promise a project graph",
+            "E2390",
+        ),
+        (
+            "Core closure",
+            "explicit-file checks keep semantic scope and do not promise project Core closure",
+            "E2391",
+        ),
+        (
+            "tier lowering",
+            "explicit-file checks keep semantic scope and do not promise project tier lowering",
+            "E2392",
+        ),
     ]
+    .into_iter()
+    .map(|(name, detail, diagnostic)| CheckProofRow {
+        output: "not-applicable".to_string(),
+        name: name.to_string(),
+        status: "not applicable".to_string(),
+        detail: detail.to_string(),
+        diagnostic: diagnostic.to_string(),
+    })
+    .collect()
 }
 
 fn is_project_runnable_output(kind: jet::AST::OutputKind) -> bool {
@@ -685,6 +705,7 @@ impl ProjectBundleProof {
         _facts: &jet::Sema::SemIndexEffectFacts,
         target: Option<&str>,
         profile: &str,
+        library: bool,
     ) -> Self {
         let import_edges = bundle
             .modules
@@ -723,8 +744,12 @@ impl ProjectBundleProof {
         } else {
             jet_foundation::MIR::MirArtifactTarget::Cranelift
         };
+        // D4: a `.Library` output has no runnable entry, so its proof lowers
+        // the library artifact kind instead of an executable.
         let artifact_kind = if artifact_target == jet_foundation::MIR::MirArtifactTarget::Web {
             jet_foundation::MIR::MirArtifactKind::WebApplication
+        } else if library {
+            jet_foundation::MIR::MirArtifactKind::NativeLibrary
         } else {
             jet_foundation::MIR::MirArtifactKind::NativeExecutable
         };
@@ -826,6 +851,7 @@ fn output_proof_rows(
     spec: &ProjectOutputSpec,
     entry_fn: Option<&str>,
     shared: &ProjectBundleProof,
+    library: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<CheckProofRow> {
     let resolved = bundle
@@ -848,6 +874,14 @@ fn output_proof_rows(
             } else {
                 None
             }
+        })
+        // D4: a library has no entry function; its proof anchors at the
+        // checked entry module itself.
+        .or_else(|| {
+            library
+                .then(|| bundle.modules.get(bundle.entry))
+                .flatten()
+                .map(|module| format!("{}:1", module.display))
         });
     let output_name = if spec.name.is_empty() {
         spec.address.as_str()
@@ -1042,13 +1076,25 @@ fn project_proof_rows(
             continue;
         };
 
-        let shared =
-            ProjectBundleProof::from_bundle(checked_bundle, checked_facts, target, profile);
+        // D4: a `.Library` output, or the fallback spec of an entry with no
+        // `fn run` and no declared output, has no runnable entry to lower.
+        let library = spec.address == "default"
+            || package_facts
+                .and_then(|facts| facts.outputs.get(&spec.address))
+                .is_some_and(|output| output.kind == jet::Package::PackageOutputKind::Library);
+        let shared = ProjectBundleProof::from_bundle(
+            checked_bundle,
+            checked_facts,
+            target,
+            profile,
+            library,
+        );
         rows.extend(output_proof_rows(
             checked_bundle,
             spec,
             entry_fn,
             &shared,
+            library,
             &mut diagnostics,
         ));
     }
@@ -1066,14 +1112,14 @@ fn push_proof_row(
 ) {
     let row = CheckProofRow {
         output: output.to_string(),
-        name,
-        status,
+        name: name.to_string(),
+        status: status.to_string(),
         detail,
-        diagnostic,
+        diagnostic: diagnostic.to_string(),
     };
-    if !matches!(row.status, "proven" | "not applicable") {
+    if !matches!(row.status.as_str(), "proven" | "not applicable") {
         diagnostics.push(Diagnostic::from_row(
-            row.diagnostic,
+            row.diagnostic.as_str(),
             &[("detail", row.detail.as_str())],
             None,
         ));
@@ -1087,10 +1133,10 @@ pub(crate) fn check_result_value(check: &CheckResult) -> StatusValue {
         StatusValue::object(
             StatusFields::new()
                 .with("output", row.output.as_str())
-                .with("name", row.name)
-                .with("status", row.status)
+                .with("name", row.name.as_str())
+                .with("status", row.status.as_str())
                 .with("detail", row.detail.as_str())
-                .with("diagnostic", row.diagnostic),
+                .with("diagnostic", row.diagnostic.as_str()),
         )
     }));
     StatusValue::object(
@@ -1106,8 +1152,8 @@ pub(crate) fn check_result_value(check: &CheckResult) -> StatusValue {
                     StatusFields::new()
                         .with("source", check.source.as_str())
                         .with("profile", check.profile.as_str())
-                        .with("front_end", check.front_end)
-                        .with("programmable_build", check.programmable_build)
+                        .with("front_end", check.front_end.as_str())
+                        .with("programmable_build", check.programmable_build.as_str())
                         .with("diagnostics", check.diagnostics),
                 ),
             )
@@ -1128,10 +1174,10 @@ pub(crate) fn check_result_json(check: &CheckResult) -> String {
             format!(
                 "{{\"output\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\",\"diagnostic\":\"{}\"}}",
                 json_escape(&row.output),
-                json_escape(row.name),
-                json_escape(row.status),
+                json_escape(&row.name),
+                json_escape(&row.status),
                 json_escape(&row.detail),
-                json_escape(row.diagnostic),
+                json_escape(&row.diagnostic),
             )
         })
         .collect::<Vec<_>>()
@@ -1144,8 +1190,8 @@ pub(crate) fn check_result_json(check: &CheckResult) -> String {
         check.elapsed_ms,
         json_escape(&check.source),
         json_escape(&check.profile),
-        json_escape(check.front_end),
-        json_escape(check.programmable_build),
+        json_escape(&check.front_end),
+        json_escape(&check.programmable_build),
         check.diagnostics,
         rows,
     )
@@ -1178,6 +1224,93 @@ pub(crate) fn check_result_text(check: &CheckResult) -> String {
         );
     }
     text
+}
+
+/// D-BUILD-NOCHANGE1=A: the typed check result a Receipt replays. Elapsed
+/// time is not recorded; a replay reports its own.
+pub(crate) fn check_result_record(check: &CheckResult) -> String {
+    let rows = check
+        .proof_rows
+        .iter()
+        .map(|row| {
+            format!(
+                "{{\"output\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\",\"diagnostic\":\"{}\"}}",
+                json_escape(&row.output),
+                json_escape(&row.name),
+                json_escape(&row.status),
+                json_escape(&row.detail),
+                json_escape(&row.diagnostic),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{},\"scope\":\"{}\",\"rows\":[{}]}}",
+        json_escape(&check.source),
+        json_escape(&check.profile),
+        json_escape(&check.front_end),
+        json_escape(&check.programmable_build),
+        check.diagnostics,
+        scope_name(check.scope),
+        rows,
+    )
+}
+
+pub(crate) fn check_result_from_record(record: &str, elapsed_ms: u64) -> Option<CheckResult> {
+    let value = jet_foundation::JSON::parse_json(record).ok()?;
+    let object = value.as_object().ok()?;
+    fn text(fields: &[(String, jet_foundation::DataTree::DataTree)], name: &str) -> Option<String> {
+        fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .and_then(|(_, value)| value.as_str().ok())
+            .map(str::to_string)
+    }
+    let diagnostics = object
+        .iter()
+        .find(|(key, _)| key == "diagnostics")
+        .and_then(|(_, value)| match value {
+            jet_foundation::DataTree::DataTree::Int(count) => usize::try_from(*count).ok(),
+            _ => None,
+        })?;
+    let scope = match text(object, "scope")?.as_str() {
+        "project" => CheckScope::Project,
+        "explicit-file" => CheckScope::ExplicitFile,
+        _ => return None,
+    };
+    let mut proof_rows = Vec::new();
+    for row in object
+        .iter()
+        .find(|(key, _)| key == "rows")?
+        .1
+        .as_array()
+        .ok()?
+    {
+        let row = row.as_object().ok()?;
+        proof_rows.push(CheckProofRow {
+            output: text(row, "output")?,
+            name: text(row, "name")?,
+            status: text(row, "status")?,
+            detail: text(row, "detail")?,
+            diagnostic: text(row, "diagnostic")?,
+        });
+    }
+    Some(CheckResult {
+        source: text(object, "source")?,
+        profile: text(object, "profile")?,
+        front_end: text(object, "front_end")?,
+        programmable_build: text(object, "programmable_build")?,
+        diagnostics,
+        scope,
+        elapsed_ms,
+        proof_rows,
+    })
+}
+
+/// A project check that ran a programmable build read inputs outside the
+/// Receipt closure (its actions), so it is never recorded.
+pub(crate) fn check_result_ran_programmable_build(check: &CheckResult) -> bool {
+    check.programmable_build != "not-selected"
 }
 
 pub(crate) fn render_check_failure(

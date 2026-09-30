@@ -310,7 +310,8 @@ fn index_production_receipt(context: &crate::ProductionReceipt::Context) -> Resu
     let artifact_id = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
     let size =
         u64::try_from(bytes.len()).map_err(|_| "production receipt is too large".to_string())?;
-    index_compile_artifact(
+    index_compile_artifact_at(
+        context.project_root(),
         identity,
         RecordKind::Receipt,
         artifact_id,
@@ -819,10 +820,14 @@ fn print_build_nodes(
     static_nodes: &[jet::Comptime::Build::BuildPlanNode],
     mode: OutputMode,
 ) {
-    let program = build_record_program(file, None);
+    let program = build_record_program(file);
+    let workspace = jet::build_project_root(file).ok();
     let records = Store::from_env()
         .ok()
-        .and_then(|store| store.latest_build_record(&program).ok().flatten())
+        .zip(workspace)
+        .and_then(|(store, workspace)| {
+            store.last_build_record(&workspace, &program).ok().flatten()
+        })
         .map(|record| record.nodes)
         .unwrap_or_else(|| {
             static_nodes
@@ -2242,7 +2247,22 @@ fn project_package_import(start: &Path, environment_root: &Path) -> Option<Strin
     let (project_root, dependencies, allow_inline) = match manifest {
         Some((root, facts)) => (
             root,
-            facts.deps.keys().cloned().collect::<BTreeSet<_>>(),
+            // A path dependency is local source in this checkout, so it
+            // never needs the environment to be realized first.
+            facts
+                .deps
+                .iter()
+                .filter(|(_, source)| {
+                    !matches!(
+                        source,
+                        jet::Package::DepSource::Provider {
+                            provider: jet::Bundler::RefSpec::Source::Path,
+                            ..
+                        }
+                    )
+                })
+                .map(|(name, _)| name.clone())
+                .collect::<BTreeSet<_>>(),
             false,
         ),
         None => (environment_root.to_path_buf(), BTreeSet::new(), true),
@@ -2803,7 +2823,6 @@ fn select_native_tier(
     emit_generated: bool,
     small: bool,
     no_os: bool,
-    build_grants: &[String],
     sbom: bool,
     profile: &BuildProfile,
     selects_build_entry: bool,
@@ -2822,7 +2841,6 @@ fn select_native_tier(
             || emit_generated
             || small
             || no_os
-            || !build_grants.is_empty()
             || sbom;
         if incompatible {
             let diagnostic = jet::Diagnostics::Diagnostic::error(
@@ -2845,7 +2863,6 @@ fn select_native_tier(
         && !emit_rust
         && !small
         && !no_os
-        && build_grants.is_empty()
         && !sbom
         && !is_web
         && !is_plugin
@@ -3100,6 +3117,159 @@ fn source_entry_returns_app(source: &str) -> bool {
     jet::AST::app_entry_run_fn(&program.items).is_some()
 }
 
+/// Replay one recorded plain native `jet build`. The recorded artifact and
+/// generated Rust are verified by digest before anything prints; `false`
+/// sends the caller down the fresh build path. Budget gates still run: they
+/// judge the artifact, not the check.
+#[allow(clippy::too_many_arguments)]
+fn replay_build_receipt(
+    receipt: &crate::CheckReceipt::ReceiptClosure,
+    record: &jet_store::ReceiptRecord,
+    store: &Store,
+    file: &str,
+    src: &str,
+    project_root: &Path,
+    profile: &BuildProfile,
+    mode: OutputMode,
+    progress: &mut BuildProgress<'_>,
+) -> bool {
+    let (Some(key), Some(rust_sha256)) =
+        (record.facts.get("native_key"), record.facts.get("rust_sha256"))
+    else {
+        return false;
+    };
+    let artifact_path = build_artifact_path(project_root, file, None);
+    let rust_path = artifact_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{}.rs", stem(file)));
+    let rust_current = fs::read(&rust_path)
+        .is_ok_and(|bytes| jet::SHA256::sha256_hex(&bytes) == *rust_sha256);
+    // An artifact already holding the stored bytes stays untouched; anything
+    // else is restored from the store or the Receipt is not answerable.
+    let artifact_current = match store.lookup_artifact(key) {
+        Ok(jet_store::ArtifactLookup::Hit(artifact)) => {
+            fs::read(&artifact_path).is_ok_and(|bytes| {
+                jet_store::ObjectHandle::from_bytes(&bytes) == artifact.object
+            }) || matches!(
+                store.restore_file(key, &artifact_path),
+                Ok(ArtifactRestore::Hit { .. })
+            )
+        }
+        _ => false,
+    };
+    if !rust_current || !artifact_current {
+        return false;
+    }
+    let output = artifact_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .into_iter()
+        .collect::<Vec<_>>();
+    receipt.log_nodes(store, true, 0.0, &output, &[]);
+    render_native_lints(file, src, mode, &record.diagnostics);
+    if !mode.json {
+        if let Some(line) = record.facts.get("effect_line") {
+            write_mode_status(mode, line);
+        }
+    }
+    print_release_job_summary(src, profile.is_release(), mode);
+    if crate::CmdBudget::run_build_gates(file, &artifact_path, "native", profile.budget_name())
+        != 0
+    {
+        exit(ExitCodes::USER_ERROR);
+    }
+    if !mode.quiet && !mode.json {
+        let artifact = artifact_path.display().to_string();
+        let artifact = if matches!(profile, BuildProfile::Hardened) {
+            format!("{artifact} (hardened; foreign dependencies fenced)")
+        } else {
+            artifact
+        };
+        if progress.enabled {
+            progress.finish(&artifact);
+        } else {
+            write_mode_renderable(mode, &format!("built: {artifact}\n"));
+        }
+        write_mode_status(
+            mode,
+            &format!(
+                "up to date: {} checks reused, link reused\n",
+                record.modules.len()
+            ),
+        );
+    }
+    if mode.json {
+        write_mode_machine(
+            mode,
+            &format!(
+                "{}\n",
+                record
+                    .facts
+                    .get("effect_json")
+                    .map(String::as_str)
+                    .unwrap_or("{\"effects\":[]}")
+            ),
+        );
+    }
+    true
+}
+
+/// Print one `jet check` outcome. A fresh check and a Receipt replay both end
+/// here, so the replayed output is the fresh output for this terminal (I4).
+fn emit_check_outcome(
+    mode: OutputMode,
+    file: &str,
+    src: &str,
+    verbose: bool,
+    all_diags: &[jet::Diagnostics::Diagnostic],
+    check: Option<&crate::CmdInspect::CheckResult>,
+    goal_report: Option<&str>,
+) {
+    let errors: Vec<_> = all_diags
+        .iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .cloned()
+        .collect();
+    if !errors.is_empty() {
+        report_problems(mode, file, src, &errors);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let lints = crate::CmdDevTools::visible_lints(all_diags);
+    if !lints.is_empty() {
+        // A warnings-only check ends in one verdict line instead of the
+        // generic problem count (#3721).
+        crate::report_problems_with_summary(mode, file, src, &lints, |n| {
+            format!(
+                "ok: `{file}` has no errors ({n} warning{})",
+                if n == 1 { "" } else { "s" }
+            )
+        });
+    }
+    if !mode.json && !mode.quiet {
+        // The status line and proof rows are internal detail: a clean
+        // check prints only its `ok:` line unless `--verbose` asks (#3721).
+        if verbose {
+            if let Some(check) = check {
+                write_mode_renderable(mode, &crate::CmdInspect::check_result_text(check));
+            }
+        }
+        if let Some(report) = goal_report {
+            write_mode_renderable(mode, report);
+        }
+    }
+    if mode.json && lints.is_empty() {
+        if let Some(check) = check {
+            write_mode_machine(mode, &crate::CmdInspect::check_result_json(check));
+        } else {
+            let machine_file = crate::machine_report_path_for_process(file);
+            write_mode_machine(mode, &jet::Diagnostics::render_success_json(&machine_file));
+        }
+    } else if !mode.json && lints.is_empty() && !mode.quiet {
+        write_mode_status(mode, &format!("ok: `{file}` has no problems\n"));
+    }
+}
+
 pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
     // Native compilation and the runtime lenses share the compiler-facing
     // `core.compiler` package views. Install the one ambient bridge before
@@ -3283,7 +3453,57 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     }
 
     if cmd == "check" {
-        let mut checked = match jet::with_compiler_stack(|| {
+        // D-BUILD-NOCHANGE1=A: a Receipt for this exact closure replays its
+        // typed diagnostics for this terminal and executes no Check.
+        let check_started = Instant::now();
+        let receipt_store = Store::from_env().ok();
+        let receipt = crate::CheckReceipt::ReceiptClosure::new(
+            "check",
+            file,
+            &project_root,
+            build_record_program(file),
+            &source_closure,
+            &[
+                ("profile", profile.budget_name().to_string()),
+                ("settings", setting_overrides_tag(setting_overrides)),
+                ("gates", format!("{gates:?}")),
+                (
+                    "scope",
+                    if check_project_scope { "project" } else { "explicit-file" }.to_string(),
+                ),
+                ("entry", entry_fn.unwrap_or_default().to_string()),
+                ("target", cross_target.unwrap_or_default().to_string()),
+            ],
+        );
+        // #2517 criteria 2/6: under the read audit a verified record does not
+        // replay; the fresh check below must read only what it declares.
+        let mut audited = None;
+        if let Some(store) = receipt_store.as_ref() {
+            if let Some(record) = receipt.lookup(store) {
+                if crate::CheckReceipt::audit_requested() {
+                    audited = Some(record);
+                } else {
+                    receipt.log_nodes(store, true, 0.0, &[], &[]);
+                    let check = record.facts.get("check_result").and_then(|text| {
+                        crate::CmdInspect::check_result_from_record(
+                            text,
+                            check_started.elapsed().as_millis() as u64,
+                        )
+                    });
+                    emit_check_outcome(
+                        mode,
+                        file,
+                        &src,
+                        verbose,
+                        &record.diagnostics,
+                        check.as_ref(),
+                        record.facts.get("goal_report").map(String::as_str),
+                    );
+                    return;
+                }
+            }
+        }
+        let checked_result = jet::with_compiler_stack(|| {
             crate::CmdInspect::check_projection_for_command(
                 Path::new(file),
                 gates,
@@ -3297,7 +3517,21 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 entry_fn,
                 cross_target,
             )
-        }) {
+        });
+        if let Some(store) = receipt_store.as_ref() {
+            let packages = checked_result
+                .as_ref()
+                .map(|projection| crate::CheckReceipt::PackageRow::from_bundle(&projection.bundle))
+                .unwrap_or_default();
+            receipt.log_nodes(
+                store,
+                false,
+                check_started.elapsed().as_secs_f64() * 1000.0,
+                &[],
+                &packages,
+            );
+        }
+        let mut checked = match checked_result {
             Ok(checked) => Some(checked),
             Err(diagnostics) => {
                 let errors: Vec<_> = diagnostics
@@ -3323,58 +3557,57 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 crate::CmdDevTools::exit_cost_projection_error(file, &error);
             }
         }
-        let errors: Vec<_> = all_diags
+        let has_errors = all_diags
             .iter()
-            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-            .cloned()
-            .collect();
-        if !errors.is_empty() {
-            report_problems(mode, file, &src, &errors);
-            exit(ExitCodes::USER_ERROR);
-        }
-        let lints = crate::CmdDevTools::visible_lints(&all_diags);
-        if !lints.is_empty() {
-            // A warnings-only check ends in one verdict line instead of the
-            // generic problem count (#3721).
-            crate::report_problems_with_summary(mode, file, &src, &lints, |n| {
-                format!(
-                    "ok: `{file}` has no errors ({n} warning{})",
-                    if n == 1 { "" } else { "s" }
-                )
-            });
-        }
-        if !mode.json && !mode.quiet {
-            // The status line and proof rows are internal detail: a clean
-            // check prints only its `ok:` line unless `--verbose` asks (#3721).
-            if verbose {
-                if let Some(projection) = checked.as_ref() {
-                    write_mode_renderable(
+            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error));
+        let goal_report = if has_errors {
+            None
+        } else {
+            checked.as_mut().and_then(|checked| {
+                crate::CmdFill::render_goal_report(checked, None, None, false, false)
+            })
+        };
+        if let (Some(store), Some(projection)) = (receipt_store.as_ref(), checked.as_ref()) {
+            let sealed = gates.is_empty()
+                && !crate::CmdInspect::check_result_ran_programmable_build(&projection.check);
+            let inputs = sealed
+                .then(|| receipt.sealed_inputs(&projection.bundle))
+                .flatten();
+            if let Some(record) = audited.as_ref() {
+                let undeclared =
+                    crate::CheckReceipt::ReceiptClosure::undeclared_reads(record, inputs.as_deref());
+                if !undeclared.is_empty() {
+                    emit_internal_fault(
+                        "",
+                        &format!(
+                            "check read audit: the recorded check does not declare {}",
+                            undeclared.join(", ")
+                        ),
                         mode,
-                        &crate::CmdInspect::check_result_text(&projection.check),
                     );
                 }
             }
-            if let Some(checked) = checked.as_mut() {
-                if let Some(report) =
-                    crate::CmdFill::render_goal_report(checked, None, None, false, false)
-                {
-                    write_mode_renderable(mode, &report);
-                }
-            }
-        }
-        if mode.json && lints.is_empty() {
-            if let Some(projection) = checked.as_ref() {
-                write_mode_machine(
-                    mode,
-                    &crate::CmdInspect::check_result_json(&projection.check),
+            if let Some(inputs) = inputs {
+                let mut facts = BTreeMap::new();
+                facts.insert(
+                    "check_result".to_string(),
+                    crate::CmdInspect::check_result_record(&projection.check),
                 );
-            } else {
-                let machine_file = crate::machine_report_path_for_process(file);
-                write_mode_machine(mode, &jet::Diagnostics::render_success_json(&machine_file));
+                if let Some(report) = goal_report.as_ref() {
+                    facts.insert("goal_report".to_string(), report.clone());
+                }
+                receipt.publish(store, inputs, all_diags.clone(), facts);
             }
-        } else if !mode.json && lints.is_empty() && !mode.quiet {
-            write_mode_status(mode, &format!("ok: `{file}` has no problems\n"));
         }
+        emit_check_outcome(
+            mode,
+            file,
+            &src,
+            verbose,
+            &all_diags,
+            checked.as_ref().map(|projection| &projection.check),
+            goal_report.as_deref(),
+        );
         return;
     }
 
@@ -3442,7 +3675,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         emit_generated,
         small,
         no_os,
-        build_grants,
         sbom,
         &profile,
         selects_build_entry,
@@ -3631,6 +3863,61 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             exit(ExitCodes::USER_ERROR);
         }
     }
+    // D-BUILD-NOCHANGE1=A: a plain native `jet build` whose closure has a
+    // Receipt restores its verified artifact and re-renders its typed
+    // warnings without running a single Check. Every excluded shape reads
+    // inputs or writes outputs the Receipt does not carry.
+    let build_receipt = (cmd == "build"
+        && !is_library
+        && output_name.is_none()
+        && !is_web
+        && !is_plugin
+        && cross_target.is_none()
+        && target_machine.is_none()
+        && remote_builder.is_none()
+        && !emit_rust
+        && !emit_generated
+        && !sbom
+        && !explain_partition
+        && gates.is_empty()
+        && Path::new(file).file_name().and_then(|name| name.to_str())
+            != Some(jet::Syntax::WORKSPACE_FILE))
+    .then(|| {
+        crate::CheckReceipt::ReceiptClosure::new(
+            "build",
+            file,
+            &project_root,
+            build_record_program(file),
+            &source_closure,
+            &[
+                ("profile", cache_profile_tag.clone()),
+                ("mode", mode_tag.to_string()),
+                ("locked", locked.to_string()),
+                ("entry", entry_fn.unwrap_or_default().to_string()),
+                ("package_scope", package_scope.to_string()),
+                ("build_override", build_override.to_string()),
+                ("authority", format!("{invocation_authority:?}")),
+                ("grants", format!("{build_grants:?}")),
+            ],
+        )
+    });
+    if let (Some(receipt), Some(store)) = (build_receipt.as_ref(), native_store.as_ref()) {
+        if let Some(record) = receipt.lookup(store) {
+            if replay_build_receipt(
+                receipt,
+                &record,
+                store,
+                file,
+                &src,
+                &project_root,
+                &profile,
+                mode,
+                &mut progress,
+            ) {
+                return;
+            }
+        }
+    }
     progress.major("Checking", "program and build plan");
 
     // #2083: one front end per build. A `jet build` used to load and
@@ -3655,6 +3942,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 package_scope,
                 build_override,
                 entry_fn,
+                cmd == "build",
                 &source_closure,
             ) {
                 Ok(prepared) => Some(prepared),
@@ -3892,6 +4180,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             entry_fn,
             false,
             invocation_authority,
+            cmd == "build",
         ) {
             Ok(output) => {
                 programmable_build_target = programmable_build_target_name(&output);
@@ -3920,6 +4209,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             entry_fn,
             true,
             invocation_authority,
+            cmd == "build",
         ) {
             Ok(output) => {
                 programmable_build_target = programmable_build_target_name(&output);
@@ -3948,6 +4238,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             entry_fn,
             false,
             invocation_authority,
+            cmd == "build",
         ) {
             Ok(output) => {
                 programmable_build_target = programmable_build_target_name(&output);
@@ -4086,6 +4377,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     // summary is the whole-program effect fixpoint (`Sema::solve`) that
     // ordinary compilation doesn't need to return.
     let mut build_effect_json = None;
+    // D-BUILD-NOCHANGE1=A: both renderings of the effect projection ride the
+    // build Receipt so a replay prints the one this terminal asks for.
+    let mut recorded_effects: Option<(String, String)> = None;
     if cmd == "build" || cmd == "run" {
         // #2083: reuse the fixpoint the build front end already solved. Only
         // the paths that never ran it — a plain `jet run`, a library or named
@@ -4210,13 +4504,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             // Program stdout stays the program's (U7 / D-DEVMODE1). The
             // effect summary is build-time tool output, not runtime stderr.
             if cmd == "build" {
+                let effect_json = jet::EffectBudget::render_effect_projection_json(&projection);
                 if mode.json {
-                    build_effect_json = Some(jet::EffectBudget::render_effect_projection_json(
-                        &projection,
-                    ));
+                    build_effect_json = Some(effect_json.clone());
                 } else {
                     write_mode_status(mode, &effect_summary);
                 }
+                recorded_effects = Some((effect_summary, effect_json));
             }
         }
     }
@@ -4352,6 +4646,36 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             ) != 0
             {
                 exit(ExitCodes::USER_ERROR);
+            }
+            // D-BUILD-NOCHANGE1=A: record this plain native build so an
+            // unchanged closure replays it without checking. A programmable
+            // build, C links, or a checked program that differs from the
+            // hashed closure read inputs the Receipt does not carry.
+            if let (Some(receipt), Some(store), Some(key), Some(bundle)) = (
+                build_receipt.as_ref(),
+                native_store.as_ref(),
+                native_key.as_ref(),
+                checked_runtime.as_ref(),
+            ) {
+                let plain = programmable_build_target.is_none()
+                    && clinks.is_empty()
+                    && !jet::Driver::selects_build_entry(
+                        &src,
+                        package_manifest.as_ref().map(|(root, _)| root.as_path()),
+                    );
+                if let Some(inputs) = plain.then(|| receipt.sealed_inputs(bundle)).flatten() {
+                    let mut facts = BTreeMap::new();
+                    facts.insert("native_key".to_string(), key.clone());
+                    facts.insert(
+                        "rust_sha256".to_string(),
+                        jet::SHA256::sha256_hex(rust_code.as_bytes()),
+                    );
+                    if let Some((line, json)) = recorded_effects.as_ref() {
+                        facts.insert("effect_line".to_string(), line.clone());
+                        facts.insert("effect_json".to_string(), json.clone());
+                    }
+                    receipt.publish(store, inputs, execution_lints.clone(), facts);
+                }
             }
             if !mode.quiet && !mode.json {
                 let artifact = if is_web {
@@ -5133,8 +5457,9 @@ fn rewrite_json_canonical_calls(src: &str) -> String {
         if already {
             out.push_str(&call);
         } else if enclosing_fn_is_fallible(src, index) {
-            // D-JSONCANON1: inside a fallible function, propagate with `?`.
-            out.push_str(&format!("{call}?"));
+            // D-JSONCANON1: a fallible function propagates the new failure
+            // automatically, so the call stays as written.
+            out.push_str(&call);
         } else {
             // D-JSONCANON1: otherwise, the ratified panic fallback.
             out.push_str(&format!("{call} ?? panic(\"value is not canonical JSON\")"));
@@ -5147,16 +5472,17 @@ fn rewrite_json_canonical_calls(src: &str) -> String {
 }
 
 /// D-JSONCANON1 migration: is the function enclosing byte offset `at` in
-/// `src` fallible (S34 `-> T !E` / omitted contract)? Walks outward through
-/// nested `{ }` scopes — `if`/`for`/`match`/struct-literal bodies aren't
-/// functions — until a scope's header text parses as a `fn` signature, or
-/// there is no enclosing scope (top-level, e.g. a `$` initializer:
-/// not fallible, since `?` propagation requires an enclosing fallible fn).
+/// `src` fallible? An omitted contract is the implicit default `Err`, so a
+/// function is infallible only when its header declares `Never!`. Walks
+/// outward through nested `{ }` scopes — `if`/`for`/`match`/struct-literal
+/// bodies aren't functions — until a scope's header text parses as a `fn`
+/// signature, or there is no enclosing scope (top-level, e.g. a `$`
+/// initializer: not fallible, since propagation needs an enclosing function).
 fn enclosing_fn_is_fallible(src: &str, at: usize) -> bool {
     let mut scan_from = at;
     while let Some(open) = innermost_open_brace(src, scan_from) {
         if let Some(sig_start) = fn_header_before(src, open) {
-            return src[sig_start..open].contains('?');
+            return !src[sig_start..open].contains("Never!");
         }
         scan_from = open;
     }
@@ -5863,14 +6189,12 @@ fn test_result_cache_key(path: &Path, opts: &TestRunOpts, package: bool) -> Opti
 }
 
 fn test_result_cache_path(path: &Path, opts: &TestRunOpts, package: bool) -> Option<PathBuf> {
-    let root = path
-        .parent()
-        .and_then(jet::Loader::find_manifest_root)
-        .unwrap_or_else(|| {
-            path.parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
+    // The workspace-root `.jet/` holds the cache, never a per-package one.
+    let root = jet::build_project_root(&path.to_string_lossy()).unwrap_or_else(|_| {
+        path.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    });
     Some(root.join(".jet").join("test-results").join(format!(
         "{}.cache",
         test_result_cache_key(path, opts, package)?
@@ -11228,6 +11552,22 @@ pub(crate) fn run_dev_web(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    // #439 / E3-UL6: same WatchSession engine as native `jet dev` / `jet run --watch`.
+    // Open the watcher before the first build, as native `jet dev` does. The
+    // server reports ready as soon as that build lands, so a caller may save
+    // immediately; opening the session afterward would sample that save as
+    // the baseline and lose the rebuild.
+    let mut watch = match jet_devserver::WatchSession::open(path) {
+        Ok(watch) => watch,
+        Err(diagnostic) => {
+            write_mode_diagnostic(
+                mode,
+                &jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr()),
+            );
+            rustc_incremental_session.cleanup();
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     if rebuild_dev_web(
         file,
         profile,
@@ -11250,18 +11590,6 @@ pub(crate) fn run_dev_web(
         host.start();
     }
 
-    // #439 / E3-UL6: same WatchSession engine as native `jet dev` / `jet run --watch`.
-    let mut watch = match jet_devserver::WatchSession::open(path) {
-        Ok(watch) => watch,
-        Err(diagnostic) => {
-            write_mode_diagnostic(
-                mode,
-                &jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr()),
-            );
-            rustc_incremental_session.cleanup();
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
     loop {
         watch.wait_for_change_for(Some(Duration::from_millis(
             jet_devserver::WATCH_POLL_INTERVAL_MS,
@@ -11316,6 +11644,24 @@ pub(crate) fn run_dev_web(
         }
     }
 }
+/// One failed dev web build: the rendered message the host shows, plus the
+/// compiler diagnostics behind it (empty for host/ICE failures).
+struct DevWebBuildFailure {
+    message: String,
+    source: String,
+    diagnostics: Vec<jet::Diagnostics::Diagnostic>,
+}
+
+impl DevWebBuildFailure {
+    fn host(message: String) -> Self {
+        Self {
+            message,
+            source: String::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+}
+
 fn rebuild_dev_web(
     file: &str,
     profile: &BuildProfile,
@@ -11327,6 +11673,71 @@ fn rebuild_dev_web(
     rustc_incremental_session: &mut WebRustcIncrementalSession,
 ) -> Result<(), String> {
     let _source_transaction = host.lock_source_transaction();
+    let result = build_dev_web(
+        file,
+        profile,
+        mode,
+        verbose,
+        is_rebuild,
+        host,
+        setting_overrides,
+        rustc_incremental_session,
+    );
+    if is_rebuild && mode.json {
+        emit_dev_rebuild_status(mode, file, host, result.as_ref().err());
+    }
+    result.map_err(|failure| failure.message)
+}
+
+/// `jet dev --json`: one `jet.status/v1` record per watch-cycle build. It
+/// carries the build's `jet.report/v3` diagnostics and the same revision facts
+/// `/__jet_dev_status` serves, so a machine diagnostic names the rejected
+/// candidate revision and the accepted revision the browser still shows.
+fn emit_dev_rebuild_status(
+    mode: OutputMode,
+    file: &str,
+    host: &jet_devserver::WebHost::WebHost,
+    failure: Option<&DevWebBuildFailure>,
+) {
+    let revisions = host.revision_facts();
+    let revision = |value: Option<u64>| value.map_or(StatusValue::Null, StatusValue::from);
+    let mut fields = StatusFields::new()
+        .with("file", file)
+        .with("candidate", revision(revisions.candidate))
+        .with("diagnostic_revision", revision(revisions.diagnostic))
+        .with("accepted_revision", revision(revisions.accepted))
+        .with("last_good_revision", revision(revisions.accepted));
+    let mut reports = Vec::new();
+    if let Some(failure) = failure {
+        if failure.diagnostics.is_empty() {
+            fields = fields.with("error", failure.message.as_str());
+        } else {
+            let machine_file = crate::machine_report_path_for_process(file);
+            let clears = jet::Diagnostics::report_clear_counts(&failure.diagnostics);
+            reports = failure
+                .diagnostics
+                .iter()
+                .zip(clears)
+                .map(|(diagnostic, clears)| {
+                    diagnostic.to_report_with_clears(&machine_file, &failure.source, clears)
+                })
+                .collect();
+        }
+    }
+    let rendered = render_status_with_reports("dev.rebuild", failure.is_none(), reports, fields);
+    write_mode_machine(mode, &format!("{rendered}\n"));
+}
+
+fn build_dev_web(
+    file: &str,
+    profile: &BuildProfile,
+    mode: OutputMode,
+    verbose: bool,
+    is_rebuild: bool,
+    host: &jet_devserver::WebHost::WebHost,
+    setting_overrides: &BTreeMap<String, String>,
+    rustc_incremental_session: &mut WebRustcIncrementalSession,
+) -> Result<(), DevWebBuildFailure> {
     let started = Instant::now();
     host.mark_building();
     let src = fs::read_to_string(file).unwrap_or_default();
@@ -11338,7 +11749,11 @@ fn rebuild_dev_web(
                 report_problems(mode, file, &src, &diagnostics);
             }
             host.mark_error("E2105".to_string(), message.clone(), is_rebuild);
-            return Err(message);
+            return Err(DevWebBuildFailure {
+                message,
+                source: src,
+                diagnostics,
+            });
         }
     };
     let out = match jet::compile_web_with_gates_and_profile_and_settings(
@@ -11358,26 +11773,30 @@ fn rebuild_dev_web(
                 .unwrap_or_default();
             let message = jet::render_diagnostics(file, &src, &diags);
             host.mark_error(code, message.clone(), is_rebuild);
-            return Err(message);
+            return Err(DevWebBuildFailure {
+                message,
+                source: src,
+                diagnostics: diags,
+            });
         }
     };
     let Some(web) = &out.web else {
         let message = jet::Diagnostics::render_ice_report("missing web codegen output", "", false);
         write_mode_diagnostic(mode, &format!("{message}\n"));
         host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
-        return Err(message);
+        return Err(DevWebBuildFailure::host(message));
     };
 
     let build_root = build_output_root(&project_root);
     let staging = build_root.join(".jet-dev-staging");
     let staging_authority =
-        match jet_devserver::WebHost::WebOutputAuthority::open_or_create(&staging) {
+        match jet_devserver::WebHost::WebOutputAuthority::open_or_create(&staging, &project_root) {
             Ok(authority) => authority,
             Err(error) => {
                 let message = format!("error: couldn't open web staging output: {error}");
                 write_mode_diagnostic(mode, &format!("{message}\n"));
                 host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
-                return Err(message);
+                return Err(DevWebBuildFailure::host(message));
             }
         };
     let model_runtime = web.wasm_rust.contains("extern crate jet_rt;");
@@ -11394,13 +11813,15 @@ fn rebuild_dev_web(
     ) {
         write_mode_diagnostic(mode, &format!("{message}\n"));
         host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
-        return Err(message);
+        return Err(DevWebBuildFailure::host(message));
     }
-    if let Err(error) = jet_devserver::WebHost::stage_and_swap(&staging, &build_root) {
+    if let Err(error) =
+        jet_devserver::WebHost::stage_and_swap(&staging, &build_root, &project_root)
+    {
         let message = format!("couldn't finalize web build: {error}");
         write_mode_diagnostic(mode, &format!("{message}\n"));
         host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
-        return Err(message);
+        return Err(DevWebBuildFailure::host(message));
     }
 
     host.mark_ready(started.elapsed().as_millis(), is_rebuild);
@@ -14123,24 +14544,39 @@ fn build_inner(
             jet::Driver::compiler_nodes_for_bundle_with_outputs(bundle, None, &output_names)
         })
         .unwrap_or_default();
-    let record_program = build_record_program(file, runtime_bundle);
-    let previous_record = native_store
-        .as_ref()
-        .and_then(|store| store.latest_build_record(&record_program).ok().flatten());
+    let record_program = build_record_program(file);
+    let packages = runtime_bundle
+        .map(crate::CheckReceipt::PackageRow::from_bundle)
+        .unwrap_or_default();
 
+    // Native outputs live below the project-owned `.jet/build`; the command may
+    // run from any project subdirectory, so the project root anchors the held
+    // output authority rather than the working directory.
+    let project_root = jet::build_project_root(file).unwrap_or_else(|diagnostics| {
+        let source = fs::read_to_string(file).unwrap_or_default();
+        report_problems(mode, file, &source, &diagnostics);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let previous_record = native_store.as_ref().and_then(|store| {
+        store
+            .last_build_record(&project_root, &record_program)
+            .ok()
+            .flatten()
+    });
     let output_root = bin
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    let output_authority =
-        jet_devserver::WebHost::WebOutputAuthority::open_or_create(&output_root)
-            .unwrap_or_else(|error| {
-                let message =
-                    format!("error: couldn't create the `.jet/build` folder safely: {error}");
-                write_mode_diagnostic(mode, &format!("{message}\n"));
-                exit(ExitCodes::USER_ERROR);
-            });
+    let output_authority = jet_devserver::WebHost::WebOutputAuthority::open_or_create(
+        &output_root,
+        &project_root,
+    )
+    .unwrap_or_else(|error| {
+        let message = format!("error: couldn't create the `.jet/build` folder safely: {error}");
+        write_mode_diagnostic(mode, &format!("{message}\n"));
+        exit(ExitCodes::USER_ERROR);
+    });
     let rs_name = format!("{}.rs", stem(file));
     let rs_path = output_authority.path_for(&rs_name).unwrap_or_else(|error| {
         let message = format!("error: invalid web Rust output `{rs_name}`: {error}");
@@ -14372,8 +14808,10 @@ fn build_inner(
         }
         persist_build_record(
             native_store.as_ref(),
+            &project_root,
             &record_program,
             &compiler_nodes,
+            &packages,
             previous_record.as_ref(),
             false,
             rustc_started.elapsed().as_secs_f64() * 1000.0,
@@ -14399,8 +14837,10 @@ fn build_inner(
             step("cache hit -> reused cached binary".to_string());
             persist_build_record(
                 native_store.as_ref(),
+                &project_root,
                 &record_program,
                 &compiler_nodes,
+                &packages,
                 previous_record.as_ref(),
                 true,
                 0.0,
@@ -14758,8 +15198,10 @@ fn build_inner(
     }
     persist_build_record(
         native_store.as_ref(),
+        &project_root,
         &record_program,
         &compiler_nodes,
+        &packages,
         previous_record.as_ref(),
         false,
         rustc_started.elapsed().as_secs_f64() * 1000.0,
@@ -14840,21 +15282,22 @@ pub(crate) fn build_target_machine(
     );
 }
 
-fn build_record_program(file: &str, runtime_bundle: Option<&jet::AST::ProgramBundle>) -> String {
+/// The store-log name of the program `file`: its path below the workspace
+/// root, the one root that owns the workspace `.jet/` state.
+fn build_record_program(file: &str) -> String {
     let input = Path::new(file);
-    let root = runtime_bundle
-        .map(|bundle| bundle.project_root.clone())
-        .or_else(|| {
-            jet::Loader::find_manifest_root(input.parent().unwrap_or_else(|| Path::new(".")))
-        })
-        .unwrap_or_else(|| PathBuf::from("."));
-    let path = if input.is_absolute() {
+    let absolute = if input.is_absolute() {
         input.to_path_buf()
     } else {
-        root.join(input)
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(input)
     };
-    path.strip_prefix(&root)
-        .unwrap_or(input)
+    let absolute = fs::canonicalize(&absolute).unwrap_or(absolute);
+    jet::build_project_root(file)
+        .ok()
+        .and_then(|root| absolute.strip_prefix(&root).ok().map(Path::to_path_buf))
+        .unwrap_or_else(|| input.to_path_buf())
         .display()
         .to_string()
         .replace('\\', "/")
@@ -14862,8 +15305,10 @@ fn build_record_program(file: &str, runtime_bundle: Option<&jet::AST::ProgramBun
 
 fn persist_build_record(
     store: Option<&Store>,
+    workspace_root: &Path,
     program: &str,
     nodes: &[jet::Comptime::Build::BuildPlanNode],
+    packages: &[crate::CheckReceipt::PackageRow],
     previous: Option<&jet_store::BuildRecord>,
     cache_hit: bool,
     compile_duration_ms: f64,
@@ -14875,7 +15320,9 @@ fn persist_build_record(
     let nodes = nodes
         .iter()
         .map(|node| {
-            let why_ran = if cache_hit {
+            // The front end ran whenever this path runs, so a Check node is
+            // never "cached" here; only the restored artifact's nodes are.
+            let why_ran = if cache_hit && node.kind != jet::Comptime::Build::BuildNodeKind::Check {
                 "cached".to_string()
             } else if previous.is_none() {
                 "first-run".to_string()
@@ -14898,13 +15345,14 @@ fn persist_build_record(
                 inputs: node.inputs.clone(),
             }
         })
+        .chain(crate::CheckReceipt::package_nodes(packages, previous, false))
         .collect::<Vec<_>>();
     let Some(store) = store else {
         return;
     };
     let record = jet_store::BuildRecord::new(program.to_string(), nodes);
     let record_key = jet::SHA256::sha256_hex(record.to_json().as_bytes());
-    let _ = store.publish_build_record(&record_key, &record);
+    let _ = store.publish_last_build_record(workspace_root, &record_key, &record);
 }
 
 /// D-DBG3 step 2 (dap-debugger): build + launch the native lldb-backed `jet

@@ -2685,13 +2685,16 @@ impl JitBackend for CraneliftBackend {
     ) -> RunOutcome {
         crate::on_compiler_stack(|| {
             crate::reset_one_shot_core_state();
-            if !cranelift_host_supported() {
-                return plan_failure(&super::tiers::plan_mir_tiers(program, artifact));
-            }
-            match try_resident(program, artifact, policy) {
-                Ok(outcome) => outcome,
-                Err(plan) => plan_failure(&plan),
-            }
+            let outcome = if !cranelift_host_supported() {
+                plan_failure(&super::tiers::plan_mir_tiers(program, artifact))
+            } else {
+                match try_resident(program, artifact, policy) {
+                    Ok(outcome) => outcome,
+                    Err(plan) => plan_failure(&plan),
+                }
+            };
+            crate::release_one_shot_core_state();
+            outcome
         })
     }
 

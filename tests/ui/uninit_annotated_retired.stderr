@@ -1,8 +1,8 @@
-Error [E0003]: expected `::` or `:=` in a binding, found `:`
-  --> tests/ui/uninit_annotated_retired.jet:6:6
+Error [E0393]: `x: Int` puts a type after the binding name, which Jet does not accept.
+  --> tests/ui/uninit_annotated_retired.jet:7:6
     |
-  6 |     x: Int := uninit
-    |      ^
- Why: a binding is `name :: value` (immutable) or `name := value` (mutable); types ride the value
- Fix: write `name :: value` or put the type on the value (e.g. `Type{ … }`)
-More: jet-lang.dev/e/E0003
+  7 |     x: Int := uninit
+    |      ^^^^^
+ Why: A binding carries no type of its own (D-BIND-BARE1); `Type{ … }` on the value states the type, checking the value or converting it the way a parameter of that type would.
+ Fix: Write `x := Int{uninit}`.
+More: jet-lang.dev/e/E0393

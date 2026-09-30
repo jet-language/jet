@@ -17,8 +17,6 @@ C_AES_RCON :: [Int]{1, 2, 4, 8, 16, 32, 64, 128, 27, 54}
 
 C_MASK32 :: 4294967295
 
-C_MASK64 :: 18446744073709551615
-
 C_P25519 :: 57896044618658097711785492504343953926634992332820282019728792003956564819949
 
 C_ED_P :: 57896044618658097711785492504343953926634992332820282019728792003956564819949
@@ -31,7 +29,8 @@ C_ED_BX :: 151122213495354007725011514095885315114540126930418572060461132839498
 
 C_ED_BY :: 46316835694926478169428394003475163141307993866256225615783033603165251855960
 
-C_SHA512_IV :: [Int]{
+/// BLAKE2b initialization vector (RFC 7693 2.6).
+C_BLAKE2B_IV :: [Int]{
     0x6a09e667f3bcc908,
     0xbb67ae8584caa73b,
     0x3c6ef372fe94f82b,
@@ -42,97 +41,12 @@ C_SHA512_IV :: [Int]{
     0x5be0cd19137e2179,
 }
 
-C_SHA512_K :: [Int]{
-    0x428a2f98d728ae22,
-    0x7137449123ef65cd,
-    0xb5c0fbcfec4d3b2f,
-    0xe9b5dba58189dbbc,
-    0x3956c25bf348b538,
-    0x59f111f1b605d019,
-    0x923f82a4af194f9b,
-    0xab1c5ed5da6d8118,
-    0xd807aa98a3030242,
-    0x12835b0145706fbe,
-    0x243185be4ee4b28c,
-    0x550c7dc3d5ffb4e2,
-    0x72be5d74f27b896f,
-    0x80deb1fe3b1696b1,
-    0x9bdc06a725c71235,
-    0xc19bf174cf692694,
-    0xe49b69c19ef14ad2,
-    0xefbe4786384f25e3,
-    0x0fc19dc68b8cd5b5,
-    0x240ca1cc77ac9c65,
-    0x2de92c6f592b0275,
-    0x4a7484aa6ea6e483,
-    0x5cb0a9dcbd41fbd4,
-    0x76f988da831153b5,
-    0x983e5152ee66dfab,
-    0xa831c66d2db43210,
-    0xb00327c898fb213f,
-    0xbf597fc7beef0ee4,
-    0xc6e00bf33da88fc2,
-    0xd5a79147930aa725,
-    0x06ca6351e003826f,
-    0x142929670a0e6e70,
-    0x27b70a8546d22ffc,
-    0x2e1b21385c26c926,
-    0x4d2c6dfc5ac42aed,
-    0x53380d139d95b3df,
-    0x650a73548baf63de,
-    0x766a0abb3c77b2a8,
-    0x81c2c92e47edaee6,
-    0x92722c851482353b,
-    0xa2bfe8a14cf10364,
-    0xa81a664bbc423001,
-    0xc24b8b70d0f89791,
-    0xc76c51a30654be30,
-    0xd192e819d6ef5218,
-    0xd69906245565a910,
-    0xf40e35855771202a,
-    0x106aa07032bbd1b8,
-    0x19a4c116b8d2d0c8,
-    0x1e376c085141ab53,
-    0x2748774cdf8eeb99,
-    0x34b0bcb5e19b48a8,
-    0x391c0cb3c5c95a63,
-    0x4ed8aa4ae3418acb,
-    0x5b9cca4f7763e373,
-    0x682e6ff3d6b2b8a3,
-    0x748f82ee5defb2fc,
-    0x78a5636f43172f60,
-    0x84c87814a1f0ab72,
-    0x8cc702081a6439ec,
-    0x90befffa23631e28,
-    0xa4506cebde82bde9,
-    0xbef9a3f7b2c67915,
-    0xc67178f2e372532b,
-    0xca273eceea26619c,
-    0xd186b8c721c0c207,
-    0xeada7dd6cde0eb1e,
-    0xf57d4f7fee6ed178,
-    0x06f067aa72176fba,
-    0x0a637dc5a2c898a6,
-    0x113f9804bef90dae,
-    0x1b710b35131c471b,
-    0x28db77f523047d84,
-    0x32caab7b40c72493,
-    0x3c9ebe0a15c9bebc,
-    0x431d67c49c100d4c,
-    0x4cc5d4becb3e42b6,
-    0x597f299cfc657e2a,
-    0x5fcb6fab3ad6faec,
-    0x6c44198c4a475817,
-}
-
 struct EdPoint {
     x: Int
     y: Int
 }
 
 fn wrap32(n: Int) -> Int Never! { n & C_MASK32 }
-
-fn wrap64(n: Int) -> Int Never! { n & C_MASK64 }
 
 fn rotl32(x: Int, n: Int) -> Int Never! {
     v :: x & C_MASK32
@@ -182,20 +96,6 @@ fn le_bytes(n: Int, width: Int) -> [U8] Never! {
         v = v >> 8
     }
     out
-}
-
-fn rotl64(x: Int, n: Int) -> Int Never! {
-    v :: x & C_MASK64
-    r :: n & 63
-    if r == 0 -> return v
-    ((v << r) | (v >> (64 - r))) & C_MASK64
-}
-
-fn rotr64(x: Int, n: Int) -> Int Never! {
-    v :: x & C_MASK64
-    r :: n & 63
-    if r == 0 -> return v
-    ((v >> r) | (v << (64 - r))) & C_MASK64
 }
 
 fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int Never! {
@@ -268,86 +168,7 @@ fn x25519_scalarmult(sk: [U8], u: [U8]) -> [U8] Never! {
     le_bytes(out, 32)
 }
 
-fn sha512_bytes(data: [U8]) -> [U8] Never! { sha512_raw(data) }
-
-fn sha512_raw(data: [U8]) -> [U8] Never! {
-    msg := copy_bytes(data)
-    bit_len :: data.len() * 8
-    &msg.push(U8{128})
-    loop msg.len() % 128 != 112 -> &msg.push(U8{0})
-    loop b in be64(0) -> &msg.push(b)
-    loop b in be64(bit_len) -> &msg.push(b)
-    state := copy_ints(C_SHA512_IV)
-    loop off in 0..<msg.len(), 128 {
-        words := [Int]{}
-        loop i in 0..<16 {
-            pos :: off + i * 8
-            word := 0
-            loop j in 0..<8 -> word = (word << 8) | u8_int(msg[pos + j])
-            &words.push(wrap64(word))
-        }
-        loop i in 16..<80 {
-            s0 :: rotr64(words[i - 15], 1) ~| rotr64(words[i - 15], 8) ~| (words[i - 15] >> 7)
-            s1 :: rotr64(words[i - 2], 19) ~| rotr64(words[i - 2], 61) ~| (words[i - 2] >> 6)
-            &words.push(wrap64(words[i - 16] + s0 + words[i - 7] + s1))
-        }
-        a := state[0]
-        b := state[1]
-        c := state[2]
-        d := state[3]
-        e := state[4]
-        f := state[5]
-        g := state[6]
-        h := state[7]
-        loop i in 0..<80 {
-            s1 :: rotr64(e, 14) ~| rotr64(e, 18) ~| rotr64(e, 41)
-            ch :: (e & f) ~| ((e ~| C_MASK64) & g)
-            temp1 :: wrap64(h + s1 + ch + C_SHA512_K[i] + words[i])
-            s0 :: rotr64(a, 28) ~| rotr64(a, 34) ~| rotr64(a, 39)
-            maj :: (a & b) ~| (a & c) ~| (b & c)
-            temp2 :: wrap64(s0 + maj)
-            h = g
-            g = f
-            f = e
-            e = wrap64(d + temp1)
-            d = c
-            c = b
-            b = a
-            a = wrap64(temp1 + temp2)
-        }
-        state[0] = wrap64(state[0] + a)
-        state[1] = wrap64(state[1] + b)
-        state[2] = wrap64(state[2] + c)
-        state[3] = wrap64(state[3] + d)
-        state[4] = wrap64(state[4] + e)
-        state[5] = wrap64(state[5] + f)
-        state[6] = wrap64(state[6] + g)
-        state[7] = wrap64(state[7] + h)
-    }
-    words_to_be_bytes(state)
-}
-
-fn be64(n: Int) -> [U8] Never! {
-    [U8]{
-        to_u8(n >> 56),
-        to_u8(n >> 48),
-        to_u8(n >> 40),
-        to_u8(n >> 32),
-        to_u8(n >> 24),
-        to_u8(n >> 16),
-        to_u8(n >> 8),
-        to_u8(n),
-    }
-}
-
-fn words_to_be_bytes(words: [Int]) -> [U8] Never! {
-    out := [U8]{}
-    shifts := [Int]{56, 48, 40, 32, 24, 16, 8, 0}
-    loop word in words {
-        loop shift in shifts -> &out.push(to_u8(word >> shift))
-    }
-    out
-}
+fn sha512_bytes(data: [U8]) -> [U8] Never! { crypto.sha512(data).bytes }
 
 fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
     h :: sha512_bytes(seed)
@@ -1074,6 +895,8 @@ fn xtime(a: Int) -> Int Never! {
 
 /// RFC 9106 Argon2id.  The portable implementation supports one to eight
 /// lanes, with memory rounded down to a whole number of four-slice lanes.
+/// Memory is one flat `[U64]` of 128-word blocks; every compression works in
+/// place through four reused 128-word scratch blocks.
 fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, out_len: Int) -> [U8] Never! {
     memory_blocks :: (memory_kib /% (4 * lanes)) * (4 * lanes)
     lane_length :: memory_blocks /% lanes
@@ -1092,8 +915,8 @@ fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, la
     loop b in le_bytes(0, 4) -> &h0_input.push(b)
     loop b in le_bytes(0, 4) -> &h0_input.push(b)
     h0 :: blake2b(h0_input, 64)
-    memory := [Int]{}
-    loop _ in 0..<(memory_blocks * 128) -> &memory.push(0)
+    memory := [U64]{}
+    loop _ in 0..<(memory_blocks * 128) -> &memory.push(U64{0})
     loop lane in 0..<lanes {
         loop block_index in 0..<2 {
             init_input := copy_bytes(h0)
@@ -1101,48 +924,44 @@ fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, la
             loop b in le_bytes(lane, 4) -> &init_input.push(b)
             block_bytes :: argon2_blake2b_long(init_input, 1024)
             position :: lane * lane_length + block_index
-            argon2_write_block(&memory, position * 128, block_bytes)
+            loop word in 0..<128 -> memory[position * 128 + word] = load_le64(block_bytes, word * 8, 1024)
         }
     }
-    pass := 0
-    loop pass < iterations {
-        slice := 0
-        loop slice < 4 {
-            lane := 0
-            loop lane < lanes {
+    work := [U64]{}
+    saved := [U64]{}
+    address_block := [U64]{}
+    input_block := [U64]{}
+    loop _ in 0..<128 {
+        &work.push(U64{0})
+        &saved.push(U64{0})
+        &address_block.push(U64{0})
+        &input_block.push(U64{0})
+    }
+    loop pass in 0..<iterations {
+        loop slice in 0..<4 {
+            loop lane in 0..<lanes {
                 data_independent :: pass == 0 && slice < 2
-                address_block := [Int]{}
-                input_block := [Int]{}
-                zero_block := [Int]{}
-                loop _ in 0..<128 {
-                    &address_block.push(0)
-                    &input_block.push(0)
-                    &zero_block.push(0)
-                }
+                first_block :: if pass == 0 && slice == 0 -> 2 else -> 0
                 if data_independent {
-                    input_block[0] = pass
-                    input_block[1] = lane
-                    input_block[2] = slice
-                    input_block[3] = memory_blocks
-                    input_block[4] = iterations
-                    input_block[5] = 2
+                    input_block[0] = U64{pass}
+                    input_block[1] = U64{lane}
+                    input_block[2] = U64{slice}
+                    input_block[3] = U64{memory_blocks}
+                    input_block[4] = U64{iterations}
+                    input_block[5] = U64{2}
+                    input_block[6] = U64{0}
+                    if first_block != 0 -> argon2_next_addresses(&address_block, &input_block, &saved)
                 }
-                first_block := 0
-                if pass == 0 && slice == 0 {
-                    if data_independent -> argon2_update_address(&address_block, &input_block, zero_block)
-                    first_block = 2
-                }
-                index := first_block
-                loop index < segment_length {
+                loop index in first_block..<segment_length {
                     position :: lane * lane_length + slice * segment_length + index
                     previous_position :: if {
                         index == 0 && slice == 0 -> lane * lane_length + lane_length - 1
                         index == 0 -> lane * lane_length + slice * segment_length - 1
                         else -> position - 1
                     }
-                    previous :: argon2_read_block(memory, previous_position * 128)
-                    random_word :: if data_independent -> argon2_address_word(index, &address_block, &input_block, zero_block) else -> previous[0]
-                    reference_lane :: if pass == 0 && slice == 0 -> lane else -> (random_word >> 32) %% lanes
+                    if data_independent && index %% 128 == 0 -> argon2_next_addresses(&address_block, &input_block, &saved)
+                    random_word :: argon2_random_word(memory, address_block, data_independent, index, previous_position * 128)
+                    reference_lane :: if pass == 0 && slice == 0 -> lane else -> Int.from_u64((random_word >> 32) %% U64{lanes})
                     same_lane :: reference_lane == lane
                     area :: if {
                         pass == 0 && slice == 0 -> index - 1
@@ -1152,53 +971,32 @@ fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, la
                         else -> lane_length - segment_length - (if index == 0 -> 1 else -> 0)
                     }
                     start :: if pass != 0 && slice != 3 -> (slice + 1) * segment_length else -> 0
-                    reference_index :: (start + argon2_mapping(random_word & 0xffffffff, area)) %% lane_length
+                    reference_index :: (start + argon2_mapping(random_word & U64{0xffffffff}, area)) %% lane_length
                     reference_position :: reference_lane * lane_length + reference_index
-                    reference :: argon2_read_block(memory, reference_position * 128)
-                    next := [Int]{}
-                    loop _ in 0..<128 -> &next.push(0)
-                    with_xor :: pass != 0
-                    if with_xor -> next = argon2_read_block(memory, position * 128)
-                    argon2_fill_block(previous, reference, &next, with_xor)
-                    loop word in 0..<128 -> memory[position * 128 + word] = next[word]
-                    index = index + 1
+                    argon2_fill_block(&memory, &work, &saved, previous_position * 128, reference_position * 128, position * 128, pass != 0)
                 }
-                lane = lane + 1
             }
-            slice = slice + 1
         }
-        pass = pass + 1
     }
-    result_block := [Int]{}
-    loop _ in 0..<128 -> &result_block.push(0)
-    lane := 0
-    loop lane < lanes {
-        last_position :: lane * lane_length + lane_length - 1
-        last :: argon2_read_block(memory, last_position * 128)
-        loop word in 0..<128 -> result_block[word] = (result_block[word] ~| last[word]) & C_MASK64
-        lane = lane + 1
+    loop word in 0..<128 -> work[word] = U64{0}
+    loop lane in 0..<lanes {
+        last :: (lane * lane_length + lane_length - 1) * 128
+        loop word in 0..<128 -> work[word] = work[word] ~| memory[last + word]
     }
     result_bytes := [U8]{}
-    loop word in result_block {
-        loop b in 0..<8 -> &result_bytes.push(to_u8(word >> (b * 8)))
+    loop word in work {
+        loop b in 0..<8 -> &result_bytes.push(to_u8(Int.from_u64(word >> (b * 8))))
     }
     argon2_blake2b_long(result_bytes, out_len)
 }
 
-fn argon2_write_block(memory: &[Int], off: Int, bytes: [U8]) Never! {
-    loop word in 0..<128 -> memory[off + word] = le_word(bytes, word * 8)
-}
-
-fn argon2_read_block(memory: [Int], off: Int) -> [Int] Never! {
-    out := [Int]{}
-    loop word in 0..<128 -> &out.push(memory[off + word])
-    out
-}
-
-fn le_word(bytes: [U8], off: Int) -> Int Never! {
-    n := 0
-    loop i in 0..<8 -> n = n | (Int.from_u8(bytes[off + i]) << (i * 8))
-    n & C_MASK64
+/// Little-endian word at `off`; bytes at or past `end` read as zero padding.
+fn load_le64(bytes: [U8], off: Int, end: Int) -> U64 Never! {
+    n := U64{0}
+    loop i in 0..<8 {
+        if off + i < end -> n |= U64.from_u8(bytes[off + i]) << (i * 8)
+    }
+    n
 }
 
 fn argon2_blake2b_long(data: [U8], out_len: Int) -> [U8] Never! {
@@ -1213,146 +1011,125 @@ fn argon2_blake2b_long(data: [U8], out_len: Int) -> [U8] Never! {
     loop produced + 64 < out_len {
         value = blake2b(value, 64)
         loop i in 0..<32 -> &out.push(value[i])
-        produced = produced + 32
+        produced += 32
     }
-    last_len :: out_len - produced
-    last :: blake2b(value, last_len)
+    last :: blake2b(value, out_len - produced)
     loop b in last -> &out.push(b)
     out
 }
 
-fn argon2_mapping(j1: Int, area: Int) -> Int Never! {
-    x :: ((j1 & 0xffffffff) * (j1 & 0xffffffff)) >> 32
+/// Pseudo-random word for the next reference: the address block during the
+/// data-independent slices, otherwise the first word of the previous block.
+fn argon2_random_word(memory: [U64], address_block: [U64], data_independent: Bool, index: Int, previous: Int) -> U64 Never! {
+    if data_independent -> return address_block[index %% 128]
+    memory[previous]
+}
+
+/// RFC 9106 3.4.2: map J1 (below 2^32) onto the reference area.
+fn argon2_mapping(j1: U64, area: Int) -> Int Never! {
+    x :: Int.from_u64((j1 * j1) >> 32)
     y :: (area * x) >> 32
     area - 1 - y
 }
 
-fn argon2_update_address(address: &[Int], input: &[Int], zero: [Int]) Never! {
-    input[6] = (input[6] + 1) & C_MASK64
-    argon2_fill_block(zero, input, &address, false)
-    source :: argon2_read_block(address, 0)
-    argon2_fill_block(zero, source, &address, false)
-}
-
-fn argon2_address_word(index: Int, address_block: &[Int], input_block: &[Int], zero_block: [Int]) -> Int Never! {
-    address_index :: index %% 128
-    if address_index == 0 -> argon2_update_address(&address_block, &input_block, zero_block)
-    address_block[address_index]
-}
-
-fn argon2_fill_block(previous: [Int], reference: [Int], next: &[Int], with_xor: Bool) Never! {
-    mixed := [Int]{}
-    loop i in 0..<128 -> &mixed.push((previous[i] ~| reference[i]) & C_MASK64)
-    permuted := copy_ints(mixed)
-    argon2_permute(&permuted)
+/// Next 128 data-independent addresses, G(0, G(0, input)), after bumping the
+/// input block's counter word.
+fn argon2_next_addresses(address_block: &[U64], input_block: &[U64], saved: &[U64]) Never! {
+    input_block[6] = input_block[6] + U64{1}
     loop i in 0..<128 {
-        value :: (permuted[i] ~| mixed[i]) & C_MASK64
-        if with_xor -> next[i] = (next[i] ~| value) & C_MASK64 else -> next[i] = value
+        address_block[i] = input_block[i]
+        saved[i] = input_block[i]
     }
+    argon2_permute(&address_block)
+    loop i in 0..<128 {
+        mixed :: address_block[i] ~| saved[i]
+        address_block[i] = mixed
+        saved[i] = mixed
+    }
+    argon2_permute(&address_block)
+    loop i in 0..<128 -> address_block[i] = address_block[i] ~| saved[i]
 }
 
-fn argon2_permute(block: &[Int]) Never! {
+/// Compress block `previous` with block `reference` into block `next` of
+/// `memory` (word offsets); later passes XOR into the existing block.
+fn argon2_fill_block(memory: &[U64], work: &[U64], saved: &[U64], previous: Int, reference: Int, next: Int, with_xor: Bool) Never! {
+    loop i in 0..<128 {
+        mixed :: memory[previous + i] ~| memory[reference + i]
+        work[i] = mixed
+        if with_xor -> saved[i] = mixed ~| memory[next + i] else -> saved[i] = mixed
+    }
+    argon2_permute(&work)
+    loop i in 0..<128 -> memory[next + i] = work[i] ~| saved[i]
+}
+
+/// Argon2 permutation P over a 128-word block, in place: eight row rounds of
+/// sixteen consecutive words, then eight column rounds of word pairs.
+fn argon2_permute(block: &[U64]) Never! {
     loop i in 0..<8 {
-        base :: i * 16
-        a := [Int]{}
-        loop j in 0..<16 -> &a.push(block[base + j])
-        argon2_round16(&a)
-        loop j in 0..<16 -> block[base + j] = a[j]
+        b :: i * 16
+        argon2_round(&block, b, b + 1, b + 2, b + 3, b + 4, b + 5, b + 6, b + 7, b + 8, b + 9, b + 10, b + 11, b + 12, b + 13, b + 14, b + 15)
     }
     loop i in 0..<8 {
-        base :: i * 2
-        a := [Int]{
-            block[base],
-            block[base + 1],
-            block[base + 16],
-            block[base + 17],
-            block[base + 32],
-            block[base + 33],
-            block[base + 48],
-            block[base + 49],
-            block[base + 64],
-            block[base + 65],
-            block[base + 80],
-            block[base + 81],
-            block[base + 96],
-            block[base + 97],
-            block[base + 112],
-            block[base + 113],
-        }
-        argon2_round16(&a)
-        loop j in 0..<16 {
-            row :: j /% 2
-            column :: base + j %% 2
-            block[row * 16 + column] = a[j]
-        }
+        b :: i * 2
+        argon2_round(&block, b, b + 1, b + 16, b + 17, b + 32, b + 33, b + 48, b + 49, b + 64, b + 65, b + 80, b + 81, b + 96, b + 97, b + 112, b + 113)
     }
 }
 
-fn argon2_round16(a: &[Int]) Never! {
-    argon2_g(&a, 0, 4, 8, 12)
-    argon2_g(&a, 1, 5, 9, 13)
-    argon2_g(&a, 2, 6, 10, 14)
-    argon2_g(&a, 3, 7, 11, 15)
-    argon2_g(&a, 0, 5, 10, 15)
-    argon2_g(&a, 1, 6, 11, 12)
-    argon2_g(&a, 2, 7, 8, 13)
-    argon2_g(&a, 3, 4, 9, 14)
+fn argon2_round(v: &[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int, i6: Int, i7: Int, i8: Int, i9: Int, i10: Int, i11: Int, i12: Int, i13: Int, i14: Int, i15: Int) Never! {
+    argon2_g(&v, i0, i4, i8, i12)
+    argon2_g(&v, i1, i5, i9, i13)
+    argon2_g(&v, i2, i6, i10, i14)
+    argon2_g(&v, i3, i7, i11, i15)
+    argon2_g(&v, i0, i5, i10, i15)
+    argon2_g(&v, i1, i6, i11, i12)
+    argon2_g(&v, i2, i7, i8, i13)
+    argon2_g(&v, i3, i4, i9, i14)
 }
 
-fn argon2_g(a: &[Int], i: Int, j: Int, k: Int, l: Int) Never! {
-    a[i] = (a[i] + a[j] + 2 * ((a[i] & 0xffffffff) * (a[j] & 0xffffffff))) & C_MASK64
-    a[l] = rotr64(a[l] ~| a[i], 32)
-    a[k] = (a[k] + a[l] + 2 * ((a[k] & 0xffffffff) * (a[l] & 0xffffffff))) & C_MASK64
-    a[j] = rotr64(a[j] ~| a[k], 24)
-    a[i] = (a[i] + a[j] + 2 * ((a[i] & 0xffffffff) * (a[j] & 0xffffffff))) & C_MASK64
-    a[l] = rotr64(a[l] ~| a[i], 16)
-    a[k] = (a[k] + a[l] + 2 * ((a[k] & 0xffffffff) * (a[l] & 0xffffffff))) & C_MASK64
-    a[j] = rotr64(a[j] ~| a[k], 63)
+/// BlaMka G: BLAKE2b G with each x + y replaced by
+/// x + y + 2 * lo32(x) * lo32(y), all modulo 2^64.
+#Arithmetic(.Wrapping)
+fn argon2_g(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+    lo :: U64{0xffffffff}
+    a := v[ia]
+    b := v[ib]
+    c := v[ic]
+    d := v[id]
+    a = a + b + U64{2} * (a & lo) * (b & lo)
+    d = (d ~| a).rotate_right(32)
+    c = c + d + U64{2} * (c & lo) * (d & lo)
+    b = (b ~| c).rotate_right(24)
+    a = a + b + U64{2} * (a & lo) * (b & lo)
+    d = (d ~| a).rotate_right(16)
+    c = c + d + U64{2} * (c & lo) * (d & lo)
+    b = (b ~| c).rotate_right(63)
+    v[ia] = a
+    v[ib] = b
+    v[ic] = c
+    v[id] = d
 }
 
+/// BLAKE2b (RFC 7693), unkeyed, `out_len` 1..=64. The state and the 16-word
+/// work and message buffers are allocated once per call.
 fn blake2b(data: [U8], out_len: Int) -> [U8] Never! {
-    iv := [Int]{
-        0x6a09e667f3bcc908,
-        0xbb67ae8584caa73b,
-        0x3c6ef372fe94f82b,
-        0xa54ff53a5f1d36f1,
-        0x510e527fade682d1,
-        0x9b05688c2b3e6c1f,
-        0x1f83d9abfb41bd6b,
-        0x5be0cd19137e2179,
+    h := [U64]{}
+    loop word in C_BLAKE2B_IV -> &h.push(U64{word})
+    h[0] = h[0] ~| U64{0x01010000 | out_len}
+    v := [U64]{}
+    m := [U64]{}
+    loop _ in 0..<16 {
+        &v.push(U64{0})
+        &m.push(U64{0})
     }
-    h := copy_ints(iv)
-    h[0] = (h[0] ~| 0x01010000 ~| out_len) & C_MASK64
     i := 0
-    t := 0
-    loop {
-        if i + 128 < data.len() {
-            t = t + 128
-            blake2b_compress(&h, slice_u8(data, i, i + 128), t, false)
-            i = i + 128
-            next
-        }
-        block := [U8]{}
-        loop {
-            if i >= data.len() -> break
-            &block.push(data[i])
-            i = i + 1
-        }
-        t = t + block.len()
-        loop {
-            if block.len() >= 128 -> break
-            &block.push(U8{0})
-        }
-        blake2b_compress(&h, block, t, true)
-        out := [U8]{}
-        loop w in h {
-            loop b in 0..<8 {
-                if out.len() >= out_len -> return slice_u8(out, 0, out_len)
-                &out.push(to_u8(w >> (b * 8)))
-            }
-        }
-        return slice_u8(out, 0, out_len)
+    loop i + 128 < data.len() {
+        blake2b_compress(&h, &v, &m, data, i, i + 128, false)
+        i += 128
     }
+    blake2b_compress(&h, &v, &m, data, i, data.len(), true)
+    out := [U8]{}
+    loop k in 0..<out_len -> &out.push(to_u8(Int.from_u64(h[k /% 8] >> ((k %% 8) * 8))))
+    out
 }
 
 C_BLAKE2B_SIGMA :: [Int]{
@@ -1550,50 +1327,47 @@ C_BLAKE2B_SIGMA :: [Int]{
     3,
 }
 
-fn blake2b_compress(h: &[Int], block: [U8], t: Int, last: Bool) Never! {
-    iv := [Int]{
-        0x6a09e667f3bcc908,
-        0xbb67ae8584caa73b,
-        0x3c6ef372fe94f82b,
-        0xa54ff53a5f1d36f1,
-        0x510e527fade682d1,
-        0x9b05688c2b3e6c1f,
-        0x1f83d9abfb41bd6b,
-        0x5be0cd19137e2179,
+/// Compress `data[start..<end]`, zero-padded to 128 bytes; `end` is also the
+/// byte counter. `v` and `m` are the caller's 16-word scratch buffers.
+fn blake2b_compress(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, end: Int, last: Bool) Never! {
+    loop i in 0..<16 -> m[i] = load_le64(data, start + i * 8, end)
+    loop i in 0..<8 {
+        v[i] = h[i]
+        v[i + 8] = U64{C_BLAKE2B_IV[i]}
     }
-    v := [Int]{}
-    loop i in 0..<8 -> &v.push(h[i])
-    loop i in 0..<8 -> &v.push(iv[i])
-    v[12] = (v[12] ~| (t & C_MASK64)) & C_MASK64
-    v[13] = (v[13] ~| ((t >> 64) & C_MASK64)) & C_MASK64
-    if last -> v[14] = (v[14] ~| C_MASK64) & C_MASK64
-    m := [Int]{}
-    loop i in 0..<16 {
-        n := 0
-        loop b in 0..<8 -> n = n | ((u8_int(block[i * 8 + b]) & 255) << (b * 8))
-        &m.push(n & C_MASK64)
-    }
+    v[12] = v[12] ~| U64{end}
+    if last -> v[14] = v[14] ~| U64.MAX
     loop r in 0..<12 {
         base :: r * 16
-        mix64(&v, 0, 4, 8, 12, m[C_BLAKE2B_SIGMA[base + 0]], m[C_BLAKE2B_SIGMA[base + 1]])
-        mix64(&v, 1, 5, 9, 13, m[C_BLAKE2B_SIGMA[base + 2]], m[C_BLAKE2B_SIGMA[base + 3]])
-        mix64(&v, 2, 6, 10, 14, m[C_BLAKE2B_SIGMA[base + 4]], m[C_BLAKE2B_SIGMA[base + 5]])
-        mix64(&v, 3, 7, 11, 15, m[C_BLAKE2B_SIGMA[base + 6]], m[C_BLAKE2B_SIGMA[base + 7]])
-        mix64(&v, 0, 5, 10, 15, m[C_BLAKE2B_SIGMA[base + 8]], m[C_BLAKE2B_SIGMA[base + 9]])
-        mix64(&v, 1, 6, 11, 12, m[C_BLAKE2B_SIGMA[base + 10]], m[C_BLAKE2B_SIGMA[base + 11]])
-        mix64(&v, 2, 7, 8, 13, m[C_BLAKE2B_SIGMA[base + 12]], m[C_BLAKE2B_SIGMA[base + 13]])
-        mix64(&v, 3, 4, 9, 14, m[C_BLAKE2B_SIGMA[base + 14]], m[C_BLAKE2B_SIGMA[base + 15]])
+        blake2b_mix(&v, 0, 4, 8, 12, m[C_BLAKE2B_SIGMA[base]], m[C_BLAKE2B_SIGMA[base + 1]])
+        blake2b_mix(&v, 1, 5, 9, 13, m[C_BLAKE2B_SIGMA[base + 2]], m[C_BLAKE2B_SIGMA[base + 3]])
+        blake2b_mix(&v, 2, 6, 10, 14, m[C_BLAKE2B_SIGMA[base + 4]], m[C_BLAKE2B_SIGMA[base + 5]])
+        blake2b_mix(&v, 3, 7, 11, 15, m[C_BLAKE2B_SIGMA[base + 6]], m[C_BLAKE2B_SIGMA[base + 7]])
+        blake2b_mix(&v, 0, 5, 10, 15, m[C_BLAKE2B_SIGMA[base + 8]], m[C_BLAKE2B_SIGMA[base + 9]])
+        blake2b_mix(&v, 1, 6, 11, 12, m[C_BLAKE2B_SIGMA[base + 10]], m[C_BLAKE2B_SIGMA[base + 11]])
+        blake2b_mix(&v, 2, 7, 8, 13, m[C_BLAKE2B_SIGMA[base + 12]], m[C_BLAKE2B_SIGMA[base + 13]])
+        blake2b_mix(&v, 3, 4, 9, 14, m[C_BLAKE2B_SIGMA[base + 14]], m[C_BLAKE2B_SIGMA[base + 15]])
     }
-    loop i in 0..<8 -> h[i] = (h[i] ~| v[i] ~| v[i + 8]) & C_MASK64
+    loop i in 0..<8 -> h[i] = h[i] ~| v[i] ~| v[i + 8]
 }
 
-fn mix64(v: &[Int], a: Int, b: Int, c: Int, d: Int, x: Int, y: Int) Never! {
-    v[a] = (v[a] + v[b] + x) & C_MASK64
-    v[d] = rotl64(v[d] ~| v[a], 32)
-    v[c] = (v[c] + v[d]) & C_MASK64
-    v[b] = rotl64(v[b] ~| v[c], 24)
-    v[a] = (v[a] + v[b] + y) & C_MASK64
-    v[d] = rotl64(v[d] ~| v[a], 16)
-    v[c] = (v[c] + v[d]) & C_MASK64
-    v[b] = rotl64(v[b] ~| v[c], 63)
+/// BLAKE2b G (RFC 7693 3.1): right rotations by 32, 24, 16 and 63.
+#Arithmetic(.Wrapping)
+fn blake2b_mix(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Never! {
+    a := v[ia]
+    b := v[ib]
+    c := v[ic]
+    d := v[id]
+    a = a + b + x
+    d = (d ~| a).rotate_right(32)
+    c += d
+    b = (b ~| c).rotate_right(24)
+    a = a + b + y
+    d = (d ~| a).rotate_right(16)
+    c += d
+    b = (b ~| c).rotate_right(63)
+    v[ia] = a
+    v[ib] = b
+    v[ic] = c
+    v[id] = d
 }

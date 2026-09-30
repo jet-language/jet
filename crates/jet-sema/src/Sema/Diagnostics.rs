@@ -862,6 +862,11 @@ pub(crate) fn expr_is_same_ident(a: &Expr, name: &str) -> bool {
 }
 
 pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
+    // S31: a nested payload pattern covers only part of its head variant;
+    // nested coverage is proven separately over the whole arm set.
+    if pattern.has_nested_pattern() && !matches!(pattern, Pattern::Or(..)) {
+        return None;
+    }
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
@@ -903,6 +908,10 @@ pub(crate) fn missing_arms_text(
     let arms: Vec<String> = missing
         .iter()
         .map(|v| match subj_ty {
+            // S31: a nested witness (`Err(.High)`) is already a full pattern.
+            _ if v.contains('(') && !v.ends_with("(...)") => {
+                format!("    .{} {} {{}}", v, crate::Syntax::OP_UNIFIED_ARROW)
+            }
             // D-ENUMDOT1: leading-dot arm heads in `if subject == { … }`.
             Type::Named(_) | Type::Apply { .. } | Type::Union(_) => {
                 format!("    .{} {} {{}}", v, crate::Syntax::OP_UNIFIED_ARROW)
@@ -927,6 +936,20 @@ pub(crate) fn missing_arms_text(
                     format!(
                         "    .{}(v) {} {{}}",
                         crate::Syntax::LIT_OK,
+                        crate::Syntax::OP_UNIFIED_ARROW
+                    )
+                } else if v.starts_with(crate::Syntax::LIT_VALUE) {
+                    // D-OUTCOME-SHAPE1=A: `T? E!` names its optional
+                    // success states directly.
+                    format!(
+                        "    .{}(inner) {} {{}}",
+                        crate::Syntax::LIT_VALUE,
+                        crate::Syntax::OP_UNIFIED_ARROW
+                    )
+                } else if v == crate::Syntax::LIT_NULL {
+                    format!(
+                        "    .{} {} {{}}",
+                        crate::Syntax::LIT_NULL,
                         crate::Syntax::OP_UNIFIED_ARROW
                     )
                 } else {
@@ -1353,19 +1376,18 @@ pub(crate) fn expiring_secret_loan_type(ty: Type) -> Type {
 }
 
 pub(crate) fn is_expiring_secret_member_type(ty: &Type) -> bool {
-    matches!(
-        ty,
+    let expiring_leaf = |name: &str| matches!(name, "Secret" | "SigningKey" | "X25519SecretKey");
+    match ty {
         Type::Tagged { marker, inner }
-            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal))
-                && matches!(
-                    inner.as_ref(),
-                    Type::Named(name)
-                        if matches!(
-                            name.as_str(),
-                            "Secret" | "SigningKey" | "X25519SecretKey"
-                        )
-                )
-    )
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
+        {
+            matches!(inner.as_ref(), Type::Named(name) if expiring_leaf(name))
+        }
+        // The secret family is source-owned Core since the crypto carrier
+        // cutover; only the canonical `core.crypto` declarations qualify.
+        Type::Named(name) => canonical_core_crypto_leaf(name).is_some_and(expiring_leaf),
+        _ => false,
+    }
 }
 
 pub(crate) fn expiring_secret_loan_matches(want: &Type, got: &Type) -> bool {
@@ -1436,6 +1458,20 @@ pub(crate) fn is_clock_type(ty: &Type) -> bool {
     }
 }
 
+/// The canonical owner prefix of the source-owned `core.crypto` declarations.
+const CORE_CRYPTO_CANONICAL_PREFIX: &str = "<corelib>/Core/crypto::Core/crypto/crypto.jet::";
+
+/// The leaf of a canonical `core.crypto` nominal, e.g. `Secret`.
+fn canonical_core_crypto_leaf(name: &str) -> Option<&str> {
+    name.strip_prefix(CORE_CRYPTO_CANONICAL_PREFIX)
+}
+
+/// The canonical `core.crypto` nominal for `leaf`, the identity every
+/// source-owned crypto signature and value carries.
+pub(crate) fn core_crypto_canonical_type(leaf: &str) -> Type {
+    Type::Named(format!("{CORE_CRYPTO_CANONICAL_PREFIX}{leaf}"))
+}
+
 pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     match ty {
         Type::Tagged { marker, inner }
@@ -1447,6 +1483,7 @@ pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
             matches!(inner.as_ref(), Type::Named(name) if secret_bearing_crypto_leaf(name))
         }
         Type::Tagged { inner, .. } => is_secret_bearing_crypto_type(inner),
+        Type::Named(name) => canonical_core_crypto_leaf(name).is_some_and(secret_bearing_crypto_leaf),
         _ => false,
     }
 }
@@ -1456,7 +1493,7 @@ pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
 pub(crate) fn secret_exposure_function(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::Tagged { inner, .. } => secret_exposure_function(inner),
-        Type::Named(name) => match crypto_leaf(name)? {
+        Type::Named(name) => match crypto_leaf(name).or_else(|| canonical_core_crypto_leaf(name))? {
             "Secret" => Some("secret_bytes"),
             "SigningKey" => Some("signing_key_bytes"),
             "X25519SecretKey" => Some("x25519_secret_bytes"),
@@ -1529,6 +1566,9 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
             | "DBLease"
             | "DBPoolReceipt"
     ) || is_core_error_family_type(name)
+        // S80 / D-FAIL-ERROR1=A: the Prelude-owned default error shows its
+        // `message` through the Prelude display every tier already carries.
+        || name == Syntax::TYPE_ERR
 }
 
 /// D-FAIL-CONV2=A: the standard library's own error family. Membership is
@@ -1539,38 +1579,55 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
 /// for exactly this list, and the Prelude owns each member's failure text, so the
 /// family renders through the same display hook every other shown Core type uses.
 ///
-/// Outside the family on purpose: `CryptoError` (secret-bearing — E0915 forbids
-/// flattening it into a message), `TaskFailure` (D-FAIL-CARRIER1 owns
+/// D-CRYPTO-ERRFAM1=A: `CryptoError` and `FileCryptoError` are members; both are
+/// payload-free enums, and the secret-bearing crypto types keep E0915.
+///
+/// Outside the family on purpose: `TaskFailure` (D-FAIL-CARRIER1 owns
 /// cancellation and deadline reporting), `[FieldError]` (a list, not one named
 /// type), and component types no Core call fails with (`DataErrorKind`,
 /// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDnsError`).
-pub(crate) fn is_core_error_family_type(name: &str) -> bool {
+///
+/// A source-owned Core error arrives under its canonical owner identity
+/// (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`); membership is
+/// decided by its leaf.
+pub fn is_core_error_family_type(name: &str) -> bool {
     matches!(
-        name,
+        core_error_family_leaf(name),
         "BuildError"
             | "BrowserError"
             | "CBORError"
+            | "CryptoError"
             | "DBError"
             | "DataError"
             | "EncodingError"
             | "EmailError"
             | "EnvError"
+            | "FileCryptoError"
             | "HTTPError"
             | "IOError"
             | "NetError"
             | "RangeError"
             | "TextError"
             | "UTF8Error"
+            | "UUIDError"
             | "WsError"
             | "XMLError"
     )
 }
 
+/// The family leaf of a Core error name: canonical `<corelib>/…::Leaf`
+/// identities reduce to `Leaf`; every other name is its own leaf.
+pub(crate) fn core_error_family_leaf(name: &str) -> &str {
+    name.strip_prefix("<corelib>/")
+        .and_then(|identity| identity.rsplit("::").next())
+        .unwrap_or(name)
+}
+
 /// D-FAILURE-FOUNDATION1=A: every Core type that may be named as the error
 /// side of an explicit `!` contract. This is intentionally broader than the
-/// default-error conversion family above: types such as `CryptoError`,
-/// `TaskFailure`, and `AllocError` keep their own typed failure meaning even
-/// when they do not convert implicitly to `Err`.
+/// default-error conversion family above: types such as `TaskFailure` and
+/// `AllocError` keep their own typed failure meaning even when they do not
+/// convert implicitly to `Err`.
 pub(crate) fn is_core_error_type(name: &str) -> bool {
     matches!(
         name,

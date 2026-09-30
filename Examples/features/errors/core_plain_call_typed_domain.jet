@@ -1,0 +1,31 @@
+// A Core wrapper whose body cannot fail (`math.inv`, written `-> Float`) is
+// solved to the plain `Float Never!` contract once every body is checked. A
+// caller with its own failure domain calls it without `??`: nothing can
+// propagate, so no conversion into `MathErr` is needed.
+use core.math as math
+
+#Error
+enum MathErr {
+    Negative
+}
+
+fn inverse_checked(n: Float) -> Float MathErr! {
+    if n < 0.0 -> return Err(MathErr.Negative)
+    value :: math.inv(n)
+    Ok(value)
+}
+
+fn inverse_or_none(n: Float) -> Float? {
+    if n == 0.0 -> return None
+    math.inv(n)
+}
+
+fn run() {
+    print(inverse_checked(4.0) ?? 0.5)
+    if inverse_checked(-2.0) == {
+        .Ok(value) -> print(value)
+        .Err(_) -> print("negative")
+    }
+    print(inverse_or_none(8.0) ?? 0.5)
+    print(inverse_or_none(0.0) ?? 0.5)
+}

@@ -394,6 +394,18 @@ pub fn reset_one_shot_core_state() {
     Watcher::clear_watcher_state();
 }
 
+/// Release process-local Core owners at the end of a one-shot JIT or
+/// interpreter run, on the thread that ran it.
+///
+/// Thread-local tables are otherwise destroyed at thread exit in no fixed
+/// order, so an undrained `core.db` pool would close its drivers after the
+/// native connection table was already gone. Resident hot-swap/restart keep
+/// their owners across runs and skip this.
+#[doc(hidden)]
+pub fn release_one_shot_core_state() {
+    DB::release_db_resources();
+}
+
 /// Invoke the already-linked resident artifact without rebuilding it.
 ///
 /// Dev reload uses this only after sema proves that the candidate has no

@@ -45,7 +45,7 @@ fn comptime_fetch_rejects_outside_files_and_private_networks() {
     fs::write(&outside, "private fixture").unwrap();
     let source_path = root.join("main.jet");
     let file_source = format!(
-        "use core.net as net\n@DATA :: net.fetch(\"file://{}\", sha256: \"{}\")\nfn run() {{}}\n",
+        "use core.net as net\nDATA :: prep {{ net.fetch(\"file://{}\", sha256: \"{}\") }}\nfn run() {{}}\n",
         outside.display(),
         "0".repeat(64)
     );
@@ -73,7 +73,7 @@ fn comptime_fetch_rejects_outside_files_and_private_networks() {
         }
     });
     let network_source = format!(
-        "use core.net as net\n@DATA :: net.fetch(\"http://127.0.0.1:{port}/secret\", sha256: \"{}\")\nfn run() {{}}\n",
+        "use core.net as net\nDATA :: prep {{ net.fetch(\"http://127.0.0.1:{port}/secret\", sha256: \"{}\") }}\nfn run() {{}}\n",
         "0".repeat(64)
     );
     fs::write(&source_path, &network_source).unwrap();
@@ -83,7 +83,7 @@ fn comptime_fetch_rejects_outside_files_and_private_networks() {
     assert!(!server.join().unwrap(), "private destination was contacted");
 
     let reserved_source = format!(
-        "use core.net as net\n@DATA :: net.fetch(\"http://192.0.0.1/secret\", sha256: \"{}\")\nfn run() {{}}\n",
+        "use core.net as net\nDATA :: prep {{ net.fetch(\"http://192.0.0.1/secret\", sha256: \"{}\") }}\nfn run() {{}}\n",
         "0".repeat(64)
     );
     fs::write(&source_path, &reserved_source).unwrap();
@@ -106,7 +106,7 @@ fn comptime_fetch_rejects_hardlinks_to_outside_files() {
     fs::hard_link(&outside, &hardlink).unwrap();
     let source_path = root.join("main.jet");
     let source = format!(
-        "use core.net as net\n@DATA :: net.fetch(\"file://{}\", sha256: \"{}\")\nfn run() {{}}\n",
+        "use core.net as net\nDATA :: prep {{ net.fetch(\"file://{}\", sha256: \"{}\") }}\nfn run() {{}}\n",
         hardlink.display(),
         "0".repeat(64)
     );

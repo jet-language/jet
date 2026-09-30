@@ -1149,7 +1149,7 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
-/// c109 (S57/M9.5): a comptime LOCAL `@name :: expr` in a function body. Sema
+/// c109 (S57/M9.5): a comptime LOCAL `NAME :: expr` in a function body. Sema
 /// evaluates `build()` at compile time and codegen emits the result as literal data
 /// (`let __jet_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
 /// serialized literal verbatim; the runtime `init` expr is never emitted. Mirrors
@@ -1168,9 +1168,9 @@ fn build() -> [Int] {
     return xs
 }
 fn run() {
-    @xs :: build()
-    print(\"{@xs}\")
-    print(\"{@xs[1]}\")
+    built :: prep { build() }
+    print(\"{built}\")
+    print(\"{built[1]}\")
 }
 ";
     let (code, stdout) = build_and_run("tir_comptime_local", src);
@@ -1181,7 +1181,7 @@ fn run() {
 #[test]
 fn lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers() {
     let src = r#"
-@TOWER :: 99
+TOWER :: prep { 99 }
 fn choose(tower: Int) -> Int -> tower
 fn run() {
     print(choose(7))
@@ -1196,7 +1196,7 @@ fn run() {
 #[test]
 fn comptime_enum_constant_ignores_unreachable_type_body_methods_on_all_tiers() {
     let src = r#"
-@COLORS :: [Color]{Color.Red, Color.Green}
+COLORS :: prep { [Color]{Color.Red, Color.Green} }
 enum Color {
     Red
     Green
@@ -1210,7 +1210,7 @@ struct Holder {
     }
 }
 fn run() {
-    print(@COLORS.len())
+    print(COLORS.len())
     red :: Color.Red
     print(red.code())
     print(Holder.new())
@@ -1423,8 +1423,8 @@ fn run() {
     assert_eq!(stdout, "0\n");
 }
 
-/// c109: a field read off a comptime-const STRUCT value (`@PAIR_VALUE :: Pair{…}`;
-/// `PAIR_VALUE.left`) and an `==` against a comptime-const ENUM value (`@LIGHT_VALUE ::
+/// c109: a field read off a comptime-const STRUCT value (`PAIR_VALUE :: Pair{…}`;
+/// `PAIR_VALUE.left`) and an `==` against a comptime-const ENUM value (`LIGHT_VALUE ::
 /// Light.Green`; `LIGHT_VALUE == Light.Green`). The struct field read folds to the
 /// projected comptime value; the comparison uses the canonical ordering hook.
 /// `main` routes through the TIR; runs to the round-trip output.
@@ -1444,17 +1444,17 @@ enum Light {
     Green
 }
 
-@PAIR_VALUE :: Pair{left: 7, right: \"seven\"}
-@LIGHT_VALUE :: Light.Green
+PAIR_VALUE :: prep { Pair{left: 7, right: \"seven\"} }
+LIGHT_VALUE :: prep { Light.Green }
 
 fn run() {
     p :: Pair{left: 7, right: \"seven\"}
     l :: Light.Green
-    print(\"{@PAIR_VALUE.left}\")
+    print(\"{PAIR_VALUE.left}\")
     print(\"{p.left}\")
-    print(\"{@PAIR_VALUE.right}\")
+    print(\"{PAIR_VALUE.right}\")
     print(\"{p.right}\")
-    print(\"{@LIGHT_VALUE == Light.Green}\")
+    print(\"{LIGHT_VALUE == Light.Green}\")
     print(\"{l == Light.Green}\")
 }
 ";

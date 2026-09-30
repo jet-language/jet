@@ -336,16 +336,16 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
 }
 
 pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
-    typed :: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
-    Val(sema_call_lower_bound_arguments(typed, params, args, environment))
+    typed :: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, &args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
+    Val(sema_call_lower_bound_arguments(typed, params, &args, environment))
 }
 
 // This path runs Ownership after expression typing and before lowering. The
 // ownership hook may mark implicit_clone on the source arg, so lowering must
 // happen only after it accepts and completes.
 pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableAbi?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
-    typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
+    typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
-    Val(sema_call_lower_bound_arguments(typed, params, args, environment))
+    Val(sema_call_lower_bound_arguments(typed, params, &args, environment))
 }

@@ -1,8 +1,3 @@
-package {
-    name: "io_db_migration_proof"
-    version: "0.1.0"
-    authority: { holds: { allow: [DB, Exec, FS, FS.Read, FS.Write, IO, Mem.Alloc, Time] } }
-}
 // #3094: migration and transaction ownership on the real core.db path.
 // A failed migration leaves no applied record and no partial schema, a
 // failed transaction leaves rows unchanged, a second connection can write
@@ -14,6 +9,13 @@ use core.files as fs
 fn count(scope: DBScope, sql: SQL) -[DB]> Int {
     row :: scope.query_one(sql) ?? return -1
     db.row_int(row, "n") ?? -1
+}
+
+fn table_state(scope: DBScope) -[DB]> String {
+    if scope.query(SQL{"SELECT id FROM audit"}) == {
+        .Ok(_) -> return "present"
+        .Err(_) -> return "absent"
+    }
 }
 
 fn run() {
@@ -29,9 +31,16 @@ fn run() {
         .Ok(steps) -> print("migrate v2: applied {steps}")
         .Err(_) -> print("migrate v2: failed")
     }
-    print("applied v1 rows: {count(scope, SQL{"SELECT COUNT(*) AS n FROM __jet_migrations WHERE migration_key = 'v1' AND status = 'applied'"})}")
-    print("applied v2 rows: {count(scope, SQL{"SELECT COUNT(*) AS n FROM __jet_migrations WHERE migration_key = 'v2' AND status = 'applied'"})}")
-    print("v2 first-step table present: {count(scope, SQL{"SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'audit'"})}")
+    // A scope may not read the migration ledger ("migration metadata is
+    // managed only by db.migrate"), so the ledger is observed through migrate
+    // itself: v1 re-applies nothing, and the corrected v2 still applies and
+    // can create `audit`, which the failed attempt therefore left absent.
+    audit_policy :: db.policy("audit", "true") ?? panic("policy")
+    audit_scope :: conn.with_policy(audit_policy, "owner")
+    print("audit table after failed v2: {table_state(audit_scope)}")
+    print("migrate v1 again steps: {db.migrate(scope, "v1", [SQL{"CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"}]) ?? -1}")
+    print("migrate v2 retry steps: {db.migrate(scope, "v2", [SQL{"CREATE TABLE audit (id INTEGER PRIMARY KEY)"}]) ?? -1}")
+    print("audit table after v2 retry: {table_state(audit_scope)}")
 
     committed :: db.transaction(scope, "good batch", [SQL{"INSERT INTO item (id, name) VALUES (1, 'one')"}, SQL{"INSERT INTO item (id, name) VALUES (2, 'two')"}]) ?? -1
     print("commit steps: {committed}")

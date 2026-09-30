@@ -75,15 +75,17 @@ macro_rules! jet_db_bridge {
             $bridge::jet_db_close(connection.jet_db_handle())
         }
 
-        fn jet_db_begin<T: JetDbCarrier>(connection: T) -> bool {
+        // A transaction statement reads the handle; the connection stays
+        // owned by its binding (or the escaping handler that captured it).
+        fn jet_db_begin<T: JetDbCarrier>(connection: &T) -> bool {
             $bridge::jet_db_begin(connection.jet_db_handle())
         }
 
-        fn jet_db_commit<T: JetDbCarrier>(connection: T) -> bool {
+        fn jet_db_commit<T: JetDbCarrier>(connection: &T) -> bool {
             $bridge::jet_db_commit(connection.jet_db_handle())
         }
 
-        fn jet_db_rollback<T: JetDbCarrier>(connection: T) -> bool {
+        fn jet_db_rollback<T: JetDbCarrier>(connection: &T) -> bool {
             $bridge::jet_db_rollback(connection.jet_db_handle())
         }
 
@@ -239,6 +241,71 @@ macro_rules! jet_db_bridge {
         ) -> Result<JetRowPolicy, jet_std::DBError> {
             jet_db_policy_new(table.clone(), expression.clone())
                 .map_err(|message| jet_std::DBError { message })
+        }
+
+        /// D-DBPOOL1: AOT drivers are bridge connections; admission, health,
+        /// reset, deadlines and draining stay in the shared pool Prelude.
+        fn jet_db_pool_hooks() -> JetDbPoolHooks<JetDbConnection> {
+            JetDbPoolHooks::new(
+                |path: &str| {
+                    let handle = $bridge::jet_db_open(path);
+                    if handle == 0 {
+                        Err(jet_db_pool_error("database pool backend open failed"))
+                    } else {
+                        Ok(JetDbConnection { handle })
+                    }
+                },
+                |connection: &mut JetDbConnection| $bridge::jet_db_health(connection.handle),
+                |connection: &mut JetDbConnection| $bridge::jet_db_reset(connection.handle),
+                |connection: JetDbConnection| {
+                    let _ = $bridge::jet_db_close(connection.handle);
+                },
+            )
+        }
+
+        fn jet_db_pool_new(
+            url: &String,
+            max: i64,
+        ) -> Result<JetDbPool<JetDbConnection>, jet_std::DBError> {
+            JetDbPool::new(url.clone(), max, jet_db_pool_hooks())
+        }
+
+        fn jet_db_pool_acquire(
+            pool: &JetDbPool<JetDbConnection>,
+        ) -> Result<JetDbLease<JetDbConnection>, jet_std::DBError> {
+            pool.acquire(None)
+        }
+
+        fn jet_db_pool_acquire_deadline(
+            pool: &JetDbPool<JetDbConnection>,
+            deadline: &jet_std::Duration,
+        ) -> Result<JetDbLease<JetDbConnection>, jet_std::DBError> {
+            let deadline_ms =
+                jet_std_time_now().saturating_add(deadline.ns.saturating_div(1_000_000));
+            pool.acquire(Some(deadline_ms))
+        }
+
+        fn jet_db_pool_ready(
+            pool: &JetDbPool<JetDbConnection>,
+        ) -> Result<bool, jet_std::DBError> {
+            pool.ready()
+        }
+
+        fn jet_db_pool_drain(
+            pool: &JetDbPool<JetDbConnection>,
+        ) -> Result<JetDbPoolReceipt, jet_std::DBError> {
+            pool.drain(None)
+        }
+
+        fn jet_db_pool_receipt(pool: &JetDbPool<JetDbConnection>) -> JetDbPoolReceipt {
+            pool.receipt()
+        }
+
+        fn jet_db_lease_close(
+            lease: &JetDbLease<JetDbConnection>,
+        ) -> Result<(), jet_std::DBError> {
+            lease.release();
+            Ok(())
         }
 
     };

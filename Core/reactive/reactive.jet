@@ -10,9 +10,10 @@ package {
 }
 module loadable
 
-// Reactive values are immutable Jet carriers. The runtime provider replaces
-// these constructors with shared, dependency-tracked cells; keeping the
-// transition rules here makes the source-level API deterministic as well.
+// Reactive values are immutable Jet carriers. The runtime provider owns the
+// `signal`, `computed`, `derived` and `effect` constructors, which return
+// shared, dependency-tracked cells; keeping the transition rules here makes
+// the source-level API deterministic as well.
 pub struct Signal<T> {
     pub value: T
     pub version: Int
@@ -33,20 +34,6 @@ pub struct Effect {
     pub active: Bool
 }
 
-pub fn signal<T>(value: T) -> Signal<T> { Signal<T>{value: value, version: 0} }
-
-pub fn computed<T>(compute: fn() -> T) -> Computed<T> {
-    Computed<T>{value: compute(), version: 0}
-}
-
-pub fn derived<T>(compute: fn() -> T) -> Derived<T> {
-    Derived<T>{value: compute(), version: 0}
-}
-
-pub fn effect(body: fn()) -> Effect {
-    body()
-    Effect{last: 0, active: true}
-}
 pub fn unsubscribe(e: Effect) -> Effect {
     Effect{last: e.last, active: false}
 }

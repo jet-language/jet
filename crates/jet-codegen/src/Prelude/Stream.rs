@@ -18,6 +18,7 @@ pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
             completion: completion_tx,
             failed: std::sync::atomic::AtomicBool::new(false),
             failure_report: failure_report.clone(),
+            cancel_shielded: std::sync::atomic::AtomicBool::new(false),
         },
         JetStream {
             values: Some(values),
@@ -45,6 +46,10 @@ where
         move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 producer(&sender);
+                // A producer that took its cancel edge ran its cleanup inside
+                // `#Shield`; leaving it now delivers the deferred cancel, so
+                // the task still reports `Cancelled`.
+                sender.leave_cancel_shield();
             }));
             if let Err(payload) = result {
                 // A cancel is not a producer failure, so it never sets the
@@ -253,6 +258,7 @@ pub struct JetStreamSender<T> {
     completion: JetSchedulerSender<JetStreamCompletion>,
     failed: std::sync::atomic::AtomicBool,
     failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    cancel_shielded: std::sync::atomic::AtomicBool,
 }
 
 impl<T: Send> JetStreamSender<T> {
@@ -260,6 +266,49 @@ impl<T: Send> JetStreamSender<T> {
     /// closes the acknowledgement channel and returns `false`.
     pub fn send_stream(&self, value: T) -> bool {
         self.values.send(value) && self.acknowledgements.receive().is_some()
+    }
+
+    /// Generator `yield`: send one value and wait for the next pull. Returns
+    /// `false` when the consumer stopped pulling, so the generator takes its
+    /// MIR cancel edge and runs its lexical cleanup instead of unwinding past
+    /// it. That cleanup runs while the producer is still cancelled, so it runs
+    /// inside `#Shield`: its own wait points complete, and `jet_stream_task`
+    /// delivers the deferred cancel when the producer returns
+    /// (D-CANCELMODEL1=C).
+    pub fn yield_value(&self, value: T) -> bool {
+        let sent = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.send_stream(value)
+        }));
+        match sent {
+            Ok(true) => true,
+            Ok(false) => {
+                self.enter_cancel_shield();
+                false
+            }
+            Err(payload) if jet_scheduler_is_cancel_unwind(payload.as_ref()) => {
+                self.enter_cancel_shield();
+                false
+            }
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    fn enter_cancel_shield(&self) {
+        if !self
+            .cancel_shielded
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            jet_scheduler_shield_enter();
+        }
+    }
+
+    fn leave_cancel_shield(&self) {
+        if self
+            .cancel_shielded
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            jet_scheduler_shield_leave();
+        }
     }
 
     pub fn fail(&self) {

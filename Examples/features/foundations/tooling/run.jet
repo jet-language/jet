@@ -1,23 +1,23 @@
 use core.build as build
 use core.compiler as compiler
 
-@SOURCE :: "fn old_name(value: Int) -> Int {{ 41 }}\nfn run() -> Int {{ 2 }}\n"
+SOURCE :: prep { "fn old_name(value: Int) -> Int {{ 41 }}\nfn run() -> Int {{ 2 }}\n" }
 
-@LEXED :: compiler.lex(@SOURCE) ?? panic("compiler lex failed")
+LEXED :: prep { compiler.lex(SOURCE) ?? panic("compiler lex failed") }
 
-@PARSED :: compiler.parse(@SOURCE) ?? panic("compiler parse failed")
+PARSED :: prep { compiler.parse(SOURCE) ?? panic("compiler parse failed") }
 
-@CHECKED :: compiler.check(@PARSED) ?? panic("compiler check failed")
+CHECKED :: prep { compiler.check(PARSED) ?? panic("compiler check failed") }
 
-@TOKENS :: @LEXED.tokens().len()
+TOKENS :: prep { LEXED.tokens().len() }
 
-@ITEMS :: @PARSED.items().len()
+ITEMS :: prep { PARSED.items().len() }
 
-@FUNCTIONS :: @CHECKED.functions().len()
+FUNCTIONS :: prep { CHECKED.functions().len() }
 
 fn build(b: BuildContext) -> BuildPlan {
     b.generate("facts") {
-        pub fn tooling_facts() -> String { "tokens={@TOKENS}; items={@ITEMS}; functions={@FUNCTIONS}" }
+        pub fn tooling_facts() -> String { "tokens={TOKENS}; items={ITEMS}; functions={FUNCTIONS}" }
     }
 
     before :: b.add_executable(
@@ -49,6 +49,6 @@ fn build(b: BuildContext) -> BuildPlan {
 }
 
 fn run() {
-    print("compiler facts: tokens={@TOKENS}; items={@ITEMS}; functions={@FUNCTIONS}")
+    print("compiler facts: tokens={TOKENS}; items={ITEMS}; functions={FUNCTIONS}")
     print("build graph: graph=checked; diff=checked")
 }

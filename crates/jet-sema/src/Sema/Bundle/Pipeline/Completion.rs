@@ -3,7 +3,7 @@ use super::super::Validation::check_ui_capabilities;
 
 pub(super) fn complete_bundle_check(
     bundle: &mut ProgramBundle,
-    states: &[ModuleState],
+    states_mut: &mut [ModuleState],
     plugin_interfaces: &PluginInterfaceRegistry,
     devtools_registry: &mut jet_foundation::AST::DevtoolsRegistry,
     mode: CompileMode,
@@ -18,6 +18,7 @@ pub(super) fn complete_bundle_check(
     Vec<Diagnostic>,
     super::super::super::Effects::SemIndexEffectFacts,
 ) {
+    let states: &[ModuleState] = &*states_mut;
     populate_name_ledger(bundle, &states, &mut name_ledger);
     super::super::record_state_marker_references(bundle, &mut name_ledger);
     record_import_edge_facts(bundle, &mut name_ledger);
@@ -170,7 +171,7 @@ pub(super) fn complete_bundle_check(
                 let param = &run_fn.params[0];
                 let cli_module =
                     jet_foundation::CLISchema::entry_type_module(bundle).unwrap_or(bundle.entry);
-                if std::env::var_os("JET_DEBUG_CLI").is_some() {
+                if jet_foundation::CheckReads::env_var_os("JET_DEBUG_CLI").is_some() {
                     eprintln!(
                         "cli-debug sema module={cli_module} param={:?} cli={:?} derives={:?}",
                         param.ty,
@@ -259,6 +260,21 @@ pub(super) fn complete_bundle_check(
         )
     }
 
+    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: settle the failure union of
+    // every unannotated function (and mint its own error cases) before any
+    // real body check, so callers see the inferred contract.
+    super::FailureUnion::infer_failure_unions(
+        bundle,
+        states_mut,
+        plugin_interfaces,
+        devtools_registry,
+        &declared_effect_facts,
+        no_os,
+        gates,
+        &name_ledger,
+        &mut diags,
+    );
+    let states: &[ModuleState] = &*states_mut;
     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let origin = std::sync::Arc::new(
@@ -327,6 +343,24 @@ pub(super) fn complete_bundle_check(
             local_summaries,
         ));
     }
+    // #3708: every body is checked; infer the empty failure sets and settle
+    // the E2404 obligations recorded against unannotated callees. The
+    // module-qualified result lets E0433 treat a dropped call to an
+    // inferred-infallible callee as pure (D-DISCARD1=A).
+    let inferred_infallible: HashSet<String> = super::super::super::solve_inferred_failure(
+        bundle,
+        &module_effect_summaries,
+        &global_addr_taken,
+        &mut diags,
+    )
+    .into_iter()
+    .zip(&module_effect_summaries)
+    .flat_map(|(names, (alias, _))| {
+        names
+            .into_iter()
+            .map(move |name| format!("{alias}::{name}"))
+    })
+    .collect();
     // D-DX-PLUGIN1=D: body inference owns publication typing. Project the
     // facts stored in each module's existing TypeRegistry into the one shared
     // panel registry before checking field liveness.
@@ -568,11 +602,13 @@ pub(super) fn complete_bundle_check(
         &mut failed_diagnostic_phases,
         &mut diags,
     );
-    // P7: a dropped result of an effect-free call does nothing (E0433).
+    // P7 / D-DISCARD1=A: a dropped result of a pure, infallible call does
+    // nothing (E0433).
     super::super::super::Effects::check_discarded_results(
         &validation_summaries,
         &public_summaries,
         &public_solved,
+        &inferred_infallible,
         &mut diags,
     );
     for (module_index, pending_diagnostics) in module_pending_diagnostics.into_iter().enumerate() {

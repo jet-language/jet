@@ -465,6 +465,9 @@ fn ui_snapshots() {
         });
         let cli_e0043 = src.lines().any(|line| line.trim() == "// @cli_e0043");
         let cli_e1219 = src.lines().any(|line| line.trim() == "// @cli_e1219");
+        // D-DBG1=A: a marked fixture drives the real `jet build <file>`, whose
+        // shipped-artifact fact rejects a leftover `debug(...)` trace.
+        let cli_build = src.lines().any(|line| line.trim() == "// @cli_build");
         let cli_e2101 = src.lines().any(|line| line.trim() == "// @cli_e2101");
         let typed_settings_cli = src
             .lines()
@@ -517,6 +520,8 @@ fn ui_snapshots() {
             run_cli_e0043_snapshot()
         } else if cli_e1219 {
             run_cli_e1219_snapshot(&file_arg)
+        } else if cli_build {
+            run_cli_build_snapshot(&file_arg)
         } else if cli_e2101 {
             run_cli_e2101_snapshot()
         } else if jetpack_hangar_digest_mismatch {
@@ -658,7 +663,7 @@ fn ui_snapshots() {
                 .collect::<Vec<_>>()
                 .join("\n");
             let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-                .args(["repl", "--deny-fs"])
+                .args(["repl", "--deny=FS"])
                 .env("NO_COLOR", "1")
                 .env("JET_REPL_HISTORY", "off")
                 .stdin(Stdio::piped())
@@ -935,7 +940,9 @@ fn run() {
     print(total)
 }
 "#;
-    let compiled = jet::compile_with_path(source, "core_lint_boundary.jet")
+    let path = unique_tmp("jet_core_lint_boundary").join("core_lint_boundary.jet");
+    fs::write(&path, source).expect("write core lint boundary fixture");
+    let compiled = jet::compile_with_path(source, &path.to_string_lossy())
         .unwrap_or_else(|diagnostics| panic!("fixture must compile: {diagnostics:?}"));
     let rendered = jet::render_diagnostics("core_lint_boundary.jet", source, &compiled.lints);
     for lint in &compiled.lints {
@@ -994,7 +1001,7 @@ fn e0507_unknown_traversal_intent_stays_explanatory() {
 
 #[test]
 fn loop_grammar_history_stays_distinct_from_collection_mutation() {
-    let path = PathBuf::from("foreign_for.jet");
+    let path = unique_tmp("jet_foreign_loop_grammar").join("foreign_for.jet");
     let source = r#"
 fn run() {
     for x in xs { print(x) }
@@ -1003,6 +1010,7 @@ fn run() {
     do { print("done") }
 }
 "#;
+    fs::write(&path, source).expect("write foreign loop fixture");
     let diagnostics = jet::compile_with_path(source, &path.to_string_lossy())
         .expect_err("retired loop spellings must be rejected");
     assert!(
@@ -1050,6 +1058,18 @@ fn run_cli_e1219_snapshot(file: &str) -> String {
     assert!(!output.status.success(), "E1219 command must fail");
     let mut rendered = String::from_utf8(output.stdout).expect("E1219 stdout is UTF-8");
     rendered.push_str(&String::from_utf8(output.stderr).expect("E1219 stderr is UTF-8"));
+    rendered
+}
+
+fn run_cli_build_snapshot(file: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", file, "--color=never"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run `jet build` CLI diagnostic fixture");
+    assert!(!output.status.success(), "`jet build` fixture must fail");
+    let mut rendered = String::from_utf8(output.stdout).expect("build stdout is UTF-8");
+    rendered.push_str(&String::from_utf8(output.stderr).expect("build stderr is UTF-8"));
     rendered
 }
 

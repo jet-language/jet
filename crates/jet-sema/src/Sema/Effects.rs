@@ -913,6 +913,10 @@ pub struct DiscardedResultFact {
     /// The whole call expression as written (`double(3)`).
     pub call_text: String,
     pub span: Span,
+    /// The call may still fail: it sits under a (possibly automatic) `?` and
+    /// its declared contract is not `T Never!`. The site fires only once the
+    /// bundle failure solve (#3708) proves the callee's failure set empty.
+    pub failure_open: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -959,6 +963,10 @@ pub struct EffectSummary {
     pub memory: super::MemoryFacts::MemorySummary,
     /// Statements that drop a call's result; checked after the solve (E0433).
     pub discarded_results: Vec<DiscardedResultFact>,
+    /// #3708: the function body produces a failure of its own (a non-`Ok`
+    /// fallible return value or a failure-carrying statement form). Call
+    /// edges and `Try`/`Err` nodes are read from the checked AST instead.
+    pub failure_direct: bool,
 }
 /// Stable semantic identity for one lambda. Module spans are local to the
 /// loaded module, so the canonical module key plus the exact source boundary
@@ -1127,7 +1135,9 @@ pub(crate) fn project_lambda_effect_facts(
 
 /// D-AUTODIFF1: reject a named differentiated function when its solved effect
 /// row reaches an ambient effect. `GPU` is the capability used by pure
-/// `core.compute` Tensor operations and is therefore allowed here.
+/// `core.compute` Tensor operations and is therefore allowed here. Memory is
+/// deny-only (D-AUTHORITY-MEM1=B): allocating a result Tensor is not an
+/// ambient effect, so `Mem.*` never breaks the pure Tensor contract.
 pub fn check_autodiff_purity(
     summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
@@ -1191,7 +1201,10 @@ pub fn check_autodiff_purity(
             };
             let mut forbidden = effects
                 .iter()
-                .filter(|effect| effect_root(effect) != Effect::GPU.name())
+                .filter(|effect| {
+                    let root = effect_root(effect);
+                    root != Effect::GPU.name() && root != "Mem"
+                })
                 .cloned()
                 .collect::<EffectSet>();
             // D-PANICROOT1 keeps Panic in the solved deny row. A differentiated
@@ -1699,6 +1712,7 @@ pub fn check_inferred_purity(
         diags: &mut Vec<Diagnostic>,
     ) {
         if !f.is_pure && !f.is_comptime {
+            check_inferred_memo(f, owner, identity, module_alias, solved, diags);
             return;
         }
         let identity = identity
@@ -1782,6 +1796,54 @@ pub fn check_inferred_purity(
             &effects,
             &display_call_chain,
             &denial.chain.scope_chain,
+        ));
+    }
+
+    /// D-MEMO1=A with D-EFFECT-OMIT1=A: a `#Memo` function without a written
+    /// `-[]>` is pure when its solved row is empty, so the marker's purity
+    /// requirement is judged here, once every row is known. A declared
+    /// `-[]>` is already proved by the body check and `check_one` above.
+    /// Panic and memory are deny-only (`effects_uncovered`), exactly as they
+    /// are for an explicit empty bound.
+    fn check_inferred_memo(
+        f: &crate::AST::Func,
+        owner: Option<&str>,
+        identity: Option<&str>,
+        module_alias: &str,
+        solved: &HashMap<String, EffectSet>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Some(marker) = f
+            .markers
+            .iter()
+            .find(|marker| marker.name == crate::Syntax::MARKER_MEMO)
+        else {
+            return;
+        };
+        let identity = identity
+            .map(str::to_owned)
+            .unwrap_or_else(|| super::effect_key(owner, &f.name));
+        let key = format!("{module_alias}::{identity}");
+        let Some(row) = solved.get(&key) else {
+            return;
+        };
+        let impure = effects_uncovered(row, &EffectSet::new());
+        if impure.is_empty() {
+            return;
+        }
+        let shown = impure.iter().cloned().collect::<Vec<_>>().join(", ");
+        diags.push(Diagnostic::error(
+            "E0938",
+            "`#Memo` requires a pure function".to_string(),
+            format!(
+                "memoization reuses a completed result, but `{}` uses `{shown}`",
+                f.name
+            ),
+            format!(
+                "remove the `{shown}` operations from `{}`, or drop `#Memo`",
+                f.name
+            ),
+            Some(marker.span),
         ));
     }
 
@@ -2051,13 +2113,17 @@ pub fn check_callback_bounds(
 }
 
 /// E0433: a statement dropped the result of a call whose solved effect row is
-/// empty, so the line has no observable outcome. Memory rights are not an
-/// observable outcome of a call; every other root (including `Panic`) keeps
-/// the site quiet, as do open-world, unresolved and undeclared-dispatch rows.
+/// empty and that cannot fail, so the line has no observable outcome
+/// (D-DISCARD1=A). Memory rights are not an observable outcome of a call;
+/// every other root (including `Panic`) keeps the site quiet, as do
+/// open-world, unresolved and undeclared-dispatch rows. A call whose failure
+/// would still propagate keeps the site quiet unless `infallible` (the #3708
+/// solve, module-qualified keys) proves its failure set empty.
 pub fn check_discarded_results(
     summaries: &HashMap<String, EffectSummary>,
     all_summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
+    infallible: &HashSet<String>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let mut facts = summaries
@@ -2067,7 +2133,8 @@ pub fn check_discarded_results(
             let Some(callee) = all_summaries.get(&fact.callee) else {
                 return false;
             };
-            !callee.maximal
+            (!fact.failure_open || infallible.contains(&fact.callee))
+                && !callee.maximal
                 && !callee.unbounded_trait_dispatch
                 && solved.get(&fact.callee).is_some_and(|row| {
                     row.iter()
@@ -2087,7 +2154,7 @@ pub fn e0433(fact: &DiscardedResultFact) -> Diagnostic {
         "E0433",
         format!("the result of `{}` is thrown away", fact.call_text),
         format!(
-            "`{}` has no other effect, so this line does nothing",
+            "`{}` is pure (it has no effects and changes nothing through `&`), so this line does nothing",
             fact.callee_name
         ),
         format!(
@@ -2097,6 +2164,24 @@ pub fn e0433(fact: &DiscardedResultFact) -> Diagnostic {
         Some(fact.span),
     )
     .with_source_derived_suggestion(Span::new(fact.span.start, fact.span.start), "result :: ")
+}
+
+/// E0433 (D-DISCARD1=A), lost-tail site: the last line of a named function
+/// with no written return type produces a value that nobody receives. The
+/// function returns nothing, so the value would only surface later as a
+/// confusing `Unit` error at a caller.
+pub fn e0433_lost_tail(function: &str, value_type: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0433",
+        format!("this {value_type} value is thrown away"),
+        format!(
+            "`{function}` has no return type, so it returns nothing and the value of its last line is lost"
+        ),
+        format!(
+            "if `{function}` should return it, write `-> {value_type}` after its parameter list; to discard it on purpose, write `.drop(\"reason\")`"
+        ),
+        Some(span),
+    )
 }
 
 /// E0747's public constructor retains its stable source-facing API. The

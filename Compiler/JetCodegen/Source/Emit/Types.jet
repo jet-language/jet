@@ -15,7 +15,7 @@ fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MirType, acce
 }
 
 fn jet_rust_emit_callable_return(ctx: &JetRustEmitContext, function: MirFunction) -> String Never! {
-    jet_rust_emit_type(ctx, function.return_type)
+    jet_rust_emit_type(&ctx, function.return_type)
 }
 
 fn jet_rust_emit_is_columnar_type(ctx: &JetRustEmitContext, source: MirType) -> Bool Never! {
@@ -68,15 +68,15 @@ fn jet_rust_emit_type(ctx: &JetRustEmitContext, source: MirType) -> String Never
         .Shared(inner) -> "{ctx.config.root_prefix}jet_std::JetShared<{jet_rust_emit_type(ctx, inner)}>"
         .Option(inner) -> "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(ctx, inner)}, {ctx.config.root_prefix}JetAbsent>"
         .Result(ok, err) -> "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(ctx, ok)}, {jet_rust_emit_type(ctx, err)}>"
-        .Fn(signature) -> jet_rust_emit_function_type(ctx, signature)
-        .SendFn(params, ret, conventions) -> jet_rust_emit_send_function_type(ctx, params, ret, conventions)
-        .Apply(name, args) -> jet_rust_emit_apply_type(ctx, name, args)
+        .Fn(signature) -> jet_rust_emit_function_type(&ctx, signature)
+        .SendFn(params, ret, conventions) -> jet_rust_emit_send_function_type(&ctx, params, ret, conventions)
+        .Apply(name, args) -> jet_rust_emit_apply_type(&ctx, name, args)
         .TraitObject(bounds) -> {
-            names :: loop bound in bounds -> jet_rust_emit_trait_name(ctx, bound.id)
+            names :: loop bound in bounds -> jet_rust_emit_trait_name(&ctx, bound.id)
             if names.len() == 0 -> "Box<dyn std::any::Any>" else -> "Box<dyn {names.join(" + ")}>"
         }
         .Tuple(fields) -> {
-            names :: loop field in fields -> jet_rust_emit_type(ctx, field.ty)
+            names :: loop field in fields -> jet_rust_emit_type(&ctx, field.ty)
             if names.len() == {
                 0 -> "()"
                 1 -> "({names[0]},)"
@@ -85,18 +85,18 @@ fn jet_rust_emit_type(ctx: &JetRustEmitContext, source: MirType) -> String Never
         }
         .FixedList(elem, len) -> "[{jet_rust_emit_type(ctx, elem)}; {mir_measure_expression(len)}]"
         .IntN(signed, bits) -> "{if signed -> "i" else -> "u"}{bits}"
-        .InlineRange(base, _, _) -> jet_rust_emit_type(ctx, base)
+        .InlineRange(base, _, _) -> jet_rust_emit_type(&ctx, base)
         .Tagged(marker, inner) -> {
-            if marker == (MirTagMarker.Internal{internal_tag: MirInternalTag.AllocatorView}) -> "&mut {jet_rust_emit_type(ctx, inner)}" else -> jet_rust_emit_type(ctx, inner)
+            if marker == (MirTagMarker.Internal{internal_tag: MirInternalTag.AllocatorView}) -> "&mut {jet_rust_emit_type(ctx, inner)}" else -> jet_rust_emit_type(&ctx, inner)
         }
         .Union(_) -> {
             identity :: ty.identity ?? {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR union has no canonical identity", "lowering must register every structural union instance before source emission", None)
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR union has no canonical identity", "lowering must register every structural union instance before source emission", None)
                 MirTypeId{value: 0}
             }
-            jet_rust_emit_type_name(ctx, identity)
+            jet_rust_emit_type_name(&ctx, identity)
         }
-        .Quantity(base, _) -> jet_rust_emit_type(ctx, base)
+        .Quantity(base, _) -> jet_rust_emit_type(&ctx, base)
         .Measure(_) -> "f64"
     }
 }
@@ -349,13 +349,13 @@ fn jet_rust_emit_c_abi_type(ctx: &JetRustEmitContext, source: MirType) -> String
         .Char -> "u32"
         .String -> "*const core::ffi::c_char"
         .IntN(signed, bits) -> "{if signed -> "i" else -> "u"}{bits}"
-        .InlineRange(base, _, _) | .Quantity(base, _) -> jet_rust_emit_c_abi_type(ctx, base)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> jet_rust_emit_c_abi_type(&ctx, base)
         .Tagged(marker, inner) -> {
             if marker == (MirTagMarker.Internal{internal_tag: MirInternalTag.AllocatorView}) {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "allocator views cannot cross a direct C ABI", "C physical values must not expose Jet-managed allocator borrows", None)
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "allocator views cannot cross a direct C ABI", "C physical values must not expose Jet-managed allocator borrows", None)
                 return "*mut ()"
             }
-            jet_rust_emit_c_abi_type(ctx, inner)
+            jet_rust_emit_c_abi_type(&ctx, inner)
         }
         .FixedList(element, length) -> "[{jet_rust_emit_c_abi_type(ctx, element)}; {mir_measure_expression(length)}]"
         .Apply(name, args) -> {
@@ -364,7 +364,7 @@ fn jet_rust_emit_c_abi_type(ctx: &JetRustEmitContext, source: MirType) -> String
             definition := jet_rust_emit_c_abi_record_definition(ctx, ty)
             if definition == None -> definition = jet_rust_emit_c_abi_enum_definition(ctx, ty)
             if definition == None {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "direct C nominal type lacks checked physical layout facts", "C by-value records and enums require checked non-generic repr(C) declarations and complete enum layout facts", None)
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "direct C nominal type lacks checked physical layout facts", "C by-value records and enums require checked non-generic repr(C) declarations and complete enum layout facts", None)
                 return "()"
             }
             row :: definition ?? return "()"
@@ -381,7 +381,7 @@ fn jet_rust_emit_c_abi_type(ctx: &JetRustEmitContext, source: MirType) -> String
             }
         }
         else -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "direct C ABI type has no checked physical mapping", "only checked C scalars, fixed arrays, repr(C) records, and tagged C enums can cross this boundary", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "direct C ABI type has no checked physical mapping", "only checked C scalars, fixed arrays, repr(C) records, and tagged C enums can cross this boundary", None)
             "()"
         }
     }
@@ -403,7 +403,7 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: Mir
             record_type :: MirType{kind: MirTypeKind.Apply{name: MirNominalRef{id: definition.id, name: definition.key}, args: [MirType]{}}, identity: Val(definition.id), layout: mir_type_layout(MirTypeKind.Apply{name: MirNominalRef{id: definition.id, name: definition.key}, args: [MirType]{}})}
             visited := [MirTypeId]{}
             if !jet_rust_emit_c_abi_type_supported(ctx, record_type, &visited) -> return
-            jet_rust_emit_layout_attributes(definition, lines)
+            jet_rust_emit_layout_attributes(definition, &lines)
             &lines.push("#[derive(Clone, Copy)]")
             name := jet_rust_emit_c_abi_nominal_name(definition, "record")
             &lines.push("struct {name} {{")
@@ -472,7 +472,7 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: Mir
 fn jet_rust_emit_c_abi_type_definitions(ctx: &JetRustEmitContext, lines: &[String]) Never! {
     loop definition in ctx.program.types {
         start :: lines.len()
-        jet_rust_emit_c_abi_type_definition(ctx, definition, lines)
+        jet_rust_emit_c_abi_type_definition(&ctx, definition, &lines)
         if lines.len() > start -> &lines.push("")
     }
 }
@@ -494,7 +494,7 @@ fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MirType]
 fn jet_rust_emit_function_type(ctx: &JetRustEmitContext, signature: MirFunctionSignature) -> String Never! {
     conventions := [MirAccess]{}
     if signature.call_metadata != None -> conventions = (signature.call_metadata ?? MirCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MirAccess]{}, policies: MirCallablePolicyChain{policies: [MirCallablePolicy]{}}}).conventions
-    jet_rust_emit_callable_type_parts(ctx, signature.params, conventions, signature.ret)
+    jet_rust_emit_callable_type_parts(&ctx, signature.params, conventions, signature.ret)
 }
 
 fn jet_rust_emit_send_function_type(ctx: &JetRustEmitContext, params: [MirType], ret: MirType?, conventions: [MirAccess]) -> String Never! {
@@ -547,7 +547,7 @@ fn jet_rust_emit_function_owner_generic_params(ctx: &JetRustEmitContext, functio
         else -> None
     }
     if owner == None -> return [MirGenericParam]{}
-    jet_rust_emit_type_application_generic_params(ctx, owner ?? function.return_type)
+    jet_rust_emit_type_application_generic_params(&ctx, owner ?? function.return_type)
 }
 
 fn jet_rust_emit_current_generic_parameter(ctx: &JetRustEmitContext, name: MirNominalRef) -> Bool Never! {
@@ -565,7 +565,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MirNominalRef, args:
     if args.len() == 0 && name.name == "Transaction" -> return "JetTransaction"
     if name.name == "Ptr" {
         if args.len() != 1 {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Ptr type has the wrong arity", "checked Ptr values always carry one element type", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Ptr type has the wrong arity", "checked Ptr values always carry one element type", None)
             return "*mut ()"
         }
         return "*mut {jet_rust_emit_type(ctx, args[0])}"
@@ -594,7 +594,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MirNominalRef, args:
             head = "{ctx.config.root_prefix}jet_std::{jet_rust_emit_sanitize(name.name)}"
             }
             else -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR nominal type is missing from the emitter registry", "checked Apply types must resolve to a declared or canonical runtime type", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR nominal type is missing from the emitter registry", "checked Apply types must resolve to a declared or canonical runtime type", None)
             head = jet_rust_emit_symbol("__jet_nominal_", name.name, name.id.value)
             }
         }
@@ -705,11 +705,11 @@ fn jet_rust_emit_capability_trait_ref(ctx: &JetRustEmitContext, trait_name: Stri
     loop candidate in ctx.program.traits {
         if candidate.id != expected_id -> next
         if candidate.name != trait_name || candidate.key == "" {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait row disagrees with its canonical identity", "native capability lookup selects the exact raw trait ID and uses the checked canonical row key", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait row disagrees with its canonical identity", "native capability lookup selects the exact raw trait ID and uses the checked canonical row key", None)
             return None
         }
         if found != None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait identity is duplicated", "capability impl selection requires one checked row for the canonical trait ID", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait identity is duplicated", "capability impl selection requires one checked row for the canonical trait ID", None)
             return None
         }
         found = Val(MirTraitRef{id: candidate.id, name: candidate.key})
@@ -730,7 +730,7 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: Mir
         trait_ref :: implementation.trait_ref ?? MirTraitRef{id: MirTraitId{value: 0}, name: ""}
         if trait_ref.id != expected_trait_ref.id -> next
         if trait_ref.name != expected_trait_ref.name {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait name disagrees with its identity", "capability impl selection uses the exact trait ID; names are consistency data only", Val(implementation.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait name disagrees with its identity", "capability impl selection uses the exact trait ID; names are consistency data only", Val(implementation.span))
             return false
         }
         if !jet_rust_emit_impl_target_enabled(ctx, implementation) -> next
@@ -771,12 +771,12 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MirTyp
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
         .Shared(_) | .Fn(_) | .SendFn(_, _, _) -> trait_name == "Clone"
         .TraitObject(_) -> false
-        .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_rust_emit_type_derive_capability(ctx, inner, trait_name, visiting, bindings, generic_params)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         .Tagged(marker, inner) -> {
             if marker == (MirTagMarker.Internal{internal_tag: MirInternalTag.CppCallbackAbi}) -> return true
-            jet_rust_emit_type_derive_capability(ctx, inner, trait_name, visiting, bindings, generic_params)
+            jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         }
-        .Map(key, value) | .Result(key, value) -> jet_rust_emit_type_derive_capability(ctx, key, trait_name, visiting, bindings, generic_params) && jet_rust_emit_type_derive_capability(ctx, value, trait_name, visiting, bindings, generic_params)
+        .Map(key, value) | .Result(key, value) -> jet_rust_emit_type_derive_capability(&ctx, key, trait_name, &visiting, bindings, generic_params) && jet_rust_emit_type_derive_capability(ctx, value, trait_name, visiting, bindings, generic_params)
         .Tuple(fields) -> {
             loop field in fields { if !jet_rust_emit_type_derive_capability(ctx, field.ty, trait_name, visiting, bindings, generic_params) -> return false }
             true
@@ -841,7 +841,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MirTyp
                     }
                     capable
                 }
-                .Distinct(base, _) | .Alias(base) -> jet_rust_emit_type_derive_capability(ctx, base, trait_name, visiting, next_bindings, next_generic_params)
+                .Distinct(base, _) | .Alias(base) -> jet_rust_emit_type_derive_capability(&ctx, base, trait_name, &visiting, next_bindings, next_generic_params)
                 .UnitFamily(_) -> true
             }
             &visiting.pop()
@@ -853,13 +853,13 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MirTyp
 fn jet_rust_emit_type_definition_derive_capability(ctx: &JetRustEmitContext, definition: MirTypeDef, trait_name: String) -> Bool Never! {
     kind :: MirTypeKind.Apply{name: MirNominalRef{id: definition.id, name: definition.key}, args: [MirType]{}}
     declared :: MirType{kind: kind, identity: Val(definition.id), layout: mir_type_layout(kind)}
-    jet_rust_emit_type_derive_capability(ctx, declared, trait_name, [MirTypeId]{}, [String:MirType]{}, [String]{})
+    jet_rust_emit_type_derive_capability(&ctx, declared, trait_name, [MirTypeId]{}, [String:MirType]{}, [String]{})
 }
 
 fn jet_rust_emit_type_derive_user_impl(ctx: &JetRustEmitContext, definition: MirTypeDef, trait_name: String) -> Bool Never! {
     kind :: MirTypeKind.Apply{name: MirNominalRef{id: definition.id, name: definition.key}, args: [MirType]{}}
     declared :: MirType{kind: kind, identity: Val(definition.id), layout: mir_type_layout(kind)}
-    jet_rust_emit_selected_user_capability_impl(ctx, declared, trait_name)
+    jet_rust_emit_selected_user_capability_impl(&ctx, declared, trait_name)
 }
 
 fn jet_rust_emit_generic_params(ctx: &JetRustEmitContext, params: [MirGenericParam]) -> String Never! {
@@ -997,14 +997,14 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: Mi
             trait_definition = Val(candidate)
             trait_key = candidate.key
             if candidate.name != trait_name {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derive trait name disagrees with its identity", "checked custom derives select the exact trait ID; names are consistency data only", Val(definition.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derive trait name disagrees with its identity", "checked custom derives select the exact trait ID; names are consistency data only", Val(definition.span))
                 return
             }
             break
         }
     }
     if trait_definition == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait has no declaration", "checked custom derives must resolve their canonical trait identity", Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait has no declaration", "checked custom derives must resolve their canonical trait identity", Val(definition.span))
         return
     }
     implementation := None
@@ -1015,7 +1015,7 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: Mi
         }
     }
     if implementation == None {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives a trait without a selected implementation", trait_name, Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives a trait without a selected implementation", trait_name, Val(definition.span))
         return
     }
     trait_row :: trait_definition ?? return
@@ -1028,7 +1028,7 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: Mi
                 if function.id == function_id && function.name == method.name -> implemented = true
             }
         }
-        if !implemented -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derived implementation omits a required method", method.name, Val(impl_row.span))
+        if !implemented -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derived implementation omits a required method", method.name, Val(impl_row.span))
     }
 }
 
@@ -1047,7 +1047,7 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MirType
         loop candidate in ctx.program.traits {
             if candidate.id == trait_id {
                 if trait_row != None {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derive trait identity is duplicated", "checked type derives require one row for each declared trait ID", Val(definition.span))
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derive trait identity is duplicated", "checked type derives require one row for each declared trait ID", Val(definition.span))
                     duplicate_trait_row = true
                     break
                 }
@@ -1056,20 +1056,20 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MirType
         }
         if duplicate_trait_row -> next
         if trait_row == .Val(row) {
-            jet_rust_emit_validate_derived_trait(ctx, definition, trait_id, row.name)
+            jet_rust_emit_validate_derived_trait(&ctx, definition, trait_id, row.name)
             next
         }
         native_name := jet_rust_emit_native_rust_derive_name_for_id(trait_id)
         if native_name == None {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait identity has no row", "only canonical native Rust derive IDs may omit a checked trait declaration", Val(definition.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR derive trait identity has no row", "only canonical native Rust derive IDs may omit a checked trait declaration", Val(definition.span))
             next
         }
         name :: native_name ?? next
         if name == "Clone" && !clone_capable {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Clone without a checked Rust Clone capability", "all stored fields and recursive nominal payloads must support Clone and ownership must not be Move", Val(definition.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Clone without a checked Rust Clone capability", "all stored fields and recursive nominal payloads must support Clone and ownership must not be Move", Val(definition.span))
         }
         if name == "Debug" && !debug_capable {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Debug without a checked Rust Debug capability", "all stored fields and recursive nominal payloads must support Debug", Val(definition.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Debug without a checked Rust Debug capability", "all stored fields and recursive nominal payloads must support Debug", Val(definition.span))
         }
         capability := derives_allowed
         if name == "Clone" -> capability = clone_capable && !clone_user_impl
@@ -1089,7 +1089,7 @@ fn jet_rust_emit_columnar_field_capability(ctx: &JetRustEmitContext, definition:
     generic_params := [String]{}
     loop parameter in definition.generic_params -> &generic_params.push(parameter.name)
     visiting := [MirTypeId]{definition.id}
-    jet_rust_emit_type_derive_capability(ctx, field.ty, trait_name, &visiting, [String:MirType]{}, generic_params)
+    jet_rust_emit_type_derive_capability(&ctx, field.ty, trait_name, &visiting, [String:MirType]{}, generic_params)
 }
 
 fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MirGenericParam]) -> String Never! {
@@ -1123,7 +1123,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MirT
         if !jet_rust_emit_columnar_field_capability(ctx, definition, field, "Debug") -> debug_capable = false
     }
     if !clone_capable {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar cell has no Rust Clone capability", "the checked JetRow contract requires every stored column cell to implement Clone", Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar cell has no Rust Clone capability", "the checked JetRow contract requires every stored column cell to implement Clone", Val(definition.span))
         return
     }
     generic_args :: jet_rust_emit_columnar_generic_args(definition.generic_params)
@@ -1190,8 +1190,8 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MirTypeDe
     if jet_rust_emit_handle_for_definition(ctx, definition) != None -> return
     previous_generic_params := ctx.current_generic_params
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(previous_generic_params, definition.generic_params)
-    jet_rust_emit_layout_attributes(definition, lines)
-    jet_rust_emit_type_derive_lines(ctx, definition, lines)
+    jet_rust_emit_layout_attributes(definition, &lines)
+    jet_rust_emit_type_derive_lines(&ctx, definition, &lines)
     visibility :: if {
         definition.public -> MirVisibility.Public
         definition.package_public -> MirVisibility.Package
@@ -1253,8 +1253,8 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MirTypeDe
         if layout == {
             .Columnar -> {
                 if definition.kind == {
-                    .Struct(fields, _) -> jet_rust_emit_columnar_row_adapter(ctx, definition, fields, lines)
-                    else -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar layout requires a struct type definition", "columnar row adapters are defined only for checked struct rows", Val(definition.span))
+                    .Struct(fields, _) -> jet_rust_emit_columnar_row_adapter(&ctx, definition, fields, &lines)
+                    else -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar layout requires a struct type definition", "columnar row adapters are defined only for checked struct rows", Val(definition.span))
                 }
             }
             else -> {}
@@ -1265,7 +1265,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MirTypeDe
 
 fn jet_rust_emit_named_type(ctx: &JetRustEmitContext, raw: String) -> String Never! {
     if ctx.type_by_name.get(raw) == .Val(name) -> return name
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing nominal type", "constant declarations must resolve to one emitted type identity", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing nominal type", "constant declarations must resolve to one emitted type identity", None)
     "__jet_missing_type_{jet_rust_emit_sanitize(raw)}"
 }
 
@@ -1282,13 +1282,13 @@ fn jet_rust_emit_named_field(ctx: &JetRustEmitContext, owner: String, raw: Strin
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing field", "constant struct fields must resolve to one emitted field identity", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing field", "constant struct fields must resolve to one emitted field identity", None)
     "__jet_missing_field_{jet_rust_emit_sanitize(raw)}"
 }
 
 fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MirType, projection: String, member: String) -> String Never! {
     identity :: target.identity ?? {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR shape adapter target has no canonical type identity", "checked shape adapters must retain the target struct identity", None)
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR shape adapter target has no canonical type identity", "checked shape adapters must retain the target struct identity", None)
         return "&[]"
     }
     loop definition in ctx.program.types {
@@ -1303,12 +1303,12 @@ fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MirType, proje
                             "env" -> Val(field.shape_names.env)
                             "args" -> Val(field.shape_names.args)
                             else -> {
-                                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shape adapter projection is unknown", "shape adapters must select one checked projection naming policy", Val(field.span))
+                                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shape adapter projection is unknown", "shape adapters must select one checked projection naming policy", Val(field.span))
                                 return "&[]"
                             }
                         }
                         if selected == None || field.shape_names.json == None {
-                            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shape adapter field name is incomplete", "checked shape adapters require both a selected source name and canonical JSON key", Val(field.span))
+                            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shape adapter field name is incomplete", "checked shape adapters require both a selected source name and canonical JSON key", Val(field.span))
                             return "&[]"
                         }
                         source_name :: selected ?? ""
@@ -1318,13 +1318,13 @@ fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MirType, proje
                     return "&[{pairs.join(", ")}]"
                 }
                 else -> {
-                    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shape adapter target is not a struct", "checked shape adapters only decode declared struct carriers", None)
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR shape adapter target is not a struct", "checked shape adapters only decode declared struct carriers", None)
                     return "&[]"
                 }
             }
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR shape adapter target type is missing", "checked shape adapters must resolve their target definition before source emission", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR shape adapter target type is missing", "checked shape adapters must resolve their target definition before source emission", None)
     return "&[]"
 }
 

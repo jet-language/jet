@@ -690,7 +690,7 @@ pub const MANIFEST_FIELD_VERSION: &str = "version";
 /// vocabulary, alongside `MANIFEST_BLOCK_PACKAGES`/`MANIFEST_BLOCK_BUILD`/
 /// `MANIFEST_BLOCK_EFFECTS`/`MANIFEST_BLOCK_GRANTS`/`MANIFEST_BLOCK_POLICY`
 /// (each already declared with its own decision). `settings:` declares the
-/// typed build facts consumed by `@build.settings.*`.
+/// typed build facts consumed by `$build.settings.*`.
 pub const MANIFEST_BLOCK_DEPS: &str = "deps";
 pub const MANIFEST_BLOCK_OUTPUTS: &str = "outputs";
 pub const MANIFEST_BLOCK_SETTINGS: &str = "settings";

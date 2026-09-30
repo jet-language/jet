@@ -246,7 +246,7 @@ fn canonical_lock_source(
     if dependency_name.is_none() {
         return "workspace".into();
     }
-    let raw = std::fs::read_to_string(project_root.join(crate::Syntax::UNIFIED_LOCK_FILE))
+    let raw = jet_foundation::CheckReads::read_to_string(project_root.join(crate::Syntax::UNIFIED_LOCK_FILE))
         .unwrap_or_default();
     let wanted = dependency_name.unwrap_or(package_name);
     let mut current = false;
@@ -353,12 +353,12 @@ pub(in crate::Sema) fn package_identity(
     root: &Path,
     dependency_name: Option<&str>,
 ) -> String {
-    let manifest_path = [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE]
+    // Each candidate is read through the audited reader, so an absent
+    // manifest is recorded as absent and its later appearance is noticed.
+    let manifest = [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE]
         .iter()
-        .map(|name| root.join(name))
-        .find(|path| path.is_file())
-        .unwrap_or_else(|| root.join(crate::Syntax::PAYLOAD_FILE));
-    let manifest = std::fs::read_to_string(manifest_path).unwrap_or_default();
+        .find_map(|name| jet_foundation::CheckReads::read_to_string(root.join(name)).ok())
+        .unwrap_or_default();
     let name = quoted_field(&manifest, "name")
         .or_else(|| dependency_name.map(str::to_string))
         .unwrap_or_else(|| "workspace".into());

@@ -734,8 +734,8 @@ fn cache_admission_preserves_native_results_without_unserialized_compile_state()
     let cases = [
         ("strings_and_small_ints", "fn run() {\n    print(\"cache-string\")\n    print(7)\n}", "cache-string\n7\n", true),
         // Keep the blob live across a runtime call instead of projecting only
-        // comptime scalar properties such as @BYTES.len() and @BYTES[0].
-        ("bytes", "@BYTES :: embed_bytes(\"payload.bin\")\nfn inspect(bytes: [U8]) {\n    print(bytes.len())\n    print(bytes[0])\n}\nfn run() { inspect(@BYTES) }", "3\n65\n", false),
+        // comptime scalar properties such as BYTES.len() and BYTES[0].
+        ("bytes", "BYTES :: prep { embed_bytes(\"payload.bin\") }\nfn inspect(bytes: [U8]) {\n    print(bytes.len())\n    print(bytes[0])\n}\nfn run() { inspect(BYTES) }", "3\n65\n", false),
         ("large_i64", "fn run() { print(9223372036854775807) }", "9223372036854775807\n", false),
         ("big_int", "fn run() { print(184467440737095516160) }", "184467440737095516160\n", false),
         ("schema", "fn equal(left: [Int], right: [Int]) -> Bool Never! { left == right }\nfn run() { print(equal([1, 2], [1, 2])) }", "true\n", false),

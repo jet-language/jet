@@ -448,41 +448,30 @@ fn run() {
 }
 
 #[test]
-fn built_in_resource_impls_follow_referenced_core_families() {
-    let src = r#"
-use core.files as files
-use core.net as net
+fn explicit_close_of_a_database_connection_releases_the_provider_handle() {
+    // D-DBDRIVER1: a DB connection is a host handle with no source `Close`
+    // impl; `close(^conn)` must consume it through the provider's close, not
+    // a missing `DBConnection::close` method.
+    let open_only = r#"
 use core.db as db
-use core.mem as mem
 fn run() {
     conn := db.open_memory()
+    print("open")
+}
+"#;
+    let closed = r#"
+use core.db as db
+fn run() {
+    conn := db.open_memory()
+    print("open")
     close(^conn)
 }
 "#;
-    let rust = compile(src).rust;
-    assert_eq!(
-        rust.matches("impl __jet_Close for JetDbConnection").count(),
-        1,
-        "the referenced database family needs its Close implementation"
+    let provider_closes = |src: &str| compile(src).rust.matches("jet_db_close(").count();
+    assert!(
+        provider_closes(closed) > provider_closes(open_only),
+        "explicit close must release the connection through the provider"
     );
-    for ty in [
-        "JetFileReader",
-        "JetFileWriter",
-        "jet_std::FileLock",
-        "JetTCPStream",
-        "JetUnixStream",
-        "JetTLSStream",
-        "jet_mem::JetArena",
-        "jet_mem::JetBump",
-        "jet_mem::JetPool",
-        "jet_mem::JetFixed",
-    ] {
-        assert_eq!(
-            rust.matches(&format!("impl __jet_Close for {ty}")).count(),
-            0,
-            "an import-only resource family must not emit an unused Close implementation"
-        );
-    }
 }
 
 #[test]

@@ -191,6 +191,12 @@ function jet_decimal_equal(left, right) {
   return jet_decimal_signed(left) * 10n ** BigInt(scale - left.scale)
     === jet_decimal_signed(right) * 10n ** BigInt(scale - right.scale);
 }
+function jet_decimal_compare(left, right) {
+  const scale = Math.max(left.scale, right.scale);
+  const a = jet_decimal_signed(left) * 10n ** BigInt(scale - left.scale);
+  const b = jet_decimal_signed(right) * 10n ** BigInt(scale - right.scale);
+  return { tag: a < b ? "Less" : a > b ? "Greater" : "Equal", values: [] };
+}
 function jet_decimal_to_string(value) {
   if (value.scale === 0) return `${value.negative ? "-" : ""}${value.digits}`;
   let digits = value.digits.toString();

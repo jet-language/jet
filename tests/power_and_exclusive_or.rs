@@ -115,7 +115,7 @@ fn power_result_types_follow_the_operands() {
 #[test]
 fn exact_int_power_stays_exact_across_tiers() {
     let src = r#"
-@FOLDED :: 2 ^ 200
+FOLDED :: prep { 2 ^ 200 }
 
 fn show_exact(value: Int) {
     print(value)
@@ -127,7 +127,7 @@ fn raise(base: Int, exponent: Int) -> Int {
 
 fn run() {
     show_exact(raise(2, 200))
-    show_exact(@FOLDED)
+    show_exact(FOLDED)
 }
 "#;
     assert_tiers_agree(

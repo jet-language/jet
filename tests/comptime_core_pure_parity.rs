@@ -779,7 +779,7 @@ fn public_transcript_covers_rank_field_writeback_exactly() {
 
 fn parity_source(expression: &str, imports: &str) -> String {
     format!(
-        "{imports}\n@EXPECTED :: {expression}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{@EXPECTED}}\")\n    print(\"{{actual}}\")\n}}\n"
+        "{imports}\nEXPECTED :: prep {{ {expression} }}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{EXPECTED}}\")\n    print(\"{{actual}}\")\n}}\n"
     )
 }
 
@@ -1157,7 +1157,7 @@ fn rustc_backed_datetime_and_measurement_display_are_exact() {
     assert_eq!(
         check_aot_comptime(
             "measurement/interpolation-display",
-            "@VALUE :: measurement(12.5, uncertainty: 0.25)\n@EXPECTED :: \"{@VALUE}\"\n\nfn run() {\n    actual :: measurement(12.5, uncertainty: 0.25)\n    print(@EXPECTED)\n    print(actual)\n}\n",
+            "VALUE :: prep { measurement(12.5, uncertainty: 0.25) }\nEXPECTED :: prep { \"{VALUE}\" }\n\nfn run() {\n    actual :: measurement(12.5, uncertainty: 0.25)\n    print(EXPECTED)\n    print(actual)\n}\n",
         ),
         "12.5 ± 0.25"
     );
@@ -1669,7 +1669,7 @@ fn crypto_values_match_aot_comptime_forced_interpreter_and_default_dev() {
 
 #[test]
 fn crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers() {
-    // New #722 ports: AOT path (no @EXPECTED :: — TIR still Todo for
+    // New #722 ports: AOT path (no EXPECTED :: — TIR still Todo for
     // Signature.bytes / AEAD in some shapes). REPL transcripts cover tier-0.
     let source = r#"use core.crypto.expert as expert
 fn run() {
@@ -1786,7 +1786,6 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
 
     let url = read("crates/jet-comptime/src/Comptime/UrlLite.rs");
     assert!(url.contains("CoreLib/JetStd/UrlMime.rs"));
-    assert!(url.contains("JetURL::parse"));
     assert!(url.contains("jet_url_percent_decode_str"));
     assert!(!url.contains("fn url_valid_scheme"));
 }

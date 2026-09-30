@@ -324,8 +324,10 @@ impl<'a> Checker<'a> {
                 let saved = self.expected_type.clone();
                 let saved_borrow = self.borrow_ctx;
                 self.expected_type = Some(param_ty.clone());
-                // A `&name` argument grants the place itself; never copy it.
+                // A `&name` argument grants the place itself, and a write
+                // parameter is a borrow slot; never copy either.
                 self.borrow_ctx = arg.convention == AccessConvention::Write
+                    || param_convention == AccessConvention::Write
                     || (param_convention == AccessConvention::Read && !param_ty.is_scalar());
                 let got = self.with_call_access(&mut call_access, |checker| {
                     checker.check_call_argument_access(arg, param_convention, param_ty, true);
@@ -338,6 +340,8 @@ impl<'a> Checker<'a> {
                 if let Some(got) = got {
                     let got =
                         self.widen_numeric_argument(&mut arg.expr, got, param_ty, param_convention);
+                    let got =
+                        self.lift_optional_argument(&mut arg.expr, got, param_ty, param_convention);
                     let boxes_as_trait = self.trait_slot_accepts(param_ty, &got);
                     let callable_shape_compatible = matches!(param_ty, Type::Fn { .. })
                         && matches!(&got, Type::Fn { .. })
@@ -374,7 +378,7 @@ impl<'a> Checker<'a> {
                         if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {
                             !callable_compatible
                         } else {
-                            got != *param_ty
+                            !Type::compute_tensor_compatible(param_ty, &got)
                         };
                     if type_mismatch && !boxes_as_trait {
                         self.diags.push(Diagnostic::error(

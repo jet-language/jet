@@ -1,0 +1,15 @@
+// core.time owns Stopwatch as a source struct: `start` samples the host wall
+// clock as Unix nanoseconds into the real `start_ns` field, and `elapsed` /
+// `elapsed_millis` subtract it from a fresh sample. Duration exposes its
+// checked `ns` count as a field on every tier.
+use core.time as time
+
+fn run() {
+    watch :: time.start()
+    print(watch.start_ns > 1700000000000000000)
+    print(watch.elapsed_millis() >= 0)
+    print(time.elapsed(watch).ns >= 0)
+    print(time.duration_ms(3).ns)
+    span :: time.duration_ns(1500)
+    print(span.ns)
+}

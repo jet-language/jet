@@ -21,6 +21,12 @@ fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree
 }
 
 pub mod runtime;
+pub mod diagnostic_record;
+pub mod project_state;
+pub mod receipt;
+pub mod records;
+pub use receipt::{ReceiptInput, ReceiptRecord};
+pub use records::RecordKind;
 pub const STORE_VERSION: &str = "jet.store.v1";
 pub const STORE_ENV: &str = "JET_STORE_DIR";
 pub const DEFAULT_CAP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
@@ -719,8 +725,9 @@ impl Store {
     }
     /// Publish one immutable build record through the ordinary blob CAS.
     ///
-    /// `key` is the caller's content key. The small index pointer is mutable
-    /// only so `latest_build_record` can find the newest content key.
+    /// `key` is the caller's content key. The last-run pointer that names
+    /// the newest record for a program is workspace state; see
+    /// [`Store::publish_last_build_record`].
     pub fn publish_build_record(
         &self,
         key: &str,
@@ -736,10 +743,22 @@ impl Store {
                 }
             }
         }
-        let latest = self.latest_build_record_pointer_path(&record.program);
         let _lock = self.acquire_lock()?;
         atomic_write(&pointer, object.to_string().as_bytes())?;
-        atomic_write(&latest, key.as_bytes())?;
+        Ok(object)
+    }
+
+    /// Publish a build record and point the workspace's last-run pointer
+    /// for its program at it (owner ruling 2026-09-30: per-workspace state
+    /// lives in the workspace-root `.jet/`, the records in this store).
+    pub fn publish_last_build_record(
+        &self,
+        workspace_root: &Path,
+        key: &str,
+        record: &BuildRecord,
+    ) -> Result<ObjectHandle, StoreError> {
+        let object = self.publish_build_record(key, record)?;
+        project_state::write_last_run(workspace_root, &record.program, key)?;
         Ok(object)
     }
 
@@ -764,23 +783,16 @@ impl Store {
             })
     }
 
-    /// Load the most recent record for a logical program path.
-    pub fn latest_build_record(&self, program: &str) -> Result<Option<BuildRecord>, StoreError> {
-        let path = self.latest_build_record_pointer_path(program);
-        let key = match read_file(&path)? {
-            RawRead::Missing => return Ok(None),
-            RawRead::Corrupt(reason) => {
-                return Err(StoreError::Corrupt { path, reason });
-            }
-            RawRead::Bytes(bytes) => String::from_utf8(bytes)
-                .map_err(|_| StoreError::Corrupt {
-                    path: path.clone(),
-                    reason: "latest build pointer is not UTF-8".to_string(),
-                })?
-                .trim()
-                .to_string(),
-        };
-        self.build_record(&key)
+    /// The workspace's last recorded run of `program`.
+    pub fn last_build_record(
+        &self,
+        workspace_root: &Path,
+        program: &str,
+    ) -> Result<Option<BuildRecord>, StoreError> {
+        match project_state::last_run(workspace_root, program) {
+            Some(key) => self.build_record(&key),
+            None => Ok(None),
+        }
     }
 
     fn build_record_pointer_path(&self, key: &str) -> PathBuf {
@@ -788,13 +800,6 @@ impl Store {
             .join("build-records")
             .join("records")
             .join(Digest::hash(key.as_bytes()).to_hex())
-    }
-
-    fn latest_build_record_pointer_path(&self, program: &str) -> PathBuf {
-        self.root()
-            .join("build-records")
-            .join("latest")
-            .join(Digest::hash(program.as_bytes()).to_hex())
     }
 
     fn read_build_pointer(&self, path: &Path) -> Result<Option<ObjectHandle>, StoreError> {
@@ -1299,7 +1304,6 @@ impl Store {
             ensure_dir(&self.root().join(name))?;
         }
         ensure_dir(&self.root().join("build-records").join("records"))?;
-        ensure_dir(&self.root().join("build-records").join("latest"))?;
         Ok(())
     }
     fn quarantine_after_read(&self, key: &EntryKey, path: &Path, reason: &str) {

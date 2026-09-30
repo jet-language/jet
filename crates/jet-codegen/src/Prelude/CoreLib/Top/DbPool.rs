@@ -58,6 +58,12 @@ impl JetShow for JetDbPoolReceipt {
     }
 }
 
+impl JetDisplay for JetDbPoolReceipt {
+    fn jet_display(&self) -> String {
+        self.render()
+    }
+}
+
 impl JetDebug for JetDbPoolReceipt {
     fn jet_debug(&self) -> String {
         self.render()
@@ -212,13 +218,17 @@ impl<D: Send + 'static> Clone for JetDbPool<D> {
 
 pub struct JetDbLease<D: Send + 'static> {
     pool: std::sync::Arc<JetDbPoolInner<D>>,
-    driver: Option<D>,
+    // `close()` borrows the lease like every other resource close, so the
+    // driver slot is emptied through a shared reference.
+    driver: std::sync::Mutex<Option<D>>,
     healthy: bool,
 }
 
 impl<D: Send + 'static> JetDbLease<D> {
     pub fn driver_mut(&mut self) -> &mut D {
         self.driver
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_mut()
             .expect("database lease already released")
     }
@@ -249,16 +259,41 @@ impl<D: Send + 'static> JetDbLease<D> {
         }
     }
 
-    pub fn release(self) {
-        drop(self);
+    /// Return the driver to its pool now. Releasing twice, or dropping a
+    /// released lease, is a no-op.
+    pub fn release(&self) {
+        let driver = self
+            .driver
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(driver) = driver {
+            self.pool.release(driver, self.healthy);
+        }
     }
 }
 
 impl<D: Send + 'static> Drop for JetDbLease<D> {
     fn drop(&mut self) {
-        if let Some(driver) = self.driver.take() {
-            self.pool.release(driver, self.healthy);
-        }
+        self.release();
+    }
+}
+
+impl<D: Send + 'static> JetShow for JetDbLease<D> {
+    fn jet_show(&self) -> String {
+        "db.lease".to_string()
+    }
+}
+
+impl<D: Send + 'static> JetDisplay for JetDbLease<D> {
+    fn jet_display(&self) -> String {
+        "db.lease".to_string()
+    }
+}
+
+impl<D: Send + 'static> JetDebug for JetDbLease<D> {
+    fn jet_debug(&self) -> String {
+        "db.lease".to_string()
     }
 }
 
@@ -336,7 +371,7 @@ impl<D: Send + 'static> JetDbPoolInner<D> {
                             drop(state);
                             return Ok(JetDbLease {
                                 pool: self.clone(),
-                                driver: Some(driver),
+                                driver: std::sync::Mutex::new(Some(driver)),
                                 healthy: true,
                             });
                         }
@@ -437,7 +472,7 @@ impl<D: Send + 'static> JetDbPoolInner<D> {
                     drop(state);
                     return Ok(JetDbLease {
                         pool: self.clone(),
-                        driver: Some(driver),
+                        driver: std::sync::Mutex::new(Some(driver)),
                         healthy: true,
                     });
                 }

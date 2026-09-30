@@ -1,0 +1,67 @@
+// A returned value widens into the declared return type exactly as an
+// argument widens into a parameter: `return`, the tail value, `?? return`,
+// and early returns inside `if` and `loop` all convert the value, so every
+// tier hands back a real `Float`/`I16`/`Int`, never the source bits.
+
+fn int_to_float_return(v: Int) -> Float {
+    return v
+}
+
+fn int_to_float_tail(v: Int) -> Float {
+    v
+}
+
+fn i8_to_i16_return(v: I8) -> I16 {
+    return v
+}
+
+fn i8_to_i16_tail(v: I8) -> I16 {
+    v
+}
+
+fn u8_to_int_return(v: U8) -> Int {
+    return v
+}
+
+fn u8_to_int_tail(v: U8) -> Int {
+    v
+}
+
+// Early returns nested inside `if` and `loop` widen like the final value.
+fn first_small(values: [I8], limit: I8) -> I16 {
+    if values.len() == 0 {
+        return limit
+    }
+    loop value in values {
+        if value < limit {
+            return value
+        }
+    }
+    I16{0}
+}
+
+// `?? return` widens its fallback into the return type too.
+fn or_default(found: Float?, fallback: Int) -> Float {
+    value :: found ?? return fallback
+    value
+}
+
+// A widened result feeds the next widening seam unchanged.
+fn chained(v: I8) -> Float {
+    i8_to_i16_tail(v)
+}
+
+fn run() {
+    print(int_to_float_return(3))
+    print(int_to_float_tail(-7) / 2.0)
+    print(i8_to_i16_return(I8{-4}))
+    print(i8_to_i16_tail(I8{127}) + I16{1000})
+    print(u8_to_int_return(U8{255}))
+    print(u8_to_int_tail(U8{200}) * 1000)
+    print(first_small([I8]{9, -3, 5}, I8{0}))
+    print(first_small([I8]{}, I8{-100}))
+    print(first_small([I8]{4, 6}, I8{2}))
+    print(or_default(None, 5) / 2.0)
+    print(or_default(Val(Float{1.25}), 5))
+    print(chained(I8{-9}) / 4.0)
+}

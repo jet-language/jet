@@ -1,18 +1,18 @@
 // 86 — Comptime Result/Option evaluation (c97 / D-STRPARSE1).
 // `Ok(v)` / `Err(e)` / `?` / `??` work at compile time for pure parse paths.
-@A :: Int.parse("10") ?? -1
+A :: prep { Int.parse("10") ?? -1 }
 
-@B :: Int.parse("bad") ?? -1
+B :: prep { Int.parse("bad") ?? -1 }
 
-@C :: Int.parse("99") ?? 0
+C :: prep { Int.parse("99") ?? 0 }
 
 fn run() {
     // a, b, c are baked at compile time.
-    print(@A)
-    print(@B)
-    print(@C)
+    print(A)
+    print(B)
+    print(C)
     // Runtime use of comptime constants.
-    print(@A + @C)
+    print(A + C)
     // .lines() + Int.parse at runtime (sanity check alongside 84_string_parse).
     total := 0
     loop row in "5\n10\n15".lines() -> total += (Int.parse(row) ?? 0)

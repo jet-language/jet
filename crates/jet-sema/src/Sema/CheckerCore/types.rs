@@ -3,21 +3,6 @@ use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
-    pub(crate) fn is_core_crypto_module(&self) -> bool {
-        self.name_ledger
-            .module_alias(self.module_idx)
-            .is_some_and(|alias| {
-                alias.starts_with("core_core_crypto")
-                    || (alias == "crypto"
-                        && self.name_ledger.module_path(self.module_idx) == Some("crypto.jet")
-                        && self
-                            .name_ledger
-                            .module(self.module_idx)
-                            .is_some_and(|module| module.package == "."))
-            })
-    }
-
-
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
     /// for imported types; the error comes from the ordinary trait impl.
@@ -92,6 +77,19 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A source-owned `core.crypto` struct under its owner's canonical
+    /// identity, the one its signatures and methods carry. Enums keep their
+    /// leaf spelling so contextual `.Variant` inference is unchanged.
+    fn core_crypto_struct_type(&self, name: &str) -> Option<Type> {
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        let module = self.modules?.get(owner)?;
+        if owner == self.module_idx || module.registry.enum_variants(leaf).is_some() {
+            return None;
+        }
+        self.imported_nominal_type(name)
+    }
+
     pub(crate) fn imported_nominal_head(&self, name: &str) -> String {
         if name.contains("::") {
             return name.to_string();
@@ -131,7 +129,11 @@ impl<'a> Checker<'a> {
         if self.lookup(alias).is_none()
             && (self.core_imports.contains_key(alias)
                 || self.core_item_imports.contains_key(alias)
-                || self.imports.contains_key(alias))
+                || self.imports.contains_key(alias)
+                || self
+                    .name_ledger
+                    .alias(self.module_idx, alias)
+                    .is_some_and(|binding| binding.target_module.is_some()))
         {
             self.record_import_alias_use(alias);
         }
@@ -165,12 +167,6 @@ impl<'a> Checker<'a> {
                         .to_string(),
                 )
             }
-            Type::Named(n)
-                if self.is_core_crypto_module()
-                    && crate::Sema::CheckerCoreLib::core_module_type_item("core.crypto", &n) =>
-            {
-                crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
-            }
             // ordinary generated enum declarations. Membership is decided by
             // the rule table, not a fixed leaf list, so it can't join the
             // generic Core-export table below.
@@ -188,7 +184,11 @@ impl<'a> Checker<'a> {
                     .get(&n)
                     .expect("Core item imports have a module alias");
                 if module == "core.crypto" {
-                    crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+                    // Source-owned Core crypto types use the owner's canonical
+                    // identity, the one its signatures and methods carry.
+                    self.core_crypto_struct_type(&n).unwrap_or_else(|| {
+                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+                    })
                 } else {
                     Type::Named(n)
                 }
@@ -217,7 +217,9 @@ impl<'a> Checker<'a> {
                 let (alias, leaf) = n.rsplit_once('.').unwrap();
                 let module = self.core_imports.get(alias).unwrap();
                 if module == "core.crypto" {
-                    crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf.to_string()))
+                    self.core_crypto_struct_type(&n).unwrap_or_else(|| {
+                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf.to_string()))
+                    })
                 } else {
                     match jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf) {
                         Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain)
@@ -455,6 +457,29 @@ impl<'a> Checker<'a> {
             return self.struct_subst_for_owner(owner, leaf, type_args);
         }
         self.struct_subst_for_owner(self.module_idx, leaf, type_args)
+    }
+
+    /// The number of type parameters `owner_mod` declares for `type_name`.
+    pub(crate) fn struct_type_param_count(&self, owner_mod: usize, type_name: &str) -> usize {
+        let leaf = Self::split_type_name(type_name).1;
+        if owner_mod == self.module_idx {
+            self.trait_reg
+                .struct_params
+                .get(leaf)
+                .or_else(|| self.trait_reg.enum_params.get(leaf))
+                .map_or(0, |params| params.len())
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner_mod))
+                .and_then(|module| {
+                    module
+                        .trait_reg
+                        .struct_params
+                        .get(leaf)
+                        .or_else(|| module.trait_reg.enum_params.get(leaf))
+                })
+                .map_or(0, |params| params.len())
+        }
     }
 
     pub(crate) fn struct_subst_for_owner(

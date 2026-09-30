@@ -83,7 +83,7 @@ pub fn sema_frame_checked_call_operation(name: String, args: [CallArg], signatur
         identity :: sema_frame_resource_identity(argument.expr) ?? next
         convention := argument.convention
         if signature_accesses != None {
-            parameters :: signature_accesses ?? [AccessConvention]{}
+            parameters :: signature_accesses
             if index < parameters.len() -> convention = parameters[index]
         }
         &accesses.push(ResourceAccess{
@@ -204,7 +204,7 @@ pub fn sema_frame_hardware_dma_wait(receiver: Expr, source_index: Int, bindings:
     binding_result := (loop item in bindings {
         if item.transfer_name == transfer_name -> break Val(item)
     } ?? None)
-    binding :: binding_result ?? return None
+    binding :: binding_result
     Val(FrameOperation{
         name: "hardware.dma.wait." + binding.profile_id + "." + binding.channel,
         source_index: source_index,
@@ -378,11 +378,11 @@ fn sema_frame_check_async_uses(operations: [FrameOperation], events: [FrameEvent
             .Pending(token) -> {
                 event_index := sema_frame_event_index(events, token)
                 if event_index < 0 -> return Val("operation `{operation.name}` has no completion event `{token}`")
-                sema_frame_push_dependency(dependencies, keys, index, event_index, "completion", operation.name + " completes at event " + token)
+                sema_frame_push_dependency(&dependencies, &keys, index, event_index, "completion", operation.name + " completes at event " + token)
                 loop later_index in event_index + 1..<operations.len() {
                     later_operation := operations[later_index]
                     loop access in later_operation.accesses {
-                        if sema_frame_operation_overlaps(operation, access) -> sema_frame_push_dependency(dependencies, keys, event_index, later_index, "completion", "event " + token + " releases submitted owners")
+                        if sema_frame_operation_overlaps(operation, access) -> sema_frame_push_dependency(&dependencies, &keys, event_index, later_index, "completion", "event " + token + " releases submitted owners")
                     }
                 }
             }

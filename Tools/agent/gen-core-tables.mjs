@@ -84,7 +84,7 @@ function parseEffects(source) {
       fail(`${EFFECT_SOURCE_PATH}:${index + 1}: duplicate effect declaration ${name}`);
     }
     const irreversible = fields.length === 3;
-    if (irreversible && fields[2] !== "@irreversible") {
+    if (irreversible && fields[2] !== "$irreversible") {
       fail(`${EFFECT_SOURCE_PATH}:${index + 1}: unknown effect annotation ${fields[2]}`);
     }
     if (name.includes(".") && !names.has(name.split(".", 1)[0])) {

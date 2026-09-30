@@ -134,6 +134,91 @@ fn direct_struct_error_match_agrees_across_execution_tiers() {
     );
 }
 
+/// D10 (S80, D-DISPLAYDBG1): the default `Err` shows its message through
+/// bare interpolation, both as a match binding and as the fallback's `err`.
+#[test]
+fn default_err_display_agrees_across_execution_tiers() {
+    tir_support::assert_tiers_agree(
+        "default_err_display",
+        r#"
+fn fails(n: Int) -> Int Err! {
+    if n < 0 -> return Err("negative: {n}")
+    Ok(n)
+}
+
+fn run() {
+    a :: fails(-1) ?? {
+        print("fallback: {err}")
+        0
+    }
+    print(a)
+    if fails(-2) == {
+        .Ok(n) -> print(n)
+        .Err(e) -> print("failed: {e}")
+    }
+}
+"#,
+        "fallback: negative: -1\n0\nfailed: negative: -2\n",
+    );
+}
+
+/// D1 / D8: an else-less statement match over a union of `#Error struct`
+/// members is exhaustive, and an empty sibling list takes its element type
+/// from the other items.
+#[test]
+fn union_error_struct_match_agrees_across_execution_tiers() {
+    tir_support::assert_tiers_agree(
+        "union_error_struct_match",
+        r#"
+#Error
+struct ListWasEmpty {
+    message: String
+}
+
+#Error
+struct BadNumStr {
+    message: String
+}
+
+fn first(xs: [String]) -> String ListWasEmpty! {
+    if xs.is_empty() -> return Err(ListWasEmpty{message: "empty"})
+    Ok(xs[0])
+}
+
+fn to_num(s: String) -> Int BadNumStr! {
+    s.to_int() ?? return Err(BadNumStr{message: "nan"})
+}
+
+fn increment_first(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
+    s :: first(xs)
+    n :: to_num(s)
+    Ok(n + 1)
+}
+
+fn run() {
+    loop xs in [["41"], [], ["x"]] {
+        if increment_first(xs) == {
+            .Ok(n) -> print(n)
+            .Err(.ListWasEmpty(_)) -> print("empty")
+            .Err(.BadNumStr(_)) -> print("not a number")
+        }
+    }
+}
+"#,
+        "42\nempty\nnot a number\n",
+    );
+}
+
+/// D3 (D-MEMO1=A, D-EFFECT-OMIT1=A): `#Memo` accepts an inferred-pure function.
+#[test]
+fn memo_inferred_pure_agrees_across_execution_tiers() {
+    tir_support::assert_tiers_agree(
+        "memo_inferred_pure",
+        "#Memo fn slow_square(n: Int) -> Int { n * n }\n\nfn run() {\n    print(slow_square(12))\n    print(slow_square(12))\n    print(slow_square(13))\n}\n",
+        "144\n144\n169\n",
+    );
+}
+
 #[test]
 fn optional_success_result_fallback_agrees_across_execution_tiers() {
     tir_support::assert_tiers_agree_with_application_policy(

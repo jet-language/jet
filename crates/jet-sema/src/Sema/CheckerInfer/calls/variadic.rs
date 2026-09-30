@@ -148,6 +148,8 @@ impl<'a> Checker<'a> {
                 if let Some(got) = got {
                     let got =
                         self.widen_numeric_argument(&mut arg.expr, got, &elem_ty, variadic_conv);
+                    let got =
+                        self.lift_optional_argument(&mut arg.expr, got, &elem_ty, variadic_conv);
                     let loan = crate::Sema::Diagnostics::contains_expiring_secret_loan(&got);
                     if loan {
                         if let Expr::Ident(name, span) = &arg.expr {

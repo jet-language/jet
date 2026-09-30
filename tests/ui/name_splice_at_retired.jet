@@ -1,0 +1,47 @@
+// D-NAME-SPLICE1=B: a template name splice carries the fact sigil `$`. Each
+// retired `@` splice (a declaration name, a member, a variant pattern and an
+// interpolated binding) teaches E0388 with a machine-applicable `$` edit.
+derive T.FieldNames {
+    prep loop field in T.$fields {
+        method :: "field_{field.$name}"
+        fn @method(self) -> String { "{@method}" }
+    }
+}
+
+derive T.Same {
+    fn same(self, rhs: T) -> Bool {
+        prep loop field in T.$fields {
+            if self.@field != rhs.@field -> return false
+        }
+        return true
+    }
+}
+
+derive T.VariantName {
+    fn variant_name(self) -> String {
+        prep loop left in T.$fields {
+            if self == {
+                .@left -> return left.$name
+                else -> {}
+            }
+        }
+        return ""
+    }
+}
+
+marker AddKind($sites: [.Type]) {
+    type_name :: target.$name
+    impl @type_name {
+        fn kind(self) -> String { "point" }
+    }
+}
+
+#[FieldNames, Same, AddKind]
+struct Point {
+    x: Int
+}
+
+fn run() {
+    point :: Point{x: 1}
+    print(point.field_x())
+}

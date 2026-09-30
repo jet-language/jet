@@ -1027,6 +1027,19 @@ fn default_entry_error_golden_matches_all_execution_tiers() {
     );
 }
 
+/// I9: an uncaught `[FieldError]` entry failure renders through the one
+/// Prelude FieldError projection (`print(errors)` text) on debug/release AOT,
+/// default `jet run`, and the interpreter. Resident JIT printed the structural
+/// `[FieldError { path: … }]` form and AOT ICE'd on the row-less list carrier.
+#[test]
+fn field_error_entry_golden_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_error_tiers_agree(
+        "serde/decode_error_exit",
+        1,
+        include_str!("../Examples/features/expected/serde/decode_error_exit.err.out"),
+    );
+}
+
 /// D-FAIL-CTX1=A / I9: the `?`-propagation trail is one byte oracle across
 /// debug AOT, `--release`, default `jet run`, and the forced interpreter. The
 /// interpreter printed `Error: file not found` with NO trail while the other

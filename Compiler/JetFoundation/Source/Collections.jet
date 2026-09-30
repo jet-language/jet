@@ -2,10 +2,10 @@
 // Zip and para_* are intentionally owned by their dedicated checkers.
 //
 // D-ONE-OPERATIONS1=A: every collection and Iter operation is one checked row in
-// @COLLECTION_OPERATIONS. Arity, receiver access, argument and callback shapes,
+// COLLECTION_OPERATIONS. Arity, receiver access, argument and callback shapes,
 // the result projection, the TIR operation, the Mem effect and the documented
 // law are all read from that row; no other table repeats them. Each row names
-// one @COLLECTION_LAWS entry that states its timing, result ownership, callback
+// one COLLECTION_LAWS entry that states its timing, result ownership, callback
 // count and order, stop-item consumption, failure channel and buffering.
 // `node Tools/agent/gen-core-tables.mjs --write` projects both tables into
 // Docs/spec/reference/core-library.md; `--check` rejects a stale projection.
@@ -221,7 +221,7 @@ fn collection_op(receivers: CollectionReceivers, name: String, minimum: Int, max
 }
 
 // BEGIN COLLECTION LAWS
-@COLLECTION_LAWS :: [CollectionLawFacts]{
+COLLECTION_LAWS :: prep { [CollectionLawFacts]{
     collection_law(CollectionLaw.Measure, "eager", "a fresh scalar", "none", "an iterator receiver is consumed whole", "none", "none"),
     collection_law(CollectionLaw.Lookup, "eager", "an optional copy of the found item or index", "none", "an iterator receiver is consumed and cannot be resumed", "absence is None", "none"),
     collection_law(CollectionLaw.Mutate, "eager, in place", "Unit, a Bool, or the displaced item", "none", "not applicable", "absence is None; no error channel", "the receiver's own storage"),
@@ -242,11 +242,11 @@ fn collection_op(receivers: CollectionReceivers, name: String, minimum: Int, max
     collection_law(CollectionLaw.Search, "eager", "an optional index", "once per probed item, in binary-search order", "stops at the match", "absence is None", "none"),
     collection_law(CollectionLaw.MergeEntries, "eager", "a fresh map", "once per key present in both maps", "every entry is read", "none", "the output map"),
     collection_law(CollectionLaw.Pull, "one item per call", "an Option of the next item", "none", "exactly the returned item is consumed; the remainder stays in the source", "end is None", "none")
-}
+} }
 // END COLLECTION LAWS
 
 // BEGIN COLLECTION OPERATIONS
-@COLLECTION_OPERATIONS :: [CollectionOperationRow]{
+COLLECTION_OPERATIONS :: prep { [CollectionOperationRow]{
     collection_op(CollectionReceivers.Set, "map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.ListMapped, CollectionOp.SetMap, CollectionLaw.Visit, "empty list"),
     collection_op(CollectionReceivers.Set, "filter", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.ListFiltered, CollectionOp.SetFilter, CollectionLaw.Visit, "empty list"),
     collection_op(CollectionReceivers.Set, "each", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Unit, CollectionOp.SetEach, CollectionLaw.Each, "Unit"),
@@ -472,7 +472,7 @@ fn collection_op(receivers: CollectionReceivers, name: String, minimum: Int, max
     collection_op(CollectionReceivers.Sequence, "compare", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.IterCompare}, CollectionLaw.Measure, "0 against an empty list"),
     collection_op(CollectionReceivers.Sequence, "is_empty", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
     collection_op(CollectionReceivers.Sequence, "len", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0")
-}
+} }
 // END COLLECTION OPERATIONS
 
 fn sema_collection_kind(ty: Type) -> SemaCollectionKind? {
@@ -591,7 +591,7 @@ pub fn sema_collection_is_set(receiver: Type) -> Bool Never! {
 pub fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
     kind :: sema_collection_kind(receiver) ?? return None
     family := sema_collection_family(kind)
-    loop row in @COLLECTION_OPERATIONS {
+    loop row in COLLECTION_OPERATIONS {
         if row.name == method && row.status != CollectionStatus.Proposed && collection_receivers_accept(row.receivers, family) {
             callbacks := [Int]{}
             seeds := [Int]{}

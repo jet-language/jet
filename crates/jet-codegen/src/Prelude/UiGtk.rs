@@ -26,7 +26,7 @@ mod jet_gtk {
         jet_font_shape_with_fallback, jet_font_vetted_bytes, jet_ui_accessibility_attach,
         jet_ui_accessibility_project, jet_ui_advance_focus, jet_ui_bind_tree_clicks,
         jet_ui_constraint, jet_ui_dispatch, jet_ui_measure_tree, jet_ui_node_id,
-        jet_ui_paint_tree, jet_ui_rect, JetAriaRole,
+        jet_ui_paint_tree, jet_ui_rect, JetUiAriaRole,
         JetBackend, JetEventResult, JetFontFace, JetGlyphRun, JetInputEvent, JetPaintCmd, JetRect,
         JetShow, JetSize, JetSizeConstraint, JetUiAccessibility, JetUiAccessibilityProjection,
         JetUiAccessibilityTarget, JetUiCapability, JetUiCapabilityFacts, JetUiCancellation,
@@ -1086,9 +1086,9 @@ mod jet_gtk {
                 JetUiNodeKind::Button => GtkWidgetKind::Button,
                 JetUiNodeKind::TextInput => GtkWidgetKind::Entry,
                 _ => match node.role {
-                    Some(JetAriaRole::Button) => GtkWidgetKind::Button,
-                    Some(JetAriaRole::TextInput) => GtkWidgetKind::Entry,
-                    Some(JetAriaRole::Container) => GtkWidgetKind::Box,
+                    Some(JetUiAriaRole::Button) => GtkWidgetKind::Button,
+                    Some(JetUiAriaRole::TextInput) => GtkWidgetKind::Entry,
+                    Some(JetUiAriaRole::Container) => GtkWidgetKind::Box,
                     _ => GtkWidgetKind::Label,
                 },
             }
@@ -1224,7 +1224,7 @@ mod jet_gtk {
             self.tree_widgets[index].css_class = new_class;
             self.trace(&format!("update {} {}", path, node.label));
 
-            if node.role.as_ref().is_some_and(JetAriaRole::is_interactive) {
+            if node.role.as_ref().is_some_and(JetUiAriaRole::is_interactive) {
                 focus_nodes.push(node.clone());
                 focus_paths.push(path.to_string());
             }

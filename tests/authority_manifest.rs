@@ -16,10 +16,10 @@ authority: {
 "#;
 
 const AUTHORITY_PROGRAM: &str = r#"
-@ANSWER :: "authority"
+ANSWER :: prep { "authority" }
 
 fn run() {
-    print(@ANSWER)
+    print(ANSWER)
 }
 "#;
 

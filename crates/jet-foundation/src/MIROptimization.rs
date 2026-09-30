@@ -6753,9 +6753,10 @@ fn inline_terminator(terminator: &MirTerminator, ids: &InlineIdMaps) -> MirTermi
         MirTerminator::Return { value } => MirTerminator::Return {
             value: value.map(|value| inline_value(ids, value)),
         },
-        MirTerminator::Yield { value, resume } => MirTerminator::Yield {
+        MirTerminator::Yield { value, resume, cancel } => MirTerminator::Yield {
             value: inline_value(ids, *value),
             resume: inline_block(ids, *resume),
+            cancel: inline_block(ids, *cancel),
         },
         MirTerminator::Break { target, value } => MirTerminator::Break {
             target: inline_block(ids, *target),
@@ -8363,12 +8364,18 @@ fn removable_dead_operation(
     }
 }
 
+/// A Prelude row is pure when it has no effect row, cannot fail, and is not
+/// an Effect-ABI row. The Effect ABI names a call made for what it does, not
+/// what it returns (`journey_reset`, `journey_frame_text`, `journey_origin`
+/// update the failure journey), so an unused unit result never makes it dead.
 fn prelude_call_is_pure(
     prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
     call: MirPreludeCallId,
 ) -> bool {
     prelude_calls.get(&call).is_some_and(|record| {
-        record.effect.is_none() && matches!(&record.fallibility, MirCallFallibility::Infallible)
+        record.effect.is_none()
+            && record.abi != crate::MIR::MirPreludeAbi::Effect
+            && matches!(&record.fallibility, MirCallFallibility::Infallible)
     })
 }
 fn conversion_is_pure(

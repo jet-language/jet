@@ -49,14 +49,15 @@ pub(super) fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic
                 _ => Vec::new(),
             })
             .collect::<HashSet<_>>();
+        let mentions = SourceMentions::new(&module.source);
         let mut selected = prelude
             .iter()
             .filter(|family| {
-                source_mentions_identifier(&module.source, &family.family)
+                mentions.identifier(&family.family)
                     || family
                         .members
                         .iter()
-                        .any(|member| source_mentions_unit_member(&module.source, &member.name))
+                        .any(|member| mentions.unit_member(&member.name))
             })
             .map(|family| family.family.clone())
             .collect::<HashSet<_>>();
@@ -84,16 +85,16 @@ pub(super) fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic
             ) {
                 continue;
             }
+            if !selected.contains(&standard.family) {
+                continue;
+            }
             let mut standard = standard.clone();
             let used_members = standard
                 .members
                 .iter()
-                .filter(|member| source_mentions_unit_member(&module.source, &member.name))
+                .filter(|member| mentions.unit_member(&member.name))
                 .map(|member| member.name.clone())
                 .collect::<HashSet<_>>();
-            if !selected.contains(&standard.family) {
-                continue;
-            }
             standard.members.retain(|member| {
                 let is_base = standard
                     .base
@@ -130,24 +131,83 @@ fn dimension_dependencies(expression: &crate::AST::Expr) -> Vec<String> {
     }
 }
 
-fn source_mentions_identifier(source: &str, name: &str) -> bool {
-    source.match_indices(name).any(|(start, _)| {
-        let before = source[..start].chars().next_back();
-        let after = source[start + name.len()..].chars().next();
-        !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-    })
+/// What one module's source mentions, gathered in a single pass. The catalog
+/// holds hundreds of members, and scanning a large unit once per member made
+/// injection cost members × source (#3661).
+struct SourceMentions<'a> {
+    /// Every maximal identifier run.
+    identifiers: HashSet<&'a str>,
+    /// Maximal identifier runs not preceded by `.`.
+    unqualified: HashSet<&'a str>,
+    /// Sorted identifier runs that start right after `from_` or right after
+    /// an ASCII digit (a literal suffix such as `5ms`).
+    suffixes: Vec<&'a str>,
 }
 
-fn source_mentions_unit_member(source: &str, member: &str) -> bool {
-    source_mentions_unqualified_identifier(source, &crate::AST::UnitFamilyDef::type_name(member))
-        || source.contains(&format!("from_{member}"))
-        || source.match_indices(member).any(|(start, _)| {
-            source[..start]
-                .chars()
-                .next_back()
-                .is_some_and(|ch| ch.is_ascii_digit())
-        })
+impl<'a> SourceMentions<'a> {
+    fn new(source: &'a str) -> Self {
+        fn is_ident(ch: char) -> bool {
+            ch.is_alphanumeric() || ch == '_'
+        }
+        /// The maximal identifier run starting at byte `start`.
+        fn run_at(source: &str, start: usize) -> &str {
+            let rest = &source[start..];
+            &rest[..rest.find(|ch: char| !is_ident(ch)).unwrap_or(rest.len())]
+        }
+        let mut identifiers = HashSet::new();
+        let mut unqualified = HashSet::new();
+        let mut previous = None;
+        for (start, ch) in source.char_indices() {
+            if is_ident(ch) && !previous.is_some_and(is_ident) {
+                let run = run_at(source, start);
+                identifiers.insert(run);
+                if previous != Some('.') {
+                    unqualified.insert(run);
+                }
+            }
+            previous = Some(ch);
+        }
+        let bytes = source.as_bytes();
+        // Members are identifiers, so they never start with a digit: only a
+        // digit-to-non-digit boundary can begin a suffix match.
+        let mut suffixes = (1..bytes.len())
+            .filter(|&at| bytes[at - 1].is_ascii_digit() && !bytes[at].is_ascii_digit())
+            .map(|at| run_at(source, at))
+            .chain(
+                source
+                    .match_indices("from_")
+                    .map(|(start, text)| run_at(source, start + text.len())),
+            )
+            .filter(|run| !run.is_empty())
+            .collect::<Vec<_>>();
+        suffixes.sort_unstable();
+        suffixes.dedup();
+        Self {
+            identifiers,
+            unqualified,
+            suffixes,
+        }
+    }
+
+    /// `name` appears as a whole identifier.
+    fn identifier(&self, name: &str) -> bool {
+        self.identifiers.contains(name)
+    }
+
+    /// The member's type name appears unqualified, or the member itself
+    /// follows `from_` or a digit.
+    fn unit_member(&self, member: &str) -> bool {
+        if self
+            .unqualified
+            .contains(crate::AST::UnitFamilyDef::type_name(member).as_str())
+        {
+            return true;
+        }
+        // Every run that starts with `member` sorts at or after it, so the
+        // first run not less than `member` starts with it if any run does.
+        let at = self.suffixes.partition_point(|run| *run < member);
+        self.suffixes.get(at).is_some_and(|run| run.starts_with(member))
+    }
 }
 
 fn source_unit_member_span(source: &str, member: &str) -> Option<Span> {
@@ -178,16 +238,6 @@ fn source_identifier_span(source: &str, name: &str) -> Option<Span> {
         (!before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
             && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_'))
         .then_some(Span::new(start, start + name.len()))
-    })
-}
-
-fn source_mentions_unqualified_identifier(source: &str, name: &str) -> bool {
-    source.match_indices(name).any(|(start, _)| {
-        let before = source[..start].chars().next_back();
-        let after = source[start + name.len()..].chars().next();
-        before != Some('.')
-            && !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
     })
 }
 

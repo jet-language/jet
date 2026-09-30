@@ -87,7 +87,7 @@ pub(crate) struct UiState {
     pub(crate) constraints: Vec<ui_rt::JetSizeConstraint>,
     pub(crate) rects: Vec<ui_rt::JetRect>,
     pub(crate) events: Vec<ui_rt::JetInputEvent>,
-    pub(crate) roles: Vec<ui_rt::JetAriaRole>,
+    pub(crate) roles: Vec<ui_rt::JetUiAriaRole>,
     pub(crate) sizes: Vec<ui_rt::JetSize>,
     pub(crate) gtk_widgets: Vec<i64>,
     /// Host selection is explicit: headless mode keeps its deterministic host,
@@ -1650,12 +1650,12 @@ fn ambient_drag_event(
 fn ambient_aria_role(
     value: &CtValue,
     span: Span,
-) -> Result<ui_rt::JetAriaRole, Diagnostic> {
+) -> Result<ui_rt::JetUiAriaRole, Diagnostic> {
     match ambient_enum(value, "UiAriaRole", span)?.as_str() {
-        "Button" => Ok(ui_rt::JetAriaRole::Button),
-        "TextInput" => Ok(ui_rt::JetAriaRole::TextInput),
-        "Label" => Ok(ui_rt::JetAriaRole::Label),
-        "Container" => Ok(ui_rt::JetAriaRole::Container),
+        "Button" => Ok(ui_rt::JetUiAriaRole::Button),
+        "TextInput" => Ok(ui_rt::JetUiAriaRole::TextInput),
+        "Label" => Ok(ui_rt::JetUiAriaRole::Label),
+        "Container" => Ok(ui_rt::JetUiAriaRole::Container),
         _ => Err(unsupported("unknown UiAriaRole variant", span)),
     }
 }
@@ -1845,10 +1845,10 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
         ambient_enum_value(
             "UiAriaRole",
             match role {
-                ui_rt::JetAriaRole::Button => "Button",
-                ui_rt::JetAriaRole::TextInput => "TextInput",
-                ui_rt::JetAriaRole::Label => "Label",
-                ui_rt::JetAriaRole::Container => "Container",
+                ui_rt::JetUiAriaRole::Button => "Button",
+                ui_rt::JetUiAriaRole::TextInput => "TextInput",
+                ui_rt::JetUiAriaRole::Label => "Label",
+                ui_rt::JetUiAriaRole::Container => "Container",
             },
             Vec::new(),
         )
@@ -2135,15 +2135,15 @@ fn ui_mir_enum(type_name: &str, variant: &str) -> MirRuntimeValue {
     }
 }
 
-fn ui_mir_role(role: Option<ui_rt::JetAriaRole>) -> MirRuntimeValue {
+fn ui_mir_role(role: Option<ui_rt::JetUiAriaRole>) -> MirRuntimeValue {
     role.map_or_else(
         || ui_mir_absent("UiAriaRole"),
         |role| {
             let variant = match role {
-                ui_rt::JetAriaRole::Button => "Button",
-                ui_rt::JetAriaRole::TextInput => "TextInput",
-                ui_rt::JetAriaRole::Label => "Label",
-                ui_rt::JetAriaRole::Container => "Container",
+                ui_rt::JetUiAriaRole::Button => "Button",
+                ui_rt::JetUiAriaRole::TextInput => "TextInput",
+                ui_rt::JetUiAriaRole::Label => "Label",
+                ui_rt::JetUiAriaRole::Container => "Container",
             };
             MirRuntimeValue::Present(Box::new(ui_mir_enum("UiAriaRole", variant)))
         },
@@ -4061,7 +4061,7 @@ fn jet_jit_ui_node_role(label: i64, w: f64, h: f64, role: i64) -> i64 {
             .ui
             .roles
             .get(role.saturating_sub(1) as usize)
-            .unwrap_or(&ui_rt::JetAriaRole::Label);
+            .unwrap_or(&ui_rt::JetUiAriaRole::Label);
         rt.ui
             .nodes
             .push(ui_rt::jet_ui_node_role(&label, w, h, role));

@@ -590,8 +590,6 @@ const TYPE_CONTAINER = {
   BuildContext: "core.compiler",
   Solver: "core.compute.solve",
   Authority: "core.process",
-  Digest256: "core.crypto",
-  Digest512: "core.crypto",
   Clock: "core.time",
   Duration: "core.time",
   Path: "core.files",
@@ -610,17 +608,8 @@ const TYPE_CONTAINER = {
   Match: "core.regex",
   ExpiringValue: "core.time.expiring",
   Condition: "core.sync",
-  Secret: "core.crypto.vault",
   WrappedVaultKey: "core.crypto.vault",
   KeyUnlock: "core.crypto.vault",
-  SigningKey: "core.crypto",
-  VerifyKey: "core.crypto",
-  Signature: "core.crypto",
-  Sealed: "core.crypto",
-  WrappedKey: "core.crypto",
-  X25519SecretKey: "core.crypto",
-  X25519PublicKey: "core.crypto",
-  PasswordHash: "core.crypto",
   TestSuite: "core.testing",
   Bytes: "Bytes",
   Queue: "Queue",
@@ -1518,7 +1507,7 @@ function translateCoreCoverage(expression, context) {
     const constant = part.match(
       /^CoreCallCoverage::(SEMA|TIR_SUBSET|TIR_EVAL|AOT|INTERPRETER|COMPTIME|JIT|KNOWN)$/,
     );
-    if (constant) return "@CORE_CALL_COVERAGE_" + constant[1];
+    if (constant) return "CORE_CALL_COVERAGE_" + constant[1];
     return translateRustInteger(part, context);
   });
   return "CoreCallCoverage{bits: " + bits.join(" | ") + "}";
@@ -2630,7 +2619,7 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     "// Source SHA-256: " + sha256(tirSource),
     "// Core ABI rows keep Core.jet order followed by the TIR extension order.",
     "// CoreModuleExportNames is the separate module/export-name projection.",
-    "@CORE_CALLS :: [CoreCallRecord]{",
+    "CORE_CALLS :: prep { [CoreCallRecord]{",
   ];
   for (const row of declarations.dispatcherRows) {
     const expression = coreDispatcherExpression(row, ambientKeys);
@@ -2648,10 +2637,10 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     );
   }
   lines.push(
-    "}",
+    "} }",
     "",
     "// Module/member/type names follow Core.jet module declaration order.",
-    "@CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
+    "CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
   );
   for (const module of declarations.modules) {
     const members = module.members.map(function (member) {

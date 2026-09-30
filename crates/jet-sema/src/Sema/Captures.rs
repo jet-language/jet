@@ -672,11 +672,18 @@ fn collect_pattern_bindings(pattern: &Pattern, bound: &mut HashSet<String>) {
     match pattern {
         Pattern::Variant { bindings, .. } => {
             for slot in bindings {
-                if let crate::AST::PatSlot::Bind { name, .. } = slot {
-                    bound.insert(name.clone());
-                }
+                collect_slot_bindings(slot, bound);
             }
         }
+        Pattern::Present {
+            inner: Some(inner), ..
+        }
+        | Pattern::Ok {
+            inner: Some(inner), ..
+        }
+        | Pattern::Err {
+            inner: Some(inner), ..
+        } => collect_pattern_bindings(inner, bound),
         Pattern::Present { binding, .. }
         | Pattern::Ok { binding, .. }
         | Pattern::Err { binding, .. } => {
@@ -709,6 +716,20 @@ fn collect_pattern_bindings(pattern: &Pattern, bound: &mut HashSet<String>) {
             }
         }
         Pattern::Absent(_) | Pattern::Range { .. } => {}
+    }
+}
+
+fn collect_slot_bindings(slot: &crate::AST::PatSlot, bound: &mut HashSet<String>) {
+    match slot {
+        crate::AST::PatSlot::Bind { name, .. } => {
+            bound.insert(name.clone());
+        }
+        crate::AST::PatSlot::Nested(inner) => collect_pattern_bindings(inner, bound),
+        // D-PAT-NAMED-NEST1=A: `field: slot` binds what its slot binds.
+        crate::AST::PatSlot::Named { slot, .. } => collect_slot_bindings(slot, bound),
+        crate::AST::PatSlot::Wildcard
+        | crate::AST::PatSlot::Range { .. }
+        | crate::AST::PatSlot::Rest(_) => {}
     }
 }
 
@@ -1135,56 +1156,7 @@ pub(crate) fn stmt_collect_captures(
                 // they are not treated as captures inside the arm body.
                 let mut arm_bound = when_bound.clone();
                 if let Expr::PatternTest { pattern, .. } = &a.cond {
-                    match pattern {
-                        Pattern::Ok { binding, .. }
-                        | Pattern::Err { binding, .. }
-                        | Pattern::Present { binding, .. } => {
-                            arm_bound.insert(binding.clone());
-                        }
-                        Pattern::Variant { bindings, .. } => {
-                            for slot in bindings {
-                                if let crate::AST::PatSlot::Bind { name, .. } = slot {
-                                    arm_bound.insert(name.clone());
-                                }
-                            }
-                        }
-                        Pattern::Absent(_) | Pattern::Range { .. } => {}
-                        Pattern::Struct { fields, .. } => {
-                            for field in fields {
-                                if let crate::AST::StructPatField::Bind { local, .. } = field {
-                                    arm_bound.insert(local.clone());
-                                }
-                            }
-                        }
-                        Pattern::Or(alts, _) => {
-                            // Insert bindings from first alt (all alts bind same names).
-                            if let Some(first) = alts.first() {
-                                if let Pattern::Variant { bindings, .. } = first {
-                                    for slot in bindings {
-                                        if let crate::AST::PatSlot::Bind { name, .. } = slot {
-                                            arm_bound.insert(name.clone());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // D-PARSESTR1: every hole binds a name into the arm body.
-                        Pattern::StrMatch { parts, .. } => {
-                            for part in parts {
-                                if let crate::AST::StrMatchPart::Hole { name, .. } = part {
-                                    arm_bound.insert(name.clone());
-                                }
-                            }
-                        }
-                        // D-BINPAT1: every binary-pattern hole binds a name too.
-                        Pattern::BinMatch { parts, .. } => {
-                            for part in parts {
-                                if let crate::AST::BinMatchPart::Hole { name, .. } = part {
-                                    arm_bound.insert(name.clone());
-                                }
-                            }
-                        }
-                    }
+                    collect_pattern_bindings(pattern, &mut arm_bound);
                 }
                 block_collect_captures(&a.body, &mut arm_bound, read, mut_cap, called);
             }

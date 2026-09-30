@@ -395,7 +395,7 @@ pub fn snapshot_from_struct(s: &StructDef, version: &str) -> SchemaSnapshot {
 /// Load a snapshot from disk. Checks `JET_SCHEMA_CACHE_DIR` env var first
 /// (for tests), then `<project_root>/<SOURCE_ROOT_DIR>/<SCHEMA_CACHE_SUBDIR>/`.
 pub fn load_snapshot(project_root: &std::path::Path, type_name: &str) -> Option<SchemaSnapshot> {
-    let base = if let Ok(override_dir) = std::env::var("JET_SCHEMA_CACHE_DIR") {
+    let base = if let Some(override_dir) = jet_foundation::CheckReads::env_var("JET_SCHEMA_CACHE_DIR") {
         std::path::PathBuf::from(override_dir)
     } else {
         project_root
@@ -403,7 +403,7 @@ pub fn load_snapshot(project_root: &std::path::Path, type_name: &str) -> Option<
             .join(Syntax::SCHEMA_CACHE_SUBDIR)
     };
     let path = base.join(format!("{}.snapshot", type_name));
-    let raw = std::fs::read_to_string(&path).ok()?;
+    let raw = jet_foundation::CheckReads::read_to_string(&path).ok()?;
     SchemaSnapshot::parse(&raw).ok()
 }
 
@@ -422,7 +422,7 @@ pub fn save_snapshot(project_root: &std::path::Path, snap: &SchemaSnapshot) -> R
 /// The schema cache directory for a project (`<root>/.jet/cache/schema/`),
 /// honouring the `JET_SCHEMA_CACHE_DIR` test override.
 pub fn schema_cache_dir(project_root: &std::path::Path) -> std::path::PathBuf {
-    if let Ok(override_dir) = std::env::var("JET_SCHEMA_CACHE_DIR") {
+    if let Some(override_dir) = jet_foundation::CheckReads::env_var("JET_SCHEMA_CACHE_DIR") {
         std::path::PathBuf::from(override_dir)
     } else {
         project_root
@@ -436,13 +436,12 @@ pub fn schema_cache_dir(project_root: &std::path::Path) -> std::path::PathBuf {
 pub fn load_all_snapshots(project_root: &std::path::Path) -> Vec<SchemaSnapshot> {
     let dir = schema_cache_dir(project_root);
     let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let path = e.path();
+    if let Ok(entries) = jet_foundation::CheckReads::read_dir_sorted(&dir) {
+        for path in entries {
             if path.extension().and_then(|x| x.to_str()) != Some("snapshot") {
                 continue;
             }
-            if let Ok(raw) = std::fs::read_to_string(&path) {
+            if let Ok(raw) = jet_foundation::CheckReads::read_to_string(&path) {
                 if let Ok(snap) = SchemaSnapshot::parse(&raw) {
                     out.push(snap);
                 }

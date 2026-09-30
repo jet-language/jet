@@ -988,6 +988,12 @@ impl<'a> Checker<'a> {
                         et,
                         crate::AST::AccessConvention::Read,
                     );
+                    let gt = self.lift_optional_argument(
+                        &mut arg.expr,
+                        gt,
+                        et,
+                        crate::AST::AccessConvention::Read,
+                    );
                     if Collections::is_closure_method(method) && i == 0 && method == "map" {
                         if let Type::Fn {
                             ret: Some(ref r), ..

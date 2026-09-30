@@ -40,7 +40,7 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
 
         if line.contains("; -> return") {
             return_anchors += 1
-            parts := line.split("; -> return")
+            parts := line.split("; -> return").to_list()
             operand := if parts.len() > 0 -> sema_inline_assembly_first_operand(parts[0].trim()) else -> None
             checked_destination := if operand == {
                 None -> None
@@ -153,7 +153,7 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
 }
 
 fn sema_inline_assembly_target_supported(target: String) -> Bool Never! {
-    parts := target.split("-")
+    parts := target.split("-").to_list()
     arch := if parts.len() > 0 -> parts[0] else -> ""
     arch == "x86_64" || arch == "i386" || arch == "i586" || arch == "i686" || arch == "x86" || arch == "aarch64" || arch == "arm" || arch == "armv7" || arch.starts_with("thumb") || arch.starts_with("riscv64")
 }
@@ -191,7 +191,7 @@ fn sema_inline_assembly_register_number(register: String, prefix: String, lo: In
 }
 
 fn sema_inline_assembly_register_known(target: String, register: String) -> Bool Never! {
-    parts := target.split("-")
+    parts := target.split("-").to_list()
     arch := if parts.len() > 0 -> parts[0] else -> ""
     name := sema_inline_assembly_normalize_register(register)
     if arch == "x86_64" {
@@ -240,7 +240,7 @@ fn sema_inline_assembly_first_operand(line: String) -> String? {
     }
     if separator < 0 -> return None
     operands := String.from_bytes(bytes.slice(separator + 1, bytes.len())) ?? ""
-    fields := operands.split(",")
+    fields := operands.split(",").to_list()
     if fields.len() == 0 -> return None
     operand := fields[0].trim()
     if operand == "" -> None else -> Val(operand)

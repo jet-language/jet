@@ -397,6 +397,31 @@ mod borrowed_pattern_tests {
 
 type IfBinding = (String, TLocal, Option<Type>);
 
+/// S31: the names a nested payload pattern binds, each at its payload type,
+/// resolved on a scratch copy of the environment.
+fn nested_pattern_if_bindings(
+    cx: &Cx,
+    env: &LowerEnv,
+    pattern: &Pattern,
+    subject_ty: &Type,
+) -> Vec<IfBinding> {
+    let mut scratch = clone_env(env);
+    if super::patterns::tir_add_nested_pattern_bindings(cx, pattern, &mut scratch, subject_ty)
+        .is_err()
+    {
+        return Vec::new();
+    }
+    pattern
+        .binding_names()
+        .into_iter()
+        .filter(|binding| binding.local_name() != "_")
+        .map(|binding| {
+            let name = binding.local_name();
+            (name.to_owned(), scratch.local_of(name), scratch.ty_of(name))
+        })
+        .collect()
+}
+
 fn lower_if_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv, cached: bool) -> TExpr {
     if cached {
         super::lower_cached_expr(expr, cx, env)
@@ -847,9 +872,13 @@ fn lower_if_cond_atom(
                         .map(Some)
                         .chain(std::iter::repeat(None)),
                 )
-                .filter_map(|(slot, ty)| match slot {
-                    PatSlot::Bind { name, .. } => Some((name.clone(), TLocal::user(name), ty)),
-                    _ => None,
+                .flat_map(|(slot, ty)| match slot {
+                    PatSlot::Bind { name, .. } => vec![(name.clone(), TLocal::user(name), ty)],
+                    // S31: names bound inside a nested payload pattern.
+                    PatSlot::Nested(inner) => ty
+                        .map(|ty| nested_pattern_if_bindings(cx, env, inner, &ty))
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
                 })
                 .collect();
             if !bindings.is_empty() {
@@ -869,25 +898,35 @@ fn lower_if_cond_atom(
                 );
             }
         }
-        if is_binding_free_user_variant_pattern_test(pattern, cx) {
-            let enum_type = match &subj.ty {
-                Type::Named(enum_name)
-                | Type::Apply {
-                    name: enum_name, ..
-                } => {
-                    let resolved = cx
-                        .core_qualified_rust_type_name(enum_name)
-                        .unwrap_or(enum_name.as_str());
-                    cx.enum_variants
-                        .get(resolved)
-                        .filter(|variants| {
-                            variants.iter().any(|(candidate, _)| candidate == variant)
-                        })
-                        .map(|_| resolved.to_string())
-                }
-                _ => None,
+        // Binding-free variant tests. The checked subject type names the
+        // owning enum even when the variant name alone is ambiguous across
+        // enums (Core `EncodingErrorKind.Syntax`, `CBORErrorKind.Syntax`, …),
+        // so the subject decides first and the name-only owner map is the
+        // fallback for subjects without a resolved enum type. Core enums
+        // (`EncodingErrorKind`) are not source-registered here; their canonical
+        // MIR row is keyed by the exported leaf.
+        let subject_enum = match &subj.ty {
+            Type::Named(enum_name)
+            | Type::Apply {
+                name: enum_name, ..
+            } => {
+                let resolved = cx
+                    .core_qualified_rust_type_name(enum_name)
+                    .unwrap_or(enum_name.as_str());
+                let declared = cx.enum_variants.get(resolved).is_some_and(|variants| {
+                    variants.iter().any(|(candidate, _)| candidate == variant)
+                }) || jet_foundation::CoreModuleExports::core_enum_variants(resolved)
+                    .is_some_and(|variants| variants.contains(&variant.as_str()));
+                declared.then(|| resolved.to_string())
             }
-            .or_else(|| cx.variant_owner.get(variant).cloned());
+            _ => None,
+        };
+        let subject_owned_unit_variant = bindings.is_empty()
+            && !is_json_variant(variant)
+            && !is_key_variant(variant)
+            && subject_enum.is_some();
+        if subject_owned_unit_variant || is_binding_free_user_variant_pattern_test(pattern, cx) {
+            let enum_type = subject_enum.or_else(|| cx.variant_owner.get(variant).cloned());
             return (
                 TIfCond::Matches {
                     pattern: TPattern::arm(pattern.clone(), enum_type),
@@ -1067,7 +1106,12 @@ fn lower_if_cond_atom(
             } else {
                 lower_if_let_subject(subject, cx, env, cached)
             };
-            if let Pattern::Present { binding, .. } = pattern {
+            if let Pattern::Present {
+                binding,
+                inner: None,
+                ..
+            } = pattern
+            {
                 if !matches!(&subj.ty, Type::Option(_)) {
                     if let Expr::Ident(source_name, _) = subject.as_ref() {
                         // A same-name Present refinement already replaced the
@@ -1122,6 +1166,17 @@ fn lower_if_cond_atom(
                         );
                     }
                 }
+            }
+            // S31: a nested payload pattern binds its own names at their
+            // payload types; the carrier itself binds nothing.
+            if pattern.has_nested_pattern() {
+                let bindings = nested_pattern_if_bindings(cx, env, pattern, &subj.ty);
+                let pattern = if matches!(&subj.ty, Type::Option(_)) {
+                    TPattern::option_binding(pattern.clone())
+                } else {
+                    TPattern::binding(pattern.clone())
+                };
+                return (TIfCond::IfLet { pattern, subj }, bindings, Vec::new());
             }
             // The bound name + its inner type, off the subject's resolved Option/Result
             // (totality — never re-inferred). Mirrors `add_pattern_bindings`.
@@ -1257,6 +1312,64 @@ pub(crate) fn lower_switch<'a>(
         }
         return lower_guard_switch(arms, else_body, env, None);
     }
+    // S31: nested payload patterns test and bind through the short-circuit
+    // TIfCond chain; MIR lowers each nested test structurally on every tier.
+    // A non-identifier subject is evaluated once into a compiler local that
+    // every arm tests.
+    if arms
+        .iter()
+        .any(|arm| crate::Codegen::TIR::arm_has_nested_pattern(&arm.cond))
+    {
+        if matches!(subject, Expr::Ident(..)) {
+            return lower_guard_switch(arms, else_body, env, Some(subject.clone()));
+        }
+        let name = jet_format!("{jet_prefix}switch_subject_{}", subject.span().start);
+        let carrier = arms.iter().any(|arm| {
+            matches!(
+                &arm.cond,
+                Expr::PatternTest {
+                    pattern: Pattern::Ok { .. } | Pattern::Err { .. },
+                    ..
+                }
+            )
+        });
+        let fallback_subject = env.fallback_subject;
+        env.fallback_subject = carrier || fallback_subject;
+        let init = lower_if_let_subject(subject, cx, env, false);
+        env.fallback_subject = fallback_subject;
+        let ty = init.ty.clone();
+        env.bind(&name, TLocal::generated(&name), Some(ty.clone()));
+        let local_subject = Expr::Ident(name.clone(), subject.span());
+        return lower_guard_switch(arms, else_body, env, Some(local_subject)).map_stmt(
+            move |stmt| {
+                let TStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                    else_is_elseif,
+                } = stmt
+                else {
+                    unreachable!("a guard table lowers to an if statement");
+                };
+                TStmt::If {
+                    cond: TIfCond::WithPrelude {
+                        prelude: vec![TStmt::Let {
+                            name,
+                            kw: "let",
+                            let_ty: crate::Codegen::TIR::TLetTy::plain(ty),
+                            init,
+                            gc_promotion: None,
+                            gc_transferred: false,
+                        }],
+                        cond: Box::new(cond),
+                    },
+                    then_body,
+                    else_body,
+                    else_is_elseif,
+                }
+            },
+        );
+    }
     // `DataTree` is a prelude enum whose variants have a specialized if-let
     // lowering (`Object` binds ordered entries and materializes the public map
     // view). A non-identifier dispatch subject is represented in the AST with
@@ -1270,7 +1383,7 @@ pub(crate) fn lower_switch<'a>(
             })
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some(subject));
+        return lower_guard_switch(arms, else_body, env, Some(subject.clone()));
     }
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
     if else_body.is_some()
@@ -1300,7 +1413,7 @@ pub(crate) fn lower_switch<'a>(
                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some(subject));
+        return lower_guard_switch(arms, else_body, env, Some(subject.clone()));
     }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
@@ -1704,7 +1817,7 @@ fn lower_guard_switch<'a>(
     arms: &'a [SwitchArm],
     else_body: &'a Option<Vec<Stmt>>,
     env: &mut LowerEnv,
-    subject_override: Option<&'a Expr>,
+    subject_override: Option<Expr>,
 ) -> LowerStmtPlan<'a> {
     // The chain is wrapped from the last arm back toward the first, so the deferred
     // bodies run in reverse source order. Prepare each condition immediately before
@@ -1719,9 +1832,11 @@ fn lower_guard_switch<'a>(
         let state = Rc::new(RefCell::new(None));
         let state_for_prepare = Rc::clone(&state);
         let branch = fork_panic(env);
+        let subject_override = subject_override.clone();
         bodies.push(
             LowerBody::scoped(&arm.body, branch).prepare(move |cx, branch| {
                 let condition = subject_override
+                    .as_ref()
                     .map(|subject| replace_pattern_subject(&arm.cond, subject))
                     .unwrap_or_else(|| arm.cond.clone());
                 let (cond, bindings, prefix) = lower_if_cond(&condition, cx, branch);

@@ -156,6 +156,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
         assert_eq!(code, 70, "AOT stderr:\n{stderr}");
         assert!(stdout.is_empty(), "AOT stdout:\n{stdout}");
         assert!(stderr.contains(MESSAGE), "AOT stderr:\n{stderr}");
+        assert!(stderr.contains("[E3010]"), "AOT stderr:\n{stderr}");
     }
 
     match run_resident(name, &[("main.jet", source)]) {
@@ -167,6 +168,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
             assert_eq!(exit_code, 70, "resident-JIT stderr:\n{stderr}");
             assert!(stdout.is_empty(), "resident-JIT stdout:\n{stdout}");
             assert!(stderr.contains(MESSAGE), "resident-JIT stderr:\n{stderr}");
+            assert!(stderr.contains("[E3010]"), "resident-JIT stderr:\n{stderr}");
         }
         RunOutcome::Problems(diagnostics) => assert!(
             diagnostics
@@ -195,6 +197,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
             assert_eq!(exit_code, 70, "interpreter stderr:\n{stderr}");
             assert!(stdout.is_empty(), "interpreter stdout:\n{stdout}");
             assert!(stderr.contains(MESSAGE), "interpreter stderr:\n{stderr}");
+            assert!(stderr.contains("[E3010]"), "interpreter stderr:\n{stderr}");
         }
         RunOutcome::Problems(diagnostics) => assert!(
             diagnostics
@@ -232,7 +235,7 @@ fn run() {
     assigned := I16{0}
     assigned = small
     narrow_decimal :: F32{1.5}
-    wide_decimal :: 2.5
+    wide_decimal :: Float{2.5}
     _ :: narrow_decimal + wide_decimal
 }
 "#,
@@ -259,10 +262,10 @@ fn run() {
     print(take_float(exact) == 9007199254740992.0)
     print(return_float(exact) == 9007199254740992.0)
     print(assigned == 9007199254740992.0)
-    print((exact + 0.0) == 9007199254740992.0)
+    print((exact + Float{0.0}) == 9007199254740992.0)
 
     lossy :: Int{9007199254740993}
-    print((approx(lossy) + 0.0) == 9007199254740992.0)
+    print((approx(lossy) + Float{0.0}) == 9007199254740992.0)
 }
 "#;
     assert_all_tiers(
@@ -303,9 +306,9 @@ fn return_float(value: Int) -[]> Float {
 
 fn run() {
     lossy :: Int{9007199254740993}
-    expected :: 9007199254740992.0
+    expected :: Float{9007199254740992.0}
 
-    print((((approx(lossy))) + 0.0) == expected)
+    print((((approx(lossy))) + Float{0.0}) == expected)
     print(take_float(((approx(lossy)))) == expected)
 
     assigned := Float{0.0}
@@ -438,7 +441,7 @@ fn run() {
     print(exact_list[0] == 9007199254740992.0)
 
     lossy :: Int{9007199254740993}
-    rounded :: 9007199254740992.0
+    rounded :: Float{9007199254740992.0}
     approx_if :: if choose_first -> approx(lossy) else -> decimal
     approx_list :: [approx(lossy), decimal]
     print(approx_if == rounded)
@@ -466,7 +469,7 @@ fn run() {
 "#,
     );
     assert!(
-        no_join.contains("[E0109]") && no_join.contains("neither U8 contains every value of I8"),
+        no_join.contains("[E0109]") && no_join.contains("Neither U8 contains every value of I8"),
         "{no_join}"
     );
 
@@ -534,14 +537,14 @@ fn run() {
         let rendered = compile_error(&format!("fn run() {{ _ :: U64{{{value}}} }}"));
         assert!(
             rendered.contains("[E1003]")
-                && rendered.contains("a U64 holds 0..18446744073709551615"),
+                && rendered.contains("A `U64` holds 0..18446744073709551615"),
             "{rendered}"
         );
     }
     let rendered = compile_error("fn run() { _ :: I64{9223372036854775808} }");
     assert!(
         rendered.contains("[E1003]")
-            && rendered.contains("an I64 holds -9223372036854775808..9223372036854775807"),
+            && rendered.contains("An `I64` holds -9223372036854775808..9223372036854775807"),
         "{rendered}"
     );
 }

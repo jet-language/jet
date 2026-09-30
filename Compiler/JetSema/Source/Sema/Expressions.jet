@@ -232,7 +232,7 @@ fn sema_expr_numeric_literal_conversion(value: TExpr, target: Type, span: Span, 
     literal :: sema_expr_integer_literal_value(value)
     if literal != None && (target == Type.Float || target == Type.Float32) {
         limit := if target == Type.Float32 -> 1 << 24 else -> 1 << 53
-        literal_value := literal ?? 0
+        literal_value := literal
         lower := -limit
         if literal_value < lower || literal_value > limit {
             &diagnostics.push(sema_error("E1003", span, "{literal_value} does not fit exactly in {type_name(target)}", "{type_name(target)} holds every whole number only from {lower} through {limit}", "use a whole-number type, or write a value from {lower} through {limit}"))
@@ -412,7 +412,7 @@ fn sema_expr_operator_target_matches(implementation: SemaRegistrationImpl, nomin
 
 fn sema_expr_operator_rhs_matches(rhs: Type?, expected: Type) -> Bool Never! {
     if rhs == None -> return false
-    type_identity_equal(rhs ?? Type.Named{name: "Never"}, expected)
+    type_identity_equal(rhs, expected)
 }
 
 fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, receiver_type: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [SemaExprOperatorResolution] Never! {
@@ -709,7 +709,7 @@ fn sema_expr_expected_trait_symbol(graph: SemaRegistrationGraph, bound: String, 
         symbol :: resolved ?? return None
         if symbol.symbol.kind == SymbolKind.Trait -> return Val(symbol.symbol)
     }
-    parts := bound.split("::")
+    parts := bound.split("::").to_list()
     if parts.len() < 2 -> return None
     leaf := parts[parts.len() - 1]
     module_parts := [String]{}
@@ -742,7 +742,7 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
                     }
                     graph :: environment.registration_graph ?? return updated
                     trait_name :: bounds[0]
-                    graph_value := graph ?? return updated
+                    graph_value := graph
                     trait_symbol :: sema_expr_expected_trait_symbol(graph_value, trait_name, environment.module_identity) ?? return updated
                     concrete :: sema_type_resolve_nominal(graph_value, offered, environment.module_identity) ?? return updated
                     updated.ty = required
@@ -761,10 +761,36 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
     updated
 }
 
+// D-OPT-LIFT1=A: a plain `T` fills a slot whose checked type is `T?`. The slot
+// type is already fixed, so the lift never picks a callee or infers a generic;
+// it adds exactly one `Present` last. A value that is already optional or
+// fallible, or that never returns, keeps the ordinary checks (E0108/E0309).
+fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environment: SemaScopeEnvironment) -> TExpr? {
+    normalized :: sema_expr_unwrap_tag(required)
+    if normalized == {
+        .Option(payload) -> {
+            if sema_expr_unwrap_tag(offered) == {
+                .Option(_) | .Result(_, _) -> return None
+                .Named(name) -> {
+                    if name == "Never" -> return None
+                }
+                else -> {}
+            }
+            fits :: sema_expr_expected_assignable(payload, offered, environment) ?? return None
+            if !fits -> return None
+            return Val(sema_tir_expr(normalized, TExprKind.Present{value: value}, value.span))
+        }
+        else -> {}
+    }
+    None
+}
+
 fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     if expected == None -> return Val(value)
-    required := sema_expr_expected_type(expected ?? value.ty, environment)
+    required := sema_expr_expected_type(expected, environment)
     offered := sema_expr_expected_type(value.ty, environment)
+    lifted :: sema_expr_optional_lift(value, required, offered, environment)
+    if lifted != None -> return lifted
     compatible :: sema_expr_expected_assignable(required, offered, environment) ?? return None
     if !compatible {
         &diagnostics.push(sema_type_mismatch(required, offered, value.span))
@@ -1127,7 +1153,7 @@ fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, scopes:
         .Named(value) -> name = value
         else -> return None
     }
-    owner := sema_expression_type_symbol(scopes, name) ?? return None
+    owner := sema_expression_type_symbol(&scopes, name) ?? return None
     declaration := sema_scope_resolve_declaration(environment, owner.id) ?? return None
     definition := None
     if declaration == {
@@ -1152,7 +1178,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     if left_facts == None && right_facts == None -> return None
     arithmetic := op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.FloorDiv || op == BinOp.Mod || op == BinOp.Rem || op == BinOp.BitAnd || op == BinOp.BitOr || op == BinOp.BitXor || op == BinOp.Shl || op == BinOp.Shr
     if arithmetic {
-        distinct :: if left_facts != None -> left_facts ?? return None else -> right_facts ?? return None
+        distinct :: if left_facts != None -> left_facts -> right_facts ?? return None
         if !distinct.numeric {
             &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available on `{distinct.name}`", "`{distinct.name}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"))
             return None
@@ -1175,7 +1201,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     }
     if op == BinOp.Eq || op == BinOp.Ne {
         if lhs.ty != rhs.ty {
-            distinct :: if left_facts != None -> left_facts ?? return None else -> right_facts ?? return None
+            distinct :: if left_facts != None -> left_facts -> right_facts ?? return None
             &diagnostics.push(sema_error("E0128", span, "a `{type_name(lhs.ty)}` can't be compared with a `{type_name(rhs.ty)}`", "`{distinct.name}` is a distinct type; it only compares equal to another `{distinct.name}`", "use `.raw()` to compare the underlying values, or construct a `{distinct.name}`"))
             return None
         }
@@ -1233,7 +1259,7 @@ fn sema_expr_unit_conversion_total(source: SemaRegistrationUnitFact, destination
 }
 
 fn sema_expr_unit_conversion_method(fact: SemaRegistrationUnitFact) -> String Never! {
-    parts := fact.name.split(".")
+    parts := fact.name.split(".").to_list()
     leaf := if parts.len() > 0 -> parts[parts.len() - 1] else -> fact.name
     bytes := leaf.bytes()
     output := [U8]{}
@@ -1681,19 +1707,19 @@ fn sema_expr_integer_range_error(value: Int, signed: Bool, bits: Int, span: Span
 
 fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     if expected != None {
-        contextual_expected :: expected ?? Type.Int
+        contextual_expected :: expected
         if contextual_expected == Type.Float | Type.Float32 -> return None
     }
     ty := Type.Int
     tir_width := None
     if {
         width != None -> {
-            literal_width :: width ?? IntegerWidth{signed: true, bits: 64}
+            literal_width :: width
             ty = Type.IntN{signed: literal_width.signed, bits: literal_width.bits}
             tir_width = Val(TIntegerWidth{signed: literal_width.signed, bits: literal_width.bits})
         }
         expected != None -> {
-            contextual :: expected ?? Type.Int
+            contextual :: expected
             if contextual == {.IntN(signed, bits) -> {
                 ty = contextual
                 tir_width = Val(TIntegerWidth{signed: signed, bits: bits})
@@ -1716,19 +1742,19 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
 
 fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     if expected != None {
-        contextual_expected :: expected ?? Type.Int
+        contextual_expected :: expected
         if contextual_expected == Type.Float | Type.Float32 -> return None
     }
     ty := Type.Int
     tir_width := None
     if {
         width != None -> {
-            literal_width :: width ?? IntegerWidth{signed: true, bits: 64}
+            literal_width :: width
             ty = Type.IntN{signed: literal_width.signed, bits: literal_width.bits}
             tir_width = Val(TIntegerWidth{signed: literal_width.signed, bits: literal_width.bits})
         }
         expected != None -> {
-            contextual :: expected ?? Type.Int
+            contextual :: expected
             if contextual == {.IntN(signed, bits) -> {
                 ty = contextual
                 tir_width = Val(TIntegerWidth{signed: signed, bits: bits})
@@ -1882,7 +1908,7 @@ fn sema_expr_comptime_value(value: TExpr) -> TComptimeValue? {
 fn sema_expr_comptime_args(args: [TCallArg], receiver: TExpr?) -> [TComptimeValue]? {
     output := [TComptimeValue]{}
     if receiver != None {
-        receiver_value :: receiver ?? return None
+        receiver_value :: receiver
         &output.push(sema_expr_comptime_value(receiver_value) ?? return None)
     }
     loop arg in args -> &output.push(sema_expr_comptime_value(arg.value) ?? return None)
@@ -2343,7 +2369,7 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     }
     geometry := sema_call_try_geometry(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if geometry.handled -> return geometry
-    transfer_fact := sema_hardware_transfer_fact_for_expr(receiver, scopes, state)
+    transfer_fact := sema_hardware_transfer_fact_for_expr(receiver, scopes, &state)
     hardware := sema_call_try_hardware_method(receiver, receiver_value, method, args, transfer_fact, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if hardware == .Val(result) && result.check.handled -> return sema_expr_record_hardware_result(result, &scopes, &context)
     memory := sema_call_try_memory_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2451,7 +2477,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
         }
     }
     if !sema_ownership_check_use(&state, expr, scopes, &diagnostics) -> return None
-    if !sema_hardware_note_cpu_use(expr, scopes, state, &context, &diagnostics) -> return None
+    if !sema_hardware_note_cpu_use(expr, scopes, &state, &context, &diagnostics) -> return None
     binding_index :: sema_scope_resolve_index(scopes, name) ?? return Val(value)
     symbol := scopes.bindings[binding_index].symbol
     reference_kind := "semantic"
@@ -2545,8 +2571,16 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
 }
 
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    lhs :: sema_check_expression(left, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    rhs :: sema_check_expression(right, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked_lhs :: sema_check_expression(left, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked_rhs :: sema_check_expression(right, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5, and
+    // `x != 5` is its opposite. The plain side lifts once, so the comparison
+    // is the existing optional equality.
+    equality := op == BinOp.Eq || op == BinOp.Ne
+    lifted_rhs := if equality -> sema_expr_optional_lift(checked_rhs, checked_lhs.ty, checked_rhs.ty, environment) else -> None
+    lifted_lhs := if equality && lifted_rhs == None -> sema_expr_optional_lift(checked_lhs, checked_rhs.ty, checked_lhs.ty, environment) else -> None
+    lhs :: lifted_lhs ?? checked_lhs
+    rhs :: lifted_rhs ?? checked_rhs
     if op == BinOp.Pow && lhs.ty == Type.Int {
         if right == {
             .Unary(operator, _, _) -> {
@@ -2661,7 +2695,7 @@ fn sema_expr_copy_string_view(value: Expr, scopes: &SemaScopeTable) -> Bool Neve
             index :: sema_scope_resolve_index(scopes, name) ?? return false
             return scopes.bindings[index].string_view
         }
-        .Paren(inner, _) -> return sema_expr_copy_string_view(inner, scopes)
+        .Paren(inner, _) -> return sema_expr_copy_string_view(inner, &scopes)
         else -> false
     }
 }
@@ -2694,7 +2728,7 @@ fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: S
     context.borrow_ctx = previous_borrow
     context.allow_string_view_read = previous_string_view_read
     checked :: checked_value ?? return None
-    sema_expr_check_copy_typed(checked, span, expected, environment, &context, &diagnostics, sema_expr_copy_string_view(value, scopes))
+    sema_expr_check_copy_typed(checked, span, expected, environment, &context, &diagnostics, sema_expr_copy_string_view(value, &scopes))
 }
 
 // D-COPY-DEFAULT1=A: an unmarked move site that a later use reached is a
@@ -2870,7 +2904,7 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
         }
         .PtrFromAddr(alias, alias_span, element, address, span) -> sema_expr_check_pointer_from_address(alias, alias_span, element, address, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Tainted(value, tag_value, span) -> {
-            if tag_value != None && !sema_taint_validate_tag(tag_value ?? "", environment, span, &diagnostics) -> return None
+            if tag_value != None && !sema_taint_validate_tag(tag_value, environment, span, &diagnostics) -> return None
             sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         .Copy(value, span) -> sema_expr_check_copy(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

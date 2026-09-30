@@ -1,0 +1,35 @@
+// A lambda bound to a local name is called directly, like a function.
+// A valueless lambda call is a plain statement; a value lambda call is its
+// value. Captures are read or written in place, and the same binding can be
+// passed on to a function-typed parameter.
+fn each_of(action: fn(Int), a: Int, b: Int) {
+    action(a)
+    action(b)
+}
+
+fn run() {
+    greet :: () -> print("hello")
+    greet()
+
+    square :: (n: Int) -> n * n
+    print("square {square(7)}")
+
+    base :: 5
+    show_base :: () -> print("base {base}")
+    show_base()
+
+    total := 0
+    add :: (n: Int) -> {
+        total += n
+    }
+    add(2)
+    add(3)
+    print("total {total}")
+
+    report :: (n: Int) -> print("item {n}")
+    each_of(report, 1, 2)
+
+    tick :: () -> print("tick")
+    tick()
+    tick()
+}

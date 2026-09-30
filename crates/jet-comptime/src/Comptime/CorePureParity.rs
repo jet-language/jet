@@ -1142,8 +1142,63 @@ fn db_blob_display(value: &CtValue) -> Option<String> {
         .map(|bytes| format!("{bytes:?}"))
 }
 
+/// D-DBPOOL1 / I9: the interpreter's pool, lease, and error carriers render
+/// the same text as AOT's `JetDisplay` impls: `JetDbPoolReceipt::render` and
+/// `JetDbLease` in `Prelude/CoreLib/Top/DbPool.rs`, and `DBError`'s message in
+/// `Prelude/CoreLib/JetStd/DBPluginWire.rs`.
+fn db_carrier_display(value: &CtValue) -> Option<String> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+    };
+    let count = |name: &str| match field(name)? {
+        CtValue::Int(value) => Some(*value),
+        _ => None,
+    };
+    match type_name
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name.as_str())
+    {
+        "DBLease" => Some("db.lease".to_string()),
+        "DBError" => match field("message")? {
+            CtValue::Str(message) => Some(message.clone()),
+            _ => None,
+        },
+        "DBPoolReceipt" => {
+            let CtValue::Str(lifecycle) = field("lifecycle")? else {
+                return None;
+            };
+            let CtValue::Bool(ready) = field("ready")? else {
+                return None;
+            };
+            Some(format!(
+                "db.pool lifecycle={} max={} available={} leased={} opening={} ready={} acquires={} releases={} timeouts={} open_failures={} unhealthy={} replacements={} replacement_failures={}",
+                lifecycle,
+                count("max")?,
+                count("available")?,
+                count("leased")?,
+                count("opening")?,
+                if *ready { 1 } else { 0 },
+                count("acquires")?,
+                count("releases")?,
+                count("timeouts")?,
+                count("open_failures")?,
+                count("unhealthy")?,
+                count("replacements")?,
+                count("replacement_failures")?,
+            ))
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn display(value: &CtValue) -> Option<String> {
-    if let Some(text) = db_value_display(value) {
+    if let Some(text) = db_value_display(value).or_else(|| db_carrier_display(value)) {
         return Some(text);
     }
     // DataTree values use the ordered JSON projection on every tier. The
@@ -1678,6 +1733,11 @@ fn canonical_structural_display(value: &CtValue) -> Option<String> {
 /// CtValue::debug_rust: that method mirrors the erased Rust carrier, while
 /// this path mirrors the source-shaped JetDebug implementations.
 pub(super) fn debug(value: &CtValue) -> Option<String> {
+    // DB pool, lease, and error carriers render one text for Display and
+    // Debug, exactly like their AOT/JIT `JetDebug` impls.
+    if let Some(text) = db_carrier_display(value) {
+        return Some(text);
+    }
     if let CtValue::Struct { type_name, fields } = value {
         let type_name = type_name
             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)

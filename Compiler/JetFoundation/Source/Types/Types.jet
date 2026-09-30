@@ -375,8 +375,11 @@ pub fn type_carrier_identity(ty: Type) -> String Never! {
         .Fn(params, ret, _, _, _, _) -> {
             names := [String]{}
             loop param in params -> &names.push(type_carrier_identity(param))
-            result :: ret.map(value -> " => {type_carrier_identity(value)}") ?? ""
-            "fn({names.join(", ")}){result}"
+            signature := "fn({names.join(", ")})"
+            if ret == .Val(value) {
+                signature = "{signature} => {type_carrier_identity(value)}"
+            }
+            signature
         }
         .Named(name) -> name
         .Apply(name, args) -> {
@@ -457,16 +460,23 @@ pub fn type_name(ty: Type) -> String Never! {
         .Shared(inner) -> "Shared<{type_name(inner)}>"
         .Option(inner) -> "{type_marked_name(inner)}?"
         .Result(ok, err) -> result_surface_name(ok, err)
+        // A callable type's surface spelling: `fn(T) -> U`, `fn(T) -[E]> U`,
+        // and the unit-fallible `fn(T) IOError!` with no arrow before its contract.
         .Fn(params, ret, effect_bound, param_contract, _, _) -> {
             out := "fn({function_parameter_names(params, param_contract)})"
-            out = if {
-                ret.map(value -> !type_is_unit_callable_return(value)) ?? false -> "{out} {ret.map(value -> type_name(value)) ?? ""}"
-                else -> out
+            shown_ret := ret
+            if ret == .Val(value) && type_is_unit_callable_return(value) -> shown_ret = None
+            unit_fallible := false
+            if shown_ret == .Val(value) {
+                if value == .Result(ok, _) -> unit_fallible = ok == Type.Named{name: "Unit"}
             }
             if effect_bound == .Val(rows) {
                 effect_names :: loop row in rows -> row.name
                 out = "{out} -[{effect_names.join(", ")}]>"
+            } else if shown_ret != None && !unit_fallible {
+                out = "{out} ->"
             }
+            if shown_ret == .Val(value) -> out = "{out} {type_name(value)}"
             out
         }
         else -> type_carrier_identity(ty)
@@ -792,10 +802,12 @@ pub fn compute_shape_dimensions(ty: Type) -> [Int]? {
     Val(dimensions)
 }
 
+// D-COMPUTE-TYPE1: the source-owned `core.compute` declaration is the one
+// Tensor owner, so its canonical nominal is the same family as `Tensor`.
 pub fn is_compute_tensor_family(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(_, inner) -> is_compute_tensor_family(inner)
-        .Named(name) -> name == "Tensor"
+        .Named(name) -> name == "Tensor" || name == "<corelib>/Core/compute::Core/compute/compute.jet::Tensor"
         .Apply(name, args) -> is_compute_tensor_application(name, args)
         else -> false
     }
@@ -920,7 +932,7 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector Never! {
                 upper = (2 ^ (bits - 1)) - 1
             }
             &entries.push(KnowledgeEntry{path: [String]{}, plane: "Interval", fact: KnowledgeFact.Interval{lo: lower, hi: upper}})
-            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Layout", fact: KnowledgeFact.Layout{bytes: (bits + 7) / 8}})
+            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Layout", fact: KnowledgeFact.Layout{bytes: (bits + 7) /% 8}})
             &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
         }
         .InlineRange(base, lo, hi) -> {

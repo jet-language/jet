@@ -1081,7 +1081,7 @@ fn authority_dev_runs_the_same_value() {
 
 #[test]
 fn authority_comptime_uses_the_same_value() {
-    let source = "@AUTHORITY :: Authority.from_rights([\"FS.Read\", \"IO\"])\n@NARROWED :: @AUTHORITY.with(\"FS.Read\")\n@RELEASED :: @NARROWED.without(\"FS.Read\")\n\nfn run() { print(\"authority\") }\n";
+    let source = "AUTHORITY :: prep { Authority.from_rights([\"FS.Read\", \"IO\"]) }\nNARROWED :: prep { AUTHORITY.with(\"FS.Read\") }\nRELEASED :: prep { NARROWED.without(\"FS.Read\") }\n\nfn run() { print(\"authority\") }\n";
     let output = jet::compile(source).expect("comptime should construct Authority");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }
@@ -1470,6 +1470,78 @@ fn script_confirmation_prompt_accepts_enter_and_refuses_n() {
         assert_eq!(marker.exists(), expect_spawn, "answer {answer:?}: {transcript}");
         if !expect_spawn {
             assert_eq!(output.status.code(), Some(1), "`n` stops with exit 1: {transcript}");
+        }
+    }
+}
+
+// ── Package without an authority block (#3718) ───────────────────────────
+// A `package.jet` that writes no `authority` block gets the same beginner
+// floor as a manifest-less file; writing the block replaces it.
+
+fn package_default_run(tier: &[&str], path: &str, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .args(tier)
+        .arg(path)
+        .args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .env("JET_RECEIPT_BYPASS", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("jet run must start")
+}
+
+/// Default `jet run`, the AOT-built `--release` run, and the interpreter.
+const PACKAGE_DEFAULT_TIERS: [&[&str]; 3] = [&[], &["--release"], &["--interpret"]];
+
+#[test]
+fn package_without_authority_block_prints_and_reads_args_on_all_tiers() {
+    let dir = "tests/fixtures/package_default_authority";
+    for tier in PACKAGE_DEFAULT_TIERS {
+        let hello = package_default_run(tier, &format!("{dir}/hello.jet"), &[]);
+        assert!(
+            hello.status.success(),
+            "{tier:?}: printing needs no grant:\n{}",
+            String::from_utf8_lossy(&hello.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&hello.stdout), "hello\n", "{tier:?}");
+
+        let argv = package_default_run(tier, &format!("{dir}/argv.jet"), &["a", "b"]);
+        assert!(
+            argv.status.success(),
+            "{tier:?}: reading arguments needs no grant:\n{}",
+            String::from_utf8_lossy(&argv.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&argv.stdout), "args=2\n", "{tier:?}");
+    }
+}
+
+#[test]
+fn package_without_authority_block_refuses_spawn_net_and_file_write() {
+    for (fixture, right, marker) in [
+        ("e1803_package_default_spawn", "`Exec", "e1803-package-spawned-must-not-exist.txt"),
+        ("e1803_package_default_net", "`Net", ""),
+        ("e1803_package_default_write", "`FS", "e1803-package-write-must-not-exist.txt"),
+    ] {
+        for tier in PACKAGE_DEFAULT_TIERS {
+            let output = package_default_run(tier, &format!("tests/ui/{fixture}/run.jet"), &[]);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{fixture} {tier:?}: must be refused:\n{stderr}");
+            assert!(stderr.contains("E1803"), "{fixture} {tier:?}: {stderr}");
+            assert!(stderr.contains(right), "{fixture} {tier:?}: E1803 names {right}: {stderr}");
+            assert!(
+                stderr.contains("package.jet (which has no authority block) has not allowed that yet."),
+                "{fixture} {tier:?}: the Why is one plain sentence: {stderr}"
+            );
+            assert!(!stderr.contains("required_effects="), "{fixture} {tier:?}: {stderr}");
+            assert!(output.stdout.is_empty(), "{fixture} {tier:?}: no user code ran");
+            if !marker.is_empty() {
+                assert!(
+                    !Path::new(env!("CARGO_MANIFEST_DIR")).join(marker).exists(),
+                    "{fixture} {tier:?}: the refused operation never ran"
+                );
+            }
         }
     }
 }

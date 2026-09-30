@@ -11,15 +11,18 @@ package {
 use core as core
 
 
-// core.time — Gregorian civil time in Jet, OS clocks on two host cells.
+// core.time — Gregorian civil time in Jet over host clock kernels.
 //
 // Leap years and month lengths are proleptic Gregorian (year 0 is 1 BCE).
 // Unix conversion uses the Howard Hinnant civil_from_days / days_from_civil
 // algorithms. Zone names other than UTC/GMT/Z and numeric offsets (`+05:30`)
 // fail closed; the IANA tzdb is not embedded here.
 //
-// `now`, `sleep`, and friends read `host_unix_ns` / `host_sleep_ns`. Everything
-// else is pure.
+// `now`, `start`, and `unix_ns` sample the host wall clock as Unix nanoseconds;
+// `sleep` waits through the host sleep kernel. `instant` and `sleep_until` are
+// compiler-owned: `Instant` is the monotonic Time point quantity, so
+// `t + 5min` is an Instant and `b - a` is a Duration. Wall-clock Unix
+// nanoseconds come only from `unix_ns()`. Everything else is pure.
 #Error
 pub struct TimeError {
     pub reason: String
@@ -70,20 +73,14 @@ pub struct ZonedDateTime {
     pub zone: Zone
 }
 
-pub struct Instant {
-    pub unix_ns: Int
-}
-
-
-
-
+/// A running stopwatch started at a Unix-nanosecond wall-clock sample.
 pub struct Stopwatch {
     pub start_ns: Int
 }
 
-pub struct Clock {
-    pub unix_ms: Int
-    pub fake: Bool
+impl Stopwatch {
+    /// Whole milliseconds since `start()`.
+    pub fn elapsed_millis(self) -[Time]> Int { duration_as_ms(elapsed(self)) }
 }
 
 pub struct Period {
@@ -359,7 +356,7 @@ pub fn zoned_local(date: LocalDate, time: LocalTime, zone: Zone, offset: String)
 
 
 
-pub fn now() -[Time]> DateTime { from_unix_ns(host_unix_ns()) }
+pub fn now() -[Time]> DateTime { from_unix_ns(unix_ns()) }
 
 pub fn now_utc() -[Time]> DateTime { now() }
 
@@ -368,22 +365,20 @@ pub fn today() -[Time]> LocalDate {
     LocalDate{year: dt.year, month: dt.month, day: dt.day}
 }
 
-pub fn instant() -[Time]> Instant { Instant{unix_ns: host_unix_ns()} }
-
-pub fn start() -[Time]> Stopwatch { Stopwatch{start_ns: host_unix_ns()} }
+pub fn start() -[Time]> Stopwatch { Stopwatch{start_ns: unix_ns()} }
 
 pub fn sleep(duration: Duration) -[Time]> {
     if duration.ns > 0 -> host_sleep_ns(duration.ns)
 }
 
-pub fn sleep_until(deadline: Instant) -[Time]> {
-    now_ns :: host_unix_ns()
-    if deadline.unix_ns > now_ns -> host_sleep_ns(deadline.unix_ns - now_ns)
+/// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
+/// point for measuring; this is the timestamp for stamps, nonces, and expiry.
+pub fn unix_ns() -[Time]> Int {
+    core.time.now_utc().to_unix_ns() ?? panic("the wall clock is outside the Unix nanosecond range")
 }
 
-fn host_unix_ns() -[Time]> Int { core.time.instant().unix_ns }
-
-fn host_sleep_ns(ns: Int) -[Time]> { core.time.sleep(Duration{ns: ns}) }
+// Host kernel: the Duration sleep.
+fn host_sleep_ns(ns: Int) -[Time]> { core.time.sleep(duration_ns(ns)) }
 
 fn from_unix_ns(ns: Int) -> DateTime Never! {
     from_unix_parts(epoch_seconds(ns, 1000000000), epoch_remainder(ns, 1000000000))
@@ -677,19 +672,21 @@ pub fn add_duration(dt: DateTime, duration: Duration) -> DateTime Never! {
 }
 
 pub fn since(later: DateTime, earlier: DateTime) -> Duration {
-    Duration{ns: saturating_sub_ns(datetime_to_ns(later), datetime_to_ns(earlier))}
+    duration_ns(saturating_sub_ns(datetime_to_ns(later), datetime_to_ns(earlier)))
 }
 
-pub fn duration_seconds(seconds: Int) -> Duration Never! { Duration{ns: saturating_scale_ns(seconds, 1000000000)} }
+pub fn duration_seconds(seconds: Int) -> Duration Never! { duration_ns(saturating_scale_ns(seconds, 1000000000)) }
 
-pub fn duration_ms(ms: Int) -> Duration { Duration{ns: saturating_scale_ns(ms, 1000000)} }
+pub fn duration_ms(ms: Int) -> Duration { duration_ns(saturating_scale_ns(ms, 1000000)) }
 
-pub fn duration_ns(ns: Int) -> Duration { Duration{ns: ns} }
+/// `Duration` is the compiler-owned nanosecond quantity, so it is built
+/// through its checked constructor; every Int is a valid nanosecond count.
+pub fn duration_ns(ns: Int) -> Duration { Duration.nanoseconds(ns) ?? panic("every Int is a nanosecond Duration") }
 
 pub fn duration_as_seconds(d: Duration) -> Int { d.ns /% 1000000000 }
 
 pub fn elapsed(watch: Stopwatch) -[Time]> Duration {
-    Duration{ns: saturating_sub_ns(host_unix_ns(), watch.start_ns)}
+    duration_ns(saturating_sub_ns(unix_ns(), watch.start_ns))
 }
 
 pub fn compare_date(a: LocalDate, b: LocalDate) -> Int {
@@ -735,11 +732,11 @@ pub fn isoweekday(date: LocalDate) -> Int { iso_weekday(date.year, date.month, d
 
 pub fn weekday_sun0(date: LocalDate) -> Int { weekday(date) }
 
-pub fn duration_minutes(minutes: Int) -> Duration { Duration{ns: saturating_scale_ns(minutes, 60000000000)} }
+pub fn duration_minutes(minutes: Int) -> Duration { duration_ns(saturating_scale_ns(minutes, 60000000000)) }
 
-pub fn duration_hours(hours: Int) -> Duration { Duration{ns: saturating_scale_ns(hours, 3600000000000)} }
+pub fn duration_hours(hours: Int) -> Duration { duration_ns(saturating_scale_ns(hours, 3600000000000)) }
 
-pub fn duration_days(days: Int) -> Duration { Duration{ns: saturating_scale_ns(days, 86400000000000)} }
+pub fn duration_days(days: Int) -> Duration { duration_ns(saturating_scale_ns(days, 86400000000000)) }
 
 pub fn duration_as_ms(d: Duration) -> Int { d.ns /% 1000000 }
 
@@ -778,22 +775,22 @@ pub fn between(dt: DateTime, start: DateTime, end: DateTime) -> Bool {
     n >= lo && n <= hi
 }
 
-pub fn duration_zero() -> Duration { Duration{ns: 0} }
+pub fn duration_zero() -> Duration { duration_ns(0) }
 
 pub fn duration_is_zero(d: Duration) -> Bool { d.ns == 0 }
 
 pub fn duration_abs(d: Duration) -> Duration {
-    if d.ns == time_int_min() -> return Duration{ns: time_int_max()}
-    if d.ns < 0 -> return Duration{ns: 0 - d.ns}
+    if d.ns == time_int_min() -> return duration_ns(time_int_max())
+    if d.ns < 0 -> return duration_ns(0 - d.ns)
     ~d
 }
 
 pub fn duration_add(a: Duration, b: Duration) -> Duration {
-    Duration{ns: saturating_add_ns(a.ns, b.ns)}
+    duration_ns(saturating_add_ns(a.ns, b.ns))
 }
 
 pub fn duration_sub(a: Duration, b: Duration) -> Duration {
-    Duration{ns: saturating_sub_ns(a.ns, b.ns)}
+    duration_ns(saturating_sub_ns(a.ns, b.ns))
 }
 
 pub fn min_date(a: LocalDate, b: LocalDate) -> LocalDate {

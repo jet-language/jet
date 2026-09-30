@@ -75,6 +75,7 @@ fn options(policy: BuildPolicy) -> BuildRunOptions {
         plugin_target: false,
         cross_target: None,
         profile: "dev".to_string(),
+        artifact_build: false,
         application_authority: None,
         setting_overrides: std::collections::BTreeMap::new(),
         remote: None,

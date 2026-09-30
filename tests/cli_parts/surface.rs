@@ -558,7 +558,7 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
 #[test]
 fn retired_cli_routes_are_absent_but_teach_real_spelling() {
     let surfaces = [
-        jet::CLI::usage_page("0.0.0"),
+        jet::CLI::usage_page("0.0.0", jet::CLI::HelpOrder::Frequency),
         jet::CLI::man_page("0.0.0"),
         jet::CLI::completions_bash(),
         jet::CLI::completions_zsh(),

@@ -113,7 +113,7 @@ fn sema_plugin_retired_method_diagnostic(method: String, span: Span, diagnostics
 
 fn sema_plugin_record_exec(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     result := Type.Result{ok: success, err: Type.String}
-    sema_effect_record_intrinsic_fact(environment, scopes, context, "Plugin.{method}", span, SemaCallFacts{
+    sema_effect_record_intrinsic_fact(environment, &scopes, &context, "Plugin.{method}", span, SemaCallFacts{
         return_type: result,
         failure_carrier: TFailureCarrier.Result{success: success, error: Type.String},
         effect_bound: Val([EffectRowEntry]{EffectRowEntry{name: "Exec", span: span}}),

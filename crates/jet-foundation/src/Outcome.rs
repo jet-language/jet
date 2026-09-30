@@ -111,14 +111,16 @@ pub struct JetErr {
     details: Option<JetErrorDetails>,
 }
 
-/// One source-linked hop in the report's structured journey. This is the
-/// report view of the private journey accumulator below; callers never need
-/// to recover source facts from rendered text.
+/// One source-linked site in the report's structured journey: the origin, or
+/// one hop the failure passed on its way out. This is the report view of the
+/// private journey accumulator below; callers never need to recover source
+/// facts from rendered text. `column` is 1-based and counts characters.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct JetErrorJourneyFrame {
     pub fn_name: String,
     pub file: String,
     pub line: u32,
+    pub column: u32,
     pub note: String,
     pub hops: u32,
 }
@@ -133,6 +135,10 @@ pub struct JetErrorReport {
     pub typed_identity: Option<String>,
     pub causes: Vec<JetErrorReport>,
     pub context_frames: Vec<JetErrorContextFrame>,
+    /// #3713: where the failure started — the `Err(...)` that a function
+    /// returned, or the first call that failed on its way out.
+    pub origin: Option<JetErrorJourneyFrame>,
+    /// Every later site the failure passed through, origin side first.
     pub source_journey: Vec<JetErrorJourneyFrame>,
     pub conversion_history: Vec<JetErrorConversion>,
     pub details: Option<JetErrorDetails>,
@@ -246,11 +252,13 @@ pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
 // journey vocabulary and collapse only consecutive duplicate hops.
 const JET_JOURNEY_DIAGNOSTIC_CODE: &str = "E3002";
 
-/// One `?` site on the failure's way out.
+/// One source site on the failure's way out: where it started, or a `?`
+/// (written or automatic) it passed. `column` is 1-based, in characters.
 struct JourneyFrame {
     fn_name: String,
     file: String,
     line: u32,
+    column: u32,
 }
 
 impl JourneyFrame {
@@ -272,9 +280,57 @@ struct JourneyHop {
     hops: u32,
 }
 
+/// #3713: one failure's journey — where it started and every site it passed
+/// since. The origin is claimed by the `Err(...)` a function returns
+/// ([`jet_journey_origin`]); a failure that began inside a call (a failing
+/// Core call, a conversion) has no such site, so the first hop it reaches
+/// becomes its origin instead.
+struct Journey {
+    origin: Option<JourneyHop>,
+    hops: Vec<JourneyHop>,
+}
+
+impl Journey {
+    const fn new() -> Self {
+        Self {
+            origin: None,
+            hops: Vec::new(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.origin.is_none() && self.hops.is_empty()
+    }
+
+    /// Record one hop. A journey with nothing yet starts here; otherwise the
+    /// hop joins the trail, collapsing into the previous hop at the same site.
+    /// The note is evaluated only when the hop opens a new line.
+    fn push<F: FnOnce() -> String>(&mut self, site: JourneyFrame, hops: u32, note: F) {
+        if self.is_empty() {
+            self.origin = Some(JourneyHop {
+                site,
+                note: note(),
+                hops,
+            });
+            return;
+        }
+        if let Some(last) = self.hops.last_mut() {
+            if last.site.same_site(&site.file, site.line, &site.fn_name) {
+                last.hops += hops;
+                return;
+            }
+        }
+        self.hops.push(JourneyHop {
+            site,
+            note: note(),
+            hops,
+        });
+    }
+}
+
 thread_local! {
-    static JET_JOURNEY_HOPS: std::cell::RefCell<Vec<JourneyHop>> = const {
-        std::cell::RefCell::new(Vec::new())
+    static JET_JOURNEY: std::cell::RefCell<Journey> = const {
+        std::cell::RefCell::new(Journey::new())
     };
     static JET_STREAM_FAILURE_REPORT: std::cell::RefCell<Option<String>> =
         const { std::cell::RefCell::new(None) };
@@ -289,11 +345,15 @@ pub fn jet_stream_take_failure_report() -> Option<String> {
 }
 
 pub fn jet_journey_reset() {
-    JET_JOURNEY_HOPS.with(|hops| hops.borrow_mut().clear());
+    JET_JOURNEY.with(|journey| {
+        let mut journey = journey.borrow_mut();
+        journey.origin = None;
+        journey.hops.clear();
+    });
 }
 
-/// Drain the accumulated hops as E3002's rendered trail block, or an empty
-/// string when the failure never crossed a `?`.
+/// Drain the accumulated journey as its rendered block (the `failed here`
+/// line and E3002's trail), or an empty string when nothing was recorded.
 ///
 /// Plain on purpose. The generated wasm store puts this string into JSON, where
 /// ANSI and a column budget are both wrong. The terminal form of the same block
@@ -303,10 +363,11 @@ pub fn jet_journey_take() -> String {
 }
 
 fn jet_journey_take_styled(style: JetReportStyle) -> String {
-    JET_JOURNEY_HOPS.with(|hops| jet_journey_trail(&std::mem::take(&mut *hops.borrow_mut()), style))
+    let journey = jet_journey_take_hops().0;
+    jet_journey_block(journey.origin.as_ref(), &journey.hops, style)
 }
 
-/// The hops a run has accumulated so far, moved off this thread.
+/// The journey a run has accumulated so far, moved off this thread.
 ///
 /// The journey belongs to the running program, but it lives in a thread-local
 /// because each `task` owns its own. An engine that moves one program across
@@ -317,17 +378,32 @@ fn jet_journey_take_styled(style: JetReportStyle) -> String {
 /// printed the failure with no trail while AOT and the resident tier printed
 /// the hops (I9).
 ///
-/// The hop list never leaves this module. An engine can only move the opaque
+/// The journey never leaves this module. An engine can only move the opaque
 /// carrier and hand it back to [`jet_journey_adopt`], so collapse, order, and
 /// rendering stay owned here. The structured default-error edge uses
 /// [`jet_error_report`] so the journey is projected beside the error facts;
 /// string-only edges use this renderer directly.
-pub struct JetJourneyHops(Vec<JourneyHop>);
+pub struct JetJourneyHops(Journey);
 
-/// Move this thread's accumulated hops out, for a caller that is about to
-/// carry them across a thread boundary it created.
+/// Move this thread's accumulated journey out, for a caller that is about to
+/// carry it across a thread boundary it created.
 pub fn jet_journey_take_hops() -> JetJourneyHops {
-    JET_JOURNEY_HOPS.with(|hops| JetJourneyHops(std::mem::take(&mut *hops.borrow_mut())))
+    JET_JOURNEY.with(|journey| {
+        JetJourneyHops(std::mem::replace(&mut *journey.borrow_mut(), Journey::new()))
+    })
+}
+
+/// `jet run --json` (#3713): the report edge writes the `jet.err/v1` wire
+/// instead of the terminal report. Process-wide because every tier's edge
+/// renders through this module and the choice belongs to the invocation.
+static JET_REPORT_WIRE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn jet_report_use_wire() {
+    JET_REPORT_WIRE.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn jet_report_wire() -> bool {
+    JET_REPORT_WIRE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 impl JetErrorDetails {
@@ -374,9 +450,13 @@ fn jet_error_json_quote(value: &str) -> String {
 }
 
 impl JetErrorReport {
-    fn from_error(error: &JetErr, source_journey: Vec<JetErrorJourneyFrame>) -> Self {
+    fn from_error(
+        error: &JetErr,
+        origin: Option<JetErrorJourneyFrame>,
+        source_journey: Vec<JetErrorJourneyFrame>,
+    ) -> Self {
         let causes = match &error.cause {
-            Ok(cause) => vec![Self::from_error(cause, Vec::new())],
+            Ok(cause) => vec![Self::from_error(cause, None, Vec::new())],
             Err(_) => Vec::new(),
         };
         Self {
@@ -388,6 +468,7 @@ impl JetErrorReport {
             typed_identity: error.typed_identity.clone(),
             causes,
             context_frames: error.context.clone(),
+            origin,
             source_journey,
             conversion_history: error.conversions.clone(),
             details: error.details.clone(),
@@ -436,26 +517,17 @@ impl JetErrorReport {
         out
     }
 
-    fn journey_hops(&self) -> Vec<JourneyHop> {
-        self
+    /// Render only the structured source journey — the `failed here` line
+    /// and the trail under it. The report edge uses this beside the root
+    /// report for terminal and wire adapters.
+    pub fn render_journey_with_style(&self, style: JetReportStyle) -> String {
+        let origin = self.origin.as_ref().map(jet_journey_hop_from_frame);
+        let hops = self
             .source_journey
             .iter()
-            .map(|frame| JourneyHop {
-                site: JourneyFrame {
-                    fn_name: frame.fn_name.clone(),
-                    file: frame.file.clone(),
-                    line: frame.line,
-                },
-                note: frame.note.clone(),
-                hops: frame.hops,
-            })
-            .collect()
-    }
-
-    /// Render only the structured source journey. The report edge uses this
-    /// beside the root report for terminal and wire adapters.
-    pub fn render_journey_with_style(&self, style: JetReportStyle) -> String {
-        jet_journey_trail(&self.journey_hops(), style)
+            .map(jet_journey_hop_from_frame)
+            .collect::<Vec<_>>();
+        jet_journey_block(origin.as_ref(), &hops, style)
     }
 
     /// Render this already-projected report with the one terminal policy.
@@ -468,7 +540,12 @@ impl JetErrorReport {
         )
     }
 
+    /// The stderr report edge: the terminal report, or under `jet run --json`
+    /// the `jet.err/v1` wire on one line.
     pub fn render(&self) -> String {
+        if jet_report_wire() {
+            return format!("{}\n", self.to_json());
+        }
         self.render_with_style(JetReportStyle::for_stderr())
     }
 
@@ -533,21 +610,26 @@ impl JetErrorReport {
                     .join(",")
             ));
         }
+        let journey_frame = |frame: &JetErrorJourneyFrame| {
+            format!(
+                "{{\"fn_name\":{},\"file\":{},\"line\":{},\"column\":{},\"note\":{},\"hops\":{}}}",
+                quote(&frame.fn_name),
+                quote(&frame.file),
+                frame.line,
+                frame.column,
+                quote(&frame.note),
+                frame.hops
+            )
+        };
+        if let Some(origin) = &self.origin {
+            fields.push(format!("\"origin\":{}", journey_frame(origin)));
+        }
         if !self.source_journey.is_empty() {
             fields.push(format!(
                 "\"source_journey\":[{}]",
                 self.source_journey
                     .iter()
-                    .map(|frame| {
-                        format!(
-                            "{{\"fn_name\":{},\"file\":{},\"line\":{},\"note\":{},\"hops\":{}}}",
-                            quote(&frame.fn_name),
-                            quote(&frame.file),
-                            frame.line,
-                            quote(&frame.note),
-                            frame.hops
-                        )
-                    })
+                    .map(journey_frame)
                     .collect::<Vec<_>>()
                     .join(",")
             ));
@@ -626,6 +708,9 @@ fn jet_error_report_from_json(
         })
         .transpose()?
         .unwrap_or_default();
+    let origin = jet_error_json_field_optional(fields, "origin")
+        .map(jet_error_journey_from_json)
+        .transpose()?;
     let source_journey = jet_error_json_optional_array(fields, "source_journey")?
         .map(|values| {
             values
@@ -653,6 +738,7 @@ fn jet_error_report_from_json(
         typed_identity,
         causes,
         context_frames,
+        origin,
         source_journey,
         conversion_history,
         details,
@@ -747,6 +833,7 @@ fn jet_error_journey_from_json(
         fn_name: jet_error_json_text(jet_error_json_field(fields, "fn_name")?, "journey function")?,
         file: jet_error_json_text(jet_error_json_field(fields, "file")?, "journey file")?,
         line: jet_error_json_u32(jet_error_json_field(fields, "line")?, "journey line")?,
+        column: jet_error_json_u32(jet_error_json_field(fields, "column")?, "journey column")?,
         note: jet_error_json_text(jet_error_json_field(fields, "note")?, "journey note")?,
         hops: jet_error_json_u32(jet_error_json_field(fields, "hops")?, "journey hops")?,
     })
@@ -853,45 +940,58 @@ fn jet_error_json_escape(s: &str) -> String {
     out
 }
 
+fn jet_journey_frame_from_hop(hop: JourneyHop) -> JetErrorJourneyFrame {
+    JetErrorJourneyFrame {
+        fn_name: hop.site.fn_name,
+        file: hop.site.file,
+        line: hop.site.line,
+        column: hop.site.column,
+        note: hop.note,
+        hops: hop.hops,
+    }
+}
+
+fn jet_journey_hop_from_frame(frame: &JetErrorJourneyFrame) -> JourneyHop {
+    JourneyHop {
+        site: JourneyFrame {
+            fn_name: frame.fn_name.clone(),
+            file: frame.file.clone(),
+            line: frame.line,
+            column: frame.column,
+        },
+        note: frame.note.clone(),
+        hops: frame.hops,
+    }
+}
+
 /// Project one escaping default error and the journey it accumulated into the
 /// report consumed by every report edge. This drains the journey exactly once
 /// and never asks `Display` to reconstruct any field.
 pub fn jet_error_report(error: &JetErr) -> JetErrorReport {
-    let journey = jet_journey_take_hops();
-    let source_journey = journey
-        .0
-        .into_iter()
-        .map(|hop| JetErrorJourneyFrame {
-            fn_name: hop.site.fn_name,
-            file: hop.site.file,
-            line: hop.site.line,
-            note: hop.note,
-            hops: hop.hops,
-        })
-        .collect();
-    JetErrorReport::from_error(error, source_journey)
+    let journey = jet_journey_take_hops().0;
+    JetErrorReport::from_error(
+        error,
+        journey.origin.map(jet_journey_frame_from_hop),
+        journey.hops.into_iter().map(jet_journey_frame_from_hop).collect(),
+    )
 }
 
-/// Adopt hops carried in from another thread, oldest first, applying the same
-/// consecutive-site collapse a fresh `?` applies — a site that re-propagates
-/// across the seam adds its count to one line instead of opening a second.
+/// Adopt a journey carried in from another thread. A carried origin means the
+/// failure started over there, so it replaces whatever this thread held; its
+/// hops then join oldest first under the same consecutive-site collapse a
+/// fresh `?` applies — a site that re-propagates across the seam adds its
+/// count to one line instead of opening a second.
 pub fn jet_journey_adopt(carried: JetJourneyHops) {
-    JET_JOURNEY_HOPS.with(|hops| {
-        let mut hops = hops.borrow_mut();
-        for hop in carried.0 {
-            let collapsed = hops.last_mut().is_some_and(|last| {
-                if last
-                    .site
-                    .same_site(&hop.site.file, hop.site.line, &hop.site.fn_name)
-                {
-                    last.hops += hop.hops;
-                    return true;
-                }
-                false
-            });
-            if !collapsed {
-                hops.push(hop);
-            }
+    let carried = carried.0;
+    JET_JOURNEY.with(|journey| {
+        let mut journey = journey.borrow_mut();
+        if carried.origin.is_some() {
+            journey.origin = carried.origin;
+            journey.hops.clear();
+        }
+        for hop in carried.hops {
+            let JourneyHop { site, note, hops } = hop;
+            journey.push(site, hops, || note);
         }
     });
 }
@@ -983,46 +1083,60 @@ fn jet_report_columns(text: &str) -> usize {
     text.chars().count()
 }
 
-/// E3002's trail block. The root failure has already been stated by the time
-/// this prints, so a hop only has to say where the failure passed: the numbered
-/// list reads origin first, one line per site, `×N` when a site repeated, and
-/// the hop's note after an em dash. The header carries the code and the
-/// mechanism once instead of repeating `error propagated from … via ?` on every
-/// line, which is what buried the root cause under its own trail.
+/// The journey block under the root failure: where the failure started, then
+/// E3002's trail of every site it passed. The root failure has already been
+/// stated by the time this prints, so a line only has to say where: `failed
+/// here:` names the origin, the numbered trail reads origin side first, one
+/// line per site, `×N` when a site repeated, and the hop's note after an em
+/// dash. The header carries the code and the mechanism once instead of
+/// repeating `error propagated from … via ?` on every line, which is what
+/// buried the root cause under its own trail.
 ///
 /// `style` is the whole terminal-state matrix. Colour dims this block and only
 /// this block, so the root failure above stays the one undimmed line and stays
 /// what the eye lands on. A column budget sheds this block's disposable parts
 /// and never reaches the root failure, which is not this function's line.
-fn jet_journey_trail(hops: &[JourneyHop], style: JetReportStyle) -> String {
-    if hops.is_empty() {
+fn jet_journey_block(origin: Option<&JourneyHop>, hops: &[JourneyHop], style: JetReportStyle) -> String {
+    const ORIGIN_LABEL: &str = "failed here:";
+    let sites = origin
+        .map(|hop| (ORIGIN_LABEL.to_string(), hop))
+        .into_iter()
+        .chain(
+            hops.iter()
+                .enumerate()
+                .map(|(index, hop)| (format!("{}.", index + 1), hop)),
+        )
+        .collect::<Vec<_>>();
+    if sites.is_empty() {
         return String::new();
     }
-    let total: u32 = hops.iter().map(|hop| hop.hops).sum();
-    // One path budget for the whole block, decided by its widest hop line, so
-    // one file never renders two different ways under one header.
+    // One path budget for the whole block, decided by its widest site line,
+    // so one file never renders two different ways under one failure.
     let layout = style
         .width
-        .map(|width| (width, jet_journey_path_budget(hops, width)));
-    let mut lines = Vec::with_capacity(hops.len() + 1);
-    lines.push(jet_journey_header(total, style.width));
-    for (index, hop) in hops.iter().enumerate() {
-        lines.push(jet_journey_hop_line(index + 1, hop, layout));
+        .map(|width| (width, jet_journey_path_budget(&sites, width)));
+    let mut lines = Vec::with_capacity(sites.len() + 1);
+    for (label, hop) in &sites {
+        if label.as_str() == "1." {
+            let total: u32 = hops.iter().map(|hop| hop.hops).sum();
+            lines.push(jet_journey_header(total, style.width));
+        }
+        lines.push(jet_journey_hop_line(label, hop, layout));
     }
-    let mut trail = String::new();
+    let mut block = String::new();
     for line in &lines {
         // One SGR pair per line, not one around the block: a pager or a
         // line-oriented filter that keeps one line still gets its reset.
         if style.color {
-            trail.push_str(JET_REPORT_DIM_SGR);
+            block.push_str(JET_REPORT_DIM_SGR);
         }
-        trail.push_str(line);
+        block.push_str(line);
         if style.color {
-            trail.push_str(JET_REPORT_SGR_RESET);
+            block.push_str(JET_REPORT_SGR_RESET);
         }
-        trail.push('\n');
+        block.push('\n');
     }
-    trail
+    block
 }
 
 /// The header separates the root failure from its trail, so it must not wrap.
@@ -1040,36 +1154,33 @@ fn jet_journey_header(total: u32, width: Option<usize>) -> String {
     }
 }
 
-/// The columns left for a hop's file path once the widest hop line's fixed
+/// The columns left for a site's file path once the widest site line's fixed
 /// parts are paid for.
-fn jet_journey_path_budget(hops: &[JourneyHop], width: usize) -> usize {
-    let widest = hops
+fn jet_journey_path_budget(sites: &[(String, &JourneyHop)], width: usize) -> usize {
+    let widest = sites
         .iter()
-        .enumerate()
-        .map(|(index, hop)| {
-            jet_report_columns(&jet_journey_hop_text(index + 1, hop, "", &hop.note))
-        })
+        .map(|(label, hop)| jet_report_columns(&jet_journey_hop_text(label, hop, "", &hop.note)))
         .max()
         .unwrap_or(0);
     width.saturating_sub(widest)
 }
 
-/// One hop line, laid out to the block's width.
+/// One site line, laid out to the block's width.
 ///
-/// A hop's identity is its number, its `fn` and `file:line` — that is the
+/// A site's identity is its label, its `fn` and `file:line` — that is the
 /// address of the code to open, and nothing sheds it. What sheds, in order:
 /// leading path segments, then the note's tail. So a narrow terminal loses
 /// commentary, never a location, and never the root failure above.
-fn jet_journey_hop_line(number: usize, hop: &JourneyHop, layout: Option<(usize, usize)>) -> String {
+fn jet_journey_hop_line(label: &str, hop: &JourneyHop, layout: Option<(usize, usize)>) -> String {
     let Some((width, path_budget)) = layout else {
-        return jet_journey_hop_text(number, hop, &hop.site.file, &hop.note);
+        return jet_journey_hop_text(label, hop, &hop.site.file, &hop.note);
     };
     let file = jet_report_elide_path(&hop.site.file, path_budget);
-    let full = jet_journey_hop_text(number, hop, &file, &hop.note);
+    let full = jet_journey_hop_text(label, hop, &file, &hop.note);
     if jet_report_columns(&full) <= width {
         return full;
     }
-    let identity = jet_journey_hop_text(number, hop, &file, "");
+    let identity = jet_journey_hop_text(label, hop, &file, "");
     // ` — ` plus the ellipsis costs four columns; a note that cannot show one
     // character on top of that goes entirely rather than leaving ` — …`.
     let room = width.saturating_sub(jet_report_columns(&identity) + 4);
@@ -1077,12 +1188,12 @@ fn jet_journey_hop_line(number: usize, hop: &JourneyHop, layout: Option<(usize, 
         return identity;
     }
     let note: String = hop.note.chars().take(room).collect();
-    jet_journey_hop_text(number, hop, &file, &format!("{note}…"))
+    jet_journey_hop_text(label, hop, &file, &format!("{note}…"))
 }
 
-fn jet_journey_hop_text(number: usize, hop: &JourneyHop, file: &str, note: &str) -> String {
+fn jet_journey_hop_text(label: &str, hop: &JourneyHop, file: &str, note: &str) -> String {
     let mut line = format!(
-        "  {number}. {} ({file}:{})",
+        "  {label} {} ({file}:{})",
         hop.site.fn_name, hop.site.line
     );
     if hop.hops > 1 {
@@ -1137,6 +1248,23 @@ pub fn jet_journey_compose(error: &str, trail: &str) -> String {
 /// which made a handled error print a report on stderr under those tiers and
 /// nothing under AOT (I9).
 pub fn jet_journey_report(error: &str) -> String {
+    if jet_report_wire() {
+        // A typed entry error reaches this edge as its display text; the wire
+        // keeps that text as the message and the journey as structured facts.
+        let journey = jet_journey_take_hops().0;
+        let report = JetErrorReport {
+            code: None,
+            message: error.trim_end_matches('\n').to_string(),
+            typed_identity: None,
+            causes: Vec::new(),
+            context_frames: Vec::new(),
+            origin: journey.origin.map(jet_journey_frame_from_hop),
+            source_journey: journey.hops.into_iter().map(jet_journey_frame_from_hop).collect(),
+            conversion_history: Vec::new(),
+            details: None,
+        };
+        return format!("{}\n", report.to_json());
+    }
     jet_journey_report_styled(error, JetReportStyle::for_stderr())
 }
 
@@ -1146,57 +1274,54 @@ pub fn jet_journey_report_styled(error: &str, style: JetReportStyle) -> String {
     jet_journey_compose(error, &jet_journey_take_styled(style))
 }
 
-/// Claim one `?` site for the failure now on its way out. Nothing prints here:
-/// the hop reaches stderr only at the report edge, and only if the failure
-/// escapes the entry.
-pub fn jet_journey_frame<F: FnOnce() -> String>(file: &str, line: u32, fn_name: &str, note: F) {
-    JET_JOURNEY_HOPS.with(|hops| {
-        let mut hops = hops.borrow_mut();
-        if let Some(last) = hops.last_mut() {
-            if last.site.same_site(file, line, fn_name) {
-                last.hops += 1;
-                return;
-            }
-        }
-        hops.push(JourneyHop {
+/// #3713: claim the site where a failure starts — the `Err(...)` a function
+/// returns. A new failure begins here, so any journey this thread still held
+/// from an earlier, handled failure is dropped.
+pub fn jet_journey_origin(file: &str, line: u32, column: u32, fn_name: &str) {
+    JET_JOURNEY.with(|journey| {
+        let mut journey = journey.borrow_mut();
+        journey.hops.clear();
+        journey.origin = Some(JourneyHop {
             site: JourneyFrame {
                 fn_name: fn_name.to_string(),
                 file: file.to_string(),
                 line,
+                column,
             },
-            note: note(),
+            note: String::new(),
             hops: 1,
         });
     });
 }
 
-/// Propagate a default error with one explicit context frame. The note is
-/// evaluated once on the failure path, then stored both as structured context
-/// and as the source-journey note.
-pub fn jet_trace_err_note_jet<T, F: FnOnce() -> String>(
-    result: JetOutcome<T, JetErr>,
+/// Claim one `?` site (written or automatic) for the failure now on its way
+/// out. Nothing prints here: the hop reaches stderr only at the report edge,
+/// and only if the failure escapes the entry. A failure that has no origin yet
+/// began inside this call, so this site becomes its origin.
+pub fn jet_journey_frame<F: FnOnce() -> String>(
     file: &str,
     line: u32,
+    column: u32,
     fn_name: &str,
     note: F,
-) -> JetOutcome<T, JetErr> {
-    match result {
-        Ok(value) => {
-            jet_journey_reset();
-            Ok(value)
-        }
-        Err(mut error) => {
-            let text = note();
-            jet_err_add_context(&mut error, text.clone(), file.to_string(), line);
-            jet_journey_frame(file, line, fn_name, || text);
-            Err(error)
-        }
-    }
+) {
+    JET_JOURNEY.with(|journey| {
+        journey.borrow_mut().push(
+            JourneyFrame {
+                fn_name: fn_name.to_string(),
+                file: file.to_string(),
+                line,
+                column,
+            },
+            1,
+            note,
+        );
+    });
 }
 
 /// Scalar MIR adapter for a checked failure-site note.
-pub fn jet_journey_frame_text(file: &str, line: u32, fn_name: &str, note: &str) {
-    jet_journey_frame(file, line, fn_name, || note.to_string());
+pub fn jet_journey_frame_text(file: &str, line: u32, column: u32, fn_name: &str, note: &str) {
+    jet_journey_frame(file, line, column, fn_name, || note.to_string());
 }
 
 /// Add one evaluated note to the default error and its source journey.
@@ -1204,11 +1329,12 @@ pub fn jet_err_with_context_frame(
     mut error: JetErr,
     file: &str,
     line: u32,
+    column: u32,
     fn_name: &str,
     note: String,
 ) -> JetErr {
     jet_err_add_context(&mut error, note.clone(), file.to_string(), line);
-    jet_journey_frame(file, line, fn_name, || note);
+    jet_journey_frame(file, line, column, fn_name, || note);
     error
 }
 #[cfg(target_arch = "wasm32")]
@@ -1354,45 +1480,33 @@ mod jet_error_wasm_bridge {
         }
         Ok(error)
     }
-    fn read_error_at(
-        slot: u32,
-        pointer: u32,
-        length: u32,
-    ) -> Result<(JetErr, Vec<JetErrorJourneyFrame>), String> {
+    fn read_error_at(slot: u32, pointer: u32, length: u32) -> Result<(JetErr, Journey), String> {
         let wire = read_input(slot, pointer, length, "error")?;
         parse_error(&wire)
     }
 
-    fn read_error(
-        pointer: u32,
-        length: u32,
-    ) -> Result<(JetErr, Vec<JetErrorJourneyFrame>), String> {
+    fn read_error(pointer: u32, length: u32) -> Result<(JetErr, Journey), String> {
         read_error_at(ERROR_SLOT, pointer, length)
     }
-    fn parse_error(wire: &str) -> Result<(JetErr, Vec<JetErrorJourneyFrame>), String> {
+    fn parse_error(wire: &str) -> Result<(JetErr, Journey), String> {
         let report = JetErrorReport::from_json(wire)?;
-        let journey = report.source_journey.clone();
+        let journey = Journey {
+            origin: report.origin.as_ref().map(jet_journey_hop_from_frame),
+            hops: report
+                .source_journey
+                .iter()
+                .map(jet_journey_hop_from_frame)
+                .collect(),
+        };
         let error = report_to_error(&report)?;
         Ok((error, journey))
     }
 
-    fn restore_journey(frames: &[JetErrorJourneyFrame]) {
-        if frames.is_empty() {
+    fn restore_journey(carried: Journey) {
+        if carried.is_empty() {
             return;
         }
-        JET_JOURNEY_HOPS.with(|cell| {
-            let mut hops = cell.borrow_mut();
-            hops.clear();
-            hops.extend(frames.iter().map(|frame| JourneyHop {
-                site: JourneyFrame {
-                    fn_name: frame.fn_name.clone(),
-                    file: frame.file.clone(),
-                    line: frame.line,
-                },
-                note: frame.note.clone(),
-                hops: frame.hops,
-            }));
-        });
+        JET_JOURNEY.with(|cell| *cell.borrow_mut() = carried);
     }
 
     fn write_carrier(error: &JetErr) {
@@ -1479,10 +1593,34 @@ mod jet_error_wasm_bridge {
     }
 
     #[no_mangle]
+    pub extern "C" fn jet_error_wasm_journey_origin(
+        file_pointer: u32,
+        file_length: u32,
+        line: u32,
+        column: u32,
+        function_pointer: u32,
+        function_length: u32,
+    ) -> i32 {
+        begin_result();
+        let file = match read_input(FILE_SLOT, file_pointer, file_length, "source file") {
+            Ok(file) => file,
+            Err(error) => return bridge_error(error),
+        };
+        let function =
+            match read_input(FUNCTION_SLOT, function_pointer, function_length, "function") {
+                Ok(function) => function,
+                Err(error) => return bridge_error(error),
+            };
+        jet_journey_origin(&file, line, column, &function);
+        OK
+    }
+
+    #[no_mangle]
     pub extern "C" fn jet_error_wasm_journey_frame_text(
         file_pointer: u32,
         file_length: u32,
         line: u32,
+        column: u32,
         function_pointer: u32,
         function_length: u32,
         note_pointer: u32,
@@ -1502,7 +1640,7 @@ mod jet_error_wasm_bridge {
             Ok(note) => note,
             Err(error) => return bridge_error(error),
         };
-        jet_journey_frame_text(&file, line, &function, &note);
+        jet_journey_frame_text(&file, line, column, &function, &note);
         OK
     }
 
@@ -1527,6 +1665,7 @@ mod jet_error_wasm_bridge {
         file_pointer: u32,
         file_length: u32,
         line: u32,
+        column: u32,
         function_pointer: u32,
         function_length: u32,
         note_pointer: u32,
@@ -1550,8 +1689,8 @@ mod jet_error_wasm_bridge {
             Ok(note) => note,
             Err(error) => return bridge_error(error),
         };
-        restore_journey(&journey);
-        let error = jet_err_with_context_frame(error, &file, line, &function, note);
+        restore_journey(journey);
+        let error = jet_err_with_context_frame(error, &file, line, column, &function, note);
         write_carrier(&error);
         OK
     }
@@ -1591,12 +1730,14 @@ mod jet_error_wasm_bridge {
             Ok(target) => target,
             Err(error) => return bridge_error(error),
         };
-        if !converted_journey.is_empty() {
-            restore_journey(&converted_journey);
-        } else if let Some((_, journey)) = &original {
-            restore_journey(journey);
-        }
-        if let Some((original, _)) = original {
+        let original = original.map(|(original, journey)| {
+            if converted_journey.is_empty() {
+                restore_journey(journey);
+            }
+            original
+        });
+        restore_journey(converted_journey);
+        if let Some(original) = original {
             if converted.typed_identity.is_none() {
                 converted.typed_identity = original.typed_identity;
             }
@@ -1625,7 +1766,7 @@ mod jet_error_wasm_bridge {
             Ok(error) => error,
             Err(error) => return bridge_error(error),
         };
-        restore_journey(&journey);
+        restore_journey(journey);
         let report = jet_error_report(&error);
         let rendered = report.render();
         let journey_text = report.render_journey_with_style(JetReportStyle::PLAIN);
@@ -1642,7 +1783,7 @@ mod jet_error_wasm_bridge {
 
 
 pub fn jet_render_err(error: &JetErr) -> String {
-    JetErrorReport::from_error(error, Vec::new()).render_root()
+    JetErrorReport::from_error(error, None, Vec::new()).render_root()
 }
 
 impl std::fmt::Display for JetErr {
@@ -1701,7 +1842,8 @@ mod err_tests {
             "IoError".to_string(),
             "ConfigError".to_string(),
         );
-        jet_journey_frame("config.jet", 42, "run", String::new);
+        jet_journey_origin("config.jet", 40, 12, "load");
+        jet_journey_frame("config.jet", 42, 5, "run", String::new);
 
         let report = jet_error_report(&error);
         assert_eq!(report.code, Some("CFG404".to_string()));
@@ -1713,23 +1855,34 @@ mod err_tests {
         assert_eq!(report.context_frames.len(), 1);
         assert_eq!(report.context_frames[0].file, "config.jet");
         assert_eq!(report.context_frames[0].line, 42);
+        let origin = report.origin.as_ref().expect("origin");
+        assert_eq!(
+            (origin.fn_name.as_str(), origin.file.as_str(), origin.line, origin.column),
+            ("load", "config.jet", 40, 12)
+        );
         assert_eq!(report.source_journey.len(), 1);
         assert_eq!(report.source_journey[0].fn_name, "run");
         assert_eq!(report.source_journey[0].file, "config.jet");
         assert_eq!(report.source_journey[0].line, 42);
+        assert_eq!(report.source_journey[0].column, 5);
         assert_eq!(report.conversion_history.len(), 1);
         assert_eq!(report.conversion_history[0].source, "IoError");
         assert_eq!(report.conversion_history[0].target, "ConfigError");
+        let wire = report.to_json();
         assert_eq!(
-            report.to_json(),
-            "{\"schema\":\"jet.err/v1\",\"message\":\"loading config\",\"code\":\"CFG404\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":\"IO001\",\"cause\":null,\"typed_identity\":\"IoError\"},\"typed_identity\":\"IoError\",\"context_frames\":[{\"text\":\"while loading app.toml\",\"file\":\"config.jet\",\"line\":42}],\"source_journey\":[{\"fn_name\":\"run\",\"file\":\"config.jet\",\"line\":42,\"note\":\"\",\"hops\":1}],\"conversion_history\":[{\"source\":\"IoError\",\"target\":\"ConfigError\"}]}"
+            wire,
+            "{\"schema\":\"jet.err/v1\",\"message\":\"loading config\",\"code\":\"CFG404\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":\"IO001\",\"cause\":null,\"typed_identity\":\"IoError\"},\"typed_identity\":\"IoError\",\"context_frames\":[{\"text\":\"while loading app.toml\",\"file\":\"config.jet\",\"line\":42}],\"origin\":{\"fn_name\":\"load\",\"file\":\"config.jet\",\"line\":40,\"column\":12,\"note\":\"\",\"hops\":1},\"source_journey\":[{\"fn_name\":\"run\",\"file\":\"config.jet\",\"line\":42,\"column\":5,\"note\":\"\",\"hops\":1}],\"conversion_history\":[{\"source\":\"IoError\",\"target\":\"ConfigError\"}]}"
         );
+        // The wire is the report: a replayed wire keeps the origin and every
+        // column instead of degrading to the rendered text.
+        assert_eq!(JetErrorReport::from_json(&wire), Ok(report.clone()));
         assert_eq!(
             report.render_with_style(JetReportStyle::PLAIN),
             "Error [CFG404]: loading config (type: IoError)\n\
              \x20\x20cause: disk offline (type: IoError)\n\
              \x20\x20context (config.jet:42): while loading app.toml\n\
              \x20\x20conversion: IoError -> ConfigError\n\
+             \x20\x20failed here: load (config.jet:40)\n\
              \x20Trail [E3002] (1 hop via ?, origin first):\n\
              \x20 1. run (config.jet:42)\n"
         );
@@ -1746,52 +1899,129 @@ mod journey_tests {
     /// runs in `tests/terminal.rs` are the same program.
     const EXAMPLE: &str = "Examples/features/errors/error_context.jet";
 
+    /// `error_context.jet`: `read_raw` returns `Err("file not found")` on line
+    /// 4, and three calls carry it out.
     fn three_real_hops() {
         jet_journey_reset();
-        jet_journey_frame(EXAMPLE, 7, "parse_config", || {
+        jet_journey_origin(EXAMPLE, 4, 27, "read_raw");
+        jet_journey_frame(EXAMPLE, 7, 12, "parse_config", || {
             "reading raw config".to_string()
         });
-        jet_journey_frame(EXAMPLE, 12, "load_config", || {
+        jet_journey_frame(EXAMPLE, 12, 12, "load_config", || {
             "loading config app.toml".to_string()
         });
-        jet_journey_frame(EXAMPLE, 16, "run", String::new);
+        jet_journey_frame(EXAMPLE, 16, 17, "run", String::new);
     }
 
     #[test]
-    fn report_leads_with_the_failure_and_puts_the_trail_under_it() {
+    fn report_leads_with_the_failure_then_where_it_started_then_the_trail() {
         jet_journey_reset();
-        jet_journey_frame("app.jet", 7, "parse_config", || {
+        jet_journey_origin("app.jet", 3, 5, "read_raw");
+        jet_journey_frame("app.jet", 7, 12, "parse_config", || {
             "reading raw config".to_string()
         });
-        jet_journey_frame("app.jet", 12, "load_config", || {
-            "loading config".to_string()
-        });
-        jet_journey_frame("app.jet", 16, "run", String::new);
+        jet_journey_frame("app.jet", 16, 5, "run", String::new);
 
         assert_eq!(
             jet_journey_report_styled("Error: file not found", JetReportStyle::PLAIN),
             "Error: file not found\n\
-             \x20Trail [E3002] (3 hops via ?, origin first):\n\
+             \x20\x20failed here: read_raw (app.jet:3)\n\
+             \x20Trail [E3002] (2 hops via ?, origin first):\n\
              \x20 1. parse_config (app.jet:7) — reading raw config\n\
-             \x20 2. load_config (app.jet:12) — loading config\n\
-             \x20 3. run (app.jet:16)\n"
+             \x20 2. run (app.jet:16)\n"
+        );
+    }
+
+    #[test]
+    fn a_failure_without_an_err_site_starts_at_its_first_hop() {
+        // A failing Core call returns no `Err(...)` of the program's own, so
+        // the call site it failed at is where the failure started.
+        jet_journey_reset();
+        jet_journey_frame("app.jet", 6, 13, "load", || "reading config".to_string());
+        jet_journey_frame("app.jet", 11, 5, "run", String::new);
+
+        let report = jet_error_report(&jet_err_from_message("file not found".to_string()));
+        let origin = report.origin.as_ref().expect("the first hop is the origin");
+        assert_eq!((origin.fn_name.as_str(), origin.line, origin.column), ("load", 6, 13));
+        assert_eq!(origin.note, "reading config");
+        assert_eq!(report.source_journey.len(), 1);
+        assert_eq!(
+            report.render_with_style(JetReportStyle::PLAIN),
+            "Error: file not found\n\
+             \x20\x20failed here: load (app.jet:6) — reading config\n\
+             \x20Trail [E3002] (1 hop via ?, origin first):\n\
+             \x20 1. run (app.jet:11)\n"
+        );
+    }
+
+    #[test]
+    fn a_new_origin_drops_the_journey_of_an_earlier_handled_failure() {
+        jet_journey_reset();
+        jet_journey_origin("app.jet", 2, 5, "stale");
+        jet_journey_frame("app.jet", 8, 5, "handled", String::new);
+        jet_journey_origin("app.jet", 20, 9, "fresh");
+        jet_journey_frame("app.jet", 30, 5, "run", String::new);
+
+        assert_eq!(
+            jet_journey_report_styled("Error: fresh", JetReportStyle::PLAIN),
+            "Error: fresh\n\
+             \x20\x20failed here: fresh (app.jet:20)\n\
+             \x20Trail [E3002] (1 hop via ?, origin first):\n\
+             \x20 1. run (app.jet:30)\n"
+        );
+    }
+
+    #[test]
+    fn a_failure_created_at_the_edge_names_its_line_and_has_no_trail() {
+        jet_journey_reset();
+        jet_journey_origin("app.jet", 5, 12, "run");
+        assert_eq!(
+            jet_journey_report_styled("Error: nothing to do", JetReportStyle::PLAIN),
+            "Error: nothing to do\n\
+             \x20\x20failed here: run (app.jet:5)\n"
+        );
+    }
+
+    #[test]
+    fn a_carried_journey_keeps_its_origin_across_threads() {
+        jet_journey_reset();
+        jet_journey_origin("app.jet", 2, 5, "stale");
+        let carried = std::thread::spawn(|| {
+            jet_journey_origin("worker.jet", 4, 9, "work");
+            jet_journey_frame("worker.jet", 9, 5, "step", String::new);
+            jet_journey_take_hops()
+        })
+        .join()
+        .expect("worker");
+        jet_journey_adopt(carried);
+        jet_journey_frame("app.jet", 12, 5, "run", String::new);
+
+        assert_eq!(
+            jet_journey_report_styled("Error: worker failed", JetReportStyle::PLAIN),
+            "Error: worker failed\n\
+             \x20\x20failed here: work (worker.jet:4)\n\
+             \x20Trail [E3002] (2 hops via ?, origin first):\n\
+             \x20 1. step (worker.jet:9)\n\
+             \x20 2. run (app.jet:12)\n"
         );
     }
 
     #[test]
     fn a_repeating_site_collapses_to_one_line_with_a_count() {
         jet_journey_reset();
-        jet_journey_frame("app.jet", 6, "dive", String::new);
+        jet_journey_origin("app.jet", 3, 5, "bottom");
+        jet_journey_frame("app.jet", 6, 5, "dive", String::new);
         for _ in 0..3 {
-            jet_journey_frame("app.jet", 6, "dive", || {
+            jet_journey_frame("app.jet", 6, 5, "dive", || {
                 panic!("a collapsed repeat must not evaluate its note")
             });
         }
-        jet_journey_frame("app.jet", 9, "run", String::new);
+        jet_journey_frame("app.jet", 9, 5, "run", String::new);
 
         assert_eq!(
             jet_journey_report_styled("Error: bottom", JetReportStyle::PLAIN),
             "Error: bottom\n\
+             \x20\x20failed here: bottom (app.jet:3)\n\
              \x20Trail [E3002] (5 hops via ?, origin first):\n\
              \x20 1. dive (app.jet:6) ×4\n\
              \x20 2. run (app.jet:9)\n"
@@ -1818,6 +2048,7 @@ mod journey_tests {
         assert_eq!(
             jet_journey_report_styled("Error: file not found", JetReportStyle::PLAIN),
             "Error: file not found\n\
+             \x20\x20failed here: read_raw (Examples/features/errors/error_context.jet:4)\n\
              \x20Trail [E3002] (3 hops via ?, origin first):\n\
              \x20 1. parse_config (Examples/features/errors/error_context.jet:7) — reading raw config\n\
              \x20 2. load_config (Examples/features/errors/error_context.jet:12) — loading config app.toml\n\
@@ -1838,6 +2069,7 @@ mod journey_tests {
         assert_eq!(
             report,
             "Error: file not found\n\
+             \x1b[2;37m  failed here: read_raw (…/errors/error_context.jet:4)\x1b[0m\n\
              \x1b[2;37m Trail [E3002] (3 hops via ?, origin first):\x1b[0m\n\
              \x1b[2;37m  1. parse_config (…/errors/error_context.jet:7) — reading raw config\x1b[0m\n\
              \x1b[2;37m  2. load_config (…/errors/error_context.jet:12) — loading config app.toml\x1b[0m\n\
@@ -1852,9 +2084,9 @@ mod journey_tests {
     fn no_color_on_a_terminal_keeps_the_layout_and_drops_the_ansi() {
         three_real_hops();
         // Same 80-column layout as the colour cell above, byte for byte, minus
-        // the SGR pairs: colour and width are separate capabilities. Every hop
-        // also elides its one file to one spelling — the block's budget is
-        // decided once, not per line.
+        // the SGR pairs: colour and width are separate capabilities. Every
+        // site also elides its one file to one spelling — the block's budget
+        // is decided once, not per line.
         assert_eq!(
             jet_journey_report_styled(
                 "Error: file not found",
@@ -1864,6 +2096,7 @@ mod journey_tests {
                 },
             ),
             "Error: file not found\n\
+             \x20\x20failed here: read_raw (…/errors/error_context.jet:4)\n\
              \x20Trail [E3002] (3 hops via ?, origin first):\n\
              \x20 1. parse_config (…/errors/error_context.jet:7) — reading raw config\n\
              \x20 2. load_config (…/errors/error_context.jet:12) — loading config app.toml\n\
@@ -1876,7 +2109,8 @@ mod journey_tests {
         three_real_hops();
         // 40 columns. The header drops its mechanism reminder, the paths fall
         // back to the file name that is never truncated, and the notes go —
-        // three addressable sites under the root failure, nothing wrapped.
+        // three addressable hops under the root failure, nothing wrapped. The
+        // origin keeps its whole address even when that is wider.
         let report = jet_journey_report_styled(
             "Error: file not found",
             JetReportStyle {
@@ -1887,12 +2121,13 @@ mod journey_tests {
         assert_eq!(
             report,
             "Error: file not found\n\
+             \x20\x20failed here: read_raw (error_context.jet:4)\n\
              \x20Trail [E3002] (3 hops):\n\
              \x20 1. parse_config (error_context.jet:7)\n\
              \x20 2. load_config (error_context.jet:12)\n\
              \x20 3. run (error_context.jet:16)\n"
         );
-        for line in report.lines().skip(1) {
+        for line in report.lines().skip(2) {
             assert!(
                 jet_report_columns(line) <= 40,
                 "the trail must fit the terminal it was laid out for: {line:?}"
@@ -1903,7 +2138,8 @@ mod journey_tests {
     #[test]
     fn a_note_too_long_for_the_line_keeps_its_head_and_an_ellipsis() {
         jet_journey_reset();
-        jet_journey_frame("a.jet", 1, "f", || {
+        jet_journey_origin("a.jet", 1, 1, "g");
+        jet_journey_frame("a.jet", 2, 5, "f", || {
             "a very long note that will not fit at all".to_string()
         });
         assert_eq!(
@@ -1915,8 +2151,9 @@ mod journey_tests {
                 },
             ),
             "Error: nope\n\
+             \x20\x20failed here: g (a.jet:1)\n\
              \x20Trail [E3002] (1 hop):\n\
-             \x20 1. f (a.jet:1) — a very lon…\n"
+             \x20 1. f (a.jet:2) — a very lon…\n"
         );
     }
 }

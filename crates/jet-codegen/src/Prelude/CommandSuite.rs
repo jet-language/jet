@@ -31,13 +31,15 @@ pub fn jet_test_suite_new() -> JetTestSuite {
     }
 }
 
-pub fn jet_test_suite_run(suite: &mut JetTestSuite) -> i64 {
+/// `suite.run()` reads its receiver (D-CMD-OVERRIDE1=C: `fn test(suite:
+/// TestSuite) { suite.run() }` takes a read parameter). The run's outcome is
+/// the returned status and the harness-owned counters; the caller's snapshot
+/// value is not rewritten.
+pub fn jet_test_suite_run(suite: &JetTestSuite) -> i64 {
     let Some(runner) = suite.runner else {
         return suite.result;
     };
     let (iteration, result) = runner();
-    suite.iteration = iteration;
-    suite.result = result;
     JET_TEST_ITERATION.with(|slot| slot.set(iteration));
     JET_TEST_RESULT.with(|slot| slot.set(result));
     result

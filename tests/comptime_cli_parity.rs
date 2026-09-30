@@ -413,16 +413,16 @@ fn computed_constants_match_aot_default_and_interpreter() {
 }
 
 const ENUM_DISCRIMINANT_SOURCE: &str = r#"
-@BASE :: 7
-@STEP :: 3
+BASE :: prep { 7 }
+STEP :: prep { 3 }
 
 #Layout(c)
 enum WireCode {
     Explicit = 0
     Sparse = 9
     Negative = -7
-    Named = @BASE
-    Arithmetic = @BASE + @STEP * 2
+    Named = BASE
+    Arithmetic = BASE + STEP * 2
     Shifted = 1 << 4
     ShiftedRight = 32 >> 3
     Implicit
@@ -432,8 +432,8 @@ fn run() {}
 "#;
 
 const ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST: &str = r#"
-@BASE :: 7
-@STEP :: 3
+BASE :: prep { 7 }
+STEP :: prep { 3 }
 
 #Layout(c)
 enum WireCode {
@@ -441,8 +441,8 @@ enum WireCode {
     Explicit = 0
     Sparse = 9
     Negative = -7
-    Named = @BASE
-    Arithmetic = @BASE + @STEP * 2
+    Named = BASE
+    Arithmetic = BASE + STEP * 2
     Shifted = 1 << 4
     ShiftedRight = 32 >> 3
 }
@@ -487,10 +487,10 @@ const ENUM_DISCRIMINANT_DIAGNOSTICS: &[(&str, &str, &str, &str)] = &[
     (
         "overflow",
         r#"
-@MAX :: 9223372036854775807
+MAX :: prep { 9223372036854775807 }
 
 enum Bad {
-    TooWide = @MAX + 1
+    TooWide = MAX + 1
 }
 
 fn run() {}
@@ -1486,7 +1486,7 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
         String::from_utf8_lossy(&override_run.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&override_run.stdout).contains("jet test: using fn test override")
+        String::from_utf8_lossy(&override_run.stderr).contains("jet test: using fn test override")
     );
 
     for command in ["test"] {

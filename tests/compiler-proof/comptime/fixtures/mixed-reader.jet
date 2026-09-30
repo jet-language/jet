@@ -2,17 +2,17 @@ use core.encoding.json as json
 use core.files as fs
 
 fn run() {
-    @ct :: Reader.over([U8]{7, 9, 11})
-    @ct_a :: @ct.read_u8() ?? panic("ct a")
-    @ct_b :: @ct.read_u8() ?? panic("ct b")
-    @comptime_value :: "{@ct_a}|{@ct_b}|{@ct.remaining()}"
+    ct :: prep { Reader.over([U8]{7, 9, 11}) }
+    ct_a :: prep { ct.read_u8() ?? panic("ct a") }
+    ct_b :: prep { ct.read_u8() ?? panic("ct b") }
+    comptime_value :: prep { "{ct_a}|{ct_b}|{ct.remaining()}" }
 
     rt :: Reader.over([U8]{7, 9, 11})
     rt_a :: rt.read_u8() ?? panic("rt a")
     rt_b :: rt.read_u8() ?? panic("rt b")
     runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
 
-    print("{@comptime_value}")
+    print("{comptime_value}")
     print("{runtime_value}")
     mode :: env.get("JET_COMPTIME_MODE") ?? "unknown"
     operation_id :: env.get("JET_COMPTIME_OPERATION_ID") ?? "mixed-reader-mutation-fallible"
@@ -20,7 +20,7 @@ fn run() {
     if journal_path != "" {
         observations :: DataTree.Object([
             "result": DataTree.Object([
-                "comptime": DataTree.Text("{@comptime_value}"),
+                "comptime": DataTree.Text("{comptime_value}"),
                 "runtime": DataTree.Text("{runtime_value}")
             ]),
             "typed_failure": DataTree.Array([]),
@@ -55,7 +55,7 @@ fn run() {
                 ])
             ]),
             "ordered_effects": DataTree.Array([
-                DataTree.Text("stdout:{@comptime_value}"),
+                DataTree.Text("stdout:{comptime_value}"),
                 DataTree.Text("stdout:{runtime_value}")
             ]),
             "cleanup": DataTree.Array([

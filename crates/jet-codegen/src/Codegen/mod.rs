@@ -1013,6 +1013,9 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push_str(
         "pub trait __jet_Iterable: Sized {\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}\n",
     );
+    // D-SHAPE-RESOURCE2=A: `Close.close(^self)` is the consuming, infallible
+    // cleanup capability that `defer close(^resource)` invokes.
+    out.push_str("pub trait __jet_Close: Sized {\n    fn close(self);\n}\n");
     out.push('\n');
 }
 
@@ -5019,7 +5022,7 @@ mod tests {
 /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
 /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
 /// active target OS is Linux. `used_core` is collected before `@if
-/// @build.os` folds, so a Linux-only backend used under a `.Linux` arm still
+/// $build.os` folds, so a Linux-only backend used under a `.Linux` arm still
 /// shows up on a macOS/Windows build; the `active_os` gate is what actually
 /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is
 /// Linux-only). The `.Linux` dispatch arm's construction is likewise folded out

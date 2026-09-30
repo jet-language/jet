@@ -161,7 +161,7 @@ impl LowerEnv {
     }
     /// Resolve and record one owned resource transfer. Child environments share
     /// this fact with their enclosing lowering pass.
-    pub(super) fn resource_take_place(&mut self, name: &str) -> TLocal {
+    pub(super) fn resource_take_place(&self, name: &str) -> TLocal {
         self.resource_take_targets
             .borrow_mut()
             .insert(self.rust_name_of(name));
@@ -219,17 +219,6 @@ impl LowerEnv {
     /// can never be captured in generated Rust.
     pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
-    }
-    /// Locals with a known type, in name order. Comptime fragment blocks use
-    /// this to export `@ { … }` bindings so later reads fold (S57).
-    pub(crate) fn typed_locals(&self) -> Vec<(String, Type)> {
-        let mut rows = self
-            .locals
-            .iter()
-            .filter_map(|(name, (_, ty))| Some((name.clone(), ty.clone()?)))
-            .collect::<Vec<_>>();
-        rows.sort_by(|left, right| left.0.cmp(&right.0));
-        rows
     }
     pub(super) fn mark_dma_transfer(&mut self, name: &str, channel: String) {
         self.dma_transfers.insert(name.to_string(), channel);

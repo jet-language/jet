@@ -20,20 +20,20 @@ const CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE: &str =
     include_str!("../../tests/fixtures/core_files_partial_move_siblings.jet");
 const UNINIT_FIXED_PARTIAL_EXIT_SOURCE: &str =
     include_str!("../../tests/fixtures/uninit_fixed_partial_exit.jet");
-const SMALL_PROGRAM_SOURCE: &str = r#"@SOURCE_TEXT :: "π🙂"
-@SOURCE_LIST :: [Int]{7, 8}
-@SOURCE_BYTES :: @SOURCE_TEXT.bytes()
-@MATERIALIZED_TEXT :: ~(@SOURCE_TEXT.after(""))
-@MATERIALIZED_LIST :: ~(@SOURCE_LIST[0..<@SOURCE_LIST.len()])
-@MATERIALIZED_BYTES :: ~(@SOURCE_BYTES[0..<@SOURCE_BYTES.len()])
-@MATERIALIZED_LIST_LEN :: @MATERIALIZED_LIST.len()
-@MATERIALIZED_BYTES_LEN :: @MATERIALIZED_BYTES.len()
+const SMALL_PROGRAM_SOURCE: &str = r#"SOURCE_TEXT :: prep { "π🙂" }
+SOURCE_LIST :: prep { [Int]{7, 8} }
+SOURCE_BYTES :: prep { SOURCE_TEXT.bytes() }
+MATERIALIZED_TEXT :: prep { ~(SOURCE_TEXT.after("")) }
+MATERIALIZED_LIST :: prep { ~(SOURCE_LIST[0..<SOURCE_LIST.len()]) }
+MATERIALIZED_BYTES :: prep { ~(SOURCE_BYTES[0..<SOURCE_BYTES.len()]) }
+MATERIALIZED_LIST_LEN :: prep { MATERIALIZED_LIST.len() }
+MATERIALIZED_BYTES_LEN :: prep { MATERIALIZED_BYTES.len() }
 
 pub fn main() {
     print("bootstrap-small-program")
-    print("{@MATERIALIZED_TEXT}")
-    print("{@MATERIALIZED_LIST_LEN}")
-    print("{@MATERIALIZED_BYTES_LEN}")
+    print("{MATERIALIZED_TEXT}")
+    print("{MATERIALIZED_LIST_LEN}")
+    print("{MATERIALIZED_BYTES_LEN}")
 }
 "#;
 const SMALL_PROGRAM_MANIFEST: &str = r#"name: "bootstrap_small"
@@ -116,13 +116,13 @@ const EXACT_DIVISION_FIXTURE_ONE: &str = r#"fn run() {
     print(third * 3 == 1)
 }
 "#;
-const EXACT_DIVISION_FIXTURE_TWO: &str = r#"@TEN :: 10
-@THIRD :: @TEN / 3
+const EXACT_DIVISION_FIXTURE_TWO: &str = r#"TEN :: prep { 10 }
+THIRD :: prep { TEN / 3 }
 fn run() {
     runtime :: 10 / 3
-    print(@THIRD)
-    print(@THIRD == runtime)
-    print(@THIRD * 3 == 10)
+    print(THIRD)
+    print(THIRD == runtime)
+    print(THIRD * 3 == 10)
 }
 "#;
 const EXACT_DIVISION_FIXTURE_ONE_EXPECTED: &str = "1/3\ninterpolated 1/3\ntrue\n";
@@ -2046,8 +2046,8 @@ struct bad_type {
     BadField: Int
 }
 
-@MAX_RETRIES :: 3
-@bad_constant :: @MAX_RETRIES
+MAX_RETRIES :: prep { 3 }
+BAD_CONSTANT :: prep { MAX_RETRIES }
 
 fn BadFunction(BadParam: Int) -> Int {
     BadLocal :: BadParam
@@ -2056,7 +2056,7 @@ fn BadFunction(BadParam: Int) -> Int {
 }
 
 pub fn main() {
-    print(BadFunction(@bad_constant))
+    print(BadFunction(BAD_CONSTANT))
 }
 "#
     .to_string();

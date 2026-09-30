@@ -539,6 +539,9 @@ mod crypto_entropy_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
     use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 }
+/// D-SHAPE-RESOURCE1=A: the MIR evaluator wipes a `Secret`'s resident bytes
+/// through the same vetted volatile kernel the AOT `Close` uses.
+pub use crypto_entropy_kernel::jet_crypto_zeroize;
 
 fn runtime_date_value(date: time_kernel::JetDate) -> CtValue {
     CtValue::Struct {

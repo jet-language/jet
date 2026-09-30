@@ -21,10 +21,10 @@ fn jet_web_needs_font_shaping(ctx: &JetWebEmitContext) -> Bool Never! {
         loop block in function.blocks {
             loop instruction in block.instructions {
                 uses_font :: if instruction.operation == {
-                    .CoreCall(call, _, _, _, _, _) -> jet_web_core_is_font_shape(ctx, call)
+                    .CoreCall(call, _, _, _, _, _) -> jet_web_core_is_font_shape(&ctx, call)
                     .Call(callee, _, _) -> {
                         if callee == {
-                            .Core(call) -> jet_web_core_is_font_shape(ctx, call)
+                            .Core(call) -> jet_web_core_is_font_shape(&ctx, call)
                             else -> false
                         }
                     }

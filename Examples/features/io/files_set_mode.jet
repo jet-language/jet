@@ -1,0 +1,22 @@
+// `files.set_mode` replaces a path's permission bits and `files.stat` reads
+// them back; a missing path is a typed `IOError`.
+use core.files as files
+
+fn perms(path: String) -> Int {
+    (files.stat(path) ?? panic("stat")).mode % 512
+}
+
+fn run() {
+    scratch :: files.temp_dir("jet-set-mode") ?? panic("temp dir")
+    path :: "{scratch.path}/note.txt"
+    files.write(path, "note") ?? panic("write")
+    files.set_mode(path, 0o640) ?? panic("set_mode 0o640")
+    print("after 0o640: {perms(path) == 0o640}")
+    files.set_mode(path, 0o600) ?? panic("set_mode 0o600")
+    print("after 0o600: {perms(path) == 0o600}")
+    files.set_mode("{scratch.path}/missing.txt", 0o600) ?? {
+        print("missing path: rejected")
+        return
+    }
+    print("missing path: accepted")
+}

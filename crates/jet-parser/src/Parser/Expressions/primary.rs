@@ -167,19 +167,14 @@ impl<'a> Parser<'a> {
                         }
                     };
             }
+            // A lone `$`: config surfaces read `$NAME` as one token, and in
+            // code a fact is always `$name` (D-COMPILER-NS1=A).
             TokKind::Dollar => {
                 let mark = self.bump();
-                if !self.allow_environment_reads {
-                    return Err(self.environment_read_outside_config(mark.span));
-                }
-                let (name, name_span) = self.expect_ident("after `$`")?;
-                if Syntax::is_comptime_name(name.as_str()) {
-                    return Err(self.invalid_environment_read(name_span));
-                }
-                return Ok(Expr::ComptimeName {
-                    name: format!("${name}"),
-                    span: Span::new(mark.span.start, name_span.end),
-                    value: None,
+                return Err(if self.allow_environment_reads {
+                    self.invalid_environment_read(mark.span)
+                } else {
+                    self.unknown_fact_root(Syntax::COMPTIME_MARK, mark.span)
                 });
             }
             // D-PREP-SURFACE2=A: `prep { … }` in value position. The block's
@@ -204,7 +199,7 @@ impl<'a> Parser<'a> {
                         "E0003",
                         "`@` needs a compile-time name or a package ref here".to_string(),
                         "prefix `@` marks compile-time names and fact reads; infix `@` joins a package target to its source (D-ONCE-AT1=D)".to_string(),
-                        "write `@name`, `T.@layout`, or a complete `target@source` ref".to_string(),
+                        "write `@name`, `T.$layout`, or a complete `target@source` ref".to_string(),
                         Some(span),
                     ));
             }
@@ -370,11 +365,52 @@ impl<'a> Parser<'a> {
                 }
                 return self.expr_primary(allow_struct_lit);
             }
-            // D-META-STAGE1=B / D-ONCE-AT1=D: `@limit` reads a compile-time name. The
-            // lexer merges the mark into one `Ident` token, and the mark
-            // stays on the name here — a marked name and a plain name are
-            // two different names. Declaration positions consume the same
-            // token through `expect_ident`, so they bind the marked name.
+            // D-PREP-SURFACE2=A: a constant is an ordinary name, declared
+            // `NAME :: prep { value }` when evaluated while building. A retired
+            // `@NAME` read teaches E0388 and reads `NAME`. A called
+            // `@ROOT(…)` is a retired metadata query, not a constant.
+            TokKind::Ident(name)
+                if self.reads_retired_constant(name.as_str())
+                    && Syntax::retired_fact_spelling(name.as_str()).is_none()
+                    && !matches!(self.peek2().kind, TokKind::LParen) =>
+            {
+                let span = self.bump().span;
+                let name = self.retire_const_mark(name, span);
+                Ok(Expr::Ident(name, span))
+            }
+            // D-NAME-SPLICE1=B: inside a derive or marker template, the retired
+            // `@name` splice of a template binding teaches E0388 and reads as
+            // `$name`.
+            TokKind::Ident(name)
+                if self.derive_template_depth > 0
+                    && name.starts_with(Syntax::RETIRED_COMPTIME_MARK)
+                    && Syntax::retired_fact_spelling(name.as_str()).is_none() =>
+            {
+                let span = self.bump().span;
+                let new = format!(
+                    "{}{}",
+                    Syntax::COMPTIME_MARK,
+                    &name[Syntax::RETIRED_COMPTIME_MARK.len()..]
+                );
+                self.diags.push(
+                    Diagnostic::from_row("E0388", &[("old", name.as_str()), ("new", new.as_str())], Some(span))
+                        .with_edit(crate::Diagnostics::TextEdit {
+                            span,
+                            new_text: new.clone(),
+                        }),
+                );
+                Ok(Expr::ComptimeName {
+                    name: new,
+                    span,
+                    value: None,
+                })
+            }
+            // D-COMPILER-NS1=A / D-META-ROOT3=A: `$build`, `$package`,
+            // `$phase` and `$program` are the subjectless fact roots. The
+            // lexer merges the mark into one `Ident` token. Config surfaces
+            // read the same token as a `$NAME` environment read
+            // (D-ONCE-DOLLAR1=B). Inside a template, any other `$name`
+            // splices a template binding (D-NAME-SPLICE1=B).
             TokKind::Ident(name)
                 if Syntax::is_comptime_name(name.as_str())
                     && !(self.derive_template_depth > 0
@@ -385,6 +421,12 @@ impl<'a> Parser<'a> {
                             .is_some_and(|token| matches!(&token.kind, TokKind::Lt))) =>
             {
                 let span = self.bump().span;
+                if !self.allow_environment_reads
+                    && self.derive_template_depth == 0
+                    && !Syntax::is_fact_root(name.as_str())
+                {
+                    return Err(self.unknown_fact_root(name.as_str(), span));
+                }
                 Ok(Expr::ComptimeName {
                     name,
                     span,

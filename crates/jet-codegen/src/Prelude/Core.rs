@@ -1130,9 +1130,11 @@ fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
 /// A cryptographic random draw is intentionally not replayed by a
 /// deterministic world. Route the canonical AOT Core entry through this
 /// boundary so it cannot silently fall back to operating-system entropy.
-fn jet_std_crypto_random_bytes_controlled(n: i64) -> Vec<u8> {
+/// A missing or rejected provider is `None`; the Jet wrapper in
+/// `Core/crypto/random.jet` reports it as `CryptoError.Unavailable`.
+fn jet_std_crypto_random_bytes_controlled(n: i64) -> Option<Vec<u8>> {
     jet_scheduler_world_reject_uncontrolled("entropy");
-    jet_std_crypto_random_bytes(n)
+    jet_crypto_entropy_bytes(n).ok()
 }
 
 /// The same classification, on the one thread that is NOT the program's entry
@@ -2304,7 +2306,7 @@ fn jet_test_require_eq(
 /// lesson — while each distinct site keeps its identity (Elixir lesson).
 fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
     if r.is_err() {
-        jet_journey_frame(file, line, fn_name, || String::new());
+        jet_journey_frame(file, line, 0, fn_name, || String::new());
     } else {
         jet_journey_reset();
     }
@@ -2319,7 +2321,7 @@ fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
     note: F,
 ) -> Result<T, E> {
     if r.is_err() {
-        jet_journey_frame(file, line, fn_name, note);
+        jet_journey_frame(file, line, 0, fn_name, note);
     } else {
         jet_journey_reset();
     }

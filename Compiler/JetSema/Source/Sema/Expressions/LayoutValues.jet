@@ -64,7 +64,7 @@ pub fn sema_expression_layout_binop_result(op: BinOp, left: Type, right: Type) -
     if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Ge && op != BinOp.Le && op != BinOp.Eq -> return None
     combined :: sema_expression_layout_axis_combine(left_axis, right_axis)
     if combined == None -> return Val(SemaExpressionLayoutBinaryResult{result_type: None, axis_mismatch: true})
-    result_type := if op == BinOp.Ge || op == BinOp.Le || op == BinOp.Eq -> Type.Named{name: "Constraint"} else -> Type.Named{name: sema_expression_layout_axis_type_name(combined ?? SemaExpressionLayoutAxis.Neutral)}
+    result_type := if op == BinOp.Ge || op == BinOp.Le || op == BinOp.Eq -> Type.Named{name: "Constraint"} else -> Type.Named{name: sema_expression_layout_axis_type_name(combined)}
     Val(SemaExpressionLayoutBinaryResult{result_type: Val(result_type), axis_mismatch: false})
 }
 
@@ -88,7 +88,7 @@ fn sema_expression_layout_binary_axis_diagnostic(left: Type, right: Type, span: 
 pub fn sema_expr_check_layout_binary(op: BinOp, left: TExpr, right: TExpr, span: Span, line: Int, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaExpressionLayoutBinaryCheck {
     contract :: sema_expression_layout_binop_result(op, left.ty, right.ty)
     if contract == None -> return SemaExpressionLayoutBinaryCheck{handled: false, value: None}
-    result :: contract ?? SemaExpressionLayoutBinaryResult{result_type: None, axis_mismatch: true}
+    result :: contract
     if result.axis_mismatch {
         sema_expression_layout_binary_axis_diagnostic(left.ty, right.ty, span, &diagnostics)
         return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
@@ -159,20 +159,21 @@ fn sema_expression_layout_method_params(types: [Type]) -> [SemaCallParam] Never!
 }
 
 pub fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    updated_args := args
     owner := if receiver_value.ty == {.Named(name) -> if name == "Layout" || name == "Constraint" -> name else -> "" else -> ""}
     if owner == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count :: sema_expression_layout_method_arity(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != expected_count {
+    if updated_args.len() != expected_count {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
-        sema_expression_layout_discard_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, updated_args.len(), false, span))
+        sema_expression_layout_discard_arguments(updated_args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type :: sema_expression_layout_method_return(owner, method, expected_count) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     values := [TExpr]{}
     required_types := [Type]{}
     valid := true
-    loop (index, argument) in args {
+    loop (index, argument) in updated_args {
         wanted := sema_expression_layout_method_arg_type(method, index)
         checked :: if wanted == .Val(required) -> sema_check_expression(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if checked == None {
@@ -180,7 +181,7 @@ pub fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method
             &required_types.push(wanted ?? Type.Named{name: "Unit"})
             next
         }
-        value :: checked ?? TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.Unit, span: argument.span, integer_bounds: None, cost: None}
+        value :: checked
         axis_type := if value.ty == {.Named(name) -> sema_expression_layout_is_axis_type(name) else -> false}
         if sema_expression_layout_method_axis_arg(method, index) && !axis_type {
             sema_expression_layout_axis_argument_mismatch(owner, method, value.ty, argument.span, &diagnostics)
@@ -193,11 +194,11 @@ pub fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method
         &values.push(value)
         &required_types.push(wanted ?? value.ty)
     }
-    ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), &args, scopes, span, &diagnostics)
+    ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> valid = false
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.LayoutMethod{method: method}, args: values}, span)
-    if !sema_effect_record_intrinsic_fact(environment, scopes, context, "{owner}.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_fact(environment, &scopes, &context, "{owner}.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
@@ -235,7 +236,7 @@ pub fn sema_call_try_measurement_method(receiver: Expr, receiver_value: TExpr, m
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type := Type.Float
     value :: sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MeasurementMethod{method: method}, args: [TExpr]{}}, span)
-    if !sema_effect_record_intrinsic_fact(environment, scopes, context, "Measurement.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_fact(environment, &scopes, &context, "Measurement.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 

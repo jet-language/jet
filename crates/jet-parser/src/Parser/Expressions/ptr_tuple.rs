@@ -111,22 +111,23 @@ impl<'a> Parser<'a> {
             self.emit_numeric_field_error(span);
             return Ok(("0".to_string(), span));
         }
-        // D-FACT-READ1=A / D-META-STAGE1=B: a marked member after `.` is a
+        // D-FACT-READ1=A / D-META-ROOT3=A: a `$` member after `.` is a
         // compiler-owned fact, and the registry is closed. Derive-template
-        // bodies are the one typed exception: `self.@field`/`rhs.@field`
-        // names a reflected payload binding that expands before sema.
+        // bodies are the one typed exception: reflected members (`T.$kind`,
+        // `left.$index`) and name splices (`self.$field`, D-NAME-SPLICE1=B)
+        // expand before sema.
         if matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n)) {
             let (member, member_span) = self.expect_ident("in a compiler fact")?;
-            if member == "@track_origin" {
+            if member == "$track_origin" {
                 return Err(Diagnostic::error(
                     "E0302",
-                    "`@track_origin` is retired".to_string(),
-                    "`#Track` origin is read through the typed `@origin` fact".to_string(),
-                    "write `value.@origin`".to_string(),
+                    "`$track_origin` is retired".to_string(),
+                    "`#Track` origin is read through the typed `$origin` fact".to_string(),
+                    "write `value.$origin`".to_string(),
                     Some(member_span),
                 ));
             }
-            if self.derive_template_depth > 0 && member.starts_with('@') {
+            if self.derive_template_depth > 0 {
                 return Ok((member, member_span));
             }
             if Syntax::fact_read_kind(&member).is_none() {

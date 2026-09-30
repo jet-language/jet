@@ -1748,20 +1748,27 @@ impl<'a> Interp<'a> {
     }
 }
 
+/// The one `invalid <codec> (line N): message` `[FieldError]` a typed decode
+/// reports for a syntax error, read from the codec's `EncodingError` value.
 pub(super) fn json_parse_err_to_decode(codec: &str, e: CtValue) -> CtValue {
     let (line, message) = match e {
         CtValue::Struct { fields, .. } => {
+            // `EncodingError.line` is `Int?`; `reason` carries the parser text.
             let line = fields
                 .iter()
                 .find(|(n, _)| n == "line")
                 .and_then(|(_, v)| match v {
                     CtValue::Int(n) => Some(*n),
+                    CtValue::Present(inner) => match inner.as_ref() {
+                        CtValue::Int(n) => Some(*n),
+                        _ => None,
+                    },
                     _ => None,
                 })
                 .unwrap_or(0);
             let message = fields
                 .iter()
-                .find(|(n, _)| n == "message")
+                .find(|(n, _)| n == "reason")
                 .and_then(|(_, v)| match v {
                     CtValue::Str(s) => Some(s.clone()),
                     _ => None,

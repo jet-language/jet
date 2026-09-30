@@ -112,9 +112,9 @@ pub(crate) struct ReceiptSectionFact {
 #[derive(Clone)]
 pub(crate) struct CoreSourceFunctionSignature {
     /// Checked namespace identity of the loaded defining module. Core source
-    /// calls use this owner in the same key as the corresponding TIR function.
-    /// `None` is reserved for checked fragments that do not carry module rows.
-    pub(crate) module_identity: Option<String>,
+    /// calls use this owner in the same key as the corresponding TIR function;
+    /// comptime fragments lower the demanded body under the same key.
+    pub(crate) module_identity: String,
     pub(crate) type_params: Vec<String>,
     pub(crate) params: Vec<(AccessConvention, Type)>,
     pub(crate) return_type: Option<Type>,
@@ -559,7 +559,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         n if n == Syntax::TYPE_ERR => Some("JetErr"),
         "Transaction" => Some("JetTransaction"),
         "Counter" => Some("JetCounter"),
-        "Deque" => Some("JetDeque"),
         "OrderedMap" => Some("JetOrderedMap"),
         "Layer" => Some("JetLayer"),
         "Chain" => Some("JetChain"),
@@ -578,7 +577,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Glyph" => Some("JetGlyph"),
         "GlyphRun" => Some("JetGlyphRun"),
         "GlyphShaper" => Some("JetGlyphShaper"),
-        "UiAriaRole" => Some("JetAriaRole"),
+        "UiAriaRole" => Some("JetUiAriaRole"),
         "InputEvent" => Some("JetInputEvent"),
         "EventResult" => Some("JetEventResult"),
         "NullBackend" => Some("JetNullBackend"),
@@ -1049,25 +1048,13 @@ pub(crate) fn core_crypto_type_name(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Host carriers that remain for the vault key-wrap boundary. Every other
+/// `core.crypto` type is a Jet-declared Core struct or enum on every tier.
 pub(crate) fn core_crypto_rust_type_name(name: &str) -> Option<&'static str> {
     let name = core_crypto_type_name(name)?;
     match name {
-        "Secret" => Some("Secret"),
-        "SigningKey" => Some("JetSigningKey"),
-        "VerifyKey" => Some("JetVerifyKey"),
-        "X25519SecretKey" => Some("JetX25519SecretKey"),
-        "X25519PublicKey" => Some("JetX25519PublicKey"),
-        "SharedSecret" => Some("JetSharedSecret"),
-        "Signature" => Some("JetSignature"),
-        "Sealed" => Some("JetSealed"),
-        "WrappedKey" => Some("JetWrappedKey"),
         "WrappedVaultKey" => Some("JetWrappedVaultKey"),
         "KeyUnlock" => Some("JetVaultKeyUnlock<'_>"),
-        "PasswordHash" => Some("JetPasswordHash"),
-        "Digest256" => Some("JetDigest256"),
-        "Digest512" => Some("JetDigest512"),
-        "CryptoError" => Some("JetCryptoError"),
-        "FileCryptoError" => Some("JetFileCryptoError"),
         "KeyWrapError" => Some("JetVaultKeyWrapError"),
         _ => None,
     }
@@ -1678,7 +1665,6 @@ impl Cx {
             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
             (Some("core.sync"), "SyncMap") => Some("SyncMap"),
             (Some("core.collections"), "Counter") => Some("Counter"),
-            (Some("core.collections"), "Deque") => Some("Deque"),
             (Some("core.collections"), "OrderedMap") => Some("OrderedMap"),
             (Some("core.collections"), "Layer") => Some("Layer"),
             (Some("core.collections"), "Chain") => Some("Chain"),
@@ -2034,68 +2020,104 @@ impl Cx {
     /// Core crypto values are move-only and intentionally do not implement
     /// Rust `Debug` or `Clone`. Do not let a containing user record derive
     /// either backend trait; its Jet debug path already honors `#Redact`.
-    pub(crate) fn type_contains_secret(&self, ty: &Type) -> bool {
-        fn payload_contains(cx: &Cx, payload: &VariantPayload, seen: &mut HashSet<String>) -> bool {
-            match payload {
-                VariantPayload::Unit => false,
-                VariantPayload::Single(ty, _) => contains(cx, ty, seen),
-                VariantPayload::Named(fields) => {
-                    fields.iter().any(|field| contains(cx, &field.ty, seen))
-                }
-            }
-        }
-
-        fn named_contains(cx: &Cx, name: &str, seen: &mut HashSet<String>) -> bool {
-            if !seen.insert(name.to_string()) {
-                return false;
-            }
-            let found = cx
-                .struct_fields
-                .get(name)
-                .is_some_and(|fields| fields.iter().any(|(_, ty)| contains(cx, ty, seen)))
-                || cx.enum_variants.get(name).is_some_and(|variants| {
-                    variants
-                        .iter()
-                        .any(|(_, payload)| payload_contains(cx, payload, seen))
-                });
-            // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
-            found
-        }
-
-        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
+    ///
+    /// Returns every struct or enum name whose declaration reaches a Core
+    /// crypto tag, directly or through the types it names. Callers ask this
+    /// for every declared type, so the reachability is computed once for the
+    /// whole graph rather than walked per type (#3661).
+    pub(crate) fn secret_containing_types(&self) -> HashSet<String> {
+        fn walk<'t>(ty: &'t Type, names: &mut Vec<&'t str>, direct: &mut bool) {
             match ty {
                 Type::Tagged {
                     marker:
                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
                     ..
-                } => true,
-                Type::Named(name) => named_contains(cx, name, seen),
+                } => *direct = true,
+                Type::Named(name) => names.push(name),
                 Type::Apply { name, args } => {
-                    args.iter().any(|arg| contains(cx, arg, seen)) || named_contains(cx, name, seen)
+                    names.push(name);
+                    for arg in args {
+                        walk(arg, names, direct);
+                    }
                 }
                 Type::List(inner)
                 | Type::Shared(inner)
                 | Type::Option(inner)
-                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                | Type::Tagged { inner, .. } => walk(inner, names, direct),
                 Type::Map { key, value, .. }
                 | Type::Result {
                     ok: key,
                     err: value,
-                } => contains(cx, key, seen) || contains(cx, value, seen),
-                Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
-                Type::Union(members) => members.iter().any(|ty| contains(cx, ty, seen)),
+                } => {
+                    walk(key, names, direct);
+                    walk(value, names, direct);
+                }
+                Type::Tuple(fields) => {
+                    for (_, ty) in fields {
+                        walk(ty, names, direct);
+                    }
+                }
+                Type::Union(members) => {
+                    for ty in members {
+                        walk(ty, names, direct);
+                    }
+                }
                 Type::FixedList { elem, .. }
                 | Type::InlineRange { base: elem, .. }
-                | Type::Quantity { base: elem, .. } => contains(cx, elem, seen),
+                | Type::Quantity { base: elem, .. } => walk(elem, names, direct),
                 Type::Fn { params, ret, .. } => {
-                    params.iter().any(|ty| contains(cx, ty, seen))
-                        || ret.as_deref().is_some_and(|ty| contains(cx, ty, seen))
+                    for ty in params {
+                        walk(ty, names, direct);
+                    }
+                    if let Some(ty) = ret.as_deref() {
+                        walk(ty, names, direct);
+                    }
                 }
-                _ => false,
+                _ => {}
             }
         }
 
-        contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
+        let owners = self
+            .struct_fields
+            .keys()
+            .chain(self.enum_variants.keys())
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let mut dependents = HashMap::<&str, Vec<&str>>::new();
+        let mut secret = HashSet::new();
+        let mut pending = Vec::new();
+        for owner in owners {
+            let mut names = Vec::new();
+            let mut direct = false;
+            for (_, ty) in self.struct_fields.get(owner).into_iter().flatten() {
+                walk(ty, &mut names, &mut direct);
+            }
+            for (_, payload) in self.enum_variants.get(owner).into_iter().flatten() {
+                match payload {
+                    VariantPayload::Unit => {}
+                    VariantPayload::Single(ty, _) => walk(ty, &mut names, &mut direct),
+                    VariantPayload::Named(fields) => {
+                        for field in fields {
+                            walk(&field.ty, &mut names, &mut direct);
+                        }
+                    }
+                }
+            }
+            for name in names {
+                dependents.entry(name).or_default().push(owner);
+            }
+            if direct && secret.insert(owner) {
+                pending.push(owner);
+            }
+        }
+        while let Some(name) = pending.pop() {
+            for &owner in dependents.get(name).into_iter().flatten() {
+                if secret.insert(owner) {
+                    pending.push(owner);
+                }
+            }
+        }
+        secret.into_iter().map(str::to_string).collect()
     }
 
     /// Render a type whose view-bearing leaves borrow the function's hidden
@@ -2604,9 +2626,6 @@ impl Cx {
             Type::Named(name) if name == "RowPolicy" => {
                 format!("{}JetRowPolicy", self.root_prefix)
             }
-            Type::Named(name) if name == "Hasher" && !self.type_names.contains(name) => {
-                format!("{}JetCryptoHasher", self.root_prefix)
-            }
             Type::Named(name)
                 if !self.type_names.contains(name)
                     && core_crypto_rust_type_name(name).is_some() =>
@@ -3106,7 +3125,6 @@ impl Cx {
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
                     || resolved == "Counter"
-                    || resolved == "Deque"
                     || resolved == "OrderedMap"
                     || resolved == "Layer"
                     || resolved == "Chain"
@@ -3123,7 +3141,6 @@ impl Cx {
                         "SyncMap" => "JetSyncMap",
                         "SyncList" => "JetSyncList",
                         "Counter" => "JetCounter",
-                        "Deque" => "JetDeque",
                         "OrderedMap" => "JetOrderedMap",
                         "Layer" => "JetLayer",
                         "StringSet" => "JetStringSet",
@@ -3132,9 +3149,6 @@ impl Cx {
                         _ => resolved,
                     };
                     return format!("{}{rust}", self.root_prefix);
-                }
-                if resolved == "Hasher" {
-                    return format!("{}JetCryptoHasher", self.root_prefix);
                 }
                 if let Some(rust) = core_crypto_rust_type_name(resolved) {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
@@ -4534,6 +4548,13 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
         .imports
         .iter()
         .filter_map(|import| {
+            // `use core.crypto as crypto` binds the source-owned Core module,
+            // whose inherent statics (`crypto.Hasher.new()`) are ordinary
+            // imported methods keyed by the declaring module's nominal.
+            if let Some(core_module) = import.core_module_path() {
+                return super::Imports::core_source_target(bundle, &core_module)
+                    .map(|(_, target)| target);
+            }
             bundle
                 .name_ledger
                 .effective_alias(module_idx, &import.import_alias())?;
@@ -4626,7 +4647,7 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 let method_visible = bundle.name_ledger.visible(
                     module_idx,
                     target,
-                    &format!("{}{}", owner, method.name),
+                    &format!("{owner}.{}", method.name),
                 );
                 if !method_visible && !(trait_name.is_some() && owner_visible) {
                     continue;
@@ -6295,12 +6316,23 @@ pub(crate) fn build_cx_items(
     // Nothing below reads `boxed_edges`, so the full set is computed once.
     let boxed_edges = find_box_edges(items, &cx);
     cx.boxed_edges.extend(boxed_edges);
+    // Both questions below are asked for every declared type; answer them
+    // once instead of walking the type graph or rescanning `items` per type.
+    let secret = cx.secret_containing_types();
+    let trait_impls = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Impl(i) => i
+                .trait_name
+                .as_deref()
+                .map(|trait_name| (i.type_name.as_str(), trait_name)),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
     for item in items {
         match item {
             Item::Struct(s) => {
-                if type_is_cloneable_struct(s, &cx.type_names)
-                    && !cx.type_contains_secret(&Type::Named(s.name.clone()))
-                {
+                if type_is_cloneable_struct(s, &cx.type_names) && !secret.contains(&s.name) {
                     cx.cloneable.insert(s.name.clone());
                 }
                 if crate::Traits::struct_auto_derive_ok(s) {
@@ -6313,12 +6345,8 @@ pub(crate) fn build_cx_items(
                             &s.type_markers,
                             trait_name,
                             s.auto_derive_default,
-                        ) && !items.iter().any(|item| match item {
-                            Item::Impl(i) => {
-                                i.type_name == s.name && i.trait_name.as_deref() == Some(trait_name)
-                            }
-                            _ => false,
-                        }) && !s
+                        ) && !trait_impls.contains(&(s.name.as_str(), trait_name))
+                            && !s
                             .trait_impls
                             .iter()
                             .any(|block| block.trait_name == trait_name)
@@ -6370,9 +6398,7 @@ pub(crate) fn build_cx_items(
                 }
             }
             Item::Enum(e) => {
-                if type_is_cloneable_enum(e, &cx.type_names)
-                    && !cx.type_contains_secret(&Type::Named(e.name.clone()))
-                {
+                if type_is_cloneable_enum(e, &cx.type_names) && !secret.contains(&e.name) {
                     cx.cloneable.insert(e.name.clone());
                 }
                 if crate::Traits::enum_auto_derive_ok(e) {
@@ -6385,12 +6411,8 @@ pub(crate) fn build_cx_items(
                             &e.type_markers,
                             trait_name,
                             e.auto_derive_default,
-                        ) && !items.iter().any(|item| match item {
-                            Item::Impl(i) => {
-                                i.type_name == e.name && i.trait_name.as_deref() == Some(trait_name)
-                            }
-                            _ => false,
-                        }) && !e
+                        ) && !trait_impls.contains(&(e.name.as_str(), trait_name))
+                            && !e
                             .trait_impls
                             .iter()
                             .any(|block| block.trait_name == trait_name)
@@ -6909,7 +6931,7 @@ pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bo
 fn core_type_cloneable(name: &str) -> bool {
     matches!(
         name,
-        "Counter" | "Deque" | "OrderedMap" | "Layer" | "Chain" | "StringSet"
+        "Counter" | "OrderedMap" | "Layer" | "Chain" | "StringSet"
     ) || (core_rust_type_name(name).is_some()
         && !matches!(
             name,
@@ -7494,6 +7516,6 @@ mod tests {
             name: "Callback".to_string(),
             args: vec![Type::Bool],
         });
-        assert_eq!(expanded.name(), "fn(*, force: Bool) Int");
+        assert_eq!(expanded.name(), "fn(*, force: Bool) -> Int");
     }
 }

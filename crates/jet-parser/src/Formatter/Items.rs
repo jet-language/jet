@@ -2082,17 +2082,20 @@ impl<'a> Fmt<'a> {
             self.fmt_expr(&c.value, Prec::OrFallback);
             return;
         }
-        if c.is_comptime {
-            // D-CONSTMARK1: `#Static` / `#Inline` precede the marked name.
-            for attr in &c.attrs {
-                match attr {
-                    ConstAttr::ForceStatic => self.write("#Static "),
-                    ConstAttr::ForceInline => self.write("#Inline "),
-                }
+        // D-CONSTMARK1: `#Static` / `#Inline` precede the constant's name,
+        // prepared or not.
+        for attr in &c.attrs {
+            match attr {
+                ConstAttr::ForceStatic => self.write("#Static "),
+                ConstAttr::ForceInline => self.write("#Inline "),
             }
+        }
+        if c.is_comptime {
+            // D-PREP-SURFACE2=A: compile time is always the explicit
+            // `NAME :: prep { value }`.
             self.write(&c.name);
             self.write(" :: ");
-            self.fmt_expr(&c.value, Prec::OrFallback);
+            self.fmt_prepared_value(&c.value);
             return;
         }
         if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) {

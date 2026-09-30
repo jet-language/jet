@@ -89,6 +89,19 @@ pub fn desugar_migrations(bundle: &mut ProgramBundle) {
             continue;
         }
 
+        // D-MIGRATE2B: a `change` without `via` converts through the
+        // `impl Old -> New` in scope; its lowered function is the converter.
+        let conversions: HashSet<(String, String)> = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::ErrorConv(conversion) => {
+                    Some((conversion.from_ty.clone(), conversion.to_ty.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+
         // Per-type migration-block counter (source order defines the chain).
         let mut block_of_type: HashMap<String, usize> = HashMap::new();
         let mut synthetic: Vec<Item> = Vec::new();
@@ -119,6 +132,18 @@ pub fn desugar_migrations(bundle: &mut ProgramBundle) {
                         let f = build_converter_func(&name, from_ty, to_ty, conv, span);
                         synthetic.push(Item::Func(f));
                         *conv_fn = Some(name);
+                    }
+                    MigrationOp::Change {
+                        from_ty,
+                        to_ty,
+                        converter: None,
+                        conv_fn,
+                        ..
+                    } => {
+                        let (from, to) = (from_ty.name(), to_ty.name());
+                        if conversions.contains(&(from.clone(), to.clone())) {
+                            *conv_fn = Some(crate::Sema::error_conv_fn_name(&from, &to));
+                        }
                     }
                     MigrationOp::Add {
                         field,

@@ -1054,6 +1054,18 @@ fn terminal_style_adapter(file: &str) -> Result<Arc<TerminalStyleHostAdapter>, S
     Ok(adapter)
 }
 
+/// Revision identity shared by `/__jet_dev_status` and `jet dev --json`.
+/// `accepted` is the revision `/__jet_dev_version` serves (the web host only
+/// publishes accepted builds, so it is also the last-good revision);
+/// `candidate` is the revision an in-flight or rejected build would publish;
+/// `diagnostic` is that candidate while its diagnostic is pending.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DevRevisionFacts {
+    pub accepted: Option<u64>,
+    pub candidate: Option<u64>,
+    pub diagnostic: Option<u64>,
+}
+
 /// D-FE-DEVSRV1 outcome D (hybrid, owner-modified 2026-07-08: pinned parity
 /// header required as the terminal anchor): a one-line terminal status and a
 /// browser corner strip mirror the exact same words from one shared status
@@ -1068,6 +1080,9 @@ struct DevStatusSnapshot {
     code: String,
     diagnostic: String,
     last_build_ms: u128,
+    /// Revision the in-flight or last rejected build would publish; `None`
+    /// once that build is accepted.
+    candidate: Option<u64>,
 }
 
 struct DevStatus {
@@ -1095,6 +1110,9 @@ struct DevStatus {
     verbose: AtomicBool,
     active: AtomicBool,
     exit_code: AtomicU64,
+    /// Set by the first accepted build: until then `version` names no
+    /// published revision and the first candidate is `version` itself.
+    published: AtomicBool,
     /// Set only after raw-mode input succeeds. Verbose DECSTBM pinning must
     /// not start before its Ctrl-C/EOF cleanup guard exists.
     controls_ready: AtomicBool,
@@ -1148,6 +1166,7 @@ impl DevStatus {
                 code: String::new(),
                 diagnostic: String::new(),
                 last_build_ms: 0,
+                candidate: None,
             }),
             browser_relay: Mutex::new(None),
             browser_trace_enabled: AtomicBool::new(false),
@@ -1160,6 +1179,7 @@ impl DevStatus {
             verbose: AtomicBool::new(verbose),
             active: AtomicBool::new(false),
             exit_code: AtomicU64::new(0),
+            published: AtomicBool::new(false),
             controls_ready: AtomicBool::new(false),
             reconnecting: AtomicBool::new(false),
             color,
@@ -1433,6 +1453,7 @@ impl DevStatus {
             code: String::new(),
             diagnostic: String::new(),
             last_build_ms,
+            candidate: Some(self.next_candidate()),
         };
         drop(state);
         self.refresh();
@@ -1446,15 +1467,19 @@ impl DevStatus {
                 .and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
         }
         drop(browser_relay);
+        let mut state = self.state.lock().unwrap();
         if is_rebuild {
             self.version.fetch_add(1, Ordering::SeqCst);
         }
-        *self.state.lock().unwrap() = DevStatusSnapshot {
+        self.published.store(true, Ordering::SeqCst);
+        *state = DevStatusSnapshot {
             state: "ready".to_string(),
             code: String::new(),
             diagnostic: String::new(),
             last_build_ms: elapsed_ms,
+            candidate: None,
         };
+        drop(state);
         self.refresh();
         if is_rebuild {
             self.log_rebuild(true, &format_build_time(elapsed_ms));
@@ -1465,11 +1490,15 @@ impl DevStatus {
         let diagnostic_for_log = diagnostic.clone();
         let mut state = self.state.lock().unwrap();
         let last_build_ms = state.last_build_ms;
+        // The rejected build keeps the candidate revision it was building;
+        // `version` still names the last accepted build.
+        let candidate = state.candidate.unwrap_or_else(|| self.next_candidate());
         *state = DevStatusSnapshot {
             state: "error".to_string(),
             code: code.clone(),
             diagnostic,
             last_build_ms,
+            candidate: Some(candidate),
         };
         drop(state);
         self.refresh();
@@ -1477,6 +1506,37 @@ impl DevStatus {
             self.log_rebuild(false, &code);
             self.log_diagnostic(&code, &diagnostic_for_log);
         }
+    }
+
+    /// The revision the next build would publish: the first build publishes
+    /// `version` itself, every later accepted rebuild bumps it by one.
+    fn next_candidate(&self) -> u64 {
+        let version = self.version.load(Ordering::SeqCst);
+        if self.published.load(Ordering::SeqCst) {
+            version + 1
+        } else {
+            version
+        }
+    }
+
+    fn revision_facts_for(&self, snap: &DevStatusSnapshot) -> DevRevisionFacts {
+        DevRevisionFacts {
+            accepted: self
+                .published
+                .load(Ordering::SeqCst)
+                .then(|| self.version.load(Ordering::SeqCst)),
+            candidate: snap.candidate,
+            diagnostic: if snap.state == "error" {
+                snap.candidate
+            } else {
+                None
+            },
+        }
+    }
+
+    fn revision_facts(&self) -> DevRevisionFacts {
+        let snap = self.state.lock().unwrap();
+        self.revision_facts_for(&snap)
     }
 
     /// Typed handoff of the live error snapshot for
@@ -1490,10 +1550,12 @@ impl DevStatus {
 
     fn json(&self) -> String {
         let snap = self.state.lock().unwrap().clone();
+        let revisions = self.revision_facts_for(&snap);
         let (word, rest) = self.header_text_for(&snap);
         let message = format!("{} · {}", word, rest);
+        let number = |value: Option<u64>| value.map_or_else(|| "null".to_string(), |n| n.to_string());
         format!(
-            "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"file\":\"{}\",\"code\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{}}}",
+            "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"file\":\"{}\",\"code\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{},\"candidate\":{},\"diagnostic_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{}}}",
             self.version.load(Ordering::SeqCst),
             json_escape(&word),
             json_escape(&message),
@@ -1501,7 +1563,11 @@ impl DevStatus {
             json_escape(&snap.code),
             json_escape(&snap.diagnostic),
             self.client_count(),
-            snap.last_build_ms
+            snap.last_build_ms,
+            number(revisions.candidate),
+            number(revisions.diagnostic),
+            number(revisions.accepted),
+            number(revisions.accepted),
         )
     }
 
@@ -2129,6 +2195,12 @@ impl WebHost {
         self.session.mark_error(&code, &diagnostic);
     }
 
+    /// The revision facts `/__jet_dev_status` serves, for machine reports of
+    /// the same build.
+    pub fn revision_facts(&self) -> DevRevisionFacts {
+        self.status.revision_facts()
+    }
+
     pub fn exit_code(&self) -> Option<i32> {
         let code = self.status.exit_code.load(Ordering::SeqCst);
         (code != 0).then_some(code as i32)
@@ -2317,20 +2389,23 @@ pub struct WebOutputTempFile {
 
 impl WebOutputAuthority {
     /// Create the directory tree without following links, then pin the final
-    /// output directory before returning.
-    pub fn open_or_create(path: &Path) -> std::io::Result<Self> {
-        let real = ensure_real_output_dir(path)?;
-        let directory = secure_output::open_root(&real)?;
+    /// output directory, which must stay below `root`.  Compiler-owned outputs
+    /// such as `<project>/.jet/build` are anchored at their project root, so a
+    /// command run from a project subdirectory still reaches them.
+    pub fn open_or_create(path: &Path, root: &Path) -> std::io::Result<Self> {
+        let real = ensure_real_output_dir(path, root)?;
+        let directory = secure_output::open_root(&real, root)?;
         Ok(Self {
             path: real,
             directory,
         })
     }
 
-    /// Open an already-created directory and retain its descriptor/handle.
-    pub fn open(path: &Path) -> std::io::Result<Self> {
-        let real = ensure_real_output_dir(path)?;
-        let directory = secure_output::open_root(&real)?;
+    /// Open an already-created directory below `root` and retain its
+    /// descriptor/handle.
+    pub fn open(path: &Path, root: &Path) -> std::io::Result<Self> {
+        let real = ensure_real_output_dir(path, root)?;
+        let directory = secure_output::open_root(&real, root)?;
         Ok(Self {
             path: real,
             directory,
@@ -2629,17 +2704,17 @@ mod secure_output {
         Ok((metadata.dev(), metadata.ino()))
     }
 
-    pub fn open_root(path: &Path) -> io::Result<Directory> {
-        let cwd = std::fs::canonicalize(".")?;
+    pub fn open_root(path: &Path, anchor: &Path) -> io::Result<Directory> {
+        let anchor = std::fs::canonicalize(anchor)?;
         let path = std::fs::canonicalize(path)?;
         let relative = path
-            .strip_prefix(&cwd)
-            .map_err(|_| permission("web output root escapes the working directory"))?;
+            .strip_prefix(&anchor)
+            .map_err(|_| permission("web output root escapes its owning directory"))?;
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-            .open(&cwd)?;
-        let mut walked = cwd.clone();
+            .open(&anchor)?;
+        let mut walked = anchor.clone();
         for component in relative.components() {
             let Component::Normal(name) = component else {
                 return Err(permission("web output root is not a normal directory"));
@@ -3017,7 +3092,7 @@ mod secure_output {
         Ok(())
     }
 
-    pub fn open_root(path: &Path) -> io::Result<Directory> {
+    pub fn open_root(path: &Path, _anchor: &Path) -> io::Result<Directory> {
         let file = open_directory(path)?;
         let expected = normalize(
             if path.is_absolute() {
@@ -3214,7 +3289,7 @@ mod secure_output {
         ))
     }
 
-    pub fn open_root(_: &Path) -> io::Result<Directory> {
+    pub fn open_root(_: &Path, _: &Path) -> io::Result<Directory> {
         unsupported()
     }
     pub fn open_child(_: &Directory, _: &OsStr) -> io::Result<Directory> {
@@ -3251,13 +3326,14 @@ mod secure_output {
 
 /// Publish one completed web bundle under the same lock used by static
 /// readers. Preflight every member, journal the old bundle, then roll back the
-/// journal if any replacement fails.
-pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
+/// journal if any replacement fails. `out_dir` must stay below `root`, the
+/// project that owns the output.
+pub fn stage_and_swap(staging: &Path, out_dir: &Path, root: &Path) -> std::io::Result<()> {
     let _publication = crate::lock_static_publication()?;
-    stage_and_swap_locked(staging, out_dir)
+    stage_and_swap_locked(staging, out_dir, root)
 }
 
-fn stage_and_swap_locked(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
+fn stage_and_swap_locked(staging: &Path, out_dir: &Path, root: &Path) -> std::io::Result<()> {
     const FILES: [&str; 6] = [
         "web.manifest.json",
         "jet_dom_runtime.js",
@@ -3268,7 +3344,7 @@ fn stage_and_swap_locked(staging: &Path, out_dir: &Path) -> std::io::Result<()> 
     ];
     const MAP_FILES: [&str; 2] = ["app.js.map", "app.wasm.map"];
 
-    let output_root = WebOutputAuthority::open(out_dir)?;
+    let output_root = WebOutputAuthority::open(out_dir, root)?;
     let staging_name = staging
         .file_name()
         .and_then(|name| name.to_str())
@@ -3347,14 +3423,14 @@ fn stage_and_swap_locked(staging: &Path, out_dir: &Path) -> std::io::Result<()> 
     Ok(())
 }
 
-fn ensure_real_output_dir(path: &Path) -> std::io::Result<PathBuf> {
-    let cwd = fs::canonicalize(".")?;
+fn ensure_real_output_dir(path: &Path, root: &Path) -> std::io::Result<PathBuf> {
+    let root = fs::canonicalize(root)?;
     ensure_directory_without_symlinks(path)?;
     let real = fs::canonicalize(path)?;
-    if !real.starts_with(&cwd) {
+    if !real.starts_with(&root) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "web output directory escapes the working directory",
+            format!("output directory escapes `{}`", root.display()),
         ));
     }
     Ok(real)
@@ -6518,7 +6594,8 @@ mod tests {
         handle_connection_with_root_and_policy, header_words, host_header_allowed,
         html_raw_response_limit, inject_canvas_session, inject_live_reload, mint_session_secret,
         origin_allowed, serve_forever, stage_and_swap, try_acquire_connection, CanvasHostOptions,
-        DeadlineStream, DevStatus, ListenerKind, Ordering, ReleaseDevtoolsPolicy, WebHost,
+        DeadlineStream, DevRevisionFacts, DevStatus, ListenerKind, Ordering, ReleaseDevtoolsPolicy,
+        WebHost,
         APPLICATION_PORT_RANGE, MAX_CONNECTION_THREADS, MAX_STATIC_RESPONSE_BYTES,
     };
 
@@ -6693,7 +6770,7 @@ mod tests {
         symlink(&outside, output.join("web.manifest.json")).unwrap();
 
         assert!(
-            stage_and_swap(&staging, &output).is_err(),
+            stage_and_swap(&staging, &output, &root).is_err(),
             "web finalization must not replace a symlinked output"
         );
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
@@ -6717,7 +6794,7 @@ mod tests {
         std::fs::hard_link(&outside, output.join("web.manifest.json")).unwrap();
 
         assert!(
-            stage_and_swap(&staging, &output).is_err(),
+            stage_and_swap(&staging, &output, &root).is_err(),
             "web finalization must reject hard-linked output members"
         );
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
@@ -6745,7 +6822,7 @@ mod tests {
         symlink(&staging_target, &staging).unwrap();
 
         assert!(
-            stage_and_swap(&staging, &output).is_err(),
+            stage_and_swap(&staging, &output, &root).is_err(),
             "web finalization must reject a symlinked staging directory"
         );
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
@@ -6774,7 +6851,7 @@ mod tests {
         symlink(&real_output, &output).unwrap();
 
         assert!(
-            stage_and_swap(&staging, &output).is_err(),
+            stage_and_swap(&staging, &output, &root).is_err(),
             "web finalization must reject a symlinked output root"
         );
         assert!(
@@ -7080,6 +7157,48 @@ mod tests {
         let ready = status.json();
         assert!(ready.contains("\"state\":\"ready\""));
         assert!(ready.contains("ready · localhost:8123 · 1 client"));
+    }
+
+    #[test]
+    fn failed_edit_revision_facts_agree() {
+        let status = DevStatus::new("app.jet", false);
+        status.mark_building();
+        assert_eq!(
+            status.revision_facts(),
+            DevRevisionFacts { accepted: None, candidate: Some(1), diagnostic: None }
+        );
+        status.mark_ready(10, false);
+        status.mark_building();
+        status.mark_ready(10, true);
+        assert_eq!(status.version.load(Ordering::SeqCst), 2);
+
+        // A rejected edit names its own candidate; the served revision stays
+        // the last accepted one.
+        status.mark_building();
+        status.mark_error("E0003".to_string(), "Error [E0003]: bad".to_string(), true);
+        let failed = status.json();
+        assert!(failed.contains("\"version\":2,"), "{failed}");
+        assert!(failed.contains("\"candidate\":3,"), "{failed}");
+        assert!(failed.contains("\"diagnostic_revision\":3,"), "{failed}");
+        assert!(failed.contains("\"accepted_revision\":2,"), "{failed}");
+        assert!(failed.contains("\"last_good_revision\":2}"), "{failed}");
+
+        // A second rejected edit reuses the unpublished candidate.
+        status.mark_building();
+        status.mark_error("E0003".to_string(), "Error [E0003]: bad".to_string(), true);
+        assert_eq!(
+            status.revision_facts(),
+            DevRevisionFacts { accepted: Some(2), candidate: Some(3), diagnostic: Some(3) }
+        );
+
+        // Recovery publishes exactly that candidate and clears the diagnostic.
+        status.mark_building();
+        status.mark_ready(10, true);
+        let recovered = status.json();
+        assert!(recovered.contains("\"version\":3,"), "{recovered}");
+        assert!(recovered.contains("\"candidate\":null,"), "{recovered}");
+        assert!(recovered.contains("\"diagnostic_revision\":null,"), "{recovered}");
+        assert!(recovered.contains("\"accepted_revision\":3,"), "{recovered}");
     }
 
     #[test]

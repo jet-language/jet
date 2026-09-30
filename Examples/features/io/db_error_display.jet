@@ -1,0 +1,25 @@
+// A `DBError` renders as the driver's message wherever it is shown: bare
+// interpolation, an explicit `:Debug`, and its conversion to the default `Err`.
+use core.db as db
+
+fn failing_step(scope: DBScope) -> Int {
+    // The DBError converts to `Err` through its one display hook.
+    db.migrate(scope, "v1", [SQL{"ALTER TABLE missing_table ADD COLUMN x INTEGER"}])
+}
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("item", "true") ?? panic("policy")
+    scope :: conn.with_policy(policy, "owner")
+    if db.migrate(scope, "v1", [SQL{"ALTER TABLE missing_table ADD COLUMN x INTEGER"}]) == {
+        .Ok(steps) -> print("applied {steps}")
+        .Err(e) -> {
+            print("display: {e}")
+            print("debug: {e:Debug}")
+        }
+    }
+    if failing_step(scope) == {
+        .Ok(steps) -> print("applied {steps}")
+        .Err(e) -> print("as Err: {e.message}")
+    }
+}

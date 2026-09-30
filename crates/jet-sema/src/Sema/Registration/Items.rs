@@ -499,6 +499,10 @@ pub(crate) fn eval_comptime_items(
         let mut globals: HashMap<String, crate::Comptime::CtValue> = HashMap::new();
         let (ct_funcs, ct_externs, _) = comptime_context_from_items(&eval_items);
         let ct_checked_funcs = HashMap::new();
+        // Loaded Core source signatures and bodies, projected once per module
+        // on the first constant that needs the evaluator: a `prep` fragment
+        // calls Core functions exactly as runtime code does.
+        let mut checked_core = None;
         for index in 0..items.len() {
             let (name, value, known, known_ty, module_value) = match &items[index] {
                 Item::Const(c) if const_evaluated_at_build(c) => (
@@ -609,25 +613,44 @@ pub(crate) fn eval_comptime_items(
                     module, method, args, call_span,
                 );
             });
-            match crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
-                &eval_value,
-                &funcs,
-                &externs,
-                base_dir,
-                &globals,
-                core_imports,
-                crate::Policy::GateSet::default(),
-                0,
-                &structs,
-                &methods,
-                &distinct_ranges,
-                &distinct_bases,
-                &unit_families,
-                None,
-                &eval_items,
-                build_facts,
-                &states[module_idx].fact_registry,
-            ) {
+            // A plain literal constant is its own value. Evaluating it through
+            // the MIR fragment path lowered, optimized and verified a program
+            // holding every type in the module, once per constant, which made
+            // registration quadratic in unit size (#3661). Anything else still
+            // takes the evaluator.
+            let evaluated = match plain_literal_value(&eval_value) {
+                Some(value) => Ok((value, Vec::new())),
+                None => {
+                    let checked_core = checked_core.get_or_insert_with(|| {
+                        crate::Sema::CheckerCore::checked_comptime_nominals_for_context(
+                            &*states,
+                            module_idx,
+                            &*name_ledger,
+                        )
+                    });
+                    crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
+                        &eval_value,
+                        &funcs,
+                        &externs,
+                        base_dir,
+                        &globals,
+                        core_imports,
+                        crate::Policy::GateSet::default(),
+                        0,
+                        &structs,
+                        &methods,
+                        &distinct_ranges,
+                        &distinct_bases,
+                        &unit_families,
+                        None,
+                        &eval_items,
+                        build_facts,
+                        &states[module_idx].fact_registry,
+                        checked_core.as_ref(),
+                    )
+                }
+            };
+            match evaluated {
                 Ok((v, inputs)) => {
                     crate::Sema::record_comptime_import_alias_uses(
                         name_ledger,
@@ -662,6 +685,29 @@ pub(crate) fn eval_comptime_items(
                 Err(d) => diags.push(d),
             }
         }
+    }
+}
+
+/// The value of a checked constant initializer that is a plain literal: an
+/// unsuffixed `Int` (optionally negated), `Bool`, `Char`, or a string with no
+/// interpolation. These are exactly the values the evaluator returns for such
+/// an initializer; every other shape returns `None` and is evaluated.
+fn plain_literal_value(expr: &Expr) -> Option<crate::Comptime::CtValue> {
+    use crate::Comptime::CtValue;
+    match expr {
+        Expr::Int(value, _, None, None) => Some(CtValue::Int(*value)),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match inner.as_ref() {
+            Expr::Int(value, _, None, None) => value.checked_neg().map(CtValue::Int),
+            _ => None,
+        },
+        Expr::Bool(value, _) => Some(CtValue::Bool(*value)),
+        Expr::Char(value, _) => Some(CtValue::Char(*value)),
+        Expr::Str(parts, _) => match parts.as_slice() {
+            [] => Some(CtValue::Str(String::new())),
+            [crate::AST::StrPart::Lit(text)] => Some(CtValue::Str(text.clone())),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -1305,6 +1351,14 @@ pub(crate) fn comptime_context_from_items(
                     globals.insert(c.name.clone(), v.clone());
                 }
             }
+            // An immutable literal module constant is its own value, so build-
+            // time code (a `prep { … }` block, a prepared value) reads it like
+            // a prepared one; literal data values already carry `ct`.
+            Item::Const(c) if !c.mutable && !c.is_persist => {
+                if let Some(v) = c.ct.clone().or_else(|| plain_literal_value(&c.value)) {
+                    globals.insert(c.name.clone(), v);
+                }
+            }
             Item::ExternRust(b) => {
                 for ef in &b.functions {
                     externs.insert(ef.name.clone());
@@ -1429,7 +1483,7 @@ pub(crate) fn register_const(
                 if storage {
                     "use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant"
                 } else {
-                    "write the value as literal data, such as `Rgb{r: U8{0}, g: U8{0}, b: U8{0}}`, or compute it inside a function"
+                    "write the value as literal data, such as `Rgb{r: U8{0}, g: U8{0}, b: U8{0}}`, prepare it while building with `NAME :: prep { value }`, or compute it inside a function"
                 }
                 .to_string(),
                 Some(c.value.span()),

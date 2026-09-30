@@ -1,8 +1,26 @@
-Error [E0003]: expected `::` or `:=` in a binding, found `:`
-  --> tests/ui/typed_binding_retired.jet:3:6
+Error [E0393]: `limit: U8` puts a type after the binding name, which Jet does not accept.
+  --> tests/ui/typed_binding_retired.jet:4:10
     |
-  3 |     x: Int :: 1
-    |      ^
- Why: a binding is `name :: value` (immutable) or `name := value` (mutable); types ride the value
- Fix: write `name :: value` or put the type on the value (e.g. `Type{ … }`)
-More: jet-lang.dev/e/E0003
+  4 |     limit: U8 :: 250
+    |          ^^^^
+ Why: A binding carries no type of its own (D-BIND-BARE1); `Type{ … }` on the value states the type, checking the value or converting it the way a parameter of that type would.
+ Fix: Write `limit :: U8{250}`.
+More: jet-lang.dev/e/E0393
+
+Error [E0393]: `total: Int` puts a type after the binding name, which Jet does not accept.
+  --> tests/ui/typed_binding_retired.jet:5:10
+    |
+  5 |     total: Int := 0
+    |          ^^^^^
+ Why: A binding carries no type of its own (D-BIND-BARE1); `Type{ … }` on the value states the type, checking the value or converting it the way a parameter of that type would.
+ Fix: Write `total := Int{0}`.
+More: jet-lang.dev/e/E0393
+
+Error [E0393]: `evens: [Int]` puts a type after the binding name, which Jet does not accept.
+  --> tests/ui/typed_binding_retired.jet:6:10
+    |
+  6 |     evens: [Int] :: [1, 2, 3].map(n -> n * 2)
+    |          ^^^^^^^
+ Why: A binding carries no type of its own (D-BIND-BARE1); `Type{ … }` on the value states the type, checking the value or converting it the way a parameter of that type would.
+ Fix: Write `evens :: [Int]{[1, 2, 3].map(n -> n * 2)}`.
+More: jet-lang.dev/e/E0393

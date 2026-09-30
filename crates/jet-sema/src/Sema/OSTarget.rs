@@ -10,7 +10,7 @@ use crate::AST::{
 };
 use std::collections::HashMap;
 
-/// D-CONF-READ1=A: fold every `@if @build.os == {
+/// D-CONF-READ1=A: fold every `prep if $build.os == {
 /// .Linux -> … .MacOS -> … .Windows -> … [else -> …] }` switch to the arm
 /// matching this build's active OS (`bundle.active_os`), discarding the rest.
 ///
@@ -19,10 +19,10 @@ use std::collections::HashMap;
 /// only ever meet the *taken* arm (constructing an OS-gated type inside it is
 /// legal; the dead arms never trip `E-OSTARGET-UNMATCHED-CALL` and never reach
 /// rustc). The rewrite lowers each switch into a chain of `Stmt::ComptimeIf`
-/// whose arm conditions are the compile-time constants `@build.os == .OS`
+/// whose arm conditions are the compile-time constants `$build.os == .OS`
 /// (emitted here as a `Bool` literal), so all the existing `@if`
 /// machinery — arm selection, dropped-arm name resolution (D-WHEN2), codegen —
-/// handles it unchanged. `@build.os` is a compile-time fact value; ordinary
+/// handles it unchanged. `$build.os` is a compile-time fact value; ordinary
 /// `build` remains an ordinary identifier everywhere else.
 pub fn desugar_os_switches(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     let active = bundle.active_os;
@@ -35,7 +35,7 @@ pub fn desugar_os_switches(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
 }
 
 /// Walk nested code and generic modules before generic expansion. This keeps
-/// `@build.os` dispatch in a template on the same pre-registration path as a
+/// `$build.os` dispatch in a template on the same pre-registration path as a
 /// top-level function; expansion then copies the already-folded body.
 fn desugar_items(
     items: &mut [Item],
@@ -201,7 +201,7 @@ fn desugar_expr(
     }
 }
 
-/// Validate one `@if @build.os == { … }` switch and rewrite it into the
+/// Validate one `prep if $build.os == { … }` switch and rewrite it into the
 /// nested `ComptimeIf` chain. On a validation error, returns an empty block
 /// (`ComptimeBlock` with no body) so the surrounding statements still check.
 fn fold_switch(
@@ -220,10 +220,10 @@ fn fold_switch(
         unreachable!("fold_switch only called on ComptimeSwitch");
     };
 
-    // `@build.os` is the original platform switch. Typed settings use the
+    // `$build.os` is the original platform switch. Typed settings use the
     // same dispatch shape and fold against the already-resolved snapshot.
     let subject_path = expr_path(&subject);
-    if subject_path.as_deref() == Some("@build.os") {
+    if subject_path.as_deref() == Some("$build.os") {
         return fold_os_switch(subject, arms, else_body, span, active, diags);
     }
     let Some(key) = subject_path
@@ -236,7 +236,7 @@ fn fold_switch(
     let Some(setting) = build_facts.setting(key) else {
         diags.push(Diagnostic::error(
             "E0302",
-            format!("`@build.settings.{key}` is undeclared"),
+            format!("`$build.settings.{key}` is undeclared"),
             "a setting must be declared with a type and default before it can be read".to_string(),
             format!("add `{key}: Type = default` to the package `settings: {{ … }}` block"),
             Some(subject.span()),
@@ -249,7 +249,7 @@ fn fold_switch(
         let Some(matches) = setting_arm_matches(&arm.cond, &subject, &setting.value) else {
             diags.push(Diagnostic::error(
                 "E0302",
-                format!("invalid arm for `@build.settings.{key}`"),
+                format!("invalid arm for `$build.settings.{key}`"),
                 "typed settings dispatch compares one setting with a literal value".to_string(),
                 format!("use a literal arm or compare `{key}` with a Bool, Int, Char, String, or enum value"),
                 Some(arm.span),

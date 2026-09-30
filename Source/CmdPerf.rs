@@ -2604,7 +2604,7 @@ fn require_pinned_baseline(name: &str) -> Result<(), String> {
         ));
     }
     let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
+    let root = jet::Loader::selected_project_root(&cwd).unwrap_or(cwd);
     let path = root
         .join(".jet")
         .join("perf")
@@ -3362,7 +3362,7 @@ fn default_trace_path(bytes: &[u8]) -> Result<PathBuf, String> {
     let stamp = utc_stamp();
     let short = &id[..8];
     let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
+    let root = jet::Loader::selected_project_root(&cwd).unwrap_or(cwd);
     Ok(root
         .join(".jet")
         .join("perf")

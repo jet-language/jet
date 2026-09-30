@@ -1,7 +1,7 @@
 // Pratt expressions and source literals. Token precedence follows the language
 // grammar: `^` is right-associative exponentiation; `~|` is bitwise XOR.
 
-@MAX_EXPRESSION_DEPTH :: 256
+MAX_EXPRESSION_DEPTH :: prep { 256 }
 
 pub struct ParsedExpr {
     pub expr: Expr
@@ -106,7 +106,7 @@ fn parser_parse_expression_dispatch_atom(state: &JetParserState, depth: Int) -> 
 }
 
 fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
-    if depth > @MAX_EXPRESSION_DEPTH {
+    if depth > MAX_EXPRESSION_DEPTH {
         span :: parser_current(&state).span
         parser_add_error(&state, span, "this expression is nested too deeply", "recursive expression parsing is bounded against adversarial nesting", "reduce the nesting depth")
         return ParsedExpr{expr: Expr.Unit{span: span}, span: span}
@@ -133,7 +133,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         }
 
         if operator == TOKEN_EQ_EQ && parser_pattern_rhs_ahead(&state) {
-            pattern :: parser_parse_pattern(&state, depth + 1)
+            pattern :: parser_parse_pattern(&state, depth + 1, allow_struct_lit)
             span := parser_cover(left.span, pattern.span)
             left = ParsedExpr{expr: Expr.PatternTest{subject: left.expr, pattern: pattern.pattern, span: span}, span: span}
             next
@@ -372,8 +372,10 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
     first := parser_parse_expression(&state, 1, depth + 1)
     parser_literal_close_terminators(&state)
     body := TypedLitBody.Value{value: first.expr}
+    // #3739: a map head's lone expression with no `:` stays a one-expression
+    // body; sema reads it as the whole value.
     if {
-        map_head || (head == None && parser_current_kind(&state) == TOKEN_COLON) -> {
+        (map_head && parser_current_kind(&state) != TOKEN_RBRACE) || (head == None && parser_current_kind(&state) == TOKEN_COLON) -> {
             parser_expect(&state, TOKEN_COLON, "`:` between a map key and its value")
             first_value :: parser_parse_expression(&state, 1, depth + 1)
             entries := [ExprPair]{ExprPair{key: first.expr, value: first_value.expr}}
@@ -436,7 +438,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         parser_bump(&state)
         block :: parser_parse_block(&state)
         span :: parser_cover(token.span, block.span)
-        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "D-PREP-SURFACE2=A makes the block's final expression its value, but the build-time value fold is not implemented; only the statement form runs today", "write `prep {{ … }}` as its own statement and name the result with a compile-time binding inside it, such as `@lanes :: calculate_lanes()`")
+        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value in a form this compiler does not support yet", "D-PREP-SURFACE2=A makes the block's final expression its value; today only `name :: prep {{ value }}` with a single final expression is evaluated while building", "write `name :: prep {{ value }}` with one final expression, or bind the result inside a `prep {{ … }}` statement block")
         return ParsedExpr{expr: Expr.Unit{span: span}, span: span}
     }
     if allow_struct_lit && parser_typed_literal_head_ahead(&state) {
@@ -528,6 +530,13 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         return parser_parse_typed_literal_body(&state, None, token.span, depth + 1)
     }
 
+    // D-PREP-SURFACE2=A: a retired `@`-marked constant read teaches E0388 and
+    // reads the plain ALL_CAPS name.
+    if parser_reads_retired_constant(&state) {
+        parser_bump(&state)
+        plain :: parser_retire_const_mark(&state, token)
+        return ParsedExpr{expr: Expr.Ident{name: plain, span: token.span}, span: token.span}
+    }
     if kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_KW_IT {
         parser_bump(&state)
         return ParsedExpr{expr: Expr.Ident{name: token.payload.decoded, span: token.span}, span: token.span}

@@ -173,29 +173,6 @@ fn coll_alloc_counter(
     record
 }
 
-fn coll_read_deque(
-    rt: &mut crate::runtime_host::JitRuntime,
-    handle: i64,
-) -> Option<collection_rt::JetDeque> {
-    let items = rt.heap.record_get_int(handle, 0)?;
-    let head = rt.heap.record_get_int(handle, 1)?;
-    Some(collection_rt::JetDeque {
-        items: coll_read_string_list(rt, items)?,
-        head,
-    })
-}
-
-fn coll_alloc_deque(
-    rt: &mut crate::runtime_host::JitRuntime,
-    deque: &collection_rt::JetDeque,
-) -> i64 {
-    let items = coll_alloc_string_list(rt, &deque.items);
-    let record = rt.heap.alloc_record(2);
-    let _ = rt.heap.record_set_int(record, 0, items);
-    let _ = rt.heap.record_set_int(record, 1, deque.head);
-    record
-}
-
 fn coll_read_ordered_map(
     rt: &mut crate::runtime_host::JitRuntime,
     handle: i64,
@@ -289,25 +266,6 @@ fn coll_option_string(rt: &mut crate::runtime_host::JitRuntime, value: Option<St
     value
         .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
         .unwrap_or(0)
-}
-
-fn coll_deque_pair(
-    rt: &mut crate::runtime_host::JitRuntime,
-    deque: &collection_rt::JetDeque,
-    value: collection_rt::JetOutcome<String, collection_rt::JetAbsent>,
-) -> i64 {
-    let deque = coll_alloc_deque(rt, deque);
-    let value = match value {
-        Ok(value) => {
-            let handle = rt.heap.alloc_string(value);
-            crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
-        }
-        Err(_) => crate::runtime_host::alloc_jit_result(rt, false, 0),
-    };
-    let record = rt.heap.alloc_record(2);
-    let _ = rt.heap.record_set_int(record, 0, deque);
-    let _ = rt.heap.record_set_int(record, 1, value);
-    record
 }
 
 fn jet_jit_comb_chain(left: i64, right: i64) -> i64 {
@@ -624,111 +582,6 @@ fn jet_jit_coll_counter_clear(counter: i64) -> i64 {
         let counter =
             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
         coll_alloc_counter(rt, &collection_rt::jet_coll_counter_clear(&counter))
-    })
-}
-
-fn jet_jit_coll_deque() -> i64 {
-    Concurrency::with_runtime_mut(|rt| coll_alloc_deque(rt, &collection_rt::jet_coll_deque()))
-}
-
-fn jet_jit_coll_deque_from(items: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let items = coll_read_string_list(rt, items).unwrap_or_default();
-        coll_alloc_deque(rt, &collection_rt::jet_coll_deque_from(&items))
-    })
-}
-
-fn jet_jit_coll_deque_len(deque: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        collection_rt::jet_coll_deque_len(&deque)
-    })
-}
-
-fn jet_jit_coll_deque_is_empty(deque: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        i8::from(collection_rt::jet_coll_deque_is_empty(&deque))
-    })
-}
-
-fn jet_jit_coll_deque_append(deque: i64, value: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        let value = coll_string(rt, value);
-        let next = collection_rt::jet_coll_deque_append(&deque, &value);
-        coll_alloc_deque(rt, &next)
-    })
-}
-
-fn jet_jit_coll_deque_appendleft(deque: i64, value: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        let value = coll_string(rt, value);
-        let next = collection_rt::jet_coll_deque_appendleft(&deque, &value);
-        coll_alloc_deque(rt, &next)
-    })
-}
-
-fn jet_jit_coll_deque_pop(deque: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        let (next, value) = collection_rt::jet_coll_deque_pop(&deque);
-        coll_deque_pair(rt, &next, value)
-    })
-}
-
-fn jet_jit_coll_deque_popleft(deque: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        let (next, value) = collection_rt::jet_coll_deque_popleft(&deque);
-        coll_deque_pair(rt, &next, value)
-    })
-}
-
-fn jet_jit_coll_deque_peek(deque: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        coll_option_string(rt, collection_rt::jet_coll_deque_peek(&deque))
-    })
-}
-
-fn jet_jit_coll_deque_peekleft(deque: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        coll_option_string(rt, collection_rt::jet_coll_deque_peekleft(&deque))
-    })
-}
-fn jet_jit_coll_deque_extend(deque: i64, values: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        let values = coll_read_string_list(rt, values).unwrap_or_default();
-        let next = collection_rt::jet_coll_deque_extend(&deque, &values);
-        coll_alloc_deque(rt, &next)
-    })
-}
-
-fn jet_jit_coll_deque_extendleft(deque: i64, values: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        let values = coll_read_string_list(rt, values).unwrap_or_default();
-        let next = collection_rt::jet_coll_deque_extendleft(&deque, &values);
-        coll_alloc_deque(rt, &next)
-    })
-}
-
-fn jet_jit_coll_deque_rotate(deque: i64, amount: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        let next = collection_rt::jet_coll_deque_rotate(&deque, amount);
-        coll_alloc_deque(rt, &next)
-    })
-}
-
-fn jet_jit_coll_deque_items(deque: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let deque = coll_read_deque(rt, deque).unwrap_or_else(collection_rt::jet_coll_deque);
-        coll_alloc_string_list(rt, &collection_rt::jet_coll_deque_items(&deque))
     })
 }
 
@@ -1571,20 +1424,6 @@ host_fns! {
     coll_counter_subtract: "jet_jit_coll_counter_subtract" => jet_jit_coll_counter_subtract: i64_i64_handle;
     coll_counter_merge_add: "jet_jit_coll_counter_merge_add" => jet_jit_coll_counter_merge_add: i64_i64_handle;
     coll_counter_clear: "jet_jit_coll_counter_clear" => jet_jit_coll_counter_clear: i64_i64;
-    coll_deque: "jet_jit_coll_deque" => jet_jit_coll_deque: zero_i64;
-    coll_deque_from: "jet_jit_coll_deque_from" => jet_jit_coll_deque_from: list_handle;
-    coll_deque_len: "jet_jit_coll_deque_len" => jet_jit_coll_deque_len: i64_i64;
-    coll_deque_is_empty: "jet_jit_coll_deque_is_empty" => jet_jit_coll_deque_is_empty: i64_i8;
-    coll_deque_append: "jet_jit_coll_deque_append" => jet_jit_coll_deque_append: i64_i64_handle;
-    coll_deque_appendleft: "jet_jit_coll_deque_appendleft" => jet_jit_coll_deque_appendleft: i64_i64_handle;
-    coll_deque_pop: "jet_jit_coll_deque_pop" => jet_jit_coll_deque_pop: i64_i64;
-    coll_deque_popleft: "jet_jit_coll_deque_popleft" => jet_jit_coll_deque_popleft: i64_i64;
-    coll_deque_peek: "jet_jit_coll_deque_peek" => jet_jit_coll_deque_peek: i64_i64;
-    coll_deque_peekleft: "jet_jit_coll_deque_peekleft" => jet_jit_coll_deque_peekleft: i64_i64;
-    coll_deque_extend: "jet_jit_coll_deque_extend" => jet_jit_coll_deque_extend: i64_i64_handle;
-    coll_deque_extendleft: "jet_jit_coll_deque_extendleft" => jet_jit_coll_deque_extendleft: i64_i64_handle;
-    coll_deque_rotate: "jet_jit_coll_deque_rotate" => jet_jit_coll_deque_rotate: i64_i64_handle;
-    coll_deque_items: "jet_jit_coll_deque_items" => jet_jit_coll_deque_items: i64_i64;
     coll_ordered_map: "jet_jit_coll_ordered_map" => jet_jit_coll_ordered_map: zero_i64;
     coll_map_get: "jet_jit_coll_map_get" => jet_jit_coll_map_get: i64_i64_handle;
     coll_map_set: "jet_jit_coll_map_set" => jet_jit_coll_map_set: i64_i64_i64_handle;

@@ -3,6 +3,7 @@
 use crate::Diagnostics::Span;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Stable package scope used by every module identity.
 ///
@@ -163,8 +164,25 @@ pub struct NameReference {
 /// Shared name facts. Loader seeds module/import identities and checked
 /// structure observations; sema adds declarations, aliases, visibility,
 /// paths, and checked reference origins.
+///
+/// The lookup tables are shared copy-on-write: registration fills them, and
+/// every function body then reads them through its own `body_snapshot`.
+/// Sharing makes that snapshot O(1); copying the tables per body made body
+/// checking quadratic in the size of a unit.
 #[derive(Debug, Clone, Default)]
 pub struct NameLedger {
+    tables: Arc<NameTables>,
+    /// Import uses keyed by the defining alias span. Source spellings and
+    /// target module text must not decide liveness.
+    alias_uses: HashSet<(usize, Span)>,
+    references: HashMap<(String, usize, usize), NameReference>,
+    structure_facts: Vec<StructureFact>,
+}
+
+/// The lookup half of [`NameLedger`], written during loading and
+/// registration and read by body checks.
+#[derive(Debug, Clone, Default)]
+struct NameTables {
     imports: HashMap<(usize, Span), usize>,
     modules: HashMap<usize, NameModule>,
     declarations: HashMap<(usize, String), NameDeclaration>,
@@ -175,34 +193,40 @@ pub struct NameLedger {
     display_paths: HashMap<(usize, String), String>,
     aliases: HashMap<(usize, String), NameAlias>,
     alias_names: HashMap<String, Vec<(usize, String)>>,
-    /// Import uses keyed by the defining alias span. Source spellings and
-    /// target module text must not decide liveness.
-    alias_uses: HashSet<(usize, Span)>,
     /// Loader-owned roots, such as package manifest Output references, must
     /// survive sema's declaration/reference refresh.
     loader_alias_uses: HashSet<(usize, Span)>,
-    references: HashMap<(String, usize, usize), NameReference>,
-    structure_facts: Vec<StructureFact>,
+    /// D-MOD-CYCLE1=A: the package namespace each package member file belongs
+    /// to (its package root). Files of one package see each other's
+    /// top-level names without imports. Loose files have no entry.
+    namespaces: HashMap<usize, String>,
 }
 
 impl NameLedger {
+    fn tables_mut(&mut self) -> &mut NameTables {
+        Arc::make_mut(&mut self.tables)
+    }
+
     pub fn with_imports(imports: HashMap<(usize, Span), usize>) -> Self {
         Self {
-            imports,
+            tables: Arc::new(NameTables {
+                imports,
+                ..NameTables::default()
+            }),
             ..Self::default()
         }
     }
 
     pub fn import_target(&self, module: usize, span: Span) -> Option<usize> {
-        self.imports.get(&(module, span)).copied()
+        self.tables.imports.get(&(module, span)).copied()
     }
 
     pub fn record_import_target(&mut self, module: usize, span: Span, target: usize) {
-        self.imports.insert((module, span), target);
+        self.tables_mut().imports.insert((module, span), target);
     }
 
     pub fn set_module(&mut self, module: usize, alias: String, path: String, package: String) {
-        self.modules.insert(
+        self.tables_mut().modules.insert(
             module,
             NameModule {
                 alias,
@@ -213,7 +237,63 @@ impl NameLedger {
     }
 
     pub fn module(&self, module: usize) -> Option<&NameModule> {
-        self.modules.get(&module)
+        self.tables.modules.get(&module)
+    }
+
+    /// D-MOD-CYCLE1=A: record that `module` is a member file of the package
+    /// whose root is `package_root`. The loader writes this before sema.
+    pub fn set_module_namespace(&mut self, module: usize, package_root: String) {
+        self.tables_mut().namespaces.insert(module, package_root);
+    }
+
+    /// D-MOD-CYCLE1=A: true when `from` and `to` are the same file or member
+    /// files of one package, so `from` sees every top-level name of `to`
+    /// (private ones included) without an import.
+    pub fn same_namespace(&self, from: usize, to: usize) -> bool {
+        from == to
+            || self
+                .tables
+                .namespaces
+                .get(&from)
+                .is_some_and(|root| self.tables.namespaces.get(&to) == Some(root))
+    }
+
+    /// D-MOD-CYCLE1=A: every other member file of `module`'s package, in
+    /// module order. Empty for a loose file.
+    pub fn namespace_siblings(&self, module: usize) -> Vec<usize> {
+        let Some(root) = self.tables.namespaces.get(&module) else {
+            return Vec::new();
+        };
+        let mut siblings = self
+            .tables
+            .namespaces
+            .iter()
+            .filter(|(other, other_root)| **other != module && *other_root == root)
+            .map(|(other, _)| *other)
+            .collect::<Vec<_>>();
+        siblings.sort_unstable();
+        siblings
+    }
+
+    /// D-MOD-CYCLE1=A: the package root `module` is a member file of, as the
+    /// loader recorded it. `None` for a loose file, a one-file package, Core,
+    /// and synthetic modules.
+    pub fn module_namespace(&self, module: usize) -> Option<&str> {
+        self.tables.namespaces.get(&module).map(String::as_str)
+    }
+
+    /// Every loader-resolved file import as `(importing module, target
+    /// module)`, sorted and deduplicated.
+    pub fn import_edges(&self) -> Vec<(usize, usize)> {
+        let mut edges = self
+            .tables
+            .imports
+            .iter()
+            .map(|((module, _), target)| (*module, *target))
+            .collect::<Vec<_>>();
+        edges.sort_unstable();
+        edges.dedup();
+        edges
     }
 
     pub fn module_path(&self, module: usize) -> Option<&str> {
@@ -245,8 +325,9 @@ impl NameLedger {
         visibility: NameVisibility,
     ) {
         let key = (module, name.clone());
-        let fresh = !self.declarations.contains_key(&key);
-        self.declarations.insert(
+        let tables = self.tables_mut();
+        let fresh = !tables.declarations.contains_key(&key);
+        tables.declarations.insert(
             key,
             NameDeclaration {
                 module,
@@ -258,7 +339,8 @@ impl NameLedger {
             },
         );
         if fresh {
-            self.declaration_names
+            tables
+                .declaration_names
                 .entry(name_leaf(&name).to_string())
                 .or_default()
                 .push((module, name));
@@ -266,11 +348,11 @@ impl NameLedger {
     }
 
     pub fn declaration(&self, module: usize, name: &str) -> Option<&NameDeclaration> {
-        self.declarations.get(&(module, name.to_string()))
+        self.tables.declarations.get(&(module, name.to_string()))
     }
 
     pub fn declarations(&self) -> impl Iterator<Item = &NameDeclaration> {
-        self.declarations.values()
+        self.tables.declarations.values()
     }
 
     pub fn declaration_path(&self, module: usize, name: &str) -> Option<&str> {
@@ -280,7 +362,8 @@ impl NameLedger {
 
     fn display_declaration_path(&self, module: usize, name: &str) -> Option<String> {
         let declaration = self.declaration(module, name)?;
-        self.display_paths
+        self.tables
+            .display_paths
             .get(&(module, declaration.path.clone()))
             .cloned()
             .or_else(|| Some(declaration.path.clone()))
@@ -295,7 +378,8 @@ impl NameLedger {
         internal_path: impl Into<String>,
         display_path: impl Into<String>,
     ) {
-        self.display_paths
+        self.tables_mut()
+            .display_paths
             .insert((module, internal_path.into()), display_path.into());
     }
 
@@ -324,7 +408,7 @@ impl NameLedger {
             }
         }
         let mut only = None;
-        for declaration in self.declarations.values() {
+        for declaration in self.tables.declarations.values() {
             if declaration.module != module
                 || declaration.span.start != start
                 || declaration.span.end != end
@@ -353,7 +437,7 @@ impl NameLedger {
     /// Return the owner module for a canonical nominal identity.
     pub fn nominal_module(&self, identity: &str) -> Option<usize> {
         let (namespace, _) = identity.rsplit_once("::")?;
-        self.modules.iter().find_map(|(module, facts)| {
+        self.tables.modules.iter().find_map(|(module, facts)| {
             (format!("{}::{}", facts.package, facts.path) == namespace).then_some(*module)
         })
     }
@@ -401,7 +485,7 @@ impl NameLedger {
     ) -> Option<String> {
         let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
         let mut paths = BTreeSet::new();
-        if let Some(declarations) = self.declaration_names.get(leaf) {
+        if let Some(declarations) = self.tables.declaration_names.get(leaf) {
             for (module, name) in declarations {
                 if self.visible(from_module, *module, leaf) {
                     if let Some(path) = self.display_declaration_path(*module, name) {
@@ -410,9 +494,9 @@ impl NameLedger {
                 }
             }
         }
-        if let Some(aliases) = self.alias_names.get(leaf) {
+        if let Some(aliases) = self.tables.alias_names.get(leaf) {
             for (module, name) in aliases {
-                let Some(alias) = self.aliases.get(&(*module, name.clone())) else {
+                let Some(alias) = self.tables.aliases.get(&(*module, name.clone())) else {
                     continue;
                 };
                 if !self.visible(from_module, *module, leaf) {
@@ -440,6 +524,7 @@ impl NameLedger {
             .or_else(|| self.canonical_path(from_module, name));
         let resolved_path = resolved_path.or_else(|| paths.iter().next().cloned())?;
         let has_display_projection = self
+            .tables
             .declaration_names
             .get(leaf)
             .into_iter()
@@ -447,7 +532,8 @@ impl NameLedger {
             .any(|(module, name)| {
                 self.visible(from_module, *module, leaf)
                     && self.declaration(*module, name).is_some_and(|declaration| {
-                        self.display_paths
+                        self.tables
+                            .display_paths
                             .contains_key(&(*module, declaration.path.clone()))
                     })
             });
@@ -511,7 +597,7 @@ impl NameLedger {
     /// package/path-qualified key used for uniqueness.
     pub fn canonical_paths(&self, module: usize) -> Vec<(String, String)> {
         let mut paths = BTreeSet::new();
-        for ((owner, name), declaration) in &self.declarations {
+        for ((owner, name), declaration) in &self.tables.declarations {
             if *owner == module {
                 let path = declaration.path.clone();
                 paths.insert((name.clone(), path.clone()));
@@ -528,7 +614,7 @@ impl NameLedger {
                 }
             }
         }
-        for ((owner, name), alias) in &self.aliases {
+        for ((owner, name), alias) in &self.tables.aliases {
             if *owner == module {
                 if let Some(path) = self.canonical_path(module, name) {
                     paths.insert((name.clone(), path));
@@ -540,7 +626,7 @@ impl NameLedger {
                     if !alias.target.contains('.') {
                         if let Some(target_alias) = self.module_alias(target_module) {
                             let prefix = format!("{target_alias}.");
-                            for declaration in self.declarations.values() {
+                            for declaration in self.tables.declarations.values() {
                                 if declaration.module != target_module {
                                     continue;
                                 }
@@ -575,8 +661,9 @@ impl NameLedger {
         visibility: NameVisibility,
     ) {
         let key = (module, name.clone());
-        let fresh = !self.aliases.contains_key(&key);
-        self.aliases.insert(
+        let tables = self.tables_mut();
+        let fresh = !tables.aliases.contains_key(&key);
+        tables.aliases.insert(
             key,
             NameAlias {
                 module,
@@ -588,7 +675,8 @@ impl NameLedger {
             },
         );
         if fresh {
-            self.alias_names
+            tables
+                .alias_names
                 .entry(name_leaf(&name).to_string())
                 .or_default()
                 .push((module, name));
@@ -601,7 +689,7 @@ impl NameLedger {
 
     pub fn record_loader_alias_use(&mut self, module: usize, span: Span) {
         let key = (module, span);
-        self.loader_alias_uses.insert(key);
+        self.tables_mut().loader_alias_uses.insert(key);
         self.alias_uses.insert(key);
     }
 
@@ -612,7 +700,8 @@ impl NameLedger {
     /// Stable identity for one import binding. The defining span is part of
     /// the identity so equal alias spellings in different scopes cannot join.
     pub fn alias_identity(&self, module: usize, span: Span) -> Option<String> {
-        self.aliases
+        self.tables
+            .aliases
             .values()
             .any(|alias| alias.module == module && alias.span == span)
             .then(|| {
@@ -626,11 +715,11 @@ impl NameLedger {
     }
 
     pub fn alias(&self, module: usize, name: &str) -> Option<&NameAlias> {
-        self.aliases.get(&(module, name.to_string()))
+        self.tables.aliases.get(&(module, name.to_string()))
     }
 
     pub fn aliases(&self) -> impl Iterator<Item = &NameAlias> {
-        self.aliases.values()
+        self.tables.aliases.values()
     }
 
     pub fn effective_alias(&self, module: usize, name: &str) -> Option<&NameAlias> {
@@ -644,17 +733,29 @@ impl NameLedger {
             .or_else(|| {
                 self.effective_alias(target_module, name)
                     .map(|alias| alias.visibility)
+            })
+            .or_else(|| {
+                // D-MOD-CYCLE1=A: a method of a type may be declared by an
+                // `impl` in another file of the type's package.
+                self.namespace_siblings(target_module)
+                    .into_iter()
+                    .find_map(|sibling| self.declaration(sibling, name))
+                    .map(|declaration| declaration.visibility)
             });
         let Some(visibility) = visibility else {
             return false;
         };
         match visibility {
             NameVisibility::Public => true,
-            NameVisibility::Package => self
-                .module(from_module)
-                .zip(self.module(target_module))
-                .is_some_and(|(from, target)| from.package == target.package),
-            NameVisibility::Private => from_module == target_module,
+            NameVisibility::Package => {
+                self.same_namespace(from_module, target_module)
+                    || self
+                        .module(from_module)
+                        .zip(self.module(target_module))
+                        .is_some_and(|(from, target)| from.package == target.package)
+            }
+            // D-MOD-CYCLE1=A: files of one package share one namespace.
+            NameVisibility::Private => self.same_namespace(from_module, target_module),
         }
     }
 
@@ -724,24 +825,27 @@ impl NameLedger {
         );
     }
 
-    /// Copy lookup facts for an incremental body check without copying prior
-    /// body references into the cache entry.
+    /// Share lookup facts with an incremental body check without copying
+    /// prior body references into the cache entry. The tables are shared, not
+    /// copied, so a snapshot per body costs O(1) instead of O(unit).
     pub fn body_snapshot(&self) -> Self {
-        let mut snapshot = self.clone();
-        snapshot.alias_uses = snapshot.loader_alias_uses.clone();
-        snapshot.references.clear();
-        snapshot.structure_facts.clear();
-        snapshot
+        Self {
+            tables: Arc::clone(&self.tables),
+            alias_uses: self.tables.loader_alias_uses.clone(),
+            references: HashMap::new(),
+            structure_facts: Vec::new(),
+        }
     }
 
     pub fn clear_sema_facts(&mut self) {
-        self.modules.clear();
-        self.declarations.clear();
-        self.declaration_names.clear();
-        self.display_paths.clear();
-        self.aliases.clear();
-        self.alias_names.clear();
-        self.alias_uses = self.loader_alias_uses.clone();
+        let tables = self.tables_mut();
+        tables.modules.clear();
+        tables.declarations.clear();
+        tables.declaration_names.clear();
+        tables.display_paths.clear();
+        tables.aliases.clear();
+        tables.alias_names.clear();
+        self.alias_uses = self.tables.loader_alias_uses.clone();
         self.references.clear();
         // The loader owns import-edge observations and sema must not erase
         // them when it refreshes its declaration/reference facts. Liveness

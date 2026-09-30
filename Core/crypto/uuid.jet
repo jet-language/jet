@@ -19,19 +19,19 @@ pub fn v4() -[Rand]> String UUIDError! {
     Ok(value)
 }
 
-pub fn v7(clock: &Clock) -[Rand]> String UUIDError! {
-    timestamp :: clock.unix_ms
+pub fn v7(clock: &Clock) -[Rand, Time]> String UUIDError! {
+    timestamp :: clock.now()
     if timestamp < 0 || timestamp > 281474976710655 {
         return Err(UUIDError{reason: "UUID v7 timestamp is outside the 48-bit range"})
     }
     tail :: random.bytes(10) ?? return Err(UUIDError{reason: "secure random unavailable"})
     bytes := [U8]{
-        U8{(timestamp >> 40) & 255},
-        U8{(timestamp >> 32) & 255},
-        U8{(timestamp >> 24) & 255},
-        U8{(timestamp >> 16) & 255},
-        U8{(timestamp >> 8) & 255},
-        U8{timestamp & 255},
+        to_u8(timestamp >> 40),
+        to_u8(timestamp >> 32),
+        to_u8(timestamp >> 24),
+        to_u8(timestamp >> 16),
+        to_u8(timestamp >> 8),
+        to_u8(timestamp),
     }
     loop b in tail -> &bytes.push(b)
     bytes[6] = U8{(Int.from_u8(bytes[6]) & 15) | 112}
@@ -86,7 +86,7 @@ fn parse_uuid(text: String) -> [U8]? {
     loop i in 0..<16 {
         hi :: hex_value(digits[i * 2]) ?? return None
         lo :: hex_value(digits[i * 2 + 1]) ?? return None
-        &out.push(U8{(hi << 4) | lo})
+        &out.push(to_u8((hi << 4) | lo))
     }
     Val(~out)
 }
@@ -123,7 +123,14 @@ fn hex_decode(text: String) -> [U8]? {
     loop i in 0..<raw.len(), 2 {
         hi :: hex_value(raw[i]) ?? return None
         lo :: hex_value(raw[i + 1]) ?? return None
-        &out.push(U8{(hi << 4) | lo})
+        &out.push(to_u8((hi << 4) | lo))
     }
     Val(~out)
+}
+
+/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
+/// checked `U8{}` conversion.
+fn to_u8(n: Int) -> U8 Never! {
+    v :: n & 255
+    (U8{v})
 }

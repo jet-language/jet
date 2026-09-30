@@ -3348,7 +3348,6 @@ pub(crate) struct JitRuntime {
         std::sync::Arc<Memory::shared_protocol::JetSharedGuardState>,
     >,
     pub(crate) expirings: Vec<Memory::ExpiringState>,
-    pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
     /// `core.net.url` / `core.net.mime` / net handles (#1221).
     pub(crate) net_values: Vec<Option<Net::NetValue>>,
@@ -4456,6 +4455,9 @@ pub(crate) enum EntryErrorType {
     Default,
     Io,
     Uninhabited,
+    /// `[FieldError]`: the typed-decode carrier renders through the one
+    /// Prelude FieldError projection, as `print(errors)` does.
+    FieldErrors,
     Descriptor(u64),
 }
 
@@ -10037,16 +10039,31 @@ fn jet_jit_trace_err(file: i64, line: i64, fn_name: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
-        jet_foundation::Outcome::jet_journey_frame(&file, line as u32, &fn_name, String::new);
+        jet_foundation::Outcome::jet_journey_frame(&file, line as u32, 0, &fn_name, String::new);
     });
 }
 
-fn jet_jit_trace_err_note(file: i64, line: i64, fn_name: i64, note: i64) {
+fn jet_jit_trace_err_note(file: i64, line: i64, column: i64, fn_name: i64, note: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
         let note = rt.heap.clone_string(note).unwrap_or_default();
-        jet_foundation::Outcome::jet_journey_frame(&file, line as u32, &fn_name, || note);
+        jet_foundation::Outcome::jet_journey_frame(
+            &file,
+            line as u32,
+            column as u32,
+            &fn_name,
+            || note,
+        );
+    })
+}
+
+/// #3713: the returned `Err(...)` claims where its failure started.
+fn jet_jit_trace_origin(file: i64, line: i64, column: i64, fn_name: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
+        jet_foundation::Outcome::jet_journey_origin(&file, line as u32, column as u32, &fn_name);
     })
 }
 
@@ -11478,7 +11495,7 @@ fn jet_jit_err_from_message(message: i64) -> i64 {
 }
 
 fn jet_jit_err_with_context_frame(
-    handle: i64, file: i64, line: i64, function: i64, note: i64,
+    handle: i64, file: i64, line: i64, column: i64, function: i64, note: i64,
 ) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let (Some(error), Some(file), Some(function), Some(note)) = (
@@ -11491,7 +11508,7 @@ fn jet_jit_err_with_context_frame(
             return 0;
         };
         let error = jet_foundation::Outcome::jet_err_with_context_frame(
-            error, file, line as u32, function, note,
+            error, file, line as u32, column as u32, function, note,
         );
         alloc_jit_default_err(rt, error)
     })
@@ -11541,6 +11558,9 @@ pub(crate) fn report_unhandled_entry_result(handle: i64, error_type: Option<Entr
                 return None;
             }
             EntryErrorType::Io => crate::Process::process_error_show_text(payload, rt),
+            EntryErrorType::FieldErrors => {
+                crate::Encoding::field_error_list_show_text(&rt.heap, payload)
+            }
             EntryErrorType::Uninhabited => {
                 rt.set_host_fault("MIR entry returned a failure from an uninhabited error domain");
                 return None;
@@ -15340,17 +15360,12 @@ fn jet_jit_testing_test_suite_run(handle: i64) -> i64 {
             rt.heap.record_get_int(handle, 1).unwrap_or(0),
         )
     });
-    let mut suite = jet_codegen::command_suite::JetTestSuite {
+    let suite = jet_codegen::command_suite::JetTestSuite {
         iteration,
         result,
         runner: None,
     };
-    let status = jet_codegen::command_suite::jet_test_suite_run(&mut suite);
-    Concurrency::with_runtime_mut(|rt| {
-        let _ = rt.heap.record_set_int(handle, 0, suite.iteration);
-        let _ = rt.heap.record_set_int(handle, 1, suite.result);
-    });
-    status
+    jet_codegen::command_suite::jet_test_suite_run(&suite)
 }
 
 /// Resident `TestComparison` carrier.  Field order is the checked Core plain
@@ -18069,17 +18084,16 @@ host_fns! {
             .extend([AbiParam::new(types::I64); 3]);
         sig_err_apply_conversion.returns.push(AbiParam::new(types::I64));
         let mut sig_err_with_context_frame = Signature::new(cc);
-        sig_err_with_context_frame.params.extend([AbiParam::new(types::I64); 5]);
+        sig_err_with_context_frame.params.extend([AbiParam::new(types::I64); 6]);
         sig_err_with_context_frame.returns.push(AbiParam::new(types::I64));
         let mut sig_trace_err = Signature::new(cc);
         sig_trace_err.params.push(AbiParam::new(types::I64));
         sig_trace_err.params.push(AbiParam::new(types::I64));
         sig_trace_err.params.push(AbiParam::new(types::I64));
         let mut sig_trace_err_note = Signature::new(cc);
-        sig_trace_err_note.params.push(AbiParam::new(types::I64));
-        sig_trace_err_note.params.push(AbiParam::new(types::I64));
-        sig_trace_err_note.params.push(AbiParam::new(types::I64));
-        sig_trace_err_note.params.push(AbiParam::new(types::I64));
+        sig_trace_err_note.params.extend([AbiParam::new(types::I64); 5]);
+        let mut sig_trace_origin = Signature::new(cc);
+        sig_trace_origin.params.extend([AbiParam::new(types::I64); 4]);
         let sig_trace_reset = Signature::new(cc);
         let mut sig_f64_i64_i64 = Signature::new(cc);
         sig_f64_i64_i64.params.push(AbiParam::new(types::F64));
@@ -18689,6 +18703,7 @@ host_fns! {
     contract_fail: "jet_jit_contract_fail" => jet_jit_contract_fail: sig_contract_fail;
     trace_err: "jet_jit_trace_err" => jet_jit_trace_err: sig_trace_err;
     trace_err_note: "jet_journey_frame_text" => jet_jit_trace_err_note: sig_trace_err_note;
+    trace_origin: "jet_journey_origin" => jet_jit_trace_origin: sig_trace_origin;
     trace_reset: "jet_journey_reset" => jet_jit_trace_reset: sig_trace_reset;
     duration_from_int: "jet_jit_duration_from_int" => jet_jit_duration_from_int: sig_duration_int;
     duration_from_float: "jet_jit_duration_from_float" => jet_jit_duration_from_float: sig_duration_float;

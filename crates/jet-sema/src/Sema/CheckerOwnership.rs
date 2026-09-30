@@ -1382,6 +1382,15 @@ impl<'a> Checker<'a> {
 
     fn bind_pattern_names(pattern: &Pattern, bound: &mut HashSet<String>) {
         match pattern {
+            Pattern::Ok {
+                inner: Some(inner), ..
+            }
+            | Pattern::Err {
+                inner: Some(inner), ..
+            }
+            | Pattern::Present {
+                inner: Some(inner), ..
+            } => Self::bind_pattern_names(inner, bound),
             Pattern::Ok { binding, .. }
             | Pattern::Err { binding, .. }
             | Pattern::Present { binding, .. } => {
@@ -1389,9 +1398,7 @@ impl<'a> Checker<'a> {
             }
             Pattern::Variant { bindings, .. } => {
                 for slot in bindings {
-                    if let crate::AST::PatSlot::Bind { name, .. } = slot {
-                        bound.insert(name.clone());
-                    }
+                    Self::bind_slot_names(slot, bound);
                 }
             }
             Pattern::Struct { fields, .. } => {
@@ -1421,6 +1428,20 @@ impl<'a> Checker<'a> {
                 }
             }
             Pattern::Absent(_) | Pattern::Range { .. } => {}
+        }
+    }
+
+    fn bind_slot_names(slot: &crate::AST::PatSlot, bound: &mut HashSet<String>) {
+        match slot {
+            crate::AST::PatSlot::Bind { name, .. } => {
+                bound.insert(name.clone());
+            }
+            crate::AST::PatSlot::Nested(inner) => Self::bind_pattern_names(inner, bound),
+            // D-PAT-NAMED-NEST1=A: `field: slot` binds what its slot binds.
+            crate::AST::PatSlot::Named { slot, .. } => Self::bind_slot_names(slot, bound),
+            crate::AST::PatSlot::Wildcard
+            | crate::AST::PatSlot::Range { .. }
+            | crate::AST::PatSlot::Rest(_) => {}
         }
     }
 
@@ -6595,6 +6616,8 @@ impl<'a> Checker<'a> {
         if let Some(got) = got {
             let got =
                 self.widen_numeric_argument(&mut arg.expr, got, &elem_ty, AccessConvention::Move);
+            let got =
+                self.lift_optional_argument(&mut arg.expr, got, &elem_ty, AccessConvention::Move);
             let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
             if !reported && got != elem_ty {
                 self.diags.push(Diagnostic::error(
@@ -6797,6 +6820,12 @@ impl<'a> Checker<'a> {
         }
         let got = self.infer_with_expected(&mut args[1].expr, inner);
         if let Some(got) = got {
+            let got = self.lift_optional_argument(
+                &mut args[1].expr,
+                got,
+                inner,
+                AccessConvention::Move,
+            );
             self.check_type_assignable(inner, &got, args[1].expr.span());
         }
         self.check_take_arg_ownership("try_replace", 0, &snapshot_ty, &mut args[0]);
@@ -6846,6 +6875,7 @@ impl<'a> Checker<'a> {
         if let Some(got) = got {
             let got =
                 self.widen_numeric_argument(&mut arg.expr, got, inner, AccessConvention::Move);
+            let got = self.lift_optional_argument(&mut arg.expr, got, inner, AccessConvention::Move);
             self.check_type_assignable(inner, &got, arg.expr.span());
         }
         self.check_take_arg_ownership(method, 0, inner, arg);
@@ -7369,6 +7399,8 @@ impl<'a> Checker<'a> {
         if let Some(got) = got {
             let got =
                 self.widen_numeric_argument(&mut arg.expr, got, &elem_ty, AccessConvention::Move);
+            let got =
+                self.lift_optional_argument(&mut arg.expr, got, &elem_ty, AccessConvention::Move);
             let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
             if !reported && got != elem_ty {
                 self.diags.push(Diagnostic::error(

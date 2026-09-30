@@ -102,7 +102,7 @@ fn mir_pass_removable_dead(operation: MirOperation, ty: MirType?, ownership: Mir
 
 fn mir_pass_prelude_is_pure(rows: [MirPreludeCall], id: MirPreludeCallId) -> Bool Never! {
     loop row in rows {
-        if row.id == id -> return row.effect_kind == None && row.fallibility == .Infallible
+        if row.id == id -> return row.effect_kind == None && row.abi != .Effect && row.fallibility == .Infallible
     }
     false
 }

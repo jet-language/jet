@@ -552,7 +552,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     }
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return None
     facts :: sema_call_facts(resolved_candidate.signature, resolved_candidate.type_args, resolved_binding) ?? return None
-    return_view_facts :: sema_call_return_view_facts(resolved_candidate.signature, Val(receiver), checked_args, resolved_binding, scopes, state, span)
+    return_view_facts :: sema_call_return_view_facts(resolved_candidate.signature, Val(receiver), checked_args, resolved_binding, scopes, &state, span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 

@@ -24,7 +24,7 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, bl
         .Yield(value, resume) -> {
             if {
                 function.generator == None -> {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Yield terminator has no generator facts", "checked generator functions must retain generator metadata", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Yield terminator has no generator facts", "checked generator functions must retain generator metadata", Val(function.span))
                 }
                 else -> {
                 &out.push("        yield __jet_values.get({value.value}); __jet_pred = __jet_block; __jet_block = {resume.value}; continue;")
@@ -93,7 +93,7 @@ fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MirFunction, out:
                 }
             }
         }
-        jet_web_emit_js_terminator(ctx, function, block, &out)
+        jet_web_emit_js_terminator(&ctx, function, block, &out)
         &out.push("        }}")
     }
     &out.push("        default: throw new Error(\"invalid MIR block\");")
@@ -111,12 +111,12 @@ fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) Never! 
         module_row := None
         loop candidate in ctx.program.modules { if candidate.id == module_id -> module_row = Val(candidate) }
         if module_row == None {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact references a missing module", "module closure identities must resolve before JavaScript emission", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact references a missing module", "module closure identities must resolve before JavaScript emission", None)
             next
         }
         row :: module_row ?? next
         if row.key == "" || row.path == "" {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact module has no stable key or path", "module registry provenance requires both checked identity fields", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact module has no stable key or path", "module registry provenance requires both checked identity fields", None)
             next
         }
         nul :: String.from_bytes([U8]{0}) ?? ""
@@ -141,7 +141,7 @@ fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) Never! {
         }
         jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> {
             if function.generator != None {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm entry cannot be a generator", function.name, Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm entry cannot be a generator", function.name, Val(function.span))
                 return
             }
             &out.push("export async function jet_main(...args) {{")
@@ -152,7 +152,7 @@ fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) Never! {
             &out.push("}}")
             &out.push("")
         }
-        else -> jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web entry has no checked partition", "the selected entry function must be JS or Wasm-applicable", Val(function.span))
+        else -> jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web entry has no checked partition", "the selected entry function must be JS or Wasm-applicable", Val(function.span))
     }
 }
 
@@ -245,7 +245,7 @@ fn jet_web_emit_js_app(ctx: &JetWebEmitContext) -> String {
     font_import :: if needs_font -> "await jet_ui_web_harfbuzz_imports()" else -> "jet_ui_web_unreachable_harfbuzz_imports()"
     lines := [String]{
         "import * as jetDom from \"./jet_dom_runtime.js\";",
-        jet_web_compose_prelude(ctx),
+        jet_web_compose_prelude(&ctx),
         "const __jetFontImports = {font_import};",
     }
     &lines.push(jet_web_js_copy_type_facts(ctx))
@@ -268,7 +268,7 @@ fn jet_web_emit_js_app(ctx: &JetWebEmitContext) -> String {
         &lines.push("  const job = __jetModelTransport.start(session, operation, packet, signal ? {{ signal }} : {{}});")
         &lines.push("  return __jetModelTransport.resume(job);")
         &lines.push("}};")
-        jet_web_emit_model_bridges(ctx, &lines)
+        jet_web_emit_model_bridges(&ctx, &lines)
     }
     if has_data {
         &lines.push("jet_data_web_bind_wasm(__jetPreludeWasm);")
@@ -291,9 +291,9 @@ fn jet_web_emit_js_app(ctx: &JetWebEmitContext) -> String {
         &lines.push("  }} catch (_) {{}}")
         &lines.push("}}")
     }
-    jet_web_emit_module_registry(ctx, &lines)
+    jet_web_emit_module_registry(&ctx, &lines)
     jet_web_emit_wasm_export_bridges(ctx, ctx.functions, &lines)
     loop function in ctx.functions -> jet_web_emit_js_function(ctx, function, &lines)
-    jet_web_emit_js_entry(ctx, &lines)
+    jet_web_emit_js_entry(&ctx, &lines)
     lines.join("\n")
 }

@@ -129,7 +129,7 @@ pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 /// D-META-NAME1=A / D-MARKER-SITES1=B: the rule-declaration contextual keyword —
 /// `marker Name(params…)`. Declares one applied rule as
 /// an ordinary Jet declaration in Prelude (or, later, library) source; the
-/// rule's own arguments and facts about the rule (`@sites`, `@repeatable`, …)
+/// rule's own arguments and facts about the rule (`$sites`, `$repeatable`, …)
 /// share one named-parameter list under D-META-FORM1=A, the facts marked with
 /// the compile-time sigil. Contextual like `state`/`protocol`. Declaration-
 /// side parse only (card #1456); lowering the parsed declaration into the
@@ -138,7 +138,7 @@ pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 pub const KW_MARKER: &str = "marker"; // D-META-NAME1, D-META-FORM1, D-MARKER-SITES1
 
 /// D-FACTDECL1=A: the one non-code fact declaration word —
-/// `fact Name(@holds: …, @safe: …, …)`. It reuses the marker declaration
+/// `fact Name($holds: …, $safe: …, …)`. It reuses the marker declaration
 /// parameter-list shape; the registry reads its rows from `Prelude/Facts.jet`.
 pub const KW_FACT: &str = "fact"; // D-FACTDECL1
 

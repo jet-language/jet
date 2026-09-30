@@ -511,6 +511,29 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Return-position widening: a plain numeric value fills the success slot
+    /// of the return contract. Every checked return is a carrier
+    /// (`T Never!`, `T E!`), so the conversion targets its `T`, not the
+    /// carrier itself; the caller lifts the widened value into `Ok`. Returns
+    /// the slot type when a conversion was recorded.
+    pub(crate) fn widen_numeric_return(
+        &mut self,
+        expr: &mut Expr,
+        source: &Type,
+        ret: &Type,
+    ) -> Option<Type> {
+        let slot = match ret {
+            Type::Result { ok, .. } => ok.as_ref(),
+            _ => ret,
+        };
+        if source == slot || source.numeric_widening_to(slot).is_none() {
+            return None;
+        }
+        let slot = slot.clone();
+        self.widen_numeric_expr(expr, source, &slot);
+        Some(slot)
+    }
+
     fn distinct_raw(expr: Expr, type_name: &str, base: Type, span: Span) -> Expr {
         Expr::MethodCall {
             receiver: Box::new(expr),
@@ -1254,6 +1277,16 @@ impl<'a> Checker<'a> {
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
+        // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5,
+        // and `x != 5` is its opposite. The plain side lifts once, so the
+        // comparison is the existing optional equality on every tier.
+        if matches!(op, BinOp::Eq | BinOp::Ne) {
+            if let Some(lifted) = self.lift_optional_slot(&lt, &rt, rhs) {
+                rt = lifted;
+            } else if let Some(lifted) = self.lift_optional_slot(&rt, &lt, lhs) {
+                lt = lifted;
+            }
+        }
 
         // A folded fact compared with a closed enum literal is already a Bool.
         // Keep the comparison out of TIR: core enum literals intentionally stay

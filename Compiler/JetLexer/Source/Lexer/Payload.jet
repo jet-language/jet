@@ -790,8 +790,94 @@ fn identifier_payload(source: [U8], start: Int, end: Int, text: String, allow_re
         add_diagnostic(&diagnostics, "E0003", start, end, "`{text}\"…\"` is not a Jet raw-string prefix", "backtick fences are the one raw ordinary-String spelling; `r` and `raw` are ordinary names", "write the text as ``…`` instead")
     }
     payload := empty_payload(text)
-    payload.decoded = text
+    payload.decoded = retired_fact_respelling(source, start, end, text, &diagnostics) ?? text
     payload
+}
+
+fn source_has_text(source: [U8], at: Int, expected: String) -> Bool Never! {
+    wanted :: expected.bytes()
+    loop offset in 0..<wanted.len() {
+        if byte_at(source, at + offset) != Int.from_u8(wanted[offset]) -> return false
+    }
+    true
+}
+
+fn text_in(name: String, values: [String]) -> Bool Never! {
+    loop value in values {
+        if value == name -> return true
+    }
+    false
+}
+
+fn retired_fact_member(name: String) -> Bool Never! {
+    text_in(name, [String]{"layout", "fields", "range", "effects", "origin", "name", "index", "sendability", "view_provenance", "movedness", "maturity", "kind", "unit_scale_provenance", "dimension", "attribution", "states", "measure", "exactness", "ty", "base", "unknown", "track_origin", "obligation", "classification", "profile", "flow", "taint", "duty", "rights", "package_policy", "nominal", "interval"})
+}
+
+fn retired_declaration_metadata(name: String) -> Bool Never! {
+    text_in(name, [String]{"sites", "repeatable", "holds", "safe", "gates", "decision", "retired", "proved_by", "inherits", "companion", "scopes", "resolution", "owns_menu", "identity", "name"})
+}
+
+// D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A:
+// compiler facts and declaration metadata moved from `@` to `$`. A retired
+// spelling teaches E0003 with a machine-applicable edit, and the word then
+// reads as its `$` respelling so parsing recovers. D-NAME-SPLICE1=B: any
+// other `@name` after `.` (`self.@field`, `.@left`) or naming a declaration
+// (`fn @method`, `impl @type_name`) is a retired template name splice; it
+// teaches E0388 and reads as `$name`.
+fn retired_fact_respelling(source: [U8], start: Int, end: Int, text: String, diagnostics: &[Diagnostic]) -> String? {
+    if byte_at(source, start) != 64 -> return None
+    name :: String.from_bytes(source.slice(start + 1, end)) ?? ""
+    colon := end
+    loop byte_at(source, colon) == 32 -> colon += 1
+    member :: byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 && retired_fact_member(name)
+    metadata :: retired_declaration_metadata(name) && byte_at(source, colon) == 58 && byte_at(source, colon + 1) != 58
+    empty_call :: byte_at(source, end) == 40 && byte_at(source, end + 1) == 41
+    package_member :: name == "build" && source_has_text(source, end, ".package") && !is_identifier_continue(source, end + 8)
+    edit_end := end
+    respelled := ""
+    if {
+        member || metadata || name == "irreversible" -> {
+            respelled = "${name}"
+        }
+        package_member -> {
+            respelled = "$package"
+            edit_end = end + 8
+        }
+        name == "build" -> {
+            respelled = "$build"
+        }
+        name == "PHASE" || name == "PROGRAM" || name == "PACKAGE" -> {
+            respelled = if name == "PHASE" -> "$phase" else -> if name == "PROGRAM" -> "$program" else -> "$package"
+            if empty_call -> edit_end = end + 2
+        }
+        name == "TYPE" || name == "FUNCTION" || name == "METHOD" || name == "CLOSURE" || name == "VALUE" -> {
+            add_diagnostic(&diagnostics, "E0003", start, end, "`{text}(…)` is retired", "compiler facts carry `$`; a fact is a `$` member of the thing it describes (D-META-ROOT3=A)", "read the fact on its subject, such as `T.$fields`, `f.$effects` or `value.$origin`")
+            return None
+        }
+        retired_name_splice(source, start) -> {
+            splice :: "${name}"
+            span :: Span{start: start, end: end}
+            retired :: diagnostic_from_registry("E0388", Val(span), "`{text}` is retired; write `{splice}`", "a template splices a binding's name with the fact sigil `$`; prefix `@` now marks a live link (D-NAME-SPLICE1=B)", "replace `{text}` with `{splice}`")
+            &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: splice}))
+            return Val(splice)
+        }
+        else -> return None
+    }
+    old :: String.from_bytes(source.slice(start, edit_end)) ?? text
+    span :: Span{start: start, end: edit_end}
+    retired :: diagnostic_from_registry("E0003", Val(span), "`{old}` is retired; write `{respelled}`", "compiler facts and declaration metadata carry `$`; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)", "replace `{old}` with `{respelled}`")
+    &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: respelled}))
+    Val(respelled)
+}
+
+fn retired_name_splice(source: [U8], start: Int) -> Bool {
+    if byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 -> return true
+    head_end := start
+    loop byte_at(source, head_end - 1) == 32 -> head_end -= 1
+    head_start := head_end
+    loop head_start > 0 && is_identifier_continue(source, head_start - 1) -> head_start -= 1
+    head :: String.from_bytes(source.slice(head_start, head_end)) ?? ""
+    head_end < start && text_in(head, [String]{"fn", "impl", "struct", "enum", "trait", "type"})
 }
 
 fn scalar_codepoint(source: [U8], start: Int, width: Int) -> Int Never! {

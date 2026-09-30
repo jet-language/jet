@@ -1,0 +1,42 @@
+// D-MOD2: a member import names any public declaration of a file module,
+// and qualified or contextual enum spellings follow the imported enum.
+use "types"
+use types.[Span, Kind, Named, make_span]
+
+struct Holder {
+    kind: types.Kind
+}
+
+struct Local { n: Int }
+
+impl Local.Named {
+    fn label(self) -> String { "local {self.n}" }
+}
+
+fn width(span: Span) -> Int { span.end - span.start }
+
+fn value(kind: types.Kind) -> Int {
+    if kind == {
+        .Alpha -> 0
+        .Beta(v) -> v
+    }
+}
+
+fn held(h: Holder) -> Int {
+    if h.kind == {
+        .Alpha -> 0
+        .Beta(v) -> v
+    }
+}
+
+fn run() {
+    print(width(make_span(2, 7)))
+    beta :: types.Kind.Beta(3)
+    print(value(beta))
+    print(value(.Beta(4)))
+    print(held(Holder{kind: .Alpha}))
+    print(beta == types.Kind.Alpha)
+    first :: Kind.Beta(9)
+    print(value(first))
+    print(Local{n: 1}.label())
+}

@@ -30,11 +30,11 @@ struct Ring {
     tail: Int
 }
 
-@SIZE :: Ring.@layout.size
-@ALIGNMENT :: Ring.@layout.alignment
+SIZE :: prep { Ring.$layout.size }
+ALIGNMENT :: prep { Ring.$layout.alignment }
 
 fn run() {
-    print("{@SIZE}:{@ALIGNMENT}")
+    print("{SIZE}:{ALIGNMENT}")
 }
 "#;
     let expected = format!(
@@ -878,7 +878,7 @@ fn orphan_fact_rows_are_typed_and_readable() {
         if name == "Attribution" {
             assert!(matches!(
                 struct_field(&info, "path"),
-                CtValue::Str(path) if path == "report.@attribution"
+                CtValue::Str(path) if path == "report.$attribution"
             ));
         }
     }

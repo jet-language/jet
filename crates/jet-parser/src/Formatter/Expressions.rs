@@ -2399,49 +2399,60 @@ impl<'a> Fmt<'a> {
                 // D-ENUMDOT1: leading dot is canonical for variant patterns.
                 self.write(".");
                 self.write(variant);
-                if !bindings.is_empty() {
-                    self.write("(");
+                if bindings
+                    .iter()
+                    .any(|slot| matches!(slot, PatSlot::Named { .. } | PatSlot::Rest(_)))
+                {
+                    // D-PAT-NAMED-NEST1=A: the named payload form keeps its
+                    // braces; `field: field` prints as the shorthand `field`.
+                    self.write("{");
                     for (i, slot) in bindings.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
                         }
                         match slot {
-                            PatSlot::Bind { name, .. } => self.write(name),
-                            PatSlot::Wildcard => self.write("_"),
-                            PatSlot::Range { lo, hi } => {
-                                self.write(&lo.to_string());
-                                self.write("..");
-                                self.write(&hi.to_string());
+                            PatSlot::Named { field, slot, .. } => {
+                                self.write(field);
+                                if slot.as_bind() != Some(field.as_str()) {
+                                    self.write(": ");
+                                    self.fmt_pat_slot(slot);
+                                }
                             }
+                            slot => self.fmt_pat_slot(slot),
                         }
+                    }
+                    self.write("}");
+                } else if !bindings.is_empty() {
+                    self.write("(");
+                    for (i, slot) in bindings.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.fmt_pat_slot(slot);
                     }
                     self.write(")");
                 }
             }
-            Pattern::Present { binding, .. } => {
+            Pattern::Present { binding, inner, .. }
+            | Pattern::Ok { binding, inner, .. }
+            | Pattern::Err { binding, inner, .. } => {
+                let head = match pat {
+                    Pattern::Present { .. } => Syntax::LIT_VALUE,
+                    Pattern::Ok { .. } => Syntax::LIT_OK,
+                    _ => Syntax::LIT_ERR,
+                };
                 self.write(".");
-                self.write(Syntax::LIT_VALUE);
+                self.write(head);
                 self.write("(");
-                self.write(binding);
+                match inner {
+                    Some(inner) => self.fmt_pattern(inner),
+                    None => self.write(binding),
+                }
                 self.write(")");
             }
             Pattern::Absent(_) => {
                 self.write(".");
                 self.write(Syntax::LIT_NULL);
-            }
-            Pattern::Ok { binding, .. } => {
-                self.write(".");
-                self.write(Syntax::LIT_OK);
-                self.write("(");
-                self.write(binding);
-                self.write(")");
-            }
-            Pattern::Err { binding, .. } => {
-                self.write(".");
-                self.write(Syntax::LIT_ERR);
-                self.write("(");
-                self.write(binding);
-                self.write(")");
             }
             // D-PATR: range pattern at arm-head level.
             Pattern::Range { lo, hi, .. } => {
@@ -2500,6 +2511,28 @@ impl<'a> Fmt<'a> {
             Pattern::BinMatch { parts, .. } => {
                 self.fmt_bin_match_parts(parts);
             }
+        }
+    }
+
+    /// One variant payload slot. `Named` entries only appear inside the
+    /// braces of the D-PAT-NAMED-NEST1 form, which `fmt_pattern` prints.
+    fn fmt_pat_slot(&mut self, slot: &crate::AST::PatSlot) {
+        use crate::AST::PatSlot;
+        match slot {
+            PatSlot::Bind { name, .. } => self.write(name),
+            PatSlot::Wildcard => self.write("_"),
+            PatSlot::Range { lo, hi } => {
+                self.write(&lo.to_string());
+                self.write("..");
+                self.write(&hi.to_string());
+            }
+            PatSlot::Nested(inner) => self.fmt_pattern(inner),
+            PatSlot::Named { field, slot, .. } => {
+                self.write(field);
+                self.write(": ");
+                self.fmt_pat_slot(slot);
+            }
+            PatSlot::Rest(_) => self.write(".."),
         }
     }
 

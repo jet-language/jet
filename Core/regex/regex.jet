@@ -543,53 +543,53 @@ fn flatten_seq(re: Regex, node: Int, parts: &[Int]) Never! {
 fn exec_sequence(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int Never! {
     parts := [Int]{}
     flatten_seq(re, node, &parts)
-    exec_parts(re, text, i, parts, 0, &caps, budget)
+    exec_parts(re, text, i, parts, 0, &caps, &budget)
 }
 
 fn exec_parts(re: Regex, text: [U8], pos: Int, parts: [Int], index: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int Never! {
     if index >= parts.len() -> return pos
     n :: re.nodes[parts[index]]
-    if n.kind == "rep" -> return exec_rep_tail(re, text, pos, n, parts, index + 1, &caps, budget, 0)
-    if n.kind == "alt" -> return exec_alt_tail(re, text, pos, n, parts, index + 1, &caps, budget)
-    end :: exec(re, text, pos, parts[index], &caps, budget)
+    if n.kind == "rep" -> return exec_rep_tail(re, text, pos, n, parts, index + 1, &caps, &budget, 0)
+    if n.kind == "alt" -> return exec_alt_tail(re, text, pos, n, parts, index + 1, &caps, &budget)
+    end :: exec(re, text, pos, parts[index], &caps, &budget)
     if end < 0 -> return -1
-    exec_parts(re, text, end, parts, index + 1, &caps, budget)
+    exec_parts(re, text, end, parts, index + 1, &caps, &budget)
 }
 
 fn exec_alt_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int Never! {
     saved := caps.len()
-    left :: exec(re, text, pos, n.left, &caps, budget)
+    left :: exec(re, text, pos, n.left, &caps, &budget)
     if left >= 0 {
-        end :: exec_parts(re, text, left, parts, next, &caps, budget)
+        end :: exec_parts(re, text, left, parts, next, &caps, &budget)
         if end >= 0 -> return end
     }
     trim_caps(&caps, saved)
-    right :: exec(re, text, pos, n.right, &caps, budget)
+    right :: exec(re, text, pos, n.right, &caps, &budget)
     if right < 0 -> return -1
-    exec_parts(re, text, right, parts, next, &caps, budget)
+    exec_parts(re, text, right, parts, next, &caps, &budget)
 }
 
 fn exec_rep_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget, count: Int) -> Int Never! {
-    if n.b >= 0 && count >= n.b -> return exec_parts(re, text, pos, parts, next, &caps, budget)
+    if n.b >= 0 && count >= n.b -> return exec_parts(re, text, pos, parts, next, &caps, &budget)
     if count >= n.a {
         saved := caps.len()
-        nxt :: exec(re, text, pos, n.left, &caps, budget)
+        nxt :: exec(re, text, pos, n.left, &caps, &budget)
         if nxt >= 0 && nxt != pos {
-            deeper :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, budget, count + 1)
+            deeper :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, &budget, count + 1)
             if deeper >= 0 -> return deeper
             trim_caps(&caps, saved)
         } else {
             trim_caps(&caps, saved)
         }
-        return exec_parts(re, text, pos, parts, next, &caps, budget)
+        return exec_parts(re, text, pos, parts, next, &caps, &budget)
     }
     saved := caps.len()
-    nxt :: exec(re, text, pos, n.left, &caps, budget)
+    nxt :: exec(re, text, pos, n.left, &caps, &budget)
     if nxt < 0 || nxt == pos {
         trim_caps(&caps, saved)
         return -1
     }
-    end :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, budget, count + 1)
+    end :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, &budget, count + 1)
     if end < 0 -> trim_caps(&caps, saved)
     end
 }
@@ -627,21 +627,21 @@ fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: 
         return -1
     }
     if n.kind == "seq" {
-        end :: exec_sequence(re, text, i, node, &caps, budget)
+        end :: exec_sequence(re, text, i, node, &caps, &budget)
         if end < 0 -> trim_caps(&caps, saved)
         return end
     }
     if n.kind == "alt" {
         left_saved := caps.len()
-        a :: exec(re, text, i, n.left, &caps, budget)
+        a :: exec(re, text, i, n.left, &caps, &budget)
         if a >= 0 -> return a
         trim_caps(&caps, left_saved)
-        return exec(re, text, i, n.right, &caps, budget)
+        return exec(re, text, i, n.right, &caps, &budget)
     }
     if n.kind == "group" {
         slot := caps.len()
         &caps.push(CaptureSpan{start: i, end: -1})
-        end :: exec(re, text, i, n.left, &caps, budget)
+        end :: exec(re, text, i, n.left, &caps, &budget)
         if end >= 0 {
             caps[slot] = CaptureSpan{start: i, end: end}
             return end
@@ -662,7 +662,7 @@ fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: 
         return -1
     }
     if n.kind == "rep" {
-        end :: exec_rep(re, text, i, n, &caps, 0, budget)
+        end :: exec_rep(re, text, i, n, &caps, 0, &budget)
         if end < 0 -> trim_caps(&caps, saved)
         return end
     }
@@ -672,17 +672,17 @@ fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: 
 fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int Never! {
     if n.b >= 0 && count == n.b -> return i
     if count >= n.a {
-        rest :: exec_rep_more(re, text, i, n, &caps, count, budget)
+        rest :: exec_rep_more(re, text, i, n, &caps, count, &budget)
         if rest >= 0 -> return rest
         return i
     }
     saved := caps.len()
-    nxt :: exec(re, text, i, n.left, &caps, budget)
+    nxt :: exec(re, text, i, n.left, &caps, &budget)
     if nxt < 0 || (nxt == i && n.b != 0) {
         trim_caps(&caps, saved)
         return -1
     }
-    end :: exec_rep(re, text, nxt, n, &caps, count + 1, budget)
+    end :: exec_rep(re, text, nxt, n, &caps, count + 1, &budget)
     if end < 0 -> trim_caps(&caps, saved)
     end
 }
@@ -690,13 +690,13 @@ fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count:
 fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int Never! {
     if n.b >= 0 && count >= n.b -> return -1
     saved := caps.len()
-    nxt :: exec(re, text, i, n.left, &caps, budget)
+    nxt :: exec(re, text, i, n.left, &caps, &budget)
     if nxt < 0 || nxt == i {
         trim_caps(&caps, saved)
         return -1
     }
     after_child := caps.len()
-    deeper :: exec_rep_more(re, text, nxt, n, &caps, count + 1, budget)
+    deeper :: exec_rep_more(re, text, nxt, n, &caps, count + 1, &budget)
     if deeper >= 0 -> return deeper
     trim_caps(&caps, after_child)
     nxt

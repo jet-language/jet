@@ -1398,8 +1398,10 @@ fn jet_error_page_failure_id(
 
 fn jet_error_page_source(report: &JetErrorReport) -> Option<JetErrorPageSourceFrame> {
     report
-        .source_journey
-        .first()
+        .origin
+        .iter()
+        .chain(&report.source_journey)
+        .next()
         .map(|frame| JetErrorPageSourceFrame {
             fn_name: jet_error_page_safe_text(&frame.fn_name, JET_ERROR_PAGE_MAX_SOURCE_BYTES),
             file: jet_error_page_bounded(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES),
@@ -5347,7 +5349,7 @@ fn jet_http_devtools_publish_exception_report(request_id: &str, report: &JetErro
         code,
         jet_http_unix_now_ms(),
     );
-    if report.source_journey.is_empty() {
+    if report.origin.is_none() && report.source_journey.is_empty() {
         if let Some(frame) = jet_error_page_source(report) {
             let file = jet_http_devtools_source_text(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES);
             if !file.is_empty() {
@@ -5367,8 +5369,9 @@ fn jet_http_devtools_publish_exception_report(request_id: &str, report: &JetErro
         }
     } else {
         for (index, frame) in report
-            .source_journey
+            .origin
             .iter()
+            .chain(&report.source_journey)
             .take(JET_DEVTOOLS_REQUEST_PANEL_MAX_SOURCE_FRAMES)
             .enumerate()
         {
@@ -6436,6 +6439,7 @@ fn jet_http_request_deadline_report(rendered: &str) -> JetErrorReport {
         typed_identity: None,
         causes: Vec::new(),
         context_frames: Vec::new(),
+        origin: None,
         source_journey: Vec::new(),
         conversion_history: Vec::new(),
         details: None,

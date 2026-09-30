@@ -24,10 +24,10 @@ fn choose() -> Int {
     return result
 }
 
-@FOLDED :: choose()
+FOLDED :: prep { choose() }
 
 fn run() {
-    print(@FOLDED)
+    print(FOLDED)
 }
 "#;
 

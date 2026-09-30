@@ -1,0 +1,19 @@
+// A task started inside `task.group` and never joined still runs to
+// completion: the group's scope end joins it before control leaves the
+// block, so the child's output lands between the owner's last line and
+// the line after the group.
+use core.time as time
+
+fn slow(value: Int) -> Int {
+    time.sleep(50ms)
+    print("slow {value} committed")
+    value
+}
+
+fn run() {
+    task.group owner {
+        pending :: task slow(9)
+        print("owner closing")
+    }
+    print("owner joined")
+}

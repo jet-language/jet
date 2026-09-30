@@ -1,0 +1,69 @@
+// `defer close(^resource)` consumes its resource when the scope exits. The
+// deferred close runs on every exit edge: falling off the end of the body, an
+// early `return`, a `break` out of a loop body, an explicit failure return, and
+// a failure propagated from a plain fallible call.
+struct Resource {
+    name: String
+}
+
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+#Error
+enum Fail {
+    Bad
+}
+
+fn plain() {
+    resource :: Resource{name: "plain"}
+    defer close(^resource)
+    print("plain body")
+}
+
+fn early(stop: Bool) -> Int {
+    resource :: Resource{name: "early"}
+    defer close(^resource)
+    if stop -> return 1
+    print("early body")
+    2
+}
+
+fn loop_break() {
+    i := 0
+    loop i < 3 {
+        resource :: Resource{name: "iteration {i}"}
+        defer close(^resource)
+        if i == 1 -> break
+        print("loop body {i}")
+        i += 1
+    }
+    print("after loop")
+}
+
+fn failing(fail: Bool) -> Int Fail! {
+    resource :: Resource{name: "failing"}
+    defer close(^resource)
+    if fail -> return Err(Fail.Bad)
+    Ok(3)
+}
+
+fn propagate() -> Int Fail! {
+    resource :: Resource{name: "propagate"}
+    defer close(^resource)
+    value :: failing(true)
+    Ok(value)
+}
+
+fn run() {
+    plain()
+    print("early {early(true)}")
+    print("early {early(false)}")
+    loop_break()
+    succeeded :: failing(false) ?? -1
+    print("failing {succeeded}")
+    failed :: failing(true) ?? -1
+    print("failing {failed}")
+    propagated :: propagate() ?? -1
+    print("propagated {propagated}")
+}

@@ -3835,7 +3835,7 @@ fn cranelift_three_way_differential_battery_inner() {
         return;
     }
 
-    // Focused stem: `JET_THREE_WAY_STEM=io/files_depth cargo test --test dev cranelift_three_way_differential_battery`
+    // Focused stem: `JET_THREE_WAY_STEM=io/files_depth cargo test --test dev_corpus cranelift_three_way_differential_battery`
     if let Ok(stem) = std::env::var("JET_THREE_WAY_STEM") {
         assert_cranelift_three_way(&example_path(&stem), &stem);
         eprintln!(

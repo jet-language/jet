@@ -1,7 +1,7 @@
 use super::super::{Diagnostic, Func, Item, MetaAttr, Parser, Span, Syntax, TokKind};
 
 const VISIBILITY_ITEM_FORMS: &str =
-    "`fn`, `struct`, `enum`, `trait`, `tag`, `module`, `protocol`, `alias`, `distinct`, or `#UnitFamily`";
+    "`fn`, `struct`, `enum`, `trait`, `tag`, `module`, `protocol`, `alias`, `distinct`, `#UnitFamily`, or `NAME :: value`";
 
 impl<'a> Parser<'a> {
     /// D-VISDEFAULT2=A: parse one top-level item after a visibility qualifier.
@@ -59,6 +59,14 @@ impl<'a> Parser<'a> {
             TokKind::Ident(_) if self.at_distinct_def() => self
                 .distinct_def(is_pub, is_package_pub)
                 .map(Item::Distinct),
+            // 3A: `pub NAME :: value` exports an immutable module binding.
+            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::ColonColon) => self
+                .module_binding_def()
+                .map(|mut constant| {
+                    constant.is_pub = is_pub;
+                    constant.is_package_pub = is_package_pub;
+                    Item::Const(constant)
+                }),
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY) => {
                 self.unit_family_def(is_pub, is_package_pub)
                     .map(Item::UnitFamily)

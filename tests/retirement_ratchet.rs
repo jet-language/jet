@@ -64,7 +64,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("core-io-println", 0),
     ("core-io-sprint", 0),
     ("core-io-repr", 0),
-    ("comptime-mark", 0),
+    ("fact-mark", 0),
     ("set-take", 0),
     ("map-replace", 0),
     ("set-replace", 0),
@@ -111,6 +111,11 @@ const CEILINGS: &[(&str, usize)] = &[
     ("core-container-bytes", 0),
     ("jet-time-now", 0),
     ("jet-time-format", 0),
+    ("operator-plus-plus", 0),
+    ("operator-minus-minus", 0),
+    ("outcome-nested-ok-pattern", 0),
+    ("comptime-constant-mark", 1),
+    ("template-name-splice-mark", 1),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "Examples", "tests", "Source"];
@@ -208,21 +213,26 @@ const FAILURE_RETIREMENT_CEILING: usize = 0;
 
 /// The failure retirement covers source-shaped documentation and generated
 /// `.jet` trees too. Unlike the older adoption rows, this walk keeps hidden
-/// `.jet` directories and skips only external/build state.
+/// `.jet` directories and skips only external/build state. The Tower board
+/// (`Tools/tower/.tower`, over a gigabyte of JSON card state and backups) and
+/// gauntlet run output (`Tools/gauntlet/results`) are tracker data, not
+/// source; scanning them blows the suite budget.
 fn failure_surface_skip_dir(path: &Path) -> bool {
-    path.components().any(|component| {
-        let std::path::Component::Normal(name) = component else {
-            return false;
-        };
-        let name = name.to_string_lossy();
-        name == ".git"
-            || name == ".claude"
-            || name == ".agent-worktrees"
-            || name == ".opencode"
-            || name == "node_modules"
-            || name == "build"
-            || name.starts_with("target")
-    })
+    path.starts_with("Tools/gauntlet/results")
+        || path.components().any(|component| {
+            let std::path::Component::Normal(name) = component else {
+                return false;
+            };
+            let name = name.to_string_lossy();
+            name == ".git"
+                || name == ".claude"
+                || name == ".agent-worktrees"
+                || name == ".opencode"
+                || name == ".tower"
+                || name == "node_modules"
+                || name == "build"
+                || name.starts_with("target")
+        })
 }
 
 fn walk_failure_surface(root: &Path, out: &mut Vec<PathBuf>) {
@@ -364,6 +374,18 @@ fn failure_embedded_fragments(text: &str) -> Vec<FailureSourceFragment> {
     let bytes = text.as_bytes();
     let mut fragments = Vec::new();
     let mut cursor = 0;
+    // Fragments are found in increasing offset order, so line numbers are
+    // counted incrementally instead of rescanning the prefix per fragment.
+    let mut counted_to = 0;
+    let mut line = 1;
+    let mut line_at = |offset: usize| {
+        line += bytes[counted_to..offset]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count();
+        counted_to = offset;
+        line
+    };
     while cursor < bytes.len() {
         if bytes[cursor] == b'r' {
             let mut quote = cursor + 1;
@@ -382,11 +404,7 @@ fn failure_embedded_fragments(text: &str) -> Vec<FailureSourceFragment> {
                 let source = &text[content_start..content_end];
                 if failure_looks_like_jet(source) {
                     fragments.push(FailureSourceFragment {
-                        first_line: text[..cursor]
-                            .bytes()
-                            .filter(|byte| *byte == b'\n')
-                            .count()
-                            + 1,
+                        first_line: line_at(cursor),
                         source: source.to_string(),
                     });
                 }
@@ -410,11 +428,7 @@ fn failure_embedded_fragments(text: &str) -> Vec<FailureSourceFragment> {
                 let source = &text[content_start..end];
                 if failure_looks_like_jet(source) {
                     fragments.push(FailureSourceFragment {
-                        first_line: text[..cursor]
-                            .bytes()
-                            .filter(|byte| *byte == b'\n')
-                            .count()
-                            + 1,
+                        first_line: line_at(cursor),
                         source: source.to_string(),
                     });
                 }
@@ -1036,10 +1050,21 @@ fn writes_interpolation_selector(text: &str, retired: bool) -> bool {
     scan(&tokens, retired)
 }
 
-fn has_retired_comptime_mark(tokens: &[jet::Lexer::Token]) -> bool {
-    for token in tokens {
-        if matches!(&token.kind, jet::Lexer::TokKind::Dollar) {
-            return true;
+/// D-COMPILER-NS1=A: a retired `@` fact read (`T.@layout`) or fact root
+/// (`@build`, `@PHASE`). `.@name` splices of a compile-time name that is not
+/// a registered fact stay with D-NAME-SPLICE1 and are not counted.
+fn has_retired_fact_mark(tokens: &[jet::Lexer::Token]) -> bool {
+    for (index, token) in tokens.iter().enumerate() {
+        if let jet::Lexer::TokKind::Ident(name) = &token.kind {
+            if let Some(rest) = name.strip_prefix(jet::Syntax::RETIRED_COMPTIME_MARK) {
+                let member = index > 0
+                    && matches!(tokens[index - 1].kind, jet::Lexer::TokKind::Dot)
+                    && jet::Syntax::fact_read_kind(&format!("{}{rest}", jet::Syntax::COMPTIME_MARK))
+                        .is_some();
+                if member || jet::Syntax::retired_fact_spelling(name).is_some() {
+                    return true;
+                }
+            }
         }
         let jet::Lexer::TokKind::Str(parts) = &token.kind else {
             continue;
@@ -1048,12 +1073,44 @@ fn has_retired_comptime_mark(tokens: &[jet::Lexer::Token]) -> bool {
             let jet::Lexer::StrTokPart::Interp(inner) = part else {
                 continue;
             };
-            if has_retired_comptime_mark(inner) {
+            if has_retired_fact_mark(inner) {
                 return true;
             }
         }
     }
     false
+}
+
+/// D-INCR1 retired: a `++` or `--` token written as a step. `--[` is the
+/// retired effect arrow, a different row's spelling, so it is not counted.
+fn writes_step_token(tokens: &[jet::Lexer::Token], plus: bool) -> bool {
+    tokens.iter().enumerate().any(|(index, token)| {
+        let step = if plus {
+            matches!(token.kind, jet::Lexer::TokKind::PlusPlus)
+        } else {
+            matches!(token.kind, jet::Lexer::TokKind::MinusMinus)
+                && !matches!(
+                    tokens.get(index + 1).map(|next| &next.kind),
+                    Some(jet::Lexer::TokKind::LBracket)
+                )
+        };
+        step || match &token.kind {
+            jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| {
+                matches!(part, jet::Lexer::StrTokPart::Interp(inner) if writes_step_token(inner, plus))
+            }),
+            _ => false,
+        }
+    })
+}
+
+fn writes_compound_step(tokens: &[jet::Lexer::Token], plus: bool) -> bool {
+    tokens.iter().any(|token| {
+        if plus {
+            matches!(token.kind, jet::Lexer::TokKind::PlusEq)
+        } else {
+            matches!(token.kind, jet::Lexer::TokKind::MinusEq)
+        }
+    })
 }
 
 fn tally_collection_example(
@@ -1263,7 +1320,7 @@ fn tally(row: &Retirement) -> (usize, usize) {
             }
             (retired, canonical)
         }
-        "comptime-mark" => {
+        "fact-mark" => {
             let mut retired = 0;
             let mut canonical = 0;
             for path in content_files() {
@@ -1275,7 +1332,7 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if !lex_diags.is_empty() {
                     continue;
                 }
-                let old = has_retired_comptime_mark(&tokens);
+                let old = has_retired_fact_mark(&tokens);
                 let current = tokens.iter().any(|token| {
                     matches!(&token.kind, jet::Lexer::TokKind::Ident(name) if name.starts_with(jet::Syntax::COMPTIME_MARK))
                 });
@@ -1378,6 +1435,24 @@ fn tally(row: &Retirement) -> (usize, usize) {
             }
             (retired, canonical)
         }
+        "operator-plus-plus" | "operator-minus-minus" => {
+            let plus = row.id == "operator-plus-plus";
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if !path.extension().is_some_and(|ext| ext == "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                let (tokens, _) = jet::Lexer::lex(&text);
+                if writes_step_token(&tokens, plus) {
+                    retired += 1;
+                } else if writes_compound_step(&tokens, plus) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
         "jet-time-now" | "jet-time-format" => {
             let files = content_files();
             let count = |needle: &str| {
@@ -1400,6 +1475,74 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if writes_effect_spelling(&text, row.retired) {
                     retired += 1;
                 } else if writes_effect_spelling(&text, row.canonical) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "outcome-nested-ok-pattern" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if !path.extension().is_some_and(|ext| ext == "jet") {
+                    continue;
+                }
+                // The E0392 registry row names the retired form it refuses.
+                if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if text.contains(".Ok(.Val(") || text.contains(".Ok(.None)") {
+                    retired += 1;
+                } else if text.contains(".Val(") && text.contains(".None") && text.contains(".Err(") {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "comptime-constant-mark" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if !path.extension().is_some_and(|ext| ext == "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                let (tokens, _) = jet::Lexer::lex(&text);
+                let declares = |marked: bool| {
+                    tokens.windows(2).any(|pair| {
+                        matches!(&pair[0].kind, jet::Lexer::TokKind::Ident(name)
+                            if marked == name.starts_with('@')
+                                && name.trim_start_matches('@').chars().any(char::is_uppercase)
+                                && !name.trim_start_matches('@').chars().any(char::is_lowercase))
+                            && matches!(pair[1].kind, jet::Lexer::TokKind::ColonColon)
+                    })
+                };
+                if declares(true) {
+                    retired += 1;
+                } else if declares(false) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "template-name-splice-mark" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if !path.extension().is_some_and(|ext| ext == "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                let (tokens, lex_diags) = jet::Lexer::lex(&text);
+                let spliced = tokens.windows(2).any(|pair| {
+                    matches!(pair[0].kind, jet::Lexer::TokKind::KwFn | jet::Lexer::TokKind::KwImpl)
+                        && matches!(&pair[1].kind, jet::Lexer::TokKind::Ident(name)
+                            if name.starts_with(jet::Syntax::COMPTIME_MARK))
+                });
+                if lex_diags.iter().any(|diag| diag.code == "E0388") {
+                    retired += 1;
+                } else if spliced {
                     canonical += 1;
                 }
             }

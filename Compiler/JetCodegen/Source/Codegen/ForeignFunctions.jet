@@ -66,13 +66,13 @@ fn jet_codegen_inline_assembly_identity_push_bytes(fields: &[JetCodegenForeignAr
 }
 
 fn jet_codegen_inline_assembly_identity_push(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: String) Never! {
-    jet_codegen_inline_assembly_identity_push_bytes(fields, name, value.bytes())
+    jet_codegen_inline_assembly_identity_push_bytes(&fields, name, value.bytes())
 }
 
 fn jet_codegen_inline_assembly_identity_push_flag(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: Bool) Never! {
     encoded := [U8]{}
     &encoded.push(if value -> U8{1} else -> U8{0})
-    jet_codegen_inline_assembly_identity_push_bytes(fields, name, encoded)
+    jet_codegen_inline_assembly_identity_push_bytes(&fields, name, encoded)
 }
 fn jet_codegen_inline_assembly_access_identity(convention: AccessConvention) -> String Never! {
     if convention == {

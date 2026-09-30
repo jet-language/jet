@@ -35,19 +35,19 @@ pub struct JetSizeConstraint {
 /// real ARIA-style role set — mirrors the four Phase-4 starter components
 /// (Button, Input, Label, Container) rather than the full ARIA taxonomy.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum JetAriaRole {
+pub enum JetUiAriaRole {
     Button,
     TextInput,
     Label,
     Container,
 }
 
-impl JetAriaRole {
+impl JetUiAriaRole {
     /// Interactive roles are keyboard-focusable and need a real accessible
     /// label (E2930); `Label`/`Container` are structural/static, never
     /// focused.
     pub fn is_interactive(&self) -> bool {
-        matches!(self, JetAriaRole::Button | JetAriaRole::TextInput)
+        matches!(self, JetUiAriaRole::Button | JetUiAriaRole::TextInput)
     }
 }
 
@@ -68,7 +68,7 @@ pub struct JetUiNode {
     pub width: f64,
     pub height: f64,
     /// D-A11YGATE1=B: `None` = decorative/non-interactive node.
-    pub role: Option<JetAriaRole>,
+    pub role: Option<JetUiAriaRole>,
     /// D-FOUND-PLATFORM1=A: optional host-facing accessibility metadata.
     /// The metadata stays on this canonical node so hosts project facts by
     /// stable node identity without constructing a second UI tree.
@@ -320,7 +320,7 @@ pub fn jet_ui_text_input(
     ime: JetUiImeMode,
 ) -> JetUiNode {
     let mut node =
-        jet_ui_node_role(state, state.chars().count() as f64, 1.0, JetAriaRole::TextInput);
+        jet_ui_node_role(state, state.chars().count() as f64, 1.0, JetUiAriaRole::TextInput);
     node.kind = JetUiNodeKind::TextInput;
     node.ime = Some(ime);
     node
@@ -1459,7 +1459,7 @@ fn jet_ui_measure_tree(node: &JetUiNode, constraint: JetSizeConstraint) -> JetSi
 }
 
 fn jet_ui_collect_focus(node: &JetUiNode, out: &mut Vec<JetUiNode>) {
-    if node.role.as_ref().is_some_and(JetAriaRole::is_interactive) {
+    if node.role.as_ref().is_some_and(JetUiAriaRole::is_interactive) {
         out.push(node.clone());
     }
     for child in &node.children {
@@ -2081,7 +2081,7 @@ pub fn jet_ui_node(label: &str, width: f64, height: f64) -> JetUiNode {
 /// D-A11YGATE1=B (c134 Phase 6): construct a `UiNode` with an explicit
 /// accessible role — the entry point for interactive controls that
 /// `jet lint --a11y` checks (E2930 unlabeled control, E2931 duplicate label).
-pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetAriaRole) -> JetUiNode {
+pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetUiAriaRole) -> JetUiNode {
     JetUiNode {
         label: label.to_string(),
         width,
@@ -2091,9 +2091,9 @@ pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetAriaRole)
         ime: None,
         color: None,
         style: None,
-        kind: if role == JetAriaRole::Button {
+        kind: if role == JetUiAriaRole::Button {
             JetUiNodeKind::Button
-        } else if role == JetAriaRole::TextInput {
+        } else if role == JetUiAriaRole::TextInput {
             JetUiNodeKind::TextInput
         } else {
             JetUiNodeKind::Custom
@@ -2116,7 +2116,7 @@ pub fn jet_ui_node_color(label: &str, width: f64, height: f64, color: &str) -> J
         height,
         // A styled node still presents text. Keep that semantic in the
         // canonical tree so every backend exposes the same accessible name.
-        role: Some(JetAriaRole::Label),
+        role: Some(JetUiAriaRole::Label),
         accessibility: None,
         ime: None,
         color: Some(color.to_string()),
@@ -2142,7 +2142,7 @@ pub fn jet_ui_text(text: &str) -> JetUiNode {
         label: text.to_string(),
         width: jet_tui_display_width(text) as f64,
         height: 1.0,
-        role: Some(JetAriaRole::Label),
+        role: Some(JetUiAriaRole::Label),
         accessibility: None,
         ime: None,
         color: None,
@@ -2161,7 +2161,7 @@ pub fn jet_ui_button(label: &str) -> JetUiNode {
         label: label.to_string(),
         width: jet_tui_display_width(label) as f64 + 4.0,
         height: 1.0,
-        role: Some(JetAriaRole::Button),
+        role: Some(JetUiAriaRole::Button),
         accessibility: None,
         ime: None,
         color: None,
@@ -2220,7 +2220,7 @@ pub fn jet_ui_box(children: Vec<JetUiNode>) -> JetUiNode {
         label: String::new(),
         width,
         height,
-        role: Some(JetAriaRole::Container),
+        role: Some(JetUiAriaRole::Container),
         accessibility: None,
         ime: None,
         color: None,
@@ -2405,20 +2405,20 @@ pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: &str) {
     }
 }
 
-pub fn jet_ui_aria_role_button() -> JetAriaRole {
-    JetAriaRole::Button
+pub fn jet_ui_aria_role_button() -> JetUiAriaRole {
+    JetUiAriaRole::Button
 }
 
-pub fn jet_ui_aria_role_text_input() -> JetAriaRole {
-    JetAriaRole::TextInput
+pub fn jet_ui_aria_role_text_input() -> JetUiAriaRole {
+    JetUiAriaRole::TextInput
 }
 
-pub fn jet_ui_aria_role_label() -> JetAriaRole {
-    JetAriaRole::Label
+pub fn jet_ui_aria_role_label() -> JetUiAriaRole {
+    JetUiAriaRole::Label
 }
 
-pub fn jet_ui_aria_role_container() -> JetAriaRole {
-    JetAriaRole::Container
+pub fn jet_ui_aria_role_container() -> JetUiAriaRole {
+    JetUiAriaRole::Container
 }
 
 pub fn jet_ui_key_event(code: &str) -> JetInputEvent {
@@ -2463,13 +2463,13 @@ impl JetShow for JetEventResult {
     }
 }
 
-impl JetShow for JetAriaRole {
+impl JetShow for JetUiAriaRole {
     fn jet_show(&self) -> String {
         match self {
-            JetAriaRole::Button => "Button".to_string(),
-            JetAriaRole::TextInput => "TextInput".to_string(),
-            JetAriaRole::Label => "Label".to_string(),
-            JetAriaRole::Container => "Container".to_string(),
+            JetUiAriaRole::Button => "Button".to_string(),
+            JetUiAriaRole::TextInput => "TextInput".to_string(),
+            JetUiAriaRole::Label => "Label".to_string(),
+            JetUiAriaRole::Container => "Container".to_string(),
         }
     }
 }
@@ -2519,8 +2519,8 @@ mod ui_backend_tests {
     #[test]
     fn focus_group_tab_cycles_and_wraps() {
         let backend = JetNullBackend::new();
-        let save = jet_ui_node_role("Save", 40.0, 10.0, JetAriaRole::Button);
-        let cancel = jet_ui_node_role("Cancel", 40.0, 10.0, JetAriaRole::Button);
+        let save = jet_ui_node_role("Save", 40.0, 10.0, JetUiAriaRole::Button);
+        let cancel = jet_ui_node_role("Cancel", 40.0, 10.0, JetUiAriaRole::Button);
         assert_eq!(backend.focused_label(), "");
 
         backend.set_focus_group(vec![save, cancel]);
@@ -2541,10 +2541,10 @@ mod ui_backend_tests {
 
     #[test]
     fn aria_role_button_is_interactive_label_is_not() {
-        assert!(JetAriaRole::Button.is_interactive());
-        assert!(JetAriaRole::TextInput.is_interactive());
-        assert!(!JetAriaRole::Label.is_interactive());
-        assert!(!JetAriaRole::Container.is_interactive());
+        assert!(JetUiAriaRole::Button.is_interactive());
+        assert!(JetUiAriaRole::TextInput.is_interactive());
+        assert!(!JetUiAriaRole::Label.is_interactive());
+        assert!(!JetUiAriaRole::Container.is_interactive());
     }
 
     // D-WEB-CLICK-PORT1=D / D-UI-EVT-DISP1=E: paint binds identity→slot; dispatch runs it.
@@ -2575,7 +2575,7 @@ mod ui_backend_tests {
     fn accessibility_attachment_projects_by_stable_identity() {
         let mut node = jet_ui_button("Save");
         assert_eq!(node.accessibility, None);
-        assert_eq!(node.role, Some(JetAriaRole::Button));
+        assert_eq!(node.role, Some(JetUiAriaRole::Button));
 
         let metadata = JetUiAccessibility::new(Some("Save note"), Some("Writes the current note"))
             .unwrap()

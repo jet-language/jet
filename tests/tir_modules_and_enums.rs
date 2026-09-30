@@ -817,9 +817,9 @@ fn comptime_if_selected_branch() {
         return;
     }
     let src = "\
-@DEBUG :: false
+DEBUG :: prep { false }
 fn pick(x: Int) -> Int {
-    prep if @DEBUG {
+    prep if DEBUG {
         return x + 100
     } else {
         return x + 1

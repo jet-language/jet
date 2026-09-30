@@ -1,0 +1,65 @@
+// A bare `None` has no payload to show its type, so it takes the optional type
+// of the place it flows into: a parameter, or a variant payload field. The
+// `T?{None}` head names that type itself. Each form below passes an absent
+// value of a user enum, a struct, and a String option.
+enum Shape {
+    Circle(r: Int)
+    Square(side: Int)
+}
+
+struct Point {
+    x: Int
+}
+
+enum Slot {
+    Holds(shape: Shape?)
+    Tagged(Point?)
+    Empty
+}
+
+fn area(s: Shape?) -> Int {
+    if s == {
+        .Val(.Circle(r)) -> 3 * r * r
+        .Val(.Square(side)) -> side * side
+        .None -> 0
+    }
+}
+
+fn x_of(p: Point?) -> Int {
+    if p == {
+        .Val(point) -> point.x
+        .None -> -1
+    }
+}
+
+fn length(text: String?) -> Int {
+    if text == {
+        .Val(value) -> value.len()
+        .None -> -1
+    }
+}
+
+fn describe(slot: Slot) -> String {
+    if slot == {
+        .Holds(.Val(shape)) -> "holds area {area(Val(shape))}"
+        .Holds(.None) -> "holds nothing"
+        .Tagged(.Val(point)) -> "tagged {point.x}"
+        .Tagged(.None) -> "untagged"
+        .Empty -> "empty"
+    }
+}
+
+fn run() {
+    print(area(None))
+    print(area(Shape?{None}))
+    print(area(Val(Shape.Square{side: 3})))
+    print(x_of(None))
+    print(x_of(Point?{None}))
+    print(length(None))
+    print(length(Val("jet")))
+    print(describe(Slot.Holds{shape: None}))
+    print(describe(Slot.Holds{shape: Val(Shape.Circle{r: 2})}))
+    print(describe(Slot.Tagged(None)))
+    print(describe(Slot.Tagged(Val(Point{x: 7}))))
+    print(describe(Slot.Empty))
+}

@@ -63,7 +63,7 @@ fn undeclared_checked_text_block_reports_one_registered_error() {
 #[test]
 fn declared_block_receives_the_whole_nested_region() {
     let source = r#"
-marker Check(@sites: [.Block]) {
+marker Check($sites: [.Block]) {
     if !target.contains("after") {
         reject(
             code: "E0927",

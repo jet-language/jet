@@ -3,20 +3,20 @@
 // engine for an answer: only `#Layout(c)` and `#Layout(columnar)` declarations
 // receive concrete aggregate facts.
 
-@JET_TARGET_LAYOUT_FACT_VERSION :: "layout-facts-v2"
+JET_TARGET_LAYOUT_FACT_VERSION :: prep { "layout-facts-v2" }
 
-@JET_LAYOUT_U64_MAX :: 0xffffffffffffffff
+JET_LAYOUT_U64_MAX :: prep { 0xffffffffffffffff }
 
-@JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX :: 1048576
+JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX :: prep { 1048576 }
 
 // Every portable alignment boundary is an exact power of two. The target
 // profile may prove a narrower set, but a portable declaration cannot exceed
 // this baseline unless it opts into target alignment mode.
-@JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE :: [Int]{
+JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE :: prep { [Int]{
     1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
     1024, 2048, 4096, 8192, 16384, 32768, 65536,
     131072, 262144, 524288, 1048576
-}
+} }
 
 // Size, alignment, and repeated-element stride for one physical value.
 pub struct ByteLayout {
@@ -135,7 +135,7 @@ pub fn jet_target_layout_support_unknown() -> MirLayoutSupportFacts Never! {
 fn jet_target_layout_support_exact(triple: String, address_bound: Int) -> MirLayoutSupportFacts Never! {
     MirLayoutSupportFacts{
         proven: true,
-        alignments: @JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE,
+        alignments: JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE,
         max_size: Val(address_bound),
         max_address: Val(address_bound),
         abi: None,
@@ -200,12 +200,12 @@ pub fn jet_target_layout_pointer_size(triple: String) -> Int Never! {
 
 fn jet_target_layout_from_triple_and_version(triple: String, package_version: String) -> JetTargetLayout Never! {
     pointer_size :: jet_target_layout_pointer_size(triple)
-    address_bound :: if pointer_size <= 4 -> 0xffffffff else -> @JET_LAYOUT_U64_MAX
+    address_bound :: if pointer_size <= 4 -> 0xffffffff else -> JET_LAYOUT_U64_MAX
     unknown :: jet_target_layout_support_unknown()
     support :: if jet_target_layout_known_triple(triple) -> jet_target_layout_support_exact(triple, address_bound) else -> unknown
     foreign :: jet_target_layout_support_with_abi(support, "C")
     layout_facts :: MirLayoutCapabilityFacts{
-        fact_version: @JET_TARGET_LAYOUT_FACT_VERSION,
+        fact_version: JET_TARGET_LAYOUT_FACT_VERSION,
         target_profile: triple,
         execution_modes: [String]{"aot"},
         backend: "jet-codegen",
@@ -302,13 +302,13 @@ pub fn jet_target_layout_cache_identity(facts: MirLayoutCapabilityFacts) -> Stri
     jet_target_layout_frame_support(&bytes, facts.global_placement)
     jet_target_layout_frame_support(&bytes, facts.heap_allocator)
     jet_target_layout_frame_support(&bytes, facts.foreign_by_value_abi)
-    "{@JET_TARGET_LAYOUT_FACT_VERSION}:{mir_sha256_hex_bytes(bytes)}"
+    "{JET_TARGET_LAYOUT_FACT_VERSION}:{mir_sha256_hex_bytes(bytes)}"
 }
 
 pub fn jet_target_layout_check_alignment(target: JetTargetLayout, requested: Int, natural: Int, target_mode: Bool) -> JetLayoutAlignmentResult Never! {
     if requested == 0 -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.Zero}
     if !jet_layout_is_power_of_two(requested) -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.NotPowerOfTwo{requested: requested}}
-    if !target_mode && requested > @JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.PortableBaseline{requested: requested, baseline: @JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX}}
+    if !target_mode && requested > JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.PortableBaseline{requested: requested, baseline: JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX}}
     if !target.facts.type_representation.proven -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.MissingTypeFacts{profile: target.facts.target_profile}}
     effective :: if natural > requested -> natural else -> requested
     if !jet_target_layout_supports_alignment(target.facts.type_representation, effective) -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.Unsupported{requested: requested, effective: effective, profile: target.facts.target_profile}}
@@ -868,20 +868,20 @@ fn jet_layout_is_power_of_two(value: Int) -> Bool Never! {
 }
 
 fn jet_layout_checked_add(left: Int, right: Int) -> Int? {
-    if left < 0 || right < 0 || left > @JET_LAYOUT_U64_MAX || right > @JET_LAYOUT_U64_MAX -> return None
-    if left > @JET_LAYOUT_U64_MAX - right -> return None
+    if left < 0 || right < 0 || left > JET_LAYOUT_U64_MAX || right > JET_LAYOUT_U64_MAX -> return None
+    if left > JET_LAYOUT_U64_MAX - right -> return None
     Val(left + right)
 }
 
 fn jet_layout_checked_mul(left: Int, right: Int) -> Int? {
-    if left < 0 || right < 0 || left > @JET_LAYOUT_U64_MAX || right > @JET_LAYOUT_U64_MAX -> return None
+    if left < 0 || right < 0 || left > JET_LAYOUT_U64_MAX || right > JET_LAYOUT_U64_MAX -> return None
     if left == 0 || right == 0 -> return Val(0)
-    if left > @JET_LAYOUT_U64_MAX /% right -> return None
+    if left > JET_LAYOUT_U64_MAX /% right -> return None
     Val(left * right)
 }
 
 fn jet_layout_align_up(value: Int, alignment: Int) -> Int? {
-    if value < 0 || value > @JET_LAYOUT_U64_MAX || alignment < 0 || alignment > @JET_LAYOUT_U64_MAX -> return None
+    if value < 0 || value > JET_LAYOUT_U64_MAX || alignment < 0 || alignment > JET_LAYOUT_U64_MAX -> return None
     effective :: if alignment < 1 -> 1 else -> alignment
     padding :: jet_layout_checked_add(value, effective - 1) ?? return None
     Val((padding /% effective) * effective)

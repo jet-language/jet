@@ -717,6 +717,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         false,
         None,
         None,
+        false,
     )
     .map(|output| output.compile)
 }
@@ -796,6 +797,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         false,
         None,
         None,
+        false,
     )
     .map(|output| output.compile)
 }
@@ -985,6 +987,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
         false,
         None,
         None,
+        false,
     )
     .map(|output| output.compile)
 }
@@ -1048,6 +1051,7 @@ pub fn prepare_programmable_build_front_end_scoped(
         package_scope,
         build_override,
         None,
+        false,
     )
 }
 
@@ -1062,10 +1066,12 @@ pub fn prepare_programmable_build_front_end_scoped_with_entry(
     package_scope: bool,
     build_override: bool,
     entry_fn: Option<&str>,
+    artifact_build: bool,
 ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
     let inputs = Driver::FrontEndInputs {
         file: file.to_string(),
         profile: profile.to_string(),
+        artifact_build,
         setting_overrides: setting_overrides.clone(),
         locked,
         web_target,
@@ -1096,12 +1102,14 @@ pub fn prepare_programmable_build_front_end_scoped_with_entry_with_overlay(
     package_scope: bool,
     build_override: bool,
     entry_fn: Option<&str>,
+    artifact_build: bool,
     source_path: &std::path::Path,
     source: &str,
 ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
     let inputs = Driver::FrontEndInputs {
         file: file.to_string(),
         profile: profile.to_string(),
+        artifact_build,
         setting_overrides: setting_overrides.clone(),
         locked,
         web_target,
@@ -1133,11 +1141,13 @@ pub fn prepare_programmable_build_front_end_scoped_with_entry_with_source_closur
     package_scope: bool,
     build_override: bool,
     entry_fn: Option<&str>,
+    artifact_build: bool,
     source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
     let inputs = Driver::FrontEndInputs {
         file: file.to_string(),
         profile: profile.to_string(),
+        artifact_build,
         setting_overrides: setting_overrides.clone(),
         locked,
         web_target,
@@ -1208,6 +1218,7 @@ pub fn check_programmable_build_for_tier(
                 plugin_target: false,
                 cross_target: None,
                 profile: profile.to_string(),
+                artifact_build: false,
                 application_authority: None,
                 setting_overrides: setting_overrides.clone(),
                 remote: None,
@@ -1258,6 +1269,7 @@ pub fn check_project_build_for_tier(
         true,
         None,
         None,
+        false,
     )?;
     Ok(Some(output))
 }
@@ -1284,6 +1296,7 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
     entry_fn: Option<&str>,
     without_codegen: bool,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    artifact_build: bool,
 ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
@@ -1306,6 +1319,7 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
         false,
         None,
         application_authority,
+        artifact_build,
     )
 }
 /// Compile a programmable build from an authority-selected source snapshot.
@@ -1353,6 +1367,7 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
         false,
         Some((source_path, source)),
         None,
+        false,
     )
 }
 
@@ -1377,6 +1392,7 @@ fn compile_programmable_build_opts_inner(
     project_check: bool,
     overlay: Option<(&std::path::Path, &str)>,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    artifact_build: bool,
 ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -1414,6 +1430,7 @@ fn compile_programmable_build_opts_inner(
                 build_override,
                 project_check,
                 application_authority,
+                artifact_build,
                 checked_workspace,
             );
         }
@@ -1432,6 +1449,7 @@ fn compile_programmable_build_opts_inner(
                         package_scope,
                         build_override,
                         entry_fn,
+                        artifact_build,
                         source_path,
                         source,
                     )?,
@@ -1446,6 +1464,7 @@ fn compile_programmable_build_opts_inner(
                     package_scope,
                     build_override,
                     entry_fn,
+                    artifact_build,
                 )?,
             });
         }
@@ -1467,6 +1486,7 @@ fn compile_programmable_build_opts_inner(
             plugin_target,
             cross_target: cross_target.map(str::to_string),
             profile: profile.to_string(),
+            artifact_build,
             application_authority: application_authority.cloned(),
             setting_overrides: setting_overrides.clone(),
             remote,
@@ -1515,6 +1535,7 @@ fn compile_workspace_build_opts(
     build_override: bool,
     project_check: bool,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    artifact_build: bool,
     checked_workspace: (
         jet_driver::Authority::AuthorityResolver,
         jetpack::WorkspaceFile::WorkspaceSource,
@@ -1595,6 +1616,7 @@ fn compile_workspace_build_opts(
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
                 profile: profile.to_string(),
+                artifact_build,
                 application_authority: None,
                 setting_overrides: BTreeMap::new(),
                 remote: remote.clone(),
@@ -1684,6 +1706,7 @@ fn compile_workspace_build_opts(
             plugin_target,
             cross_target: cross_target.map(str::to_string),
             profile: profile.to_string(),
+            artifact_build,
             application_authority: application_authority.cloned(),
             setting_overrides: setting_overrides.clone(),
             remote,

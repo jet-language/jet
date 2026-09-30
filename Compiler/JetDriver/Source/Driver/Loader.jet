@@ -1,6 +1,6 @@
 // In-memory source closure loader. Filesystem authority and provider access stay
 // with their adapters; this stage only resolves the checked source collection.
-@JET_DRIVER_LATEST_EDITION :: "2028"
+JET_DRIVER_LATEST_EDITION :: prep { "2028" }
 
 struct JetDriverFilePath {
     path: String
@@ -88,7 +88,7 @@ fn jet_driver_authority_diagnostic(span: Span, detail: String) -> Diagnostic {
 }
 
 fn jet_driver_is_ui_capability(name: String) -> Bool Never! {
-    loop call in @CORE_CALLS {
+    loop call in CORE_CALLS {
         loop capability in call.ui_capabilities {
             if capability == name -> return true
         }
@@ -671,7 +671,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
             &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains a retired package manifest", "package identity is read only from the canonical package.jet manifest", "replace the retired manifest with package.jet"))
         }
         identity :: "source-root:{root.canonical_path.len()}:{root.canonical_path}"
-        return JetDriverPackageInfo{root_index: root_index, identity: identity, name: "", version: "", edition: @JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MirAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, dependencies: [JetDriverPackageDependency]{}}
+        return JetDriverPackageInfo{root_index: root_index, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MirAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, dependencies: [JetDriverPackageDependency]{}}
     }
     if retired_manifest {
         &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
@@ -685,7 +685,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     tokens :: lexed.tokens
     name := ""
     version := ""
-    edition := @JET_DRIVER_LATEST_EDITION
+    edition := JET_DRIVER_LATEST_EDITION
     runtime_ceiling := None
     allocator_policy := MirAllocatorPolicy.HostedDefault
     authority_allow := None
@@ -1398,7 +1398,23 @@ fn jet_driver_module_reaches(imports: [SemaRegistrationImportEdge], start: Strin
     false
 }
 
+// A loose source root has no package manifest (`jet_driver_parse_package_root`
+// gives it a `source-root:` identity). Only loose files may import by a path
+// that walks up with `..`; inside a package, file imports stay in its tree.
+fn jet_driver_unit_is_loose(unit: JetDriverSourceUnit) -> Bool Never! {
+    unit.package_identity.starts_with("source-root:")
+}
+
 fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_unit: JetDriverSourceUnit, import_path: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {
+    walks_up :: loop part in import_path.split("/") {
+        if part == ".." {
+            break true
+        }
+    } ?? false
+    if walks_up && !jet_driver_unit_is_loose(importing_unit) {
+        &diagnostics.push(jet_driver_diagnostic("E0602", span, "this import path escapes the package", "inside a package, file imports stay in the package tree — `..` works only for loose files outside any package", "use a path without `..`, or move the file inside the package tree"))
+        return None
+    }
     resolved :: jet_driver_file_import_path(importing_unit.relative_path, import_path)
     if !resolved.valid {
         &diagnostics.push(jet_driver_diagnostic("E0602", span, "this file import path escapes or is not relative to its authorized source root", "file imports may traverse parent directories only while remaining beneath the same pinned root", "use a relative file path contained by the source root"))

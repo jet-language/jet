@@ -14,7 +14,6 @@ use jet_foundation::App::{
 };
 use crate::Sema::Effects::EffectSet;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fs;
 use std::path::Path;
 
 /// Walk the entry module for the App-returning `fn run` and record the static
@@ -606,7 +605,8 @@ fn app_action_contract(
     };
     let (output_type, error_type) = match function.failure_contract() {
         crate::AST::FailureContract::Default { success, error }
-        | crate::AST::FailureContract::Explicit { success, error } => {
+        | crate::AST::FailureContract::Explicit { success, error }
+        | crate::AST::FailureContract::Inferred { success, error } => {
             (success.name(), error.name())
         }
         crate::AST::FailureContract::Optional { success } => (success.name(), "Never".to_string()),
@@ -614,7 +614,8 @@ fn app_action_contract(
         crate::AST::FailureContract::Converted { success, target, .. } => {
             (success.name(), target.name())
         }
-        crate::AST::FailureContract::ProvenUnreachable { success } => {
+        crate::AST::FailureContract::ProvenUnreachable { success }
+        | crate::AST::FailureContract::InferredNever { success } => {
             (success.name(), "Never".to_string())
         }
     };
@@ -1880,9 +1881,7 @@ fn expand_routes_from(
 }
 
 fn collect_jet_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
+    for path in jet_foundation::CheckReads::read_dir_sorted(dir)? {
         if path.is_dir() {
             collect_jet_files(root, &path, out)?;
             continue;
@@ -1929,7 +1928,7 @@ fn convention_handler(rel: &str) -> String {
 }
 
 fn convention_has_page(path: &Path) -> bool {
-    let Ok(src) = fs::read_to_string(path) else {
+    let Ok(src) = jet_foundation::CheckReads::read_to_string(path) else {
         return false;
     };
     for line in src.lines() {

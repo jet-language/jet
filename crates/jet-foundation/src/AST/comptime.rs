@@ -55,6 +55,15 @@ pub enum FailureContract {
     },
     /// The declaration proves that no reachable failure remains (`!Never`).
     ProvenUnreachable { success: Type },
+    /// #3708 (D-FAILURE-FOUNDATION1=A: "Sema removes it when impossible"):
+    /// no contract was written and sema proved the body's failure set empty.
+    /// Same carrier as `ProvenUnreachable`; only the provenance differs.
+    InferredNever { success: Type },
+    /// D-FAIL-INFER-UNION1=A: no contract was written and sema inferred the
+    /// typed failures that can reach the function. `error` is one member or
+    /// the union of every member (the general `Err` among them when an
+    /// untyped failure also reaches it).
+    Inferred { success: Type, error: Type },
 }
 
 impl FailureContract {
@@ -87,7 +96,9 @@ impl FailureContract {
     pub fn effective_type(&self) -> Type {
         match self {
             Self::DeclaredNever => Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-            Self::Default { success, error } | Self::Explicit { success, error } => Type::Result {
+            Self::Default { success, error }
+            | Self::Explicit { success, error }
+            | Self::Inferred { success, error } => Type::Result {
                 ok: Box::new(success.clone()),
                 err: Box::new(error.clone()),
             },
@@ -98,7 +109,7 @@ impl FailureContract {
                 ok: Box::new(success.clone()),
                 err: Box::new(target.clone()),
             },
-            Self::ProvenUnreachable { success } => Type::Result {
+            Self::ProvenUnreachable { success } | Self::InferredNever { success } => Type::Result {
                 ok: Box::new(success.clone()),
                 err: Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string())),
             },
@@ -121,8 +132,9 @@ impl FailureContract {
         matches!(self, Self::DeclaredNever)
     }
 
+    /// An empty failure set, written (`Never!`) or inferred.
     pub fn is_proven_unreachable(&self) -> bool {
-        matches!(self, Self::ProvenUnreachable { .. })
+        matches!(self, Self::ProvenUnreachable { .. } | Self::InferredNever { .. })
     }
 
     /// Stable human/tooling projection of where the effective failure route
@@ -140,6 +152,8 @@ impl FailureContract {
             }
             Self::DeclaredNever => "declared Never return".to_string(),
             Self::ProvenUnreachable { .. } => "explicit !Never (proven unreachable)".to_string(),
+            Self::InferredNever { .. } => "inferred: none".to_string(),
+            Self::Inferred { error, .. } => format!("inferred: {}", error.name()),
         }
     }
 }

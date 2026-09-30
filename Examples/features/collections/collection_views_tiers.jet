@@ -1,0 +1,19 @@
+// Set list views, Set equality and PriorityQueue pop agree on every tier
+// (#3811, #3816). A hash Set has no stable order, so each Set list view is
+// sorted before it is printed; a PriorityQueue pops the highest item first.
+fn run() {
+    s := Set.from([30, 10, 20])
+    items := s.to_list()
+    &items.sort()
+    print("to_list sorted: {items}")
+    vals := s.values().to_list()
+    &vals.sort()
+    print("values sorted: {vals}")
+    print("sort: {s.sort()}")
+    print("equal: {Set.from([1]).equal(Set.from([1]))}")
+    print("not equal: {Set.from([1]).equal(Set.from([2]))}")
+
+    pq := PriorityQueue.from([4, 9, 1, 7])
+    print("pq pop: {&pq.pop() ?? -1} then {&pq.pop() ?? -1}")
+    print("pq len after pops: {pq.len()}")
+}

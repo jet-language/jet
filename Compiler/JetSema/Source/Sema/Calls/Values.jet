@@ -95,7 +95,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     }
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return None
     facts :: sema_call_facts(resolved_signature, [Type]{}, resolved_binding) ?? return None
-    return_view_facts :: sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, state, span)
+    return_view_facts :: sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, &state, span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 
@@ -124,7 +124,7 @@ fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, envi
     checked_args := [CallArg]{}
     binding :: sema_call_bind_value(signature, &checked_args, span, &diagnostics) ?? return None
     facts :: sema_call_facts(signature, [Type]{}, binding) ?? return None
-    return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, scopes, state, span)
+    return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, scopes, &state, span)
     Val(SemaCallChecked{value: checked_value, binding: binding, facts: facts, return_view_facts: return_view_facts})
 }
 

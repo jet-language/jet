@@ -155,7 +155,7 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident("for a field name")?;
         // D-META-STAGE1=B: the compile-time mark rides the name, so
         // `@word` now lexes as one identifier. A field never carries it —
-        // the `@`-marked members belong to the compiler (`T.@layout`).
+        // the `@`-marked members belong to the compiler (`T.$layout`).
         if Syntax::is_comptime_name(&name) {
             return Err(Diagnostic::error(
                     "E0003",
@@ -243,10 +243,17 @@ impl<'a> Parser<'a> {
     }
 
     /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)
-    /// immediately before a comptime binding.
+    /// immediately before a constant binding.
     pub(in crate::Parser) fn at_comptime_marker(&self) -> bool {
         matches!(&self.peek().kind, TokKind::Hash)
             && self.marker_head_is_followed_by_comptime_target()
+    }
+
+    /// D-PREP-SURFACE2=A: a word that can name a module constant after a
+    /// storage marker — an ALL_CAPS name, or a retired `@name` that E0388
+    /// respells. The case says nothing about compile time.
+    pub(in crate::Parser) fn names_constant(name: &str) -> bool {
+        name.starts_with(Syntax::RETIRED_COMPTIME_MARK) || Syntax::is_constant_name(name)
     }
 
     /// D-CONST-RETIRE1 (E0146): `const` is retired — teach `comptime`, then
@@ -332,6 +339,8 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             value,
+            is_pub: false,
+            is_package_pub: false,
             meta,
             attrs: Vec::new(),
             rust_kind: crate::AST::RustConstKind::Const,
@@ -362,13 +371,18 @@ impl<'a> Parser<'a> {
         self.finish_stmt()?;
         Ok(ConstDef {
             span: Span::new(item_start, self.prev_end()),
-            name: binding.name,
+            name: binding.name.clone(),
             name_span: binding.name_span,
             value: binding.init,
+            is_pub: false,
+            is_package_pub: false,
             meta: binding.meta,
             attrs: Vec::new(),
             rust_kind: crate::AST::RustConstKind::Const,
-            is_comptime: false,
+            // D-PREP-SURFACE2=A (owner ruling, 2026-09-30): compile time is
+            // always explicit, `NAME :: prep { value }`; the name's case
+            // never implies it.
+            is_comptime: binding.is_comptime,
             ct: binding.ct,
             ty: binding.ty,
             is_persist: false,
@@ -449,6 +463,8 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             value,
+            is_pub: false,
+            is_package_pub: false,
             meta: None,
             attrs: Vec::new(),
             rust_kind: crate::AST::RustConstKind::Const,
@@ -477,6 +493,8 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             value,
+            is_pub: false,
+            is_package_pub: false,
             meta: None,
             attrs: Vec::new(),
             rust_kind: crate::AST::RustConstKind::Const,
@@ -492,8 +510,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// S57 (M9.5): `@name :: expr;` — a compile-time constant binding.
-    /// D-CONSTMARK1: optional `#Static` / `#Inline` precede `comptime`.
+    /// D-CONSTMARK1 / D-PREP-SURFACE2=A: `#Static NAME :: value` /
+    /// `#Inline NAME :: value` — a module constant under a storage marker.
+    /// As everywhere, only `NAME :: prep { value }` is evaluated while
+    /// building.
     /// D-CONST-RETIRE1: bare/`#Static`/`#Inline` `const` teaches E0146 and recovers.
     pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
         let item_start = self.peek().span.start;
@@ -521,7 +541,7 @@ impl<'a> Parser<'a> {
                         "`comptime` is retired".to_string(),
                         "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
                             .to_string(),
-                        "remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build"
+                        "remove the keyword; a build-time value is written `NAME :: prep { … }`, and `prep { … }` runs other work while building"
                             .to_string(),
                         Some(span),
                     ));
@@ -530,53 +550,68 @@ impl<'a> Parser<'a> {
                 let kw = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0146",
-                    format!("`{}` is retired — write `@`", Syntax::KW_CONST),
-                    "explicit compile-time demand is a marker on an immutable binding".to_string(),
-                    "write `@name :: …` (or `#Persist name := …` for hot-reload state)".to_string(),
+                    format!("`{}` is retired — write `NAME :: prep {{ … }}`", Syntax::KW_CONST),
+                    "a compile-time constant is an immutable binding whose value is prepared while building".to_string(),
+                    "write `NAME :: prep { … }` (or `#Persist name := …` for hot-reload state)".to_string(),
                     Some(kw.span),
                 ));
             }
             // D-META-STAGE1=B: `#Known` is retired. Recover it so the rest
-            // of the file still parses, and teach the `@` form once.
+            // of the file still parses, and teach the constant form once.
             TokKind::Hash if known => {
                 let head = self.read_marker_head()?;
                 let fix = match &self.peek().kind {
-                    TokKind::Ident(name) => format!("write `@{name} :: …`"),
-                    _ => "write the mark on the name: `@name :: …`".to_string(),
+                    TokKind::Ident(name) => format!(
+                        "write `{} :: {} {{ … }}`",
+                        Syntax::canonical_name_case(name, Syntax::NameCase::Screaming),
+                        Syntax::KW_PREP
+                    ),
+                    _ => format!("write a prepared constant: `NAME :: {} {{ … }}`", Syntax::KW_PREP),
                 };
                 self.diags.push(self.retired_known_error(head.span, fix));
             }
-            // D-META-STAGE1=B: `@name :: expr` — the mark rides the name.
-            // Additive new spelling from #1537's checkpoint; kept, not part
-            // of the B5 revert (it doesn't hard-error anything in the
-            // existing `@` corpus).
-            TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {}
+            // D-PREP-SURFACE2=A: `NAME :: expr` after `#Static` / `#Inline`;
+            // a retired `@name` recovers below and teaches E0388.
+            TokKind::Ident(ref n) if Self::names_constant(n) => {}
             _ => {
                 self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
             }
         }
-        let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
+        let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Self::names_constant(n));
         let (name, name_span) = self.expect_ident(if known || marked {
-            "after `@`"
+            "for the constant name"
         } else {
             "for the compile-time binding name"
         })?;
-        if known || marked {
-            self.expect(TokKind::ColonColon, "after the `@` name")?;
+        let retired = self.retired_const_decl_name(&name);
+        let (name, retired) = match retired {
+            Some(new) => (new, Some(name)),
+            None => (name, None),
+        };
+        let (value, prepared) = if known || marked {
+            self.expect(TokKind::ColonColon, "after the constant name")?;
+            self.binding_value(false)?
         } else {
             self.expect(TokKind::Eq, "after the retired comptime name")?;
+            (self.expr()?, true)
+        };
+        if let Some(old) = &retired {
+            self.retire_const_decl(old, &name, name_span, &value, prepared, false);
         }
-        let value = self.expr()?;
         self.finish_stmt()?;
         Ok(ConstDef {
             span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
             name,
             name_span,
             value,
+            is_pub: false,
+            is_package_pub: false,
             meta,
             attrs,
             rust_kind,
-            is_comptime: true,
+            // A retired `@NAME :: value`, `#Known` or `comptime` form
+            // recovers with its old compile-time meaning.
+            is_comptime: prepared || known || retired.is_some(),
             ct: None,
             ty: None,
             is_persist: false,

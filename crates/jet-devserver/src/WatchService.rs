@@ -158,6 +158,9 @@ impl EventWaiter {
         true
     }
 
+    /// Absorb one save burst: wait out `timeout`, draining native events.
+    /// Without a native event source the window is a plain sleep, so callers
+    /// that re-sample after coalescing never spin.
     fn coalesce(&self, timeout: Duration) {
         #[cfg(target_os = "linux")]
         if self.native.is_some() {
@@ -169,9 +172,9 @@ impl EventWaiter {
                 }
             }
             while self.receiver.try_recv().is_ok() {}
+            return;
         }
-        #[cfg(not(target_os = "linux"))]
-        let _ = timeout;
+        std::thread::sleep(timeout);
     }
 
     fn wake_handle(&self) -> WatchWake {
@@ -1578,8 +1581,9 @@ impl WatchSession {
         }
         // Coalesce one editor save burst without making every quiet wait pay a
         // fixed delay. The native event queue waits once for the bounded save
-        // burst, then the settled filesystem state is sampled.
+        // burst, then the filesystem state is sampled until it stops moving.
         self.events.coalesce(self.coalesce);
+        self.settle(&changed);
 
         // Re-sample after coalescing (atomic save / editor write settle).
         let mut settled = Vec::new();
@@ -1700,6 +1704,33 @@ impl WatchSession {
             dev_entries,
             edit_to_visible_ms,
         })
+    }
+
+    /// Wait until the changed paths' content is stable across one coalesce
+    /// window, so a rebuild never compiles a half-written save. An in-place
+    /// save truncates before it writes: a file that had content and now reads
+    /// empty keeps waiting for that write, bounded by `WATCH_SETTLE_MAX_MS`
+    /// so a deliberately emptied file still rebuilds.
+    fn settle(&self, paths: &[PathBuf]) {
+        let deadline = Instant::now() + Duration::from_millis(WATCH_SETTLE_MAX_MS);
+        let mut previous: Vec<PathStamp> = paths.iter().map(|path| PathStamp::capture(path)).collect();
+        while Instant::now() < deadline {
+            let truncated = paths.iter().zip(&previous).any(|(path, now)| {
+                now.len == Some(0)
+                    && self
+                        .graph
+                        .nodes
+                        .get(path)
+                        .and_then(|node| node.stamp.len)
+                        .is_some_and(|len| len > 0)
+            });
+            self.events.coalesce(self.coalesce);
+            let current: Vec<PathStamp> = paths.iter().map(|path| PathStamp::capture(path)).collect();
+            if current == previous && !truncated {
+                return;
+            }
+            previous = current;
+        }
     }
 
     /// Poll the shared watcher once and route only cycles containing a
@@ -2135,6 +2166,11 @@ pub const WATCH_POLL_INTERVAL_MS: u64 = 5;
 /// native event waits absorb the editor save burst without an idle sleep.
 pub const WATCH_COALESCE_MS: u64 = 4;
 
+/// Upper bound on waiting for a save's content to stop changing. A stable
+/// save settles after one extra coalesce window; only a save that is still
+/// moving (or reads empty right after a truncation) waits longer.
+pub const WATCH_SETTLE_MAX_MS: u64 = 250;
+
 /// Shared edit-to-visible budget used by browser and native matrices (ms).
 pub const EDIT_TO_VISIBLE_BUDGET_MS: u128 = 2000;
 
@@ -2462,6 +2498,32 @@ mod tests {
         session.mark_edit_started();
         let receipt = session.poll().expect("post-reconnect edit");
         assert!(within_budget(&receipt));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn in_place_save_settles_past_truncation() {
+        let dir = tmp_dir("truncate");
+        let entry = dir.join("app.jet");
+        fs::write(&entry, "fn run() {}\n").unwrap();
+        let mut session = WatchSession::open(&entry).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        // An in-place save: truncate now, write the new body a moment later.
+        let saved = "fn run() { print(\"saved\") }\n";
+        let mut file = fs::File::create(&entry).unwrap();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            file.write_all(saved.as_bytes()).unwrap();
+        });
+        let receipt = session.poll().expect("in-place save");
+        writer.join().unwrap();
+        let expected = format!(
+            "sha256-{}",
+            jet_foundation::SHA256::sha256_file_hex(&entry).unwrap()
+        );
+        assert_eq!(fs::read_to_string(&entry).unwrap(), saved);
+        assert_eq!(receipt.content_digests, vec![Some(expected)]);
+        assert!(session.poll().is_none(), "settled save must not rebuild twice");
         let _ = fs::remove_dir_all(&dir);
     }
 }

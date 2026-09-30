@@ -1,0 +1,34 @@
+// Fixed-width packers across their whole unsigned range. Values above one
+// byte keep every byte in its declared position, the largest value of each
+// width packs to all ones, and one past the width is rejected instead of
+// being truncated.
+use core.encoding.binary as binary
+
+fn be32(n: Int) {
+    bytes :: binary.pack_u32be(n) ?? {
+        print("pack_u32be({n}): rejected")
+        return
+    }
+    print("pack_u32be({n}): {bytes}")
+}
+
+fn run() {
+    be32(1)
+    be32(255)
+    be32(256)
+    be32(16777215)
+    be32(16777216)
+    be32(2147483647)
+    be32(2147483648)
+    be32(4294967295)
+    be32(4294967296)
+    print("u16le 256: {binary.pack_u16le(256) ?? [U8]{}}")
+    print("u16be 256: {binary.pack_u16be(256) ?? [U8]{}}")
+    print("u16be 65535: {binary.pack_u16be(65535) ?? [U8]{}}")
+    print("u16le 65536: {binary.pack_u16le(65536) ?? [U8]{}}")
+    print("u32le 256: {binary.pack_u32le(256) ?? [U8]{}}")
+    print("u32le 4294967295: {binary.pack_u32le(4294967295) ?? [U8]{}}")
+    print("u64be 256: {binary.pack_u64be(256) ?? [U8]{}}")
+    print("u64le 256: {binary.pack_u64le(256) ?? [U8]{}}")
+    print("u64be 4294967296: {binary.pack_u64be(4294967296) ?? [U8]{}}")
+}

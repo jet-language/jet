@@ -20,7 +20,7 @@ pub(crate) mod runtime {
 
     pub mod jet_std {
         #[derive(Clone, Debug)]
-        pub struct JetURL {
+        pub struct JetURLParts {
             pub scheme: String,
             pub username: Option<String>,
             pub password: Option<String>,
@@ -69,7 +69,7 @@ pub(crate) mod runtime {
         include!("../../jet-pkg-model/src/Prelude/NetTls.rs");
     }
 
-    pub use jet_std::{JetMIME, JetURL};
+    pub use jet_std::{JetMIME, JetURLParts};
 
     pub(crate) fn email_cancelled() -> bool {
         jet_codegen::scheduler::jet_scheduler_task_cancelled()
@@ -97,8 +97,8 @@ pub(crate) mod runtime {
         }
     }
 
-    pub fn url_parse(s: &String) -> Result<JetURL, String> {
-        JetURL::parse(s)
+    pub fn url_parse(s: &String) -> Result<JetURLParts, String> {
+        JetURLParts::parse(s)
     }
     pub fn url_from_parts(
         scheme: &String,
@@ -106,18 +106,18 @@ pub(crate) mod runtime {
         path: &String,
         query: &Vec<Vec<String>>,
         fragment: &String,
-    ) -> Result<JetURL, String> {
-        JetURL::from_parts(scheme, host, path, query, fragment)
+    ) -> Result<JetURLParts, String> {
+        JetURLParts::from_parts(scheme, host, path, query, fragment)
     }
-    pub fn url_typed_literal(literals: &Vec<String>, holes: &Vec<String>) -> JetURL {
+    pub fn url_typed_literal(literals: &Vec<String>, holes: &Vec<String>) -> JetURLParts {
         let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
-        jet_std::jet_typed_url_literal(&literal_refs, holes.clone())
+        jet_std::jet_typed_url_parts_literal(&literal_refs, holes.clone())
     }
-    pub fn url_file(path: &String) -> JetURL {
-        JetURL::file(path)
+    pub fn url_file(path: &String) -> JetURLParts {
+        JetURLParts::file(path)
     }
-    pub fn url_data(mime: &JetMIME, text: &String) -> JetURL {
-        JetURL::data(mime, text)
+    pub fn url_data(mime: &JetMIME, text: &String) -> JetURLParts {
+        JetURLParts::data(mime, text)
     }
     pub fn url_query(pairs: &Vec<Vec<String>>) -> String {
         let rows: Vec<(String, String)> = pairs
@@ -268,7 +268,7 @@ pub(crate) fn email_runtime_fns() -> jet_codegen::Comptime::EmailAdapter::Runtim
 }
 
 pub(crate) enum NetValue {
-    Url(runtime::JetURL),
+    Url(runtime::JetURLParts),
     Mime(runtime::JetMIME),
     EmailAddress(runtime::jet_email::Address),
     EmailAttachment(runtime::jet_email::Attachment),

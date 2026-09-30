@@ -95,30 +95,129 @@ pub fn digest(hasher: ^Hasher) -> String { hasher.digest() }
 
 pub struct Secret {
     pub bytes: [U8]
+
+    /// The UTF-8 bytes of `text` as secret material.
+    pub fn from_text(text: String) -> Secret { Secret{bytes: text.bytes()} }
+
+    pub fn from_bytes(bytes: [U8]) -> Secret { Secret{bytes: bytes} }
+}
+
+// Secret-bearing values wipe their bytes when they close (D-SHAPE-RESOURCE1=A).
+// The wipe consumes the byte buffer; the emptied field keeps the owner whole
+// for its own release.
+impl Secret.Close {
+    fn close(^self) {
+        secret := ^self
+        core.crypto.__zeroize(^secret.bytes)
+        secret.bytes = [U8]{}
+    }
 }
 
 pub struct SigningKey {
     pub bytes: [U8]
+
+    /// A fresh Ed25519 seed from the OS CSPRNG. There is no fallback generator.
+    pub fn new_random() -[Rand]> SigningKey CryptoError! {
+        seed :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+        Ok(SigningKey{bytes: seed})
+    }
+
+    /// An Ed25519 seed. It must be exactly 32 bytes.
+    pub fn from_bytes(bytes: [U8]) -> SigningKey CryptoError! {
+        if bytes.len() != 32 -> return Err(CryptoError.Length)
+        Ok(SigningKey{bytes: bytes})
+    }
+
+    /// The RFC 8032 public key for this seed.
+    pub fn public_key(self) -> VerifyKey Never! { VerifyKey{bytes: ed25519_public_raw(self.bytes)} }
+}
+
+impl SigningKey.Close {
+    fn close(^self) {
+        key := ^self
+        core.crypto.__zeroize(^key.bytes)
+        key.bytes = [U8]{}
+    }
 }
 
 pub struct VerifyKey {
     pub bytes: [U8]
+
+    /// An encoded Ed25519 public key. It must be exactly 32 bytes.
+    pub fn from_bytes(bytes: [U8]) -> VerifyKey CryptoError! {
+        if bytes.len() != 32 -> return Err(CryptoError.Length)
+        Ok(VerifyKey{bytes: bytes})
+    }
 }
 
 pub struct X25519SecretKey {
     pub bytes: [U8]
+
+    /// A fresh X25519 private key from the OS CSPRNG.
+    pub fn new_random() -[Rand]> X25519SecretKey CryptoError! {
+        key :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+        Ok(X25519SecretKey{bytes: key})
+    }
+
+    /// A raw X25519 private key. It must be exactly 32 bytes.
+    pub fn from_bytes(bytes: [U8]) -> X25519SecretKey CryptoError! {
+        if bytes.len() != 32 -> return Err(CryptoError.Length)
+        Ok(X25519SecretKey{bytes: bytes})
+    }
+
+    /// The RFC 7748 public key. A key that isn't 32 bytes stops with a panic;
+    /// `x25519_public` is the checked form.
+    pub fn public_key(self) -> X25519PublicKey { X25519PublicKey{bytes: x25519_scalarmult(self.bytes, x25519_base_point())} }
+}
+
+impl X25519SecretKey.Close {
+    fn close(^self) {
+        key := ^self
+        core.crypto.__zeroize(^key.bytes)
+        key.bytes = [U8]{}
+    }
 }
 
 pub struct X25519PublicKey {
     pub bytes: [U8]
+
+    /// A raw X25519 public key. It must be exactly 32 bytes.
+    pub fn from_bytes(bytes: [U8]) -> X25519PublicKey CryptoError! {
+        if bytes.len() != 32 -> return Err(CryptoError.Length)
+        Ok(X25519PublicKey{bytes: bytes})
+    }
+
+    /// Parse the Bech32m recipient text written by `text`. Anything else,
+    /// including uppercase, truncation and a bad checksum, is `KeyRejected`.
+    pub fn from_text(text: String) -> X25519PublicKey CryptoError! {
+        bytes :: x25519_recipient_decode(text) ?? return Err(CryptoError.KeyRejected)
+        Ok(X25519PublicKey{bytes: bytes})
+    }
+
+    /// Bech32m recipient text: `jetx25519` + `1` + 52 data symbols + checksum.
+    pub fn text(self) -> String Never! { x25519_recipient_encode(self.bytes) }
 }
 
 pub struct SharedSecret {
     pub bytes: [U8]
 }
 
+impl SharedSecret.Close {
+    fn close(^self) {
+        secret := ^self
+        core.crypto.__zeroize(^secret.bytes)
+        secret.bytes = [U8]{}
+    }
+}
+
 pub struct Signature {
     pub bytes: [U8]
+
+    /// An Ed25519 signature. It must be exactly 64 bytes.
+    pub fn from_bytes(bytes: [U8]) -> Signature CryptoError! {
+        if bytes.len() != 64 -> return Err(CryptoError.Length)
+        Ok(Signature{bytes: bytes})
+    }
 }
 
 pub struct Sealed {
@@ -152,13 +251,15 @@ pub struct KeyWrapError {
 pub fn sha256(bytes: [U8]) -> Digest256 Never! { {bytes: sha256_raw(bytes)} }
 
 /// SHA-224. SHA-256 with the SHA-224 IV, truncated to 28 bytes.
-pub fn sha224(bytes: [U8]) -> String { hex_encode(sha2_256(bytes, C_SHA224_IV)[0..27]) }
+pub fn sha224(bytes: [U8]) -> String { hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)) }
 
 /// SHA-1. RFC 3174. Prefer SHA-256; this exists for UUID v5 and legacy checks.
 pub fn sha1(bytes: [U8]) -> String { hex_encode(sha1_raw(bytes)) }
 
-pub fn sha384(bytes: [U8]) -> String { hex_encode(sha512_raw(bytes, C_SHA384_IV)[0..47]) }
+/// SHA-384. SHA-512 with the SHA-384 IV, truncated to 48 bytes.
+pub fn sha384(bytes: [U8]) -> String { hex_encode(slice_u8(sha512_raw(bytes, C_SHA384_IV), 0, 48)) }
 
+/// SHA-512 (FIPS 180-4).
 pub fn sha512(bytes: [U8]) -> Digest512 { {bytes: sha512_raw(bytes, C_SHA512_IV)} }
 
 /// SHA-3 (FIPS 202). Keccak-f[1600] sponge, rate 1152/1088/832/576.
@@ -265,11 +366,11 @@ pub fn seal(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Seal
             return Err(CryptoError.KeyRejected)
         }
     }
-    eph_sk :: core.crypto.random.bytes(32)
+    eph_sk :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
     eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(~eph_sk)}) ?? return Err(CryptoError.KeyRejected)
-    salt :: core.crypto.random.bytes(16)
-    nonce :: core.crypto.random.bytes(24)
-    file_key :: core.crypto.random.bytes(32)
+    salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
+    nonce :: core.crypto.random.bytes(24) ?? return Err(CryptoError.Unavailable)
+    file_key :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
     header := [U8]{}
     loop b in "JETV".bytes() -> &header.push(b)
     &header.push(U8{1})
@@ -338,7 +439,7 @@ fn open_sealed(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypto
         if index > 0 && key_order(~previous, ~current) >= 0 -> return Err(CryptoError.OpenFailed)
         previous = current
     }
-    own_public :: x25519_public(~identity) ?? return Err(CryptoError.KeyRejected)
+    own_public :: x25519_public(identity) ?? return Err(CryptoError.KeyRejected)
     stanza_index := -1
     loop index in 0..<count {
         current :: slice_u8(~raw, 82 + index * 80, 82 + index * 80 + 32)
@@ -374,8 +475,7 @@ fn open_sealed(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypto
     loop b in aad -> &payload_aad.push(b)
     nonce :: slice_u8(~raw, 58, 82)
     body :: slice_u8(~raw, len_offset + 4, raw.len())
-    opened :: xchacha_open(file_key, nonce, payload_aad, body)
-    if opened == .None -> return Err(CryptoError.OpenFailed)
+    opened :: xchacha_open(file_key, nonce, payload_aad, body) ?? return Err(CryptoError.OpenFailed)
     Ok(opened)
 }
 
@@ -459,10 +559,109 @@ pub fn x25519(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> Share
 
 pub fn x25519_public(secret_key: X25519SecretKey) -> X25519PublicKey CryptoError! {
     if secret_key.bytes.len() != 32 -> return Err(CryptoError.KeyRejected)
+    Ok(X25519PublicKey{bytes: x25519_scalarmult(secret_key.bytes, x25519_base_point())})
+}
+
+/// The RFC 7748 X25519 base point, u = 9.
+fn x25519_base_point() -> [U8] Never! {
     base := [U8]{}
-    loop i in 0..<32 -> &base.push(to_u8(0))
+    loop _ in 0..<32 -> &base.push(U8{0})
     base[0] = (U8{9})
-    Ok(X25519PublicKey{bytes: x25519_scalarmult(secret_key.bytes, base)})
+    base
+}
+
+/// Bech32m generator polymod (BIP 350).
+fn bech32_polymod(values: [Int]) -> Int Never! {
+    generators :: [Int]{0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3}
+    chk := 1
+    loop v in values {
+        top :: chk >> 25
+        chk = ((chk & 0x1ffffff) << 5) ~| v
+        loop i in 0..<5 {
+            if ((top >> i) & 1) == 1 -> chk = chk ~| generators[i]
+        }
+    }
+    chk
+}
+
+fn bech32_hrp_expand(hrp: String) -> [Int] Never! {
+    raw :: hrp.bytes()
+    out := [Int]{}
+    loop b in raw -> &out.push(Int.from_u8(b) >> 5)
+    &out.push(0)
+    loop b in raw -> &out.push(Int.from_u8(b) & 31)
+    out
+}
+
+fn bech32_charset() -> [U8] Never! { "qpzry9x8gf2tvdw0s3jn54khce6mua7l".bytes() }
+
+fn bech32_value(b: U8) -> Int? {
+    i := 0
+    loop c in bech32_charset() {
+        if c == b -> return Val(i)
+        i += 1
+    }
+    None
+}
+
+C_BECH32M_CONST :: 0x2bc830a3
+
+fn x25519_recipient_encode(key: [U8]) -> String Never! {
+    data := [Int]{}
+    acc := 0
+    bits := 0
+    loop b in key {
+        acc = ((acc << 8) | Int.from_u8(b)) & 4095
+        bits += 8
+        loop bits >= 5 {
+            bits -= 5
+            &data.push((acc >> bits) & 31)
+        }
+    }
+    if bits > 0 -> &data.push((acc << (5 - bits)) & 31)
+    input := bech32_hrp_expand("jetx25519")
+    loop v in data -> &input.push(v)
+    loop _ in 0..<6 -> &input.push(0)
+    polymod :: bech32_polymod(input) ~| C_BECH32M_CONST
+    charset :: bech32_charset()
+    out := [U8]{}
+    loop b in "jetx255191".bytes() -> &out.push(b)
+    loop v in data -> &out.push(charset[v])
+    loop i in 0..<6 -> &out.push(charset[(polymod >> (5 * (5 - i))) & 31])
+    String.from_bytes(out) ?? panic("invalid UTF-8 in Bech32m recipient")
+}
+
+/// Exact-size decode: HRP (9) + separator + 52 data symbols + 6 checksum
+/// symbols. Nonzero padding bits are rejected so each key has one spelling.
+fn x25519_recipient_decode(text: String) -> [U8]? {
+    raw :: text.bytes()
+    if raw.len() != 68 -> return None
+    prefix :: "jetx255191".bytes()
+    loop i in 0..<10 {
+        if raw[i] != prefix[i] -> return None
+    }
+    values := [Int]{}
+    loop i in 10..<68 {
+        v :: bech32_value(raw[i]) ?? return None
+        &values.push(v)
+    }
+    check := bech32_hrp_expand("jetx25519")
+    loop v in values -> &check.push(v)
+    if bech32_polymod(check) != C_BECH32M_CONST -> return None
+    out := [U8]{}
+    acc := 0
+    bits := 0
+    loop i in 0..<52 {
+        acc = ((acc << 5) | values[i]) & 4095
+        bits += 5
+        if bits >= 8 {
+            bits -= 8
+            &out.push(to_u8(acc >> bits))
+        }
+    }
+    if (acc & ((1 << bits) - 1)) != 0 -> return None
+    if out.len() != 32 -> return None
+    Val(out)
 }
 
 fn all_zero(bytes: [U8]) -> Bool Never! {
@@ -502,9 +701,9 @@ pub fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoE
     if recipient.bytes.len() != 32 || key.bytes.len() > 1048576 {
         return Err(CryptoError.KeyRejected)
     }
-    eph_sk :: core.crypto.random.bytes(32)
+    eph_sk :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
     eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(~eph_sk)}) ?? return Err(CryptoError.KeyRejected)
-    salt :: core.crypto.random.bytes(16)
+    salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
     shared :: x25519(X25519SecretKey{bytes: copy_bytes(~eph_sk)}, ~recipient) ?? return Err(CryptoError.KeyRejected)
     key_info := [U8]{}
     loop b in "JETW1 key".bytes() -> &key_info.push(b)
@@ -543,7 +742,7 @@ pub fn unwrap(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoE
     }
     key_len :: read_be32(~raw, 88)
     if key_len > 1048576 || raw.len() != 92 + key_len + 16 -> return Err(CryptoError.OpenFailed)
-    own_public :: x25519_public(~recipient) ?? return Err(CryptoError.KeyRejected)
+    own_public :: x25519_public(recipient) ?? return Err(CryptoError.KeyRejected)
     expected_recipient :: slice_u8(~raw, 8, 40)
     if !constant_time_equal_bytes(~own_public.bytes, ~expected_recipient) {
         return Err(CryptoError.OpenFailed)
@@ -804,8 +1003,6 @@ C_SHA384_IV :: [Int]{
 
 fn wrap32(n: Int) -> Int Never! { n & C_MASK32 }
 
-fn wrap64(n: Int) -> Int Never! { n & C_MASK64 }
-
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
 fn read_be32(data: [U8], offset: Int) -> Int Never! {
@@ -946,7 +1143,28 @@ fn sha1_raw(data: [U8]) -> [U8] {
     words_to_bytes([Int]{h0, h1, h2, h3, h4}, 4)
 }
 
-fn sha512_raw(data: [U8], iv: [Int]) -> [U8] Never! { sha2_512(data, iv) }
+/// SHA-512 family (FIPS 180-4) over `U64` words with the given initial hash.
+/// The message schedule is one 80-word buffer reused by every block.
+fn sha512_raw(data: [U8], iv: [Int]) -> [U8] Never! {
+    msg := copy_bytes(~data)
+    bit_len :: data.len() * 8
+    &msg.push(U8{0x80})
+    loop msg.len() % 128 != 112 -> &msg.push(U8{0})
+    loop b in be64(0) -> &msg.push(b)
+    loop b in be64(bit_len) -> &msg.push(b)
+    state := [U64]{}
+    loop word in iv -> &state.push(U64{word})
+    k := [U64]{}
+    loop word in C_SHA512_K -> &k.push(U64{word})
+    w := [U64]{}
+    loop _ in 0..<80 -> &w.push(U64{0})
+    loop off in 0..<msg.len(), 128 -> sha512_block(&state, &w, k, msg, off)
+    out := [U8]{}
+    loop word in state {
+        loop i in 0..<8 -> &out.push(to_u8(Int.from_u64(word >> (56 - 8 * i))))
+    }
+    out
+}
 
 C_SHA512_K :: [Int]{
     0x428a2f98d728ae22,
@@ -1031,68 +1249,53 @@ C_SHA512_K :: [Int]{
     0x6c44198c4a475817,
 }
 
-fn rotr64(x: Int, n: Int) -> Int Never! {
-    v :: wrap64(x)
-    r :: n & 63
-    if r == 0 -> return v
-    wrap64((v >> r) | (v << (64 - r)))
+/// Big-endian word at `bytes[off]`.
+fn load_be64(bytes: [U8], off: Int) -> U64 Never! {
+    n := U64{0}
+    loop i in 0..<8 -> n = (n << 8) | U64.from_u8(bytes[off + i])
+    n
 }
 
-fn sha2_512(data: [U8], iv: [Int]) -> [U8] Never! {
-    msg := copy_bytes(~data)
-    bit_len :: data.len() * 8
-    &msg.push(U8{0x80})
-    loop msg.len() % 128 != 112 -> &msg.push(U8{0})
-    loop b in be64(0) -> &msg.push(b)
-    loop b in be64(bit_len) -> &msg.push(b)
-    state := copy_ints(iv)
-    loop off in 0..<msg.len(), 128 {
-        w := [Int]{}
-        loop t in 0..<16 {
-            i :: off + t * 8
-            word := 0
-            loop k in 0..<8 -> word = (word << 8) | u8_int(msg[i + k])
-            &w.push(wrap64(word))
-        }
-        loop t in 16..<80 {
-            s0 :: rotr64(w[t - 15], 1) ~| rotr64(w[t - 15], 8) ~| (w[t - 15] >> 7)
-            s1 :: rotr64(w[t - 2], 19) ~| rotr64(w[t - 2], 61) ~| (w[t - 2] >> 6)
-            &w.push(wrap64(w[t - 16] + s0 + w[t - 7] + s1))
-        }
-        a := state[0]
-        b := state[1]
-        c := state[2]
-        d := state[3]
-        e := state[4]
-        f := state[5]
-        g := state[6]
-        h := state[7]
-        loop t in 0..<80 {
-            s1 :: rotr64(e, 14) ~| rotr64(e, 18) ~| rotr64(e, 41)
-            ch :: (e & f) ~| ((e ~| C_MASK64) & g)
-            temp1 :: wrap64(h + s1 + ch + C_SHA512_K[t] + w[t])
-            s0 :: rotr64(a, 28) ~| rotr64(a, 34) ~| rotr64(a, 39)
-            maj :: (a & b) ~| (a & c) ~| (b & c)
-            temp2 :: wrap64(s0 + maj)
-            h = g
-            g = f
-            f = e
-            e = wrap64(d + temp1)
-            d = c
-            c = b
-            b = a
-            a = wrap64(temp1 + temp2)
-        }
-        state[0] = wrap64(state[0] + a)
-        state[1] = wrap64(state[1] + b)
-        state[2] = wrap64(state[2] + c)
-        state[3] = wrap64(state[3] + d)
-        state[4] = wrap64(state[4] + e)
-        state[5] = wrap64(state[5] + f)
-        state[6] = wrap64(state[6] + g)
-        state[7] = wrap64(state[7] + h)
+/// One SHA-512 compression of the 128-byte block at `msg[off]` into `state`.
+#Arithmetic(.Wrapping)
+fn sha512_block(state: &[U64], w: &[U64], k: [U64], msg: [U8], off: Int) Never! {
+    loop t in 0..<16 -> w[t] = load_be64(msg, off + t * 8)
+    loop t in 16..<80 {
+        s0 :: w[t - 15].rotate_right(1) ~| w[t - 15].rotate_right(8) ~| (w[t - 15] >> 7)
+        s1 :: w[t - 2].rotate_right(19) ~| w[t - 2].rotate_right(61) ~| (w[t - 2] >> 6)
+        w[t] = w[t - 16] + s0 + w[t - 7] + s1
     }
-    words_to_bytes(state, 8)
+    a := state[0]
+    b := state[1]
+    c := state[2]
+    d := state[3]
+    e := state[4]
+    f := state[5]
+    g := state[6]
+    h := state[7]
+    loop t in 0..<80 {
+        s1 :: e.rotate_right(14) ~| e.rotate_right(18) ~| e.rotate_right(41)
+        ch :: (e & f) ~| ((e ~| U64.MAX) & g)
+        temp1 :: h + s1 + ch + k[t] + w[t]
+        s0 :: a.rotate_right(28) ~| a.rotate_right(34) ~| a.rotate_right(39)
+        maj :: (a & b) ~| (a & c) ~| (b & c)
+        h = g
+        g = f
+        f = e
+        e = d + temp1
+        d = c
+        c = b
+        b = a
+        a = temp1 + s0 + maj
+    }
+    state[0] = state[0] + a
+    state[1] = state[1] + b
+    state[2] = state[2] + c
+    state[3] = state[3] + d
+    state[4] = state[4] + e
+    state[5] = state[5] + f
+    state[6] = state[6] + g
+    state[7] = state[7] + h
 }
 
 fn hmac_sha256_raw(key: [U8], data: [U8]) -> [U8] Never! {
@@ -1666,6 +1869,14 @@ C_ED_D :: 3709570593466943934313808350875456518954211387984321901638878553308594
 C_ED_BX :: 15112221349535400772501151409588531511454012693041857206046113283949847762202
 
 C_ED_BY :: 46316835694926478169428394003475163141307993866256225615783033603165251855960
+
+/// RFC 8032 5.1.5: the encoded public key A = [s]B for a 32-byte seed.
+fn ed25519_public_raw(seed: [U8]) -> [U8] Never! {
+    h :: sha512_raw(seed, C_SHA512_IV)
+    a :: clamp_scalar(le_int(slice_u8(~h, 0, 32)))
+    point_a :: ed_scalarmult(a, C_ED_BX, C_ED_BY)
+    ed_encode(point_a.x, point_a.y)
+}
 
 fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
     h :: sha512_raw(seed, C_SHA512_IV)

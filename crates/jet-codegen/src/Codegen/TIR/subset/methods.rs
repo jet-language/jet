@@ -1321,9 +1321,9 @@ pub(crate) fn method_call_in_subset(
             .next()
             .unwrap_or(name)
     });
-    // D-CRYPTO-SUBSET1: Core crypto constructors carry a nominal receiver
-    // marker in some checked paths even though lowering uses the static helper
-    // route. Reuse the existing constructor admission table for that shape.
+    // D-CRYPTO-SUBSET1: Core crypto constructors are Jet-declared static
+    // methods; a checked path may still carry the nominal receiver marker.
+    // Reuse the existing constructor admission table for that shape.
     if let Some(type_name) = recv_type_leaf {
         if matches!(
             type_name,
@@ -1333,12 +1333,8 @@ pub(crate) fn method_call_in_subset(
                 | "VerifyKey"
                 | "X25519PublicKey"
                 | "Signature"
-                | "Sealed"
-                | "WrappedKey"
                 | "WrappedVaultKey"
                 | "KeyUnlock"
-                | "PasswordHash"
-                | "Hasher"
         ) && matches!(receiver, Expr::Ident(name, _) if name == type_name && !locals.contains(name))
         {
             return static_method_call_in_subset(type_name, method, args, cx, locals);
@@ -1347,32 +1343,11 @@ pub(crate) fn method_call_in_subset(
     if matches!(
         (recv_type_leaf, method, args.len()),
         (Some("SigningKey" | "X25519SecretKey"), "public_key", 0)
-            | (
-                Some(
-                    "VerifyKey"
-                        | "X25519PublicKey"
-                        | "Signature"
-                        | "Sealed"
-                        | "WrappedKey"
-                        | "WrappedVaultKey"
-                        | "Digest256"
-                        | "Digest512"
-                ),
-                "bytes",
-                0
-            )
-            | (Some("Digest256" | "Digest512"), "hex", 0)
-            | (Some("PasswordHash"), "text", 0)
+            | (Some("WrappedVaultKey"), "bytes", 0)
+            | (Some("Digest256" | "Digest512"), "hex" | "as_bytes", 0)
             | (Some("X25519PublicKey"), "text", 0)
     ) {
         return expr_in_subset(receiver, cx, locals);
-    }
-    if matches!(
-        (recv_type_leaf, method, args.len()),
-        (Some("Hasher"), "update", 1) | (Some("Hasher"), "digest", 0)
-    ) {
-        return expr_in_subset(receiver, cx, locals)
-            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (n) [c109 Phase 30]: DYNAMIC dispatch on a TRAIT-OBJECT receiver
     // (`s.name()`/`s.area()` where `s: Shape` is a `Box<dyn __jet_Shape>`). Sema sets
@@ -1701,19 +1676,17 @@ pub(crate) fn static_method_call_in_subset(
         ("Secret", "from_text" | "from_bytes", 1)
             | ("SigningKey" | "X25519SecretKey", "new_random", 0)
             | (
-                "VerifyKey"
+                "SigningKey"
+                    | "X25519SecretKey"
+                    | "VerifyKey"
                     | "X25519PublicKey"
                     | "Signature"
-                    | "Sealed"
-                    | "WrappedKey"
                     | "WrappedVaultKey",
                 "from_bytes",
                 1
             )
             | ("KeyUnlock", "Recipient" | "Passphrase", 1)
             | ("X25519PublicKey", "from_text", 1)
-            | ("PasswordHash", "parse", 1)
-            | ("Hasher", "new", 0)
     ) {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }

@@ -1,0 +1,11 @@
+// #3755 / D-ATTR4: a Core error enum carries the same auto-derived Debug as a
+// user enum, so a caller can show the BinaryError variant it received.
+use core.encoding.binary as binary
+
+fn run() {
+    packed :: binary.pack_u8(256) ?? {
+        print("rejected {err:Debug}")
+        return
+    }
+    print("packed {packed}")
+}

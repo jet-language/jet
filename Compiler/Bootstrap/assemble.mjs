@@ -25,7 +25,6 @@ const sourceRoots = [
   "Compiler/JetLexer/Source",
   "Compiler/JetFoundation/Source",
   "Compiler/JetOptimizer/Source",
-  "Compiler/JetAst/Source",
   "Compiler/JetParser/Source/Parser",
   "Compiler/JetSema/Source",
   "Compiler/JetCodegen/Source/Codegen",

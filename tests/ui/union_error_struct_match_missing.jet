@@ -1,0 +1,33 @@
+// D1: an else-less match over a union of `#Error struct` members names the
+// missing member.
+#Error
+struct ListWasEmpty {
+    message: String
+}
+
+#Error
+struct BadNumStr {
+    message: String
+}
+
+fn first(xs: [String]) -> String ListWasEmpty! {
+    if xs.is_empty() -> return Err(ListWasEmpty{message: "empty"})
+    Ok(xs[0])
+}
+
+fn to_num(s: String) -> Int BadNumStr! {
+    s.to_int() ?? return Err(BadNumStr{message: "nan"})
+}
+
+fn increment_first(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
+    s :: first(xs)
+    n :: to_num(s)
+    Ok(n + 1)
+}
+
+fn run() {
+    if increment_first(["41"]) == {
+        .Ok(n) -> print(n)
+        .Err(.ListWasEmpty(_)) -> print("empty")
+    }
+}

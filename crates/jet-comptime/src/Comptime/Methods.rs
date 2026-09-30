@@ -31,7 +31,7 @@ pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
 pub use core_calls::apply_fake_method;
 /// Public host entry for the MIR evaluator (#777).
 pub use core_calls::{
-    display_core_pure_value, eval_regex_replace_all_with,
+    display_core_pure_value, eval_regex_replace_all_with, jet_crypto_zeroize,
 };
 pub(crate) use core_calls::{
     eval_data_pivot_sum, evaluate_typed_datetime_literal, url_parts_to_ct,

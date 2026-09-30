@@ -26,14 +26,14 @@ pub struct Path {
 }
 
 
-pub fn of(raw: String) -> Path { Path{raw: ~raw} }
+pub fn of(raw: String) -> Path Never! { Path{raw: ~raw} }
 
 
 /// Construct a path from its platform-neutral textual spelling.
-pub fn path(raw: String) -> Path { of(raw) }
+pub fn path(raw: String) -> Path Never! { of(raw) }
 
 
-pub fn from_parts(parts: [String]) -> Path {
+pub fn from_parts(parts: [String]) -> Path Never! {
     acc := ""
     loop p in parts {
         if acc.bytes().len() == 0 {
@@ -61,17 +61,17 @@ pub fn home() -[FS, Env]> Path IOError! {
 pub fn join(base: Path, other: String) -> Path Never! { Path{raw: files.join(~base.raw, other)} }
 
 
-pub fn join_path(base: Path, other: Path) -> Path { Path{raw: files.join(~base.raw, ~other.raw)} }
+pub fn join_path(base: Path, other: Path) -> Path Never! { Path{raw: files.join(~base.raw, ~other.raw)} }
 
 
-pub fn join_many(base: Path, parts: [String]) -> Path {
+pub fn join_many(base: Path, parts: [String]) -> Path Never! {
     acc := base
     loop p in parts -> acc = join(acc, p)
     acc
 }
 
 
-pub fn parent(path: Path) -> Path { Path{raw: files.dirname(~path.raw)} }
+pub fn parent(path: Path) -> Path Never! { Path{raw: files.dirname(~path.raw)} }
 
 
 fn ends_colon(text: String) -> Bool {
@@ -81,7 +81,7 @@ fn ends_colon(text: String) -> Bool {
 }
 
 
-pub fn parents(path: Path) -> [Path] {
+pub fn parents(path: Path) -> [Path] Never! {
     out := [Path]{}
     cur := parent(~path)
     seen := ~path.raw
@@ -100,10 +100,10 @@ pub fn parents(path: Path) -> [Path] {
 pub fn name(path: Path) -> String Never! { files.basename(~path.raw) }
 
 
-pub fn stem(path: Path) -> String { files.stem(~path.raw) }
+pub fn stem(path: Path) -> String Never! { files.stem(~path.raw) }
 
 
-pub fn suffix(path: Path) -> String { files.suffix(~path.raw) }
+pub fn suffix(path: Path) -> String Never! { files.suffix(~path.raw) }
 
 
 fn files_slice(raw: [U8], start: Int, end: Int) -> String {
@@ -117,7 +117,7 @@ fn files_slice(raw: [U8], start: Int, end: Int) -> String {
 }
 
 
-pub fn suffixes(path: Path) -> [String] {
+pub fn suffixes(path: Path) -> [String] Never! {
     n :: files.basename(~path.raw)
     raw :: n.bytes()
     out := [String]{}
@@ -135,19 +135,19 @@ pub fn suffixes(path: Path) -> [String] {
 }
 
 
-pub fn with_name(path: Path, name: String) -> Path { Path{raw: files.with_name(~path.raw, name)} }
+pub fn with_name(path: Path, name: String) -> Path Never! { Path{raw: files.with_name(~path.raw, name)} }
 
 
-pub fn with_suffix(path: Path, suffix: String) -> Path { Path{raw: files.with_suffix(~path.raw, suffix)} }
+pub fn with_suffix(path: Path, suffix: String) -> Path Never! { Path{raw: files.with_suffix(~path.raw, suffix)} }
 
 
-pub fn with_stem(path: Path, stem: String) -> Path { Path{raw: files.with_name(~path.raw, "{stem}{files.suffix(~path.raw)}")} }
+pub fn with_stem(path: Path, stem: String) -> Path Never! { Path{raw: files.with_name(~path.raw, "{stem}{files.suffix(~path.raw)}")} }
 
 
-pub fn with_segments(path: Path, segments: [String]) -> Path { from_parts(segments) }
+pub fn with_segments(path: Path, segments: [String]) -> Path Never! { from_parts(segments) }
 
 
-pub fn parts(path: Path) -> [String] { files.split_slash(~path.raw) }
+pub fn parts(path: Path) -> [String] Never! { files.split_slash(~path.raw) }
 
 
 fn is_letter(b: U8) -> Bool {
@@ -156,7 +156,7 @@ fn is_letter(b: U8) -> Bool {
 }
 
 
-pub fn drive(path: Path) -> String {
+pub fn drive(path: Path) -> String Never! {
     raw :: (~path.raw).bytes()
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
         return files_slice(raw, 0, 2)
@@ -165,10 +165,10 @@ pub fn drive(path: Path) -> String {
 }
 
 
-pub fn is_absolute(path: Path) -> Bool { files.is_absolute(~path.raw) }
+pub fn is_absolute(path: Path) -> Bool Never! { files.is_absolute(~path.raw) }
 
 
-pub fn root(path: Path) -> String {
+pub fn root(path: Path) -> String Never! {
     if is_absolute(~path) {
         d :: drive(~path)
         if d.bytes().len() > 0 -> return "{d}/"
@@ -178,7 +178,7 @@ pub fn root(path: Path) -> String {
 }
 
 
-pub fn anchor(path: Path) -> String {
+pub fn anchor(path: Path) -> String Never! {
     d :: drive(~path)
     r :: root(~path)
     if d.bytes().len() > 0 -> return r
@@ -186,13 +186,13 @@ pub fn anchor(path: Path) -> String {
 }
 
 
-pub fn is_relative(path: Path) -> Bool { !files.is_absolute(~path.raw) }
+pub fn is_relative(path: Path) -> Bool Never! { !files.is_absolute(~path.raw) }
 
 
-pub fn is_empty(path: Path) -> Bool { (~path.raw).bytes().len() == 0 || path.raw == "." }
+pub fn is_empty(path: Path) -> Bool Never! { (~path.raw).bytes().len() == 0 || path.raw == "." }
 
 
-pub fn as_posix(path: Path) -> String {
+pub fn as_posix(path: Path) -> String Never! {
     out := [U8]{}
     loop b in (~path.raw).bytes() {
         if b == (U8{92}) {
@@ -205,7 +205,7 @@ pub fn as_posix(path: Path) -> String {
 }
 
 
-pub fn as_windows(path: Path) -> String {
+pub fn as_windows(path: Path) -> String Never! {
     out := [U8]{}
     loop b in (~path.raw).bytes() {
         if b == (U8{47}) {
@@ -218,10 +218,10 @@ pub fn as_windows(path: Path) -> String {
 }
 
 
-pub fn collapse(path: Path) -> Path { Path{raw: files.collapse(~path.raw)} }
+pub fn collapse(path: Path) -> Path Never! { Path{raw: files.collapse(~path.raw)} }
 
 
-pub fn resolve_pure(path: Path) -> Path { collapse(path) }
+pub fn resolve_pure(path: Path) -> Path Never! { collapse(path) }
 
 
 fn starts_slash(text: String) -> Bool {
@@ -230,7 +230,7 @@ fn starts_slash(text: String) -> Bool {
 }
 
 
-pub fn as_uri(path: Path) -> String {
+pub fn as_uri(path: Path) -> String Never! {
     posix :: as_posix(resolve_pure(path))
     if starts_slash(posix) -> return "file://{posix}"
     "file:///{posix}"
@@ -252,10 +252,10 @@ pub fn expanduser(path: Path) -[FS, Env]> Path IOError! {
 }
 
 
-pub fn relative_to(path: Path, start: Path) -> Path { Path{raw: files.relative(~path.raw, ~start.raw)} }
+pub fn relative_to(path: Path, start: Path) -> Path Never! { Path{raw: files.relative(~path.raw, ~start.raw)} }
 
 
-pub fn is_relative_to(path: Path, start: Path) -> Bool {
+pub fn is_relative_to(path: Path, start: Path) -> Bool Never! {
     target :: files.collapse(~path.raw)
     base :: files.collapse(~start.raw)
     common :: files.commonpath([String]{~target, ~base})
@@ -265,22 +265,22 @@ pub fn is_relative_to(path: Path, start: Path) -> Bool {
 }
 
 
-pub fn match_glob(path: Path, pattern: String) -> Bool { files.fnmatch(name(~path), pattern) }
+pub fn match_glob(path: Path, pattern: String) -> Bool Never! { files.fnmatch(name(~path), pattern) }
 
 
-pub fn match_path(path: Path, pattern: String) -> Bool { files.fnmatch(as_posix(~path), pattern) }
+pub fn match_path(path: Path, pattern: String) -> Bool Never! { files.fnmatch(as_posix(~path), pattern) }
 
 
-pub fn exists(path: Path) -[FS]> Bool { files.exists(~path.raw) }
+pub fn exists(path: Path) -[FS]> Bool Never! { files.exists(~path.raw) }
 
 
-pub fn is_dir(path: Path) -[FS]> Bool { files.is_dir(~path.raw) }
+pub fn is_dir(path: Path) -[FS]> Bool Never! { files.is_dir(~path.raw) }
 
 
-pub fn is_file(path: Path) -[FS]> Bool { files.is_file(~path.raw) }
+pub fn is_file(path: Path) -[FS]> Bool Never! { files.is_file(~path.raw) }
 
 
-pub fn is_symlink(path: Path) -[FS]> Bool { files.is_symlink(~path.raw) }
+pub fn is_symlink(path: Path) -[FS]> Bool Never! { files.is_symlink(~path.raw) }
 
 
 pub fn stat(path: Path) -[FS]> Stat IOError! { files.stat(~path.raw) }
@@ -412,7 +412,7 @@ pub fn walk(path: Path) -[FS]> [Path] IOError! {
 }
 
 
-pub fn which(name: String) -[FS, Env]> Path? {
+pub fn which(name: String) -[FS, Env]> Path? Never! {
     found :: files.which(name) ?? return None
     Val(Path{raw: found})
 }
@@ -424,10 +424,10 @@ pub fn open_read(path: Path) -[FS]> FileReader IOError! { files.open(~path.raw) 
 pub fn open_write(path: Path) -[FS]> FileWriter IOError! { files.create(~path.raw) }
 
 
-pub fn show(path: Path) -> String { ~path.raw }
+pub fn show(path: Path) -> String Never! { ~path.raw }
 
 
-pub fn equals(a: Path, b: Path) -> Bool { files.collapse(~a.raw) == files.collapse(~b.raw) }
+pub fn equals(a: Path, b: Path) -> Bool Never! { files.collapse(~a.raw) == files.collapse(~b.raw) }
 
 
 fn starts_dotdot(text: String) -> Bool {

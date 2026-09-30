@@ -5,7 +5,7 @@
 
 // BEGIN GENERATED BUILD EFFECT DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Effects.jet
-// Source SHA-256: 6271597730bff63a19dc93b24ab2ab06bb2cb54ff5b5c80042dcc3ac3f441bd2
+// Source SHA-256: cb7a9b9ef6c7be8620deacda9eb20c0411f81a39f432c8a01a94f9427414bc2f
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuildEffect {
     Net,

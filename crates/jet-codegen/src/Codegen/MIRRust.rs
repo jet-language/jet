@@ -2503,98 +2503,18 @@ impl<'a> RustEmitter<'a> {
             .cloned()
             .unwrap_or_else(|| panic!("MIR type ID {:?} has no type row", id))
     }
-    fn anonymous_union_definition_key(definition: &MirTypeDef) -> Option<String> {
-        if !definition.generic_params.is_empty() {
+    /// D-UNIONTYPE1=A: every spelling of an anonymous union (the bare
+    /// structural key or a module-qualified sema declaration) names the one
+    /// carrier row MIR lowering keeps for it.
+    fn anonymous_union_definition(&self, name: &str) -> Option<&'a MirTypeDef> {
+        let leaf = name.rsplit("::").next()?;
+        if !leaf.starts_with("__JetUnion_") {
             return None;
         }
-        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-            return None;
-        };
-        if variants.is_empty()
-            || variants
-                .iter()
-                .any(|variant| !matches!(&variant.payload, MirVariantPayload::Single(_)))
-        {
-            return None;
-        }
-        let key = format!(
-            "__JetUnion_{}",
-            variants
-                .iter()
-                .map(|variant| variant.name.as_str())
-                .collect::<Vec<_>>()
-                .join("_")
-        );
-        let key_matches = definition
-            .key
-            .rsplit("::")
-            .next()
-            .is_some_and(|name| name == key);
-        (key_matches || definition.name == key).then_some(key)
-    }
-
-    fn anonymous_union_shape_matches(left: &MirTypeDef, right: &MirTypeDef) -> bool {
-        let (
-            MirTypeDefKind::Enum {
-                variants: left_variants,
-                ..
-            },
-            MirTypeDefKind::Enum {
-                variants: right_variants,
-                ..
-            },
-        ) = (&left.kind, &right.kind)
-        else {
-            return false;
-        };
-        left_variants.len() == right_variants.len()
-            && left_variants
-                .iter()
-                .zip(right_variants)
-                .all(|(left, right)| {
-                    left.name == right.name
-                        && matches!(
-                            (&left.payload, &right.payload),
-                            (
-                                MirVariantPayload::Single(left),
-                                MirVariantPayload::Single(right)
-                            ) if left.same_checked_type(right)
-                                || left.canonical_key() == right.canonical_key()
-                        )
-                })
-    }
-
-    fn canonical_anonymous_union_definition(
-        &self,
-        definition: &MirTypeDef,
-    ) -> Option<&'a MirTypeDef> {
-        let key = Self::anonymous_union_definition_key(definition)?;
-        self.program.types.iter().find(|candidate| {
-            candidate.key == key
-                && candidate.name == key
-                && Self::anonymous_union_definition_key(candidate).as_deref() == Some(key.as_str())
-                && Self::anonymous_union_shape_matches(definition, candidate)
-        })
-    }
-
-    fn canonical_anonymous_union_definition_for_name(
-        &self,
-        name: &MirNominalRef,
-    ) -> Option<&'a MirTypeDef> {
-        if !name
-            .name
-            .rsplit("::")
-            .next()
-            .is_some_and(|name| name.starts_with("__JetUnion_"))
-        {
-            return None;
-        }
-        let definition = self
-            .program
+        self.program
             .types
             .iter()
-            .find(|definition| definition.key == name.name || definition.name == name.name)?;
-        self.canonical_anonymous_union_definition(definition)
+            .find(|definition| definition.key == leaf)
     }
 
     fn push_generic_scope(&self, params: &'a [MirGenericParam]) {
@@ -2673,6 +2593,18 @@ impl<'a> RustEmitter<'a> {
         }
         if name == "ScopeGuard" {
             return "_".to_string();
+        }
+        // The Shared wait condition is a Prelude handle, not a declared
+        // nominal; keep the AOT spelling in lockstep with Context::rust_type.
+        if name == jet_foundation::Syntax::TYPE_CONDITION && !self.types_by_name.contains_key(name) {
+            return format!("{}jet_std::JetCondition", self.config.root_prefix);
+        }
+        // D-LAYOUT1: layout variables and constraints are runtime handles in
+        // the root `jet_layout` module; a user type of that name still wins.
+        if let Some(rust) = crate::Codegen::layout_handle_rust_type(name)
+            .filter(|_| !self.types_by_name.contains_key(name))
+        {
+            return format!("{}{rust}", self.config.root_prefix);
         }
         if matches!(name, "KeyStatus" | "VaultError") {
             let ffi = self
@@ -2839,48 +2771,11 @@ impl<'a> RustEmitter<'a> {
         key.starts_with("<corelib>/Core/http::")
             && key.rsplit_once("::").is_some_and(|(_, name)| name == leaf)
     }
-    fn core_crypto_rust_type_name(&self, type_id: MirTypeId) -> Option<&'static str> {
-        let key = &self.type_def(type_id).key;
-        key.starts_with("<corelib>/Core/crypto::")
-            .then(|| crate::Codegen::core_crypto_rust_type_name(key))
-            .flatten()
-    }
     fn is_structural_tuple_type(&self, type_id: MirTypeId) -> bool {
         self.type_instances
             .get(&type_id)
             .is_some_and(|owner| matches!(owner.kind(), MirTypeKind::Tuple(_)))
     }
-
-
-    fn core_crypto_ffi_symbol(&self, symbol: &str) -> String {
-        let ffi = self
-            .config
-            .execution
-            .ffi
-            .map(|link| link.crate_name.as_str())
-            .unwrap_or("jet_ffi");
-        format!("{ffi}::{symbol}")
-    }
-
-    fn native_crypto_digest256_field_projection(
-        &self,
-        base: MirValueId,
-        field: MirFieldId,
-    ) -> Option<String> {
-        let row = self.program.fields.iter().find(|row| row.id == field)?;
-        if self.is_structural_tuple_type(row.owner)
-            || row.field.name != "bytes"
-            || self.core_crypto_rust_type_name(row.owner) != Some("JetDigest256")
-        {
-            return None;
-        }
-        let base = self.value_slot_reference(base, false);
-        Some(format!(
-            "{}({base})",
-            self.core_crypto_ffi_symbol("jet_crypto_digest256_bytes_impl")
-        ))
-    }
-
 
     fn native_http_headers_fields_projection(
         &self,
@@ -3096,25 +2991,6 @@ impl<'a> RustEmitter<'a> {
         if let Some(literal) = self.native_http_headers_literal(type_id, fields) {
             return literal;
         }
-        if self.core_crypto_rust_type_name(type_id) == Some("JetDigest256") {
-            let MirTypeDefKind::Struct {
-                fields: declared, ..
-            } = &self.type_def(type_id).kind
-            else {
-                panic!("Core Digest256 native projection is not a source record");
-            };
-            if declared.len() != 1 || declared[0].name != "bytes" {
-                panic!("Core Digest256 native projection requires exactly its bytes field");
-            }
-            let bytes = self
-                .named_struct_field_value(type_id, fields, "bytes")
-                .unwrap_or_else(|| panic!("Core Digest256 literal is missing bytes"));
-            return format!(
-                "{}({bytes})",
-                self.core_crypto_ffi_symbol("jet_crypto_digest256_from_bytes_impl")
-            );
-        }
-
         let rust_type_name = self.type_name(type_id);
         let range_type = rust_type_name.ends_with("JetRange");
         let net_error_detail = rust_type_name == "JetNetErrorDetail";
@@ -3674,7 +3550,7 @@ impl<'a> RustEmitter<'a> {
         }
         let native_name = core_native_probe_name(&name.name);
         if args.is_empty() {
-            if let Some(canonical) = self.canonical_anonymous_union_definition_for_name(name) {
+            if let Some(canonical) = self.anonymous_union_definition(&name.name) {
                 return mangle_path(&canonical.key);
             }
         }
@@ -3858,6 +3734,9 @@ impl<'a> RustEmitter<'a> {
         }
         if name.name == "ExpiringSecret" && args.len() == 1 {
             return format!("JetExpiringSecret<{}>", self.rust_type(&args[0]));
+        }
+        if name.name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 {
+            return format!("JetExpiring<{}>", self.rust_type(&args[0]));
         }
         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
             if matches!(email_name, "SMTPAuth" | "DkimConfig" | "SMTPConfig") && args.is_empty() {
@@ -5735,50 +5614,6 @@ impl<'a> RustEmitter<'a> {
                 );
             }
         }
-        // Digest256 is an external tuple carrier; source methods and fields are
-        // projected through its native helpers instead of a foreign inherent impl.
-
-        if implementation.trait_ref.is_none()
-            && self.core_crypto_rust_type_name(self.type_identity(&implementation.self_type))
-                == Some("JetDigest256")
-        {
-            for method in &implementation.methods {
-                let function = self.function_row(*method);
-                if !self.module_selected(function.module_id)
-                    || !self.selected_for_target(function)
-                {
-                    panic!(
-                        "Core Digest256 method {:?} is not selected for the emitted artifact",
-                        function.id
-                    );
-                }
-                if !matches!(
-                    &function.form,
-                    MirFunctionForm::Method {
-                        owner,
-                        self_access: Some(_),
-                    } if owner.same_checked_type(&implementation.self_type)
-                ) || !self.declared_params(function).is_empty()
-                    || !matches!(
-                        self.function_leaf_name(function).as_str(),
-                        "as_bytes" | "hex"
-                    )
-                {
-                    panic!(
-                        "Core Digest256 native projection does not cover method {:?}",
-                        function.id
-                    );
-                }
-                if !emitted_methods.insert(function.id) {
-                    panic!(
-                        "MIR implementation method {:?} was emitted more than once",
-                        function.id
-                    );
-                }
-            }
-            return;
-        }
-
         let impl_generic_params = self.generic_params_for_type(&implementation.self_type);
         self.push_generic_scope(impl_generic_params);
         let generics = self.generic_params_from(impl_generic_params);
@@ -6788,6 +6623,57 @@ impl<'a> RustEmitter<'a> {
         let _ = writeln!(out, "    }}\n}}\n");
     }
 
+    /// D-CAPBUNDLE1: `#Printable` on a distinct type admits bare `{value}`
+    /// and renders the base value on every tier. AOT's
+    /// `jet_fmt_display<T: JetDisplay>` needs that render as a `JetDisplay`
+    /// impl forwarding to the base; a user `Display` impl keeps its own.
+    fn emit_printable_distinct_display_impl(&self, def: &MirTypeDef, out: &mut String) {
+        if !matches!(&def.kind, MirTypeDefKind::Distinct { .. })
+            || !def.auto_printable
+            || self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY)
+        {
+            return;
+        }
+        let name = self.type_name(def.id);
+        let _ = writeln!(
+            out,
+            "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        self.0.jet_display()\n    }}\n}}\n"
+        );
+    }
+
+    /// D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family
+    /// member onto `Err` with `Err("{self}")`, and every Prelude-owned member
+    /// renders that text through its `JetShow`. A member declared in Core Jet
+    /// source (`UUIDError`) is emitted from MIR instead, so it needs the same
+    /// `JetDisplay` forwarding its Prelude-owned siblings carry (I9: the
+    /// resident engine shows the same record). A unit-only enum keeps the
+    /// case-name display above; a user `Display` impl keeps its own.
+    fn emit_core_error_family_display_impl(&self, def: &MirTypeDef, out: &mut String) {
+        let unit_enum = matches!(
+            &def.kind,
+            MirTypeDefKind::Enum { variants, .. }
+                if variants
+                    .iter()
+                    .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
+        );
+        if !def.key.starts_with("<corelib>/")
+            || !crate::Sema::is_core_error_family_type(&def.key)
+            || !def.generic_params.is_empty()
+            || unit_enum
+            || matches!(
+                &def.kind,
+                MirTypeDefKind::Distinct { .. } | MirTypeDefKind::Alias { .. }
+            )
+            || self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY)
+        {
+            return;
+        }
+        let name = self.type_name(def.id);
+        let _ = writeln!(
+            out,
+            "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as JetShow>::jet_show(self)\n    }}\n}}\n"
+        );
+    }
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
         let emit_show = def.auto_printable
@@ -6795,6 +6681,10 @@ impl<'a> RustEmitter<'a> {
         let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
             && !self.selected_trait_impl_for_type(def, crate::Generics::DEBUG);
         self.emit_plain_enum_display_impl(def, out);
+        self.emit_printable_distinct_display_impl(def, out);
+        if emit_show {
+            self.emit_core_error_family_display_impl(def, out);
+        }
         if (!emit_show && !emit_debug) || matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             return;
         }
@@ -8675,6 +8565,11 @@ impl<'a> RustEmitter<'a> {
         }
         let params = params.join(", ");
         let ret = self.foreign_return_type(foreign);
+        // A Rust crate item has no C symbol: calls go through the bridge
+        // crate's safe wrapper (see `foreign_call`).
+        if matches!(foreign.foreign_language, MirForeignLanguage::Rust) {
+            return;
+        }
         let rust_name = self.foreign_name(foreign.id);
         let _ = writeln!(out, "extern \"{abi}\" {{");
         if rust_name != foreign.symbol {
@@ -9989,15 +9884,24 @@ impl<'a> RustEmitter<'a> {
         };
         let is_jet_err = function
             .is_some_and(|ty| ty.nominal_name() == Some(jet_foundation::Syntax::TYPE_ERR));
+        // `[FieldError]` (the typed-decode carrier) has no definition row; it
+        // shows through the one Prelude FieldError projection, like `print`.
+        // Otherwise only a declared nominal carries the Printable entry voice.
+        let field_errors = function.is_some_and(|ty| {
+            matches!(ty.kind(), MirTypeKind::List(inner)
+                if matches!(inner.kind(), MirTypeKind::Apply { name, args }
+                    if name.name == "FieldError" && args.is_empty()))
+        });
         let has_jet_show = !is_jet_err
-            && function
-                .and_then(|ty| ty.nominal_id().or(ty.identity))
-                .is_some_and(|id| {
-                    let def = self.type_def(id);
-                    def.key == jet_foundation::Syntax::TYPE_IO_ERROR
-                        || def.auto_printable
-                        || self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE)
-                });
+            && (field_errors
+                || function
+                    .and_then(|ty| ty.nominal_id().or(ty.identity))
+                    .and_then(|id| self.try_type_def(id))
+                    .is_some_and(|def| {
+                        def.key == jet_foundation::Syntax::TYPE_IO_ERROR
+                            || def.auto_printable
+                            || self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE)
+                    }));
         let root = &self.config.root_prefix;
         if self.config.target_kind == MirRustTarget::WebWasm {
             return if is_jet_err {
@@ -10842,25 +10746,13 @@ impl<'a> RustEmitter<'a> {
                     ));
                     generated.push_str("                }\n");
                 }
-                if let Some(function_id) = entry.function {
-                    let function = self.function_row(function_id);
-                    generated.push_str("                None => {\n");
-                    generated.push_str(&self.cli_decode_and_invoke(
-                        function,
-                        &cli.inputs,
-                        cli.record_inputs,
-                        None,
-                        entry.output,
-                        entry.serves_until_stopped,
-                        service,
-                        "                    ",
-                    ));
-                    generated.push_str("                }\n");
-                } else {
-                    generated.push_str(
-                        "                None => { eprintln!(\"no command selected\"); std::process::exit(2); }\n",
-                    );
-                }
+                // A bare invocation of a command program asks what it can do:
+                // print the root command list and exit 0, the same as the JIT
+                // and interpreter tiers. `run` is not a hidden default command.
+                let _ = writeln!(
+                    generated,
+                    "                None => {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}"
+                );
                 generated.push_str(
                     "                Some(__other) => { eprintln!(\"unknown command: {}\", __other); std::process::exit(2); }\n            }\n",
                 );
@@ -16461,17 +16353,24 @@ impl<'a> RustEmitter<'a> {
                     let _ = writeln!(out, "{pad}return {value};");
                 }
             }
-            MirTerminator::Yield { value, resume } => {
+            MirTerminator::Yield {
+                value,
+                resume,
+                cancel,
+            } => {
                 if function.generator.is_none() {
                     panic!("MIR yield requires generator facts");
                 }
                 self.emit_drops(function, &MirDropEdge::Normal, out, indent);
                 let _ = writeln!(
                     out,
-                    "{pad}let _ = __jet_yield_tx.send_stream({});",
+                    "{pad}if __jet_yield_tx.yield_value({}) {{",
                     self.value_move(*value)
                 );
-                self.set_pc(block.id, *resume, out, indent);
+                self.set_pc(block.id, *resume, out, indent + 4);
+                let _ = writeln!(out, "{pad}}} else {{");
+                self.set_pc(block.id, *cancel, out, indent + 4);
+                let _ = writeln!(out, "{pad}}}");
             }
             MirTerminator::Break { target, value } => {
                 self.emit_drops(function, &MirDropEdge::Normal, out, indent);
@@ -17189,12 +17088,17 @@ impl<'a> RustEmitter<'a> {
 
     fn structural_type_def_for(&self, ty: &MirType) -> Option<&'a MirTypeDef> {
         match ty.kind() {
-            MirTypeKind::Apply { name, .. } => self.program.types.iter().find(|definition| {
-                Some(definition.id) == ty.identity
-                    || definition.id == name.id
-                    || definition.key == name.name
-                    || definition.name == name.name
-            }),
+            MirTypeKind::Apply { name, .. } => self
+                .program
+                .types
+                .iter()
+                .find(|definition| {
+                    Some(definition.id) == ty.identity
+                        || definition.id == name.id
+                        || definition.key == name.name
+                        || definition.name == name.name
+                })
+                .or_else(|| self.anonymous_union_definition(&name.name)),
             MirTypeKind::Union(members) => {
                 if let Some(identity) = ty.identity {
                     return self
@@ -17774,7 +17678,17 @@ impl<'a> RustEmitter<'a> {
             })
             .unwrap_or_default();
         self.append_prelude_context(call, &mut args, &extras);
-        self.prelude_call_args_exact(call, &args)
+        let emitted = self.prelude_call_args_exact(call, &args);
+        // `checked_*` kernels return a Rust `Option`; the Jet `T?` carrier is
+        // `JetOutcome<T, JetAbsent>`.
+        if matches!(
+            self.prelude_row(call).fallibility,
+            MirCallFallibility::Failure(MirFailureCarrier::Optional { .. })
+        ) {
+            format!("({emitted}).ok_or({}JetAbsent)", self.config.root_prefix)
+        } else {
+            emitted
+        }
     }
     fn require_locals(&self, function: &MirFunction, context: &MirPanicContext) -> String {
         if self.portable_require_abi() {
@@ -19491,7 +19405,17 @@ impl<'a> RustEmitter<'a> {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        let raw_call = if setup.is_empty() {
+        let raw_call = if matches!(foreign.foreign_language, MirForeignLanguage::Rust) {
+            // A Rust crate item is called through the safe `jet_ffi_<name>`
+            // wrapper the prepared bridge crate exports; it has no C symbol.
+            let ffi = self
+                .config
+                .execution
+                .ffi
+                .map(|link| link.crate_name.as_str())
+                .unwrap_or("jet_ffi");
+            format!("{ffi}::jet_ffi_{}({call_args})", foreign.name)
+        } else if setup.is_empty() {
             format!("unsafe {{ {}({call_args}) }}", self.foreign_name(id))
         } else {
             format!(
@@ -19595,29 +19519,6 @@ impl<'a> RustEmitter<'a> {
             MirFunctionForm::TraitMethod { trait_ref, .. } => Some(trait_ref),
             _ => None,
         };
-        if trait_ref.is_none()
-            && self.core_crypto_rust_type_name(self.type_identity(owner))
-                == Some("JetDigest256")
-        {
-            if args.len() != 1 {
-                panic!("Core Digest256 native method has unexpected arguments");
-            }
-            let helper = match self.function_leaf_name(row).as_str() {
-                "as_bytes" => "jet_crypto_digest256_bytes_impl",
-                "hex" => "jet_crypto_digest256_hex_impl",
-                _ => panic!("Core Digest256 native method has no carrier projection"),
-            };
-            let receiver = self.call_arg_for_function(caller, receiver, true);
-            let projected = format!("{}({receiver})", self.core_crypto_ffi_symbol(helper));
-            if let Some((_, error)) = row.return_type.result_parts() {
-                return format!("Ok::<_, {}>({projected})", self.rust_type(error));
-            }
-            if row.return_type.option_inner().is_some() {
-                return format!("Some({projected})");
-            }
-            return projected;
-        }
-
         let receiver = self.call_arg_for_function(caller, receiver, self_access == MirAccess::Read);
         let generic = if row.generic_params.is_empty() || type_args.is_empty() {
             String::new()
@@ -20367,6 +20268,21 @@ impl<'a> RustEmitter<'a> {
                 ),
                 _ => unreachable!(),
             };
+        }
+        // `cbor.parse(bytes)` omits its options; the Prelude kernel always
+        // takes them. Pass the safe default explicitly, the same default the
+        // JIT's one-argument symbol applies.
+        if row.module == "core.encoding.cbor" && row.member == "parse" && args.len() == 1 {
+            let bytes = self.call_arg_for_function(
+                function,
+                &args[0],
+                route_row.signature.borrow_mask.first().copied().unwrap_or(true),
+            );
+            return format!(
+                "{}({bytes}, {}jet_std::CBOROptions::safe())",
+                self.prelude_symbol(route),
+                self.config.root_prefix
+            );
         }
         let emitted = self.core_call_symbol_for_function(
             function,
@@ -21737,6 +21653,9 @@ impl<'a> RustEmitter<'a> {
                                     | "clock.advance"
                                     | "Match.group_start"
                                     | "Match.group_end"
+                                    | "reader.seek"
+                                    | "reader.skip"
+                                    | "reader.take"
                             ))
                         || (route.module == "core.encoding.datatree" && route.member == "at")
                         || route.member == "shutdown_report_field")
@@ -21970,7 +21889,7 @@ impl<'a> RustEmitter<'a> {
             (Some(owner), _) => {
                 let owner_definition = self.type_def(owner);
                 let owner_name = self
-                    .canonical_anonymous_union_definition(owner_definition)
+                    .anonymous_union_definition(&owner_definition.key)
                     .map(|canonical| mangle_path(&canonical.key))
                     .unwrap_or_else(|| self.type_name(owner));
                 format!("{owner_name}::{variant}")
@@ -23236,7 +23155,11 @@ impl<'a> RustEmitter<'a> {
         );
         let address = format!("jet_mem::jet_sentry_address_of({pointer})");
         if as_int {
-            address
+            // The sentry reports a native `i64`; the MIR result is `Int`.
+            format!(
+                "{}jet_std::jet_int_owned_from_native_result({address})",
+                self.config.root_prefix
+            )
         } else {
             format!("({address} as usize as *mut {pointee})")
         }
@@ -24038,10 +23961,6 @@ impl<'a> RustEmitter<'a> {
         base: MirValueId,
         field: MirFieldId,
     ) -> String {
-        if let Some(projected) = self.native_crypto_digest256_field_projection(base, field) {
-            return projected;
-        }
-
         if let Some(projected) =
             self.native_http_headers_fields_projection(&self.value_read(base), field)
         {
@@ -26785,7 +26704,7 @@ impl<'a> RustEmitter<'a> {
 
         let variant_name = mangle_variant(&declared_variant.name);
         let owner_name = self
-            .canonical_anonymous_union_definition(definition)
+            .anonymous_union_definition(&definition.key)
             .map(|canonical| mangle_path(&canonical.key))
             .unwrap_or_else(|| self.nominal_name(type_name));
         let variant_path = format!("{owner_name}::{variant_name}");

@@ -5,6 +5,18 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, name: String) -> Symbol?
     if symbol.kind == SymbolKind.Type -> Val(symbol) else -> None
 }
 
+// D-MOD2: an enum named through a module alias (`types.Kind`) or by the
+// canonical identity a declared type resolves to (`module::Kind`) is the
+// imported enum itself, so constructors and leading-dot variants resolve it
+// through the registration graph when no local binding has that name.
+fn sema_expression_enum_owner(scopes: &SemaScopeTable, environment: SemaScopeEnvironment, name: String) -> Symbol? {
+    local :: sema_expression_type_symbol(&scopes, name)
+    if local != None -> return local
+    graph :: environment.registration_graph ?? return None
+    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
+    if resolved.symbol.kind == SymbolKind.Type -> Val(resolved.symbol) else -> None
+}
+
 struct SemaExpressionResolvedType {
     ty: Type
     owner: Symbol
@@ -19,14 +31,14 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
         normalized :: sema_expr_unwrap_tag(expected_ty)
         if normalized == {
             .Named(name) -> {
-                owner :: sema_expression_type_symbol(scopes, name) ?? {
+                owner :: sema_expression_type_symbol(&scopes, name) ?? {
                     &diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
                     return None
                 }
                 return Val(SemaExpressionResolvedType{ty: normalized, owner: owner})
             }
             .Apply(name, args) -> {
-                owner :: sema_expression_type_symbol(scopes, name) ?? {
+                owner :: sema_expression_type_symbol(&scopes, name) ?? {
                     &diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
                     return None
                 }
@@ -38,7 +50,7 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
             }
         }
     }
-    owner :: sema_expression_type_symbol(scopes, type_name) ?? {
+    owner :: sema_expression_type_symbol(&scopes, type_name) ?? {
         &diagnostics.push(sema_unknown_name(type_name, span))
         return None
     }
@@ -53,7 +65,7 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
 }
 
 fn sema_expression_struct_literal(type_name: String, type_args: [Type], fields: [ExprField], inferred: Bool, as_trait: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    resolved :: sema_expression_struct_type(type_name, type_args, expected, span, scopes, &diagnostics) ?? return None
+    resolved :: sema_expression_struct_type(type_name, type_args, expected, span, &scopes, &diagnostics) ?? return None
     owner := resolved.owner
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
     result_ty := resolved.ty
@@ -180,6 +192,9 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 .Named(name) -> name
                 else -> ""
             }
+            // D-ERR-CASES1=A: a case that exactly one union member declares
+            // builds that member.
+            .Union(_) -> sema_pattern_flat_union_owner(normalized, variant, environment, span) ?? ""
             else -> ""
         }
         if resolved_name == "" {
@@ -188,11 +203,10 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         }
     }
     if type_name == "" {
-        inferred_owner_index :: sema_scope_resolve_index(scopes, resolved_name)
+        inferred_owner :: sema_expression_enum_owner(&scopes, environment, resolved_name)
         inferred_declaration := None
-        if inferred_owner_index == .Val(owner_index) {
-            inferred_owner :: scopes.bindings[owner_index].symbol
-            if inferred_owner.kind == SymbolKind.Type -> inferred_declaration = sema_scope_resolve_declaration(environment, inferred_owner.id)
+        if inferred_owner == .Val(owner_symbol) {
+            inferred_declaration = sema_scope_resolve_declaration(environment, owner_symbol.id)
         }
         inferred_is_enum :: if inferred_declaration == {
             .Val(inferred) -> if inferred == {
@@ -206,7 +220,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             return None
         }
     }
-    owner :: sema_expression_type_symbol(scopes, resolved_name) ?? {
+    owner :: sema_expression_enum_owner(&scopes, environment, resolved_name) ?? {
         &diagnostics.push(sema_unknown_name(resolved_name, span))
         return None
     }
@@ -414,7 +428,7 @@ struct SemaExpressionCheckedTextLiteral {
 
 fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> SemaExpressionCheckedTextTarget? {
     name :: if head == {.Named(value) -> value else -> { return None }}
-    owner :: sema_expression_type_symbol(scopes, name) ?? return None
+    owner :: sema_expression_type_symbol(&scopes, name) ?? return None
     if owner.kind != SymbolKind.Type -> return None
     graph :: environment.registration_graph ?? return None
     nominal := None
@@ -785,6 +799,35 @@ fn sema_expression_typed_literal_mismatch(head: Type, span: Span, diagnostics: &
     None
 }
 
+// #3739 (amends D-DOTCTOR3=A): a list head's lone expression is the whole
+// value when it checks as a value of the head the way a parameter of that
+// type accepts it; otherwise it is the literal's single element. The probe
+// runs on snapshots, so the caller re-checks the chosen reading and every
+// diagnostic is reported once. Spreads and inferred-head bodies (`{…}`,
+// `.{…}`) always use element notation.
+fn sema_expression_typed_literal_whole_value(head: Type, value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) -> Bool {
+    if value == {
+        .Spread(_, _) -> return false
+        else -> {}
+    }
+    if sema_expression_list_element_needs_expected_type(value) -> return false
+    probe_scopes := sema_scope_snapshot(scopes)
+    probe_context := sema_check_context_snapshot(context)
+    probe_state := sema_ownership_state_snapshot(state)
+    probe_diagnostics := [Diagnostic]{}
+    probe_tail_store := sema_statement_tail_store_init()
+    checked :: sema_check_expression(value, Val(head), environment, &probe_scopes, &probe_state, &probe_tail_store, &probe_context, &probe_diagnostics) ?? return false
+    if probe_diagnostics.len() != 0 -> return false
+    _ := sema_expr_expected(checked, Val(head), environment, &probe_diagnostics) ?? return false
+    probe_diagnostics.len() == 0
+}
+
+fn sema_expression_typed_literal_whole(head: Type, value: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    checked :: sema_check_expression(value, Val(head), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    typed :: sema_expr_expected(checked, Val(head), environment, &diagnostics) ?? return None
+    sema_expr_expected(typed, expected, environment, &diagnostics)
+}
+
 struct SemaExpressionVariantHead {
     enum_name: String
     variant: String
@@ -795,13 +838,14 @@ struct SemaExpressionVariantHead {
 // resolve it here against the enum declaration so the payload is checked by
 // the enum constructor, never by the struct-literal path.
 fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> SemaExpressionVariantHead? {
+    // A non-named head has no dotted path; the part count below rejects it.
     path :: if sema_expr_unwrap_tag(head) == {
         .Named(name) -> name
-        else -> return None
+        else -> ""
     }
-    parts :: path.split(".")
+    parts :: path.split(".").to_list()
     if parts.len() != 2 -> return None
-    owner :: sema_expression_type_symbol(scopes, parts[0]) ?? return None
+    owner :: sema_expression_type_symbol(&scopes, parts[0]) ?? return None
     declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
     declares_variant :: if declaration == {
         .Enum(value) -> loop candidate in value.variants {
@@ -810,6 +854,24 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, s
         else -> false
     }
     if declares_variant -> Val(SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}) else -> None
+}
+
+// D-DIST1/D-DIST3 (E0128): a distinct head never re-types its base value;
+// the destination owns the explicit conversion. Returns true when reported.
+fn sema_expression_typed_literal_distinct_mismatch(head: Type, value: TExpr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if value.ty == head -> return false
+    facts :: sema_expr_distinct_facts(head, environment, &scopes) ?? return false
+    offered :: type_name(value.ty)
+    method :: if value.ty == {
+        .Int -> "from_int"
+        .Float -> "from_float"
+        .String -> "from_string"
+        .Bool -> "from_bool"
+        .Char -> "from_char"
+        else -> "from_{offered}"
+    }
+    &diagnostics.push(sema_error("E0128", value.span, "a `{offered}` can't be used where a `{facts.name}` is expected", "`{facts.name}` and `{offered}` are different types — even though `{facts.name}` is built on `{type_name(facts.base)}`, one is never accepted in place of the other", "convert explicitly: `{facts.name}.{method}(expr)`"))
+    true
 }
 
 fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -825,7 +887,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             }
         }
     }
-    written_head :: head ?? expected ?? {
+    written_head :: head
         &diagnostics.push(sema_error("E0119", span, "this inferred typed literal needs a known type", "an inferred typed literal needs an expected type from the surrounding context", "add a type head, or annotate the binding with the intended type"))
         return None
     }
@@ -848,10 +910,12 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
                 return sema_expr_expected(checked, expected, environment, &diagnostics)
             }
             .Elements(elements) -> {
+                if elements.len() == 1 && sema_expression_typed_literal_whole_value(result_head, elements[0], environment, &scopes, &state, &context) -> return sema_expression_typed_literal_whole(result_head, elements[0], expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                 checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected(checked, expected, environment, &diagnostics)
             }
             .Value(value) -> {
+                if sema_expression_typed_literal_whole_value(result_head, value, environment, &scopes, &state, &context) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                 elements := [Expr]{value}
                 checked :: sema_expression_list(Expr.ListLit{elements: elements, span: span}, elements, span, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected(checked, expected, environment, &diagnostics)
@@ -867,6 +931,8 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
                 checked :: sema_expression_map(Expr.MapLit{entries: entries, span: span}, entries, span, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 return sema_expr_expected(checked, expected, environment, &diagnostics)
             }
+            // #3739: a map body without `:` can only be the whole value.
+            .Value(value) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             else -> return sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
         }
         .Named(name) -> if body == {
@@ -924,6 +990,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
             }
+            if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, &scopes, &diagnostics) -> return None
             typed :: sema_expr_expected(converted, Val(result_head), environment, &diagnostics) ?? return None
             return sema_expr_expected(typed, expected, environment, &diagnostics)
         }
@@ -938,6 +1005,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
             }
+            if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, &scopes, &diagnostics) -> return None
             typed :: sema_expr_expected(converted, Val(result_head), environment, &diagnostics) ?? return None
             return sema_expr_expected(typed, expected, environment, &diagnostics)
         }

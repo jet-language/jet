@@ -331,6 +331,12 @@ impl<'a> Checker<'a> {
             &want,
             crate::AST::AccessConvention::Read,
         );
+        let got = self.lift_optional_argument(
+            &mut arg.expr,
+            got,
+            &want,
+            crate::AST::AccessConvention::Read,
+        );
         let reported = self.check_type_assignable(&want, &got, arg.expr.span());
         // D-FIXARR1: [T#N] widens to [T] at a call site.
         let fixed_widens = matches!((&want, &got),

@@ -132,7 +132,7 @@ pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg],
 }
 pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !call.name.contains(".") -> return SemaDirectSpecialCheck{handled: false, value: None}
-    parts := call.name.split(".")
+    parts := call.name.split(".").to_list()
     if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
     alias := parts[0]
     member := parts[1]
@@ -459,7 +459,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     }
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return None
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
-    return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, state, call.name_span)
+    return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 

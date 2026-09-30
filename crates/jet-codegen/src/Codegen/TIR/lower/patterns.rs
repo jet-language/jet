@@ -812,6 +812,7 @@ pub(crate) fn tir_add_pattern_bindings(
                         env.bind(name, local, Some(ty.clone()));
                     }
                     PatSlot::Wildcard => {}
+                    PatSlot::Nested(inner) => tir_add_nested_pattern_bindings(cx, inner, env, ty)?,
                     PatSlot::Range { lo, hi } => {
                         if range_slots_forbidden
                             || lo > hi
@@ -822,6 +823,10 @@ pub(crate) fn tir_add_pattern_bindings(
                         {
                             return Err("enum range payload type or bounds");
                         }
+                    }
+                    // D-PAT-NAMED-NEST1=A: sema places every named entry.
+                    PatSlot::Named { .. } | PatSlot::Rest(_) => {
+                        return Err("unplaced named payload entry");
                     }
                 }
             }
@@ -861,6 +866,41 @@ pub(crate) fn tir_add_pattern_bindings(
             Ok(())
         }
         _ => Err("unsupported enum binding pattern"),
+    }
+}
+
+/// S31: bind the names a nested payload pattern introduces, each at its
+/// payload type. Optional and Result carriers descend into their payload;
+/// enum patterns reuse `tir_add_pattern_bindings`.
+pub(crate) fn tir_add_nested_pattern_bindings(
+    cx: &Cx,
+    pattern: &Pattern,
+    env: &mut LowerEnv,
+    subject_ty: &Type,
+) -> Result<(), &'static str> {
+    let payload_ty = match (pattern, subject_ty.without_user_tags()) {
+        (Pattern::Present { .. }, Type::Option(inner)) => (**inner).clone(),
+        (Pattern::Ok { .. }, Type::Result { ok, .. }) => (**ok).clone(),
+        (Pattern::Err { .. }, Type::Result { err, .. }) => (**err).clone(),
+        (Pattern::Absent(_), Type::Option(_)) => return Ok(()),
+        (Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. } | Pattern::Absent(_), _) => {
+            return Err("nested carrier pattern does not match its payload type");
+        }
+        _ => return tir_add_pattern_bindings(cx, pattern, env, Some(subject_ty)),
+    };
+    match pattern {
+        Pattern::Present { binding, inner, .. }
+        | Pattern::Ok { binding, inner, .. }
+        | Pattern::Err { binding, inner, .. } => match inner {
+            Some(inner) => tir_add_nested_pattern_bindings(cx, inner, env, &payload_ty),
+            None => {
+                if !binding.is_empty() && binding != "_" {
+                    env.bind(binding, TLocal::user(binding), Some(payload_ty));
+                }
+                Ok(())
+            }
+        },
+        _ => Ok(()),
     }
 }
 
@@ -1085,9 +1125,37 @@ pub(crate) fn lower_enum_arg(
     if let Some(want) = payload_ty {
         value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
     }
+    // `None` carries no payload to type it; the declared variant field does.
+    if matches!(value.kind, TExprKind::Absent) {
+        if let Some(want @ Type::Option(_)) = enum_edge_declared_type(cx, type_name, edge) {
+            value.ty = want.clone();
+        }
+    }
     TEnumArg {
         value,
         clone,
         boxed,
+    }
+}
+
+/// The declared type of one enum-literal payload edge: the single payload for
+/// a positional `edge`, or the labelled field for a named `"Variant.label"`.
+fn enum_edge_declared_type<'a>(cx: &'a Cx, type_name: &str, edge: &str) -> Option<&'a Type> {
+    if let Ok(Some(ty)) = enum_variant_payload_type(cx, type_name, edge) {
+        return Some(ty);
+    }
+    let (variant, label) = edge.rsplit_once('.')?;
+    let owner = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
+    let (_, payload) = cx
+        .enum_variants
+        .get(&owner)?
+        .iter()
+        .find(|(candidate, _)| candidate == variant)?;
+    match payload {
+        VariantPayload::Named(fields) => fields
+            .iter()
+            .find(|field| field.name == label)
+            .map(|field| &field.ty),
+        VariantPayload::Unit | VariantPayload::Single(..) => None,
     }
 }

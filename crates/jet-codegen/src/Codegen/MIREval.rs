@@ -241,10 +241,10 @@ fn mir_ui_node(value: &CtValue, span: Span) -> Result<mir_ui_kernel::JetUiNode, 
         .and_then(|value| mir_ui_float(value, span))?;
     let role = match mir_ui_present(mir_ui_field(value, "role")) {
         Some(CtValue::Enum { variant, .. }) => match variant.as_str() {
-            "Button" => Some(mir_ui_kernel::JetAriaRole::Button),
-            "TextInput" => Some(mir_ui_kernel::JetAriaRole::TextInput),
-            "Label" => Some(mir_ui_kernel::JetAriaRole::Label),
-            "Container" => Some(mir_ui_kernel::JetAriaRole::Container),
+            "Button" => Some(mir_ui_kernel::JetUiAriaRole::Button),
+            "TextInput" => Some(mir_ui_kernel::JetUiAriaRole::TextInput),
+            "Label" => Some(mir_ui_kernel::JetUiAriaRole::Label),
+            "Container" => Some(mir_ui_kernel::JetUiAriaRole::Container),
             _ => None,
         },
         _ => None,
@@ -1525,7 +1525,10 @@ pub struct MirEvalConfig {
     pub runtime_execution: bool,
     pub try_anyway: bool,
     pub globals: BTreeMap<String, MirEvalValue>,
-    pub fuel: u64,
+    /// Step budget. `None` runs without a step limit: the `jet run` tiers
+    /// (D-INTERP-BUDGET1). Compile-time evaluation, `jet dev`, and the REPL
+    /// stay bounded so a build or watch loop always finishes.
+    pub fuel: Option<u64>,
     /// The REPL fragment uses the same MIR dispatcher but keeps transcript
     /// output on the REPL-authorized Core path.
     pub repl_mode: bool,
@@ -1543,7 +1546,7 @@ impl Default for MirEvalConfig {
             runtime_execution: false,
             try_anyway: false,
             globals: BTreeMap::new(),
-            fuel: 10_000_000,
+            fuel: Some(10_000_000),
             repl_mode: false,
             release_devtools_policy:
                 jet_pkg_model::Package::ReleaseDevtoolsPolicy::from_manifest_profile(
@@ -1762,7 +1765,7 @@ fn fragment_config(
     }
     Ok(MirEvalConfig {
         base_dir: base_dir.to_path_buf(),
-        fuel: req_fuel,
+        fuel: Some(req_fuel),
         runtime_execution,
         repl_mode,
         globals: converted,
@@ -2970,6 +2973,30 @@ fn eval_core_call_binding(
                 .iter()
                 .map(|(key, value)| (crate::AST::CtKey::Str(key.clone()), value.clone()))
                 .collect(),
+            // The checked MIR payload of `DataTree.Object` is the ordered entry
+            // vector `[(key: String, value: DataTree)]`, the same carrier AOT
+            // hands to `jet_data_entries_to_map`.
+            CtValue::List(items) => items
+                .iter()
+                .map(|item| {
+                    let CtValue::Struct { fields, .. } = item else {
+                        return None;
+                    };
+                    let field = |name: &str| {
+                        fields
+                            .iter()
+                            .find(|(field, _)| field == name)
+                            .map(|(_, value)| value.clone())
+                    };
+                    Some((crate::AST::CtKey::from_value(field("key")?)?, field("value")?))
+                })
+                .collect::<Option<_>>()
+                .ok_or_else(|| {
+                    mir_error_at(
+                        "core.collections.entries_to_map expects (key, value) entries",
+                        span,
+                    )
+                })?,
             _ => {
                 return Err(mir_error_at(
                     "core.collections.entries_to_map expects an object",
@@ -3914,7 +3941,7 @@ impl MirInterpreterStream {
             }
 
 
-            Self::Generator { state } => machine.pull_generator(state, span),
+            Self::Generator { state } => machine.pull_generator(state, false, span),
             Self::EventTime {
                 source,
                 callback,
@@ -4300,12 +4327,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         Ok(())
     }
 
+    /// Resume a generator for its next value, or, with `cancel`, take the
+    /// cancel edge of the `yield` it is suspended at so its lexical cleanup
+    /// runs (D-CANCELMODEL1=C). A generator that never started has nothing
+    /// to clean up.
     fn pull_generator(
         &mut self,
         state: &mut MirInterpreterGeneratorState,
+        cancel: bool,
         span: Span,
     ) -> Result<Option<MirEvalValue>, Diagnostic> {
         let (frames, execution) = match state {
+            MirInterpreterGeneratorState::Pending { .. } if cancel => {
+                *state = MirInterpreterGeneratorState::Done;
+                return Ok(None);
+            }
             MirInterpreterGeneratorState::Pending {
                 function,
                 args,
@@ -4322,7 +4358,35 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 (vec![frame], self.execution.clone())
             }
             MirInterpreterGeneratorState::Suspended { frames } => {
-                (std::mem::take(frames), self.execution.clone())
+                let mut frames = std::mem::take(frames);
+                if cancel {
+                    let frame = frames.last_mut().ok_or_else(|| {
+                        mir_error_at("interpreter Stream generator has no suspended frame", span)
+                    })?;
+                    let function = program_function(self.program, frame.function)?;
+                    let cancel_block = frame
+                        .predecessor
+                        .and_then(|yielded| {
+                            function.blocks.iter().find(|block| block.id == yielded)
+                        })
+                        .and_then(|block| match &block.terminator {
+                            MirTerminator::Yield { resume, cancel, .. }
+                                if *resume == frame.block =>
+                            {
+                                Some(*cancel)
+                            }
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            mir_error_at(
+                                "interpreter Stream generator is not suspended at a yield",
+                                span,
+                            )
+                        })?;
+                    frame.block = cancel_block;
+                    frame.ip = 0;
+                }
+                (frames, self.execution.clone())
             }
             MirInterpreterGeneratorState::Done => return Ok(None),
         };
@@ -4781,7 +4845,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             self.hardware_setup_pending = false;
         }
         loop {
-            if self.steps >= self.config.fuel {
+            if self.config.fuel.is_some_and(|fuel| self.steps >= fuel) {
                 return Err(mir_error("MIR execution exhausted its fuel", None));
             }
             self.steps = self.steps.saturating_add(1);
@@ -5271,6 +5335,37 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 .borrow_mut()
                 .insert(next_scheduler_id, task);
         }
+    }
+
+    /// The generator that a dropped stream or loop cursor still owns.
+    fn generator_stream(value: &RuntimeValue) -> Option<MirStreamHandle> {
+        let handle = match value {
+            RuntimeValue::Stream(handle) => handle.clone(),
+            RuntimeValue::StreamCursor(cursor) => cursor.try_borrow().ok()?.source.clone(),
+            _ => return None,
+        };
+        let generator = matches!(
+            &*handle.try_borrow().ok()?,
+            MirInterpreterStream::Generator { .. }
+        );
+        generator.then_some(handle)
+    }
+
+    /// D-CONC-STREAM1=A: dropping the consumer cancels its generator. A
+    /// generator suspended at `yield` takes that yield's cancel edge, so its
+    /// lexical cleanup runs before the consumer continues.
+    fn cancel_generator_stream(
+        &mut self,
+        handle: &MirStreamHandle,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        let mut stream = handle
+            .try_borrow_mut()
+            .map_err(|_| mir_error_at("interpreter stream is already being pulled", span))?;
+        let MirInterpreterStream::Generator { state } = &mut *stream else {
+            return Ok(());
+        };
+        self.pull_generator(state, true, span).map(|_| ())
     }
 
     fn realtime_state(value: &RuntimeValue) -> Option<Rc<RefCell<MirRealtimeTask>>> {
@@ -6395,7 +6490,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 self.run_drops(frame_index, DropEdge::Return, span)?;
                 Ok(Action::Return(value))
             }
-            MirTerminator::Yield { value, resume } => {
+            // The cancel edge is taken by `cancel_generator_stream` when the
+            // consumer drops a suspended generator.
+            MirTerminator::Yield { value, resume, .. } => {
                 self.run_drops(frame_index, DropEdge::Normal, span)?;
                 let value = self.value(frame_index, *value, span)?;
                 self.jump(frame_index, *resume, span)?;
@@ -7803,6 +7900,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if let Some(removed) = removed {
                     if let Some(state) = Self::realtime_state(&removed) {
                         self.cancel_realtime_state(&state);
+                    }
+                    if let Some(generator) = Self::generator_stream(&removed) {
+                        self.cancel_generator_stream(&generator, span)?;
                     }
                     if runtime_contains_moved(&removed) {
                         return Ok(RuntimeValue::Data(MirEvalValue::Unit));
@@ -9825,6 +9925,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     );
                 }
+                if route.module == "core.expiring" {
+                    let secret = route.member == "secret_new";
+                    let values = self.call_args(frame_index, args, span)?;
+                    return self.eval_expiring_new(secret, values, span);
+                }
                 let codec_member = match (route.module.as_str(), route.member.as_str()) {
                     ("core.encoding.codec", "encode") => Some("encode"),
                     ("core.encoding.codec", "decode") => Some("decode"),
@@ -9896,6 +10001,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     return self.eval_cell_host(&member, values, result_ty, span);
                 }
 
+                if module == "core.host" && member == "ExpiringSecret.with" {
+                    return self.eval_expiring_secret_with(values, span);
+                }
                 if module == "core.host" {
                     if let Some(value) =
                         self.eval_comptime_host_method(frame_index, &member, values.clone(), span)?
@@ -10383,6 +10491,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     );
                 }
+                if route.member == "expiring.get" {
+                    return self.eval_expiring_get(receiver_value, args, frame_index, span);
+                }
                 if route.module == "core.handle"
                     && matches!(
                         route.member.as_str(),
@@ -10551,6 +10662,40 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                     let flatten_result = route.symbol.name() == "jet_std::jet_task_join_result";
                     return self.eval_task_join(receiver_value, flatten_result, span);
+                }
+                if route.family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+                    && route.module == "core.handle"
+                    && matches!(
+                        route.member.as_str(),
+                        "task.pause" | "task.resume" | "task.cancel"
+                    )
+                {
+                    if !args.is_empty() {
+                        return Err(mir_error_at(
+                            "MIR task control route received unexpected arguments",
+                            span,
+                        ));
+                    }
+                    let receiver = match receiver_value {
+                        RuntimeValue::Address(address) => {
+                            require_address_access(&address, MirAccess::Read, span)?;
+                            self.read_place(address.frame, address.place, span)?
+                        }
+                        receiver => receiver,
+                    };
+                    let RuntimeValue::Ambient(value) = receiver else {
+                        return Err(mir_error_at(
+                            "MIR task control receiver has no scheduler owner",
+                            span,
+                        ));
+                    };
+                    let task = mir_interpreter_task_from_ct(&value, span)?;
+                    match route.member.as_str() {
+                        "task.pause" => task.control.pause_with_mode(0),
+                        "task.resume" => task.control.resume(),
+                        _ => task.cancel(),
+                    }
+                    return Ok(RuntimeValue::Data(MirEvalValue::Unit));
                 }
                 if route.family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
                     && route.module == "core.handle"
@@ -14240,6 +14385,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 })
             }
             (
+                "index_list" | "index_list_mut",
+                [MirEvalValue::Bytes(bytes), index, MirEvalValue::String(file), MirEvalValue::Int(line)],
+            ) => {
+                let index = int_value(index.clone(), span)?;
+                crate::fixed_list::jet_fixed_list_index(bytes.len(), index, |index| {
+                    MirEvalValue::Int(i64::from(bytes[index]))
+                })
+                .map_err(|error| {
+                    self.located_runtime_stop("E3010", file, *line as u32, &error.message(), span)
+                })
+            }
+            (
                 "index_map" | "index_map_mut",
                 [MirEvalValue::Map(entries), key, MirEvalValue::String(file), MirEvalValue::Int(line), MirEvalValue::String(function), MirEvalValue::String(source), MirEvalValue::Int(column), MirEvalValue::Int(caret)],
             ) => {
@@ -14947,6 +15104,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
     }
 
+    /// Checked numeric conversion and widening stops share the `E3010`
+    /// arithmetic report with `jet_arithmetic_stop` on AOT and the JIT (I9).
     fn numeric_runtime_stop(
         &mut self,
         file: &str,
@@ -14954,7 +15113,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         message: &str,
         span: Span,
     ) -> Result<MirEvalValue, Diagnostic> {
-        Err(self.located_runtime_stop("E3001", file, line, message, span))
+        Err(self.located_runtime_stop("E3010", file, line, message, span))
     }
 
     fn eval_prelude(
@@ -15870,6 +16029,75 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             };
             return Ok(RuntimeValue::Data(result));
         }
+        // D-RANGE-VALUE1=A: owned range slices share the Prelude bounds kernel
+        // (`jet_slice_vec_range` / `jet_slice_range`) with AOT and the JIT.
+        if family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+            && module == "core.collections"
+            && matches!(
+                (member_name.as_str(), symbol.as_str()),
+                ("slice_list_range", "jet_slice_vec_range")
+                    | ("slice_string_range", "jet_slice_range")
+            )
+        {
+            let mut values = Vec::with_capacity(args.len());
+            for value in args {
+                values.push(runtime_to_data(self.materialize_runtime(value, span)?, span)?);
+            }
+            let [base, range, file, line] = values.as_slice() else {
+                return Err(mir_error_at(
+                    "MIR range slice route requires a base, range, file and line",
+                    span,
+                ));
+            };
+            let (start, end, exclusive) = mir_range_parts(range, span)?;
+            let (MirEvalValue::String(file), MirEvalValue::Int(line)) = (file, line) else {
+                return Err(mir_error_at(
+                    "MIR range slice route has a malformed source location",
+                    span,
+                ));
+            };
+            let line = u32::try_from(*line).unwrap_or(0);
+            let mode = if exclusive { "exclusive" } else { "inclusive" };
+            let result = match base {
+                MirEvalValue::String(text) => {
+                    mir_range_prelude::jet_string_slice_value(text, start, end, exclusive)
+                        .map(MirEvalValue::String)
+                }
+                MirEvalValue::List(items) => {
+                    let len = i64::try_from(items.len()).unwrap_or(i64::MAX);
+                    mir_range_prelude::jet_range_bounds(start, end, exclusive, len)
+                        .map(|(from, to)| {
+                            MirEvalValue::List(items[from as usize..to as usize].to_vec())
+                        })
+                        .ok_or_else(|| {
+                            format!("can't slice {len} items from {start} to {end} ({mode})")
+                        })
+                }
+                MirEvalValue::Bytes(bytes) => {
+                    let len = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
+                    mir_range_prelude::jet_range_bounds(start, end, exclusive, len)
+                        .map(|(from, to)| {
+                            MirEvalValue::Bytes(bytes[from as usize..to as usize].to_vec())
+                        })
+                        .ok_or_else(|| {
+                            format!("can't slice {len} items from {start} to {end} ({mode})")
+                        })
+                }
+                _ => {
+                    return Err(mir_error_at(
+                        "MIR range slice base is not a String or List",
+                        span,
+                    ))
+                }
+            };
+            return match result {
+                Ok(value) => Ok(RuntimeValue::Data(value)),
+                Err(message) => {
+                    let file = file.clone();
+                    Err(self.located_runtime_stop("E3001", &file, line, &message, span))
+                }
+            };
+        }
         if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
             && module == "core.builtin"
             && matches!(
@@ -16684,16 +16912,22 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         MirInterpreterStream::Source { values },
                     ))));
                 }
-                "string_starts_with" => {
-                    if symbol != "jet_string_starts_with" {
+                "string_starts_with" | "string_ends_with" => {
+                    let suffix = member_name == "string_ends_with";
+                    let expected = if suffix {
+                        "jet_string_ends_with"
+                    } else {
+                        "jet_string_starts_with"
+                    };
+                    if symbol != expected {
                         return Err(mir_error_at(
-                            "MIR String.starts_with route has an unknown checked symbol",
+                            "MIR String prefix/suffix route has an unknown checked symbol",
                             span,
                         ));
                     }
-                    let [text, prefix] = args.as_slice() else {
+                    let [text, affix] = args.as_slice() else {
                         return Err(mir_error_at(
-                            "MIR String.starts_with route requires text and prefix",
+                            "MIR String prefix/suffix route requires text and an affix",
                             span,
                         ));
                     };
@@ -16701,21 +16935,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         self.materialize_runtime(text.clone(), span)?,
                         span,
                     )?;
-                    let prefix = runtime_to_data(
-                        self.materialize_runtime(prefix.clone(), span)?,
+                    let affix = runtime_to_data(
+                        self.materialize_runtime(affix.clone(), span)?,
                         span,
                     )?;
-                    let (MirEvalValue::String(text), MirEvalValue::String(prefix)) =
-                        (text, prefix)
+                    let (MirEvalValue::String(text), MirEvalValue::String(affix)) =
+                        (text, affix)
                     else {
                         return Err(mir_error_at(
-                            "MIR String.starts_with route requires two Strings",
+                            "MIR String prefix/suffix route requires two Strings",
                             span,
                         ));
                     };
-                    return Ok(RuntimeValue::Data(MirEvalValue::Bool(
-                        text.starts_with(&prefix),
-                    )));
+                    return Ok(RuntimeValue::Data(MirEvalValue::Bool(if suffix {
+                        text.ends_with(&affix)
+                    } else {
+                        text.starts_with(&affix)
+                    })));
                 }
                 "string_from_bytes" | "string_from_bytes_lossy" => {
                     let [receiver] = args.as_slice() else {
@@ -17081,6 +17317,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "string_lower" | "lower" => Some("to_lower"),
                 "string_lines" => Some("lines"),
                 "string_slice" => Some("slice"),
+                "string_split_once" => Some("split_once"),
                 "map_has_key" => Some("has_key"),
                 "set_to_list" => Some("to_list"),
                 "set_values" => Some("values"),
@@ -17091,8 +17328,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "ordering_then" => Some("then"),
                 "ordering_reverse" => Some("reverse"),
                 "min_max" => Some("min_max"),
-                "min" => Some("min"),
-                "max" => Some("max"),
+                "min" | "min_float" => Some("min"),
+                "max" | "max_float" => Some("max"),
                 "join" | "iter_join" => Some("join"),
                 "map_min" => Some("min"),
                 "map_max" => Some("max"),
@@ -17106,6 +17343,26 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     ));
                 };
+                // A rejected count or step is a runtime Stop on every tier,
+                // decided by the one shared Prelude policy, never a comptime
+                // build stop while a program runs.
+                if self.config.runtime_execution {
+                    if let [CtValue::Int(value)] = args {
+                        if let Some(message) =
+                            crate::Comptime::CollectionEval::sequence_argument_message(
+                                method, *value,
+                            )
+                        {
+                            return Err(self.located_runtime_stop(
+                                "E3001",
+                                "<core.collections>",
+                                0,
+                                message,
+                                span,
+                            ));
+                        }
+                    }
+                }
                 let result =
                     crate::Comptime::Builtins::apply_method(receiver, method, args.to_vec(), span)?;
                 return runtime_from_ct(result, span);
@@ -17235,6 +17492,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             ))
             || (family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
                 && module == "core.encoding.datatree"
+                // `DBValue` accessors share this route family but belong to the
+                // ambient `core.db` adapter and its wire kernel.
+                && !symbol.starts_with("jet_std::DBValue::")
                 && matches!(
                     member_name.as_str(),
                     "field"
@@ -17283,10 +17543,28 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 CtValue::Unit
             }),
             (
-                "jet_journey_frame_text",
-                [CtValue::Str(file), CtValue::Int(line), CtValue::Str(function), CtValue::Str(note)],
+                "jet_journey_origin",
+                [CtValue::Str(file), CtValue::Int(line), CtValue::Int(column), CtValue::Str(function)],
             ) => Ok({
-                jet_foundation::Outcome::jet_journey_frame_text(file, *line as u32, function, note);
+                jet_foundation::Outcome::jet_journey_origin(
+                    file,
+                    *line as u32,
+                    *column as u32,
+                    function,
+                );
+                CtValue::Unit
+            }),
+            (
+                "jet_journey_frame_text",
+                [CtValue::Str(file), CtValue::Int(line), CtValue::Int(column), CtValue::Str(function), CtValue::Str(note)],
+            ) => Ok({
+                jet_foundation::Outcome::jet_journey_frame_text(
+                    file,
+                    *line as u32,
+                    *column as u32,
+                    function,
+                    note,
+                );
                 CtValue::Unit
             }),
             ("jet_err_from_message", [CtValue::Str(message)]) => Ok(CtValue::from_jet_err(
@@ -17311,7 +17589,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }),
             (
                 "jet_err_with_context_frame",
-                [error, CtValue::Str(file), CtValue::Int(line), CtValue::Str(function), CtValue::Str(note)],
+                [error, CtValue::Str(file), CtValue::Int(line), CtValue::Int(column), CtValue::Str(function), CtValue::Str(note)],
             ) => Ok({
                 let error = error.to_jet_err().ok_or_else(|| {
                     mir_error_at(
@@ -17323,6 +17601,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     error,
                     file,
                     *line as u32,
+                    *column as u32,
                     function,
                     note.clone(),
                 ))
@@ -20415,6 +20694,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | ("core.args", "merge")
                 | ("core.sys", "decode")
                 | ("core.encoding.json", "decode")
+                | ("core.encoding.toml", "decode")
+                | ("core.encoding.yaml", "decode")
                 | ("core.encoding.csv", "decode")
                 | ("core.data", "csv")
                 | ("core.db", "decode")
@@ -20586,6 +20867,35 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             span,
                         ))
                     }
+                }))
+            }
+            ("core.encoding.toml", "decode") | ("core.encoding.yaml", "decode") => {
+                let [text] = args else {
+                    return Err(mir_error_at(
+                        "typed markup decode needs one text argument",
+                        span,
+                    ));
+                };
+                let text = runtime_to_data(self.materialize_runtime(text.clone(), span)?, span)?;
+                let MirEvalValue::String(text) = text else {
+                    return Err(mir_error_at("typed markup decode expects Text", span));
+                };
+                let (codec, parsed) = if row.module == "core.encoding.toml" {
+                    ("TOML", crate::Comptime::toml_parse_for_tir(&text))
+                } else {
+                    ("YAML", crate::Comptime::yaml_parse_for_tir(&text))
+                };
+                Ok(Some(match parsed {
+                    Ok(tree) => {
+                        let tree = crate::Comptime::MirBridge::ct_to_mir_value(tree, span)?;
+                        self.invoke_typed_decode(target, tree, span)?
+                    }
+                    Err(error) => RuntimeValue::Data(crate::Comptime::MirBridge::ct_to_mir_value(
+                        CtValue::failed(Box::new(crate::Comptime::codec_parse_error_for_tir(
+                            codec, error,
+                        ))),
+                        span,
+                    )?),
                 }))
             }
             ("core.encoding.csv", "decode") | ("core.data", "csv") => {
@@ -20827,6 +21137,91 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }
         };
         Ok(RuntimeValue::Data(MirEvalValue::Int(now)))
+    }
+
+    /// D-TTLVAL1=A: `ExpiringValue.new` / `ExpiringSecret.new`. The clock is
+    /// the caller's Clock owner, so later ticks move the same clock.
+    fn eval_expiring_new(
+        &mut self,
+        secret: bool,
+        values: Vec<RuntimeValue>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let [value, ttl, clock] = <[RuntimeValue; 3]>::try_from(values).map_err(|_| {
+            mir_error_at("MIR expiring constructor expects a value, a TTL and a Clock", span)
+        })?;
+        let value = runtime_to_data(self.materialize_runtime(value, span)?, span)?;
+        let ttl = runtime_to_data(self.materialize_runtime(ttl, span)?, span)?;
+        let ttl_ns = mir_stream_duration_ns(&ttl)
+            .and_then(|ns| i64::try_from(ns).ok())
+            .ok_or_else(|| mir_error_at("MIR expiring TTL is not a Duration", span))?;
+        let clock = self.expiring_owner(clock, span)?;
+        let now = mir_clock_now(&clock, span)?;
+        let deadline_ms =
+            now.saturating_add(crate::scheduler::jet_std_time_duration_to_millis(ttl_ns));
+        Ok(RuntimeValue::Ambient(mir_runtime_owner_value(MirExpiring {
+            value: std::sync::Mutex::new(Some(value)),
+            deadline_ms,
+            clock,
+            secret,
+        })))
+    }
+
+    /// `ExpiringValue.get(clock)`: the value while `clock` is inside the TTL.
+    fn eval_expiring_get(
+        &mut self,
+        receiver: RuntimeValue,
+        args: &[MirValueId],
+        frame_index: usize,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let receiver = self.expiring_owner(receiver, span)?;
+        let expiring = mir_runtime_owner::<MirExpiring>(&receiver)
+            .ok_or_else(|| mir_error_at("MIR ExpiringValue receiver has no native owner", span))?;
+        let [clock] = args else {
+            return Err(mir_error_at("MIR ExpiringValue.get expects one Clock", span));
+        };
+        let clock = self.value(frame_index, *clock, span)?;
+        let clock = self.expiring_owner(clock, span)?;
+        let now = mir_clock_now(&clock, span)?;
+        Ok(mir_expiring_result(expiring.live(now, span)?))
+    }
+
+    /// `ExpiringSecret.with(callback)`: loan the secret to `callback` while
+    /// its own clock is inside the TTL.
+    fn eval_expiring_secret_with(
+        &mut self,
+        values: Vec<RuntimeValue>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let [receiver, callback] = <[RuntimeValue; 2]>::try_from(values).map_err(|_| {
+            mir_error_at("MIR ExpiringSecret.with expects a receiver and a callback", span)
+        })?;
+        let receiver = self.expiring_owner(receiver, span)?;
+        let expiring = mir_runtime_owner::<MirExpiring>(&receiver)
+            .ok_or_else(|| mir_error_at("MIR ExpiringSecret receiver has no native owner", span))?;
+        let now = mir_clock_now(&expiring.clock, span)?;
+        let Some(value) = expiring.live(now, span)? else {
+            return Ok(mir_expiring_result(None));
+        };
+        let result = self.invoke_callback(callback, RuntimeValue::Data(value), span)?;
+        Ok(RuntimeValue::Result {
+            ok: true,
+            value: Box::new(result),
+        })
+    }
+
+    /// The native owner carried by an expiring wrapper or a Clock, read
+    /// through a borrowed place when the call passes one.
+    fn expiring_owner(&mut self, value: RuntimeValue, span: Span) -> Result<CtValue, Diagnostic> {
+        let value = match value {
+            RuntimeValue::Address(address) => {
+                require_address_access(&address, MirAccess::Read, span)?;
+                self.read_place(address.frame, address.place, span)?
+            }
+            value => value,
+        };
+        self.runtime_to_ct(value, span)
     }
 
     fn eval_channel_constructor(
@@ -21303,7 +21698,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 );
                 return Err(Diagnostic::e3403(&api, Some(span)));
             }
-            if jet_foundation::Effects::core_requires_comptime_gate(&row.module, &row.member) {
+            // Compile-time evaluation runs only calls whose effect row is
+            // empty (memory and panics aside). Any other effect is observable
+            // outside the program, so folding it would bake one build-time
+            // result into every run.
+            if jet_foundation::Effects::core_effect(&row.module, &row.member)
+                .is_some_and(|effect| {
+                    !matches!(
+                        effect,
+                        jet_foundation::Effects::Effect::Mem | jet_foundation::Effects::Effect::Panic
+                    )
+                })
+            {
                 return Err(Diagnostic::error(
                     "E3410",
                     format!(
@@ -22181,6 +22587,19 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .into_iter()
             .map(|value| self.materialize_runtime(value, span))
             .collect::<Result<Vec<_>, Diagnostic>>()?;
+        if row.module == "core.crypto" && row.member == "__zeroize" {
+            // D-SHAPE-RESOURCE1=A: the argument is the moved `bytes` storage of
+            // the closing secret. Wipe that storage itself; a CtValue copy
+            // would leave the resident bytes to be freed unwiped.
+            let [RuntimeValue::Data(bytes)] = runtime_args.as_mut_slice() else {
+                return Err(mir_error_at(
+                    "core.crypto.__zeroize expects one owned [U8] argument",
+                    span,
+                ));
+            };
+            mir_zeroize_owned_bytes(bytes, span)?;
+            return Ok(RuntimeValue::Data(MirEvalValue::Unit));
+        }
         if row.module.is_empty() && row.member == "attach" {
             let [payload_ty] = type_args else {
                 return Err(mir_error_at(
@@ -26823,6 +27242,68 @@ enum RuntimeValue {
     #[allow(dead_code)]
     GcRoot(Rc<RefCell<MirGcRoot>>),
 }
+
+/// D-TTLVAL1=A / D-TTL-ZEROIZE1=A: the interpreter carrier behind
+/// `ExpiringValue<T>` and `ExpiringSecret<T>`. An expired secret's bytes are
+/// wiped in place before the value is released.
+struct MirExpiring {
+    value: std::sync::Mutex<Option<MirEvalValue>>,
+    deadline_ms: i64,
+    clock: CtValue,
+    secret: bool,
+}
+
+impl MirExpiring {
+    fn live(&self, now_ms: i64, span: Span) -> Result<Option<MirEvalValue>, Diagnostic> {
+        let mut slot = self.value.lock().unwrap_or_else(|error| error.into_inner());
+        if now_ms <= self.deadline_ms {
+            return Ok(slot.clone());
+        }
+        if let Some(mut expired) = slot.take() {
+            if self.secret {
+                mir_zeroize_secret_record(&mut expired, span)?;
+            }
+        }
+        Ok(None)
+    }
+}
+
+fn mir_expiring_result(value: Option<MirEvalValue>) -> RuntimeValue {
+    match value {
+        Some(value) => RuntimeValue::Result {
+            ok: true,
+            value: Box::new(RuntimeValue::Data(value)),
+        },
+        None => RuntimeValue::Result {
+            ok: false,
+            value: Box::new(RuntimeValue::Data(MirEvalValue::Struct {
+                type_name: "Expired".to_string(),
+                fields: Vec::new(),
+            })),
+        },
+    }
+}
+
+fn mir_clock_now(clock: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+    let clock = mir_runtime_owner::<MirClock>(clock)
+        .ok_or_else(|| mir_error_at("MIR expiring clock has no native Clock owner", span))?;
+    let clock = clock.lock().unwrap_or_else(|error| error.into_inner());
+    Ok(crate::Comptime::ClockRuntime::jet_clock_now(&clock))
+}
+
+/// A Core secret (`Secret`, `SigningKey`, `X25519SecretKey`) is a record whose
+/// `bytes` field holds the key material.
+fn mir_zeroize_secret_record(value: &mut MirEvalValue, span: Span) -> Result<(), Diagnostic> {
+    let MirEvalValue::Struct { fields, .. } = value else {
+        return Err(mir_error_at("MIR expiring secret is not a secret record", span));
+    };
+    let (_, bytes) = fields
+        .iter_mut()
+        .find(|(name, _)| name == "bytes")
+        .ok_or_else(|| mir_error_at("MIR expiring secret has no bytes field", span))?;
+    mir_zeroize_owned_bytes(bytes, span)
+}
+
 type MirClock = std::sync::Mutex<crate::Comptime::ClockRuntime::jet_std::Clock>;
 type MirPool = std::sync::Mutex<crate::Comptime::PoolRuntime::jet_std::JetPool<CtValue>>;
 type MirPoolId = crate::Comptime::PoolRuntime::jet_std::JetId<CtValue>;
@@ -29002,6 +29483,36 @@ fn runtime_from_ct(value: CtValue, span: Span) -> Result<RuntimeValue, Diagnosti
     }
 }
 
+/// D-SHAPE-RESOURCE1=A: wipe a moved `[U8]` in its own storage. Byte buffers
+/// go through the one vetted volatile kernel; a boxed list wipes each element
+/// cell in place.
+fn mir_zeroize_owned_bytes(value: &mut MirEvalValue, span: Span) -> Result<(), Diagnostic> {
+    match value {
+        MirEvalValue::Bytes(bytes) => {
+            crate::Comptime::jet_crypto_zeroize(std::mem::take(bytes));
+            Ok(())
+        }
+        MirEvalValue::List(items) => {
+            for item in items.iter_mut() {
+                let MirEvalValue::Int(byte) = item else {
+                    return Err(mir_error_at(
+                        "core.crypto.__zeroize list element is not a U8",
+                        span,
+                    ));
+                };
+                // SAFETY: `byte` is a live, uniquely borrowed element of the moved list.
+                unsafe { std::ptr::write_volatile(byte, 0) };
+            }
+            std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        _ => Err(mir_error_at(
+            "core.crypto.__zeroize expects one owned [U8] argument",
+            span,
+        )),
+    }
+}
+
 fn runtime_to_data(value: RuntimeValue, span: Span) -> Result<MirEvalValue, Diagnostic> {
     match value {
         RuntimeValue::Moved => Err(mir_error_at("MIR value was moved", span)),
@@ -30305,6 +30816,34 @@ fn mir_error(message: &str, span: Option<Span>) -> Diagnostic {
 
 fn mir_error_at(message: &str, span: Span) -> Diagnostic {
     mir_error(message, Some(span))
+}
+
+#[allow(dead_code)]
+mod mir_range_prelude {
+    use jet_foundation::StructuralDebug::jet_debug_range;
+    include!("../Prelude/Core/RangeBounds.rs");
+}
+
+/// Read one checked `Range` carrier as `(start, end, exclusive)`.
+fn mir_range_parts(range: &MirEvalValue, span: Span) -> Result<(i64, i64, bool), Diagnostic> {
+    let MirEvalValue::Struct { type_name, fields } = range else {
+        return Err(mir_error_at("MIR range operand is not a Range", span));
+    };
+    if type_name != crate::Syntax::TYPE_RANGE {
+        return Err(mir_error_at("MIR range operand has the wrong type", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then(|| value.clone()))
+            .ok_or_else(|| mir_error_at(&format!("MIR range has no `{name}` field"), span))
+    };
+    let start = int_value(field("start")?, span)?;
+    let end = int_value(field("end")?, span)?;
+    let MirEvalValue::Bool(exclusive) = field("exclusive")? else {
+        return Err(mir_error_at("MIR range exclusive flag is not Bool", span));
+    };
+    Ok((start, end, exclusive))
 }
 #[allow(dead_code)]
 mod mir_fixed_arithmetic {

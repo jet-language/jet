@@ -1522,39 +1522,6 @@ print(api.total(out))`,
     clear_counter: `c :: api.counter_from([String]{"jet"})
 out :: api.clear_counter(c)
 print(api.total(out))`,
-    deque: `d :: api.deque()
-print(api.deque_len(d))`,
-    deque_from: `d :: api.deque_from([String]{"jet"})
-print(api.deque_len(d))`,
-    deque_len: `d :: api.deque()
-print(api.deque_len(d))`,
-    deque_is_empty: `d :: api.deque()
-print(api.deque_is_empty(d))`,
-    append: `d :: api.deque()
-out :: api.append(d, "jet")
-print(api.deque_len(out))`,
-    appendleft: `d :: api.deque()
-out :: api.appendleft(d, "jet")
-print(api.deque_len(out))`,
-    pop: `d :: api.deque()
-pair :: api.pop(d)
-print(api.deque_len(pair.deque))`,
-    popleft: `d :: api.deque()
-pair :: api.popleft(d)
-print(api.deque_len(pair.deque))`,
-    peek: `print(api.peek(api.deque()) == None)`,
-    peekleft: `print(api.peekleft(api.deque()) == None)`,
-    extend: `d :: api.deque()
-out :: api.extend(d, [String]{"jet"})
-print(api.deque_len(out))`,
-    extendleft: `d :: api.deque()
-out :: api.extendleft(d, [String]{"jet"})
-print(api.deque_len(out))`,
-    rotate: `d :: api.deque_from([String]{"jet"})
-out :: api.rotate(d, 1)
-print(api.deque_len(out))`,
-    deque_items: `d :: api.deque_from([String]{"jet"})
-print(api.deque_items(d))`,
     ordered_map: `m :: api.ordered_map()
 print(api.map_len(m))`,
     map_get: `m :: api.ordered_map()

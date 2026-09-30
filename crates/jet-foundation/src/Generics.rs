@@ -484,8 +484,6 @@ pub fn e0904(span: Span, param: &str) -> Diagnostic {
 pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) -> Diagnostic {
     let fix = if trait_name == COMPARABLE && type_name == crate::Syntax::TYPE_FLOAT {
         "use explicit Float comparisons or sort by a total key that handles NaN".to_string()
-    } else if trait_name == COMPARABLE && type_name == crate::Syntax::TYPE_DECIMAL {
-        "pass a Comparable type such as Int; for approximate values, use concrete Float parameters and Float{2.5}, with explicit NaN handling".to_string()
     } else if needs_derive && (trait_name == COMPARABLE || trait_name == SERIALIZE) {
         format!("write `#{trait_name}` before `{type_name}`, or use a different approach")
     } else if trait_name == COMPARABLE {
@@ -564,10 +562,16 @@ pub fn trait_method_expected_signature(
         .collect::<Vec<_>>()
         .join(", ");
     let mut rendered = format!("fn {}({params})", sig.name);
-    if let Some(ret) = &sig.return_type {
-        rendered.push(' ');
-        rendered.push_str(&concrete(ret));
-    }
+    // D-SIG-AFTER1=A: the arrow carries the effect row when one is declared
+    // (`-[IO]> T`, pure `-[]> T`); otherwise a success value is spelled
+    // `-> T`. Unit and unit-fallible (`E!`) results keep the arrowless form.
+    let success_value = sig.return_type.as_ref().is_some_and(|ret| {
+        let success = match ret {
+            Type::Result { ok, .. } => ok.as_ref(),
+            other => other,
+        };
+        !matches!(success, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+    });
     if let Some(effects) = &sig.declared_effects {
         let names = effects
             .iter()
@@ -577,6 +581,12 @@ pub fn trait_method_expected_signature(
         rendered.push_str(&format!(" -[{names}]>"));
     } else if sig.is_pure {
         rendered.push_str(" -[]>");
+    } else if success_value {
+        rendered.push_str(" ->");
+    }
+    if let Some(ret) = &sig.return_type {
+        rendered.push(' ');
+        rendered.push_str(&concrete(ret));
     }
     format!("`{rendered}`")
 }

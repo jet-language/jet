@@ -189,25 +189,45 @@ pub(crate) fn bind_call_args(
                 {
                     next_positional += 1;
                 }
-                match params.get(next_positional) {
-                    Some(param) if param.zone == ParamZone::LabelOnly => {
-                        diags.push(binder_label_required(callee, param.label, arg.span));
-                        ok = false;
-                        // Keep recovery aligned with the written argument
-                        // position so consecutive label-only omissions report
-                        // each parameter's registered label.
-                        if !param.variadic {
-                            next_positional += 1;
-                        }
+                // A label-only parameter is never a positional slot: a bare
+                // argument fills the next parameter that accepts a position,
+                // so `f(name, body, viewport: v)` binds `body` past a
+                // label-only `viewport`. E0769 names a label-only parameter
+                // only when no position-accepting parameter remains for the
+                // bare argument.
+                let target = (next_positional..params.len()).find(|&position| {
+                    params[position].zone != ParamZone::LabelOnly
+                        && (params[position].variadic || slots[position].is_empty())
+                });
+                if let Some(position) = target {
+                    slots[position].push(index);
+                    next_positional = if params[position].variadic {
+                        position
+                    } else {
+                        position + 1
+                    };
+                    continue;
+                }
+                // Wrap to an earlier skipped label-only parameter only for the
+                // call's first failure, so recovery never repeats a report.
+                let wrapped = if ok { 0..next_positional } else { 0..0 };
+                let skipped = (next_positional..params.len())
+                    .chain(wrapped)
+                    .find(|&position| {
+                        params[position].zone == ParamZone::LabelOnly
+                            && slots[position].is_empty()
+                    });
+                // Past every parameter, arity is reported by the caller's
+                // own check.
+                if let Some(position) = skipped {
+                    diags.push(binder_label_required(callee, params[position].label, arg.span));
+                    ok = false;
+                    // Keep recovery aligned with the written argument
+                    // position so consecutive label-only omissions report
+                    // each parameter's registered label.
+                    if !params[position].variadic {
+                        next_positional = next_positional.max(position + 1);
                     }
-                    Some(param) => {
-                        slots[next_positional].push(index);
-                        if !param.variadic {
-                            next_positional += 1;
-                        }
-                    }
-                    // Arity is reported by the caller's own check.
-                    None => {}
                 }
             }
             Some((label, label_span)) => {

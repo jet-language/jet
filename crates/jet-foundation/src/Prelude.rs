@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn source_is_the_complete_ambient_registry() {
-        assert_eq!(entries().len(), 20);
+        assert_eq!(entries().len(), 21);
         assert_eq!(
             entry("print").map(|entry| entry.target),
             Some(Target::Builtin)
@@ -260,6 +260,7 @@ mod tests {
             "panic",
             "assert",
             "assert_eq",
+            "debug",
             "keep",
             "eprint",
             "file_exists",

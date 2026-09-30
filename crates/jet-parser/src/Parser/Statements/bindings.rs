@@ -62,8 +62,8 @@ impl<'a> Parser<'a> {
 
     /// D-BIND-BARE1: a binding starting with the target (no keyword), written
     /// `name (:: | :=) expr`. The sigil chooses mutability.
-    /// Typed forms `name: Type :: expr` / `name: Type := expr` are retired —
-    /// ordinary parse error, no teaching window.
+    /// The retired typed form `name: Type :: expr` / `name: Type := expr`
+    /// teaches E0393 (D-BIND-TYPE2=A); `name@ Type` stays a plain parse error.
     pub(in crate::Parser) fn sigil_binding(&mut self) -> Result<Binding, Diagnostic> {
         // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
         // struct — instead of a plain `name`.
@@ -92,8 +92,34 @@ impl<'a> Parser<'a> {
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
+        let retired = self.retired_const_decl_name(&name);
+        let (name, retired) = match retired {
+            Some(new) => (new, Some(name)),
+            None => (name, None),
+        };
+        // D-COMPILER-NS1=A: the fact mark names compiler facts only; a
+        // program's own build-time value is `NAME :: prep { value }`.
+        if Syntax::is_comptime_name(&name) {
+            let plain = Syntax::canonical_name_case(
+                name.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_'),
+                Syntax::NameCase::Screaming,
+            );
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("`{name}` is a compiler fact, not a binding name"),
+                "a marked name reads a fact the compiler supplies; a program's own build-time value is an ordinary name bound with `prep { … }`".to_string(),
+                format!("declare `{plain} :: {} {{ value }}`", Syntax::KW_PREP),
+                Some(name_span),
+            ));
+        }
+        if matches!(self.peek().kind, TokKind::Colon) {
+            if let Some(binding) = self.retired_typed_binding(name.clone(), name_span)? {
+                return Ok(binding);
+            }
+        }
         // Retired D-BINDEXPLICIT1 / D-BIND4 typed forms — ordinary parse error.
-        // `name@ Type` and `name: Type` never open a binding under D-BIND-BARE1.
+        // `name@ Type` and a `name:` that is not `name: Type ::` never open a
+        // binding under D-BIND-BARE1.
         if matches!(self.peek().kind, TokKind::At | TokKind::Colon) {
             return Err(Diagnostic::error(
                 "E0003",
@@ -137,7 +163,10 @@ impl<'a> Parser<'a> {
                 Some(uninit_span),
             ));
         }
-        let init = self.expr()?;
+        let (init, prepared) = self.binding_value(mutable)?;
+        if let Some(old) = &retired {
+            self.retire_const_decl(old, &name, name_span, &init, prepared, mutable);
+        }
         // D-UNINIT-SENTINEL2: `name := Type{ uninit }` — uninit only as a
         // whole typed-literal body. Mutable bindings only (`:=`).
         if mutable {
@@ -169,8 +198,11 @@ impl<'a> Parser<'a> {
             markers: Vec::new(),
             reactive_upgrade: false,
             meta: None,
-            // one Ident token, so the ordinary path must read stage from it.
-            is_comptime: Syntax::is_comptime_name(&name),
+            // D-PREP-SURFACE2=A (owner ruling, 2026-09-30): compile time is
+            // always explicit. Only `name :: prep { value }` is evaluated
+            // while building; an ALL_CAPS name is an ordinary runtime value.
+            // A retired `@name :: value` recovers with its old meaning.
+            is_comptime: prepared || (retired.is_some() && !mutable),
             name,
             name_span,
             sigil_span: Some(sigil_span),
@@ -185,6 +217,84 @@ impl<'a> Parser<'a> {
             gc_promotion: None,
             gc_transferred: false,
         })
+    }
+
+    /// D-BIND-TYPE2=A: `name: Type :: value` (or `:=`) teaches E0393 with a
+    /// behavior-preserving edit to `name :: Type{value}`, then parses on as the
+    /// untyped binding so one mistake reports once. Returns `None` with the
+    /// cursor restored when the tokens after `:` are not `Type` and a sigil.
+    fn retired_typed_binding(
+        &mut self,
+        name: String,
+        name_span: Span,
+    ) -> Result<Option<Binding>, Diagnostic> {
+        let save = self.pos;
+        let save_diags = self.diags.len();
+        let colon_span = self.bump().span;
+        let parsed = self.type_();
+        let Ok((ty, ty_span)) = parsed else {
+            self.pos = save;
+            self.diags.truncate(save_diags);
+            return Ok(None);
+        };
+        if self.diags.len() != save_diags
+            || !matches!(self.peek().kind, TokKind::ColonColon | TokKind::ColonEq)
+        {
+            self.pos = save;
+            self.diags.truncate(save_diags);
+            return Ok(None);
+        }
+        let (mutable, sigil_span) = self.expect_bind_sigil()?;
+        let init = self.expr()?;
+        let value_span = init.span();
+        let sigil = if mutable {
+            Syntax::SIGIL_BIND_MUT
+        } else {
+            Syntax::SIGIL_BIND_IMMUT
+        };
+        let type_text = self.source_fragment(ty_span).unwrap_or_else(|| ty.name());
+        let diagnostic = |replacement: &str| {
+            Diagnostic::from_row(
+                "E0393",
+                &[
+                    ("name", name.as_str()),
+                    ("type", type_text.as_str()),
+                    ("replacement", replacement),
+                ],
+                Some(Span::new(colon_span.start, ty_span.end)),
+            )
+        };
+        let report = match self.source_fragment(value_span) {
+            Some(value_text) => {
+                let replacement = format!("{name} {sigil} {type_text}{{{value_text}}}");
+                diagnostic(&replacement).with_edit(crate::Diagnostics::TextEdit {
+                    span: Span::new(name_span.start, value_span.end),
+                    new_text: replacement,
+                })
+            }
+            None => diagnostic(&format!("{name} {sigil} {type_text}{{ … }}")),
+        };
+        self.diags.push(report);
+        Ok(Some(Binding {
+            mutable,
+            markers: Vec::new(),
+            reactive_upgrade: false,
+            meta: None,
+            is_comptime: false,
+            name,
+            name_span,
+            sigil_span: Some(sigil_span),
+            pattern: None,
+            ty: None,
+            ty_span: None,
+            init,
+            ct: None,
+            uninit: false,
+            arena_view: false,
+            string_view: false,
+            gc_promotion: None,
+            gc_transferred: false,
+        }))
     }
 
     /// D-BIND-BARE1: consume `::` (immutable) or `:=` (mutable), returning the
@@ -220,8 +330,8 @@ impl<'a> Parser<'a> {
 
     /// D-BIND-BARE1: true when the tokens at the cursor begin a sigil binding —
     /// `name ::`, `name :=`, or a destructuring pattern target.
-    /// Also matches retired `name : …` so sigil_binding can emit the ordinary
-    /// parse error (no teaching window).
+    /// Also matches retired `name : …` so sigil_binding can teach E0393
+    /// (D-BIND-TYPE2=A) or report the ordinary parse error.
     /// Used by the statement dispatcher to tell a binding apart from an
     /// expression/assignment that also starts with a name.
     pub(in crate::Parser) fn looks_like_sigil_binding(&self) -> bool {
@@ -233,7 +343,7 @@ impl<'a> Parser<'a> {
                 true
             }
             // Retired typed form `name : Type ::/:= …` — still recognized so
-            // sigil_binding can reject it with E0003 (D-BIND-BARE1).
+            // sigil_binding can teach it with E0393 (D-BIND-TYPE2=A).
             TokKind::Ident(_) | TokKind::KwSelf if matches!(self.peek2().kind, TokKind::Colon) => {
                 true
             }
@@ -520,7 +630,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
-        // `prep if @build.os == { .Linux -> … .MacOS -> … }`. Detected the
+        // `prep if $build.os == { .Linux -> … .MacOS -> … }`. Detected the
         // same way `if_or_dispatch` does — parse the subject below comparison
         // precedence so a trailing `== {` marker survives; reuse `if_arms` for
         // the arm grammar, then repackage the resulting `Stmt::Switch` as a
@@ -637,15 +747,14 @@ impl<'a> Parser<'a> {
             && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
     }
 
-    /// D-META-STAGE1=B / D-ONCE-AT1=D: `#Known` retired in favour of the `@` mark. One
-    /// teaching error covers all three of its forms, because the fix is the
-    /// same move in each: put the mark on the name, or open the block with a
-    /// bare mark.
+    /// D-META-STAGE1=B: `#Known` is retired. One teaching error covers all
+    /// three of its forms: a constant is `NAME :: prep { value }`, and a
+    /// build-time branch or block carries `prep` (D-PREP-SURFACE2=A).
     pub(in crate::Parser) fn retired_known_error(&self, span: Span, fix: String) -> Diagnostic {
         Diagnostic::error(
             "E0377",
             format!("`#{}` is retired", Syntax::RETIRED_MARKER_KNOWN),
-            "compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention"
+            "compile-time work carries the word `prep`, and a compile-time constant is `NAME :: prep { value }`"
                 .to_string(),
             fix,
             Some(span),
@@ -658,6 +767,32 @@ impl<'a> Parser<'a> {
     pub(in crate::Parser) fn at_prep_verb(&self, verb: &TokKind) -> bool {
         matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_PREP)
             && self.peek2().kind == *verb
+    }
+
+    /// D-PREP-SURFACE2=A (owner ruling, 2026-09-30): the value after a
+    /// binding sigil, and whether it is prepared. Compile time is always
+    /// explicit: `name :: prep { value }` — a block holding one final
+    /// expression — is evaluated while building, at module and block scope
+    /// alike; any other value is an ordinary runtime value, whatever the
+    /// name's case. Any other `prep` block keeps E0391.
+    pub(in crate::Parser) fn binding_value(&mut self, mutable: bool) -> Result<(Expr, bool), Diagnostic> {
+        if mutable || !self.at_prep_verb(&TokKind::LBrace) {
+            return Ok((self.expr()?, false));
+        }
+        let start = self.bump().span.start;
+        self.bump(); // `{`
+        // The block's final expression is its value, as in a callable body,
+        // so a bare literal tail is accepted here.
+        let saved_tail = (self.callable_tail_block_depth, self.callable_tail_expects_value);
+        self.callable_tail_block_depth = Some(self.block_depth + 1);
+        self.callable_tail_expects_value = true;
+        let mut body = self.block_stmts();
+        (self.callable_tail_block_depth, self.callable_tail_expects_value) = saved_tail;
+        let end = self.toks[self.pos - 1].span.end;
+        match (body.pop(), body.is_empty()) {
+            (Some(Stmt::Expr(value)), true) => Ok((value, true)),
+            _ => Err(Diagnostic::from_row("E0391", &[], Some(Span::new(start, end)))),
+        }
     }
 
     /// D-PREP-BRANCH1=A / D-PREP-FN1=A: the retired `@if`, `@loop` and `@fn`
@@ -698,6 +833,102 @@ impl<'a> Parser<'a> {
         at
     }
 
+    /// D-PREP-SURFACE2=A (owner ruling, 2026-09-30): a module constant is an
+    /// ALL_CAPS name and a block-scope binding a snake_case local
+    /// (D-SHAPE-CASE1); compile time is always the explicit
+    /// `name :: prep { value }`. The respelling of a retired `@name`, or
+    /// `None` when the name carries no retired mark. A read of an ALL_CAPS
+    /// name keeps it, since it names a module constant.
+    fn retired_const_name(&self, name: &str, read: bool) -> Option<String> {
+        let new = Syntax::retired_constant_respelling(name)?;
+        let rest = &name[Syntax::RETIRED_COMPTIME_MARK.len()..];
+        if self.block_depth == 0 || (read && Syntax::is_constant_name(rest)) {
+            return Some(new);
+        }
+        Some(Syntax::canonical_name_case(&new, Syntax::NameCase::Snake))
+    }
+
+    /// A retired `@name` read teaches E0388 with the behavior-preserving
+    /// respelling and the parse continues under the plain name, so each
+    /// mention reports once and nothing cascades.
+    pub(in crate::Parser) fn retire_const_mark(&mut self, name: String, span: Span) -> String {
+        let Some(new) = self.retired_const_name(&name, true) else {
+            return name;
+        };
+        self.diags.push(
+            Diagnostic::from_row("E0388", &[("old", name.as_str()), ("new", new.as_str())], Some(span))
+                .with_edit(crate::Diagnostics::TextEdit {
+                    span,
+                    new_text: new.clone(),
+                }),
+        );
+        new
+    }
+
+    /// The respelled name of a retired `@name` declaration, or `None`.
+    pub(in crate::Parser) fn retired_const_decl_name(&self, name: &str) -> Option<String> {
+        self.retired_const_name(name, false)
+    }
+
+    /// A retired `@name :: value` declaration teaches E0388. The mark always
+    /// meant compile time, so the behavior-preserving edit is
+    /// `name :: prep { value }`; a value already written `prep { … }` (or a
+    /// mutable binding, which `prep` cannot bind) only loses the mark.
+    pub(in crate::Parser) fn retire_const_decl(
+        &mut self,
+        old: &str,
+        new: &str,
+        name_span: Span,
+        value: &Expr,
+        prepared: bool,
+        mutable: bool,
+    ) {
+        let diagnostic = |replacement: &str| {
+            Diagnostic::from_row("E0388", &[("old", old), ("new", replacement)], Some(name_span))
+        };
+        let report = if prepared || mutable {
+            diagnostic(new).with_edit(crate::Diagnostics::TextEdit {
+                span: name_span,
+                new_text: new.to_string(),
+            })
+        } else {
+            let value_span = value.span();
+            match self.source_fragment(value_span) {
+                Some(text) => {
+                    let replacement = format!(
+                        "{new} {} {} {{ {text} }}",
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::KW_PREP
+                    );
+                    diagnostic(&replacement).with_edit(crate::Diagnostics::TextEdit {
+                        span: Span::new(name_span.start, value_span.end),
+                        new_text: replacement.clone(),
+                    })
+                }
+                None => diagnostic(&format!(
+                    "{new} {} {} {{ … }}",
+                    Syntax::SIGIL_BIND_IMMUT,
+                    Syntax::KW_PREP
+                )),
+            }
+        };
+        self.diags.push(report);
+    }
+
+    /// True when a `@name` read names a retired constant: an ALL_CAPS name
+    /// under the mark, or a name this file declares as `@name :: …`. Other
+    /// `@` words are compiler facts and keep their own path.
+    pub(in crate::Parser) fn reads_retired_constant(&self, name: &str) -> bool {
+        let Some(rest) = name.strip_prefix(Syntax::RETIRED_COMPTIME_MARK) else {
+            return false;
+        };
+        Syntax::is_constant_name(rest)
+            || self.toks.windows(2).any(|pair| {
+                matches!(&pair[0].kind, TokKind::Ident(declared) if declared == name)
+                    && matches!(pair[1].kind, TokKind::ColonColon)
+            })
+    }
+
     /// D-META-STAGE1=B / D-PREP-BRANCH1=A / D-PREP-SURFACE2=A: consume
     /// whatever opened a compile-time construct. The ratified heads are `prep`
     /// before `if`/`loop` or a `{` block; the retired `@if`, `@loop`, `@ { … }`,
@@ -717,9 +948,13 @@ impl<'a> Parser<'a> {
             } else if matches!(self.peek().kind, TokKind::LBrace) {
                 format!("write `{} {{ … }}`", Syntax::KW_PREP)
             } else if let TokKind::Ident(name) = &self.peek().kind {
-                format!("write `@{name} :: …`")
+                format!(
+                    "write `{} :: {} {{ … }}`",
+                    Syntax::canonical_name_case(name, Syntax::NameCase::Snake),
+                    Syntax::KW_PREP
+                )
             } else {
-                "write the mark on the name: `@name :: …`".to_string()
+                format!("write a prepared value: `name :: {} {{ … }}`", Syntax::KW_PREP)
             };
             self.diags.push(self.retired_known_error(head.span, fix));
             return Ok(head.span);
@@ -731,7 +966,7 @@ impl<'a> Parser<'a> {
                 "`comptime` is retired".to_string(),
                 "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
                     .to_string(),
-                "remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build"
+                "remove the keyword; a build-time value is written `name :: prep { … }`, and `prep { … }` runs other work while building"
                     .to_string(),
                 Some(span),
             ));

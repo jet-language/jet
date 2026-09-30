@@ -148,7 +148,7 @@ fn sema_call_compute_model_trait(graph: SemaRegistrationGraph, environment: Sema
         .Named(name) -> {
             leaf :: sema_call_compute_model_trait_name(Type.Named{name: name}) ?? return None
             if name.contains(".") {
-                parts := name.split(".")
+                parts := name.split(".").to_list()
                 alias := parts[0]
                 imported_name := ""
                 loop index in 1..<parts.len() {
@@ -175,11 +175,11 @@ fn sema_call_compute_model_trait(graph: SemaRegistrationGraph, environment: Sema
 fn sema_call_compute_model_trait_name(raw: Type) -> String? {
     return if raw == {
         .Named(name) -> {
-            parts := name.split("::")
+            parts := name.split("::").to_list()
             if {
                 parts.len() > 1 -> Val(parts[parts.len() - 1])
                 else -> {
-                    dotted := name.split(".")
+                    dotted := name.split(".").to_list()
                     if {
                         dotted.len() > 1 -> Val(dotted[dotted.len() - 1])
                         else -> Val(name)
@@ -191,11 +191,11 @@ fn sema_call_compute_model_trait_name(raw: Type) -> String? {
             if {
                 names.len() != 1 -> None
                 else -> {
-                    parts := names[0].split("::")
+                    parts := names[0].split("::").to_list()
                     if {
                         parts.len() > 1 -> Val(parts[parts.len() - 1])
                         else -> {
-                            dotted := names[0].split(".")
+                            dotted := names[0].split(".").to_list()
                             if {
                                 dotted.len() > 1 -> Val(dotted[dotted.len() - 1])
                                 else -> Val(names[0])
@@ -399,16 +399,17 @@ fn sema_call_compute_owned_params(types: [Type], accesses: [AccessConvention]) -
 }
 
 fn sema_call_compute_check_alias(member: String, record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+    updated_args := args
     arity := if member == "vec" -> 2 else -> 3
-    if args.len() != arity {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        sema_call_compute_arity_error(member, arity, args.len(), span, &diagnostics)
+    if updated_args.len() != arity {
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_call_compute_arity_error(member, arity, updated_args.len(), span, &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     }
     typed := [TExpr]{}
     value_types := if member == "vec" -> [Type]{Type.Int, Type.Float} else -> [Type]{Type.Int, Type.Int, Type.Float}
     valid := true
-    loop (index, argument) in args {
+    loop (index, argument) in updated_args {
         value :: sema_check_expression(argument.expr, Val(value_types[index]), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
             valid = false
             next
@@ -417,9 +418,9 @@ fn sema_call_compute_check_alias(member: String, record: CoreCallRecord, args: [
     }
     if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     accesses := (loop _ in value_types -> AccessConvention.Read)
-    ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(value_types, accesses), &args, scopes, &diagnostics)
+    ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(value_types, accesses), &updated_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    result_type :: sema_call_compute_alias_type(member, args) ?? Type.Result{ok: Type.Named{name: "Tensor"}, err: Type.Named{name: "ComputeError"}}
+    result_type :: sema_call_compute_alias_type(member, updated_args) ?? Type.Result{ok: Type.Named{name: "Tensor"}, err: Type.Named{name: "ComputeError"}}
     fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
     value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, None, result_type, fallibility, expected, environment, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     _ := sema_call_core_record_effects(record, span, [Type]{}, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics)
@@ -731,18 +732,19 @@ fn sema_call_compute_literal_string(expression: Expr) -> String? {
 }
 
 fn sema_call_models_open(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, outputs: [SemaCallModelOutputInput], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    if args.len() != 1 {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        sema_call_compute_arity_error("open", 1, args.len(), span, &diagnostics)
+    updated_args := args
+    if updated_args.len() != 1 {
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_call_compute_arity_error("open", 1, updated_args.len(), span, &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     }
     if type_args.len() != 1 {
         &diagnostics.push(sema_generic_count_diagnostic("models.open", 1, type_args.len(), span))
-        _ := sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        _ := sema_check_expression(updated_args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     }
-    argument :: sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    output :: sema_call_compute_literal_string(args[0].expr) ?? {
+    argument :: sema_check_expression(updated_args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+    output :: sema_call_compute_literal_string(updated_args[0].expr) ?? {
         sema_call_compute_models_invalid(span, "`models.open` needs a literal output name", "model output selection is checked before provider execution", "write `models.open<Trait>(\"output\")` with a package output name", &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     }
@@ -776,7 +778,7 @@ fn sema_call_models_open(record: CoreCallRecord, args: [CallArg], type_args: [Ty
     fallibility := TFailureCarrier.Result{success: Type.TraitObject{bounds: [String]{model_trait.name}}, error: Type.Named{name: "Err"}}
     call_args := [TExpr]{argument}
     effective_type_args := [Type]{Type.TraitObject{bounds: [String]{model_trait.name}}}
-    ownership := sema_ownership_check_call_arguments(&state, "core.models.open", sema_call_compute_owned_params([Type]{Type.String}, [AccessConvention]{AccessConvention.Read}), &args, scopes, &diagnostics)
+    ownership := sema_ownership_check_call_arguments(&state, "core.models.open", sema_call_compute_owned_params([Type]{Type.String}, [AccessConvention]{AccessConvention.Read}), &updated_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     value :: sema_call_core_tir(record, call_args, span, effective_type_args, [Bool]{false}, None, result_type, fallibility, expected, environment, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
     _ := sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics)

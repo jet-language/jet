@@ -42,6 +42,20 @@ struct JetDriverCompileRequest {
     host_facts: JetDriverHostFacts
     eval_config: JetEvalConfig
     target: JetDriverCompileTarget
+    record_store: JetDriverRecordStore?
+}
+
+// The compiler's record store, reached only through the host, which owns
+// where records live. `schema` names the record kind (`jet.pkg-check/v1`,
+// `jet.iface/v1`, ...). Action kinds are addressed by a computed key; blob
+// kinds by the lowercase hex SHA-256 of their bytes. The host verifies the
+// bytes and schema on both calls; a missing or unreadable record is `None`.
+// `stamp` reports a file's (size, mtime, ctime, inode) stamp so an unchanged
+// file can skip rehashing; a stamp never decides freshness.
+pub trait JetDriverRecordStore {
+    fn record(self, schema: String, key: String) -> [U8]?
+    fn put_record(self, schema: String, key: String, bytes: [U8]) -> Bool
+    fn stamp(self, path: String) -> String?
 }
 
 struct JetDriverSourceUnit {
@@ -261,4 +275,131 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
         diagnostics: diagnostics,
         complete: complete,
     }
+}
+
+// D-BUILD-NOCHANGE1=A: the Receipt closure for one driver request. The host
+// store keys a recorded outcome (typed diagnostics, artifact digest) by this
+// digest. It frames the verb, the host's compiler identity and target, every
+// option that changes what the verb checks, and each authorized source's
+// root identity, root-relative path, and SHA-256 of its exact bytes. Equal
+// digests mean the recorded diagnostics are this request's diagnostics.
+pub struct JetDriverReceipt {
+    pub closure: String
+    pub diagnostics: [Diagnostic]
+}
+
+fn jet_driver_receipt_field(label: String, value: String) -> String Never! {
+    "{label.len()}:{label}{value.len()}:{value}"
+}
+
+pub fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, options: [String]) -> String Never! {
+    compiler :: request.host_facts.compiler_identity ?? ""
+    target :: request.host_facts.target_triple ?? ""
+    closure := jet_driver_receipt_field("schema", "jet.receipt-closure/v1")
+    verb_field :: jet_driver_receipt_field("verb", verb)
+    compiler_field :: jet_driver_receipt_field("compiler", compiler)
+    target_field :: jet_driver_receipt_field("target", target)
+    entry_field :: jet_driver_receipt_field("entry", request.authorized_sources.entry_path)
+    closure = "{closure}{verb_field}{compiler_field}{target_field}{entry_field}"
+    loop option in options {
+        option_field :: jet_driver_receipt_field("option", option)
+        closure = "{closure}{option_field}"
+    }
+    loop root in request.authorized_sources.roots {
+        root_field :: jet_driver_receipt_field("root", root.identity)
+        closure = "{closure}{root_field}"
+        loop file in root.files {
+            path_field :: jet_driver_receipt_field("module", file.relative_path)
+            digest_field :: jet_driver_receipt_field("sha256", mir_sha256_hex(file.source))
+            closure = "{closure}{path_field}{digest_field}"
+        }
+    }
+    mir_sha256_hex(closure)
+}
+
+// A recorded Receipt answers the request only when its closure is the
+// request's closure; anything else checks fresh.
+pub fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, request: JetDriverCompileRequest, options: [String]) -> Bool Never! {
+    receipt.closure == jet_driver_receipt_closure(verb, request, options)
+}
+
+// #2517 package keys for the self-hosted driver, framed by
+// `package_key_*` in JetFoundation.
+
+// The facts self-hosted sema reads from the request for one package: the
+// active OS, the target triple, the package edition, and whether the build
+// targets the web. The build clock and root policy never enter.
+pub fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
+    web :: if request.target == {
+        .Web(_, _, _) -> "true"
+        .Native -> "false"
+    }
+    [PackageKeyTargetFact]{
+        PackageKeyTargetFact{name: "active_os", value: request.host_facts.active_os ?? ""},
+        PackageKeyTargetFact{name: "edition", value: package.edition},
+        PackageKeyTargetFact{name: "target_triple", value: request.host_facts.target_triple ?? ""},
+        PackageKeyTargetFact{name: "web", value: web},
+    }
+}
+
+// The package.jet source of a package that has a manifest.
+fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot) -> String? Never! {
+    if package.manifest_path == None -> return None
+    loop file in snapshot.roots[package.root_index].files {
+        if file.relative_path == "package.jet" -> return Val(file.source)
+    }
+    None
+}
+
+// The package's source digest from the authorized snapshot: its loaded
+// member sources and its package.jet manifest.
+pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit]) -> String Never! {
+    files := [PackageKeySourceFile]{}
+    loop unit in source_units {
+        if unit.package_identity != package.identity -> next
+        file :: snapshot.roots[unit.root_index].files[unit.file_index]
+        &files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: file.source})
+    }
+    package_key_source_digest(files, jet_driver_package_manifest_source(package, snapshot))
+}
+
+// The package check key: `None` when the host names no compiler identity or
+// a direct dependency has no interface digest yet (it must be checked
+// first). `interface_digests` maps package identity to interface digest.
+pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
+    compiler :: request.host_facts.compiler_identity ?? return None
+    dependencies := [PackageKeyDependency]{}
+    loop dependency in package.dependencies {
+        loop candidate in packages {
+            if candidate.root_index != dependency.target_root_index -> next
+            digest :: interface_digests.get(candidate.identity) ?? return None
+            &dependencies.push(PackageKeyDependency{identity: candidate.identity, interface_digest: digest})
+        }
+    }
+    target :: package_key_target_facts_digest(jet_driver_package_target_facts(request, package))
+    source :: jet_driver_package_source_digest(package, request.authorized_sources, source_units)
+    Val(package_key_check_key(compiler, target, package.identity, source, dependencies))
+}
+
+// Read one record through the host store. A missing store, a missing record,
+// or bytes that do not open under `schema` are all a miss.
+pub fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, key: String) -> Record? Never! {
+    store :: request.record_store ?? return None
+    bytes :: store.record(schema, key) ?? return None
+    record :: record_decode(bytes).record ?? return None
+    if record.schema != schema -> return None
+    Val(record)
+}
+
+// Encode and publish one record. Action kinds use `key`; blob kinds pass
+// `None` and are addressed by their content. Returns the key published
+// under, or `None` when there is no store or the record cannot be encoded
+// or written.
+pub fn jet_driver_publish_record(request: JetDriverCompileRequest, schema: String, key: String?, sections: [RecordSection]) -> String? Never! {
+    store :: request.record_store ?? return None
+    encoded :: record_encode(schema, sections)
+    bytes :: encoded.bytes ?? return None
+    address :: key ?? record_blob_key(bytes)
+    if !store.put_record(schema, address, bytes) -> return None
+    Val(address)
 }

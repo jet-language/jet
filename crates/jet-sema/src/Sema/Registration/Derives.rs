@@ -89,15 +89,23 @@ fn expand_builtin_provider_body(
     for item in expanded {
         match item {
             Item::Func(mut function) => {
+                // The provider signature was parsed from `Prelude/Derives.jet`,
+                // so its type spans point into that file. The only authored
+                // location a derived signature has is the target's name; a
+                // declared-type report on it must land there, never on an
+                // offset from the provider source (which renders past the end
+                // of the user's file).
                 for parameter in &mut function.params {
                     replace_provider_type(
                         &mut parameter.ty,
                         &provider.type_param,
                         owner_type,
                     );
+                    parameter.ty_span = target_span;
                 }
                 if let Some(return_type) = &mut function.return_type {
                     replace_provider_type(return_type, &provider.type_param, owner_type);
+                    function.return_type_span = Some(target_span);
                 }
                 function.compiler_generated = true;
                 methods.push(function);

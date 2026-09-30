@@ -5565,8 +5565,9 @@ fn bind_e3208(what: String, why: String, fix: String) -> ! {
 fn selected_project_root_for_path(path: &str) -> PathBuf {
     match jet::build_project_root(path) {
         Ok(root) => root,
-        Err(_) => {
-            eprintln!("error: couldn't select a project root for `{path}`");
+        Err(diagnostics) => {
+            let source = fs::read_to_string(path).unwrap_or_default();
+            eprint!("{}", jet::render_diagnostics(path, &source, &diagnostics));
             exit(ExitCodes::USER_ERROR);
         }
     }

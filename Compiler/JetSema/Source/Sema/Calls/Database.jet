@@ -75,13 +75,13 @@ fn sema_database_contract(receiver: Type, method: String, argument_count: Int) -
 
 fn sema_database_record_effect(effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, result_type: Type, diagnostics: &[Diagnostic]) -> Bool Never! {
     row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
-    sema_effect_record_intrinsic_fact(environment, scopes, context, api, span, SemaCallFacts{
+    sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_call_failure_carrier(Val(result_type)),
         effect_bound: Val(row),
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
-    }, diagnostics)
+    }, &diagnostics)
 }
 
 fn sema_database_check_argument(method: String, index: Int, argument: CallArg, expected: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -120,7 +120,7 @@ pub fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, meth
         &diagnostics.push(sema_error("E0104", span, "`{method}` expects {contract.argument_types.len()} argument{if contract.argument_types.len() == 1 -> "" else -> "s"}, got {args.len()}", "database handle operations have fixed arity except for the optional labeled pool deadline", "pass the documented argument shape"))
         sema_database_discard_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        sema_database_record_effect(contract.effect_name, api, span, environment, scopes, context, contract.result_type, diagnostics)
+        sema_database_record_effect(contract.effect_name, api, span, environment, &scopes, &context, contract.result_type, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if contract.deadline_label && args.len() == 1 -> sema_database_check_deadline_label(args[0], &diagnostics)
@@ -130,7 +130,7 @@ pub fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, meth
         &typed.push(value)
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_database_record_effect(contract.effect_name, api, span, environment, scopes, context, contract.result_type, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_database_record_effect(contract.effect_name, api, span, environment, &scopes, &context, contract.result_type, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(contract.result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: contract.operation, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

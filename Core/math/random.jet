@@ -136,7 +136,7 @@ pub fn bytes(n: Int) -[Rand]> [U8] {
         word :: full_word64()
         loop k in 0..<8 {
             if out.len() >= n -> return ~out
-            &out.push(U8{(word >> (k * 8)) & 255})
+            &out.push(to_u8(word >> (k * 8)))
         }
     }
 }
@@ -373,4 +373,11 @@ pub fn binomialvariate(n: Int, p: Float) -[Rand]> Int {
         if unit() < p -> successes += 1
     }
     successes
+}
+
+/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
+/// checked `U8{}` conversion.
+fn to_u8(n: Int) -> U8 Never! {
+    v :: n & 255
+    (U8{v})
 }

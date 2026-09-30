@@ -116,7 +116,7 @@ pub const RESERVED_SIGILS: &[ReservedEntry] = &[
     ReservedEntry {
         spelling: crate::Syntax::COMPTIME_MARK,
         kind: "sigil",
-        note: "compile-time value name (S57)",
+        note: "compiler fact: `T.$layout`, `$build.os`, `$sites:` (D-COMPILER-NS1)",
     },
     ReservedEntry {
         spelling: crate::Syntax::SIGIL_FENCE_OPEN,
@@ -251,6 +251,7 @@ pub fn flag_takes_separate_value(argument: &str) -> bool {
             | "--shuffle"
             | "--verify"
             | "--template"
+            | "--sort"
     )
 }
 
@@ -316,9 +317,12 @@ pub struct CommandSpec {
     pub name: &'static str,
     /// One-line summary (man + completion description).
     pub summary: &'static str,
-    /// Whether this is one of the three "commands that matter" shown when argv
-    /// is flags-only with no subcommand (bare `jet` starts the REPL instead).
+    /// Whether this is one of the "commands that matter" shown when argv is
+    /// flags-only with no subcommand (bare `jet` starts the REPL instead).
     pub headline: bool,
+    /// Position in `jet help`'s default order, 1 = most used. Measured and
+    /// written by `node Tools/cli-census/census.mjs`; never edit by hand.
+    pub frequency_rank: u16,
     /// Nested actions when this is a namespaced group (`registry`, …); empty
     /// for a bare leaf command.
     pub actions: &'static [NestedCommandSpec],
@@ -1128,12 +1132,16 @@ pub fn moved_command_group(name: &str) -> Option<&'static str> {
 }
 
 /// Every built-in subcommand. Order here is the order shown in the man page and
-/// completions; the greeting picks the `headline` ones.
+/// completions. `jet help` lists the rows by `frequency_rank` (1 = most used),
+/// which `node Tools/cli-census/census.mjs` measures and writes in place; run
+/// it after adding a row, and `--check` proves the ranks are current. The
+/// greeting shows the `headline` rows in that same order.
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "registry",
         summary: "Publish and manage packages",
         headline: false,
+        frequency_rank: 16,
         actions: REGISTRY_ACTIONS,
         exhaustive: true,
         usage: None,
@@ -1142,6 +1150,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "db",
         summary: "Run a bounded SQL console and manage database migrations",
         headline: false,
+        frequency_rank: 57,
         actions: DB_ACTIONS,
         exhaustive: false,
         usage: Some("db [PATH] [--query SQL | --script PATH]"),
@@ -1150,6 +1159,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "inspect",
         summary: "Explore code, builds, packages, and bindings",
         headline: false,
+        frequency_rank: 4,
         actions: INSPECT_ACTIONS,
         exhaustive: true,
         usage: None,
@@ -1158,6 +1168,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "bind",
         summary: "Resolve and record a checked foreign binding plan",
         headline: false,
+        frequency_rank: 37,
         actions: &[],
         exhaustive: false,
         usage: Some("bind <name> [--shape automatic|native] [--freeze]\nbind --policy automatic|frozen\nbind <name> --update --preview\nbind <name> --update --accept <candidate-digest>"),
@@ -1166,6 +1177,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "project",
         summary: "Inspect project files and modules",
         headline: false,
+        frequency_rank: 53,
         actions: PROJECT_ACTIONS,
         exhaustive: true,
         usage: None,
@@ -1174,6 +1186,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "self",
         summary: "Manage the Jet installation and editor tools",
         headline: false,
+        frequency_rank: 11,
         actions: SELF_ACTIONS,
         exhaustive: true,
         usage: None,
@@ -1182,6 +1195,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "diff",
         summary: "Compare two Jet programs by meaning",
         headline: false,
+        frequency_rank: 50,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1190,6 +1204,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "merge",
         summary: "Merge Jet programs without losing code structure",
         headline: false,
+        frequency_rank: 52,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1198,6 +1213,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "review",
         summary: "Review meaning, authority, and proof changes",
         headline: false,
+        frequency_rank: 45,
         actions: &[],
         exhaustive: false,
         usage: Some("review <base.jet> <head.jet>"),
@@ -1206,6 +1222,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "run",
         summary: "Run a program or project",
         headline: true,
+        frequency_rank: 1,
         actions: &[],
         exhaustive: false,
         usage: Some("run [<file.jet|dir>] [--no-prepare] [-- <args>]"),
@@ -1214,6 +1231,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: JOBS_COMMAND,
         summary: "List, inspect, watch, or run named project jobs",
         headline: false,
+        frequency_rank: 25,
         actions: &[],
         exhaustive: false,
         usage: Some("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]]"),
@@ -1224,14 +1242,16 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "generate",
         summary: "Run an explicit source generator with authority and a receipt",
         headline: false,
+        frequency_rank: 59,
         actions: &[],
         exhaustive: false,
         usage: Some("generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json]"),
     },
     CommandSpec {
         name: "check",
-        summary: "check code without creating a binary",
+        summary: "Check code without creating a binary",
         headline: true,
+        frequency_rank: 3,
         actions: &[],
         exhaustive: false,
         usage: Some("check [<file.jet|dir>]"),
@@ -1240,6 +1260,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "fill",
         summary: "Propose checked code for typed goals",
         headline: false,
+        frequency_rank: 58,
         actions: &[],
         exhaustive: false,
         usage: Some("fill <file.jet[:line]>"),
@@ -1247,7 +1268,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "test",
         summary: "Run tests",
-        headline: true,
+        headline: false,
+        frequency_rank: 7,
         actions: &[],
         exhaustive: false,
         usage: Some("test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>]"),
@@ -1256,6 +1278,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "test-compare",
         summary: "Compare one recorded observation corpus against its relation",
         headline: false,
+        frequency_rank: 54,
         actions: &[],
         exhaustive: false,
         usage: Some("test-compare <corpus.json> [--relation=<name>] [--json]"),
@@ -1264,6 +1287,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "prove",
         summary: "Create a proof report for code and tests",
         headline: false,
+        frequency_rank: 13,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1274,6 +1298,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "status",
         summary: "Show what the project has proved",
         headline: false,
+        frequency_rank: 32,
         actions: &[],
         exhaustive: false,
         usage: Some("status [<file.jet|dir>]"),
@@ -1282,6 +1307,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "build",
         summary: "Create a native executable",
         headline: false,
+        frequency_rank: 2,
         actions: &[],
         exhaustive: false,
         usage: Some("build [<file.jet|dir>] | build --verify <receipt-id>"),
@@ -1290,6 +1316,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "package",
         summary: "Create a desktop or game application bundle",
         headline: false,
+        frequency_rank: 28,
         actions: &[],
         exhaustive: false,
         usage: Some("package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>]"),
@@ -1298,6 +1325,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "flash",
         summary: "Flash firmware to a target board",
         headline: false,
+        frequency_rank: 29,
         actions: &[],
         exhaustive: false,
         usage: Some("flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]"),
@@ -1306,6 +1334,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "cc",
         summary: "Compile and link C with the pinned Jetpack toolchain",
         headline: false,
+        frequency_rank: 38,
         actions: &[],
         exhaustive: false,
         usage: Some("cc [options] <sources>"),
@@ -1314,6 +1343,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "c++",
         summary: "Compile and link C++ with the pinned Jetpack toolchain",
         headline: false,
+        frequency_rank: 40,
         actions: &[],
         exhaustive: false,
         usage: Some("c++ [options] <sources>"),
@@ -1322,6 +1352,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "dev",
         summary: "Watch and run a program; optionally open Canvas or a local app",
         headline: false,
+        frequency_rank: 6,
         actions: &[],
         exhaustive: false,
         usage: Some("dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"),
@@ -1330,6 +1361,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "learn",
         summary: "Practice Jet with offline code exercises",
         headline: false,
+        frequency_rank: 35,
         actions: &[],
         exhaustive: false,
         usage: Some("learn [--check] [--watch|--watch=off] [--json] [--quiet] [--color[=<mode>]]"),
@@ -1338,6 +1370,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "try",
         summary: "Speculatively apply a plan and re-check its claims",
         headline: false,
+        frequency_rank: 61,
         actions: &[],
         exhaustive: false,
         usage: Some("try <plan.json>"),
@@ -1346,6 +1379,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "debug",
         summary: "Debug a program from Jet source",
         headline: false,
+        frequency_rank: 10,
         actions: &[],
         exhaustive: false,
         usage: Some(
@@ -1356,6 +1390,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "repl",
         summary: "Try Jet code interactively",
         headline: false,
+        frequency_rank: 24,
         actions: &[],
         exhaustive: false,
         usage: Some("repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>]"),
@@ -1364,6 +1399,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "notebook",
         summary: "Open a Jet notebook (.jetnb) or Jupyter adapter",
         headline: false,
+        frequency_rank: 36,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1372,6 +1408,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "import",
         summary: "Convert supported source code into editable Jet",
         headline: false,
+        frequency_rank: 31,
         actions: &[],
         exhaustive: false,
         usage: Some("import <language> <dir> [--dry-run|--update]"),
@@ -1379,7 +1416,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "new",
         summary: "Create a Jet project or backend source scaffold",
-        headline: false,
+        headline: true,
+        frequency_rank: 15,
         actions: &[],
         exhaustive: false,
         usage: Some("new <name> [--template cli|ui|web|overrides] | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove]"),
@@ -1388,6 +1426,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "fmt",
         summary: "Format Jet and configured project files",
         headline: false,
+        frequency_rank: 8,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1396,6 +1435,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "fix",
         summary: "Apply safe automatic fixes, including `fix memory`",
         headline: false,
+        frequency_rank: 9,
         actions: &[],
         exhaustive: false,
         usage: Some("fix <file.jet|dir>"),
@@ -1404,6 +1444,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "audit",
         summary: "Inspect implicit copies, exercised memory witnesses, or dependencies",
         headline: false,
+        frequency_rank: 27,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1412,6 +1453,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "lint",
         summary: "Run optional code-quality checks",
         headline: false,
+        frequency_rank: 43,
         actions: &[],
         exhaustive: false,
         usage: Some("lint --a11y|--complexity|--cost <file.jet>"),
@@ -1420,6 +1462,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "doc",
         summary: "Generate reference documentation",
         headline: false,
+        frequency_rank: 48,
         actions: &[],
         exhaustive: false,
         usage: Some("doc [--json|--check] [<file.jet|dir>]"),
@@ -1428,6 +1471,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "explain",
         summary: "Explain a diagnostic code, build fact, generic-module value, or typed cost",
         headline: false,
+        frequency_rank: 5,
         actions: &[],
         exhaustive: false,
         usage: Some("explain <CODE|FACT> [file] | explain --cost <file.jet> | explain --reload <file.jet|dir>"),
@@ -1436,6 +1480,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "env",
         summary: "Open the project development shell",
         headline: false,
+        frequency_rank: 18,
         actions: ENV_ACTIONS,
         exhaustive: false,
         usage: None,
@@ -1444,6 +1489,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "shared-store",
         summary: "Manage the optional shared package broker",
         headline: false,
+        frequency_rank: 60,
         actions: SHARED_STORE_ACTIONS,
         exhaustive: true,
         usage: None,
@@ -1452,6 +1498,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "cache",
         summary: "Manage the machine-wide artifact store",
         headline: false,
+        frequency_rank: 47,
         actions: CACHE_ACTIONS,
         exhaustive: true,
         usage: None,
@@ -1460,6 +1507,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "remote",
         summary: "Manage host-owned remote builders",
         headline: false,
+        frequency_rank: 51,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1470,6 +1518,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "trust",
         summary: "Review or change trusted authority",
         headline: false,
+        frequency_rank: 44,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1478,6 +1527,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "image",
         summary: "Build a declared container image",
         headline: false,
+        frequency_rank: 21,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1486,22 +1536,25 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "os",
         summary: "Manage Jetos machines and images",
         headline: false,
+        frequency_rank: 12,
         actions: OS_ACTIONS,
         exhaustive: false,
         usage: None,
     },
     CommandSpec {
         name: "add",
-        summary: "add and download a dependency",
+        summary: "Add and download a dependency",
         headline: false,
+        frequency_rank: 39,
         actions: &[],
         exhaustive: false,
         usage: None,
     },
     CommandSpec {
         name: "remove",
-        summary: "remove a dependency",
+        summary: "Remove a dependency",
         headline: false,
+        frequency_rank: 56,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1510,6 +1563,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "fetch",
         summary: "Download locked dependencies",
         headline: false,
+        frequency_rank: 14,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1518,6 +1572,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "search",
         summary: "Search the local package catalog",
         headline: false,
+        frequency_rank: 46,
         actions: &[],
         exhaustive: false,
         usage: Some("search <query>"),
@@ -1526,6 +1581,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "find",
         summary: "Find code by type, effect, or example",
         headline: false,
+        frequency_rank: 55,
         actions: &[],
         exhaustive: false,
         usage: Some(
@@ -1536,6 +1592,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "update",
         summary: "Update dependency or toolchain pins",
         headline: false,
+        frequency_rank: 17,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1544,6 +1601,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "init",
         summary: "Create package settings in this directory",
         headline: false,
+        frequency_rank: 23,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1552,6 +1610,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "split",
         summary: "Extract closed Package facts into Configs or members",
         headline: false,
+        frequency_rank: 49,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1560,6 +1619,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "Fold",
         summary: "Reverse a recorded Package source transition",
         headline: false,
+        frequency_rank: 62,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1569,14 +1629,16 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "gc",
         summary: "Show values moved into automatic memory management",
         headline: false,
+        frequency_rank: 34,
         actions: GC_ACTIONS,
         exhaustive: false,
         usage: None,
     },
     CommandSpec {
         name: "clean",
-        summary: "remove unused package-store data",
+        summary: "Remove unused package-store data",
         headline: false,
+        frequency_rank: 41,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1588,6 +1650,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "emit",
         summary: "Print generated build output",
         headline: false,
+        frequency_rank: 42,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1596,14 +1659,16 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "eval",
         summary: "Evaluate pure Jet and print the value (`--json` for JSON)",
         headline: false,
+        frequency_rank: 22,
         actions: &[],
         exhaustive: false,
         usage: Some("eval <file.jet|expression>"),
     },
     CommandSpec {
         name: "budget",
-        summary: "check performance limits or update baselines",
+        summary: "Check performance limits or update baselines",
         headline: false,
+        frequency_rank: 26,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1612,6 +1677,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "perf",
         summary: "Collect and inspect performance traces",
         headline: false,
+        frequency_rank: 20,
         actions: PERF_ACTIONS,
         exhaustive: true,
         usage: None,
@@ -1620,6 +1686,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "fuzz",
         summary: "Find failing inputs for property tests",
         headline: false,
+        frequency_rank: 30,
         actions: &[],
         exhaustive: false,
         usage: Some("fuzz <file.jet> [<test>]"),
@@ -1628,6 +1695,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "version",
         summary: "Show the Jet version",
         headline: false,
+        frequency_rank: 33,
         actions: &[],
         exhaustive: false,
         usage: None,
@@ -1636,9 +1704,10 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "help",
         summary: "Show command help",
         headline: false,
+        frequency_rank: 19,
         actions: &[],
         exhaustive: false,
-        usage: Some("help [<command>]"),
+        usage: Some("help [<command>] [--sort frequency|az|za]"),
     },
 ];
 
@@ -1978,6 +2047,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--sbom", help: "With build: Also write an SPDX SBOM next to the binary" },
     FlagSpec { long: "--verbose", help: "With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision" },
     FlagSpec { long: "--template", help: "With new: Start from a named template: cli, ui, web, or overrides" },
+    FlagSpec { long: "--sort", help: "With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)" },
     FlagSpec { long: "--online", help: "With doctor: Allow network checks" },
     FlagSpec { long: "--fix", help: "With doctor: Apply auto-fixable problems" },
     FlagSpec { long: DRY_RUN_FLAG, help: "With package/rewrite commands/generate: Preview changes without writing" },
@@ -2240,14 +2310,60 @@ pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
 }
 
 
-/// Full top-level help generated from the live command and flag registries.
-/// Completion and man generators expose the same canonical rows.
-pub fn usage_page(version: &str) -> String {
+/// D-HELP-SORT1=A with the owner's spelling: the order `jet help` lists
+/// commands in. `Frequency` (the default) reads each row's measured
+/// `frequency_rank`; `jet help --sort az` and `--sort za` list by name for
+/// lookup. Man and completions keep the registry's declaration order.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum HelpOrder {
+    #[default]
+    Frequency,
+    Az,
+    Za,
+}
+
+impl HelpOrder {
+    /// The accepted `--sort` values, as a diagnostic lists them.
+    pub const NAMES: &'static str = "frequency, az, za";
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "frequency" => Some(Self::Frequency),
+            "az" => Some(Self::Az),
+            "za" => Some(Self::Za),
+            _ => None,
+        }
+    }
+}
+
+/// Every `COMMANDS` row in `order`. Names compare case-insensitively, so the
+/// capitalized `Fold` sits between `flash` and `fuzz`.
+pub fn commands_in(order: HelpOrder) -> Vec<&'static CommandSpec> {
+    let by_name = |left: &CommandSpec, right: &CommandSpec| {
+        left.name
+            .bytes()
+            .map(|byte| byte.to_ascii_lowercase())
+            .cmp(right.name.bytes().map(|byte| byte.to_ascii_lowercase()))
+    };
+    let mut commands: Vec<&'static CommandSpec> = COMMANDS.iter().collect();
+    match order {
+        HelpOrder::Frequency => commands.sort_by_key(|command| command.frequency_rank),
+        HelpOrder::Az => commands.sort_by(|left, right| by_name(*left, *right)),
+        HelpOrder::Za => commands.sort_by(|left, right| by_name(*right, *left)),
+    }
+    commands
+}
+
+/// Full top-level help generated from the live command and flag registries,
+/// commands and group sections both in `order`. Completion and man
+/// generators expose the same canonical rows.
+pub fn usage_page(version: &str, order: HelpOrder) -> String {
     let mut output = format!(
         "Welcome to {lang}! (v{version})\n\nUsage:\n",
         lang = crate::Syntax::LANG_NAME,
     );
-    for command in COMMANDS
+    let commands = commands_in(order);
+    for command in commands
         .iter()
         .filter(|command| is_canonical_top_level(command.name))
     {
@@ -2257,7 +2373,7 @@ pub fn usage_page(version: &str) -> String {
             command.summary
         ));
     }
-    for group in command_groups() {
+    for group in commands.iter().filter(|command| command.is_group()) {
         output.push_str(&format!(
             "\n{} Commands:\n",
             command_group_label(group.name)
@@ -3316,7 +3432,10 @@ mod tests {
         );
         assert!(is_known_flag(CANVAS_FLAG));
         let usage = command_usage("dev");
-        assert_eq!(usage, "jet dev [<file.jet|dir>] [--canvas] [-- <args>]");
+        assert_eq!(
+            usage,
+            "jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"
+        );
         assert!(flags_for_command("dev")
             .iter()
             .any(|flag| flag.0 == CANVAS_FLAG));
@@ -3397,7 +3516,7 @@ mod tests {
     fn hangar_is_not_a_jet_command_or_help_route() {
         assert!(!is_builtin("hangar"));
         assert!(command_group("hangar").is_none());
-        assert!(!usage_page("0.0.0").to_ascii_lowercase().contains("hangar"));
+        assert!(!usage_page("0.0.0", HelpOrder::Frequency).to_ascii_lowercase().contains("hangar"));
     }
 
     #[test]
@@ -3757,18 +3876,18 @@ fn authority_flags_render_in_registry_completions_and_man() {
 
     #[test]
     fn help_copy_uses_sentence_case_descriptions_and_title_case_chrome() {
-        let starts_lowercase = |text: &str| {
+        let starts_uppercase = |text: &str| {
             text.chars()
                 .next()
-                .is_some_and(|character| character.is_lowercase())
+                .is_some_and(|character| character.is_uppercase())
         };
-        assert!(COMMANDS.iter().all(|command| starts_lowercase(command.summary)));
+        assert!(COMMANDS.iter().all(|command| starts_uppercase(command.summary)));
         assert!(command_groups()
             .flat_map(|group| group.actions.iter())
-            .all(|action| starts_lowercase(action.summary)));
-        assert!(FLAGS.iter().all(|flag| starts_lowercase(flag.help)));
+            .all(|action| starts_uppercase(action.summary)));
+        assert!(FLAGS.iter().all(|flag| starts_uppercase(flag.help)));
 
-        let help = usage_page("test");
+        let help = usage_page("test", HelpOrder::Frequency);
         assert!(help.contains("\nUsage:\n"));
         assert!(help.contains("\nFlags:\n"));
         for group in command_groups() {
@@ -3780,9 +3899,20 @@ fn authority_flags_render_in_registry_completions_and_man() {
     }
 
     #[test]
+    fn frequency_ranks_order_every_command_exactly_once() {
+        let mut ranks: Vec<u16> = COMMANDS.iter().map(|command| command.frequency_rank).collect();
+        ranks.sort_unstable();
+        let expected: Vec<u16> = (1..=COMMANDS.len() as u16).collect();
+        assert_eq!(
+            ranks, expected,
+            "run `node Tools/cli-census/census.mjs` to rank every COMMANDS row"
+        );
+    }
+
+    #[test]
     fn retired_routes_have_zero_live_registry_rows() {
         let surfaces = [
-            usage_page("0.0.0"),
+            usage_page("0.0.0", HelpOrder::Frequency),
             man_page("0.0.0"),
             completions_bash(),
             completions_zsh(),

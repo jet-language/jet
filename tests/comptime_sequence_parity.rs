@@ -391,9 +391,9 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
 
 fn check_aot_comptime(index: usize, name: &str, preamble: &str, expression: &str) {
     let src = format!(
-        "{preamble}\n@EXPECTED :: {expression}\nfn run() {{\n\
+        "{preamble}\nEXPECTED :: prep {{ {expression} }}\nfn run() {{\n\
              actual :: {expression}\n\
-             print(\"{{@EXPECTED}}\")\n\
+             print(\"{{EXPECTED}}\")\n\
              print(\"{{actual}}\")\n\
          }}\n"
     );

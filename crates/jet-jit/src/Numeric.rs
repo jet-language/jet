@@ -484,6 +484,8 @@ fixed_trap_hosts! {
     jet_jit_u64_trap_mul => (JET_FIXED_OP_MUL, false, 64),
     jet_jit_u64_trap_div => (JET_FIXED_OP_DIV, false, 64),
     jet_jit_u64_trap_rem => (JET_FIXED_OP_REM, false, 64),
+    jet_jit_u64_rotate_left => (JET_FIXED_OP_ROTATE_LEFT, false, 64),
+    jet_jit_u64_rotate_right => (JET_FIXED_OP_ROTATE_RIGHT, false, 64),
     jet_jit_i8_trap_shl => (JET_FIXED_OP_SHL, true, 8),
     jet_jit_i8_trap_shr => (JET_FIXED_OP_SHR, true, 8),
     jet_jit_i8_trap_pow => (JET_FIXED_OP_POW, true, 8),
@@ -746,8 +748,10 @@ fn jet_jit_decimal_equal(a: i64, b: i64) -> i8 {
         }
     })
 }
+/// `Decimal.compare` returns a Prelude `Ordering` value, so the result is the
+/// registered variant tag, not a raw `-1`/`0`/`1` sign.
 fn jet_jit_decimal_compare(a: i64, b: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    let order = Concurrency::with_runtime_mut(|rt| {
         let left = rt
             .decimal_values
             .get(a.saturating_sub(1) as usize)
@@ -757,14 +761,17 @@ fn jet_jit_decimal_compare(a: i64, b: i64) -> i64 {
             .get(b.saturating_sub(1) as usize)
             .and_then(|value| value.as_ref());
         match (left, right) {
-            (Some(left), Some(right)) => match left.cmp(right) {
-                std::cmp::Ordering::Less => -1,
-                std::cmp::Ordering::Equal => 0,
-                std::cmp::Ordering::Greater => 1,
-            },
-            _ => 0,
+            (Some(left), Some(right)) => left.cmp(right) as i8,
+            _ => 0i8,
         }
-    })
+    });
+    let variant = match order.cmp(&0) {
+        std::cmp::Ordering::Less => "Less",
+        std::cmp::Ordering::Equal => "Equal",
+        std::cmp::Ordering::Greater => "Greater",
+    };
+    crate::types_meta::prelude_enum_variant_index(jet_foundation::Syntax::TYPE_ORDERING, variant)
+        .expect("Prelude Ordering variants must be registered")
 }
 
 fn jet_jit_decimal_to_string(a: i64) -> i64 {
@@ -1175,6 +1182,8 @@ host_fns! {
     u64_trap_mul: "jet_u64_trap_mul" => jet_jit_u64_trap_mul: sig_located;
     u64_trap_div: "jet_u64_trap_div" => jet_jit_u64_trap_div: sig_located;
     u64_trap_rem: "jet_u64_trap_rem" => jet_jit_u64_trap_rem: sig_located;
+    u64_rotate_left: "jet_u64_rotate_left" => jet_jit_u64_rotate_left: sig_located;
+    u64_rotate_right: "jet_u64_rotate_right" => jet_jit_u64_rotate_right: sig_located;
     i8_trap_shl: "jet_i8_trap_shl" => jet_jit_i8_trap_shl: sig_located;
     i8_trap_shr: "jet_i8_trap_shr" => jet_jit_i8_trap_shr: sig_located;
     i8_trap_pow: "jet_i8_trap_pow" => jet_jit_i8_trap_pow: sig_located;

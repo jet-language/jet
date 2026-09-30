@@ -1,0 +1,20 @@
+// D9: a `_` failure domain is one error at the hole, with no dependent E2417
+// at the signature or E2404 at the propagating call.
+#Error
+enum ParseError {
+    Empty
+}
+
+fn parse(raw: String) -> Int ParseError! {
+    if raw == "" -> return Err(.Empty)
+    Ok(7)
+}
+
+fn doubled(raw: String) -> Int _! {
+    n :: parse(raw)
+    Ok(n * 2)
+}
+
+fn run() {
+    print(doubled("x") ?? 0)
+}

@@ -135,6 +135,7 @@ impl<'a> Checker<'a> {
                 pattern: Pattern::Present {
                     binding,
                     binding_span: base_span,
+                    inner: None,
                     span: base_span,
                 },
                 span: base_span,

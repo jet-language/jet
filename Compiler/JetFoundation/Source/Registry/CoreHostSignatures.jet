@@ -34,7 +34,6 @@ pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTyp
     unit :: core_sig_named("Unit")
     io :: core_sig_named("IOError")
     time_error :: core_sig_named("TimeError")
-    crypto_error :: core_sig_named("CryptoError")
     encoding_error :: core_sig_named("EncodingError")
     u8 :: Type.IntN{signed: false, bits: 8}
     list_u8 :: Type.List{element: u8}
@@ -44,7 +43,6 @@ pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTyp
     list_list_int :: Type.List{element: list_int}
     list_string :: Type.List{element: Type.String}
     counter :: core_sig_named("Counter")
-    deque :: core_sig_named("Deque")
     ordered_map :: core_sig_named("OrderedMap")
     chain :: core_sig_named("Chain")
     string_set :: core_sig_named("StringSet")
@@ -271,16 +269,6 @@ pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTyp
         if member == "most_common" -> return Val(core_host_typed_signature(module_name, member, [Type]{counter, integer}, Val(counter), None))
         if core_sig_one_of(member, [String]{"subtract", "merge_add"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{counter, counter}, Val(counter), None))
         if member == "clear_counter" -> return Val(core_host_typed_signature(module_name, member, [Type]{counter}, Val(counter), None))
-        if member == "deque" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(deque), None))
-        if member == "deque_from" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_string}, Val(deque), None))
-        if member == "deque_len" -> return Val(core_host_typed_signature(module_name, member, [Type]{deque}, Val(integer), None))
-        if member == "deque_is_empty" -> return Val(core_host_typed_signature(module_name, member, [Type]{deque}, Val(boolean), None))
-        if core_sig_one_of(member, [String]{"append", "appendleft"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{deque, Type.String}, Val(deque), None))
-        if core_sig_one_of(member, [String]{"pop", "popleft"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{deque}, Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "deque", ty: deque}, TypeTupleField{name: "value", ty: Type.Option{inner: Type.String}}}}), None))
-        if core_sig_one_of(member, [String]{"peek", "peekleft"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{deque}, Val(Type.Option{inner: Type.String}), None))
-        if core_sig_one_of(member, [String]{"extend", "extendleft"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{deque, list_string}, Val(deque), None))
-        if member == "rotate" -> return Val(core_host_typed_signature(module_name, member, [Type]{deque, integer}, Val(deque), None))
-        if member == "deque_items" -> return Val(core_host_typed_signature(module_name, member, [Type]{deque}, Val(list_string), None))
         if member == "ordered_map" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(ordered_map), None))
         if member == "map_get" -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map, Type.String}, Val(Type.Option{inner: Type.String}), None))
         if member == "map_set" -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map, Type.String, Type.String}, Val(ordered_map), None))
@@ -346,7 +334,11 @@ pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTyp
         if core_sig_one_of(member, [String]{"rng", "split"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Rng")), None))
         return None
     }
-    if module_name == "core.crypto.random" && member == "bytes" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_result(list_u8, crypto_error)), None))
+    // D-CRYPTO-RNG1=A: the OS CSPRNG kernel is `None` on a missing or rejected
+    // provider; the Jet wrapper in Core/crypto/random.jet reports `Unavailable`.
+    if module_name == "core.crypto.random" && member == "bytes" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(Type.Option{inner: list_u8}), None))
+    // D-SHAPE-RESOURCE1=A: the Core-internal wipe behind each secret type's `Close`.
+    if module_name == "core.crypto" && member == "__zeroize" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_u8}, None, None))
     if module_name == "core.units" && member == "from" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(measurement), None))
     if module_name == "core.time" {
         if member == "sleep" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("Duration")}, None, None))

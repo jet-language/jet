@@ -1,6 +1,6 @@
     include!("Mime.rs");
 
-    impl JetURL {
+    impl JetURLParts {
         pub fn parse(input: &String) -> Result<Self, String> {
             Self::parse_without_normalization(input).map(|url| url.normalize())
         }
@@ -60,7 +60,7 @@
             } else {
                 path = jet_url_percent_decode_str(rest)?;
             }
-            let url = JetURL {
+            let url = JetURLParts {
                 scheme,
                 username,
                 password,
@@ -95,7 +95,7 @@
             } else {
                 Some(fragment.clone())
             };
-            Ok(JetURL {
+            Ok(JetURLParts {
                 scheme: scheme.to_ascii_lowercase(),
                 username: None,
                 password: None,
@@ -111,7 +111,7 @@
         }
 
         pub fn file(path: &String) -> Self {
-            JetURL {
+            JetURLParts {
                 scheme: "file".to_string(),
                 username: None,
                 password: None,
@@ -130,7 +130,7 @@
         }
 
         pub fn data(mime: &JetMIME, text: &String) -> Self {
-            JetURL {
+            JetURLParts {
                 scheme: "data".to_string(),
                 username: None,
                 password: None,
@@ -249,11 +249,11 @@
             if let Some(colon) = rel.find(':') {
                 let before_slash = rel.find('/').map_or(true, |slash| colon < slash);
                 if before_slash && jet_url_valid_scheme(&rel[..colon]) {
-                    return JetURL::parse(rel);
+                    return JetURLParts::parse(rel);
                 }
             }
             if rel.starts_with("//") {
-                return JetURL::parse(&format!("{}:{}", self.scheme, rel));
+                return JetURLParts::parse(&format!("{}:{}", self.scheme, rel));
             }
             let mut out = self.clone();
             let mut rest = rel.as_str();
@@ -407,16 +407,16 @@
                 }
             }
         }
-        JetURL::parse_without_normalization_with_marker(&skeleton, Some(&marker)).map(|_| ())
+        JetURLParts::parse_without_normalization_with_marker(&skeleton, Some(&marker)).map(|_| ())
     }
 
     /// D-BOUND-HEAD1=A: URL heads parse the literal skeleton once. Hole values
     /// are assembled after parsing, so path and authority boundaries remain
     /// opaque to URL normalization and reparsing.
-    pub fn jet_typed_url_literal(
+    pub fn jet_typed_url_parts_literal(
         literals: &[&str],
         holes: Vec<String>,
-    ) -> JetURL {
+    ) -> JetURLParts {
         let Ok(url) = jet_typed_url_literal_checked(literals, holes) else {
             // The parser/sema boundary rejects malformed heads before this
             // constructor is lowered. There is no user-facing runtime error
@@ -430,7 +430,7 @@
     fn jet_typed_url_literal_checked(
         literals: &[&str],
         holes: Vec<String>,
-    ) -> Result<JetURL, String> {
+    ) -> Result<JetURLParts, String> {
         if literals.len() != holes.len() + 1 {
             return Err("typed URL literal and hole counts do not match".to_string());
         }
@@ -521,7 +521,7 @@
         Ok(url)
     }
 
-    impl PartialEq for JetURL {
+    impl PartialEq for JetURLParts {
         fn eq(&self, other: &Self) -> bool {
             self.scheme == other.scheme
                 && self.username == other.username
@@ -534,19 +534,19 @@
         }
     }
 
-    impl crate::JetShow for JetURL {
+    impl crate::JetShow for JetURLParts {
         fn jet_show(&self) -> String {
             self.to_string_value()
         }
     }
 
-    impl crate::JetDisplay for JetURL {
+    impl crate::JetDisplay for JetURLParts {
         fn jet_display(&self) -> String {
             self.to_string_value()
         }
     }
 
-    impl crate::JetDebug for JetURL {
+    impl crate::JetDebug for JetURLParts {
         fn jet_debug(&self) -> String {
             self.to_string_value()
         }
@@ -609,10 +609,10 @@
         }
     }
 
-    fn jet_typed_url_marker(literals: &[&str]) -> Result<(String, JetURL), String> {
+    fn jet_typed_url_marker(literals: &[&str]) -> Result<(String, JetURLParts), String> {
         let marker = jet_typed_url_marker_name(literals);
         let skeleton = jet_typed_url_skeleton(literals, &marker);
-        let url = JetURL::parse_without_normalization_with_marker(&skeleton, Some(&marker))?;
+        let url = JetURLParts::parse_without_normalization_with_marker(&skeleton, Some(&marker))?;
         Ok((marker, url))
     }
 
@@ -1067,11 +1067,11 @@
                 return rel.to_string();
             }
         }
-        let Ok(parsed) = JetURL::parse(&base.to_string()) else {
+        let Ok(parsed) = JetURLParts::parse(&base.to_string()) else {
             return rel.to_string();
         };
         if rel.starts_with("//") {
-            return JetURL::parse(&format!("{}:{}", parsed.scheme, rel))
+            return JetURLParts::parse(&format!("{}:{}", parsed.scheme, rel))
                 .map(|url| url.to_string_value())
                 .unwrap_or_else(|_| rel.to_string());
         }

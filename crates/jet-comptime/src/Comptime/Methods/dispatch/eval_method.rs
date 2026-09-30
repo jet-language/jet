@@ -941,7 +941,7 @@ impl<'a> Interp<'a> {
                                 ))
                             }
                         };
-                        let bytes = match crate::SHA256::read_file_nofollow_at_root(
+                        let bytes = match jet_foundation::CheckReads::read_nofollow_at_root(
                             self.base_dir,
                             std::path::Path::new(&path),
                             crate::SHA256::MAX_TREE_FILE_BYTES,

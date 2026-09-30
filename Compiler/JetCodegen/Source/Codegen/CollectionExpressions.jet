@@ -25,13 +25,13 @@ fn jet_codegen_collection_trait_target(target: Type, builder: &JetCodegenBuilder
     if untagged == {
         .TraitObject(bounds) -> {
             if bounds.len() != 1 -> return None
-            jet_codegen_require_trait_box_target(untagged, builder)
+            jet_codegen_require_trait_box_target(untagged, &builder)
             return Val(untagged)
         }
         .Named(name) -> {
             if !jet_codegen_trait_bound_is_declared(builder.modules, name, builder.function.module_identity) -> return None
             trait_target := Type.TraitObject{bounds: [String]{name}}
-            jet_codegen_require_trait_box_target(trait_target, builder)
+            jet_codegen_require_trait_box_target(trait_target, &builder)
             return Val(trait_target)
         }
         else -> None

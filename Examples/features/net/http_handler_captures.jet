@@ -1,0 +1,44 @@
+// A route handler closure captures enclosing locals: a policy-scoped DB
+// handle (a borrowed resource) and a plain String. The handler runs once per
+// request on the server task; the enclosing function keeps using the same
+// scope afterwards, so the captured handle shares the one connection.
+// serve_once_listener drives one connection at a time so golden output order
+// stays fixed.
+use core.db as db
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+
+fn post_order(addr: String, user: String) -> String Never! {
+    if http.request("POST", "http://{addr}/order").header("x-user", user).send() == {
+        .Ok(resp) -> "{resp.status()} {resp.text() ?? "invalid body"}"
+        .Err(_) -> "request failed"
+    }
+}
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    conn :: db.open_memory() ?? panic("open")
+    policy :: db.policy("orders", "true") ?? panic("policy")
+    scope :: conn.with_policy(policy, "service")
+    db.migrate(scope, "orders-v1", [SQL{"CREATE TABLE orders (user TEXT)"}]) ?? panic("migrate")
+    greeting :: "accepted"
+
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    addr :: listener.local_addr() ?? panic("address failed")
+    mux :: server.mux()
+    mux.post("/order", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+        user :: req.header("x-user") ?? "anonymous"
+        scope.execute(SQL{"INSERT INTO orders (user) VALUES ({user})"}) ?? panic("insert")
+        Ok(server.response(200, "{greeting} {user}"))
+    })
+    t :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+    }
+    print(post_order(addr, "alice"))
+    print(post_order(addr, "bob"))
+    ^t.join() ?? panic("server failed")
+
+    row :: scope.query_one(SQL{"SELECT COUNT(*) AS n FROM orders"}) ?? panic("count")
+    print("rows after requests: {db.row_int(row, "n") ?? 0}")
+}

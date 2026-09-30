@@ -2,7 +2,7 @@ package {
     name: "core.collections"
     version: "0.1.0"
     edition: "2026"
-    description: "Counters, deques, heaps, bisection, and ordered maps."
+    description: "Counters, heaps, bisection, and ordered maps."
     license: "MIT"
     outputs: {
         collections: .Library{ entry: collections }
@@ -15,20 +15,14 @@ module set
 // `bisect`, written in Jet over arrays.
 //
 // There is no hidden hash table here. A `Counter` is parallel key/count arrays
-// so iteration order is insertion order. A `Deque` stores a head index and
-// compacts when the wasted prefix grows. A heap is a binary min-heap on
-// `[Int]`. Missing keys return `0` / `None` rather than raising.
+// so iteration order is insertion order. A heap is a binary min-heap on
+// `[Int]`. Missing keys return `0` / `None` rather than raising. The
+// double-ended queue is the built-in `Queue<T>` (D-DEQUE-QUEUE1=A).
 
 /// Insertion-ordered string multiset. `get` is `0` for an unseen key.
 pub struct Counter {
     pub keys: [String]
     pub counts: [Int]
-}
-
-/// Double-ended queue. `head` is the live front; slots before it are dead.
-pub struct Deque {
-    pub items: [String]
-    pub head: Int
 }
 
 /// Insertion-ordered string map. Replacing a key keeps its original position.
@@ -48,12 +42,6 @@ pub struct Chain {
     pub layers: [Layer]
 }
 
-fn copy_strings(xs: [String]) -> [String] {
-    out := [String]{}
-    loop x in xs -> &out.push(~x)
-    out
-}
-
 fn copy_ints(xs: [Int]) -> [Int] {
     out := [Int]{}
     loop x in xs -> &out.push(x)
@@ -66,9 +54,9 @@ fn counter_entries(c: Counter) -> Int {
     n
 }
 
-pub fn counter() -> Counter { Counter{keys: [String]{}, counts: [Int]{}} }
+pub fn counter() -> Counter Never! { Counter{keys: [String]{}, counts: [Int]{}} }
 
-pub fn counter_from(keys: [String]) -> Counter {
+pub fn counter_from(keys: [String]) -> Counter Never! {
     out_keys := [String]{}
     out_counts := [Int]{}
     loop key in keys {
@@ -88,7 +76,7 @@ pub fn counter_from(keys: [String]) -> Counter {
     Counter{keys: out_keys, counts: out_counts}
 }
 
-pub fn add(c: Counter, key: String, n: Int) -> Counter {
+pub fn add(c: Counter, key: String, n: Int) -> Counter Never! {
     entries := counter_entries(c)
     target_count := n
     first_target := -1
@@ -122,11 +110,11 @@ pub fn add(c: Counter, key: String, n: Int) -> Counter {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn inc(c: Counter, key: String) -> Counter { add(c, key, 1) }
+pub fn inc(c: Counter, key: String) -> Counter Never! { add(c, key, 1) }
 
-pub fn dec(c: Counter, key: String) -> Counter { add(c, key, -1) }
+pub fn dec(c: Counter, key: String) -> Counter Never! { add(c, key, -1) }
 
-pub fn get(c: Counter, key: String) -> Int {
+pub fn get(c: Counter, key: String) -> Int Never! {
     acc := 0
     found := false
     i := 0
@@ -142,12 +130,12 @@ pub fn get(c: Counter, key: String) -> Int {
     0
 }
 
-pub fn set_count(c: Counter, key: String, n: Int) -> Counter {
+pub fn set_count(c: Counter, key: String, n: Int) -> Counter Never! {
     cur :: get(c, key)
     add(c, key, n - cur)
 }
 
-pub fn total(c: Counter) -> Int {
+pub fn total(c: Counter) -> Int Never! {
     acc := 0
     entries := counter_entries(c)
     i := 0
@@ -158,7 +146,7 @@ pub fn total(c: Counter) -> Int {
     acc
 }
 
-pub fn names(c: Counter) -> [String] {
+pub fn names(c: Counter) -> [String] Never! {
     out := [String]{}
     entries := counter_entries(c)
     i := 0
@@ -169,7 +157,7 @@ pub fn names(c: Counter) -> [String] {
     out
 }
 
-pub fn elements(c: Counter) -> [String] {
+pub fn elements(c: Counter) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := counter_entries(c)
@@ -185,7 +173,7 @@ pub fn elements(c: Counter) -> [String] {
 }
 
 /// Highest counts first. Ties keep insertion order.
-pub fn most_common(c: Counter, k: Int) -> Counter {
+pub fn most_common(c: Counter, k: Int) -> Counter Never! {
     entries := counter_entries(c)
     if k == 0 -> return Counter{keys: [String]{}, counts: [Int]{}}
     limit := k
@@ -257,7 +245,7 @@ fn counter_copy(c: Counter) -> Counter {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn subtract(a: Counter, b: Counter) -> Counter {
+pub fn subtract(a: Counter, b: Counter) -> Counter Never! {
     out := counter_copy(a)
     keys := out.keys
     counts := out.counts
@@ -270,7 +258,7 @@ pub fn subtract(a: Counter, b: Counter) -> Counter {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn merge_add(a: Counter, b: Counter) -> Counter {
+pub fn merge_add(a: Counter, b: Counter) -> Counter Never! {
     out := counter_copy(a)
     keys := out.keys
     counts := out.counts
@@ -283,137 +271,7 @@ pub fn merge_add(a: Counter, b: Counter) -> Counter {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn clear_counter(_c: Counter) -> Counter { counter() }
-
-fn deque_start(d: Deque) -> Int Never! {
-    if d.head <= 0 -> return 0
-    if d.head >= d.items.len() -> return d.items.len()
-    d.head
-}
-
-fn deque_live_len(d: Deque) -> Int Never! { d.items.len() - deque_start(d) }
-
-pub fn deque() -> Deque { Deque{items: [String]{}, head: 0} }
-
-pub fn deque_from(items: [String]) -> Deque {
-    Deque{items: copy_strings(items), head: 0}
-}
-
-pub fn deque_len(d: Deque) -> Int { deque_live_len(d) }
-
-pub fn deque_is_empty(d: Deque) -> Bool { deque_live_len(d) == 0 }
-
-fn compact(d: Deque) -> Deque {
-    start := deque_start(d)
-    if start <= 0 -> return Deque{items: copy_strings(d.items), head: d.head}
-    if start >= d.items.len() -> return Deque{items: [String]{}, head: 0}
-    xs := [String]{}
-    i := start
-    loop i < d.items.len() {
-        &xs.push(~d.items[i])
-        i = i + 1
-    }
-    Deque{items: xs, head: 0}
-}
-
-fn maybe_compact(d: Deque) -> Deque {
-    start := deque_start(d)
-    if start >= 32 && start * 2 >= d.items.len() -> return compact(d)
-    Deque{items: copy_strings(d.items), head: d.head}
-}
-
-pub fn append(d: Deque, value: String) -> Deque {
-    xs := copy_strings(d.items)
-    &xs.push(~value)
-    Deque{items: xs, head: d.head}
-}
-
-pub fn appendleft(d: Deque, value: String) -> Deque {
-    d2 :: compact(d)
-    xs := [String]{~value}
-    loop x in d2.items -> &xs.push(~x)
-    Deque{items: xs, head: 0}
-}
-
-pub fn pop(d: Deque) -> (deque: Deque, value: String?) {
-    if deque_live_len(d) == 0 {
-        return (deque: Deque{items: copy_strings(d.items), head: d.head}, value: None)
-    }
-    start := deque_start(d)
-    last := d.items.len() - 1
-    value :: ~d.items[last]
-    xs := [String]{}
-    i := start
-    loop i < last {
-        &xs.push(~d.items[i])
-        i = i + 1
-    }
-    (deque: Deque{items: xs, head: 0}, value: Val(value))
-}
-
-pub fn popleft(d: Deque) -> (deque: Deque, value: String?) {
-    if deque_live_len(d) == 0 {
-        return (deque: Deque{items: copy_strings(d.items), head: d.head}, value: None)
-    }
-    start := deque_start(d)
-    value :: ~d.items[start]
-    next := Deque{items: copy_strings(d.items), head: d.head + 1}
-    (deque: maybe_compact(next), value: Val(value))
-}
-
-pub fn peek(d: Deque) -> String? {
-    if deque_live_len(d) == 0 -> return None
-    Val(~d.items[d.items.len() - 1])
-}
-
-pub fn peekleft(d: Deque) -> String? {
-    if deque_live_len(d) == 0 -> return None
-    Val(~d.items[deque_start(d)])
-}
-
-pub fn extend(d: Deque, values: [String]) -> Deque {
-    out := Deque{items: copy_strings(d.items), head: d.head}
-    loop v in values -> &out.items.push(~v)
-    out
-}
-
-pub fn extendleft(d: Deque, values: [String]) -> Deque {
-    out := Deque{items: copy_strings(d.items), head: d.head}
-    i := values.len()
-    loop i > 0 {
-        i = i - 1
-        out = appendleft(out, ~values[i])
-    }
-    out
-}
-
-pub fn rotate(d: Deque, n: Int) -> Deque {
-    len := deque_live_len(d)
-    if len == 0 -> return Deque{items: copy_strings(d.items), head: d.head}
-    steps := n % len
-    if steps == 0 -> return Deque{items: copy_strings(d.items), head: d.head}
-    d2 :: compact(d)
-    right := steps
-    if right < 0 -> right = right + len
-    split := len - right
-    out := [String]{}
-    i := split
-    loop i < len {
-        &out.push(~d2.items[i])
-        i = i + 1
-    }
-    i = 0
-    loop i < split {
-        &out.push(~d2.items[i])
-        i = i + 1
-    }
-    Deque{items: out, head: 0}
-}
-
-pub fn deque_items(d: Deque) -> [String] {
-    d2 :: compact(d)
-    d2.items
-}
+pub fn clear_counter(_c: Counter) -> Counter Never! { counter() }
 
 fn sift_down(xs: &[Int], start: Int, end: Int) {
     i := start
@@ -446,7 +304,7 @@ fn sift_up(xs: &[Int], start: Int) {
     }
 }
 
-pub fn heapify(xs: [Int]) -> [Int] {
+pub fn heapify(xs: [Int]) -> [Int] Never! {
     out := copy_ints(xs)
     n := out.len()
     if n > 1 {
@@ -460,7 +318,7 @@ pub fn heapify(xs: [Int]) -> [Int] {
     out
 }
 
-pub fn heappush(xs: [Int], value: Int) -> [Int] {
+pub fn heappush(xs: [Int], value: Int) -> [Int] Never! {
     out := copy_ints(xs)
     &out.push(value)
     last := out.len() - 1
@@ -468,7 +326,7 @@ pub fn heappush(xs: [Int], value: Int) -> [Int] {
     out
 }
 
-pub fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) {
+pub fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
     if xs.len() == 0 -> return (heap: [Int]{}, value: None)
     if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
     last := xs[xs.len() - 1]
@@ -483,7 +341,7 @@ pub fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) {
     (heap: rest, value: Val(xs[0]))
 }
 
-pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) {
+pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
     if xs.len() == 0 || value <= xs[0] -> return (heap: copy_ints(xs), value: value)
     popped := xs[0]
     rest := [Int]{value}
@@ -497,7 +355,7 @@ pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) {
     (heap: rest, value: popped)
 }
 
-pub fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: Int?) {
+pub fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
     if xs.len() == 0 -> return (heap: [Int]{value}, value: None)
     popped := xs[0]
     rest := [Int]{value}
@@ -574,7 +432,7 @@ fn max_heappop(xs: [Int]) -> (heap: [Int], value: Int?) {
     (heap: rest, value: Val(popped))
 }
 
-pub fn nsmallest(n: Int, xs: [Int]) -> [Int] {
+pub fn nsmallest(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
@@ -603,7 +461,7 @@ pub fn nsmallest(n: Int, xs: [Int]) -> [Int] {
     out
 }
 
-pub fn nlargest(n: Int, xs: [Int]) -> [Int] {
+pub fn nlargest(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
@@ -633,7 +491,7 @@ pub fn nlargest(n: Int, xs: [Int]) -> [Int] {
     out
 }
 
-pub fn merge_sorted(left: [Int], right: [Int]) -> [Int] {
+pub fn merge_sorted(left: [Int], right: [Int]) -> [Int] Never! {
     out := [Int]{}
     i := 0
     j := 0
@@ -657,7 +515,7 @@ pub fn merge_sorted(left: [Int], right: [Int]) -> [Int] {
     out
 }
 
-pub fn bisect_left(xs: [Int], value: Int) -> Int {
+pub fn bisect_left(xs: [Int], value: Int) -> Int Never! {
     lo := 0
     hi := xs.len()
     loop lo < hi {
@@ -671,7 +529,7 @@ pub fn bisect_left(xs: [Int], value: Int) -> Int {
     lo
 }
 
-pub fn bisect_right(xs: [Int], value: Int) -> Int {
+pub fn bisect_right(xs: [Int], value: Int) -> Int Never! {
     lo := 0
     hi := xs.len()
     loop lo < hi {
@@ -685,7 +543,7 @@ pub fn bisect_right(xs: [Int], value: Int) -> Int {
     lo
 }
 
-pub fn insort_left(xs: [Int], value: Int) -> [Int] {
+pub fn insort_left(xs: [Int], value: Int) -> [Int] Never! {
     i :: bisect_left(xs, value)
     out := [Int]{}
     k := 0
@@ -701,7 +559,7 @@ pub fn insort_left(xs: [Int], value: Int) -> [Int] {
     out
 }
 
-pub fn insort_right(xs: [Int], value: Int) -> [Int] {
+pub fn insort_right(xs: [Int], value: Int) -> [Int] Never! {
     i :: bisect_right(xs, value)
     out := [Int]{}
     k := 0
@@ -748,9 +606,9 @@ fn layer_from(keys: [String], values: [String]) -> Layer {
     Layer{keys: out_keys, values: out_values}
 }
 
-pub fn ordered_map() -> OrderedMap { OrderedMap{keys: [String]{}, values: [String]{}} }
+pub fn ordered_map() -> OrderedMap Never! { OrderedMap{keys: [String]{}, values: [String]{}} }
 
-pub fn map_get(m: OrderedMap, key: String) -> String? {
+pub fn map_get(m: OrderedMap, key: String) -> String? Never! {
     i := 0
     entries := map_entries(m)
     loop i < entries {
@@ -760,7 +618,7 @@ pub fn map_get(m: OrderedMap, key: String) -> String? {
     None
 }
 
-pub fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap {
+pub fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
     keys := [String]{}
     values := [String]{}
     found := false
@@ -786,7 +644,7 @@ pub fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap {
     OrderedMap{keys: keys, values: values}
 }
 
-pub fn map_remove(m: OrderedMap, key: String) -> OrderedMap {
+pub fn map_remove(m: OrderedMap, key: String) -> OrderedMap Never! {
     keys := [String]{}
     values := [String]{}
     i := 0
@@ -801,7 +659,7 @@ pub fn map_remove(m: OrderedMap, key: String) -> OrderedMap {
     OrderedMap{keys: keys, values: values}
 }
 
-pub fn map_keys(m: OrderedMap) -> [String] {
+pub fn map_keys(m: OrderedMap) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := map_entries(m)
@@ -812,7 +670,7 @@ pub fn map_keys(m: OrderedMap) -> [String] {
     out
 }
 
-pub fn map_values(m: OrderedMap) -> [String] {
+pub fn map_values(m: OrderedMap) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := map_entries(m)
@@ -823,19 +681,19 @@ pub fn map_values(m: OrderedMap) -> [String] {
     out
 }
 
-pub fn map_contains(m: OrderedMap, key: String) -> Bool { map_get(m, key) != None }
+pub fn map_contains(m: OrderedMap, key: String) -> Bool Never! { map_get(m, key) != None }
 
-pub fn map_len(m: OrderedMap) -> Int { map_entries(m) }
+pub fn map_len(m: OrderedMap) -> Int Never! { map_entries(m) }
 
-pub fn chain() -> Chain { Chain{layers: [Layer]{}} }
+pub fn chain() -> Chain Never! { Chain{layers: [Layer]{}} }
 
-pub fn chain_push(c: Chain, keys: [String], values: [String]) -> Chain {
+pub fn chain_push(c: Chain, keys: [String], values: [String]) -> Chain Never! {
     layers := [Layer]{layer_from(keys, values)}
     loop layer in c.layers -> &layers.push(layer_from(layer.keys, layer.values))
     Chain{layers: layers}
 }
 
-pub fn chain_get(c: Chain, key: String) -> String? {
+pub fn chain_get(c: Chain, key: String) -> String? Never! {
     loop layer in c.layers {
         i := 0
         entries := layer.keys.len()
@@ -848,4 +706,4 @@ pub fn chain_get(c: Chain, key: String) -> String? {
     None
 }
 
-pub fn chain_contains(c: Chain, key: String) -> Bool { chain_get(c, key) != None }
+pub fn chain_contains(c: Chain, key: String) -> Bool Never! { chain_get(c, key) != None }

@@ -23,7 +23,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     diags.extend(inject_units_prelude(bundle));
     super::super::Prelude::inject(bundle);
     diags.extend(super::super::Casing::validate_bundle(bundle));
-    // D-OSTARGET2=B (ratified 2026-07-03): fold every `@if @build.os == {
+    // D-OSTARGET2=B (ratified 2026-07-03): fold every `prep if $build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
     // meet the taken arm. Rewrites into an `@if` chain (reuses D-WHEN1).
@@ -98,6 +98,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // (card #2054). Runs after generic expansion (instances are already
     // lifted) and before sibling-call mangling and registration.
     hoist_inline_module_member_types(bundle);
+    // D-IMPLDOT1=A: an `impl` head that names a declaration through a module
+    // alias splits at the alias, not at the last segment.
+    let qualified_impl_traits = normalize_qualified_impl_heads(bundle);
     // Rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
@@ -476,6 +479,103 @@ pub(super) fn check_bundle_opts_for_output_inner(
         );
     }
 
+    // D-MOD2: a trait named in a member import (`use types.[Named]`) is known
+    // to the importing module's trait registry before its impls validate.
+    // D-MOD-CYCLE1=A: a trait from another file of the same package counts
+    // as local for the orphan rule, because the package is the orphan unit.
+    let imported_traits: Vec<Vec<(String, crate::AST::TraitDef, bool)>> = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(idx, module)| {
+            let package = jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
+            let mut traits = Vec::new();
+            for imp in &module.imports {
+                let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
+                    continue;
+                };
+                let Some(target) = module
+                    .imports
+                    .iter()
+                    .filter(|candidate| {
+                        !matches!(candidate.kind, ImportKind::Unqualified { .. })
+                            && candidate.import_alias() == *module_alias
+                    })
+                    .find_map(|candidate| name_ledger.import_target(idx, candidate.span))
+                else {
+                    continue;
+                };
+                let target_module = &bundle.modules[target];
+                let same_package =
+                    jet_foundation::Names::package_scope_for(&target_module.path, &bundle.project_root)
+                        == package;
+                for binding in imp.walk_bindings() {
+                    let Some(original) = binding.original else {
+                        continue;
+                    };
+                    let definition = target_module.items.iter().find_map(|item| match item {
+                        Item::Trait(definition)
+                            if definition.name == original
+                                && (definition.is_pub
+                                    || (definition.is_package_pub && same_package)) =>
+                        {
+                            Some(definition)
+                        }
+                        _ => None,
+                    });
+                    if let Some(definition) = definition {
+                        traits.push((binding.local.clone(), definition.clone(), same_package));
+                    }
+                }
+            }
+            // D-IMPLDOT1=A: a trait named through an alias in an impl head.
+            for qualified in qualified_impl_traits.get(idx).into_iter().flatten() {
+                let same_package = name_ledger.same_namespace(idx, qualified.target);
+                let definition = bundle.modules[qualified.target].items.iter().find_map(|item| {
+                    match item {
+                        Item::Trait(definition)
+                            if definition.name == qualified.leaf
+                                && (same_package || definition.is_pub) =>
+                        {
+                            Some(definition)
+                        }
+                        _ => None,
+                    }
+                });
+                if let Some(definition) = definition {
+                    traits.push((qualified.key.clone(), definition.clone(), same_package));
+                }
+            }
+            traits
+        })
+        .collect();
+
+    // D-MOD-CYCLE1=A: a package is one namespace, so an `impl` may extend a
+    // type declared in another file of the same package.
+    let mut namespace_type_owners: HashMap<String, Vec<usize>> = HashMap::new();
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        if name_ledger.namespace_siblings(idx).is_empty() {
+            continue;
+        }
+        for item in &module.items {
+            let name = match item {
+                Item::Struct(definition) => &definition.name,
+                Item::Enum(definition) => &definition.name,
+                Item::Distinct(definition) => &definition.name,
+                _ => continue,
+            };
+            namespace_type_owners.entry(name.clone()).or_default().push(idx);
+        }
+    }
+    let sibling_type_owner =
+        |ledger: &jet_foundation::Names::NameLedger, idx: usize, type_name: &str| {
+            namespace_type_owners.get(type_name).and_then(|owners| {
+                owners
+                    .iter()
+                    .copied()
+                    .find(|&owner| owner != idx && ledger.same_namespace(idx, owner))
+            })
+        };
     let mut top_level_embed_inputs = Vec::new();
     let module_count = bundle.modules.len();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
@@ -579,6 +679,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 Item::Impl(i) => {
                     if !i.type_name.contains('.')
                         && !st.registry.contains(&i.type_name)
+                        && sibling_type_owner(&name_ledger, idx, &i.type_name).is_none()
                         && !super::opmix_allows_builtin_impl(i, &module.items)
                     {
                         diags.push(e0301_impl_target(i));
@@ -1322,6 +1423,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_synthetic_driver();
+        for (local, definition, same_package) in &imported_traits[idx] {
+            st.trait_reg
+                .register_imported_trait(local, definition, *same_package);
+        }
         st.trait_reg.register_items(&module.items, &mut diags);
         // Registration validates source spelling before this sema-owned
         // normalization turns bare operator RHS into the canonical owner type.
@@ -1378,6 +1483,27 @@ pub(super) fn check_bundle_opts_for_output_inner(
             &st.trait_reg,
         ));
         drop_core_source_lints(module, &mut diags, module_diag_start);
+    }
+    // D-MOD-CYCLE1=A: attach each package-sibling `impl` to the file that
+    // declares its type, where method lookup for that type reads.
+    for idx in 0..bundle.modules.len() {
+        for item in &bundle.modules[idx].items {
+            let Item::Impl(implementation) = item else {
+                continue;
+            };
+            if implementation.type_name.contains('.')
+                || states[idx].registry.contains(&implementation.type_name)
+            {
+                continue;
+            }
+            if let Some(owner) = sibling_type_owner(&name_ledger, idx, &implementation.type_name) {
+                register_impl_methods(
+                    std::slice::from_ref(item),
+                    &mut states[owner].registry,
+                    &mut diags,
+                );
+            }
+        }
     }
     // D-ADOPT-GUEST1=A: both directions use the same C-safe type law. Artifact
     // paths consume the rows exposed by `guest_surface` after these checks;
@@ -1809,6 +1935,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
             let mut inserted_core_items = Vec::new();
             let mut inserted_file = Vec::new();
             let mut inserted_imports = Vec::new();
+            let mut pending_item_aliases = Vec::new();
             if let Some(canonical) = states[idx].code_modules.get(module_alias.as_str()).cloned() {
                 // Inline module: items are mangled as `__jet_{alias}__{item}`.
                 let st = &mut states[idx];
@@ -1934,13 +2061,28 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 }
             } else if states[idx].imports.contains_key(module_alias.as_str()) {
                 // File module: look up items in the target module's state.
-                let target_idx = states[idx].imports[module_alias.as_str()];
+                let imported_idx = states[idx].imports[module_alias.as_str()];
                 let is_reexport = imp.is_pub;
                 for binding in &bindings {
                     let orig = binding
                         .original
                         .expect("member walker returned a binding without a member");
                     let local = binding.local.clone();
+                    // D-MOD-CYCLE1=A: an imported package is one namespace;
+                    // the member is declared by whichever of its files owns it.
+                    let declares = |candidate: usize| {
+                        states[candidate].funcs.contains_key(orig)
+                            || name_ledger.declaration(candidate, orig).is_some()
+                    };
+                    let target_idx = if declares(imported_idx) {
+                        imported_idx
+                    } else {
+                        name_ledger
+                            .namespace_siblings(imported_idx)
+                            .into_iter()
+                            .find(|&candidate| declares(candidate))
+                            .unwrap_or(imported_idx)
+                    };
                     let is_pub = name_ledger.visible(idx, target_idx, orig);
                     let file_module_target =
                         states[target_idx].imports.get(orig).copied().filter(|_| {
@@ -1977,8 +2119,21 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         }
                         continue;
                     }
-                    let exists = states[target_idx].funcs.contains_key(orig);
-                    if !exists {
+                    // D-MOD2: a member import names any top-level declaration
+                    // of the target module. Functions bind for calls through
+                    // `unqualified_file`; types, enums, traits and constants
+                    // bind as NameLedger aliases, the table nominal lookup
+                    // (`struct_owner_module`) already consults.
+                    let is_function = states[target_idx].funcs.contains_key(orig);
+                    let declaration_kind = name_ledger
+                        .declaration(target_idx, orig)
+                        .map(|declaration| declaration.kind.as_str());
+                    let is_other_item = !is_function
+                        && matches!(
+                            declaration_kind,
+                            Some("type" | "trait" | "const" | "tag" | "protocol")
+                        );
+                    if !is_function && !is_other_item {
                         diags.push(Diagnostic::error(
                             "E0611",
                             format!("`{}` is not defined in module `{}`", orig, module_alias),
@@ -1991,8 +2146,22 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             "E0609",
                             format!("`{}` is private in module `{}`", orig, module_alias),
                             "only `pub` items can be brought into scope with `use`".to_string(),
-                            format!("add `pub` before `fn {}` in the imported file", orig),
+                            if is_function {
+                                format!("add `pub` before `fn {}` in the imported file", orig)
+                            } else {
+                                format!(
+                                    "add `pub` before the declaration of `{}` in the imported file",
+                                    orig
+                                )
+                            },
                             Some(*module_alias_span),
+                        ));
+                    } else if is_other_item {
+                        pending_item_aliases.push((
+                            local,
+                            format!("{}.{}", bundle.modules[target_idx].alias, orig),
+                            target_idx,
+                            binding.local_span,
                         ));
                     } else {
                         states[idx]
@@ -2017,7 +2186,22 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     Some(*module_alias_span),
                 ));
             }
-            if diags.len() != group_diagnostics {
+            if diags.len() == group_diagnostics {
+                let visibility = jet_foundation::Names::NameVisibility::from_flags(
+                    imp.is_pub,
+                    imp.is_package_pub,
+                );
+                for (local, target, target_idx, span) in pending_item_aliases {
+                    name_ledger.record_alias(
+                        idx,
+                        local,
+                        target,
+                        Some(target_idx),
+                        span,
+                        visibility,
+                    );
+                }
+            } else {
                 let st = &mut states[idx];
                 for name in inserted_unqualified {
                     st.unqualified.remove(&name);
@@ -2107,7 +2291,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // registry before emitting unfed-field diagnostics.
     complete_bundle_check(
         bundle,
-        &states,
+        &mut states,
         &plugin_interfaces,
         &mut devtools_registry,
         mode,

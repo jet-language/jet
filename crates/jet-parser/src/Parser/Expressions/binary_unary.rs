@@ -423,7 +423,7 @@ impl<'a> Parser<'a> {
             .map(|text| format!("({text})"));
         let diagnostic = Diagnostic::from_row(
             "E0082",
-            &[("grouped", grouped.as_deref().unwrap_or("(a && b)"))],
+            &[("grouped", grouped.as_deref().unwrap_or("(… && …)"))],
             Some(operand),
         );
         let diagnostic = match grouped {
@@ -486,7 +486,7 @@ impl<'a> Parser<'a> {
         let Some(op) = op else { return Ok(lhs) };
         let op_span = self.bump().span;
         if op == BinOp::Eq {
-            if let Some(pat) = self.try_pattern_rhs()? {
+            if let Some(pat) = self.try_pattern_rhs(allow_struct_lit)? {
                 let span = Span::new(lhs.span().start, pat_span(&pat).end.max(op_span.end));
                 return Ok(Expr::PatternTest {
                     subject: Box::new(lhs),

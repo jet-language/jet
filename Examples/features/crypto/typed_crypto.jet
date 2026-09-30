@@ -1,3 +1,8 @@
+package {
+    name: "crypto_typed_crypto"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Rand] } }
+}
 // D-CRYPTO-API1=A: purpose-bound safe cryptography.
 use core.crypto as crypto
 
@@ -10,7 +15,7 @@ fn run() {
     print(opened == plaintext)
     recipient_text :: recipient.public_key().text()
     parsed_recipient :: crypto.X25519PublicKey.from_text(recipient_text) ?? return
-    print(parsed_recipient.bytes() == recipient.public_key().bytes())
+    print(parsed_recipient.bytes == recipient.public_key().bytes)
     signing :: crypto.SigningKey.new_random() ?? return
     signature :: crypto.sign(signing, plaintext) ?? return
     verified :: crypto.verify(signing.public_key(), plaintext, signature) ?? return

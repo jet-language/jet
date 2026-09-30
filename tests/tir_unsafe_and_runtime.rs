@@ -115,9 +115,9 @@ fn mem_address_of_known_binding_is_a_compile_error_not_a_silent_bake() {
     let src = "\
 use core.mem
 fn run() {
-    @cell :: 1337
-    @addr :: mem.address_of(@cell)
-    print(@addr)
+    cell_value :: prep { 1337 }
+    address :: prep { mem.address_of(cell_value) }
+    print(address)
 }
 ";
     let diags = jet::compile(src).expect_err("@ mem.address_of must not silently fold");

@@ -304,7 +304,8 @@ fn jet_new_native_scaffold_builds_for_explicit_web_target() {
         .allow
         .as_ref()
         .expect("native scaffold authority must declare allowed effects");
-    for effect in ["Exec", "Browser"] {
+    // A new project holds only the `Exec.Args` leaf, never the `Exec` root.
+    for effect in [jet::Syntax::EFFECT_LEAF_EXEC_ARGS, "Browser"] {
         assert!(
             allowed_effects.iter().any(|declared| declared == effect),
             "native scaffold authority must grant {effect}:\n{manifest}"

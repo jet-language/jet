@@ -1,0 +1,31 @@
+// L0303 stays quiet when the arms before `else` leave a case open: `warm`
+// has no `.Blue` arm, so its `else` still runs. The `Light` table below is
+// the one report this snapshot expects.
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+enum Light {
+    On
+    Off
+}
+
+fn warm(c: Color) -> Bool {
+    if c == {
+        .Red -> true
+        .Green -> false
+        else -> false
+    }
+}
+
+fn run() {
+    print(warm(Color.Blue))
+    light :: Light.Off
+    if light == {
+        .On -> print("on")
+        .Off -> print("off")
+        else -> print("never")
+    }
+}

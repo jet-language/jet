@@ -1,0 +1,26 @@
+// D-OUTCOME-SHAPE1=A: a failure passes up by itself, but a missing value
+// never does. `user` stays `User?`, so reading its field is E0310, which
+// teaches `?.`, `??`, or a `.Val`/`.None` pattern instead of an early return.
+struct User {
+    name: String
+}
+
+#Error
+enum DBError {
+    Down
+}
+
+fn read_user(id: Int) -> User? DBError! {
+    if id == 0 -> return Err(DBError.Down)
+    if id == 7 -> return Ok(Val(User{name: "priya"}))
+    Ok(None)
+}
+
+fn greet(id: Int) -> String? DBError! {
+    user :: read_user(id)
+    Ok(Val(user.name))
+}
+
+fn run() {
+    print(greet(7) ?? "stranger")
+}

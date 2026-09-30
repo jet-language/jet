@@ -160,6 +160,37 @@ fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, 
     &lines.push("}}")
 }
 
+// D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family member
+// onto `Err` with `Err("{self}")`, and every Prelude-owned member renders that
+// text through its `JetShow`. A member declared in Core Jet source
+// (`UUIDError`) is emitted from MIR, so it forwards `JetDisplay` to the
+// structural `JetShow` above. A unit-only enum keeps its case-name display; a
+// selected user `Display` impl keeps its own rendering.
+fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, definition: MirTypeDef, lines: &[String]) Never! {
+    if !definition.key.starts_with("<corelib>/") || !sema_core_error_family_member(definition.key) || definition.generic_params.len() > 0 -> return
+    if definition.kind == {
+        .Struct(_, _) -> {}
+        .Enum(variants, _) -> {
+            unit_only := true
+            loop variant in variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    else -> unit_only = false
+                }
+            }
+            if unit_only -> return
+        }
+        else -> return
+    }
+    if jet_codegen_auto_derives_impl_selected(ctx, definition, "Display") -> return
+    name :: jet_rust_emit_type_name(ctx, definition.id)
+    &lines.push("impl JetDisplay for {name} {{")
+    &lines.push("    fn jet_display(&self) -> String {{")
+    &lines.push("        <Self as JetShow>::jet_show(self)")
+    &lines.push("    }}")
+    &lines.push("}}")
+}
+
 fn jet_codegen_auto_derives_field_ref(ctx: &JetRustEmitContext, definition: MirTypeDef, field: MirField, receiver: String, edge: String) -> String Never! {
     value := "&({receiver}).{jet_rust_emit_field_name(ctx, field.id)}"
     if jet_codegen_auto_derives_boxed(definition, edge) -> value = "({value}).as_ref()"
@@ -245,26 +276,27 @@ fn jet_codegen_auto_derives_append_equatable(ctx: &JetRustEmitContext, definitio
 pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MirTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
     lines := [String]{}
     if facts.type_id != definition.id {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "auto-derive facts name a different MIR type", "structural auto-derive selections are bound to the exact canonical type ID", Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "auto-derive facts name a different MIR type", "structural auto-derive selections are bound to the exact canonical type ID", Val(definition.span))
         return lines
     }
     if definition.kind == {
-        .Enum(variants, _) -> jet_codegen_auto_derives_append_plain_enum_display(ctx, definition, variants, &lines)
+        .Enum(variants, _) -> jet_codegen_auto_derives_append_plain_enum_display(&ctx, definition, variants, &lines)
         else -> {}
     }
     if !facts.printable && !facts.debug && !facts.equatable -> return lines
     if definition.kind == {.Struct(_, _) | .Enum(_, _) -> {} else -> {
-        jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "structural auto-derive facts target a non-structural type", "Printable, Debug, and Equatable auto bodies are defined only for checked structs and enums", Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "structural auto-derive facts target a non-structural type", "Printable, Debug, and Equatable auto bodies are defined only for checked structs and enums", Val(definition.span))
         return lines
     }}
     if facts.printable && !jet_codegen_auto_derives_impl_selected(ctx, definition, "Printable") {
-        jet_codegen_auto_derives_append_show(ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
+        jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
+        jet_codegen_auto_derives_append_core_error_display(&ctx, definition, &lines)
     }
     if facts.debug && !jet_codegen_auto_derives_impl_selected(ctx, definition, "Debug") {
-        jet_codegen_auto_derives_append_show(ctx, definition, "JetDebug", "jet_debug", "JetDebug", &lines)
+        jet_codegen_auto_derives_append_show(&ctx, definition, "JetDebug", "jet_debug", "JetDebug", &lines)
     }
     if facts.equatable && !jet_codegen_auto_derives_impl_selected(ctx, definition, "Equatable") {
-        jet_codegen_auto_derives_append_equatable(ctx, definition, &lines)
+        jet_codegen_auto_derives_append_equatable(&ctx, definition, &lines)
     }
     lines
 }

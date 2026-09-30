@@ -57,7 +57,7 @@ impl JitBackend for InterpreterBackend {
         if let Err(error) = jet_jit::bind_interpreter_ffi(program, artifact) {
             return RunOutcome::Problems(vec![interpreter_bridge_failure(error)]);
         }
-        jet_jit::with_interpreter_ambient(|ambient| {
+        let outcome = jet_jit::with_interpreter_ambient(|ambient| {
             jet_jit::register_db_interpreter_ambient(ambient);
             jet_jit::register_raylib_interpreter_ambient(ambient);
             jet_jit::register_ui_interpreter_ambient(ambient);
@@ -73,7 +73,9 @@ impl JitBackend for InterpreterBackend {
                 );
             }
             run_checked(program, artifact, try_anyway, self.invocation, policy)
-        })
+        });
+        jet_jit::release_one_shot_core_state();
+        outcome
     }
 
     fn hot_swap(

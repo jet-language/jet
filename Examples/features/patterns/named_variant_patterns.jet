@@ -1,0 +1,83 @@
+// D-PAT-NAMED-NEST1=A: a case declared with named fields is matched by the
+// names it is built with, at any depth: `.FailedToFetch{url, cause: .BadUrl(why)}`.
+// A bare `url` binds `url`, any pattern can follow `field:`, a trailing `..`
+// skips the fields a pattern leaves out, entries may come in any order, and
+// the positional form keeps working.
+#Error
+enum FetchError {
+    BadUrl(String)
+    Timeout(seconds: Int, retries: Int)
+}
+
+#Error
+enum AppError {
+    FailedToFetch(url: String, cause: FetchError)
+    Offline
+}
+
+enum Shape {
+    Rect(w: Int, h: Int)
+    Circle(r: Int)
+}
+
+fn fetch(raw: String) -> String AppError! {
+    if raw == "ftp://b" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.BadUrl("ftp is not supported")})
+    if raw == "slow" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.Timeout{seconds: 30, retries: 2}})
+    if raw == "" -> return Err(.Offline)
+    Ok("page at {raw}")
+}
+
+// Named patterns inside `.Err(…)`, nested two deep, with shorthand, `..`,
+// and entries in a different order from the declaration. The table covers
+// every state without `else`.
+fn report(raw: String) -> String {
+    if fetch(raw) == {
+        .Ok(page) -> page
+        .Err(.FailedToFetch{url, cause: .BadUrl(why)}) -> "could not fetch {url}: {why}"
+        .Err(.FailedToFetch{cause: .Timeout{seconds, ..}, url}) -> "timed out after {seconds}s: {url}"
+        .Err(.Offline) -> "offline"
+    }
+}
+
+// Top level: shorthand in any order, and a renamed binding.
+fn area(shape: Shape) -> Int {
+    if shape == {
+        .Rect{h, w} -> w * h
+        .Circle{r: radius} -> 3 * radius * radius
+    }
+}
+
+// Inside `.Val(…)`, with a range pattern on one field and `_` on another.
+fn width(shape: Shape?) -> Int {
+    if shape == {
+        .Val(.Rect{w, h: 1..1}) -> w
+        .Val(.Rect{w, ..}) -> w + 100
+        .Val(.Circle{r: _}) -> -1
+        .None -> 0
+    }
+}
+
+// The positional and named forms test the same payload slots.
+fn same(shape: Shape) -> Bool {
+    positional := false
+    named := false
+    if shape == .Rect(w, h) -> positional = w < h
+    if shape == .Rect{h, w} -> named = w < h
+    positional == named
+}
+
+
+fn run() {
+    print(report("https://a"))
+    print(report("ftp://b"))
+    print(report("slow"))
+    print(report(""))
+    print(area(Shape.Rect{w: 3, h: 4}))
+    print(area(Shape.Circle{r: 2}))
+    print(width(Val(Shape.Rect{w: 7, h: 1})))
+    print(width(Val(Shape.Rect{w: 7, h: 2})))
+    print(width(Val(Shape.Circle{r: 5})))
+    print(width(None))
+    print(same(Shape.Rect{w: 1, h: 2}))
+    print(same(Shape.Circle{r: 1}))
+}

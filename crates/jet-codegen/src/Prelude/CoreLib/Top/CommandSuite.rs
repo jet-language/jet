@@ -6,7 +6,7 @@ fn jet_test_suite_install(runner: jet_std::JetSuiteRunner) {
 fn jet_test_suite_new() -> jet_std::JetTestSuite {
     jet_std::jet_test_suite_new()
 }
-fn jet_test_suite_run(suite: &mut jet_std::JetTestSuite) -> i64 {
+fn jet_test_suite_run(suite: &jet_std::JetTestSuite) -> i64 {
     jet_std::jet_test_suite_run(suite)
 }
 fn jet_test_suite_status() -> i64 {

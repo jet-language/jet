@@ -90,7 +90,7 @@ fn aot_and_jet_run_agree() {
 #[test]
 fn comptime_folds_the_same_answer() {
     let source =
-        format!("{SOURCE}\n@FOLDED :: score(true)\n\nfn show() {{\n    print(@FOLDED)\n}}\n");
+        format!("{SOURCE}\nFOLDED :: prep {{ score(true) }}\n\nfn show() {{\n    print(FOLDED)\n}}\n");
     let out = jet::compile(&source);
     assert!(
         out.is_ok(),

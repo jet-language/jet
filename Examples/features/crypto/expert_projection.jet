@@ -6,23 +6,23 @@ fn run() {
     message :: "expert surface".bytes()
     digest256 :: crypto.sha256(message)
     digest512 :: crypto.sha512(message)
-    print("digests:{digest256.bytes().len()}:{digest512.bytes().len()}")
+    print("digests:{digest256.bytes.len()}:{digest512.bytes.len()}")
 
     recipient :: crypto.X25519SecretKey.new_random() ?? return
     sealed :: crypto.seal([recipient.public_key()], message, []) ?? return
     opened :: crypto.open(recipient, sealed, []) ?? return
-    print("sealed:{sealed.bytes().len()}:{opened == message}")
-    print("public:{recipient.public_key().bytes().len()}")
+    print("sealed:{sealed.bytes.len()}:{opened == message}")
+    print("public:{recipient.public_key().bytes.len()}")
 
     signer :: crypto.SigningKey.new_random() ?? return
     signature :: crypto.sign(signer, message) ?? return
     verify_key :: signer.public_key()
     verified :: crypto.verify(verify_key, message, signature) ?? return
-    print("signature:{signature.bytes().len()}:{verify_key.bytes().len()}:{verified}")
+    print("signature:{signature.bytes.len()}:{verify_key.bytes.len()}:{verified}")
 
     secret :: crypto.Secret.from_text("expert secret")
     wrapped :: crypto.wrap(secret, recipient.public_key()) ?? return
-    print("wrapped:{wrapped.bytes().len()}")
+    print("wrapped:{wrapped.bytes.len()}")
 
     shared :: crypto.x25519(recipient, recipient.public_key()) ?? return
     print("shared:{expert.shared_secret_bytes(shared).len()}")
@@ -40,8 +40,8 @@ fn run() {
 
         seed :: expert.signing_key_bytes(signer)
         raw_signature :: expert.ed25519_sign(seed, message) ?? return
-        strict :: expert.ed25519_verify_strict(verify_key.bytes(), message, raw_signature) ?? return
-        print("ed25519:{raw_signature.bytes().len()}:{strict}")
+        strict :: expert.ed25519_verify_strict(verify_key.bytes, message, raw_signature) ?? return
+        print("ed25519:{raw_signature.bytes.len()}:{strict}")
         print("secret-bytes:{expert.x25519_secret_bytes(recipient).len()}")
     }
 }

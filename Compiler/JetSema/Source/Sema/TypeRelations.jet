@@ -442,7 +442,7 @@ pub fn sema_type_resolve_declared(graph: SemaRegistrationGraph, ty: Type, caller
 fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
     local :: sema_registration_lookup_name(graph, module_identity, name)
     if local != None -> return local
-    canonical_parts :: name.split("::")
+    canonical_parts :: name.split("::").to_list()
     if canonical_parts.len() >= 2 {
         last :: canonical_parts.len() - 1
         target_name := canonical_parts[last]
@@ -453,7 +453,7 @@ fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: 
             return sema_registration_lookup_name(graph, target_module, target_name)
         }
     }
-    parts :: name.split(".")
+    parts :: name.split(".").to_list()
     if parts.len() < 2 -> return None
     alias := parts[0]
     target_name := [String]{}

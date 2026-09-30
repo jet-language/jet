@@ -1,0 +1,36 @@
+// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: no function here writes a failure
+// contract. `find_person` and `parse_age` create their own error cases,
+// which form `FindPersonError` and `ParseAgeError`. `age_of` passes both up,
+// so its failures are the union `FindPersonError | ParseAgeError`, and
+// `describe` matches every case by its flat name. The compiler checks that
+// no case is missing.
+
+fn parse_age(raw: String) -> Int {
+    if raw == "" -> return Err(.BadNumber(~raw))
+    42
+}
+
+fn find_person(book: [String:String], name: String) -> String {
+    if book.has_key(name) -> return book[name]
+    Err(.NotFound(~name))
+}
+
+fn age_of(book: [String:String], name: String) -> Int {
+    raw :: find_person(book, name)
+    parse_age(raw)
+}
+
+fn describe(book: [String:String], name: String) -> String {
+    if age_of(book, name) == {
+        .Ok(n) -> "age {n}"
+        .Err(.NotFound(who)) -> "no such person: {who}"
+        .Err(.BadNumber(_)) -> "bad age on file"
+    }
+}
+
+fn run() {
+    book :: ["ada": "36", "bob": ""]
+    print(describe(book, "ada"))
+    print(describe(book, "bob"))
+    print(describe(book, "zed"))
+}

@@ -3,7 +3,7 @@
 //! These records define public shapes only. Parsing, checking, evaluation, and
 //! runtime retention are owned by the compiler delivery cards.
 
-/// D-PREP-SURFACE2=A: the total phase reported by `@PHASE()` at its evaluation site.
+/// D-PREP-SURFACE2=A: the total phase reported by `$phase` at its evaluation site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Phase {
     Preparation,
@@ -24,7 +24,7 @@ impl Phase {
 }
 
 /// D-META-REFLECT2=A: compiler stage at which a checked fact becomes available.
-/// This is distinct from the language execution phase returned by `@PHASE()`.
+/// This is distinct from the language execution phase returned by `$phase`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompilerStage {
     Parsed,

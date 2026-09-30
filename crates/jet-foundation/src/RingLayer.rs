@@ -16,14 +16,14 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7b8cfd5d9fbaef4df89a7d7a50a01593de3e8ee7e66ca6bd98ddca7af165b8ca
+// Source SHA-256: 7fe1a788b6f6309e47cbd8290a023000223f00714dd7bcdadb8b08dcce5e58d5
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
     ("core.archive.gzip", &["core.archive"]),
     ("core.archive.zstd", &["core.archive"]),
     ("core.args", &["core.process"]),
-    ("core.auth", &["core.crypto", "core.net"]),
+    ("core.auth", &["core.crypto", "core.net", "core.time"]),
     ("core.compiler", &["core.text"]),
     ("core.compiler.lang", &["core.compiler"]),
     ("core.collections.set", &["core.collections"]),
@@ -66,7 +66,6 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.http", &["core.net"]),
     ("core.http.client", &["core.http"]),
     ("core.http.server", &["core.http"]),
-    ("core.io", &["core.files"]),
     ("core.math.random", &["core.math"]),
     ("core.math.combinatorics", &["core.math"]),
     ("core.math.stats", &["core.math", "core.math.random"]),

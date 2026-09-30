@@ -25,6 +25,22 @@ pub struct MirFragmentCoreSourceSignature {
     pub return_type: Option<Type>,
 }
 
+/// Loaded source-owned Core module whose bodies a comptime fragment lowers
+/// on demand, exactly as runtime lowering does for a reachable Core call.
+#[derive(Clone, Debug)]
+pub struct MirFragmentCoreSourceModule {
+    /// Loader alias of the defining module (`CoreSourceModule::alias`).
+    pub alias: String,
+    /// Checked module identity. Lowered bodies and the call sites that reach
+    /// them share this owner in their semantic key.
+    pub module_identity: String,
+    /// The defining module's own `use core... as alias` table.
+    pub core_imports: HashMap<String, String>,
+    /// Every top-level function of the module by name, private helpers
+    /// included, so a demanded body can call its same-module helpers.
+    pub functions: HashMap<String, Func>,
+}
+
 /// Checked nominal facts retained for a comptime fragment.
 ///
 /// Sema owns the source-to-canonical projection and the checked declaration
@@ -45,6 +61,10 @@ pub struct MirFragmentNominalFacts {
     pub enums: HashMap<String, crate::AST::EnumDef>,
     /// Loaded source signatures for imported source-owned Core members.
     pub core_source_sigs: HashMap<(String, String), MirFragmentCoreSourceSignature>,
+    /// Loaded source-owned Core modules keyed by Core module path
+    /// (`core.math`); the owner of every `core_source_sigs` row is here.
+    /// Shared: every evaluation request clones these facts.
+    pub core_source_bodies: std::sync::Arc<HashMap<String, MirFragmentCoreSourceModule>>,
 }
 
 pub struct ExprEvalRequest<'a> {
@@ -247,8 +267,8 @@ fn static_ct_value(
                 fields: vec![("inner".to_string(), CtValue::Str(text))],
             })
         }
-        // Template conditions (`T.@kind == "enum"`, `left.@index <
-        // right.@index`) compare values already in scope. Evaluating them
+        // Template conditions (`T.$kind == "enum"`, `left.$index <
+        // right.$index`) compare values already in scope. Evaluating them
         // here avoids building a whole MIR fragment per condition, which is
         // quadratic for derives over large enums. Only cases with one
         // unambiguous meaning are handled; everything else (big integers,
@@ -312,7 +332,7 @@ fn static_ct_value(
             };
             fields
                 .iter()
-                .find(|(field, _)| field == member)
+                .find(|(field, _)| field == member.trim_start_matches('$'))
                 .map(|(_, value)| value.clone())
         }
         Expr::Index { base, index, .. } => {

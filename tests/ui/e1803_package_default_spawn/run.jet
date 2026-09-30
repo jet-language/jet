@@ -1,0 +1,13 @@
+// @run_cli
+// #3718: a package.jet with no authority block gets the beginner floor (IO,
+// Mem.Alloc, Exec.Args). Starting a process needs the `Exec` root, which the
+// floor never grants, so the run stops before the process starts.
+use core.process
+
+fn run() {
+    receipt :: process.cmd([String]{"touch", "e1803-package-spawned-must-not-exist.txt"}).run() ?? {
+        print("spawn failed")
+        return
+    }
+    print("spawned code={receipt.code}")
+}

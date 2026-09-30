@@ -64,6 +64,16 @@ fn jet_eval_task_roots_fixture_foreign_token(value: JetEvalRuntimeValue) -> Int?
     }
 }
 
+fn jet_eval_task_roots_fixture_int_data(value: JetEvalRuntimeValue) -> Int? {
+    if value == .Data(.Int(number)) -> return Val(number)
+    None
+}
+
+fn jet_eval_task_roots_fixture_ok_payload(value: JetEvalRuntimeValue) -> JetEvalRuntimeValue? {
+    if value == .Result(ok, payload) && ok -> return Val(payload)
+    None
+}
+
 // Stable owner for the real checked callback selected by the fixture harness.
 // Returning the lambda makes its capture escape; the generated lambda MIR row
 // has one capture parameter and escaping capture facts.
@@ -82,6 +92,12 @@ fn jet_eval_task_roots_fixture_token_aliases(machine: &JetEvalMachine, token: In
 fn jet_eval_task_roots_fixture_register_weak(registry: JetEvalSharedRuntime, weak: JetEvalSharedWeak) -> Bool {
     permit := registry.storage.guard_edit()
     &permit.value.weaks.push(weak)
+    true
+}
+
+fn jet_eval_task_roots_fixture_set_element_type(metadata: Shared<JetEvalSharedValueMeta>, element_type: MirType) -> Bool {
+    permit := metadata.guard_edit()
+    permit.value.element_type = element_type
     true
 }
 
@@ -122,7 +138,7 @@ fn jet_eval_task_roots_fixture_shared_field(value: JetEvalRuntimeValue, name: St
 fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: String, span: Span) -> MirType? {
     found := None
     loop candidate in machine.program.type_instances {
-        if candidate.kind == {.Apply(_, _)} && mir_type_display_name(candidate) == name {
+        if candidate.kind == .Apply(_, _) && mir_type_display_name(candidate) == name {
             if found != None {
                 jet_eval_compiler_fail(&machine, span, "TaskRoots fixture nominal type is ambiguous in the checked program")
                 return None
@@ -219,7 +235,7 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
         Val(int_type),
         span,
     ) ?? return None
-    count_before_value :: if count_before == {.Data(TComptimeValue.Int{value: value}) -> Val(value) else -> None} ?? return None
+    count_before_value :: jet_eval_task_roots_fixture_int_data(count_before) ?? return None
     if count_before_value != 1 -> return None
     source_weak_value :: jet_eval_shared_runtime_route(
         &source_machine, downgrade_row, [JetEvalRuntimeValue]{source_value}, [MirType]{}, None, span,
@@ -232,7 +248,7 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
         Val(option_shared_type),
         span,
     ) ?? return None
-    source_initial_upgrade_payload :: if source_initial_upgrade_result == {.Result(true, value) -> Val(value) else -> None} ?? return None
+    source_initial_upgrade_payload :: jet_eval_task_roots_fixture_ok_payload(source_initial_upgrade_result) ?? return None
     source_initial_upgrade_value :: if source_initial_upgrade_payload == {.Shared(_) -> Val(source_initial_upgrade_payload) else -> None} ?? return None
     transfer_index :: if source_initial_upgrade_value == {.Shared(index) -> Val(index) else -> None} ?? return None
     transfer_entry :: jet_eval_shared_runtime_value(&source_machine, transfer_index) ?? return None
@@ -255,18 +271,12 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
     shape_failure_machine := jet_eval_machine(^program, ^source_config)
     isolated_shared_runtime := shape_failure_machine.registry.shared_runtime
     shape_failure_machine.registry.shared_runtime = source_machine.registry.shared_runtime
-    {
-        permit := transfer_entry.metadata.guard_edit()
-        permit.value.element_type = invalid_payload_type
-    }
+    if !jet_eval_task_roots_fixture_set_element_type(transfer_entry.metadata, invalid_payload_type) -> return None
     invalid_shape :: jet_eval_shared_runtime_host_payload_shape(&shape_failure_machine, JetEvalSharedHostKind.Shared, transfer_index, span)
     if invalid_shape != None -> return None
     shape_failure_machine.failure = None
     failed_prepare :: jet_eval_shared_runtime_owner_alias_transfer_commit(&shape_failure_machine, transfer_index, transfer_token, transfer_capability, span)
-    {
-        permit := transfer_entry.metadata.guard_edit()
-        permit.value.element_type = transfer_meta.element_type
-    }
+    if !jet_eval_task_roots_fixture_set_element_type(transfer_entry.metadata, transfer_meta.element_type) -> return None
     shape_failure_machine.registry.shared_runtime = isolated_shared_runtime
     shape_failure_machine.failure = None
     shape_failure_machine.internal_problem = None
@@ -346,9 +356,9 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         else -> None
     } ?? return false
     carrier_metadata :: if updated.physical == {
-        .Shared(entry) -> entry.metadata.guard_read().value
-        else -> return false
-    }
+        .Shared(entry) -> Val(entry.metadata.guard_read().value)
+        else -> None
+    } ?? return false
     carrier_metadata_before := carrier_metadata
     if !jet_eval_shared_runtime_host_entry_loan_preflight(updated, Val(shared_type))
         || jet_eval_shared_runtime_host_entry_loan_preflight(updated, Val(int_type)) -> return false
@@ -384,7 +394,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         Val(int_type),
         span,
     ) ?? return false
-    count_after_receive_value :: if count_after_receive == {.Data(TComptimeValue.Int{value: value}) -> Val(value) else -> None} ?? return false
+    count_after_receive_value :: jet_eval_task_roots_fixture_int_data(count_after_receive) ?? return false
     if count_after_receive_value != 1 -> return false
 
     read_projection :: jet_eval_shared_runtime_host_projection(&receiver, received_value, span) ?? return false
@@ -627,11 +637,11 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     count_before_upgrade :: jet_eval_shared_runtime_route(
         &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(int_type), span,
     ) ?? return false
-    count_before_upgrade_value :: if count_before_upgrade == {.Data(TComptimeValue.Int{value: value}) -> Val(value) else -> None} ?? return false
+    count_before_upgrade_value :: jet_eval_task_roots_fixture_int_data(count_before_upgrade) ?? return false
     upgraded_result :: jet_eval_shared_runtime_route(
         &receiver, upgrade_row, [JetEvalRuntimeValue]{weak_value}, [MirType]{}, Val(option_shared_type), span,
     ) ?? return false
-    upgraded_payload :: if upgraded_result == {.Result(true, value) -> Val(value) else -> None} ?? return false
+    upgraded_payload :: jet_eval_task_roots_fixture_ok_payload(upgraded_result) ?? return false
     upgraded_value :: if upgraded_payload == {.Shared(_) -> Val(upgraded_payload) else -> None} ?? return false
     upgraded_index :: if upgraded_value == {.Shared(index) -> Val(index) else -> None} ?? return false
     upgraded_entry :: jet_eval_shared_runtime_value(&receiver, upgraded_index) ?? return false
@@ -643,7 +653,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     count_after_upgrade :: jet_eval_shared_runtime_route(
         &receiver, count_row, [JetEvalRuntimeValue]{upgraded_value}, [MirType]{}, Val(int_type), span,
     ) ?? return false
-    count_after_upgrade_value :: if count_after_upgrade == {.Data(TComptimeValue.Int{value: value}) -> Val(value) else -> None} ?? return false
+    count_after_upgrade_value :: jet_eval_task_roots_fixture_int_data(count_after_upgrade) ?? return false
     if count_after_upgrade_value != count_before_upgrade_value + 1 -> return false
 
     upgraded_nested_for_write :: jet_eval_copy_value(receiver_nested, &receiver, span) ?? return false
@@ -692,11 +702,12 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     no_owner_upgrade :: jet_eval_shared_runtime_route(
         &receiver, upgrade_row, [JetEvalRuntimeValue]{weak_value}, [MirType]{}, Val(option_shared_type), span,
     ) ?? return false
-    if no_owner_upgrade != {
+    no_owner_absent :: if no_owner_upgrade == {
         .Absent(_) -> true
-        .Result(false, _) -> true
+        .Result(ok, _) -> !ok
         else -> false
-    } -> return false
+    }
+    if !no_owner_absent -> return false
     if !jet_eval_drop_value(&receiver, no_owner_upgrade, span) -> return false
     if !jet_eval_drop_value(&receiver, weak_value, span) -> return false
     jet_eval_retire_machine(&receiver, span) && jet_eval_task_roots_fixture_clean(&receiver)
@@ -917,7 +928,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     if !jet_eval_host_writebacks_from(&failure_child, address_target, address_writeback, 0, span) -> return false
     if weak_root.metadata.guard_read().value.references != 2 -> return false
     address_replacement :: failure_child.frames[address_frame].values.get(address_value_id.value) ?? return false
-    if address_replacement != {.SharedWeak(_) -> true else -> false} -> return false
+    if address_replacement != .SharedWeak(_) -> return false
     failure_child.frames[address_frame].values[address_value_id.value] = JetEvalRuntimeValue.Moved
     if !jet_eval_drop_value(&failure_child, address_replacement, span) -> return false
     if weak_root.metadata.guard_read().value.references != 1 -> return false
@@ -935,7 +946,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     if !jet_eval_host_writebacks_from(&failure_child, cell_target, cell_writeback, 0, span) -> return false
     if weak_root.metadata.guard_read().value.references != 2 -> return false
     cell_replacement :: jet_eval_shared_read(&failure_child, writeback_cell_id, span) ?? return false
-    if cell_replacement != {.SharedWeak(_) -> true else -> false} -> return false
+    if cell_replacement != .SharedWeak(_) -> return false
     if weak_root.metadata.guard_read().value.references != 3 -> return false
     if !jet_eval_drop_value(&failure_child, cell_replacement, span) -> return false
     if weak_root.metadata.guard_read().value.references != 2 -> return false
@@ -962,7 +973,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     failure_child.internal_problem = None
     failure_child.failure = None
     committed_after_close_failure :: jet_eval_shared_read(&failure_child, failing_cell_id, span) ?? return false
-    if committed_after_close_failure != {.SharedWeak(_) -> true else -> false} -> return false
+    if committed_after_close_failure != .SharedWeak(_) -> return false
     if weak_root.metadata.guard_read().value.references != 3 -> return false
     if !jet_eval_drop_value(&failure_child, committed_after_close_failure, span) -> return false
     if weak_root.metadata.guard_read().value.references != 2 -> return false

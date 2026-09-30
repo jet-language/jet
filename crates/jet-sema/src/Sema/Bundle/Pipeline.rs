@@ -3,8 +3,11 @@ use jet_foundation::CanonicalPass;
 use super::super::CheckerValidate::process_validate_blocks;
 
 mod Completion;
+mod FailureUnion;
+mod ImplHeads;
 mod InlineImports;
 use Completion::complete_bundle_check;
+use ImplHeads::normalize_qualified_impl_heads;
 use InlineImports::resolve_inline_module_imports;
 
 /// D-STRUCT-ONCE1=A: expand root declaration loops through the same typed
@@ -208,7 +211,7 @@ fn fact_identity(declaration: &crate::AST::FactDecl) -> String {
     declaration
         .params
         .iter()
-        .find(|parameter| parameter.name == "@name")
+        .find(|parameter| parameter.name == "$name")
         .and_then(|parameter| parameter.value.as_deref())
         .and_then(|value| match value {
             crate::AST::Expr::Str(parts, _) => {
@@ -610,7 +613,7 @@ fn check_bundle_opts_for_output_on_stack(
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
     let edition = bundle.edition.clone();
-    super::super::Edition::with_package_edition(&edition, || {
+    let (diags, facts) = super::super::Edition::with_package_edition(&edition, || {
         check_bundle_opts_for_output_inner(
             bundle,
             mode,
@@ -620,7 +623,52 @@ fn check_bundle_opts_for_output_on_stack(
             incremental,
             allow_compiler_api,
         )
-    })
+    });
+    (summarize_dependency_reports(bundle, diags), facts)
+}
+
+/// D-MOD-CYCLE1=A: a dependency package is checked as its own package, so an
+/// importer never repeats its reports. A dependency with errors still fails
+/// the importer, once per dependency package (E0626), naming the check that
+/// owns those errors.
+fn summarize_dependency_reports(bundle: &ProgramBundle, diags: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    if bundle.dep_roots.is_empty() {
+        return diags;
+    }
+    let owner_of = |diagnostic: &Diagnostic| {
+        let path = std::path::Path::new(&diagnostic.origin()?.path);
+        bundle
+            .dep_roots
+            .iter()
+            .filter(|(_, root)| path.starts_with(root))
+            .max_by_key(|(_, root)| root.components().count())
+    };
+    let mut failing: std::collections::BTreeMap<&str, &std::path::Path> =
+        std::collections::BTreeMap::new();
+    let mut kept = Vec::with_capacity(diags.len());
+    for diagnostic in diags {
+        match owner_of(&diagnostic) {
+            Some((name, root)) => {
+                if diagnostic.severity == crate::Diagnostics::Severity::Error {
+                    failing.insert(name.as_str(), root.as_path());
+                }
+            }
+            None => kept.push(diagnostic),
+        }
+    }
+    for (package, root) in failing {
+        let root = root
+            .strip_prefix(&bundle.project_root)
+            .unwrap_or(root)
+            .display()
+            .to_string();
+        kept.push(Diagnostic::from_row(
+            "E0626",
+            &[("package", package), ("root", root.as_str())],
+            None,
+        ));
+    }
+    kept
 }
 
 mod CheckInner;

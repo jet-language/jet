@@ -107,7 +107,7 @@ pub fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord
         if existing.id == record.id -> return Val(derivation_record_reference(existing))
     }
     &store.records.push(record)
-    derivation_store_sort(store)
+    derivation_store_sort(&store)
     Val(derivation_record_reference(record))
 }
 
@@ -210,8 +210,8 @@ fn derivation_method_raw(method: MirDerivationMethod) -> String Never! {
 fn derivation_hash_frame(state: &DerivationHashState, value: String) Never! {
     bytes := value.bytes()
     length := bytes.len()
-    loop index in 0..<8 -> derivation_hash_byte(state, U8{(length >> ((7 - index) * 8)) & 255})
-    loop byte in bytes -> derivation_hash_byte(state, byte)
+    loop index in 0..<8 -> derivation_hash_byte(&state, U8{(length >> ((7 - index) * 8)) & 255})
+    loop byte in bytes -> derivation_hash_byte(&state, byte)
 }
 
 fn derivation_hash_byte(state: &DerivationHashState, byte: U8) Never! {

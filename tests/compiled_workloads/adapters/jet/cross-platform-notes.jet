@@ -1,14 +1,14 @@
 // #1414 cross-platform workload. The frozen event script is embedded so the
 // native and browser artifacts interpret the same input without a host-only
 // filesystem adapter.
-@SCRIPT :: embed_file("input.tsv")
-@NOTES :: if @SCRIPT.contains("key:add") -> 1 else -> 0
-@SEARCH :: if @SCRIPT.contains("key:search") -> "found" else -> "not-run"
-@PERSISTENCE :: if @SCRIPT.contains("key:reload") -> "reloaded" else -> "not-saved"
-@READONLY :: if @SCRIPT.contains("key:readonly") -> "blocked" else -> "not-run"
-@CORRUPT :: if @SCRIPT.contains("key:corrupt") -> "rejected" else -> "not-run"
-@REJECT :: if @SCRIPT.contains("key:unknown") -> "\nreject=unknown-key" else -> ""
+SCRIPT :: prep { embed_file("input.tsv") }
+NOTES :: prep { if SCRIPT.contains("key:add") -> 1 else -> 0 }
+SEARCH :: prep { if SCRIPT.contains("key:search") -> "found" else -> "not-run" }
+PERSISTENCE :: prep { if SCRIPT.contains("key:reload") -> "reloaded" else -> "not-saved" }
+READONLY :: prep { if SCRIPT.contains("key:readonly") -> "blocked" else -> "not-run" }
+CORRUPT :: prep { if SCRIPT.contains("key:corrupt") -> "rejected" else -> "not-run" }
+REJECT :: prep { if SCRIPT.contains("key:unknown") -> "\nreject=unknown-key" else -> "" }
 
 fn run() {
-    print("notes={@NOTES}\nfocus=title\nsearch={@SEARCH}\npersistence={@PERSISTENCE}\nreadonly={@READONLY}\ncorrupt={@CORRUPT}{@REJECT}")
+    print("notes={NOTES}\nfocus=title\nsearch={SEARCH}\npersistence={PERSISTENCE}\nreadonly={READONLY}\ncorrupt={CORRUPT}{REJECT}")
 }

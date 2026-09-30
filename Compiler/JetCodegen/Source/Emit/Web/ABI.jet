@@ -22,12 +22,12 @@ fn jet_web_wasm_abi_kind(ctx: &JetWebEmitContext, ty: MirType) -> String? {
         .List(inner) -> {
             kind :: jet_web_wasm_list_kind(ctx, inner)
             if kind == .Val(name) -> return Val(name)
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export collection type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export collection type", mir_type_display_name(ty), None)
             None
         }
         .Map(key, value) -> {
             if key.kind == MirTypeKind.String && value.kind == MirTypeKind.Int -> return Val("map-string-int")
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export map type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export map type", mir_type_display_name(ty), None)
             None
         }
         .InlineRange(base, _, _) -> jet_web_wasm_abi_kind(ctx, base)
@@ -35,7 +35,7 @@ fn jet_web_wasm_abi_kind(ctx: &JetWebEmitContext, ty: MirType) -> String? {
         .Quantity(base, _) -> jet_web_wasm_abi_kind(ctx, base)
         .Float | .Bool | .Char | .IntN(_, _) | .Float32 -> None
         else -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export boundary type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export boundary type", mir_type_display_name(ty), None)
             None
         }
     }
@@ -51,7 +51,7 @@ fn jet_web_wasm_direct_argument(ctx: &JetWebEmitContext, value: String, ty: MirT
         .Tagged(_, base) -> jet_web_wasm_direct_argument(ctx, value, base)
         .Quantity(base, _) -> jet_web_wasm_direct_argument(ctx, value, base)
         else -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported direct Web Wasm export argument type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported direct Web Wasm export argument type", mir_type_display_name(ty), None)
             "undefined"
         }
     }
@@ -70,7 +70,7 @@ fn jet_web_wasm_direct_return(ctx: &JetWebEmitContext, raw: String, ty: MirType)
         .Tagged(_, base) -> jet_web_wasm_direct_return(ctx, raw, base)
         .Quantity(base, _) -> jet_web_wasm_direct_return(ctx, raw, base)
         else -> {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported direct Web Wasm export return type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported direct Web Wasm export return type", mir_type_display_name(ty), None)
             "undefined"
         }
     }
@@ -133,11 +133,11 @@ fn jet_web_wasm_export_success_type(function: MirFunction) -> MirType Never! {
 fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunction, out: &[String]) {
     if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> return
     if function.form != MirFunctionForm.TopLevel || function.capture_params.len() != 0 {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export is not a top-level capture-free function", function.name, Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export is not a top-level capture-free function", function.name, Val(function.span))
         return
     }
     if function.generator != None {
-        jet_web_fail(ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export cannot be a generator", function.name, Val(function.span))
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export cannot be a generator", function.name, Val(function.span))
         return
     }
     bridge :: jet_web_wasm_bridge_name(function)
@@ -171,7 +171,7 @@ fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunc
         if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> next
         loop name in names {
             if name == function.name {
-                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export has a duplicate JavaScript bridge name", function.name, Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export has a duplicate JavaScript bridge name", function.name, Val(function.span))
                 break
             }
         }

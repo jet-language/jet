@@ -128,6 +128,10 @@ impl<'a> Checker<'a> {
         let Stmt::Expr(expr) = stmt else {
             return;
         };
+        // D-DISCARD1=A: a lost function tail is the E0433 error instead.
+        if self.lost_tail_span == Some(expr.span()) {
+            return;
+        }
         let expression = expr.without_parens();
         let discarded = match expression {
             Expr::Ident(name, _) => !name.starts_with('\0') && name != "_",
@@ -185,15 +189,17 @@ impl<'a> Checker<'a> {
         if tail_has_write {
             return;
         }
-        let sigil_span = binding.sigil_span.or(info_sigil_span);
-        let mut diagnostic =
-            Diagnostic::from_row("L0528", &[], Some(binding.name_span));
-        if let Some(sigil_span) = sigil_span {
-            diagnostic = diagnostic.with_edit(TextEdit {
+        // Only a written `:=` can become `::`. Compiler-created locals carry
+        // no sigil and are not the author's to rewrite.
+        let Some(sigil_span) = binding.sigil_span.or(info_sigil_span) else {
+            return;
+        };
+        let diagnostic = Diagnostic::from_row("L0528", &[], Some(binding.name_span)).with_edit(
+            TextEdit {
                 span: sigil_span,
                 new_text: "::".to_string(),
-            });
-        }
+            },
+        );
         let diagnostic = self.attach_decision_row(
             diagnostic,
             MirDecisionKind::LoopInvariant,

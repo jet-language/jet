@@ -10,8 +10,8 @@ package {
 // GCM spec test cases 13/14 (AES-256-GCM), draft-irtf-cfrg-xchacha-03
 // A.3.1 (XChaCha20-Poly1305). Argon2id rows match OpenSSL 3.6 argon2id.
 // core.math.random bytes are simulation bytes and never appear here.
-// Error rows print only `Err`: the CryptoError variant is not yet
-// matchable from user code on the current binary (see #3256 evidence).
+// Error rows print the typed CryptoError variant. Secret-bearing bytes are
+// read only through the `#Unsafe` expert exposure functions (D-CRYPTO-API1).
 use core.crypto as crypto
 use core.crypto.expert as expert
 use core.crypto.random as csprng
@@ -29,8 +29,21 @@ fn repeat_byte(value: U8, count: Int) -> [U8] {
 
 fn mod251(count: Int) -> [U8] {
     out := [U8]{}
-    loop i in 0..<count -> &out.push(U8{i %% 251})
+    loop i in 0..<count {
+        value :: i % 251
+        &out.push(U8{value})
+    }
     out
+}
+
+fn crypto_error_name(e: crypto.CryptoError) -> String {
+    if e == {
+        .OpenFailed -> "OpenFailed"
+        .VerifyFailed -> "VerifyFailed"
+        .KeyRejected -> "KeyRejected"
+        .Length -> "Length"
+        .Unavailable -> "Unavailable"
+    }
 }
 
 fn run() {
@@ -42,13 +55,20 @@ fn run() {
     print("sha256_empty {crypto.sha256([U8]{}).hex()}")
     print("sha256_1000a {crypto.sha256(repeat_byte(U8{0x61}, 1000)).hex()}")
     print("sha384 {crypto.sha384(abc)}")
+    print("sha512 {crypto.sha512(abc).hex()}")
     print("sha3_224 {crypto.sha3_224(abc)}")
     print("sha3_256 {crypto.sha3_256(abc)}")
     print("sha3_384 {crypto.sha3_384(abc)}")
     print("sha3_512 {crypto.sha3_512(abc)}")
     print("blake3_empty {crypto.blake3([U8]{}).hex()}")
     print("blake3 {crypto.blake3(abc).hex()}")
+    print("blake3_1024 {crypto.blake3(mod251(1024)).hex()}")
+    print("blake3_1025 {crypto.blake3(mod251(1025)).hex()}")
     print("blake3_2049 {crypto.blake3(mod251(2049)).hex()}")
+    hasher := crypto.Hasher.new()
+    &hasher.update("ab".bytes())
+    &hasher.update("c".bytes())
+    print("hasher_sha256 {hasher.digest()}")
 
     print("-- mac and kdf")
     print("hmac_rfc4231_1 {hex.encode(crypto.hmac_sha256(repeat_byte(U8{0x0b}, 20), "Hi There".bytes()))}")
@@ -72,25 +92,36 @@ fn run() {
     bob_public :: crypto.x25519_public(bob) ?? return
     print("x25519_public_alice {hex.encode(alice_public.bytes)}")
     shared :: crypto.x25519(alice, bob_public) ?? return
-    print("x25519_shared {hex.encode(shared.bytes)}")
     shared_back :: crypto.x25519_shared(bob, alice_public) ?? return
-    print("x25519_shared_symmetric {shared_back.bytes == shared.bytes}")
+    #Unsafe("known-answer check reads the RFC 7748 shared secret") {
+        shared_bytes :: expert.shared_secret_bytes(shared)
+        print("x25519_shared {hex.encode(shared_bytes)}")
+        print("x25519_shared_symmetric {expert.shared_secret_bytes(shared_back) == shared_bytes}")
+    }
 
     print("-- envelopes")
     plaintext :: "matrix".bytes()
     aad :: "aad".bytes()
     sealed :: crypto.seal([crypto.X25519PublicKey]{~alice_public}, plaintext, aad) ?? return
+    recipient_text :: alice.public_key().text()
+    print("x25519_recipient_text {recipient_text}")
+    print("x25519_recipient_roundtrip {(crypto.X25519PublicKey.from_text(recipient_text) ?? crypto.X25519PublicKey{bytes: [U8]{}}).bytes == alice.public_key().bytes}")
+    uppercase_rejected :: if crypto.X25519PublicKey.from_text(recipient_text.to_upper()) == {
+        .Err(.KeyRejected) -> true
+        else -> false
+    }
+    print("x25519_recipient_uppercase {uppercase_rejected}")
     opened :: crypto.open(alice, sealed, aad) ?? return
     print("seal_open {opened == plaintext}")
     if crypto.open(alice, sealed, "other".bytes()) == {
         .Ok(_) -> print("open_wrong_aad accepted")
-        .Err(_) -> print("open_wrong_aad Err")
+        .Err(e) -> print("open_wrong_aad {crypto_error_name(e)}")
     }
     if crypto.open(bob, sealed, aad) == {
         .Ok(_) -> print("open_wrong_key accepted")
         .Err(_) -> print("open_wrong_key Err")
     }
-    wrapped :: crypto.wrap(crypto.Secret{bytes: "wrapped secret".bytes()}, alice_public) ?? return
+    wrapped :: crypto.wrap(crypto.Secret.from_text("wrapped secret"), alice.public_key()) ?? return
     unwrapped :: crypto.unwrap(alice, wrapped) ?? return
     print("wrap_unwrap {crypto.constant_time_equal(unwrapped, crypto.Secret{bytes: "wrapped secret".bytes()})}")
     if crypto.unwrap(bob, wrapped) == {
@@ -109,6 +140,14 @@ fn run() {
     sig2 :: crypto.sign(crypto.SigningKey{bytes: seed2}, unhex("72")) ?? return
     print("ed25519_sig2 {hex.encode(sig2.bytes)}")
     print("ed25519_verify2 {crypto.verify(pk2, unhex("72"), sig2) ?? false} {crypto.verify(pk2, unhex("73"), sig2) ?? false}")
+    signer1 :: crypto.SigningKey{bytes: unhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")}
+    derived_pk1 :: signer1.public_key()
+    print("signing_public_key {derived_pk1.bytes == pk1.bytes}")
+    short_verify_key :: if crypto.VerifyKey.from_bytes(repeat_byte(U8{1}, 31)) == {
+        .Err(.Length) -> true
+        else -> false
+    }
+    print("verify_key_from_short {short_verify_key}")
 
     print("-- passwords")
     password :: crypto.Secret{bytes: "password".bytes()}
@@ -150,7 +189,7 @@ fn run() {
         short :: repeat_byte(U8{1}, 31)
         if expert.aes256gcm_seal(short, zero_iv, [U8]{}, [U8]{}) == {
             .Ok(_) -> print("aes256gcm_short_key accepted")
-            .Err(_) -> print("aes256gcm_short_key Err")
+            .Err(e) -> print("aes256gcm_short_key {crypto_error_name(e)}")
         }
         if expert.aes256gcm_seal(zero_key, repeat_byte(U8{0}, 11), [U8]{}, [U8]{}) == {
             .Ok(_) -> print("aes256gcm_short_nonce accepted")
@@ -191,11 +230,11 @@ fn run() {
     }
     if crypto.hkdf_sha256(ikm, salt, info, 8161) == {
         .Ok(_) -> print("hkdf_too_long accepted")
-        .Err(_) -> print("hkdf_too_long Err")
+        .Err(e) -> print("hkdf_too_long {crypto_error_name(e)}")
     }
     if crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 0, 32) == {
         .Ok(_) -> print("pbkdf2_zero_iterations accepted")
-        .Err(_) -> print("pbkdf2_zero_iterations Err")
+        .Err(e) -> print("pbkdf2_zero_iterations {crypto_error_name(e)}")
     }
     if crypto.x25519_public(crypto.X25519SecretKey{bytes: repeat_byte(U8{1}, 31)}) == {
         .Ok(_) -> print("x25519_public_short accepted")
@@ -207,11 +246,11 @@ fn run() {
     }
     if crypto.sign(crypto.SigningKey{bytes: repeat_byte(U8{1}, 31)}, [U8]{}) == {
         .Ok(_) -> print("sign_short_key accepted")
-        .Err(_) -> print("sign_short_key Err")
+        .Err(e) -> print("sign_short_key {crypto_error_name(e)}")
     }
     if crypto.verify(pk1, [U8]{}, crypto.Signature{bytes: repeat_byte(U8{0}, 63)}) == {
         .Ok(_) -> print("verify_short_signature accepted")
-        .Err(_) -> print("verify_short_signature Err")
+        .Err(e) -> print("verify_short_signature {crypto_error_name(e)}")
     }
     if crypto.seal([crypto.X25519PublicKey]{}, plaintext, aad) == {
         .Ok(_) -> print("seal_no_recipients accepted")

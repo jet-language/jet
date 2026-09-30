@@ -30,7 +30,7 @@ fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MirFun
             }
             }
             else -> {
-            jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR source file row is missing", "checked panic locations must resolve through the function source-file identity", Val(function.span))
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR source file row is missing", "checked panic locations must resolve through the function source-file identity", Val(function.span))
             }
         }
     }
@@ -158,7 +158,7 @@ fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MirFuncti
         }
         else -> {}
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR non-unit Return has no value", "checked Return terminators need an operand unless the full return is Unit or the Result success type is Unit", Val(function.span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR non-unit Return has no value", "checked Return terminators need an operand unless the full return is Unit or the Result success type is Unit", Val(function.span))
     "unreachable!(\"missing MIR Return value\")"
 }
 
@@ -196,7 +196,7 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MirFunction, mo
         close :: jet_rust_emit_foreign_name(ctx, foreign)
         return "{{ let __jet_handle = {moved}; unsafe {{ let _ = {close}(__jet_handle.into_raw()); }} () }}"
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "owned foreign handle has no close adapter", "checked handle lifecycle rows must retain the canonical close operation required by MIR", Val(span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "owned foreign handle has no close adapter", "checked handle lifecycle rows must retain the canonical close operation required by MIR", Val(span))
     "unreachable!(\"foreign handle close adapter missing\")"
 }
 
@@ -205,14 +205,14 @@ fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MirFunction, pla
         if row.id == place {
             partial :: jet_rust_emit_partial_drop(ctx, function, place)
             if row.access != MirAccess.Move {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a non-owned place", "checked drop actions must use a move-access place", Val(span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a non-owned place", "checked drop actions must use a move-access place", Val(span))
                 return "unreachable!(\"non-owned MIR drop\")"
             }
             if partial == .Val(partial_drop) -> return partial_drop
             uninit_drop :: jet_rust_emit_uninit_fixed_drop_place(function, place)
             if uninit_drop == .Val(fixed_drop) -> return fixed_drop
             if row.projections.len() > 0 {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a projected place without partial-drop storage", "checked projected drops require a canonical partial-move/drop plan", Val(span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a projected place without partial-drop storage", "checked projected drops require a canonical partial-move/drop plan", Val(span))
                 return "unreachable!(\"unsupported projected MIR drop\")"
             }
             moved :: jet_rust_emit_place_move(ctx, function, place)
@@ -222,7 +222,7 @@ fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MirFunction, pla
             return "drop({moved})"
         }
     }
-    jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR drop targets a missing place", "checked drop actions must resolve to one function place row", Val(span))
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR drop targets a missing place", "checked drop actions must resolve to one function place row", Val(span))
     "unreachable!(\"missing MIR drop place\")"
 }
 
@@ -268,7 +268,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MirFunction, blo
             loop line in jet_rust_emit_drops(ctx, function, MirDropEdge.Return) -> &lines.push(line)
             if {
                 function.generator != None -> {
-                if value != None -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR generator return carries a value", "generator returns must terminate the stream without a value", Val(function.span))
+                if value != None -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR generator return carries a value", "generator returns must terminate the stream without a value", Val(function.span))
                 &lines.push("return;")
                 }
                 else -> {
@@ -280,7 +280,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MirFunction, blo
             loop line in jet_rust_emit_drops(ctx, function, MirDropEdge.Normal) -> &lines.push(line)
             if {
                 function.generator == None -> {
-                jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR yield appears in a non-generator function", "the checked generator facts must accompany every Yield terminator", Val(function.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR yield appears in a non-generator function", "the checked generator facts must accompany every Yield terminator", Val(function.span))
                 &lines.push("unreachable!(\"invalid MIR yield\");")
                 }
                 else -> {

@@ -572,6 +572,18 @@ pub(crate) fn if_cond_in_subset(
                     .collect(),
             );
         }
+        // S31: a nested payload pattern lowers through the structural MIR
+        // pattern test; it binds the names its nested patterns introduce.
+        if pattern.has_nested_pattern() {
+            return Some(
+                pattern
+                    .binding_names()
+                    .into_iter()
+                    .map(|binding| binding.local_name().to_owned())
+                    .filter(|name| name != "_")
+                    .collect(),
+            );
+        }
         // c109 Phase 24: a JSON variant if-let (`if data == Object(entries)` /
         // `if port == Number(n)`). The prelude JSON enum is matched via a single-payload
         // variant pattern (`Object`/`Number`/`Text`/`Boolean`/`Array`) binding one name.
@@ -796,6 +808,32 @@ pub(crate) fn switch_in_subset(
                     .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
             });
         }
+        for arm in arms {
+            let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
+                return false;
+            };
+            let mut body_locals = locals.clone();
+            body_locals.extend(bindings);
+            if !arm
+                .body
+                .iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        return else_body.as_ref().is_none_or(|body| {
+            let mut else_locals = locals.clone();
+            body.iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
+        });
+    }
+    // S31: `lower_switch` routes a table with a nested payload pattern through
+    // the guard chain; each arm head is an ordinary condition.
+    if arms
+        .iter()
+        .any(|arm| crate::Codegen::TIR::arm_has_nested_pattern(&arm.cond))
+    {
         for arm in arms {
             let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
                 return false;

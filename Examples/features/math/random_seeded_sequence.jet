@@ -1,0 +1,27 @@
+package {
+    name: "math_random_seeded_sequence"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Rand] } }
+}
+// A seeded stream is a sequence, not one repeated value: each draw advances
+// the shared generator, and reseeding replays the same sequence on every tier.
+use core.math.random as random
+
+fn run() -[Rand, IO]> {
+    random.seed(42)
+    first :: random.int(0, 1000000)
+    second :: random.int(0, 1000000)
+    third :: random.int(0, 1000000)
+    print("{first} {second} {third}")
+    random.seed(42)
+    replay :: random.int(0, 1000000)
+    print("replay matches: {replay == first}")
+    random.seed(7)
+    rolls := [Int]{}
+    loop _ in 0..<8 -> &rolls.push(random.int(1, 6))
+    print("rolls: {rolls}")
+    random.seed(2026)
+    signed :: random.int(-50, 50)
+    low_bits :: random.getrandbits(16)
+    print("{signed} {low_bits}")
+}

@@ -1,18 +1,18 @@
-// D-STRUCT-ONCE1=A: one typed @loop mechanism reaches derive/marker bodies,
+// D-STRUCT-ONCE1=A: one typed `prep loop` mechanism reaches derive/marker bodies,
 // root impl items, and interpolated test declarations.
 derive T.FieldNames {
-    prep loop field in T.@fields {
-        method :: "field_{field.@name}"
-        fn @method(self) -> String { field.@name }
+    prep loop field in T.$fields {
+        method :: "field_{field.$name}"
+        fn $method(self) -> String { field.$name }
     }
 }
 
-marker AddMarkerFields(@sites: [.Type]) {
-    type_name :: target.@name
-    prep loop field in target.@fields {
-        method :: "marked_{field.@name}"
-        impl @type_name {
-            fn @method(self) -> String { field.@name }
+marker AddMarkerFields($sites: [.Type]) {
+    type_name :: target.$name
+    prep loop field in target.$fields {
+        method :: "marked_{field.$name}"
+        impl $type_name {
+            fn $method(self) -> String { field.$name }
         }
     }
 }
@@ -27,7 +27,7 @@ struct Case {
     n: Int
 }
 
-@CASES :: [Case]{Case{n: 1}, Case{n: 2}}
+CASES :: prep { [Case]{Case{n: 1}, Case{n: 2}} }
 
 prep loop T in [Point] {
     impl T {
@@ -35,7 +35,7 @@ prep loop T in [Point] {
     }
 }
 
-prep loop case in @CASES {
+prep loop case in CASES {
     #Test("case {case.n}") {
         .measure {
             assert(case.n > 0)

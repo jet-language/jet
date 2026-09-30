@@ -1146,9 +1146,20 @@ impl TirTypeDef {
                 methods: resolve_type_methods(self, methods, registry)?,
             },
             TirTypeDefKind::Enum { variants, methods } => MirTypeDefKind::Enum {
+                // `#Layout(c)`: an omitted discriminant follows declaration
+                // order as in C, one past the previous variant (zero first).
                 variants: variants
                     .iter()
-                    .map(|variant| MirVariant {
+                    .scan(Some(0i64), |next, variant| {
+                        let discriminant = if self.c_layout_tag.is_some() {
+                            variant.discriminant.or(*next)
+                        } else {
+                            variant.discriminant
+                        };
+                        *next = discriminant.and_then(|value| value.checked_add(1));
+                        Some((variant, discriminant))
+                    })
+                    .map(|(variant, discriminant)| MirVariant {
                         name: variant.name.clone(),
                         wire_name: variant.wire_name.clone(),
                         span: variant.span,
@@ -1171,7 +1182,7 @@ impl TirTypeDef {
                                     .collect(),
                             ),
                         },
-                        discriminant: variant.discriminant,
+                        discriminant,
                     })
                     .collect(),
                 methods: resolve_type_methods(self, methods, registry)?,
@@ -1392,6 +1403,16 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
 ) -> TirDeclarations {
     let mut out = TirDeclarations::default();
     let layout_engine = TargetLayoutEngine::new(items, target_layout.clone());
+    let owned = super::module_owned_type_names(items);
+    // Rows are keyed `module::Name`. Field and payload types that name a
+    // sibling row must spell that same key, or a comptime fragment's payload
+    // type (`Box2`) and its constructed value (`__comptime::Box2`) disagree.
+    let qualify_owned = |ty: &Type, binders: &[String]| {
+        ty.map_named_types(&|name| {
+            (owned.contains(name) && !binders.iter().any(|binder| binder == name))
+                .then(|| qualified_key(module, name))
+        })
+    };
     collect_items(
         &mut out,
         items,
@@ -1400,8 +1421,8 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
         boxed_edges,
         auto_printable,
         auto_debug,
-        &|ty, _| ty.clone(),
-        !super::module_owned_type_names(items).contains("ParseError"),
+        &qualify_owned,
+        !owned.contains("ParseError"),
         checked_nominals,
     );
     discard_duplicate_core_enum_fallbacks(&mut out);
@@ -1773,7 +1794,14 @@ fn lower_distinct(
         generic_params: Vec::new(),
         derives: lower_derive_names(&definition.derives, false, false),
         auto_derive_default: false,
-        auto_printable,
+        // D-CAPBUNDLE1: `#Printable` on a distinct type grants the base
+        // type's rendering, so the adapters emit the same Printable surface
+        // an auto-derived nominal gets.
+        auto_printable: auto_printable
+            || definition
+                .derives
+                .iter()
+                .any(|(name, _)| name == crate::Generics::PRINTABLE),
         published_schema: false,
         single_use: false,
         must_use: false,
@@ -2624,8 +2652,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("JSONReader", &[]),
     ("JSONLWriter", &[]),
     ("JSONLReader", &[]),
-    ("SigningKey", &[]),
-    ("VerifyKey", &[]),
     ("DirEntry", &["name", "path", "is_dir"]),
     ("WalkEntry", &["path", "relative", "is_dir", "depth"]),
     ("TempDir", &["path"]),

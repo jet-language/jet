@@ -16,12 +16,12 @@
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "return", "task", "task.all", "task.any", "task.group", "task.race"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fn", "impl", "marker", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
-const JET_HIGHLIGHT_KEYWORD_OTHER = ["@CLOSURE", "@FUNCTION", "@METHOD", "@PACKAGE", "@PHASE", "@PROGRAM", "@SOURCE", "@TYPE", "@TYPES", "@VALUE", "it", "prep", "self", "shared"];
+const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$package", "$phase", "$program", "@SOURCE", "@TYPES", "it", "prep", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Derived", "Duration", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "Extern", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
-const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "@[", "]@", "^", "~"];
+const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", "::", ":=", "@[", "]@", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||", "~|", "~|="];
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
@@ -168,8 +168,9 @@ module.exports = grammar({
       ),
 
     // A marker declaration has one named parameter list. Ordinary names carry
-    // typed use-site arguments; `@` names carry fixed declaration metadata.
-    // D-MARKER-SITES1=B: `@sites: [...]` is the sole legal-site form.
+    // typed use-site arguments; `$` names carry fixed declaration metadata
+    // (D-DECL-META1=A). D-MARKER-SITES1=B: `$sites: [...]` is the sole
+    // legal-site form.
     marker_decl: ($) =>
       seq(
         "marker",
@@ -192,7 +193,7 @@ module.exports = grammar({
         ),
       ),
 
-    marker_fact_name: ($) => seq("@", $.identifier),
+    marker_fact_name: ($) => seq("$", $.identifier),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────
     // `use core.encoding.json as json`, `use "./file.jet"`, or a member list
@@ -1403,9 +1404,11 @@ module.exports = grammar({
         ),
       ),
 
-    // D-FACT-READ1: every registered `@fact` is a compiler-owned member after
-    // an expression. `@name` remains a comptime splice in expression position.
-    compiler_fact: ($) => seq("@", field("name", $.identifier)),
+    // D-FACT-READ1 / D-META-ROOT3=A: every registered `$fact` is a
+    // compiler-owned member after an expression. Inside a template, `$name`
+    // also splices a template binding (D-NAME-SPLICE1=B): `fn $method`,
+    // `self.$field`, `.$left`.
+    compiler_fact: ($) => seq("$", field("name", $.identifier)),
 
     // Postfix deref `p.*` (D-CAP7).
     deref_expr: ($) => prec.left(4, seq($._expr, ".", "*")),

@@ -512,11 +512,12 @@ pub(crate) fn jet_crypto_entropy_fail_closed(
     std::panic::panic_any(format!("__jet_ffi_runtime__: {operation}: {error}"))
 }
 
-pub(crate) fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
-    match jet_crypto_entropy_bytes(n) {
-        Ok(bytes) => bytes,
-        Err(error) => jet_crypto_entropy_fail_closed("core.crypto.random.bytes", error),
-    }
+/// D-SHAPE-RESOURCE1=A: the one vetted wipe behind `core.crypto.__zeroize`.
+/// Each secret-bearing Core type's `Close` hands its owned bytes here, so the
+/// zeroing is volatile and fenced and cannot be elided before the buffer is
+/// freed.
+pub fn jet_crypto_zeroize(mut bytes: Vec<u8>) {
+    jet_crypto_entropy_zeroize(&mut bytes);
 }
 
 fn jet_crypto_uuid_format(bytes: &[u8; 16]) -> String {

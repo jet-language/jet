@@ -1,21 +1,18 @@
-// D-META-STAGE1=B: `@ { … }` execution block.
+// D-PREP-SURFACE2=A: `prep { … }` execution block.
 // Runs at build time via the comptime interpreter; erases entirely — no runtime
-// Rust is emitted (I3). A block-local comptime binding can be spliced into
-// runtime code with `@name` after the block.
-@LIMIT :: 1000
+// Rust is emitted (I3). A value that outlives it is prepared explicitly with
+// `name :: prep { value }`.
+LIMIT :: prep { 1000 }
 
-@BASE :: 10
+BASE :: prep { 10 }
 
 fn run() {
+    ratio :: prep { LIMIT /% BASE }
     // Build-time assertion: verify constants are valid before compiling.
     prep {
-        @ratio :: @LIMIT /% @BASE
-        if @ratio < 1 -> panic("limit must be >= base")
+        if ratio < 1 -> panic("limit must be >= base")
     }
-    // The block ran at build time and produced no runtime code. Its comptime
-    // binding leaks into the surrounding comptime scope, so `@ratio` splices a
-    // runtime literal.
-    print("limit: {@LIMIT}")
-    print("base: {@BASE}")
-    print("ratio: {@ratio}")
+    print("limit: {LIMIT}")
+    print("base: {BASE}")
+    print("ratio: {ratio}")
 }

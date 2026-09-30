@@ -869,7 +869,7 @@ fn canonicalize_expr(expr: &mut TExpr) {
         | TExprKind::DistinctRaw(operand)
         | TExprKind::Present(operand)
         | TExprKind::Ok(operand)
-        | TExprKind::Err(operand)
+        | TExprKind::Err(operand, _)
         | TExprKind::OptField { base: operand, .. }
         | TExprKind::PatternMatches { subj: operand, .. }
         | TExprKind::NumericMethod { recv: operand, .. }

@@ -28,6 +28,12 @@ fn run() {
     print("empty average: {empty.average()}")
     print("empty min absent: {empty.min() == None} max absent: {empty.max() == None}")
 
+    // Float extrema use the collection sort order: NaN is the greatest item.
+    with_nan :: [Float]{1.0, 0.0 / 0.0, 3.0}
+    top :: with_nan.max() ?? 0.0
+    print("float min: {with_nan.min() ?? 0.0} max is NaN: {top != top}")
+    print("float max: {[Float]{1.0, 3.0, 2.0}.max() ?? 0.0}")
+
     // Counts at zero and beyond the source length select exactly.
     print("take 0: {xs.lazy().take(0).to_list()}")
     print("skip 0: {xs.lazy().skip(0).to_list()}")

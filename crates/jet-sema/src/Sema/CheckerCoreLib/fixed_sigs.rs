@@ -1240,7 +1240,6 @@ fn core_fixed_sig_impl(
     let archive_error = Type::Named("ArchiveError".to_string());
     let gzip_error = Type::Named("GzipFileError".to_string());
     let zstd_error = Type::Named("ZstdFileError".to_string());
-    let crypto_error = Type::Named("CryptoError".to_string());
     let json = json_ty();
     let list_u8 = Type::List(Box::new(u8_ty()));
     let list_float = Type::List(Box::new(Type::Float));
@@ -1249,7 +1248,6 @@ fn core_fixed_sig_impl(
     let list_list_int = Type::List(Box::new(list_int.clone()));
     let list_string = Type::List(Box::new(Type::String));
     let counter = Type::Named("Counter".to_string());
-    let deque = Type::Named("Deque".to_string());
     let ordered_map = Type::Named("OrderedMap".to_string());
     let chain = Type::Named("Chain".to_string());
     let string_set = Type::Named("StringSet".to_string());
@@ -2151,49 +2149,6 @@ fn core_fixed_sig_impl(
             vec![(read, counter.clone())],
             Some(counter.clone()),
         )),
-        ("core.collections", "deque") => Some((vec![], Some(deque.clone()))),
-        ("core.collections", "deque_from") => Some((
-            vec![(read, list_string.clone())],
-            Some(deque.clone()),
-        )),
-        ("core.collections", "deque_len") => Some((
-            vec![(read, deque.clone())],
-            Some(int.clone()),
-        )),
-        ("core.collections", "deque_is_empty") => Some((
-            vec![(read, deque.clone())],
-            Some(bool_.clone()),
-        )),
-        ("core.collections", "append" | "appendleft") => Some((
-            vec![(read, deque.clone()), (read, Type::String)],
-            Some(deque.clone()),
-        )),
-        ("core.collections", "pop" | "popleft") => Some((
-            vec![(read, deque.clone())],
-            Some(Type::Tuple(vec![
-                ("deque".to_string(), Box::new(deque.clone())),
-                (
-                    "value".to_string(),
-                    Box::new(Type::Option(Box::new(Type::String))),
-                ),
-            ])),
-        )),
-        ("core.collections", "peek" | "peekleft") => Some((
-            vec![(read, deque.clone())],
-            Some(Type::Option(Box::new(Type::String))),
-        )),
-        ("core.collections", "extend" | "extendleft") => Some((
-            vec![(read, deque.clone()), (read, list_string.clone())],
-            Some(deque.clone()),
-        )),
-        ("core.collections", "rotate") => Some((
-            vec![(read, deque.clone()), (read, int.clone())],
-            Some(deque.clone()),
-        )),
-        ("core.collections", "deque_items") => Some((
-            vec![(read, deque.clone())],
-            Some(list_string.clone()),
-        )),
         ("core.collections", "ordered_map") => {
             Some((vec![], Some(ordered_map.clone())))
         }
@@ -2472,12 +2427,16 @@ fn core_fixed_sig_impl(
         ("core.math.random", "paretovariate") => {
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
-        // D-CRYPTO-RNG1=A: fail-closed bytes from the target's tier-1 OS CSPRNG.
-        // Invalid lengths and provider failures stay visible as CryptoError.
+        // D-CRYPTO-RNG1=A: the fail-closed OS CSPRNG kernel behind the Jet
+        // `core.crypto.random.bytes` wrapper. A missing or rejected provider is
+        // `None` here; the wrapper surfaces it as `CryptoError.Unavailable`.
         ("core.crypto.random", "bytes") => Some((
             vec![(read, Type::Int)],
-            Some(result_ty(list_u8.clone(), crypto_error.clone())),
+            Some(Type::Option(Box::new(list_u8.clone()))),
         )),
+        // D-SHAPE-RESOURCE1=A: the Core-internal wipe that each secret-bearing
+        // crypto type's `Close` hands its owned bytes to.
+        ("core.crypto", "__zeroize") => Some((vec![(moved, list_u8.clone())], None)),
         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
         // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
@@ -6029,13 +5988,7 @@ fn core_fixed_sig_impl(
         ("core.ui", "preview" | "playground") => Some((
             vec![
                 (read, string.clone()),
-                (
-                    read,
-                    Type::Result {
-                        ok: Box::new(Type::Named("UiPreviewViewport".to_string())),
-                        err: Box::new(Type::Named("Absent".to_string())),
-                    },
-                ),
+                (read, Type::Option(Box::new(Type::Named("UiPreviewViewport".to_string())))),
                 (read, ui_node_callback),
             ],
             Some(ui_preview),

@@ -384,6 +384,7 @@ fn lower_lambda_expecting_with_host_borrow(
     let mut extra_cloned: Vec<String> = Vec::new();
     let mut handle_shares: Vec<String> = Vec::new();
     let mut captures: Vec<(String, String, Type)> = Vec::new();
+    let mut capture_origins = std::collections::BTreeMap::new();
     // Moving escape into `jet_iter_map` / similar hosts needs owned captures. A
     // borrowed Fn parameter (`&Box<dyn Fn…>`) is not always in `cloned_captures`
     // yet, and a bare `move || f(…)` trips rustc E0521. Clone it into an owned
@@ -402,6 +403,15 @@ fn lower_lambda_expecting_with_host_borrow(
                 continue;
             }
             if !env.locals.contains_key(&name) {
+                continue;
+            }
+            // A resource local is owned by its cleanup guard, not borrowed:
+            // its Rust carrier has no `Clone`. Sema's move fact transfers it
+            // out of the guard into the closure; any other capture borrows it.
+            if env.is_resource(&name) {
+                if lam.meta.moved_captures.iter().any(|c| c == &name) {
+                    env.resource_take_place(&name);
+                }
                 continue;
             }
             let needs_clone =
@@ -441,6 +451,7 @@ fn lower_lambda_expecting_with_host_borrow(
                 .expect("checked capture local has no resolved type")
         };
         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
+        capture_origins.insert(name.clone(), env.local_of(name).name);
         let slot = TLocal::generated(&cap);
         lam_env.bind(name, slot, Some(cap_ty));
         // D-MEM-COPYSEM1=A: the capture slot now OWNS its bytes. Inside the
@@ -555,8 +566,13 @@ fn lower_lambda_expecting_with_host_borrow(
     // explicit clone list, these slots are inserted here to make a moving
     // closure own borrowed/Fn captures.  Carry the fact onto the target MIR
     // row so its capture parameter and the enclosing Closure operand agree.
+    // A borrowed slot cannot be moved out of, so the clone replaces any
+    // sema move fact for the same name (an escaping HTTP handler capturing a
+    // borrowed `DBScope` resource is both); otherwise MIR would read the
+    // closure-only `__jet___cap_<n>` slot from the enclosing function.
     capture_facts.cloned.extend(extra_cloned.iter().cloned());
     capture_facts.cloned.extend(handle_shares.iter().cloned());
+    capture_facts.moved.retain(|name| !extra_cloned.contains(name));
     TLambda {
         executable,
         source_span: lam.span,
@@ -614,6 +630,7 @@ fn lower_lambda_expecting_with_host_borrow(
             && !direct_fallible,
         arc: false,
         captures,
+        capture_origins,
         materialized_captures: lam.meta.materialized_captures.clone(),
         frozen_captures: lam.meta.frozen_captures.clone(),
         uses_stack_sentry,

@@ -123,16 +123,16 @@ fn takes(v: Float) {
     print(v)
 }
 
-@THIRD :: 1 / 3
-@ROUNDTRIP :: @THIRD * 3
-@DECIMAL :: 0.1 + 0.2
-@FAST :: Float{19.99}
+THIRD :: prep { 1 / 3 }
+ROUNDTRIP :: prep { THIRD * 3 }
+DECIMAL :: prep { 0.1 + 0.2 }
+FAST :: prep { Float{19.99} }
 
 fn run() {
-    print(@THIRD)
-    print(@ROUNDTRIP == 1)
-    print(@DECIMAL == 0.3)
-    print(@FAST)
+    print(THIRD)
+    print(ROUNDTRIP == 1)
+    print(DECIMAL == 0.3)
+    print(FAST)
     takes(3.4)
     decimal :: 3.4
     print("dec={decimal}")

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 
 const FACT_SOURCE: &str = r#"
-fact StructureLiveness(@name: "Structure.Liveness", @holds: .Build, @safe: .Gain, @gates: ["_name"], @decision: "D-STRUCT-PLANE1")
+fact StructureLiveness($name: "Structure.Liveness", $holds: .Build, $safe: .Gain, $gates: ["_name"], $decision: "D-STRUCT-PLANE1")
 
 fn run() {
     print("structure facts erase")
@@ -277,7 +277,7 @@ fn structure_fact_declaration_erases_before_codegen() {
     let output = jet::compile(FACT_SOURCE).expect("structure fact fixture compiles");
     assert!(output.rust.contains("structure facts erase"));
     assert!(!output.rust.contains("Structure.Liveness"));
-    assert!(!output.rust.contains("@holds"));
+    assert!(!output.rust.contains("$holds"));
     assert!(!output.rust.contains("manifest rule edit"));
 }
 
@@ -288,7 +288,7 @@ fn structure_fact_declaration_erases_for_web_codegen() {
     let web = output.web.expect("web artifacts are present");
     for generated in [&web.wasm_rust, &web.js_app] {
         assert!(!generated.contains("Structure.Liveness"));
-        assert!(!generated.contains("@holds"));
+        assert!(!generated.contains("$holds"));
         assert!(!generated.contains("manifest rule edit"));
     }
 }

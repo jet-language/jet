@@ -6,7 +6,7 @@
 
 // BEGIN GENERATED EFFECT DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Effects.jet
-// Source SHA-256: 6271597730bff63a19dc93b24ab2ab06bb2cb54ff5b5c80042dcc3ac3f441bd2
+// Source SHA-256: cb7a9b9ef6c7be8620deacda9eb20c0411f81a39f432c8a01a94f9427414bc2f
 pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");
 use std::sync::LazyLock;
 
@@ -132,33 +132,11 @@ pub const TIME_WAIT_EFFECT: &str = "Time.Wait";
 
 /// D-DET1: Core calls whose result depends on ambient wall-clock or PRNG
 /// state. This is the one classification used by purity checking and
-/// compile-time folding; deterministic constructors such as `random.rng`
-/// remain outside it.
+/// compile-time folding. It is derived from the call's effect row, never a
+/// second member list, so a new time or random host call cannot be missed;
+/// deterministic constructors such as `random.rng` carry no effect.
 pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
-    matches!(
-        (module, method),
-        (
-            "core.time",
-            "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
-        ) | ("core.tasks", "timeout")
-            | (
-                "core.math.random",
-                "int"
-                    | "float"
-                    | "float_range"
-                    | "bool"
-                    | "normal"
-                    | "exponential"
-                    | "pick"
-                    | "weighted_pick"
-                    | "sample"
-                    | "shuffle"
-                    | "seed"
-                    | "split"
-                    | "bytes"
-            )
-            | ("core.crypto.random", "bytes")
-    )
+    matches!(core_effect(module, method), Some(Effect::Time | Effect::Rand))
 }
 
 /// The effect carried by a Core call `module.method`, or `None` if pure.
@@ -279,12 +257,8 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     ) {
         return None;
     }
-    if is_nondeterministic_core(module, method) {
-        return Some(match module {
-            "core.time" | "core.tasks" => Effect::Time,
-            "core.math.random" | "core.crypto.random" => Effect::Rand,
-            _ => return None,
-        });
+    if (module, method) == ("core.tasks", "timeout") {
+        return Some(Effect::Time);
     }
     // D-META-EFFECT1: these read or reshape values the caller already holds —
     // parsing an address, asking a recorded error for its message, reading a
@@ -458,7 +432,7 @@ pub fn core_requires_comptime_gate(module: &str, method: &str) -> bool {
     core_effect(module, method).is_some_and(Effect::requires_comptime_gate)
 }
 /// D-TXN2: the irreversible effects — a root is irreversible when the
-/// Prelude declaration marks that root or one of its leaves `@irreversible`.
+/// Prelude declaration marks that root or one of its leaves `$irreversible`.
 /// This keeps the transaction wall on the declared effect facts instead of a
 /// second Rust-only table. The remaining effects (IO/Time/Rand/Env/DB/Log/GPU)
 /// are reversible-or-benign for this purpose: reads, clock/RNG reads, and

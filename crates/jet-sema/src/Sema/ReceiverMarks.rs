@@ -53,6 +53,21 @@ fn place_root(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// The source span of a whole syntactic place. Field, index, and range nodes
+/// span only their own suffix (`.buf`, `[i]`), so the place starts at its root.
+pub(crate) fn place_span(expr: &Expr) -> Span {
+    fn start(expr: &Expr) -> usize {
+        match expr {
+            Expr::Field(base, _, _) | Expr::Index { base, .. } | Expr::Slice { base, .. } => {
+                start(base)
+            }
+            other => other.span().start,
+        }
+    }
+    let span = expr.span();
+    Span::new(start(expr).min(span.start), span.end)
+}
+
 fn is_window_type(ty: &Type) -> bool {
     match ty {
         Type::Apply { name, .. } => matches!(name.as_str(), "ViewMut" | "ComputeViewMut"),
@@ -133,7 +148,7 @@ impl<'a> Checker<'a> {
             // A fresh receiver (a call result or literal) takes no mark.
             return;
         };
-        let span = receiver.span();
+        let span = place_span(receiver);
         // Only a place the user wrote gets a missing-mark report; lowering
         // and desugaring passes synthesize receivers with borrowed spans.
         if !self

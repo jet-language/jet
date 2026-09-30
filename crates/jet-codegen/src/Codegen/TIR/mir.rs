@@ -184,6 +184,11 @@ pub(super) struct FunctionRegistry {
     generic_params: HashMap<MirFunctionId, Vec<String>>,
     owner_types: HashMap<MirFunctionId, Type>,
     pub(super) receiver_access: HashMap<MirFunctionId, MirAccess>,
+    /// D-SHAPE-RESOURCE1=A: each nominal `Close` implementation, keyed by the
+    /// checked owner's MIR type identity once the type rows exist. Scope-end
+    /// cleanup closes a still-live local of that type through this function.
+    close_impl_rows: Vec<(String, Type, Span, MirFunctionId)>,
+    close_impls: HashMap<MirTypeId, MirFunctionId>,
 }
 
 impl FunctionRegistry {
@@ -201,6 +206,8 @@ impl FunctionRegistry {
             owner_types: HashMap::new(),
             generic_params: HashMap::new(),
             receiver_access: HashMap::new(),
+            close_impl_rows: Vec::new(),
+            close_impls: HashMap::new(),
         };
         // Resolve stable-ID hash collisions from a canonical identity order.
         // Normal rows retain their historical IDs; only a real collision gets
@@ -258,6 +265,22 @@ impl FunctionRegistry {
                 registry
                     .receiver_access
                     .insert(id, lower_mir_convention(access));
+            }
+            if let TFuncKind::TraitMethod {
+                owner_type,
+                trait_name,
+                ..
+            } = &function.kind
+            {
+                let leaf = trait_name.rsplit("::").next().unwrap_or(trait_name);
+                if leaf == crate::Syntax::TRAIT_CLOSE && method_leaf(&function.name) == "close" {
+                    registry.close_impl_rows.push((
+                        function.module.clone(),
+                        owner_type.clone(),
+                        function.source_span,
+                        id,
+                    ));
+                }
             }
             registry.by_identity.insert(identity, id);
             registry.return_types.insert(id, function.ret.clone());
@@ -317,6 +340,26 @@ impl FunctionRegistry {
             }
         }
         Ok(registry)
+    }
+
+    /// Resolve every `Close` owner to its checked MIR type identity. Runs once
+    /// the type rows exist, before any function body is lowered.
+    fn index_close_impls(&mut self, types: &[MirTypeDef]) -> Result<(), LowerError> {
+        for (module, owner, span, function) in std::mem::take(&mut self.close_impl_rows) {
+            let owner = module_relative_type_instance(types, &owner, &module, span)?;
+            let Some(identity) = owner.identity else {
+                return Err(LowerError::new(span, "checked Close owner has no nominal identity"));
+            };
+            if self.close_impls.insert(identity, function).is_some_and(|other| other != function) {
+                return Err(LowerError::new(span, "checked Close owner has two implementations"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The nominal `Close` implementation for a value of this MIR type.
+    pub(super) fn close_impl_for(&self, ty: &MirType) -> Option<MirFunctionId> {
+        self.close_impls.get(&ty.identity?).copied()
     }
 
     fn id_for(&self, function: &TFunc) -> Result<MirFunctionId, LowerError> {
@@ -880,19 +923,23 @@ fn lower_anonymous_union_type_defs(
             continue;
         }
 
-        let variants: Vec<MirVariant> = members
+        // Each payload is the member's checked instance, so a member value
+        // built anywhere in the program has exactly this payload identity.
+        let variants = members
             .iter()
             .map(|member| {
                 let tag = crate::AST::union_member_tag(member);
-                MirVariant {
+                Ok(MirVariant {
                     name: tag.clone(),
                     wire_name: tag,
                     span,
-                    payload: MirVariantPayload::Single(lower_type(member)),
+                    payload: MirVariantPayload::Single(canonical_type_instance(
+                        types, member, span,
+                    )?),
                     discriminant: None,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, LowerError>>()?;
         let qualified_suffix = format!("::{name}");
         let metadata = types
             .iter()
@@ -967,8 +1014,68 @@ fn lower_anonymous_union_type_defs(
     Ok(())
 }
 
+/// D-UNIONTYPE1=A: an anonymous union has one identity. Sema declares its
+/// carrier enum in every module that spells the union
+/// (`module::__JetUnion_A_B`), but all of those declarations name the one
+/// structural type. Fold each declaration into the canonical row: that row
+/// keeps the structural id and key and gains the declarations' checked
+/// methods; the module copies leave the table, so no value, pattern, or impl
+/// can be typed by a second carrier. `canonical_nominal_name` resolves the
+/// qualified spelling to the canonical key. Runs after method retargeting,
+/// which pairs rows with their TIR declarations by position.
+fn fold_anonymous_union_declarations(types: &mut Vec<MirTypeDef>) {
+    let mut folded = HashSet::new();
+    for canonical_index in 0..types.len() {
+        let canonical = &types[canonical_index];
+        if canonical.key != canonical.name || !canonical.name.starts_with("__JetUnion_") {
+            continue;
+        }
+        let MirTypeDefKind::Enum { variants, .. } = &canonical.kind else {
+            continue;
+        };
+        let qualified_suffix = format!("::{}", canonical.name);
+        let declarations = types
+            .iter()
+            .enumerate()
+            .filter(|(_, declaration)| {
+                declaration.generic_params.is_empty()
+                    && declaration.name == canonical.name
+                    && declaration.key.ends_with(&qualified_suffix)
+                    && matches!(
+                        &declaration.kind,
+                        MirTypeDefKind::Enum {
+                            variants: declared,
+                            ..
+                        } if anonymous_union_shape_matches(variants, declared)
+                    )
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let mut declared_methods = Vec::new();
+        for index in declarations {
+            if let MirTypeDefKind::Enum { methods, .. } = &types[index].kind {
+                declared_methods.extend(methods.iter().copied());
+            }
+            folded.insert(index);
+        }
+        if let MirTypeDefKind::Enum { methods, .. } = &mut types[canonical_index].kind {
+            for method in declared_methods {
+                if !methods.contains(&method) {
+                    methods.push(method);
+                }
+            }
+        }
+    }
+    let mut index = 0;
+    types.retain(|_| {
+        let keep = !folded.contains(&index);
+        index += 1;
+        keep
+    });
+}
+
 pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> {
-    let function_registry = FunctionRegistry::build(&program.funcs)?;
+    let mut function_registry = FunctionRegistry::build(&program.funcs)?;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,
@@ -985,6 +1092,8 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
         &program.declarations.type_defs,
         &function_registry,
     );
+    fold_anonymous_union_declarations(&mut types);
+    function_registry.index_close_impls(&types)?;
     types.sort_unstable_by_key(|ty| ty.id);
     let mut functions: Vec<MirFunction> = Vec::with_capacity(program.funcs.len());
     let mut prelude_calls: Vec<MirPreludeCall> = Vec::new();
@@ -1008,8 +1117,6 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             &function_registry,
             &program.source_files,
             &program.artifact_facts.modules,
-            None,
-            None,
             None,
             None,
         )
@@ -1163,14 +1270,26 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
         }
     }
     ensure_referenced_traits(&mut traits, &impls, &functions, &types);
-    let constants = lower_constant_rows(&program.declarations.constants);
+    let mut constants = lower_constant_rows(&program.declarations.constants);
     for row in program
         .declarations
         .constants
         .iter()
         .filter(|row| is_runtime_constant(row))
     {
-        let instance = canonical_type_instance(&types, &row.ty, row.span)?;
+        let instance = canonical_type_instance(&types, &row.ty, row.span);
+        // A prepared constant is materialized only when its folded value has
+        // a canonical MIR type; reads of any other stay folded at the use.
+        if row.is_comptime && instance.is_err() {
+            constants.retain(|constant| constant.key != row.key);
+            continue;
+        }
+        let instance = instance?;
+        // The row carries the checked instance, so its nominal members name
+        // the same type identities as the program's type table.
+        if let Some(constant) = constants.iter_mut().find(|constant| constant.key == row.key) {
+            constant.ty = instance.clone();
+        }
         merge_type_instance(&mut type_instances, instance, row.span)?;
     }
     let jobs = lower_job_rows(
@@ -1706,6 +1825,32 @@ fn lower_artifact_param(param: &TirParamFact) -> MirParam {
         default_present: false,
     }
 }
+/// #3740 (D-FAILURE-FOUNDATION1): a callable whose failure set is empty
+/// (`T Never!`, written or inferred) returns its success value directly on
+/// every tier. Checked expressions keep naming the `Result<T, Never>`
+/// carrier; this is that carrier's success type.
+pub(super) fn never_carrier_success(ty: &Type) -> Option<&Type> {
+    match ty.without_user_tags() {
+        Type::Result { ok, err } if err.is_never() => Some(ok.as_ref()),
+        _ => None,
+    }
+}
+
+/// A checked `Result` carrier expression. #3708: callers checked before the
+/// failure solve name the default `Result<T, Err>` of a callee that now
+/// returns plainly, so reconciliation accepts any `Result` expression.
+pub(super) fn is_result_carrier(ty: &Type) -> bool {
+    matches!(ty.without_user_tags(), Type::Result { .. })
+}
+
+/// An executable return that is neither a failure nor an absence carrier.
+pub(super) fn is_plain_return(ty: &Type) -> bool {
+    !matches!(
+        ty.without_user_tags(),
+        Type::Result { .. } | Type::Option(_)
+    ) && !ty.is_never()
+}
+
 /// The adaptation a raw-payload function value needs to fill a callable slot
 /// with the shared `Result` carrier: the slot parameters, the source payload
 /// return, and the slot's carrier return. `None` when the two already agree.
@@ -2058,10 +2203,13 @@ fn lower_impl_rows(
                 key,
                 span: row.span,
                 self_type,
-                trait_ref: trait_name.map(|name| MirTraitRef {
-                    id: MirTraitId(stable_id("mir-trait", name)),
-                    name: name.clone(),
-                }),
+                // A literal capability impl is an inherent block of its hook.
+                trait_ref: trait_name
+                    .filter(|name| !is_literal_capability_trait(name))
+                    .map(|name| MirTraitRef {
+                        id: MirTraitId(stable_id("mir-trait", name)),
+                        name: name.clone(),
+                    }),
                 associated_types: row
                     .associated_types
                     .iter()
@@ -2277,8 +2425,12 @@ fn lower_decl_visibility(visibility: super::tir_to_mir_types::TirVisibility) -> 
     }
 }
 
+/// Every module constant a function body may read through a `Global`: runtime
+/// constants and storage, and (D-PREP-SURFACE2=A) prepared constants whose
+/// build-time value is folded. A plain ALL_CAPS read lowers to the same
+/// `Global` either way, so every tier must find the value here.
 fn is_runtime_constant(row: &super::tir_to_mir_types::TirConstantDef) -> bool {
-    !row.is_comptime
+    !(row.is_comptime && matches!(row.value, CtValue::Unit))
         && !matches!(
             &row.ty,
             Type::Named(name)
@@ -3729,6 +3881,15 @@ fn lower_function_form(
             owner_type,
             trait_name,
             self_conv,
+            ..
+        } if is_literal_capability_trait(trait_name) => Ok(MirFunctionForm::Method {
+            owner: ctx.mir_type(owner_type)?,
+            self_access: self_conv.map(lower_mir_convention),
+        }),
+        TFuncKind::TraitMethod {
+            owner_type,
+            trait_name,
+            self_conv,
             serde,
             ..
         } => Ok(MirFunctionForm::TraitMethod {
@@ -3741,6 +3902,15 @@ fn lower_function_form(
             }),
         }),
     }
+}
+
+/// D-FOUND-LITERAL1=A: `Literal.Int` and `Literal.Float` are compiler-intrinsic
+/// capabilities, not runtime traits. Their `from_literal` hook is an ordinary
+/// static method of the implementing type in every artifact.
+fn is_literal_capability_trait(name: &str) -> bool {
+    name.rsplit("::")
+        .next()
+        .is_some_and(crate::Generics::is_literal_capability)
 }
 
 fn parse_runtime_part(key: &str) -> Option<MirRuntimePartId> {
@@ -3801,9 +3971,7 @@ fn lower_function(
     source_texts: &BTreeMap<String, String>,
     modules: &[TirModuleFact],
     body: Option<&TLambdaBody>,
-    expression: Option<&TExpr>,
     lambda: Option<&TLambda>,
-    capture_specs: Option<(&[(String, String, Type)], MirCaptureFacts)>,
 ) -> Result<LoweredFunction, LowerError> {
     let mut ctx = LowerCtx::new(
         f,
@@ -3819,8 +3987,6 @@ fn lower_function(
 
     if let Some(lambda) = lambda {
         ctx.bind_captures(lambda)?;
-    } else if let Some((captures, facts)) = capture_specs {
-        ctx.bind_capture_specs(captures, facts, f.source_span)?;
     }
     let mut param_index = 0;
     if let Some((owner_type, conv)) = f.kind.receiver() {
@@ -3830,36 +3996,29 @@ fn lower_function(
     for (offset, (name, ty, access)) in f.params.iter().enumerate() {
         ctx.bind_parameter(param_index + offset, name, ty, *access)?;
     }
-    if let Some(expr) = expression {
-        let value = ctx.lower_child(expr)?;
-        if !ctx.is_terminated() {
-            ctx.terminate_with_cleanup(MirTerminator::Return { value: Some(value) }, 0)?;
+    match body {
+        Some(TLambdaBody::Expr(expr)) => {
+            let value = ctx.lower_child(expr)?;
+            if !ctx.is_terminated() {
+                ctx.terminate_with_cleanup(MirTerminator::Return { value: Some(value) }, 0)?;
+            }
         }
-    } else {
-        match body {
-            Some(TLambdaBody::Expr(expr)) => {
-                let value = ctx.lower_child(expr)?;
-                if !ctx.is_terminated() {
-                    ctx.terminate_with_cleanup(MirTerminator::Return { value: Some(value) }, 0)?;
-                }
+        Some(TLambdaBody::Block(stmts)) => {
+            lower_stmts(&mut ctx, stmts)?;
+            if !ctx.is_terminated() {
+                ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
             }
-            Some(TLambdaBody::Block(stmts)) => {
-                lower_stmts(&mut ctx, stmts)?;
-                if !ctx.is_terminated() {
-                    ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
-                }
+        }
+        Some(TLambdaBody::SharedBlock(stmts)) => {
+            lower_stmts(&mut ctx, stmts.as_ref())?;
+            if !ctx.is_terminated() {
+                ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
             }
-            Some(TLambdaBody::SharedBlock(stmts)) => {
-                lower_stmts(&mut ctx, stmts.as_ref())?;
-                if !ctx.is_terminated() {
-                    ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
-                }
-            }
-            None => {
-                lower_stmts(&mut ctx, &f.body)?;
-                if !ctx.is_terminated() {
-                    ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
-                }
+        }
+        None => {
+            lower_stmts(&mut ctx, &f.body)?;
+            if !ctx.is_terminated() {
+                ctx.terminate_with_cleanup(MirTerminator::Return { value: None }, 0)?;
             }
         }
     }
@@ -4096,7 +4255,13 @@ pub(super) fn type_identity_key(ty: &Type) -> String {
                 .unwrap_or_else(|| "Unit".to_string());
             format!("Fn({params})->{ret};conventions={conventions}")
         }
+        Type::Named(name) if name == crate::Syntax::TYPE_TASKGROUP => {
+            BUILTIN_TASK_GROUP_IDENTITY_KEY.to_string()
+        }
         Type::Named(name) => name.clone(),
+        Type::Apply { name, args } if args.is_empty() && name == crate::Syntax::TYPE_TASKGROUP => {
+            BUILTIN_TASK_GROUP_IDENTITY_KEY.to_string()
+        }
         Type::Apply { name, args } if args.is_empty() => name.clone(),
         Type::Apply { name, args } => format!(
             "{}<{}>",
@@ -4141,13 +4306,22 @@ pub(super) fn type_identity_key(ty: &Type) -> String {
     }
 }
 
-/// The bare `Group` is the compiler-owned task-group handle. A same-leaf Core
-/// nominal (`core.data::Group<K, V>`) is generic and always spelled with
-/// arguments, so only an exact checked key may claim the bare spelling; the
-/// leaf-name fallback must never turn the handle into that record.
+/// The bare `Group` is the compiler-owned task-group handle. The same-leaf
+/// Core record (`core.data::Group<K, V>`) is generic and always spelled with
+/// arguments, so it never claims the bare spelling; only a non-generic checked
+/// row keyed exactly `Group` may.
 fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
-    name == crate::Syntax::TYPE_TASKGROUP && !type_defs.iter().any(|row| row.key == name)
+    name == crate::Syntax::TYPE_TASKGROUP
+        && !type_defs
+            .iter()
+            .any(|row| row.key == name && row.generic_params.is_empty())
 }
+
+/// The task-group handle's identity key. Every lowering path derives the
+/// handle's `mir-type` identity from it, so it must differ from the generic
+/// `Group<K, V>` record row keyed `Group`; otherwise runtime adapters resolve
+/// the handle to that record's field layout (#3779).
+const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 
 fn canonical_nominal_name(
     type_defs: &[MirTypeDef],
@@ -4169,6 +4343,17 @@ fn canonical_nominal_name(
             span,
             format!("ambiguous checked MIR type key `{name}`"),
         ));
+    }
+    // D-UNIONTYPE1=A: a module-qualified anonymous-union spelling names the
+    // one structural carrier row (`fold_anonymous_union_declarations`).
+    if let Some(leaf) = name
+        .rsplit("::")
+        .next()
+        .filter(|leaf| *leaf != name && leaf.starts_with("__JetUnion_"))
+    {
+        if type_defs.iter().any(|ty| ty.key == leaf) {
+            return Ok(leaf.to_string());
+        }
     }
     let matches = type_defs
         .iter()
@@ -4429,7 +4614,8 @@ struct ContractScopeState {
 }
 #[derive(Debug, Clone, Copy)]
 enum DeferredCleanup {
-    Call(MirValueId),
+    /// Index into `LowerCtx::deferred_closes`.
+    Close(usize),
     Guard(MirPlaceId),
     FileOwner { place: MirPlaceId, live: MirPlaceId },
     DropPlace {
@@ -4437,6 +4623,17 @@ enum DeferredCleanup {
         live: MirPlaceId,
         kind: MirDropKind,
     },
+}
+
+/// One `defer close(^resource)` action. The close expression is lowered
+/// inline on every exit edge of its scope, so the consuming `^resource` is an
+/// ordinary move of the resource place at that point.
+struct DeferredClose {
+    close: TExpr,
+    resource: String,
+    place: MirPlaceId,
+    ty: Type,
+    span: Span,
 }
 
 #[derive(Debug, Default)]
@@ -4512,6 +4709,7 @@ pub(super) struct LowerCtx<'a> {
     pub(super) loops: Vec<(Option<String>, MirBlockId, MirBlockId)>,
     loop_defer_depths: Vec<usize>,
     defer_stack: Vec<DeferFrame>,
+    deferred_closes: Vec<std::rc::Rc<DeferredClose>>,
     pub(super) transaction_restores: Vec<(MirScopeId, Vec<(MirPlaceId, MirPlaceId, Type)>)>,
     contract_scopes: Vec<ContractScopeState>,
     pub(super) local_places: HashMap<String, MirPlaceId>,
@@ -4528,6 +4726,11 @@ pub(super) struct LowerCtx<'a> {
     pub(super) current_line: Option<u32>,
     switch_subject: Option<MirValueId>,
     identity_counts: HashMap<String, usize>,
+    /// #3740: address of the `Try` operand whose plain-return call may hand
+    /// its success value straight to that `Try`. Argument calls lowered
+    /// beneath it never share the address.
+    pub(super) plain_try_operand: Option<usize>,
+    pub(super) plain_try_taken: bool,
 }
 
 fn construct_identity(
@@ -4678,6 +4881,7 @@ impl<'a> LowerCtx<'a> {
             loops: Vec::new(),
             loop_defer_depths: Vec::new(),
             defer_stack: vec![DeferFrame::default()],
+            deferred_closes: Vec::new(),
             transaction_restores: Vec::new(),
             contract_scopes: Vec::new(),
             local_places: HashMap::new(),
@@ -4694,6 +4898,8 @@ impl<'a> LowerCtx<'a> {
             current_line: None,
             switch_subject: None,
             identity_counts,
+            plain_try_operand: None,
+            plain_try_taken: false,
         }
     }
 
@@ -5272,6 +5478,15 @@ impl<'a> LowerCtx<'a> {
         }
         self.function.line as u32
     }
+    /// 1-based character column of the statement being lowered, or 0 when
+    /// its source text is not retained.
+    pub(super) fn source_column(&self) -> u32 {
+        self.source_texts
+            .get(&self.function.source_file)
+            .map_or(0, |src| {
+                crate::Diagnostics::span_line_col(src, self.current_span.start).1 as u32
+            })
+    }
     pub(super) fn with_switch_subject<R>(
         &mut self,
         subject: MirValueId,
@@ -5545,6 +5760,13 @@ impl<'a> LowerCtx<'a> {
                 format!("missing checked MIR field `{key}` on {owner:?}"),
             )
         })
+    }
+
+    /// Whether `ty` names a checked MIR record row. The compiler-owned
+    /// Duration quantity has none; its `ns` read is a scalar projection.
+    pub(super) fn has_field_owner(&self, ty: &Type) -> bool {
+        self.field_owner_id_for_type(ty)
+            .is_ok_and(|owner| self.type_defs.iter().any(|definition| definition.id == owner))
     }
 
     pub(super) fn field_owner_id_for_type(&self, ty: &Type) -> Result<MirTypeId, LowerError> {
@@ -5912,6 +6134,58 @@ impl<'a> LowerCtx<'a> {
         self.emit_deferred_cleanups_from(0, true)
     }
 
+    /// D-SHAPE-RESOURCE1=A: run the cleanups that must happen before the one
+    /// CFG path that stops the program (`panic`, a failed `assert`/`require`):
+    /// deferred actions and the automatic `Close` of still-live resources.
+    /// Plain releases are skipped because the process is ending anyway, and
+    /// the actions stay registered for sibling paths that continue.
+    pub(super) fn emit_stop_path_cleanups(&mut self) -> Result<(), LowerError> {
+        self.emit_cleanup_actions(0, false, true)
+    }
+
+    /// Whether a stop at this point owes any cleanup: a deferred action, or
+    /// the automatic `Close` of a still-registered resource local.
+    pub(super) fn has_stop_path_cleanups(&self) -> bool {
+        self.defer_stack
+            .iter()
+            .flat_map(|frame| frame.actions.iter())
+            .any(|action| match *action {
+                DeferredCleanup::DropPlace { place, .. } => self.place_has_scope_end_close(place),
+                _ => true,
+            })
+    }
+
+    /// Locals that `emit_stop_path_cleanups` moves out. A stop report must not
+    /// read them afterwards.
+    pub(super) fn stop_path_moved_locals(&self) -> HashSet<MirLocalId> {
+        self.defer_stack
+            .iter()
+            .flat_map(|frame| frame.actions.iter())
+            .filter_map(|action| match *action {
+                DeferredCleanup::Close(index) => Some(self.deferred_closes[index].place),
+                DeferredCleanup::Guard(place) | DeferredCleanup::FileOwner { place, .. } => {
+                    Some(place)
+                }
+                DeferredCleanup::DropPlace { place, .. } => {
+                    self.place_has_scope_end_close(place).then_some(place)
+                }
+            })
+            .filter_map(|place| {
+                match self.places.iter().find(|row| row.id == place)?.base {
+                    MirPlaceBase::Local(local) => Some(local),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    fn place_has_scope_end_close(&self, place: MirPlaceId) -> bool {
+        self.places
+            .iter()
+            .find(|row| row.id == place)
+            .is_some_and(|row| self.scope_end_close(&row.ty).is_some())
+    }
+
     fn emit_deferred_cleanups(&mut self, from_depth: usize) -> Result<(), LowerError> {
         self.emit_deferred_cleanups_from(from_depth, true)
     }
@@ -5921,6 +6195,15 @@ impl<'a> LowerCtx<'a> {
         from_depth: usize,
         consume: bool,
     ) -> Result<(), LowerError> {
+        self.emit_cleanup_actions(from_depth, consume, false)
+    }
+
+    fn emit_cleanup_actions(
+        &mut self,
+        from_depth: usize,
+        consume: bool,
+        stop_path: bool,
+    ) -> Result<(), LowerError> {
         let from_depth = from_depth.min(self.defer_stack.len());
         for depth in (from_depth..self.defer_stack.len()).rev() {
             let actions = if consume {
@@ -5928,19 +6211,16 @@ impl<'a> LowerCtx<'a> {
             } else {
                 self.defer_stack[depth].actions.clone()
             };
-            for action in actions.into_iter().rev() {
+            // D-SHAPE-RESOURCE1=A: explicit deferred actions run first in
+            // reverse registration order; the automatic safety net then
+            // closes or releases every still-live local in reverse
+            // declaration order.
+            let (automatic, explicit): (Vec<_>, Vec<_>) = actions
+                .into_iter()
+                .partition(|action| matches!(action, DeferredCleanup::DropPlace { .. }));
+            for action in explicit.into_iter().rev().chain(automatic.into_iter().rev()) {
                 match action {
-                    DeferredCleanup::Call(thunk) => {
-                        self.emit(
-                            "defer.cleanup",
-                            None,
-                            MirOperation::IndirectCall {
-                                callee: thunk,
-                                args: Vec::new(),
-                                type_args: Vec::new(),
-                            },
-                        )?;
-                    }
+                    DeferredCleanup::Close(index) => self.emit_deferred_close(index)?,
                     DeferredCleanup::Guard(place) => {
                         let ty = self
                             .places
@@ -5971,6 +6251,9 @@ impl<'a> LowerCtx<'a> {
                         self.emit_file_owner_cleanup(place, live)?;
                     }
                     DeferredCleanup::DropPlace { place, live, kind } => {
+                        if stop_path && !self.place_has_scope_end_close(place) {
+                            continue;
+                        }
                         self.emit_owned_place_cleanup(place, live, kind)?;
                     }
                 }
@@ -5993,16 +6276,81 @@ impl<'a> LowerCtx<'a> {
         self.emit_deferred_cleanups_from(depth, false)
     }
 
-    pub(super) fn register_defer(&mut self, thunk: MirValueId) -> Result<(), LowerError> {
+    /// The name a user local is bound under. A binding whose source spelling
+    /// collides with a reserved identifier may be bound under its mangled
+    /// Rust spelling; every lookup resolves through this one rule.
+    pub(super) fn resolved_local_name(&self, local: &TLocal) -> String {
+        let mangled = crate::Codegen::mangle(&local.name);
+        if !local.generated && mangled != local.name && self.local_places.contains_key(&mangled) {
+            mangled
+        } else {
+            local.name.clone()
+        }
+    }
+
+    /// Register `close` to run at every exit of the innermost lexical frame.
+    /// The resource place is resolved now, so a later binding that shadows the
+    /// resource name cannot redirect the close.
+    pub(super) fn register_defer_close(
+        &mut self,
+        close: TExpr,
+        resource: &TLocal,
+    ) -> Result<(), LowerError> {
         if self.defer_stack.is_empty() {
             return Err(self.error(self.span(), "defer registered without lexical scope"));
         }
+        let resource = self.resolved_local_name(resource);
+        let ty = self.local_types.get(&resource).cloned().ok_or_else(|| {
+            self.error(
+                self.span(),
+                format!("unbound deferred resource `{resource}`"),
+            )
+        })?;
+        let place = self.place_for_local(&TLocal::user(resource.clone()), MirAccess::Move)?;
+        let index = self.deferred_closes.len();
+        self.deferred_closes.push(std::rc::Rc::new(DeferredClose {
+            close,
+            resource,
+            place,
+            ty,
+            span: self.span(),
+        }));
         self.defer_stack
             .last_mut()
             .expect("checked non-empty defer stack")
             .actions
-            .push(DeferredCleanup::Call(thunk));
+            .push(DeferredCleanup::Close(index));
         Ok(())
+    }
+
+    /// Lower one deferred close at the current exit edge. The resource name is
+    /// rebound to the place captured at registration while the close lowers,
+    /// and the close gets its own lexical frame so any temporaries it owns are
+    /// cleaned up here rather than joining the frame being exited.
+    fn emit_deferred_close(&mut self, index: usize) -> Result<(), LowerError> {
+        let deferred = std::rc::Rc::clone(&self.deferred_closes[index]);
+        let exit_span = self.span();
+        let previous_place = self
+            .local_places
+            .insert(deferred.resource.clone(), deferred.place);
+        let previous_ty = self
+            .local_types
+            .insert(deferred.resource.clone(), deferred.ty.clone());
+        self.set_span(deferred.span);
+        self.push_lexical_frame();
+        let lowered = self
+            .lower_child(&deferred.close)
+            .and_then(|_| self.pop_lexical_frame());
+        self.set_span(exit_span);
+        match previous_place {
+            Some(place) => self.local_places.insert(deferred.resource.clone(), place),
+            None => self.local_places.remove(&deferred.resource),
+        };
+        match previous_ty {
+            Some(ty) => self.local_types.insert(deferred.resource.clone(), ty),
+            None => self.local_types.remove(&deferred.resource),
+        };
+        lowered
     }
 
     pub(super) fn register_scope_guard(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
@@ -6265,16 +6613,73 @@ impl<'a> LowerCtx<'a> {
         };
         let value = self.emit_mir_type(
             "owned.local.cleanup.move",
-            Some(ty),
+            Some(ty.clone()),
             MirOperation::MovePlace { place },
         )?;
-        self.emit(
-            "owned.local.cleanup.drop",
-            None,
-            MirOperation::Drop { value, kind },
-        )?;
+        match self.scope_end_close(&ty) {
+            Some(function) => self.emit_scope_end_close(function, ty, value)?,
+            None => {
+                self.emit(
+                    "owned.local.cleanup.drop",
+                    None,
+                    MirOperation::Drop { value, kind },
+                )?;
+            }
+        }
         self.terminate(MirTerminator::Jump { target: after });
         self.switch_to(after);
+        Ok(())
+    }
+
+    /// D-SHAPE-RESOURCE1=A: a still-live local whose type has a nominal
+    /// `Close` implementation is closed, not merely released, at scope end.
+    /// Inside that type's own `close` body the receiver is the value being
+    /// closed, so values of the type are released there without re-entering
+    /// `close`.
+    fn scope_end_close(&self, ty: &MirType) -> Option<MirFunctionId> {
+        let function = self.function_registry.close_impl_for(ty)?;
+        let current = self.function_registry.id_for(self.function).ok();
+        (current != Some(function)).then_some(function)
+    }
+
+    /// The same consuming receiver call an explicit `close(^value)` lowers to.
+    fn emit_scope_end_close(
+        &mut self,
+        function: MirFunctionId,
+        owner: MirType,
+        value: MirValueId,
+    ) -> Result<(), LowerError> {
+        let return_type = self
+            .function_registry
+            .return_type_for(function)
+            .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()));
+        let arg = MirCallArg {
+            value,
+            access: MirAccess::Move,
+            span: self.span(),
+            label: None,
+            source_index: None,
+            binder_slot: None,
+            spread: false,
+            implicit_clone: false,
+            shared_auto_clone: false,
+            owned_last_use: false,
+            authority_boundary: false,
+            fn_coercion: None,
+            widen_fixed_to_list: false,
+            widen_to_union: None,
+            box_as_trait: None,
+            place: None,
+        };
+        self.emit(
+            "owned.local.cleanup.close",
+            Some(return_type),
+            MirOperation::Call {
+                callee: MirCallee::Method { function, owner },
+                args: vec![arg],
+                type_args: Vec::new(),
+            },
+        )?;
         Ok(())
     }
 
@@ -7272,9 +7677,10 @@ impl<'a> LowerCtx<'a> {
                 if matches!(subject_ty.without_user_tags(), Type::Result { .. })
                     && matches!(variant.as_str(), "Ok" | "Err")
                 {
-                    let (binding, binding_span) = match bindings.as_slice() {
-                        [] | [MirPatternBinding::Wildcard] => ("", self.span()),
-                        [MirPatternBinding::Bind { name, span }] => (name.as_str(), *span),
+                    let (binding, binding_span, inner) = match bindings.as_slice() {
+                        [] | [MirPatternBinding::Wildcard] => ("", self.span(), None),
+                        [MirPatternBinding::Bind { name, span }] => (name.as_str(), *span, None),
+                        [MirPatternBinding::Nested(inner)] => ("", self.span(), Some(inner.clone())),
                         _ => {
                             return Err(self.error(
                                 self.span(),
@@ -7286,12 +7692,14 @@ impl<'a> LowerCtx<'a> {
                         MirPatternShape::Ok {
                             binding: binding.to_string(),
                             binding_span,
+                            inner,
                             span: self.span(),
                         }
                     } else {
                         MirPatternShape::Err {
                             binding: binding.to_string(),
                             binding_span,
+                            inner,
                             span: self.span(),
                         }
                     };
@@ -7355,12 +7763,38 @@ impl<'a> LowerCtx<'a> {
                                 )?;
                                 tests.push(ctx.lower_numeric_range(value, &ty, *lo, *hi)?);
                             }
+                            MirPatternBinding::Nested(inner) => {
+                                let ty = ctx
+                                    .enum_payload_type_for(subject_ty, variant, index)
+                                    .or_else(|_| ctx.variant_payload_type(owner, variant, index))?;
+                                let value = ctx.emit_checked(
+                                    "pattern",
+                                    Some(&ty),
+                                    MirOperation::EnumPayload {
+                                        subject,
+                                        owner,
+                                        variant: variant.clone(),
+                                        index,
+                                    },
+                                )?;
+                                tests.push(ctx.lower_nested_pattern_condition(
+                                    value,
+                                    &ty,
+                                    inner,
+                                    mutable,
+                                    reuse_bindings,
+                                )?);
+                            }
                         }
                     }
                     ctx.combine_pattern_tests(tests, jet_foundation::AST::BinOp::And)
                 })
             }
-            MirPatternShape::Present { binding, .. } => {
+            MirPatternShape::Present {
+                binding,
+                inner: nested,
+                ..
+            } => {
                 let inner = match subject_ty {
                     Type::Option(inner) => (**inner).clone(),
                     _ => {
@@ -7375,7 +7809,7 @@ impl<'a> LowerCtx<'a> {
                     Some(&Type::Bool),
                     MirOperation::OptionIsSome { subject },
                 )?;
-                if binding.is_empty() || binding == "_" {
+                if nested.is_none() && (binding.is_empty() || binding == "_") {
                     return Ok(test);
                 }
                 self.lower_guarded_pattern(test, |ctx| {
@@ -7384,6 +7818,15 @@ impl<'a> LowerCtx<'a> {
                         Some(&inner),
                         MirOperation::OptionValue { subject },
                     )?;
+                    if let Some(nested) = nested {
+                        return ctx.lower_nested_pattern_condition(
+                            value,
+                            &inner,
+                            nested,
+                            mutable,
+                            reuse_bindings,
+                        );
+                    }
                     ctx.bind_pattern_value(binding, inner, value, mutable, reuse_bindings)?;
                     Ok(test)
                 })
@@ -7403,7 +7846,16 @@ impl<'a> LowerCtx<'a> {
                     },
                 )
             }
-            MirPatternShape::Ok { binding, .. } | MirPatternShape::Err { binding, .. } => {
+            MirPatternShape::Ok {
+                binding,
+                inner: nested,
+                ..
+            }
+            | MirPatternShape::Err {
+                binding,
+                inner: nested,
+                ..
+            } => {
                 let ok = matches!(shape, MirPatternShape::Ok { .. });
                 let (success, error) = match subject_ty {
                     Type::Result { ok, err } => ((**ok).clone(), (**err).clone()),
@@ -7431,7 +7883,7 @@ impl<'a> LowerCtx<'a> {
                         },
                     )?
                 };
-                if binding.is_empty() || binding == "_" {
+                if nested.is_none() && (binding.is_empty() || binding == "_") {
                     return Ok(test);
                 }
                 self.lower_guarded_pattern(test, |ctx| {
@@ -7441,6 +7893,15 @@ impl<'a> LowerCtx<'a> {
                         Some(&value_ty),
                         MirOperation::ResultValue { subject, ok },
                     )?;
+                    if let Some(nested) = nested {
+                        return ctx.lower_nested_pattern_condition(
+                            value,
+                            &value_ty,
+                            nested,
+                            mutable,
+                            reuse_bindings,
+                        );
+                    }
                     ctx.bind_pattern_value(binding, value_ty, value, mutable, reuse_bindings)?;
                     Ok(test)
                 })
@@ -7517,6 +7978,61 @@ impl<'a> LowerCtx<'a> {
             MirPatternShape::Binary(parts, _) => {
                 self.lower_binary_pattern(subject, subject_ty, parts)
             }
+        }
+    }
+
+    /// S31: test a payload value against a nested pattern. The nested
+    /// pattern's owner is the payload type's canonical owner; a D-TAG1 group
+    /// head expands to its leaves exactly as at the top level.
+    fn lower_nested_pattern_condition(
+        &mut self,
+        subject: MirValueId,
+        subject_ty: &Type,
+        shape: &MirPatternShape,
+        mutable: bool,
+        reuse_bindings: bool,
+    ) -> Result<MirValueId, LowerError> {
+        let owner = self.field_owner_id_for_type(subject_ty).ok();
+        let shape = self.expand_nested_group_heads(shape, owner);
+        self.lower_pattern_shape_condition(subject, subject_ty, owner, &shape, mutable, reuse_bindings)
+    }
+
+    fn expand_nested_group_heads(
+        &self,
+        shape: &MirPatternShape,
+        owner: Option<MirTypeId>,
+    ) -> MirPatternShape {
+        match shape {
+            MirPatternShape::Variant {
+                variant,
+                bindings,
+                leading_dot,
+                span,
+            } if bindings.is_empty() => {
+                match owner.and_then(|owner| self.enum_group_leaves(owner, variant)) {
+                    Some(leaves) => MirPatternShape::Or {
+                        alternatives: leaves
+                            .into_iter()
+                            .map(|variant| MirPatternShape::Variant {
+                                variant,
+                                bindings: Vec::new(),
+                                leading_dot: *leading_dot,
+                                span: *span,
+                            })
+                            .collect(),
+                        span: *span,
+                    },
+                    None => shape.clone(),
+                }
+            }
+            MirPatternShape::Or { alternatives, span } => MirPatternShape::Or {
+                alternatives: alternatives
+                    .iter()
+                    .map(|alternative| self.expand_nested_group_heads(alternative, owner))
+                    .collect(),
+                span: *span,
+            },
+            _ => shape.clone(),
         }
     }
 
@@ -7709,26 +8225,49 @@ impl<'a> LowerCtx<'a> {
                     return Ok(());
                 };
                 for (index, binding) in bindings.iter().enumerate() {
-                    let MirPatternBinding::Bind { name, .. } = binding else {
-                        continue;
-                    };
-                    let ty = self.variant_payload_type(owner, variant, index)?;
-                    let value = self.emit_checked(
-                        "pattern",
-                        Some(&ty),
-                        MirOperation::EnumPayload {
-                            subject,
-                            owner,
-                            variant: variant.clone(),
-                            index,
-                        },
-                    )?;
-                    self.bind_pattern_value(name, ty, value, mutable, false)?;
+                    match binding {
+                        MirPatternBinding::Bind { name, .. } => {
+                            let ty = self.variant_payload_type(owner, variant, index)?;
+                            let value = self.emit_checked(
+                                "pattern",
+                                Some(&ty),
+                                MirOperation::EnumPayload {
+                                    subject,
+                                    owner,
+                                    variant: variant.clone(),
+                                    index,
+                                },
+                            )?;
+                            self.bind_pattern_value(name, ty, value, mutable, false)?;
+                        }
+                        MirPatternBinding::Nested(inner) => {
+                            let ty = self
+                                .enum_payload_type_for(subject_ty, variant, index)
+                                .or_else(|_| self.variant_payload_type(owner, variant, index))?;
+                            let value = self.emit_checked(
+                                "pattern",
+                                Some(&ty),
+                                MirOperation::EnumPayload {
+                                    subject,
+                                    owner,
+                                    variant: variant.clone(),
+                                    index,
+                                },
+                            )?;
+                            let owner = self.field_owner_id_for_type(&ty).ok();
+                            self.bind_success_shape(value, &ty, owner, inner, mutable)?;
+                        }
+                        MirPatternBinding::Wildcard | MirPatternBinding::Range { .. } => {}
+                    }
                 }
                 Ok(())
             }
-            MirPatternShape::Present { binding, .. } => {
-                if binding.is_empty() || binding == "_" {
+            MirPatternShape::Present {
+                binding,
+                inner: nested,
+                ..
+            } => {
+                if nested.is_none() && (binding.is_empty() || binding == "_") {
                     return Ok(());
                 }
                 let inner = match subject_ty {
@@ -7745,10 +8284,23 @@ impl<'a> LowerCtx<'a> {
                     Some(&inner),
                     MirOperation::OptionValue { subject },
                 )?;
+                if let Some(nested) = nested {
+                    let owner = self.field_owner_id_for_type(&inner).ok();
+                    return self.bind_success_shape(value, &inner, owner, nested, mutable);
+                }
                 self.bind_pattern_value(binding, inner, value, mutable, false)
             }
-            MirPatternShape::Ok { binding, .. } | MirPatternShape::Err { binding, .. } => {
-                if binding.is_empty() || binding == "_" {
+            MirPatternShape::Ok {
+                binding,
+                inner: nested,
+                ..
+            }
+            | MirPatternShape::Err {
+                binding,
+                inner: nested,
+                ..
+            } => {
+                if nested.is_none() && (binding.is_empty() || binding == "_") {
                     return Ok(());
                 }
                 let ok = matches!(shape, MirPatternShape::Ok { .. });
@@ -7767,6 +8319,10 @@ impl<'a> LowerCtx<'a> {
                     Some(&value_ty),
                     MirOperation::ResultValue { subject, ok },
                 )?;
+                if let Some(nested) = nested {
+                    let owner = self.field_owner_id_for_type(&value_ty).ok();
+                    return self.bind_success_shape(value, &value_ty, owner, nested, mutable);
+                }
                 self.bind_pattern_value(binding, value_ty, value, mutable, false)
             }
             MirPatternShape::Or { alternatives, .. } => {
@@ -8242,12 +8798,132 @@ impl<'a> LowerCtx<'a> {
             rc: false,
             arc: false,
             captures: vec![(name.clone(), name, source)],
+            capture_origins: Default::default(),
             materialized_captures: Vec::new(),
             frozen_captures: Vec::new(),
             uses_stack_sentry: false,
             jit_name: String::new(),
         };
         self.lower_synthetic_lambda(&lambda, "fn-carrier")
+    }
+
+    /// #3740: a function value keeps the `Result` carrier its checked `fn`
+    /// type names, while a plain-return function (`T Never!`) returns `T`.
+    /// Close over the call once and lift its value into `Ok` — the same seam
+    /// `adapt_fn_value_carrier` gives a raw-payload value — so every tier
+    /// sees one callable ABI in the value slot. The slot may name `T Never!`
+    /// or, when it was checked before the failure solve (a generated policy
+    /// wrapper's `call` slot, #3708), the default `Result<T, Err>`. `None`
+    /// when the named function already returns the value type's carrier.
+    pub(super) fn plain_named_fn_value(
+        &mut self,
+        name: &str,
+        function: MirFunctionId,
+        value_ty: &Type,
+        send: bool,
+    ) -> Result<Option<MirValueId>, LowerError> {
+        let Type::Fn {
+            params,
+            ret: Some(ret),
+            ..
+        } = value_ty.without_user_tags()
+        else {
+            return Ok(None);
+        };
+        if !is_result_carrier(ret) {
+            return Ok(None);
+        }
+        let Ok(Some(returned)) = self.function_registry.call_return_type_for(function, &[]) else {
+            return Ok(None);
+        };
+        if !is_plain_return(&returned) {
+            return Ok(None);
+        }
+        let source_params = (0..params.len())
+            .map(|index| format!("plain_fn_arg_{index}"))
+            .collect::<Vec<_>>();
+        let args = source_params
+            .iter()
+            .zip(params.iter())
+            .map(|(param, ty)| TCallArg {
+                value: TExpr {
+                    ty: ty.clone(),
+                    kind: TExprKind::Local(TLocal::user(param)),
+                },
+                template_items: None,
+                borrow: !ty.is_scalar(),
+                mut_borrow: false,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            })
+            .collect::<Vec<_>>();
+        let carrier = ret.as_ref().clone();
+        let body = TExpr {
+            ty: carrier.clone(),
+            kind: TExprKind::Ok(Box::new(TExpr {
+                ty: returned,
+                kind: TExprKind::Call {
+                    name: name.to_string(),
+                    type_args: Vec::new(),
+                    args,
+                },
+            })),
+        };
+        let lambda = TLambda {
+            executable: TLambdaBody::Expr(Box::new(body)),
+            source_span: self.span(),
+            frame_schedule: None,
+            frame_schedule_derivation: None,
+            capture_facts: super::TCaptureFacts::default(),
+            host_param_conventions: None,
+            failure_carrier: TFailureCarrier::from_checked_type(&carrier),
+            effects: super::TEffectFacts::default(),
+            source_params,
+            param_types: params.clone(),
+            ret: Some(carrier),
+            is_move: false,
+            boxed: false,
+            rc: false,
+            arc: false,
+            captures: Vec::new(),
+            capture_origins: Default::default(),
+            materialized_captures: Vec::new(),
+            frozen_captures: Vec::new(),
+            uses_stack_sentry: false,
+            jit_name: String::new(),
+        };
+        let identity = format!("plain-fn-{}", self.nested_functions.len());
+        self.lower_lambda_kind(&lambda, send, Some(&identity)).map(Some)
+    }
+
+    /// #3740: reconcile a user call's executable return with the carrier its
+    /// checked expression names. A plain-return callee hands its value
+    /// straight to the propagating `Try` whose operand it is, and is lifted
+    /// into `Ok` once where the source still consumes the `T Never!`
+    /// carrier (a `??`, a match, a carrier-typed slot).
+    pub(super) fn reconcile_plain_call_return(
+        &mut self,
+        expr: &TExpr,
+        value: MirValueId,
+        returned: &Type,
+    ) -> Result<MirValueId, LowerError> {
+        if !is_plain_return(returned) || !is_result_carrier(&expr.ty) {
+            return Ok(value);
+        }
+        if self.plain_try_operand == Some(expr as *const TExpr as usize) {
+            self.plain_try_operand = None;
+            self.plain_try_taken = true;
+            return Ok(value);
+        }
+        self.emit(
+            "plain-return.ok",
+            Some(expr.ty.clone()),
+            MirOperation::ResultOk { value },
+        )
     }
 
     fn lower_lambda_kind(
@@ -8335,9 +9011,7 @@ impl<'a> LowerCtx<'a> {
             self.source_texts,
             self.modules,
             Some(&lambda.executable),
-            None,
             Some(lambda),
-            None,
         )?;
         self.nested_functions.push(nested);
         self.nested_functions.extend(deeper);
@@ -8365,18 +9039,20 @@ impl<'a> LowerCtx<'a> {
                 MirAccess::Read
             };
             let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !cloned;
-            // `runtime` is the canonical TIR slot used by the lambda body.
-            // Only a cloned/materialized capture has a fresh runtime slot;
-            // those values are read from the enclosing source slot. Borrowed
-            // and moved captures must resolve the exact checked runtime slot,
-            // which may carry a generated spelling.
-            let outer_slot = if cloned && runtime != source {
-                source
-            } else {
-                runtime
-            };
+            // `runtime` is the canonical TIR slot used by the lambda body and,
+            // for borrowed and moved captures, the exact enclosing slot (which
+            // may carry a generated spelling). A cloned/materialized capture's
+            // body reads a fresh slot; its value comes from the enclosing slot
+            // the TIR recorded, which differs from the Jet name for a resource
+            // binding (`conn :: db.open(…) ?? panic(…)`).
+            let outer_slot = lambda
+                .capture_origins
+                .get(source)
+                .cloned()
+                .unwrap_or_else(|| runtime.clone());
             let outer_access = if cloned { MirAccess::Read } else { access };
-            let place = self.place_for_local(&TLocal::user(outer_slot), outer_access)?;
+            let outer_name = self.resolved_local_name(&TLocal::user(outer_slot));
+            let place = self.place_for_local(&TLocal::user(outer_name), outer_access)?;
             if borrowed {
                 captures.push(MirCaptureOperand::Place(place));
                 continue;
@@ -8457,113 +9133,6 @@ impl<'a> LowerCtx<'a> {
                 },
             )
         }
-    }
-
-    pub(super) fn lower_defer_thunk(
-        &mut self,
-        close: &TExpr,
-        resource: &str,
-        id: impl std::fmt::Display,
-    ) -> Result<MirValueId, LowerError> {
-        let resource_ty = self.local_types.get(resource).cloned().ok_or_else(|| {
-            self.error(
-                self.span(),
-                format!("unbound deferred resource `{resource}`"),
-            )
-        })?;
-        let key = format!("{}::defer@{id}", self.function.key);
-        let function = TFunc {
-            name: format!("__jet_defer_{id}"),
-            module: self.function.module.clone(),
-            key,
-            source_file: self.function.source_file.clone(),
-            source_span: self.span(),
-            failure_carrier: TFailureCarrier::from_checked_type(&close.ty),
-            effects: self.function.effects.clone(),
-            target_applicability: TTargetApplicability {
-                rust_aot: true,
-                cranelift: true,
-                interpreter: true,
-                web: true,
-            },
-            web_bucket: self.function.web_bucket,
-            web_marker: None,
-            visibility: TVisibility::Private,
-            foreign: None,
-            params: Vec::new(),
-            web_param_reconstructions: Vec::new(),
-            ret: Some(close.ty.clone()),
-            gc_return: false,
-            return_view_provenance: None,
-            generic_params: Vec::new(),
-            clone_types: Vec::new(),
-            is_main: false,
-            line: self.function.line,
-            synthetic: true,
-            is_unsafe: false,
-            unsafe_gate: None,
-            is_pure: false,
-            memo_bound: None,
-            is_reactive: false,
-            reactive_upgrades: Vec::new(),
-            is_inline: false,
-            is_inline_always: false,
-            is_scalar: false,
-            kernel_proof: None,
-            memo_field: None,
-            uses_stack_sentry: false,
-            body: Vec::new(),
-            kind: TFuncKind::TopLevel,
-            gc_scope: false,
-        };
-        let captures = vec![(resource.to_string(), resource.to_string(), resource_ty)];
-        let (nested, calls, files, instances, deeper, callbacks) = lower_function(
-            &function,
-            self.type_defs,
-            self.nominal_identities,
-            self.reflect_paths,
-            self.trait_defs,
-            self.function_registry,
-            self.source_texts,
-            self.modules,
-            None,
-            Some(close),
-            None,
-            Some((&captures, MirCaptureFacts::default())),
-        )?;
-        let function_key = function.key.clone();
-        self.nested_functions.push(nested);
-        self.nested_functions.extend(deeper);
-        self.prelude_calls.extend(calls);
-        self.callbacks.extend(callbacks);
-        self.type_instances.extend(instances);
-        for file in files {
-            self.source_files.entry(file.path).or_insert(file.id);
-        }
-        let function_id = self
-            .nested_functions
-            .iter()
-            .find(|candidate| candidate.key == function_key)
-            .map(|candidate| candidate.id)
-            .ok_or_else(|| self.error(self.span(), "missing lowered defer thunk"))?;
-        let place = self.place_for_local(&TLocal::user(resource), MirAccess::Read)?;
-        let closure_ty = Type::Fn {
-            params: Vec::new(),
-            ret: Some(Box::new(close.ty.clone())),
-            effect_bound: None,
-            param_contract: None,
-            call_metadata: None,
-            return_view_provenance: None,
-        };
-        self.emit(
-            &format!("defer.thunk.{id}"),
-            Some(closure_ty),
-            MirOperation::Closure {
-                function: function_id,
-                captures: vec![MirCaptureOperand::Place(place)],
-                facts: MirCaptureFacts::default(),
-            },
-        )
     }
     pub(super) fn lower_index_hook_failure(&mut self, line: usize) -> Result<(), LowerError> {
         let never = Type::Named(crate::Syntax::TYPE_NEVER.to_string());
@@ -8699,9 +9268,15 @@ impl<'a> LowerCtx<'a> {
             MirAccess::Move
         } else if arg.borrow {
             MirAccess::Read
-        } else if arg.clone
+        } else if (arg.clone
             || arg.arc_clone
-            || matches!(arg.fact_channel().exclusivity, super::TExclusivity::Move)
+            || matches!(arg.fact_channel().exclusivity, super::TExclusivity::Move))
+            // Copy values cannot be consumed: a literal handed to a `^T`
+            // parameter is a copy, the same rule Core-call arguments use.
+            && !matches!(
+                self.ownership_for(&arg.value.ty).mode,
+                jet_foundation::MIR::MirOwnershipMode::Copy
+            )
         {
             MirAccess::Move
         } else {
@@ -9299,15 +9874,25 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn lower_return(&mut self, value: Option<&TExpr>) -> Result<(), LowerError> {
         let value = match value {
             Some(expr) => {
-                let value = self.lower_child(expr)?;
-                if self.contract_scopes.is_empty() {
-                    if let Some(expected) = self.function.ret.as_ref() {
-                        Some(self.trait_box_value(value, &expr.ty, expected)?)
+                let plain = match self.function.ret.clone() {
+                    Some(expected) if self.contract_scopes.is_empty() => {
+                        super::tir_to_mir_expr::lower_plain_return_value(self, expr, &expected)?
+                    }
+                    _ => None,
+                };
+                if plain.is_some() {
+                    plain
+                } else {
+                    let value = self.lower_child(expr)?;
+                    if self.contract_scopes.is_empty() {
+                        if let Some(expected) = self.function.ret.as_ref() {
+                            Some(self.trait_box_value(value, &expr.ty, expected)?)
+                        } else {
+                            Some(value)
+                        }
                     } else {
                         Some(value)
                     }
-                } else {
-                    Some(value)
                 }
             }
             None => None,
@@ -9571,6 +10156,9 @@ impl<'a> LowerCtx<'a> {
         ty: &Type,
     ) -> Result<MirValueId, LowerError> {
         let function = self.function_id_for(name)?;
+        if let Some(adapted) = self.plain_named_fn_value(name, function, ty, true)? {
+            return Ok(adapted);
+        }
         let target = self.mir_send_fn_type(ty)?;
         self.emit_mir_type(
             "named-fn-send",

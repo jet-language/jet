@@ -871,21 +871,23 @@ pub(crate) fn callable_policy_wrapper_name(policy: &str, target: &str) -> String
 }
 
 #[derive(Clone)]
-struct ComptimeStageJob {
+struct ComptimeStageJob<'a> {
     owner: Option<String>,
     raw_protocol_return: bool,
-    function: Func,
+    function: &'a Func,
 }
 
-fn comptime_stage_jobs(items: &[Item]) -> HashMap<String, ComptimeStageJob> {
+/// Every function and method of `items`, borrowed: the staged pass clones
+/// only the few bodies it checks, not the whole module (#3661).
+fn comptime_stage_jobs(items: &[Item]) -> HashMap<String, ComptimeStageJob<'_>> {
     let mut jobs = HashMap::new();
-    let mut insert = |key: String, owner: Option<String>, raw_protocol_return: bool, function: &Func| {
+    let mut insert = |key: String, owner: Option<String>, raw_protocol_return: bool, function| {
         jobs.insert(
             key,
             ComptimeStageJob {
                 owner,
                 raw_protocol_return,
-                function: function.clone(),
+                function,
             },
         );
     };
@@ -964,9 +966,12 @@ fn comptime_stage_jobs(items: &[Item]) -> HashMap<String, ComptimeStageJob> {
 
 fn comptime_stage_roots(
     items: &[Item],
-    raw_funcs: &HashMap<String, Func>,
+    raw_funcs: &HashMap<String, &Func>,
 ) -> (HashSet<String>, bool) {
-    let mut names = HashSet::new();
+    // Gather the direct roots of every call site first, then take one closure
+    // over their union: a closure per call site repeated the same call-graph
+    // walk for each site, which grew with call sites times reachable code.
+    let mut roots = HashSet::new();
     let mut all_methods = false;
     let mut visit_function = |function: &Func| {
         if !stmts_have_comptime_evaluation(&function.body) {
@@ -989,8 +994,8 @@ fn comptime_stage_roots(
                     expression,
                     Expr::Call(..) | Expr::Ident(..) | Expr::MethodCall { .. }
                 ) {
-                    names.extend(
-                        crate::Comptime::reachable_owned_function_names(expression, raw_funcs),
+                    crate::Comptime::reachable_owned_function_roots(
+                        expression, raw_funcs, &mut roots,
                     );
                 }
             });
@@ -1021,7 +1026,10 @@ fn comptime_stage_roots(
             _ => {}
         }
     }
-    (names, all_methods)
+    (
+        crate::Comptime::reachable_owned_function_closure(roots, raw_funcs),
+        all_methods,
+    )
 }
 
 pub(crate) fn check_module_bodies(
@@ -1056,9 +1064,12 @@ pub(crate) fn check_module_bodies(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let stage_jobs = comptime_stage_jobs(&module.items);
-    let mut raw_eval_funcs = ct_funcs.clone();
+    let mut raw_eval_funcs = ct_funcs
+        .iter()
+        .map(|(name, function)| (name.clone(), function))
+        .collect::<HashMap<_, _>>();
     for (key, job) in &stage_jobs {
-        raw_eval_funcs.insert(key.clone(), job.function.clone());
+        raw_eval_funcs.insert(key.clone(), job.function);
     }
     let (stage_names, stage_all_methods) =
         comptime_stage_roots(&module.items, &raw_eval_funcs);
@@ -1180,13 +1191,14 @@ pub(crate) fn check_module_bodies(
     // diagnostics and other analysis products are discarded. Tentative facts
     // let mutually recursive SCCs converge; the real pass below still rejects
     // any path that ultimately conflicts or cannot stabilize.
-    #[derive(Clone)]
-    struct ViewSummaryJob {
+    // Jobs borrow their functions: most are dropped by the view filter below,
+    // and each round clones the kept ones afresh anyway (#3661).
+    struct ViewSummaryJob<'m> {
         key: String,
         owner: Option<String>,
         trait_name: Option<String>,
         raw_protocol_return: bool,
-        function: Func,
+        function: &'m Func,
     }
     let mut view_jobs = Vec::new();
     for item in &module.items {
@@ -1196,7 +1208,7 @@ pub(crate) fn check_module_bodies(
                 owner: None,
                 trait_name: None,
                 raw_protocol_return: false,
-                function: function.clone(),
+                function,
             }),
             Item::Struct(definition) => {
                 for function in &definition.methods {
@@ -1205,7 +1217,7 @@ pub(crate) fn check_module_bodies(
                         owner: Some(definition.name.clone()),
                         trait_name: None,
                         raw_protocol_return: false,
-                        function: function.clone(),
+                        function,
                     });
                 }
                 for implementation in &definition.trait_impls {
@@ -1222,7 +1234,7 @@ pub(crate) fn check_module_bodies(
                                 implementation.compiler_generated,
                                 function,
                             ),
-                            function: function.clone(),
+                            function,
                         });
                     }
                 }
@@ -1234,7 +1246,7 @@ pub(crate) fn check_module_bodies(
                         owner: Some(definition.name.clone()),
                         trait_name: None,
                         raw_protocol_return: false,
-                        function: function.clone(),
+                        function,
                     });
                 }
                 for implementation in &definition.trait_impls {
@@ -1251,7 +1263,7 @@ pub(crate) fn check_module_bodies(
                                 implementation.compiler_generated,
                                 function,
                             ),
-                            function: function.clone(),
+                            function,
                         });
                     }
                 }
@@ -1272,7 +1284,7 @@ pub(crate) fn check_module_bodies(
                             false,
                             function,
                         ),
-                        function: function.clone(),
+                        function,
                     });
                 }
             }
@@ -1351,9 +1363,18 @@ pub(crate) fn check_module_bodies(
             counts
         },
     );
+    // Each round publishes every job's `return_view_provenance` (BodyCheck)
+    // and each complete trait contract. When a round yields exactly the
+    // previous round's per-job results, it published the same values, so the
+    // next round would start from the same state and repeat itself: that is
+    // the fixed point. `view_jobs.len() + 1` rounds stays the upper bound;
+    // running all of them after convergence made this pass quadratic in the
+    // number of view-returning functions.
+    let mut previous_round: Option<Vec<Option<crate::AST::ViewProvenanceMap>>> = None;
     for _ in 0..=view_jobs.len() {
         let mut trait_candidates =
             HashMap::<(String, String), Vec<crate::AST::ViewProvenanceMap>>::new();
+        let mut round = Vec::with_capacity(view_jobs.len());
         for job in &view_jobs {
             let mut function = job.function.clone();
             let mut scratch_summaries = HashMap::new();
@@ -1385,6 +1406,7 @@ pub(crate) fn check_module_bodies(
                 &mut scratch_ledger,
                 &mut scratch_pending_diagnostics,
             );
+            round.push(function.return_view_provenance.clone());
             if let (Some(trait_name), Some(provenance)) =
                 (&job.trait_name, function.return_view_provenance)
             {
@@ -1418,6 +1440,10 @@ pub(crate) fn check_module_bodies(
                 let _ = signature.return_view_provenance.set(contract);
             }
         }
+        if previous_round.as_ref() == Some(&round) {
+            break;
+        }
+        previous_round = Some(round);
     }
     let cache_allowed = view_jobs.is_empty();
     let module_key = module.display.clone();

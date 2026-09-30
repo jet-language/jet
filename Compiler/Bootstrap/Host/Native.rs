@@ -3210,6 +3210,7 @@ fn emit_bootstrap_host_factory(
     let request_eval_config = symbols.field_symbol("JetDriverCompileRequest", "eval_config")?;
     let request_target = symbols.field_symbol("JetDriverCompileRequest", "target")?;
     let request_effect_source = symbols.field_symbol("JetDriverCompileRequest", "canonical_effect_source")?;
+    let request_record_store = symbols.field_symbol("JetDriverCompileRequest", "record_store")?;
     let target_type = symbols.type_symbol("JetDriverCompileTarget")?;
     let mir_program_type = symbols.type_symbol("MirProgram")?;
     let eval_config_type = symbols.type_symbol("JetEvalConfig")?;
@@ -3290,6 +3291,7 @@ fn emit_bootstrap_host_factory(
             "        {request_effect_source}: ::jet_foundation::Effects::EFFECT_SOURCE.to_string(),\n",
             "        {request_eval_config}: __jet_eval_config,\n",
             "        {request_target}: __jet_target,\n",
+            "        {request_record_store}: Err(Default::default()),\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
             "}}\n",
@@ -3319,6 +3321,7 @@ fn emit_bootstrap_host_factory(
         host_target_triple = host_target_triple,
         host_active_os = host_active_os,
         request_effect_source = request_effect_source,
+        request_record_store = request_record_store,
         host_compiler_identity = host_compiler_identity,
         default_symbol = default_symbol,
     )

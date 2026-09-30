@@ -1,0 +1,47 @@
+// #3739 (amends D-DOTCTOR3=A): `Type{body}` decides a one-expression body by
+// its type. When the body is already a value of the head type, or converts to
+// it the way a parameter of that type accepts it, the result is that whole
+// value. Otherwise the head's literal notation applies: a list head reads the
+// body as its single element.
+// Run with `jet run Examples/features/types/typed_literal_whole_value.jet`.
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn make_point() -> Point { Point{x: 3, y: 4} }
+fn rows() -> Int { 7 }
+fn grid() -> [[Int]] { [[1, 2], [3]] }
+
+fn run() {
+    // A list-valued body is the whole list, not one element.
+    doubled :: [Int]{[1, 2, 3].map(n -> n * 2)}
+    print("doubled: {doubled.len()} items, first {doubled[0]}, last {doubled[2]}")
+
+    // `[[Int]]{xs}` with `xs: [Int]` is a one-element list of lists.
+    row :: [4, 5]
+    wrapped :: [[Int]]{row}
+    print("wrapped: {wrapped.len()} row of {wrapped[0].len()}")
+
+    // The same head over a `[[Int]]` body is that whole value.
+    rows_of :: grid()
+    whole :: [[Int]]{rows_of}
+    print("whole: {whole.len()} rows, first has {whole[0].len()}")
+
+    // A map head over a map body is the whole map.
+    scores := [String:Int]{"ana": 3, "bo": 5}
+    same :: [String:Int]{scores}
+    print("same: {same.len()} entries, bo = {same["bo"]}")
+
+    // Element and entry bodies keep their literal notation.
+    listed :: [Int]{1, 2, 3}
+    entry :: [String:Int]{"a": 1}
+    print("listed: {listed.len()}, entry: {entry["a"]}")
+
+    // A record head over a record value, and a scalar widening that a
+    // `Float` parameter would also apply.
+    p :: Point{make_point()}
+    print("point: {p.x} {p.y}")
+    count :: Float{rows()}
+    print("count: {count}")
+}

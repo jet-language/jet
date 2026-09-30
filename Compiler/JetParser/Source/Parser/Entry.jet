@@ -44,6 +44,7 @@ fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Dia
     state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
+    program.else_arms = state.else_arms
     program.fenced_statements = prepared.fenced_statements
     ParseResult{program: program, diagnostics: state.diagnostics}
 }
@@ -161,6 +162,68 @@ fn parser_comptime_const_ahead(state: &JetParserState, offset: Int) -> Bool Neve
     parser_kind_at(&state, offset) == TOKEN_AT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON_COLON
 }
 
+// D-PREP-SURFACE2=A + owner ruling (2026-09-30): an immutable module binding
+// is named in ALL_CAPS, `MAX_ROWS :: 100`. This is the casing predicate only;
+// compile time is always the explicit `NAME :: prep { value }`.
+fn parser_constant_name(name: String) -> Bool Never! {
+    if name == "" || name.starts_with("@") || name.starts_with("$") -> return false
+    has_upper := false
+    loop byte in name.bytes() {
+        if byte >= (U8{97}) && byte <= (U8{122}) -> return false
+        if byte >= (U8{65}) && byte <= (U8{90}) -> has_upper = true
+    }
+    has_upper
+}
+
+// D-CONSTMARK1: after `#Static` / `#Inline`, a constant binding `NAME :: …`
+// (or a retired `@`-marked name, which E0388 respells) is a declaration.
+fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
+    token :: parser_lookahead(&state, offset)
+    token.kind == TOKEN_IDENT && parser_kind_at(&state, offset + 1) == TOKEN_COLON_COLON && (token.payload.decoded.starts_with("@") || parser_constant_name(token.payload.decoded))
+}
+
+// D-PREP-SURFACE2=A: a retired `@`-marked constant read (or a declaration whose
+// value is already `prep { … }`) teaches E0388 with the behavior-preserving
+// respelling, and the parse continues under the plain name so each mention
+// reports once.
+fn parser_retire_const_mark(state: &JetParserState, token: Token) -> String {
+    name :: token.payload.decoded
+    if !name.starts_with("@") -> return name
+    bytes :: name.bytes()
+    // A block-scope name stays an ordinary snake_case local; only a module
+    // constant is ALL_CAPS, so the mark is dropped and the case kept.
+    plain :: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
+    diagnostic :: diagnostic_from_registry("E0388", Val(token.span), "`{name}` is retired; write `{plain}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{name}` with `{plain}`")
+    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: token.span, new_text: plain}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    plain
+}
+
+// D-PREP-SURFACE2=A: a retired `@name :: value` declaration always meant
+// compile time, so E0388 teaches `name :: prep { value }` and the parse
+// continues under the plain name as that prepared binding.
+fn parser_retire_const_decl(state: &JetParserState, span: Span, old: String) -> String {
+    bytes :: old.bytes()
+    plain :: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
+    parser_add_error_code(&state, "E0388", span, "`{old}` is retired; write `{plain} :: prep {{ value }}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{old} :: value` with `{plain} :: prep {{ value }}`")
+    plain
+}
+
+// An `@`-marked read names a retired constant when the name under the mark
+// is ALL_CAPS or this file declares that marked name with `::`; a called
+// marked root is a retired metadata query, not a constant.
+fn parser_reads_retired_constant(state: &JetParserState) -> Bool Never! {
+    token :: parser_current(&state)
+    name :: token.payload.decoded
+    if token.kind != TOKEN_IDENT || !name.starts_with("@") || parser_kind_at(&state, 1) == TOKEN_LPAREN -> return false
+    bytes :: name.bytes()
+    if parser_constant_name(String.from_bytes(bytes.slice(1, bytes.len())) ?? "") -> return true
+    loop index in 0..<state.tokens.len() {
+        candidate :: state.tokens[index]
+        if candidate.kind == TOKEN_IDENT && candidate.payload.decoded == name && index + 1 < state.tokens.len() && state.tokens[index + 1].kind == TOKEN_COLON_COLON -> return true
+    }
+    false
+}
+
 fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     offset := 0
     loop {
@@ -199,5 +262,5 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
         }
     }
     kind :: parser_kind_at(&state, offset)
-    parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_lookahead(&state, offset).payload.decoded == "alias")
+    parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_lookahead(&state, offset).payload.decoded == "alias")
 }

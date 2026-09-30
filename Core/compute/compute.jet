@@ -185,7 +185,7 @@ pub fn get(tensor: Tensor, index: [Int]) -> Float ComputeError! {
 }
 
 pub fn set(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
-    _ :: validate_tensor_ref(tensor)
+    _ :: validate_tensor_ref(&tensor)
     if tensor.shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     _ :: finite_or_error(value)
     if tensor.numeric_profile == c_profile_f32() {

@@ -411,7 +411,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, args: 
         box_as_trait := None
         if argument.box_as_trait != None {
             target_ty := argument.box_as_trait ?? Type.TraitObject{bounds: [String]{}}
-            jet_codegen_require_trait_box_target(target_ty, builder)
+            jet_codegen_require_trait_box_target(target_ty, &builder)
             if argument.value.ty == {
                 .TraitObject(_) -> {
                     if type_identity_key(argument.value.ty) != type_identity_key(target_ty) -> panic("checked trait-object upcast has no MIR operation")
@@ -1173,7 +1173,7 @@ fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, expressio
 
 
 fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, expression: TExpr, fields: [TStructFieldValue], extra: TStructExtra?, as_trait: TCoercionTarget?) -> MirValueId {
-    if as_trait != None -> jet_codegen_require_trait_box_target(expression.ty, builder)
+    if as_trait != None -> jet_codegen_require_trait_box_target(expression.ty, &builder)
     owner := if as_trait == {
         None -> jet_codegen_mir_type_id_for_type(builder.modules, builder.function.module_identity, builder.generic_type_names, expression.ty)
         Val(target) -> jet_codegen_mir_type_id_for_symbol(builder.modules, target.concrete_type)
@@ -2718,17 +2718,53 @@ fn jet_codegen_try_output_error_type(builder: &JetCodegenBuilder, source_error: 
     }
 }
 
-fn jet_codegen_try_context_values(builder: &JetCodegenBuilder, span: Span, file: String, line: Int, function: String, note: TExpr?) -> [MirValueId] {
+// The journey routes' source-site arguments in ABI order: file, line, column,
+// function (#3713).
+fn jet_codegen_try_site_values(builder: &JetCodegenBuilder, span: Span, file: String, line: Int, function: String) -> [MirValueId] {
     if line < 1 || line > 4294967295 -> panic("checked try context line is outside the supported source range")
+    column := jet_codegen_source_column_at(&builder, span)
     file_value := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant{value: MirConstant.String{value: file}})
     line_ty := Type.IntN{signed: false, bits: 32}
     line_value := jet_codegen_emit_value(&builder, span, line_ty, MirOperation.Constant{value: MirConstant.Int{value: line, width: Val(MirIntegerWidth{signed: false, bits: 32}), spelling: None}})
+    column_value := jet_codegen_emit_value(&builder, span, line_ty, MirOperation.Constant{value: MirConstant.Int{value: column, width: Val(MirIntegerWidth{signed: false, bits: 32}), spelling: None}})
     function_value := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant{value: MirConstant.String{value: function}})
+    [MirValueId]{file_value, line_value, column_value, function_value}
+}
+
+// The site arguments followed by the hop's note.
+fn jet_codegen_try_context_values(builder: &JetCodegenBuilder, span: Span, file: String, line: Int, function: String, note: TExpr?) -> [MirValueId] {
+    values := jet_codegen_try_site_values(&builder, span, file, line, function)
     note_value := if note == {
         None -> jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant{value: MirConstant.String{value: ""}})
         Val(value) -> jet_codegen_lower_expr(&builder, value)
     }
-    [MirValueId]{file_value, line_value, function_value, note_value}
+    &values.push(note_value)
+    values
+}
+
+// #3713: a returned `Err(...)` is where its failure starts.
+fn jet_codegen_lower_journey_origin(builder: &JetCodegenBuilder, span: Span) Never! {
+    location := jet_codegen_source_location_at(&builder, span, false)
+    values := jet_codegen_try_site_values(&builder, span, builder.function.source_file, location.line, builder.function.name)
+    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "journey_origin", "jet_journey_origin", 4, [Bool]{true, false, false, true}, None, TFailureCarrier.Infallible, MirPreludeAbi.Effect)
+    jet_codegen_emit_static_prelude_effect(&builder, span, route, values)
+}
+
+// A Core call runs no program code, so its failure starts at the call; one
+// that takes a callback may carry a failure out of program code instead.
+fn jet_codegen_try_operand_starts_failure(operand: TExpr) -> Bool Never! {
+    if operand.kind == {
+        .CoreCall(_, args, _, _, _, _, _) -> {
+            loop arg in args {
+                if arg.ty == {
+                    .Fn(_, _, _, _, _, _) -> return false
+                    else -> {}
+                }
+            }
+            true
+        }
+        else -> false
+    }
 }
 
 fn jet_codegen_emit_static_prelude_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, call: MirPreludeCallId, values: [MirValueId]) -> MirValueId Never! {
@@ -2768,7 +2804,14 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
                 else -> jet_codegen_emit_value(&builder, span, target, MirOperation.Call{callee: MirCallee.User{function: jet_codegen_function_id(function)}, args: [MirCallArg]{argument}, type_args: [MirType]{}})
             }
             if !jet_codegen_is_default_err_type(builder, target) -> return converted
-            source_name := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant{value: MirConstant.String{value: type_name(source)}})
+            // A source-owned Core error reports under its user spelling
+            // (`CryptoError`), never its canonical owner identity.
+            source_spelling := type_name(source)
+            if source_spelling.starts_with("<corelib>/") {
+                owner_parts :: source_spelling.split("::")
+                source_spelling = owner_parts[owner_parts.len() - 1]
+            }
+            source_name := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant{value: MirConstant.String{value: source_spelling}})
             target_name := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant{value: MirConstant.String{value: type_name(target)}})
             route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "apply_conversion", "jet_err_apply_conversion", 3, [Bool]{false, false, false}, None, TFailureCarrier.Infallible, MirPreludeAbi.Value)
             return jet_codegen_emit_static_prelude_call(&builder, span, target, route, [MirValueId]{converted, source_name, target_name})
@@ -2843,14 +2886,16 @@ fn jet_codegen_try_target_is_default_err(builder: &JetCodegenBuilder, source_err
     }
 }
 
-fn jet_codegen_lower_try_context(builder: &JetCodegenBuilder, span: Span, converted: MirValueId, target_error: Type, source_error: Type, conversion: TTryConvert, context_values: [MirValueId]) -> MirValueId {
-    if context_values.len() != 4 -> panic("checked try context lowering produced an invalid argument set")
-    if jet_codegen_try_target_is_default_err(builder, source_error, conversion) {
-        route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "err_with_context_frame", "jet_err_with_context_frame", 5, [Bool]{false, true, false, true, false}, None, TFailureCarrier.Infallible, MirPreludeAbi.Value)
-        values := [MirValueId]{converted, context_values[0], context_values[1], context_values[2], context_values[3]}
+fn jet_codegen_lower_try_context(builder: &JetCodegenBuilder, span: Span, converted: MirValueId, target_error: Type, source_error: Type, conversion: TTryConvert, context_values: [MirValueId], has_note: Bool) -> MirValueId {
+    if context_values.len() != 5 -> panic("checked try context lowering produced an invalid argument set")
+    // Only a `?(text)` note becomes a context frame on the default error; an
+    // automatic propagation hop joins the journey alone (#3713).
+    if has_note && jet_codegen_try_target_is_default_err(builder, source_error, conversion) {
+        route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "err_with_context_frame", "jet_err_with_context_frame", 6, [Bool]{false, true, false, false, true, false}, None, TFailureCarrier.Infallible, MirPreludeAbi.Value)
+        values := [MirValueId]{converted, context_values[0], context_values[1], context_values[2], context_values[3], context_values[4]}
         return jet_codegen_emit_static_prelude_call(&builder, span, target_error, route, values)
     }
-    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "journey_frame_text", "jet_journey_frame_text", 4, [Bool]{true, false, true, true}, None, TFailureCarrier.Infallible, MirPreludeAbi.Effect)
+    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "journey_frame_text", "jet_journey_frame_text", 5, [Bool]{true, false, false, true, true}, None, TFailureCarrier.Infallible, MirPreludeAbi.Effect)
     jet_codegen_emit_static_prelude_effect(&builder, span, route, context_values)
     converted
 }
@@ -2858,10 +2903,17 @@ fn jet_codegen_lower_try_context(builder: &JetCodegenBuilder, span: Span, conver
 fn jet_codegen_lower_try(builder: &JetCodegenBuilder, expression: TExpr, inner: TExpr, note: TExpr?, conversion: TTryConvert, file: String?, line: Int, function: String?) -> MirValueId {
     input := jet_codegen_lower_expr(&builder, inner)
     input_type := jet_codegen_expression_call_return_type(&builder, inner) ?? inner.ty
-    jet_codegen_lower_try_value(&builder, expression, input, input_type, inner.span, note, conversion, file, line, function)
+    jet_codegen_lower_try_value(&builder, expression, input, input_type, inner.span, note, conversion, file, line, function, jet_codegen_try_operand_starts_failure(inner))
 }
 
-fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, expression: TExpr, input: MirValueId, input_type: Type, input_span: Span, note: TExpr?, conversion: TTryConvert, file: String?, line: Int, function: String?) -> MirValueId {
+fn jet_codegen_lower_journey_reset(builder: &JetCodegenBuilder, span: Span) Never! {
+    reset := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "journey_reset", "jet_journey_reset", 0, [Bool]{}, None, TFailureCarrier.Infallible, MirPreludeAbi.Effect)
+    jet_codegen_emit_static_prelude_effect(&builder, span, reset, [MirValueId]{})
+}
+
+// `fresh_failure`: the operand's failure starts at this site, so any journey
+// left from an earlier, handled failure is dropped before the hop (#3713).
+fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, expression: TExpr, input: MirValueId, input_type: Type, input_span: Span, note: TExpr?, conversion: TTryConvert, file: String?, line: Int, function: String?, fresh_failure: Bool) -> MirValueId {
     is_result := if input_type == {
         .Result(_, _) -> true
         else -> false
@@ -2882,10 +2934,7 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, expression: TExpr, i
 
     incoming := [MirPhiIncoming]{}
     jet_codegen_switch_block(&builder, success_block)
-    if context_enabled {
-        reset := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "journey_reset", "jet_journey_reset", 0, [Bool]{}, None, TFailureCarrier.Infallible, MirPreludeAbi.Effect)
-        jet_codegen_emit_static_prelude_effect(&builder, expression.span, reset, [MirValueId]{})
-    }
+    if context_enabled -> jet_codegen_lower_journey_reset(&builder, expression.span)
     success := if is_result -> jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ResultValue{subject: input, ok: true}) else -> jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.OptionValue{subject: input})
     success_source := builder.current
     if jet_codegen_current_is_open(builder) {
@@ -2919,8 +2968,9 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, expression: TExpr, i
                 converted := jet_codegen_lower_try_failure_conversion(&builder, expression.span, error, source_error, conversion, carrier)
                 if {
                     context_enabled -> {
+                        if fresh_failure -> jet_codegen_lower_journey_reset(&builder, expression.span)
                         values := jet_codegen_try_context_values(&builder, expression.span, file ?? "", line, function ?? "", note)
-                        converted = jet_codegen_lower_try_context(&builder, expression.span, converted, target_error, source_error, conversion, values)
+                        converted = jet_codegen_lower_try_context(&builder, expression.span, converted, target_error, source_error, conversion, values, note != None)
                     }
                     note != None -> {
                         panic("checked try note has no source context")
@@ -2940,8 +2990,9 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, expression: TExpr, i
             .Optional(success_type) -> {
                 if conversion != TTryConvert.NoConversion -> panic("checked optional propagation carries a non-optional error conversion")
                 if context_enabled {
+                    if fresh_failure -> jet_codegen_lower_journey_reset(&builder, expression.span)
                     values := jet_codegen_try_context_values(&builder, expression.span, file ?? "", line, function ?? "", note)
-                    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "journey_frame_text", "jet_journey_frame_text", 4, [Bool]{true, false, true, true}, None, TFailureCarrier.Infallible, MirPreludeAbi.Effect)
+                    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.errors", "journey_frame_text", "jet_journey_frame_text", 5, [Bool]{true, false, false, true, true}, None, TFailureCarrier.Infallible, MirPreludeAbi.Effect)
                     jet_codegen_emit_static_prelude_effect(&builder, expression.span, route, values)
                 }
                 return_type := Type.Option{inner: success_type}
@@ -3108,7 +3159,7 @@ fn jet_codegen_lower_list_spread(builder: &JetCodegenBuilder, expression: TExpr,
     trait_coercion := if trait_type == {
         None -> None
         Val(target) -> {
-            jet_codegen_require_trait_box_target(target, builder)
+            jet_codegen_require_trait_box_target(target, &builder)
             identity :: jet_codegen_lower_type_for_function(target, builder).identity ?? panic("checked list spread trait target has no MIR identity")
             Val(identity)
         }
@@ -3810,6 +3861,63 @@ fn jet_codegen_close_function(builder: JetCodegenBuilder, receiver_type: Type) -
     selected ?? panic("checked close method has no reachable function")
 }
 
+/// D-SHAPE-RESOURCE1=A: the nominal `Close` implementation that scope-end
+/// cleanup runs for a still-live local of `ty`. Inside that implementation's
+/// own `close` body the receiver is the value being closed, so values of the
+/// type are released there without re-entering `close`.
+fn jet_codegen_scope_end_close_function(builder: &JetCodegenBuilder, ty: Type) -> TFunc? Never! {
+    name := ""
+    if jet_codegen_unwrap_pattern_tags(ty) == {
+        .Named(value) | .Apply(value, _) -> name = value
+        else -> return None
+    }
+    owner :: jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names) ?? return None
+    loop function in builder.functions {
+        if function.name != "close" -> next
+        function_owner := if function.kind == {
+            .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
+                if jet_codegen_symbol_name(&builder, trait_symbol) != "Close" -> next
+                owner_type
+            }
+            else -> next
+        }
+        function_owner_name := if jet_codegen_unwrap_pattern_tags(function_owner) == {
+            .Named(value) | .Apply(value, _) -> value
+            else -> next
+        }
+        identity :: jet_codegen_find_nominal_identity(builder.modules, function.module_identity, function_owner_name, [String]{}) ?? next
+        if identity.key != owner.key -> next
+        if jet_codegen_function_id(function) == jet_codegen_function_id(builder.function) -> return None
+        return Val(function)
+    }
+    None
+}
+
+/// Close a moved-out scope-end value through the same consuming receiver
+/// call an explicit `close(^value)` lowers to.
+fn jet_codegen_emit_scope_end_close(builder: &JetCodegenBuilder, function: TFunc, ty: Type, value: MirValueId, span: Span) Never! {
+    result_type := jet_codegen_checked_method_return_type(&builder, function, ty, [Type]{})
+    argument := MirCallArg{
+        value: value,
+        place: None,
+        access: MirAccess.Move,
+        span: span,
+        label: None,
+        source_index: None,
+        binder_slot: None,
+        spread: false,
+        implicit_clone: false,
+        shared_auto_clone: false,
+        owned_last_use: true,
+        authority_boundary: false,
+        fn_coercion: None,
+        widen_fixed_to_list: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    }
+    _ := jet_codegen_emit_value(&builder, span, result_type, MirOperation.Call{callee: MirCallee.User{function: jet_codegen_function_id(function)}, args: [MirCallArg]{argument}, type_args: [MirType]{}})
+}
+
 fn jet_codegen_lower_close(builder: &JetCodegenBuilder, expression: TExpr, inner: TExpr) -> MirValueId {
     receiver_type := jet_codegen_unwrap_pattern_tags(inner.ty)
     name := if receiver_type == {
@@ -3822,8 +3930,17 @@ fn jet_codegen_lower_close(builder: &JetCodegenBuilder, expression: TExpr, inner
     }
     if name == "DBLease" {
         receiver := jet_codegen_lower_expr(&builder, inner)
-        call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.handle", "db_lease.close", "jet_db_lease_close", 1, [Bool]{false}, Val(Effect.DB), jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+        call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.handle", "db_lease.close", "jet_db_lease_close", 1, [Bool]{true}, Val(Effect.DB), jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
         return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: call, receiver: receiver, args: [MirValueId]{}, frame_schedule: None, frame_schedule_derivation: None}})
+    }
+    // D-DBDRIVER1: a connection or scope is a host handle with no source `Close` impl; its
+    // consuming close is the provider's own `db.close` handle operation, whose Bool report the
+    // Unit `close(^value)` statement discards.
+    if name == "DBConnection" || name == "DBScope" {
+        receiver := jet_codegen_lower_expr(&builder, inner)
+        call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.handle", "db.close", "jet_db_close", 1, [Bool]{false}, Val(Effect.DB), jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
+        _ := jet_codegen_emit_value(&builder, expression.span, Type.Bool, MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: call, receiver: receiver, args: [MirValueId]{}, frame_schedule: None, frame_schedule_derivation: None}})
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant{value: MirConstant.Unit})
     }
     function := jet_codegen_close_function(builder, inner.ty)
     result_type := jet_codegen_checked_method_return_type(&builder, function, inner.ty, [Type]{})
@@ -4057,7 +4174,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
             lowered_coercion := if trait_coercion == {
                 None -> None
                 Val(ty) -> {
-                    jet_codegen_require_trait_box_target(ty, builder)
+                    jet_codegen_require_trait_box_target(ty, &builder)
                     loop value in values {
                         if value.ty == {
                             .TraitObject(_) -> if type_identity_key(value.ty) != type_identity_key(ty) -> panic("checked list trait coercion attempts an unsupported trait-object upcast")
@@ -4065,7 +4182,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> Mir
                             else -> panic("checked list trait coercion source is not nominal")
                         }
                     }
-                    jet_codegen_lower_type_for_function(ty, builder).identity
+                    jet_codegen_lower_type_for_function(ty, &builder).identity
                 }
             }
             jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList{values: lowered_values, trait_coercion: lowered_coercion})
@@ -4267,6 +4384,58 @@ fn jet_codegen_lower_guarded_pattern_range(builder: &JetCodegenBuilder, test: Mi
     jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Phi{incoming: incoming})
 }
 
+// S31: the payload type behind a checked `.Val` / `.Ok` / `.Err` pattern.
+fn jet_codegen_carrier_payload_type(subject_ty: Type, ok: Bool) -> Type Never! {
+    if jet_codegen_unwrap_pattern_tags(subject_ty) == {
+        .Option(inner) -> inner
+        .Result(ok_ty, err_ty) -> if ok -> ok_ty else -> err_ty
+        else -> panic("checked carrier pattern has no payload type")
+    }
+}
+
+// S31: a nested pattern is tested and bound as its own TPattern over the
+// payload, with the payload type's owner and the outer binding facts.
+fn jet_codegen_nested_pattern(pattern: TPattern, nested: TNestedPattern) -> TPattern Never! {
+    inner := pattern
+    inner.shape = nested.shape
+    inner.enum_type = nested.enum_type
+    inner
+}
+
+fn jet_codegen_nested_subject(ty: Type, span: Span) -> TExpr Never! {
+    TExpr{ty: ty, kind: TExprKind.Unit, span: span, integer_bounds: None, cost: None}
+}
+
+// S31: once the carrier or variant test passed, project the payload and test
+// it against the nested pattern; a missed carrier test stays false.
+fn jet_codegen_lower_guarded_nested_pattern(builder: &JetCodegenBuilder, pattern: TPattern, test: MirValueId, payload_ty: Type, nested: TNestedPattern, span: Span, role: String, payload_operation: MirOperation) -> MirValueId {
+    matched_block := jet_codegen_new_block(&builder, span, "{role}-matched")
+    missed_block := jet_codegen_new_block(&builder, span, "{role}-missed")
+    join_block := jet_codegen_new_block(&builder, span, "{role}-join")
+    jet_codegen_terminate(&builder, MirTerminator.Branch{condition: test, then_target: matched_block, else_target: missed_block})
+    jet_codegen_switch_block(&builder, matched_block)
+    payload := jet_codegen_emit_value(&builder, span, payload_ty, payload_operation)
+    nested_test := jet_codegen_lower_pattern_shape_condition(&builder, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(payload_ty, span), payload, nested.shape, false, false)
+    matched_predecessor := builder.current
+    jet_codegen_terminate(&builder, MirTerminator.Jump{target: join_block})
+    jet_codegen_switch_block(&builder, missed_block)
+    false_value := jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Constant{value: MirConstant.Bool{value: false}})
+    missed_predecessor := builder.current
+    jet_codegen_terminate(&builder, MirTerminator.Jump{target: join_block})
+    jet_codegen_switch_block(&builder, join_block)
+    incoming := [MirPhiIncoming]{
+        MirPhiIncoming{block: matched_predecessor, value: nested_test},
+        MirPhiIncoming{block: missed_predecessor, value: false_value},
+    }
+    jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Phi{incoming: incoming})
+}
+
+// S31: bind the names of a matched nested pattern from its payload.
+fn jet_codegen_bind_nested_pattern(builder: &JetCodegenBuilder, pattern: TPattern, payload_ty: Type, nested: TNestedPattern, span: Span, payload_operation: MirOperation, reuse: Bool) {
+    payload := jet_codegen_emit_value(&builder, span, payload_ty, payload_operation)
+    _ := jet_codegen_lower_pattern_shape_condition(&builder, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(payload_ty, span), payload, nested.shape, true, reuse)
+}
+
 fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, subject_ty: Type, owner: SymbolId, variant: String, index: Int) -> Type Never! {
     subject_type := jet_codegen_unwrap_pattern_tags(subject_ty)
     loop semantic_module in builder.modules {
@@ -4429,21 +4598,32 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, pattern: TP
                         operation := MirOperation.EnumPayload{subject: subject_value, owner: owner_id, variant: variant, index: index}
                         is_variant = jet_codegen_lower_guarded_pattern_range(&builder, is_variant, payload_ty, lo, hi, span, "enum-pattern-range", operation)
                     }
+                    .Nested(nested) -> {
+                        payload_ty := jet_codegen_pattern_variant_payload_type(builder, subject.ty, owner, variant, index)
+                        operation := MirOperation.EnumPayload{subject: subject_value, owner: owner_id, variant: variant, index: index}
+                        is_variant = jet_codegen_lower_guarded_nested_pattern(&builder, pattern, is_variant, payload_ty, nested, span, "enum-pattern-nested", operation)
+                    }
                     else -> {}
                 }
                 index += 1
             }
             JetCodegenPatternTest{value: is_variant, matched: None}
         }
-        .Present(_, _, span) -> JetCodegenPatternTest{value: jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.OptionIsSome{subject: subject_value}), matched: None}
+        .Present(_, _, inner, span) -> {
+            is_some := jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.OptionIsSome{subject: subject_value})
+            if inner == .Val(nested) -> return JetCodegenPatternTest{value: jet_codegen_lower_guarded_nested_pattern(&builder, pattern, is_some, jet_codegen_carrier_payload_type(subject.ty, true), nested, span, "option-pattern-nested", MirOperation.OptionValue{subject: subject_value}), matched: None}
+            JetCodegenPatternTest{value: is_some, matched: None}
+        }
         .Absent(span) -> {
             is_some := jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.OptionIsSome{subject: subject_value})
             JetCodegenPatternTest{value: jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Unary{op: MirUnaryOp.Not, value: is_some}), matched: None}
         }
-        .Ok(_, _, span) -> JetCodegenPatternTest{value: jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.ResultIsOk{subject: subject_value}), matched: None}
-        .Err(_, _, span) -> {
+        .Ok(_, _, inner, span) | .Err(_, _, inner, span) -> {
+            ok :: if shape == {.Ok(_, _, _, _) -> true else -> false}
             is_ok := jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.ResultIsOk{subject: subject_value})
-            JetCodegenPatternTest{value: jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Unary{op: MirUnaryOp.Not, value: is_ok}), matched: None}
+            is_selected := if ok -> is_ok else -> jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Unary{op: MirUnaryOp.Not, value: is_ok})
+            if inner == .Val(nested) -> return JetCodegenPatternTest{value: jet_codegen_lower_guarded_nested_pattern(&builder, pattern, is_selected, jet_codegen_carrier_payload_type(subject.ty, ok), nested, span, "result-pattern-nested", MirOperation.ResultValue{subject: subject_value, ok: ok}), matched: None}
+            JetCodegenPatternTest{value: is_selected, matched: None}
         }
         .Range(lo, hi, span) -> JetCodegenPatternTest{value: jet_codegen_lower_numeric_pattern_range(&builder, subject_value, subject.ty, lo, hi, span), matched: None}
         .Or(_, _) -> panic("or-pattern tests must use the ordered alternative lowerer")
@@ -4522,23 +4702,31 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, pattern: TPattern
                             jet_codegen_write_pattern_binding(&builder, fact, payload, reuse)
                         }
                     }
+                    .Nested(nested) -> {
+                        payload_ty := jet_codegen_pattern_variant_payload_type(builder, subject.ty, owner, variant, index)
+                        jet_codegen_bind_nested_pattern(&builder, pattern, payload_ty, nested, span, MirOperation.EnumPayload{subject: subject_value, owner: owner_id, variant: variant, index: index}, reuse)
+                    }
                     else -> {}
                 }
                 index += 1
             }
         }
-        .Present(name, binding_span, _) -> {
-            if name != "" && name != "_" {
+        .Present(name, binding_span, inner, span) -> {
+            if inner == .Val(nested) {
+                jet_codegen_bind_nested_pattern(&builder, pattern, jet_codegen_carrier_payload_type(subject.ty, true), nested, span, MirOperation.OptionValue{subject: subject_value}, reuse)
+            } else if name != "" && name != "_" {
                 fact := jet_codegen_pattern_binding_fact(pattern, name)
                 payload := jet_codegen_emit_value(&builder, binding_span, fact.ty, MirOperation.OptionValue{subject: subject_value})
                 jet_codegen_write_pattern_binding(&builder, fact, payload, reuse)
             }
         }
         .Absent(_) | .Range(_, _, _) -> {}
-        .Ok(name, binding_span, _) | .Err(name, binding_span, _) -> {
-            if name != "" && name != "_" {
+        .Ok(name, binding_span, inner, span) | .Err(name, binding_span, inner, span) -> {
+            ok := if shape == {.Ok(_, _, _, _) -> true else -> false}
+            if inner == .Val(nested) {
+                jet_codegen_bind_nested_pattern(&builder, pattern, jet_codegen_carrier_payload_type(subject.ty, ok), nested, span, MirOperation.ResultValue{subject: subject_value, ok: ok}, reuse)
+            } else if name != "" && name != "_" {
                 fact := jet_codegen_pattern_binding_fact(pattern, name)
-                ok := if shape == {.Ok(_, _, _) -> true else -> false}
                 payload := jet_codegen_emit_value(&builder, binding_span, fact.ty, MirOperation.ResultValue{subject: subject_value, ok: ok})
                 jet_codegen_write_pattern_binding(&builder, fact, payload, reuse)
             }

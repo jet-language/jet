@@ -60,3 +60,16 @@ pub(super) fn no_any_type(span: Span) -> Diagnostic {
         Some(span),
     )
 }
+
+/// D9: `_` is a pattern wildcard, never a type hole. A signature names every
+/// type, so the hole is one error at its own site; failure-contract checks
+/// that would read the hole as a domain stay quiet.
+pub(super) fn type_hole_diag(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0119",
+        "`_` isn't a type".to_string(),
+        "a signature names every type; `_` is only a pattern wildcard".to_string(),
+        "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`".to_string(),
+        Some(span),
+    )
+}

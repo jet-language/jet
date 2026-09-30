@@ -30,6 +30,7 @@ use jet_foundation::Report::{
 static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
     jet::program_allocator::JetHostProgramAllocator;
 
+mod CheckReceipt;
 mod CmdBackendScaffold;
 mod CmdBudget;
 mod CmdCodemod;
@@ -698,7 +699,34 @@ impl BuildProfile {
 }
 
 pub(crate) fn usage() -> String {
-    jet::CLI::usage_page(env!("CARGO_PKG_VERSION"))
+    usage_in(jet::CLI::HelpOrder::default())
+}
+
+fn usage_in(order: jet::CLI::HelpOrder) -> String {
+    jet::CLI::usage_page(env!("CARGO_PKG_VERSION"), order)
+}
+
+/// `jet help --sort frequency|az|za` (D-HELP-SORT1=A, owner spelling `az`
+/// and `za`). Without `--sort`, `jet help` lists the most used commands first.
+fn help_order(jet_argv: &[String]) -> jet::CLI::HelpOrder {
+    if !jet_argv
+        .iter()
+        .any(|arg| arg == "--sort" || arg.starts_with("--sort="))
+    {
+        return jet::CLI::HelpOrder::default();
+    }
+    let value = test_option_value(jet_argv, "--sort").unwrap_or_default();
+    jet::CLI::HelpOrder::parse(&value).unwrap_or_else(|| {
+        crate::cli_error!(
+            @fix "E2104",
+            format!("`{value}` is not a `jet help` order"),
+            format!(
+                "choose one of {}: `jet help --sort az`",
+                jet::CLI::HelpOrder::NAMES
+            )
+        );
+        exit(ExitCodes::USAGE);
+    })
 }
 
 /// #1659 criterion 2: `jet <cmd> --help`/`-h`. Rendered from the same
@@ -837,24 +865,25 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
 
 /// The bare-`jet` greeting (D-DX): friendly, exit 0, not a usage error.
 /// Shown when argv is flags-only with no subcommand (not for a bare `jet` —
-/// that starts the REPL per c6vz465).
+/// that starts the REPL per c6vz465). Its rows are the registry's `headline`
+/// commands in `jet help`'s measured order (#3724).
 fn greeting() -> String {
-    format!(
-        "\
-Welcome to {lang}! (v{ver})
-
-Get started:
-  {bin} new   <name>           create a new project
-  {bin} run   <file.{ext}>     build and run a file (or a project)
-  {bin} check <file.{ext}>     look for problems, build nothing
-
-  {bin} help                   see every command
-",
-        bin = jet::Syntax::BINARY_NAME,
+    let bin = jet::Syntax::BINARY_NAME;
+    let mut output = format!(
+        "Welcome to {lang}! (v{ver})\n\nGet started:\n",
         lang = jet::Syntax::LANG_NAME,
         ver = env!("CARGO_PKG_VERSION"),
-        ext = jet::Syntax::FILE_EXT,
-    )
+    );
+    for command in jet::CLI::commands_in(jet::CLI::HelpOrder::Frequency)
+        .into_iter()
+        .filter(|command| command.headline)
+    {
+        let invocation = format!("{bin} {}", command.name);
+        output.push_str(&format!("  {invocation:<12} {}\n", command.summary));
+    }
+    let help = format!("{bin} help");
+    output.push_str(&format!("\n  {help:<12} see every command\n"));
+    output
 }
 
 /// Teach E2101 for an unknown subcommand, with a "did you mean" when one is
@@ -3100,7 +3129,7 @@ fn main() {
             // #1659 criterion 2: `jet --help`/`jet -h` are real requests for
             // the full command table, not the short orientation greeting.
             if jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
-                write_renderable(profile, &usage());
+                write_renderable(profile, &usage_in(help_order(jet_argv)));
                 exit(ExitCodes::OK);
             }
             // No-args: a friendly greeting that orients, NOT a usage error.
@@ -3470,9 +3499,11 @@ fn main() {
             // `jet <cmd> --help` (#2072): one renderer, so the two spellings
             // can never drift. `diff`/`merge` keep their bespoke deep help,
             // exactly as the `--help` path above does. Bare `jet help` is the
-            // full inventory. An unknown word falls through `command_help`'s
+            // full inventory, most used first; `--sort az|za` lists it by
+            // name (#3724). An unknown word falls through `command_help`'s
             // teaching line rather than dumping the ~200-line global screen.
-            if let Some(command) = raw.get(1) {
+            let order = help_order(jet_argv);
+            if let Some(command) = args.get(1) {
                 if let Some(help) = structural_help(command) {
                     write_renderable(profile, &help);
                     exit(ExitCodes::OK);
@@ -3480,7 +3511,7 @@ fn main() {
                 write_renderable(profile, &command_help(command));
                 exit(ExitCodes::OK);
             }
-            write_renderable(profile, &usage());
+            write_renderable(profile, &usage_in(order));
             exit(ExitCodes::OK);
         }
         "learn" => {
@@ -4969,6 +5000,10 @@ fn main() {
                     );
                     return;
                 }
+            }
+            if cmd == "run" && mode.json {
+                // #3713: an escaping failure is reported as the jet.err/v1 wire.
+                jet::Outcome::jet_report_use_wire();
             }
             if jet_argv.iter().any(|arg| arg == "--show-default") && !mode.quiet {
                 write_status(profile, &format!("jet {cmd}: using stock default\n"));

@@ -9,58 +9,29 @@
 //! regardless of pronunciation. Coined contractions (`Wasm`, `Bindgen`) stay
 //! ordinary words.
 
-/// Closed applied acronym lexicon (D-ACRO-LEX1=A). Longer entries first so
-/// compound renames win over bare roots.
-pub const ACRONYM_RESPILLS: &[(&str, &str)] = &[
-    // Jet-prefixed emitted runtime families
-    ("JetHttp", "JetHTTP"),
-    ("JetTls", "JetTLS"),
-    ("JetDns", "JetDNS"),
-    ("JetTcp", "JetTCP"),
-    ("JetUdp", "JetUDP"),
-    ("JetIo", "JetIO"),
-    ("JetJson", "JetJSON"),
-    ("JetCbor", "JetCBOR"),
-    ("JetUrl", "JetURL"),
-    ("JetMime", "JetMIME"),
-    // Direct surface respells
-    ("Utf8Error", "UTF8Error"),
-    ("Utf8", "UTF8"),
-    ("IpAddr", "IPAddr"),
-    ("Ip", "IP"),
-    ("DbValue", "DBValue"),
-    ("IoError", "IOError"),
-    ("IoContext", "IOContext"),
-    ("IoOperation", "IOOperation"),
-    ("Macos", "MacOS"),
-    ("Http", "HTTP"),
-    ("Smtp", "SMTP"),
-    ("Tls", "TLS"),
-    ("Dns", "DNS"),
-    ("Tcp", "TCP"),
-    ("Udp", "UDP"),
-    ("Html", "HTML"),
-    ("Json", "JSON"),
-    ("Toml", "TOML"),
-    ("Yaml", "YAML"),
-    ("Csv", "CSV"),
-    ("Sql", "SQL"),
-    ("Cli", "CLI"),
-    ("Abi", "ABI"),
-    ("Cpu", "CPU"),
-    ("Gpu", "GPU"),
-    ("Fs", "FS"),
-    ("Db", "DB"),
-    ("Io", "IO"),
-    ("Os", "OS"),
-    ("Js", "JS"),
-    ("Cbor", "CBOR"),
-    ("Url", "URL"),
-    ("Mime", "MIME"),
+/// Closed applied acronym lexicon (D-ACRO-LEX1=A, owner rule 2026-09-30):
+/// every initials-formed word in current Jet names, in canonical caps. A
+/// PascalCase word whose letters (ignoring trailing digits) equal an entry
+/// case-insensitively is written in these caps (`Mir` -> `MIR`,
+/// `Utf8` -> `UTF8`). Keep in sync with `SEMA_CASING_ACRONYMS` in
+/// Compiler/JetSema/Source/Sema/Casing.jet.
+pub const ACRONYMS: &[&str] = &[
+    "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
+    "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DKIM", "DMA", "DNS",
+    "DSL", "DTD", "EOF", "FFI", "FS", "GC", "GPIO", "GPU", "HLL", "HMAC", "HSM", "HTML", "HTTP",
+    "ID", "IME", "IO", "IP", "IR", "JIT", "JS", "JSON", "JSONL", "JVM", "KDF", "KMS", "LRU",
+    "LSP", "LTO", "LWW", "MCP", "MIME", "MIR", "MMIO", "OCI", "OS", "PEM", "PID", "PM", "PNG",
+    "RGA", "RGB", "RNG", "RPC", "RSA", "SDK", "SHA", "SMTP", "SPSC", "SQL", "SRI", "SRV", "SSG",
+    "SSH", "SSR", "SVD", "SVG", "TCP", "TIR", "TLS", "TOML", "TTY", "TUF", "TUI", "UART", "UDP",
+    "UI", "URI", "URL", "UTF", "UUID", "VJP", "VM", "XML", "YAML",
 ];
 
+/// Mixed-case words with one fixed canonical spelling.
+pub const ACRONYM_COMPOUNDS: &[(&str, &str)] =
+    &[("macos", "MacOS"), ("ipv4", "IPv4"), ("ipv6", "IPv6")];
+
 /// Acronyms that stay ordinary words (not initials-formed).
-pub const ACRONYM_WORD_EXCEPTIONS: &[&str] = &["Wasm", "WasmExport", "Bindgen"];
+pub const ACRONYM_WORD_EXCEPTIONS: &[&str] = &["Wasm", "Bindgen"];
 
 /// Retired → canonical spelling for one teaching fix each (I8, no aliases).
 pub fn retired_acronym_spelling(name: &str) -> Option<String> {
@@ -72,16 +43,46 @@ pub fn retired_acronym_spelling(name: &str) -> Option<String> {
     }
 }
 
-/// Apply the lexicon respell to a PascalCase identifier (prefix-aware).
+/// Canonical spelling of one PascalCase word: a lexicon acronym (plus any
+/// trailing digits) in caps, a compound in its fixed spelling, else unchanged.
+fn respell_acronym_word(word: &str) -> Option<String> {
+    if ACRONYM_WORD_EXCEPTIONS.contains(&word) {
+        return None;
+    }
+    let lower = word.to_ascii_lowercase();
+    if let Some((_, canonical)) = ACRONYM_COMPOUNDS.iter().find(|(from, _)| *from == lower) {
+        return Some((*canonical).to_string());
+    }
+    let letters = word.trim_end_matches(|c: char| c.is_ascii_digit());
+    if letters.is_empty() || !letters.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let canonical = ACRONYMS
+        .iter()
+        .find(|acronym| acronym.eq_ignore_ascii_case(letters))?;
+    Some(format!("{canonical}{}", &word[letters.len()..]))
+}
+
+/// Apply the lexicon respell to every word of a PascalCase identifier
+/// (`MirTypeId` -> `MIRTypeID`, `JetHttpClient` -> `JetHTTPClient`).
+/// ALL_CAPS and snake_case names are value-like and returned unchanged.
 pub fn respell_acronym_name(name: &str) -> String {
-    for (from, to) in ACRONYM_RESPILLS {
-        if let Some(rest) = name.strip_prefix(from) {
-            if rest.is_empty() || rest.starts_with(|c: char| c.is_uppercase() || c == '_') {
-                return format!("{to}{rest}");
+    if !name.starts_with(|c: char| c.is_uppercase()) || !name.chars().any(|c| c.is_lowercase()) {
+        return name.to_string();
+    }
+    let mut out = String::with_capacity(name.len());
+    for (index, segment) in name.split('_').enumerate() {
+        if index > 0 {
+            out.push('_');
+        }
+        for word in split_pascal_words(segment) {
+            match respell_acronym_word(&word) {
+                Some(canonical) => out.push_str(&canonical),
+                None => out.push_str(&word),
             }
         }
     }
-    name.to_string()
+    out
 }
 
 /// Mechanical word split for PascalCase / glued-acronym names (D-ACRO-CASE1=A).
@@ -173,13 +174,8 @@ pub fn to_pascal_acronym(name: &str) -> String {
 }
 
 fn restore_acronym_word(word: &str) -> String {
-    let lower = word.to_lowercase();
-    for (from, to) in ACRONYM_RESPILLS {
-        if from.to_lowercase() == lower || to.to_lowercase() == lower {
-            if to.chars().all(|c| !c.is_lowercase()) {
-                return (*to).to_string();
-            }
-        }
+    if let Some(canonical) = respell_acronym_word(word) {
+        return canonical;
     }
     let mut chars = word.chars();
     match chars.next() {
@@ -245,6 +241,18 @@ mod tests {
         assert_eq!(respell_acronym_name("Macos"), "MacOS");
         assert_eq!(respell_acronym_name("Wasm"), "Wasm");
         assert_eq!(respell_acronym_name("WasmExport"), "WasmExport");
+        // Acronyms anywhere in the name, with trailing digits, idempotent.
+        assert_eq!(respell_acronym_name("MirTypeId"), "MIRTypeID");
+        assert_eq!(respell_acronym_name("SourceAst"), "SourceAST");
+        assert_eq!(respell_acronym_name("Utf8Error"), "UTF8Error");
+        assert_eq!(respell_acronym_name("Ipv4Addr"), "IPv4Addr");
+        assert_eq!(respell_acronym_name("IPv4Addr"), "IPv4Addr");
+        assert_eq!(respell_acronym_name("HTTP_API"), "HTTP_API");
+        assert_eq!(respell_acronym_name("JetDriverRecordStore"), "JetDriverRecordStore");
+        // Words that merely start with acronym letters stay words.
+        assert_eq!(respell_acronym_name("Identity"), "Identity");
+        assert_eq!(respell_acronym_name("IoError"), "IOError");
+        assert_eq!(respell_acronym_name("MAX_ID"), "MAX_ID");
     }
 
     #[test]

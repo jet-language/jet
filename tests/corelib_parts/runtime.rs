@@ -1170,7 +1170,7 @@ fn run() {
     object_expiry := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjp7Im4iOjQxMDI0NDQ4MDB9fQ.X1BTPgGav4pUqxQVq2uMYt4_VYEHfMRGP1aI5V50k2g"
     wrong_issuer := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiaXNzIjoib3RoZXIiLCJleHAiOjQxMDI0NDQ4MDB9.ZVsh0LK7bvsylhpzu4i8TrgthCbSaelpKaoxWqF5-G4"
     expired := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo5NDY2ODQ4MDB9.P-GYVR6Tc1zwSdZCEX6kbv4eSryvnxlevXfHU0MJMEg"
-    overflow_expiry := "@OVERFLOW_EXPIRY"
+    overflow_expiry := "OVERFLOW_EXPIRY"
     if auth.verify_jwt(valid_jwt, key: jwt_key, audience: "gateway", issuer: "partner", clock_skew: no_skew) == {
         .Ok(claims) -> { print("ok:{claims.audience}") }
         .Err(_) -> { print("rejected") }
@@ -1197,11 +1197,11 @@ fn run() {
     if auth.verify_jwt(wrong_issuer, key: jwt_key, audience: "gateway", issuer: "partner") == { .Ok(_) -> { print("issuer-accepted") } .Err(_) -> { print("issuer-rejected") } }
     if auth.verify_jwt(expired, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("expired-accepted") } .Err(_) -> { print("expired-rejected") } }
     if auth.verify_jwt(overflow_expiry, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("overflow-accepted") } .Err(_) -> { print("overflow-rejected") } }
-    if auth.verify_jwt("@LOWER_BOUND_EXPIRY", key: jwt_key, audience: "gateway") == {
+    if auth.verify_jwt("LOWER_BOUND_EXPIRY", key: jwt_key, audience: "gateway") == {
         .Ok(_) -> { print("lower-bound-accepted") }
         .Err(error) -> { if error == { .TokenExpired -> { print("lower-bound-expired") } else -> { print("lower-bound-wrong-error") } } }
     }
-    if auth.verify_jwt("@BELOW_LOWER_BOUND_EXPIRY", key: jwt_key, audience: "gateway") == {
+    if auth.verify_jwt("BELOW_LOWER_BOUND_EXPIRY", key: jwt_key, audience: "gateway") == {
         .Ok(_) -> { print("below-lower-bound-accepted") }
         .Err(error) -> {
             if error == {
@@ -1211,8 +1211,8 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@HIGH_RANGE", key: jwt_key, audience: "gateway") == { .Ok(claims) -> { print("high-range:{claims.expires_at}") } .Err(_) -> { print("high-range-rejected") } }
-    if auth.verify_jwt("@NEGATIVE_ZERO_EXPIRY", key: jwt_key, audience: "gateway") == {
+    if auth.verify_jwt("HIGH_RANGE", key: jwt_key, audience: "gateway") == { .Ok(claims) -> { print("high-range:{claims.expires_at}") } .Err(_) -> { print("high-range-rejected") } }
+    if auth.verify_jwt("NEGATIVE_ZERO_EXPIRY", key: jwt_key, audience: "gateway") == {
         .Ok(_) -> { print("negative-zero-expiry-accepted") }
         .Err(error) -> {
             if error == {
@@ -1221,7 +1221,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@NEGATIVE_ZERO_ISSUED_AT", key: jwt_key, audience: "gateway") == {
+    if auth.verify_jwt("NEGATIVE_ZERO_ISSUED_AT", key: jwt_key, audience: "gateway") == {
         .Ok(_) -> { print("negative-zero-iat-accepted") }
         .Err(error) -> {
             if error == {
@@ -1230,7 +1230,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@UNICODE_WHITESPACE", key: jwt_key, audience: "gateway") == {
+    if auth.verify_jwt("UNICODE_WHITESPACE", key: jwt_key, audience: "gateway") == {
         .Ok(_) -> { print("unicode-whitespace-accepted") }
         .Err(error) -> {
             if error == {
@@ -1239,7 +1239,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@NONCANONICAL_BASE64", key: jwt_key, audience: "gateway", issuer: "partner") == {
+    if auth.verify_jwt("NONCANONICAL_BASE64", key: jwt_key, audience: "gateway", issuer: "partner") == {
         .Ok(_) -> { print("noncanonical-accepted") }
         .Err(error) -> {
             if error == {
@@ -1274,14 +1274,14 @@ fn run() {
     if auth.verify_paseto(bad_signature, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == { .Ok(_) -> { print("bad-signature-accepted") } .Err(_) -> { print("bad-signature-rejected") } }
 }
 "#
-    .replace("@HIGH_RANGE", &high_range)
-    .replace("@LOWER_BOUND_EXPIRY", &lower_bound_expiry)
-    .replace("@BELOW_LOWER_BOUND_EXPIRY", &below_lower_bound_expiry)
-    .replace("@OVERFLOW_EXPIRY", &overflow_expiry)
-    .replace("@NEGATIVE_ZERO_EXPIRY", &negative_zero_expiry)
-    .replace("@NEGATIVE_ZERO_ISSUED_AT", &negative_zero_issued_at)
-    .replace("@UNICODE_WHITESPACE", &unicode_whitespace)
-    .replace("@NONCANONICAL_BASE64", &noncanonical_base64);
+    .replace("HIGH_RANGE", &high_range)
+    .replace("LOWER_BOUND_EXPIRY", &lower_bound_expiry)
+    .replace("BELOW_LOWER_BOUND_EXPIRY", &below_lower_bound_expiry)
+    .replace("OVERFLOW_EXPIRY", &overflow_expiry)
+    .replace("NEGATIVE_ZERO_EXPIRY", &negative_zero_expiry)
+    .replace("NEGATIVE_ZERO_ISSUED_AT", &negative_zero_issued_at)
+    .replace("UNICODE_WHITESPACE", &unicode_whitespace)
+    .replace("NONCANONICAL_BASE64", &noncanonical_base64);
     let (code, stdout, stderr) = build_and_run(&dir, "strict_tokens", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
@@ -1312,15 +1312,15 @@ use core.auth as auth
 
 fn run() {
     key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
-    if auth.verify_jwt("@SCALAR", key: key, audience: "gateway") == {
+    if auth.verify_jwt("SCALAR", key: key, audience: "gateway") == {
         .Ok(claims) -> { print("scalar:{claims.audience}") }
         .Err(_) -> { print("scalar:rejected") }
     }
-    if auth.verify_jwt("@LIST", key: key, audience: "gateway") == {
+    if auth.verify_jwt("LIST", key: key, audience: "gateway") == {
         .Ok(claims) -> { print("list:{claims.audience}") }
         .Err(_) -> { print("list:rejected") }
     }
-    if auth.verify_jwt("@WRONG_LIST", key: key, audience: "gateway") == {
+    if auth.verify_jwt("WRONG_LIST", key: key, audience: "gateway") == {
         .Ok(_) -> { print("wrong:accepted") }
         .Err(error) -> {
             if error == {
@@ -1329,7 +1329,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@EMPTY", key: key, audience: "gateway") == {
+    if auth.verify_jwt("EMPTY", key: key, audience: "gateway") == {
         .Ok(_) -> { print("empty:accepted") }
         .Err(error) -> {
             if error == {
@@ -1338,7 +1338,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@MIXED", key: key, audience: "gateway") == {
+    if auth.verify_jwt("MIXED", key: key, audience: "gateway") == {
         .Ok(_) -> { print("mixed:accepted") }
         .Err(error) -> {
             if error == {
@@ -1347,7 +1347,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@NESTED", key: key, audience: "gateway") == {
+    if auth.verify_jwt("NESTED", key: key, audience: "gateway") == {
         .Ok(_) -> { print("nested:accepted") }
         .Err(error) -> {
             if error == {
@@ -1356,7 +1356,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@FUTURE_NBF", key: key, audience: "gateway") == {
+    if auth.verify_jwt("FUTURE_NBF", key: key, audience: "gateway") == {
         .Ok(_) -> { print("future-nbf:accepted") }
         .Err(error) -> {
             if error == {
@@ -1365,7 +1365,7 @@ fn run() {
             }
         }
     }
-    if auth.verify_jwt("@PAST_NBF", key: key, audience: "gateway") == {
+    if auth.verify_jwt("PAST_NBF", key: key, audience: "gateway") == {
         .Ok(claims) -> {
             if claims.not_before == {
                 .Val(value) -> { print("past-nbf:{value}") }
@@ -1394,14 +1394,14 @@ fn run() {
     }
 }
 "#
-    .replace("@SCALAR", &scalar)
-    .replace("@LIST", &list)
-    .replace("@WRONG_LIST", &wrong_list)
-    .replace("@EMPTY", &empty)
-    .replace("@MIXED", &mixed)
-    .replace("@NESTED", &nested)
-    .replace("@FUTURE_NBF", &future_not_before)
-    .replace("@PAST_NBF", &past_not_before);
+    .replace("SCALAR", &scalar)
+    .replace("LIST", &list)
+    .replace("WRONG_LIST", &wrong_list)
+    .replace("EMPTY", &empty)
+    .replace("MIXED", &mixed)
+    .replace("NESTED", &nested)
+    .replace("FUTURE_NBF", &future_not_before)
+    .replace("PAST_NBF", &past_not_before);
     let (code, aot_stdout, stderr) = build_and_run(&dir, "audience_shapes", &src, &[], None);
     assert_eq!(code, 0, "audience-shape AOT failed: {stderr}");
     let expected = "scalar:gateway\nlist:gateway\nwrong:gateway:billing\nempty:malformed\nmixed:malformed\nnested:malformed\nfuture-nbf:not-yet-valid\npast-nbf:1700000000\npaseto:gateway\npaseto-wrong:billing:gateway\n";
@@ -1461,7 +1461,7 @@ use core.auth as auth
 
 fn run() {
     key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
-    if auth.verify_jwt("@NEGATIVE", key: key, audience: "gateway") == {
+    if auth.verify_jwt("NEGATIVE", key: key, audience: "gateway") == {
         .Ok(claims) -> {
             negative_iat :: claims.issued_at
             negative_copy :: negative_iat
@@ -1474,7 +1474,7 @@ fn run() {
         }
         .Err(_) -> { print("iat-neg:error") }
     }
-    if auth.verify_jwt("@MAXIMUM", key: key, audience: "gateway") == {
+    if auth.verify_jwt("MAXIMUM", key: key, audience: "gateway") == {
         .Ok(claims) -> {
             maximum_iat :: claims.issued_at
             maximum_copy :: maximum_iat
@@ -1489,8 +1489,8 @@ fn run() {
     }
 }
 "#
-    .replace("@NEGATIVE", &negative)
-    .replace("@MAXIMUM", &maximum);
+    .replace("NEGATIVE", &negative)
+    .replace("MAXIMUM", &maximum);
     let (code, aot_stdout, stderr) = build_and_run(&dir, "iat_boundaries", &src, &[], None);
     assert_eq!(code, 0, "iat-boundary AOT failed: {stderr}");
     let expected = "iat-neg\n-1\niat-max\n9223372036854775807\n";
@@ -1689,9 +1689,9 @@ fn check(token: String, key: [U8], label: String, skew: Duration) {
 
 fn run() {
     key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
-    skew_token := "@SKEW_TOKEN"
-    skew_expiry :: @SKEW_EXPIRY
-    base_ns :: @NOW_NS - skew_expiry * 1000000000
+    skew_token := "SKEW_TOKEN"
+    skew_expiry :: SKEW_EXPIRY
+    base_ns :: NOW_NS - skew_expiry * 1000000000
     boundary_ns :: base_ns
     next_boundary_ns :: base_ns + 1
     boundary :: Duration.nanoseconds(boundary_ns) ?? panic("boundary")
@@ -1705,35 +1705,35 @@ fn run() {
     accepted_skew :: Duration.nanoseconds(base_ns + margin_ns) ?? panic("accepted skew")
     check(skew_token, key, "skew-margin-before", expired_skew)
     check(skew_token, key, "skew-margin-after", accepted_skew)
-    token := "@TOKEN"
+    token := "TOKEN"
     zero :: Duration.milliseconds(0) ?? panic("zero")
     check(token, key, "future", zero)
-    check("@EQUALITY", key, "equality", zero)
-    check("@UPPER", key, "upper", zero)
-    check("@ABOVE_UPPER", key, "above-upper", zero)
-    check("@LOWER", key, "lower", zero)
-    check("@BELOW_LOWER", key, "below-lower", zero)
-    check("@I64_MAX", key, "i64-max", zero)
-    check("@I64_MIN", key, "i64-min", zero)
-    check("@INVALID", key, "invalid", zero)
+    check("EQUALITY", key, "equality", zero)
+    check("UPPER", key, "upper", zero)
+    check("ABOVE_UPPER", key, "above-upper", zero)
+    check("LOWER", key, "lower", zero)
+    check("BELOW_LOWER", key, "below-lower", zero)
+    check("I64_MAX", key, "i64-max", zero)
+    check("I64_MIN", key, "i64-min", zero)
+    check("INVALID", key, "invalid", zero)
     max_skew :: Duration.nanoseconds(9223372036854775807) ?? panic("max skew")
     min_skew :: Duration.nanoseconds(-9223372036854775807 - 1) ?? panic("min skew")
     check(token, key, "max-skew", max_skew)
     check(token, key, "min-skew", min_skew)
 }
 "#
-        .replace("@TOKEN", &fixture.token)
-        .replace("@SKEW_TOKEN", &fixture.skew_token)
-        .replace("@NOW_NS", &fixture.now_ns.to_string())
-        .replace("@SKEW_EXPIRY", &fixture.skew_expires_at.to_string())
-        .replace("@EQUALITY", &fixture.equality)
-        .replace("@UPPER", &fixture.upper)
-        .replace("@ABOVE_UPPER", &fixture.above_upper)
-        .replace("@LOWER", &fixture.lower)
-        .replace("@BELOW_LOWER", &fixture.below_lower)
-        .replace("@I64_MAX", &fixture.i64_max)
-        .replace("@I64_MIN", &fixture.i64_min)
-        .replace("@INVALID", &fixture.invalid)
+        .replace("TOKEN", &fixture.token)
+        .replace("SKEW_TOKEN", &fixture.skew_token)
+        .replace("NOW_NS", &fixture.now_ns.to_string())
+        .replace("SKEW_EXPIRY", &fixture.skew_expires_at.to_string())
+        .replace("EQUALITY", &fixture.equality)
+        .replace("UPPER", &fixture.upper)
+        .replace("ABOVE_UPPER", &fixture.above_upper)
+        .replace("LOWER", &fixture.lower)
+        .replace("BELOW_LOWER", &fixture.below_lower)
+        .replace("I64_MAX", &fixture.i64_max)
+        .replace("I64_MIN", &fixture.i64_min)
+        .replace("INVALID", &fixture.invalid)
     };
 
     let aot_fixture = fresh_fixture();
@@ -1852,7 +1852,7 @@ fn tracked_origin_is_a_folded_optional_fact() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let name = "origin_fact";
-    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    @speed_origin :: speed.@origin\n    @plain_origin :: plain.@origin\n    @copied_origin :: copied.@origin\n    print(@speed_origin?.tracked ?? false)\n    print(@speed_origin?.source ?? \"missing\")\n    print(@speed_origin?.line ?? 0)\n    print(@speed_origin?.column ?? 0)\n    print(@plain_origin == None)\n    print(@copied_origin == None)\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    speed_origin :: prep { speed.$origin }\n    plain_origin :: prep { plain.$origin }\n    copied_origin :: prep { copied.$origin }\n    print(speed_origin?.tracked ?? false)\n    print(speed_origin?.source ?? \"missing\")\n    print(speed_origin?.line ?? 0)\n    print(speed_origin?.column ?? 0)\n    print(plain_origin == None)\n    print(copied_origin == None)\n}\n";
     let (code, stdout, stderr) = build_and_run(&dir, name, src, &[], None);
     let source_path = dir.join(name);
 

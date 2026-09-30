@@ -678,11 +678,23 @@ impl<'a> Lexer<'a> {
         } else {
             lex_raw_at_depth(inner, next_depth)
         };
-        for t in &mut inner_toks {
-            t.span = Span::new(
-                t.span.start + inner_start_byte,
-                t.span.end + inner_start_byte,
-            );
+        // Nested interpolations carry spans relative to this `inner` slice
+        // too, so rebase every token in the tree, not only the top level.
+        let mut pending: Vec<&mut [Token]> = vec![inner_toks.as_mut_slice()];
+        while let Some(tokens) = pending.pop() {
+            for t in tokens {
+                t.span = Span::new(
+                    t.span.start + inner_start_byte,
+                    t.span.end + inner_start_byte,
+                );
+                if let TokKind::Str(parts) = &mut t.kind {
+                    for part in parts {
+                        if let StrTokPart::Interp(nested) = part {
+                            pending.push(nested.as_mut_slice());
+                        }
+                    }
+                }
+            }
         }
         for mut d in inner_diags {
             if let Some(s) = d.span.as_mut() {
