@@ -1,5 +1,23 @@
 // Shared marker projection bodies for declaration parsers. Keep the original
 // marker list on each AST node; these helpers only fill its typed projections.
+use jet_foundation.[
+    EnumDef,
+    EveryArg,
+    EveryMarker,
+    Expr,
+    Func,
+    JobCachePolicy,
+    JobMetadata,
+    JobScope,
+    JobSkip,
+    Marker,
+    NamedSpan,
+    Span,
+    StringMapEntry,
+    StructDef,
+    ast_job_metadata,
+    expr_span,
+]
 
 fn parser_marker_is_signed_auto_derive(name: String) -> Bool Never! {
     name == "Printable" || name == "Equatable" || name == "Debug" || name == "Comparable" || name == "Encode" || name == "Decode" || name == "Codable"
@@ -54,7 +72,7 @@ fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
     parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
 }
 
-fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [String], required: Int) -> [Expr?]? Err! {
+fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [String], required: Int) -> [Expr?]? {
     values := [Expr?]{}
     loop _ in 0..<names.len() -> &values.push(None)
     positional := 0
@@ -158,7 +176,7 @@ fn parser_job_static_word(value: Expr) -> String? {
     }
 }
 
-fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String, value: Expr?) -> [String]? Err! {
+fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String, value: Expr?) -> [String]? {
     expression :: value ?? return Val([String]{})
     if expression == {
         .ListLit(values, _) -> {
@@ -182,7 +200,7 @@ fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String,
     }
 }
 
-fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> JobSkip? Err! {
+fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> JobSkip? {
     word := parser_job_word(expression)
     if word != None {
         reason :: word ?? ""
@@ -242,7 +260,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
     }
 }
 
-fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -> [StringMapEntry]? Err! {
+fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -> [StringMapEntry]? {
     if expression == {
         .MapLit(entries, _) -> {
             limits := [StringMapEntry]{}
@@ -283,7 +301,7 @@ fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -
     }
 }
 
-fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr) -> Int? Err! {
+fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr) -> Int? {
     word := parser_job_word(expression)
     if word != None {
         reason :: word ?? ""
@@ -299,7 +317,7 @@ fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr)
     None
 }
 
-pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> JobMetadata? Err! {
+pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> JobMetadata? {
     if marker.args.len() == 0 -> return None
     values :: parser_bind_marker_arguments(&state, marker, [String]{"scope", "packages", "cwd", "inputs", "outputs", "skip", "cache", "limits", "after", "parallel"}, 0) ?? return None
     metadata := ast_job_metadata()
@@ -361,7 +379,7 @@ pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -
     Val(metadata)
 }
 
-pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> EveryMarker? Err! {
+pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> EveryMarker? {
     values :: parser_bind_marker_arguments(&state, marker, [String]{"schedule"}, 1) ?? return None
     schedule :: values[0] ?? return None
     arg := if schedule == {

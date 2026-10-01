@@ -1,6 +1,11 @@
 // Reactive UI flagship: canonical UiNode composition, typed color, motion,
 // signals, DOM rendering, and native/null rendering share one tree mechanism.
 // `#[Target(Web), HTML(...)]` makes the companion page the default web output.
+package {
+    name: "ui_showcase"
+    authority: { holds: { allow: [Browser, IO, Mem.Alloc] } }
+}
+
 use core.ui as ui
 use core.reactive as reactive
 // Native and browser entry points compose the same canonical UiNode tree.
@@ -51,11 +56,11 @@ use core.reactive as reactive
 // by ui_showcase.html.
 #[Target(Web), HTML("ui_showcase.html")]
 
-fn stat_line(label: String, value: String) -> UiNode {
+fn stat_line(label: String, value: String) -> UINode {
     return ui.text("{label}: {value}")
 }
 
-fn dashboard_view(cards: [UiNode]) -> UiNode {
+fn dashboard_view(cards: [UINode]) -> UINode {
     return ui.box(cards)
 }
 

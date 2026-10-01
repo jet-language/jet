@@ -27,18 +27,18 @@ pub fn files(path: String) -[FS]> WatchHandle IOError! {
     core.watcher.files(path)
 }
 
-pub fn process_pid(pid: Int) -> WatchHandle {
+pub fn process_pid(pid: Int) -> WatchHandle Never! {
     core.watcher.process_pid(pid)
 }
 
-pub fn port(host: String, port: Int) -[Net]> WatchHandle {
+pub fn port(host: String, port: Int) -[Net]> WatchHandle Never! {
     core.watcher.port(host, port)
 }
 
-pub fn set() -> WatchSet { core.watcher.set() }
+pub fn set() -> WatchSet Never! { core.watcher.set() }
 
 
-pub fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet {
+pub fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
     set.add(handle)
     ~set
 }
@@ -70,11 +70,11 @@ pub fn contains(set: WatchSet, target: String) -> Bool IOError! {
     }))
 }
 
-pub fn len(set: WatchSet) -> Int {
+pub fn len(set: WatchSet) -> Int Never! {
     summary_count(set.summary())
 }
 
-pub fn kind(handle: WatchHandle) -> String {
+pub fn kind(handle: WatchHandle) -> String Never! {
     summary_kind(handle.summary())
 }
 
@@ -129,17 +129,17 @@ pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
     }))
 }
 
-pub fn poll(handle: WatchHandle) -[IO]> [WatchEvent] { handle.poll() }
+pub fn poll(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.poll() }
 
-pub fn events(handle: WatchHandle) -[IO]> [WatchEvent] { handle.events() }
+pub fn events(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.events() }
 
-pub fn cancel(handle: WatchHandle) -[IO]> { handle.cancel() }
+pub fn cancel(handle: WatchHandle) Never! -[IO]> { handle.cancel() }
 
-pub fn is_active(handle: WatchHandle) -> Bool { handle.is_active() }
+pub fn is_active(handle: WatchHandle) -> Bool Never! { handle.is_active() }
 
-pub fn summary(handle: WatchHandle) -> String { handle.summary() }
+pub fn summary(handle: WatchHandle) -> String Never! { handle.summary() }
 
-pub fn drain(set: WatchSet) -[IO]> [WatchEvent] { set.poll() }
+pub fn drain(set: WatchSet) -[IO]> [WatchEvent] Never! { set.poll() }
 
 fn summary_kind(text: String) -> String {
     if has_prefix(text, "watch file ") -> return "file"

@@ -2683,18 +2683,23 @@ impl JitBackend for CraneliftBackend {
         _try_anyway: bool,
         policy: &Self::InvocationPolicy,
     ) -> RunOutcome {
+        // Runtime hosts (strict base64/base32 decoders) read the package
+        // edition; bind the program's edition exactly as AOT bakes
+        // `__JET_PACKAGE_EDITION` into the emitted crate.
         crate::on_compiler_stack(|| {
-            crate::reset_one_shot_core_state();
-            let outcome = if !cranelift_host_supported() {
-                plan_failure(&super::tiers::plan_mir_tiers(program, artifact))
-            } else {
-                match try_resident(program, artifact, policy) {
-                    Ok(outcome) => outcome,
-                    Err(plan) => plan_failure(&plan),
-                }
-            };
-            crate::release_one_shot_core_state();
-            outcome
+            jet_foundation::PackageEdition::with_package_edition(&program.facts.edition, || {
+                crate::reset_one_shot_core_state();
+                let outcome = if !cranelift_host_supported() {
+                    plan_failure(&super::tiers::plan_mir_tiers(program, artifact))
+                } else {
+                    match try_resident(program, artifact, policy) {
+                        Ok(outcome) => outcome,
+                        Err(plan) => plan_failure(&plan),
+                    }
+                };
+                crate::release_one_shot_core_state();
+                outcome
+            })
         })
     }
 
@@ -2706,10 +2711,12 @@ impl JitBackend for CraneliftBackend {
         _try_anyway: bool,
         policy: &Self::InvocationPolicy,
     ) -> Result<RunOutcome, Vec<jet_foundation::Diagnostics::Diagnostic>> {
-        match try_resident_hot_swap(program, artifact, policy) {
-            Ok(outcome) => Ok(outcome),
-            Err(plan) => Err(plan_failure_diagnostics(&plan)),
-        }
+        jet_foundation::PackageEdition::with_package_edition(&program.facts.edition, || {
+            match try_resident_hot_swap(program, artifact, policy) {
+                Ok(outcome) => Ok(outcome),
+                Err(plan) => Err(plan_failure_diagnostics(&plan)),
+            }
+        })
     }
 
     fn restart(
@@ -2719,10 +2726,12 @@ impl JitBackend for CraneliftBackend {
         _try_anyway: bool,
         policy: &Self::InvocationPolicy,
     ) -> RunOutcome {
-        match try_resident_restart(program, artifact, policy) {
-            Ok(outcome) => outcome,
-            Err(plan) => plan_failure(&plan),
-        }
+        jet_foundation::PackageEdition::with_package_edition(&program.facts.edition, || {
+            match try_resident_restart(program, artifact, policy) {
+                Ok(outcome) => outcome,
+                Err(plan) => plan_failure(&plan),
+            }
+        })
     }
 }
 

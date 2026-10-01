@@ -19,10 +19,10 @@ pub struct SyncCounter {
 pub struct SyncMap {
     pub replica: String
     pub clock: Int
-    pub entries: [String:Lww]
+    pub entries: [String:LWW]
 }
 
-pub struct Lww {
+pub struct LWW {
     pub value: String
     pub ts: Int
     pub replica: String
@@ -32,10 +32,10 @@ pub struct Lww {
 pub struct SyncList {
     pub replica: String
     pub clock: Int
-    pub items: [RgaItem]
+    pub items: [RGAItem]
 }
 
-pub struct RgaItem {
+pub struct RGAItem {
     pub id: String
     pub value: String
     pub tombstone: Bool
@@ -53,16 +53,16 @@ pub struct RowPolicy {
     pub deny: [String]
 }
 
-pub fn counter_new() -> SyncCounter { counter_for("local") }
+pub fn counter_new() -> SyncCounter Never! { counter_for("local") }
 
-pub fn counter_for(replica: String) -> SyncCounter {
+pub fn counter_for(replica: String) -> SyncCounter Never! {
     id := replica
     if id.len() == 0 -> id = "local"
     if !valid_sync_text(id, 1048576, false) -> id = ""
     SyncCounter{replica: id, counts: [String:Int]{}}
 }
 
-pub fn counter_inc(counter: SyncCounter) -> SyncCounter {
+pub fn counter_inc(counter: SyncCounter) -> SyncCounter Never! {
     if !valid_sync_text(counter.replica, 1048576, false) -> return ~counter
     cur :: counter.counts.get(counter.replica) ?? 0
     if cur >= 2147483646 -> return ~counter
@@ -72,7 +72,7 @@ pub fn counter_inc(counter: SyncCounter) -> SyncCounter {
     SyncCounter{replica: counter.replica, counts: counts}
 }
 
-pub fn counter_merge(left: SyncCounter, right: SyncCounter) -> SyncCounter {
+pub fn counter_merge(left: SyncCounter, right: SyncCounter) -> SyncCounter Never! {
     out := left.counts
     loop k in right.counts.keys() {
         rv :: right.counts.get(k) ?? 0
@@ -82,22 +82,22 @@ pub fn counter_merge(left: SyncCounter, right: SyncCounter) -> SyncCounter {
     SyncCounter{replica: left.replica, counts: out}
 }
 
-pub fn counter_value(counter: SyncCounter) -> Int {
+pub fn counter_value(counter: SyncCounter) -> Int Never! {
     n := 0
     loop k in counter.counts.keys() -> n += (counter.counts.get(k) ?? 0)
     n
 }
 
-pub fn map_new() -> SyncMap { map_for("local") }
+pub fn map_new() -> SyncMap Never! { map_for("local") }
 
-pub fn map_for(replica: String) -> SyncMap {
+pub fn map_for(replica: String) -> SyncMap Never! {
     id := replica
     if id.len() == 0 -> id = "local"
     if !valid_sync_text(id, 1048576, false) -> id = ""
-    SyncMap{replica: id, clock: 0, entries: [String:Lww]{}}
+    SyncMap{replica: id, clock: 0, entries: [String:LWW]{}}
 }
 
-pub fn map_set(map: SyncMap, key: String, value: String) -> SyncMap {
+pub fn map_set(map: SyncMap, key: String, value: String) -> SyncMap Never! {
     invalid := !valid_sync_text(map.replica, 1048576, false)
         || !valid_sync_text(key, 1048576, false)
         || !valid_sync_text(value, 1048576, true)
@@ -105,13 +105,13 @@ pub fn map_set(map: SyncMap, key: String, value: String) -> SyncMap {
         || (map.entries.len() >= 100000 && map.entries.get(key) == None)
     if invalid -> return ~map
     ts :: map.clock + 1
-    e :: Lww{value: value, ts: ts, replica: ~map.replica, deleted: false}
+    e :: LWW{value: value, ts: ts, replica: ~map.replica, deleted: false}
     entries := map.entries
     _ :: &entries.add(key, e)
     SyncMap{replica: ~map.replica, clock: ts, entries: entries}
 }
 
-pub fn map_delete(map: SyncMap, key: String) -> SyncMap {
+pub fn map_delete(map: SyncMap, key: String) -> SyncMap Never! {
     invalid := !valid_sync_text(map.replica, 1048576, false)
         || !valid_sync_text(key, 1048576, false)
         || map.clock >= 2147483646
@@ -119,15 +119,15 @@ pub fn map_delete(map: SyncMap, key: String) -> SyncMap {
     if invalid -> return ~map
     ts :: map.clock + 1
     entries := map.entries
-    _ :: &entries.add(key, Lww{value: "", ts: ts, replica: ~map.replica, deleted: true})
+    _ :: &entries.add(key, LWW{value: "", ts: ts, replica: ~map.replica, deleted: true})
     SyncMap{replica: ~map.replica, clock: ts, entries: entries}
 }
 
-pub fn map_contains(map: SyncMap, key: String) -> Bool {
+pub fn map_contains(map: SyncMap, key: String) -> Bool Never! {
     map_get(map, key) != .None
 }
 
-pub fn map_keys(map: SyncMap) -> [String] {
+pub fn map_keys(map: SyncMap) -> [String] Never! {
     out := [String]{}
     loop key in map.entries.keys() {
         entry :: map.entries.get(key) ?? next
@@ -136,12 +136,12 @@ pub fn map_keys(map: SyncMap) -> [String] {
     out
 }
 
-pub fn map_get(map: SyncMap, key: String) -> String? {
+pub fn map_get(map: SyncMap, key: String) -> String? Never! {
     e :: map.entries.get(key) ?? return None
     if e.deleted -> return None
     Val(e.value)
 }
-pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap {
+pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap Never! {
     out := left.entries
     loop k in right.entries.keys() {
         rv :: right.entries.get(k) ?? next
@@ -172,7 +172,7 @@ pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap {
     SyncMap{replica: left.replica, clock: clock, entries: out}
 }
 
-pub fn map_show(map: SyncMap) -> String {
+pub fn map_show(map: SyncMap) -> String Never! {
     out := "{{"
     first := true
     loop k in map.entries.keys() {
@@ -185,16 +185,16 @@ pub fn map_show(map: SyncMap) -> String {
     "{out}}}"
 }
 
-pub fn list_new() -> SyncList { list_for("local") }
+pub fn list_new() -> SyncList Never! { list_for("local") }
 
-pub fn list_for(replica: String) -> SyncList {
+pub fn list_for(replica: String) -> SyncList Never! {
     id := replica
     if id.len() == 0 -> id = "local"
     if !valid_sync_text(id, 1048576, false) -> id = ""
-    SyncList{replica: id, clock: 0, items: [RgaItem]{}}
+    SyncList{replica: id, clock: 0, items: [RGAItem]{}}
 }
 
-pub fn list_push(list: SyncList, value: String) -> SyncList {
+pub fn list_push(list: SyncList, value: String) -> SyncList Never! {
     invalid := !valid_sync_text(list.replica, 1048576, false)
         || !valid_sync_text(value, 1048576, true)
         || list.clock >= 2147483646
@@ -202,15 +202,15 @@ pub fn list_push(list: SyncList, value: String) -> SyncList {
     if invalid -> return ~list
     clock :: list.clock + 1
     id :: "{list.replica}:{clock}"
-    items := [RgaItem]{}
+    items := [RGAItem]{}
     loop item in list.items -> &items.push(item)
-    &items.push(RgaItem{id: id, value: value, tombstone: false})
+    &items.push(RGAItem{id: id, value: value, tombstone: false})
     SyncList{replica: list.replica, clock: clock, items: items}
 }
 
-pub fn list_remove(list: SyncList, id: String) -> SyncList {
+pub fn list_remove(list: SyncList, id: String) -> SyncList Never! {
     if id.len() == 0 || !valid_sync_text(list.replica, 1048576, false) -> return ~list
-    items := [RgaItem]{}
+    items := [RGAItem]{}
     found := false
     changed := false
     loop item in ~list.items {
@@ -219,7 +219,7 @@ pub fn list_remove(list: SyncList, id: String) -> SyncList {
             if item.tombstone {
                 &items.push(item)
             } else {
-                &items.push(RgaItem{id: item.id, value: item.value, tombstone: true})
+                &items.push(RGAItem{id: item.id, value: item.value, tombstone: true})
                 changed = true
             }
         } else {
@@ -230,15 +230,15 @@ pub fn list_remove(list: SyncList, id: String) -> SyncList {
     SyncList{replica: list.replica, clock: list.clock + 1, items: items}
 }
 
-pub fn list_contains(list: SyncList, id: String) -> Bool {
+pub fn list_contains(list: SyncList, id: String) -> Bool Never! {
     loop item in ~list.items {
         if item.id == id && !item.tombstone -> return true
     }
     false
 }
 
-pub fn list_merge(left: SyncList, right: SyncList) -> SyncList {
-    seen := [String:RgaItem]{}
+pub fn list_merge(left: SyncList, right: SyncList) -> SyncList Never! {
+    seen := [String:RGAItem]{}
     order := [String]{}
     loop item in left.items {
         old :: seen.get(item.id)
@@ -279,14 +279,14 @@ pub fn list_merge(left: SyncList, right: SyncList) -> SyncList {
         order[j] = key
         i += 1
     }
-    items := [RgaItem]{}
-    loop id in order -> &items.push(seen.get(id) ?? RgaItem{id: id, value: "", tombstone: true})
+    items := [RGAItem]{}
+    loop id in order -> &items.push(seen.get(id) ?? RGAItem{id: id, value: "", tombstone: true})
     clock := left.clock
     if right.clock > clock -> clock = right.clock
     SyncList{replica: left.replica, clock: clock, items: items}
 }
 
-pub fn list_show(list: SyncList) -> String {
+pub fn list_show(list: SyncList) -> String Never! {
     out := "["
     first := true
     loop item in list.items {
@@ -298,15 +298,15 @@ pub fn list_show(list: SyncList) -> String {
     "{out}]"
 }
 
-pub fn text_new() -> SyncText { text_for("local") }
+pub fn text_new() -> SyncText Never! { text_for("local") }
 
-pub fn text_for(replica: String) -> SyncText {
+pub fn text_for(replica: String) -> SyncText Never! {
     id := replica
     if id.len() == 0 -> id = "local"
     if !valid_sync_text(id, 1048576, false) -> id = ""
     SyncText{replica: id, clock: 0, value: "", ts: 0}
 }
-pub fn text_set(text: SyncText, value: String) -> SyncText {
+pub fn text_set(text: SyncText, value: String) -> SyncText Never! {
     invalid := !valid_sync_text(text.replica, 1048576, false)
         || !valid_sync_text(value, 1048576, true)
         || text.clock >= 2147483646
@@ -315,9 +315,9 @@ pub fn text_set(text: SyncText, value: String) -> SyncText {
     SyncText{replica: text.replica, clock: ts, value: value, ts: ts}
 }
 
-pub fn text_edit(text: SyncText, value: String) -> SyncText { text_set(text, value) }
+pub fn text_edit(text: SyncText, value: String) -> SyncText Never! { text_set(text, value) }
 
-pub fn text_merge(left: SyncText, right: SyncText) -> SyncText {
+pub fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
     invalid := !valid_sync_text(left.replica, 1048576, false)
         || !valid_sync_text(right.replica, 1048576, false)
     if invalid -> return ~left
@@ -331,29 +331,29 @@ pub fn text_merge(left: SyncText, right: SyncText) -> SyncText {
     SyncText{replica: left.replica, clock: clock, value: left.value, ts: left.ts}
 }
 
-pub fn text_append(text: SyncText, suffix: String) -> SyncText {
+pub fn text_append(text: SyncText, suffix: String) -> SyncText Never! {
     if text.value.len() + suffix.len() > 1048576 -> return ~text
     text_set(text, "{text.value}{suffix}")
 }
 
-pub fn text_clock(text: SyncText) -> Int { text.clock }
-pub fn text_replica(text: SyncText) -> String { text.replica }
+pub fn text_clock(text: SyncText) -> Int Never! { text.clock }
+pub fn text_replica(text: SyncText) -> String Never! { text.replica }
 
-pub fn policy_grant(policy: RowPolicy, action: String) -> RowPolicy {
+pub fn policy_grant(policy: RowPolicy, action: String) -> RowPolicy Never! {
     if action.len() == 0 || contains(policy.allow, action) -> return ~policy
     allow := ~policy.allow
     &allow.push(action)
     RowPolicy{allow: allow, deny: ~policy.deny}
 }
 
-pub fn policy_deny(policy: RowPolicy, action: String) -> RowPolicy {
+pub fn policy_deny(policy: RowPolicy, action: String) -> RowPolicy Never! {
     if action.len() == 0 || contains(policy.deny, action) -> return ~policy
     deny := ~policy.deny
     &deny.push(action)
     RowPolicy{allow: ~policy.allow, deny: deny}
 }
 
-pub fn policy_revoke(policy: RowPolicy, action: String) -> RowPolicy {
+pub fn policy_revoke(policy: RowPolicy, action: String) -> RowPolicy Never! {
     allow := [String]{}
     loop item in ~policy.allow {
         if item != action -> &allow.push(item)
@@ -382,13 +382,13 @@ fn contains(items: [String], value: String) -> Bool {
     false
 }
 
-pub fn text_show(text: SyncText) -> String { text.value }
+pub fn text_show(text: SyncText) -> String Never! { text.value }
 
-pub fn text_metadata(text: SyncText) -> String { "{text.replica}@{text.ts}" }
+pub fn text_metadata(text: SyncText) -> String Never! { "{text.replica}@{text.ts}" }
 
-pub fn policy_new() -> RowPolicy { RowPolicy{allow: [String]{}, deny: [String]{}} }
+pub fn policy_new() -> RowPolicy Never! { RowPolicy{allow: [String]{}, deny: [String]{}} }
 
-pub fn policy_allows(policy: RowPolicy, action: String) -> Bool {
+pub fn policy_allows(policy: RowPolicy, action: String) -> Bool Never! {
     loop d in policy.deny {
         if d == action || d == "*" -> return false
     }
@@ -399,6 +399,6 @@ pub fn policy_allows(policy: RowPolicy, action: String) -> Bool {
     false
 }
 
-pub fn policy_show(policy: RowPolicy) -> String {
+pub fn policy_show(policy: RowPolicy) -> String Never! {
     "allow={policy.allow.len()} deny={policy.deny.len()}"
 }

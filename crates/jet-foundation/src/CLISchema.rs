@@ -93,24 +93,6 @@ pub struct CLIInputSchema {
 }
 
 impl CLIInputSchema {
-    /// Help passed to the shared `core.args` builder. The builder adds the
-    /// environment label; the typed layer adds its decoded default and the
-    /// ratified precedence law.
-    pub fn builder_help(&self) -> String {
-        let mut help = self.help.clone();
-        if let CLIInputShape::Value {
-            default: Some(default),
-            ..
-        } = &self.shape
-        {
-            help.push_str(&format!(" [default: {}]", default.display()));
-            if self.env.is_some() {
-                help.push_str(" [precedence: flag > env > default]");
-            }
-        }
-        help
-    }
-
     pub fn required(&self) -> bool {
         matches!(
             self.shape,

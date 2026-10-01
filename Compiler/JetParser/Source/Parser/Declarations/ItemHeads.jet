@@ -1,6 +1,21 @@
 // Pure dispatcher lookahead for contextual and marker-led declarations.
 // `offset` is relative to the current token, so marker stacks can be inspected
 // without consuming them.
+use jet_lexer.[
+    TOKEN_COLON_COLON,
+    TOKEN_DOT,
+    TOKEN_HASH,
+    TOKEN_IDENT,
+    TOKEN_KW_EXTERN,
+    TOKEN_KW_MODULE,
+    TOKEN_KW_TAG,
+    TOKEN_LBRACE,
+    TOKEN_LPAREN,
+    TOKEN_LT,
+    TOKEN_MINUS,
+    TOKEN_SEMI,
+]
+
 fn parser_c_module_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
     if parser_kind_at(&state, offset) != TOKEN_HASH || parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
     marker :: parser_lookahead(&state, offset + 1)

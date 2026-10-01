@@ -299,31 +299,14 @@ fn volatile_zeroize(bytes: &mut [u8]) {
 // Encodings (I6: std-only, no external crates)
 // ──────────────────────────────────────────────
 
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{:02x}", b));
-    }
-    s
-}
+use jet_foundation::Hex::encode as hex_encode;
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim();
     if s.len() % 2 != 0 {
         return Err("odd-length hex string".to_string());
     }
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(s.len() / 2);
-    let mut i = 0;
-    while i < bytes.len() {
-        let hi = (bytes[i] as char).to_digit(16).ok_or("invalid hex digit")?;
-        let lo = (bytes[i + 1] as char)
-            .to_digit(16)
-            .ok_or("invalid hex digit")?;
-        out.push(((hi << 4) | lo) as u8);
-        i += 2;
-    }
-    Ok(out)
+    jet_foundation::Hex::decode(s).ok_or_else(|| "invalid hex digit".to_string())
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

@@ -1,5 +1,108 @@
 // Declaration grammar. AST nodes are assembled directly from Jet tokens; no
 // Rust parser or semantic compiler is involved.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    CallLabel,
+    CodeModule,
+    ConstAttr,
+    ConstDef,
+    DeriveBodyItem,
+    DeriveDef,
+    EffectDecl,
+    EffectRowEntry,
+    EnumDef,
+    ErrorConvDef,
+    Expr,
+    Field,
+    Func,
+    ImplDef,
+    ImportDecl,
+    ImportKind,
+    ImportedItem,
+    InlineVersion,
+    Item,
+    Marker,
+    MarkerCallArg,
+    NamedSpan,
+    NamedType,
+    Param,
+    ParamZone,
+    PrepParam,
+    RustConstKind,
+    Span,
+    StateDecl,
+    Stmt,
+    StructDef,
+    TagDef,
+    TraitDef,
+    TraitMethodSig,
+    Type,
+    TypeAliasDef,
+    TypeParam,
+    UserPolicyDecl,
+    Variant,
+    VariantField,
+    VariantPayload,
+    ast_const,
+    ast_enum,
+    ast_func,
+    ast_struct,
+]
+use jet_lexer.[
+    TOKEN_AMP,
+    TOKEN_AT,
+    TOKEN_BANG,
+    TOKEN_CARET,
+    TOKEN_COLON,
+    TOKEN_COLON_COLON,
+    TOKEN_COLON_EQ,
+    TOKEN_COMMA,
+    TOKEN_DOT,
+    TOKEN_DOT_DOT_DOT,
+    TOKEN_EOF,
+    TOKEN_EQ,
+    TOKEN_FLOAT,
+    TOKEN_GT,
+    TOKEN_HASH,
+    TOKEN_IDENT,
+    TOKEN_INT,
+    TOKEN_KW_COMPTIME,
+    TOKEN_KW_CONST,
+    TOKEN_KW_COPY,
+    TOKEN_KW_DERIVE,
+    TOKEN_KW_EFFECT,
+    TOKEN_KW_ENUM,
+    TOKEN_KW_EXTERN,
+    TOKEN_KW_FN,
+    TOKEN_KW_IMPL,
+    TOKEN_KW_MODULE,
+    TOKEN_KW_MOVE,
+    TOKEN_KW_MUTATE,
+    TOKEN_KW_PRIV,
+    TOKEN_KW_PUB,
+    TOKEN_KW_STRUCT,
+    TOKEN_KW_TAG,
+    TOKEN_KW_TRAIT,
+    TOKEN_KW_USE,
+    TOKEN_LBRACE,
+    TOKEN_LBRACKET,
+    TOKEN_LPAREN,
+    TOKEN_LT,
+    TOKEN_MINUS,
+    TOKEN_PIPE,
+    TOKEN_RAW_STRING,
+    TOKEN_RBRACE,
+    TOKEN_RBRACKET,
+    TOKEN_RPAREN,
+    TOKEN_SELF,
+    TOKEN_SEMI,
+    TOKEN_SLASH,
+    TOKEN_STAR,
+    TOKEN_STRING,
+    TOKEN_UNIFIED_ARROW,
+    Token,
+]
 
 pub struct ParsedItemOrImport {
     pub item: Item?
@@ -756,7 +859,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers)
     has_body := false
     if {
         parser_current_kind(&state) == TOKEN_LBRACE -> {
-            body :: parser_parse_block(&state)
+            body :: parser_parse_body_block(&state, parser_return_type_has_value(return_type))
             func.body = body.statements
             func.span = parser_cover(modifiers.start_span, body.span)
             has_body = true
@@ -771,6 +874,17 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers)
         }
     }
     ParsedFunction{value: func, has_body: has_body}
+}
+
+// A unit or unit-fallible (`E!`) result carries no value, so the body's final
+// line stays a statement.
+fn parser_return_type_has_value(return_type: Type?) -> Bool Never! {
+    ty :: return_type ?? return false
+    if ty == {
+        .Named(name) -> name != "Unit"
+        .Result(ok, _) -> ok != (Type.Named{name: "Unit"})
+        else -> true
+    }
 }
 
 fn parser_apply_function_markers(func: &Func, markers: [Marker]) Never! {
@@ -1059,7 +1173,7 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     parsed_value := ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}
     if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
         head :: parser_bump(&state)
-        block :: parser_parse_value_block(&state, 0)
+        block :: parser_parse_value_block(&state, 0, true)
         span :: parser_cover(head.span, block.span)
         parsed_value = ParsedExpr{expr: Expr.Unit{span: span}, span: span}
         if block.statements.len() == 0 && block.tail == .Val(tail) {

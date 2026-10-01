@@ -18,11 +18,11 @@ use crate::Comptime::{CtValue, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{Func, Stmt, StructDef};
 use jet_foundation::Authority::{answer, parse_right, root, Authority, Holds, Verdict};
+use jet_foundation::Hex::encode as hex_bytes;
 use jet_foundation::SHA256;
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 pub const CONSOLE_PROTOCOL: &str = "jet.console.v1";
@@ -320,10 +320,6 @@ impl ConsoleProject {
         Ok(self)
     }
 
-    pub fn has_database(&self, name: &str) -> bool {
-        self.databases.iter().any(|database| database.name == name)
-    }
-
     pub fn has_service(&self, name: &str) -> bool {
         self.services.iter().any(|service| service.name == name)
     }
@@ -437,16 +433,6 @@ impl ConsoleOptions {
         self
     }
 
-    pub fn with_session_nonce(mut self, nonce: impl Into<String>) -> Self {
-        self.session_nonce = nonce.into();
-        self
-    }
-
-    pub fn with_now_ms(mut self, now_ms: u64) -> Self {
-        self.now_ms = now_ms;
-        self
-    }
-
     pub fn with_ttl_ms(mut self, ttl_ms: u64) -> Self {
         self.ttl_ms = ttl_ms;
         self
@@ -454,11 +440,6 @@ impl ConsoleOptions {
 
     pub fn release_build(mut self, release: bool) -> Self {
         self.release_build = release;
-        self
-    }
-
-    pub fn with_loopback(mut self, loopback: bool) -> Self {
-        self.loopback = loopback;
         self
     }
 
@@ -1460,23 +1441,6 @@ impl ConsoleSession {
         self.expires_at_ms != 0 && self.now_ms >= self.expires_at_ms
     }
 
-    pub fn set_now_ms(&mut self, now_ms: u64) {
-        self.now_ms = self.now_ms.max(now_ms);
-    }
-
-    pub fn attach_router<R>(&mut self, router: R)
-    where
-        R: InProcessRouter + 'static,
-    {
-        self.router = Some(Box::new(router));
-    }
-
-    pub fn attach_data_backend<B>(&mut self, backend: B)
-    where
-        B: ConsoleDataBackend + 'static,
-    {
-        self.data = Some(Box::new(backend));
-    }
     /// Retain a host-owned resource for this session without coupling the
     /// transport-neutral REPL to the host's concrete runtime type.
     pub fn attach_resource<R>(&mut self, resource: R)
@@ -2519,23 +2483,6 @@ impl ConsoleSession {
                 continue;
             }
             let output = self.run_line(line)?;
-            if matches!(output.kind, ConsoleOutputKind::Goodbye | ConsoleOutputKind::Cancelled) {
-                break;
-            }
-        }
-        Ok(())
-    }
-    pub fn run_reader<R: BufRead>(&mut self, reader: &mut R) -> Result<(), ConsoleError> {
-        let mut line = String::new();
-        loop {
-            line.clear();
-            let bytes = reader
-                .read_line(&mut line)
-                .map_err(|error| ConsoleError::InvalidInput(format!("console input read failed: {error}")))?;
-            if bytes == 0 {
-                break;
-            }
-            let output = self.run_line(line.trim_end_matches(['\r', '\n']))?;
             if matches!(output.kind, ConsoleOutputKind::Goodbye | ConsoleOutputKind::Cancelled) {
                 break;
             }
@@ -3634,14 +3581,6 @@ fn bounded_bytes(mut value: Vec<u8>, max_bytes: usize) -> (Vec<u8>, bool) {
     }
     value.truncate(max_bytes);
     (value, true)
-}
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len().saturating_mul(2));
-    for byte in bytes {
-        output.push_str(&format!("{byte:02x}"));
-    }
-    output
 }
 fn audit_error_reason(error: &ConsoleError) -> String {
     match error {

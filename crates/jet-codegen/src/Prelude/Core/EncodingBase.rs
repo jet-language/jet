@@ -3,29 +3,19 @@
 const JET_B64_CHARS: &[u8; 64] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/// `core.encoding.hex.decode`: mixed-case digits, whole bytes only, no
+/// whitespace. The length check runs before the digit scan.
 pub(crate) fn jet_std_hex_decode(text: &String) -> Result<Vec<u8>, String> {
-    if let Some((offset, _)) = text.char_indices().find(|(_, ch)| ch.is_whitespace()) {
-        return Err(format!(
-            "hex string contains whitespace at byte offset {offset}"
-        ));
-    }
     if text.len() % 2 != 0 {
-        return Err(format!("hex string has odd length ({})", text.len()));
+        return Err(
+            "odd-length hex string; hex text encodes whole bytes, so the length must be even"
+                .to_string(),
+        );
     }
     let mut out = Vec::with_capacity(text.len() / 2);
-    for (pair_index, pair) in text.as_bytes().chunks_exact(2).enumerate() {
-        let offset = pair_index * 2;
-        let Some(high) = hex_nibble(pair[0]) else {
-            return Err(format!(
-                "invalid hex at offset {offset}: {:?}",
-                String::from_utf8_lossy(pair)
-            ));
-        };
-        let Some(low) = hex_nibble(pair[1]) else {
-            return Err(format!(
-                "invalid hex at offset {offset}: {:?}",
-                String::from_utf8_lossy(pair)
-            ));
+    for pair in text.as_bytes().chunks_exact(2) {
+        let (Some(high), Some(low)) = (hex_nibble(pair[0]), hex_nibble(pair[1])) else {
+            return Err("invalid hex digit; expected 0-9, a-f, or A-F".to_string());
         };
         out.push((high << 4) | low);
     }
@@ -41,14 +31,19 @@ fn hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
+fn hex_with_digits(bytes: &[u8], digits: &[u8; 16]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(digits[usize::from(byte >> 4)] as char);
+        out.push(digits[usize::from(byte & 0x0f)] as char);
+    }
+    out
+}
 pub(crate) fn jet_std_hex_encode(bytes: &Vec<u8>) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    hex_with_digits(bytes, b"0123456789abcdef")
 }
 pub(crate) fn jet_std_hex_encode_upper(bytes: &Vec<u8>) -> String {
-    bytes.iter().map(|byte| format!("{byte:02X}")).collect()
-}
-pub(crate) fn jet_std_hex_encode_prefixed(bytes: &Vec<u8>) -> String {
-    format!("0x{}", jet_std_hex_encode(bytes))
+    hex_with_digits(bytes, b"0123456789ABCDEF")
 }
 pub(crate) fn jet_std_hex_encode_sep(bytes: &Vec<u8>, separator: &String) -> String {
     bytes
@@ -62,7 +57,8 @@ pub(crate) fn jet_std_hex_is_hex(text: &String) -> bool {
 }
 pub(crate) fn jet_std_hex_dump(bytes: &Vec<u8>) -> String {
     let mut out = String::new();
-    for (offset, chunk) in bytes.chunks(16).enumerate() {
+    for (row, chunk) in bytes.chunks(16).enumerate() {
+        let offset = row * 16;
         let mut hex = String::new();
         for index in 0..16 {
             if index > 0 {
@@ -118,103 +114,6 @@ pub(crate) fn jet_std_crc32(bytes: &Vec<u8>) -> i64 {
     i64::from((!crc) as i32) & 0xffff_ffff
 }
 
-pub(crate) fn jet_std_b2a_qp(bytes: &Vec<u8>) -> String {
-    let mut out = String::new();
-    for &byte in bytes {
-        match byte {
-            b'\n' => out.push('\n'),
-            33..=60 | 62..=126 | b' ' | b'\t' => out.push(byte as char),
-            _ => out.push_str(&format!("={byte:02X}")),
-        }
-    }
-    out
-}
-
-pub(crate) fn jet_std_a2b_qp(text: &String) -> Result<Vec<u8>, String> {
-    let raw = text.as_bytes();
-    let mut out = Vec::new();
-    let mut index = 0usize;
-    while index < raw.len() {
-        if raw[index] == b'=' {
-            if index + 1 < raw.len() && raw[index + 1] == b'\n' {
-                index += 2;
-                continue;
-            }
-            if index + 2 >= raw.len() {
-                return Err("incomplete quoted-printable escape".to_string());
-            }
-            let Some(high) = hex_nibble(raw[index + 1]) else {
-                return Err("invalid quoted-printable escape".to_string());
-            };
-            let Some(low) = hex_nibble(raw[index + 2]) else {
-                return Err("invalid quoted-printable escape".to_string());
-            };
-            out.push((high << 4) | low);
-            index += 3;
-        } else {
-            out.push(raw[index]);
-            index += 1;
-        }
-    }
-    Ok(out)
-}
-
-fn uu_char(value: u8) -> u8 {
-    let value = value & 0x3f;
-    if value == 0 { b'`' } else { value + 32 }
-}
-
-fn uu_value(value: u8) -> u8 {
-    if value == b'`' { 0 } else { value.wrapping_sub(32) & 0x3f }
-}
-
-pub(crate) fn jet_std_b2a_uu(bytes: &Vec<u8>) -> String {
-    let mut out = String::new();
-    for chunk in bytes.chunks(45) {
-        out.push(uu_char(chunk.len() as u8) as char);
-        for triple in chunk.chunks(3) {
-            let a = triple[0];
-            let b = triple.get(1).copied().unwrap_or(0);
-            let c = triple.get(2).copied().unwrap_or(0);
-            out.push(uu_char(a >> 2) as char);
-            out.push(uu_char((a << 4) | (b >> 4)) as char);
-            out.push(uu_char((b << 2) | (c >> 6)) as char);
-            out.push(uu_char(c) as char);
-        }
-        out.push('\n');
-    }
-    out
-}
-
-pub(crate) fn jet_std_a2b_uu(text: &String) -> Result<Vec<u8>, String> {
-    let raw = text.as_bytes();
-    if raw.is_empty() {
-        return Ok(Vec::new());
-    }
-    let count = uu_value(raw[0]) as usize;
-    let mut out = Vec::with_capacity(count);
-    let mut index = 1usize;
-    while index + 3 < raw.len() && out.len() < count {
-        let a = uu_value(raw[index]);
-        let b = uu_value(raw[index + 1]);
-        let c = uu_value(raw[index + 2]);
-        let d = uu_value(raw[index + 3]);
-        out.push((a << 2) | (b >> 4));
-        if out.len() < count {
-            out.push((b << 4) | (c >> 2));
-        }
-        if out.len() < count {
-            out.push((c << 6) | d);
-        }
-        index += 4;
-    }
-    if out.len() == count {
-        Ok(out)
-    } else {
-        Err("truncated uuencoded data".to_string())
-    }
-}
-
 pub(crate) fn jet_std_b64_encode(bytes: &Vec<u8>) -> String {
     let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
     for chunk in bytes.chunks(3) {
@@ -234,6 +133,17 @@ pub(crate) fn jet_std_b64_encode(bytes: &Vec<u8>) -> String {
         } else {
             '='
         });
+    }
+    out
+}
+/// Python `base64.encodebytes`: standard Base64 in 76-character lines, each
+/// ending in `\n`.
+pub(crate) fn jet_std_b64_encodebytes(bytes: &Vec<u8>) -> String {
+    let encoded = jet_std_b64_encode(bytes);
+    let mut out = String::with_capacity(encoded.len() + encoded.len() / 76 + 1);
+    for line in encoded.as_bytes().chunks(76) {
+        out.extend(line.iter().map(|&byte| char::from(byte)));
+        out.push('\n');
     }
     out
 }
@@ -291,39 +201,6 @@ pub(crate) fn jet_std_b64_pad(text: &String) -> String {
 pub(crate) fn jet_std_b64_unpad(text: &String) -> String {
     text.trim_end_matches('=').to_string()
 }
-pub(crate) fn jet_std_b64_is_base64(text: &String) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-    let mut padding = 0usize;
-    for byte in text.bytes() {
-        if byte == b'=' {
-            padding += 1;
-            if padding > 2 {
-                return false;
-            }
-            continue;
-        }
-        if padding != 0
-            || !(byte.is_ascii_uppercase()
-                || byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || matches!(byte, b'+' | b'/' | b'-' | b'_'))
-        {
-            return false;
-        }
-    }
-    text.len().is_multiple_of(4) || padding > 0
-}
-
-pub(crate) fn jet_std_base32_is_base32(text: &String) -> bool {
-    !text.is_empty()
-        && text.bytes().all(|byte| {
-            byte.is_ascii_uppercase()
-                || byte.is_ascii_lowercase()
-                || matches!(byte, b'2'..=b'7' | b'=')
-        })
-}
 
 const JET_BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const JET_BASE32HEX_CHARS: &[u8; 32] = b"0123456789ABCDEFGHIJKLMNOPQRSTUV";
@@ -359,178 +236,6 @@ pub(crate) fn jet_std_base32hex_encode(bytes: &Vec<u8>) -> String {
     base32_encode_with_alphabet(bytes, JET_BASE32HEX_CHARS)
 }
 
-const JET_B85_CHARS: &[u8] =
-    b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
-
-fn base85_word(chunk: &[u8]) -> u32 {
-    let mut word = 0u32;
-    for &byte in chunk {
-        word = (word << 8) | byte as u32;
-    }
-    word << (8 * (4 - chunk.len()))
-}
-
-fn base85_digits(word: u32, alphabet: impl Fn(usize) -> u8) -> [u8; 5] {
-    let mut digits = [0u8; 5];
-    let mut value = word as u64;
-    let mut index = 5usize;
-    while index > 0 {
-        index -= 1;
-        digits[index] = alphabet((value % 85) as usize);
-        value /= 85;
-    }
-    digits
-}
-
-pub(crate) fn jet_std_a85_encode(bytes: &Vec<u8>) -> String {
-    let mut out = String::new();
-    for chunk in bytes.chunks(4) {
-        let word = base85_word(chunk);
-        if chunk.len() == 4 && word == 0 {
-            out.push('z');
-            continue;
-        }
-        let digits = base85_digits(word, |index| (33 + index) as u8);
-        let count = if chunk.len() == 4 { 5 } else { chunk.len() + 1 };
-        for &digit in &digits[..count] {
-            out.push(digit as char);
-        }
-    }
-    out
-}
-
-pub(crate) fn jet_std_b85_encode(bytes: &Vec<u8>) -> String {
-    let mut out = String::new();
-    for chunk in bytes.chunks(4) {
-        let digits = base85_digits(base85_word(chunk), |index| JET_B85_CHARS[index]);
-        let count = if chunk.len() == 4 { 5 } else { chunk.len() + 1 };
-        for &digit in &digits[..count] {
-            out.push(digit as char);
-        }
-    }
-    out
-}
-
-fn decode_base85_group(group: &[u8; 5]) -> u32 {
-    let mut word = 0u32;
-    for &digit in group {
-        word = word * 85 + digit as u32;
-    }
-    word
-}
-
-fn is_ascii_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
-}
-
-pub(crate) fn jet_std_a85_decode(text: &String) -> Result<Vec<u8>, String> {
-    let mut raw = text.as_bytes();
-    let adobe = raw.starts_with(b"<~");
-    if adobe {
-        if !raw.ends_with(b"~>") {
-            return Err("Ascii85 adobe framing must end with ~>".to_string());
-        }
-        raw = &raw[2..raw.len() - 2];
-    }
-    let mut out = Vec::new();
-    let mut group = [0u8; 5];
-    let mut length = 0usize;
-    for &byte in raw {
-        if is_ascii_space(byte) {
-            continue;
-        }
-        if byte == b'z' {
-            if length != 0 {
-                return Err("Ascii85 z shortcut must start a group".to_string());
-            }
-            out.extend_from_slice(&[0, 0, 0, 0]);
-            continue;
-        }
-        if !(33..=117).contains(&byte) {
-            return Err("invalid Ascii85 character".to_string());
-        }
-        group[length] = byte - 33;
-        length += 1;
-        if length == 5 {
-            out.extend_from_slice(&decode_base85_group(&group).to_be_bytes());
-            length = 0;
-        }
-    }
-    if length == 1 {
-        return Err("Ascii85 final group must contain at least two characters".to_string());
-    }
-    if length > 1 {
-        for digit in &mut group[length..] {
-            *digit = 84;
-        }
-        let bytes = decode_base85_group(&group).to_be_bytes();
-        out.extend_from_slice(&bytes[..length - 1]);
-    }
-    Ok(out)
-}
-
-pub(crate) fn jet_std_b85_decode(text: &String) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    let mut group = [0u8; 5];
-    let mut length = 0usize;
-    for byte in text.bytes() {
-        let Some(index) = JET_B85_CHARS.iter().position(|&candidate| candidate == byte) else {
-            return Err("invalid Base85 character".to_string());
-        };
-        group[length] = index as u8;
-        length += 1;
-        if length == 5 {
-            out.extend_from_slice(&decode_base85_group(&group).to_be_bytes());
-            length = 0;
-        }
-    }
-    if length == 1 {
-        return Err("Base85 final group must contain at least two characters".to_string());
-    }
-    if length > 1 {
-        for digit in &mut group[length..] {
-            *digit = 84;
-        }
-        let bytes = decode_base85_group(&group).to_be_bytes();
-        out.extend_from_slice(&bytes[..length - 1]);
-    }
-    Ok(out)
-}
-
-const JET_Z85_CHARS: &[u8] =
-    b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
-
-pub(crate) fn jet_std_z85_encode(bytes: &Vec<u8>) -> String {
-    if bytes.len() % 4 != 0 {
-        return String::new();
-    }
-    let mut out = String::with_capacity(bytes.len() / 4 * 5);
-    for chunk in bytes.chunks_exact(4) {
-        let digits = base85_digits(base85_word(chunk), |index| JET_Z85_CHARS[index]);
-        for &digit in &digits {
-            out.push(digit as char);
-        }
-    }
-    out
-}
-
-pub(crate) fn jet_std_z85_decode(text: &String) -> Result<Vec<u8>, String> {
-    if text.len() % 5 != 0 {
-        return Err("Z85 text length must be a multiple of five".to_string());
-    }
-    let mut out = Vec::with_capacity(text.len() / 5 * 4);
-    let mut group = [0u8; 5];
-    for (index, byte) in text.bytes().enumerate() {
-        let Some(digit) = JET_Z85_CHARS.iter().position(|&candidate| candidate == byte) else {
-            return Err("invalid Z85 character".to_string());
-        };
-        group[index % 5] = digit as u8;
-        if index % 5 == 4 {
-            out.extend_from_slice(&decode_base85_group(&group).to_be_bytes());
-        }
-    }
-    Ok(out)
-}
 pub(crate) fn jet_std_binary_pack_u8(value: i64) -> Vec<u8> {
     vec![value as u8]
 }

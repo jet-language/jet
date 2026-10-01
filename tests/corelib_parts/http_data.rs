@@ -24,7 +24,7 @@ fn run() {
     envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")
     replaced :: message.with_envelope(envelope) ?? panic("replace")
     bytes :: email.serialize(replaced) ?? panic("serialize")
-    start_tls :: email.SMTPSecurity.StartTls
+    start_tls :: email.SMTPSecurity.StartTLS
     transport_tls :: email.SMTPSecurity.TLS
     require_all :: email.RecipientPolicy.RequireAll
     recipient :: email.RecipientReport{
@@ -53,7 +53,7 @@ fn run() {
         code: Val(525),
         reason: "certificate",
     } }
-    print(start_tls == .StartTls)
+    print(start_tls == .StartTLS)
     print(transport_tls == .TLS)
     print(require_all == .RequireAll)
     print(default_envelope.recipients.len())
@@ -95,7 +95,7 @@ fn run() {
     );
     assert!(
         out.rust.contains(".to_string_value()"),
-        "typed Url should render to String at HTTP boundary:\n{}",
+        "typed URL should render to String at HTTP boundary:\n{}",
         out.rust
     );
 }
@@ -533,7 +533,7 @@ fn main() {
             &[], &[], &[],
         ).unwrap_err()
     });
-    assert!(url_errors.into_iter().all(|error| matches!(error, bridge::JetHTTPBridgeError::InvalidUrl)));
+    assert!(url_errors.into_iter().all(|error| matches!(error, bridge::JetHTTPBridgeError::InvalidURL)));
     let refused_url = "http://127.0.0.1:0/".to_string();
     let connection_error = bridge::jet_http_client_send_parts_impl(
         "GET", &refused_url, &[], None, None, None, None, None, None, None, None, None, None, None,

@@ -1,0 +1,104 @@
+// A module `prep` table evaluates helper bodies before they are checked, the
+// way the compiler's own registry tables are built: a one-row typed list whose
+// row is a named-payload variant holding its own typed list, optional helpers
+// matched with `.Val(...)` / `.None` patterns, enum equality in the table
+// expression (the `Comparable.compare` hook), an enum method called on a
+// parameter, a user enum that shares its name with a Core enum (`Effect`),
+// and a leading-dot `return .Less` that takes its enum from the declared
+// `-> Ordering` return type.
+pub enum Shape {
+    Int
+    Float
+    Union(members: [Shape])
+}
+
+pub enum Sink {
+    Credential
+    Other
+
+    fn label(self) -> String {
+        if self == {
+            .Credential -> "credential"
+            .Other -> "other"
+        }
+    }
+}
+
+pub enum Effect {
+    Time
+    GPU
+}
+
+fn numeric_union() -> [Shape] Never! {
+    [Shape]{Shape.Union{members: [Shape]{Shape.Int, Shape.Float}}}
+}
+
+fn sink_for(module_name: String) -> Sink? {
+    if module_name == "core.log" -> Val(Sink.Credential) else -> None
+}
+
+fn sink_rank(module_name: String) -> Int {
+    if sink_for(module_name) == {
+        .Val(.Credential) -> 2
+        .Val(_) -> 1
+        .None -> 0
+    }
+}
+
+fn label_of(sink: Sink) -> String {
+    sink.label()
+}
+
+fn shape_width(shape: Shape) -> Int {
+    if shape == {
+        .Union(members) -> members.len()
+        else -> 1
+    }
+}
+
+fn effect_for(module_name: String) -> Effect? {
+    if {
+        module_name == "core.time" -> Val(Effect.Time)
+        module_name == "core.compute" -> Val(Effect.GPU)
+        else -> None
+    }
+}
+
+fn effect_label(module_name: String) -> String {
+    if effect_for(module_name) == {
+        .Val(root) -> "{root}"
+        .None -> "none"
+    }
+}
+
+fn sink_order(sink: Sink) -> Ordering {
+    if sink == {
+        .Credential -> return .Less
+        else -> {}
+    }
+    return .Equal
+}
+
+fn order_rank(order: Ordering) -> Int {
+    if order == {
+        .Less -> 1
+        .Equal -> 2
+        .Greater -> 3
+    }
+}
+
+SHAPES :: prep { numeric_union() }
+RANKS :: prep { [Int]{sink_rank("core.log"), sink_rank("core.term")} }
+IS_CREDENTIAL :: prep { [Bool]{Sink.Credential == Sink.Credential, Sink.Other == Sink.Credential} }
+LABELS :: prep { [String]{label_of(Sink.Credential), label_of(Sink.Other)} }
+EFFECTS :: prep { [String]{effect_label("core.time"), effect_label("core.compute"), effect_label("core.text")} }
+ORDERS :: prep { [Int]{order_rank(sink_order(Sink.Credential)), order_rank(sink_order(Sink.Other))} }
+
+fn run() {
+    print("shapes {SHAPES.len()} width {shape_width(SHAPES[0])}")
+    print("ranks {RANKS[0]} {RANKS[1]}")
+    print("credential {IS_CREDENTIAL[0]} {IS_CREDENTIAL[1]}")
+    print("labels {LABELS[0]} {LABELS[1]}")
+    print("effects {EFFECTS[0]} {EFFECTS[1]} {EFFECTS[2]}")
+    print("orders {ORDERS[0]} {ORDERS[1]}")
+}

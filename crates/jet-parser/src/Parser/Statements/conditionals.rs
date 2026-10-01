@@ -581,9 +581,20 @@ impl<'a> Parser<'a> {
             ));
         }
         self.adjacent_if_body_depth += 1;
-        let statement = self.stmt();
+        let statement = self.braceless_arm_stmt();
         self.adjacent_if_body_depth -= 1;
         Ok(vec![statement?])
+    }
+
+    /// The one statement of a braceless arm. It shares the enclosing block's
+    /// depth but is never that block's final line, so a trailing
+    /// `loop … -> e` in it keeps statement meaning: D-TAIL-RETURN1=A makes
+    /// only a direct final body line a collecting loop.
+    pub(super) fn braceless_arm_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let saved = self.lambda_tail_block_depth.replace(self.block_depth);
+        let statement = self.stmt();
+        self.lambda_tail_block_depth = saved;
+        statement
     }
 
     /// Parse an optional `else` tail. Each body it consumes is appended to
@@ -742,7 +753,7 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             ));
         }
-        Ok(vec![self.stmt()?])
+        Ok(vec![self.braceless_arm_stmt()?])
     }
 
     /// D-IF1: is the `if` body (cursor just past `{`) a multi-arm dispatch?
@@ -1376,8 +1387,7 @@ impl<'a> Parser<'a> {
             Ok(self.block_stmts())
         } else {
             // Braceless single statement (a call, binding, return, etc.).
-            let stmt = self.stmt()?;
-            Ok(vec![stmt])
+            Ok(vec![self.braceless_arm_stmt()?])
         }
     }
 

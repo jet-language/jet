@@ -20,7 +20,7 @@ use jet::REPL::Notebook::{
     NotebookAppSchema,
 };
 use jet_foundation::DataTree::DataTree;
-use jet_foundation::JSON::parse_json;
+use jet_foundation::JSON::{parse_json, quote as json_str};
 const MAX_REQUEST_HEADERS: usize = 64 * 1024;
 const MAX_REQUEST_BODY: usize = 8 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 64;
@@ -1333,23 +1333,6 @@ fn checked_error_json(code: &str, message: &str) -> String {
         Ok(DataTree::Object(_)) => format!("{{\"ok\":false,\"error\":{message}}}"),
         _ => error_json(code, message),
     }
-}
-
-fn json_str(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
 }
 
 const APP_HTML: &str = r##"<!doctype html>

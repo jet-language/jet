@@ -13,19 +13,19 @@ pub struct DerivationObservation {
     pub counterexample_id: String?
 }
 
-pub enum DerivationPayload { FrameSchedule(schedule: MirFrameSchedule) }
+pub enum DerivationPayload { FrameSchedule(schedule: MIRFrameSchedule) }
 
 pub struct DerivationRecord {
     pub id: String
     pub subject: String
     pub claim: String
     pub producer: String
-    pub method: MirDerivationMethod
+    pub method: MIRDerivationMethod
     pub rule: String
     pub premises: [String]
     pub identity: DerivationIdentity
     pub assumptions: [String]
-    pub disposition: MirDerivationDisposition
+    pub disposition: MIRDerivationDisposition
     pub observation: DerivationObservation?
     pub payload: DerivationPayload?
 }
@@ -36,7 +36,7 @@ pub fn derivation_identity(source: String, build: String, run: String, target: S
     DerivationIdentity{source: source, build: build, run: run, target: target}
 }
 
-pub fn derivation_record(subject: String, claim: String, producer: String, method: MirDerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
+pub fn derivation_record(subject: String, claim: String, producer: String, method: MIRDerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
     sorted_premises := derivation_strings_sorted_unique(premises)
     record := DerivationRecord{
         id: "",
@@ -48,7 +48,7 @@ pub fn derivation_record(subject: String, claim: String, producer: String, metho
         premises: sorted_premises,
         identity: identity,
         assumptions: [String]{},
-        disposition: MirDerivationDisposition.Current,
+        disposition: MIRDerivationDisposition.Current,
         observation: None,
         payload: None,
     }
@@ -63,8 +63,8 @@ pub fn derivation_record_with_payload(record: ^DerivationRecord, payload: Deriva
     updated
 }
 
-pub fn derivation_record_reference(record: DerivationRecord) -> MirDerivationRef Never! {
-    MirDerivationRef{id: record.id}
+pub fn derivation_record_reference(record: DerivationRecord) -> MIRDerivationRef Never! {
+    MIRDerivationRef{id: record.id}
 }
 
 pub fn derivation_record_validate(record: DerivationRecord) -> Bool Never! {
@@ -101,7 +101,7 @@ pub fn derivation_store_empty() -> DerivationStore Never! {
 
 // Invalid non-canonical records are not interned. Existing IDs resolve to the
 // first canonical record, preserving idempotent evidence collection.
-pub fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) -> MirDerivationRef? {
+pub fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) -> MIRDerivationRef? {
     if !derivation_record_validate(record) -> return None
     loop existing in store.records {
         if existing.id == record.id -> return Val(derivation_record_reference(existing))
@@ -141,7 +141,7 @@ fn derivation_strings_sorted_unique(values: [String]) -> [String] Never! {
     result
 }
 
-fn derivation_method_name(method: MirDerivationMethod) -> String Never! {
+fn derivation_method_name(method: MIRDerivationMethod) -> String Never! {
     if method == {
         .StaticDerivation -> derivation_json_quote("static_derivation")
         .FormalProof -> derivation_json_quote("formal_proof")
@@ -151,7 +151,7 @@ fn derivation_method_name(method: MirDerivationMethod) -> String Never! {
     }
 }
 
-fn derivation_disposition_name(disposition: MirDerivationDisposition) -> String Never! {
+fn derivation_disposition_name(disposition: MIRDerivationDisposition) -> String Never! {
     if disposition == {
         .Current -> derivation_json_quote("current")
         .Stale -> derivation_json_quote("stale")
@@ -197,7 +197,7 @@ fn derivation_record_id(record: DerivationRecord) -> String Never! {
 
 pub struct DerivationHashState { pub first: Int, pub second: Int }
 
-fn derivation_method_raw(method: MirDerivationMethod) -> String Never! {
+fn derivation_method_raw(method: MIRDerivationMethod) -> String Never! {
     if method == {
         .StaticDerivation -> "static_derivation"
         .FormalProof -> "formal_proof"
@@ -296,7 +296,7 @@ fn derivation_hex_byte(value: Int) -> String Never! {
     String.from_bytes([U8]{digits[(value >> 4) & 15], digits[value & 15]}) ?? "00"
 }
 
-fn mir_frame_schedule_json(schedule: MirFrameSchedule) -> String Never! {
+fn mir_frame_schedule_json(schedule: MIRFrameSchedule) -> String Never! {
     operations := [String]{}
     dependencies := [String]{}
     transfers := [String]{}
@@ -318,7 +318,7 @@ fn mir_frame_schedule_json(schedule: MirFrameSchedule) -> String Never! {
     "{{\"schema\":\"jet.frame_schedule/v1\",\"operations\":[{operations_json}],\"dependencies\":[{dependencies_json}],\"transfers\":[{transfers_json}],\"reuse\":[{reuse_json}],\"retentions\":[{retentions_json}],\"conservative\":[{conservative_json}]}}"
 }
 
-fn mir_frame_operation_json(operation: MirFrameOperation) -> String Never! {
+fn mir_frame_operation_json(operation: MIRFrameOperation) -> String Never! {
     accesses := [String]{}
     loop access in operation.accesses -> &accesses.push(mir_resource_access_json(access))
     provider := if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{derivation_json_quote(operation.completion_provider ?? "")}"
@@ -326,18 +326,18 @@ fn mir_frame_operation_json(operation: MirFrameOperation) -> String Never! {
     "{{\"name\":{derivation_json_quote(operation.name)},\"source_index\":{derivation_json_quote(operation.source_index.to_string())},\"accesses\":[{accesses_json}],\"completion\":{mir_frame_completion_json(operation.completion)},\"external_effect\":{derivation_json_bool(operation.external_effect)}{provider}}}"
 }
 
-fn mir_resource_access_json(access: MirResourceAccess) -> String Never! {
+fn mir_resource_access_json(access: MIRResourceAccess) -> String Never! {
     "{{\"resource\":{mir_resource_identity_json(access.resource)},\"mode\":{derivation_json_quote(mir_resource_mode_name(access.mode))},\"region\":{mir_resource_region_json(access.region)},\"layout\":{mir_resource_layout_json(access.layout)},\"temporary\":{derivation_json_bool(access.temporary)}}}"
 }
 
-fn mir_resource_identity_json(identity: MirResourceIdentity) -> String Never! {
+fn mir_resource_identity_json(identity: MIRResourceIdentity) -> String Never! {
     if identity == {
         .Named(name) -> "{{\"kind\":\"named\",\"value\":{derivation_json_quote(name)}}}"
         .Unknown -> "{{\"kind\":\"unknown\"}}"
     }
 }
 
-fn mir_resource_mode_name(mode: MirResourceAccessMode) -> String Never! {
+fn mir_resource_mode_name(mode: MIRResourceAccessMode) -> String Never! {
     if mode == {
         .Read -> "read"
         .Write -> "write"
@@ -345,7 +345,7 @@ fn mir_resource_mode_name(mode: MirResourceAccessMode) -> String Never! {
     }
 }
 
-fn mir_resource_region_json(region: MirResourceRegion) -> String Never! {
+fn mir_resource_region_json(region: MIRResourceRegion) -> String Never! {
     if region == {
         .Whole -> "{{\"kind\":\"whole\"}}"
         .Unknown -> "{{\"kind\":\"unknown\"}}"
@@ -353,12 +353,12 @@ fn mir_resource_region_json(region: MirResourceRegion) -> String Never! {
     }
 }
 
-fn mir_resource_layout_json(layout: MirResourceLayout?) -> String Never! {
+fn mir_resource_layout_json(layout: MIRResourceLayout?) -> String Never! {
     value :: layout ?? return "null"
     "{{\"size\":{derivation_json_quote(value.size.to_string())},\"align\":{derivation_json_quote(value.align.to_string())},\"layout\":{derivation_json_quote(value.layout)},\"device\":{derivation_json_quote(value.device)}}}"
 }
 
-fn mir_frame_completion_json(completion: MirFrameCompletion) -> String Never! {
+fn mir_frame_completion_json(completion: MIRFrameCompletion) -> String Never! {
     if completion == {
         .Synchronous -> "{{\"kind\":\"synchronous\"}}"
         .Pending(token) -> "{{\"kind\":\"pending\",\"token\":{derivation_json_quote(token)}}}"
@@ -366,19 +366,19 @@ fn mir_frame_completion_json(completion: MirFrameCompletion) -> String Never! {
     }
 }
 
-fn mir_frame_dependency_json(row: MirFrameDependency) -> String Never! {
+fn mir_frame_dependency_json(row: MIRFrameDependency) -> String Never! {
     "{{\"before\":{derivation_json_quote(row.before.to_string())},\"after\":{derivation_json_quote(row.after.to_string())},\"resource\":{derivation_json_quote(row.resource)},\"reason\":{derivation_json_quote(row.reason)}}}"
 }
 
-fn mir_frame_transfer_json(row: MirFrameTransfer) -> String Never! {
+fn mir_frame_transfer_json(row: MIRFrameTransfer) -> String Never! {
     "{{\"before\":{derivation_json_quote(row.before.to_string())},\"after\":{derivation_json_quote(row.after.to_string())},\"resource\":{derivation_json_quote(row.resource)},\"from_device\":{derivation_json_quote(row.from_device)},\"to_device\":{derivation_json_quote(row.to_device)}}}"
 }
 
-fn mir_frame_reuse_json(row: MirFrameReuse) -> String Never! {
+fn mir_frame_reuse_json(row: MIRFrameReuse) -> String Never! {
     "{{\"previous_resource\":{derivation_json_quote(row.previous_resource)},\"next_resource\":{derivation_json_quote(row.next_resource)},\"previous_last_use\":{derivation_json_quote(row.previous_last_use.to_string())},\"next_first_use\":{derivation_json_quote(row.next_first_use.to_string())},\"legal\":{derivation_json_bool(row.legal)},\"reason\":{derivation_json_quote(row.reason)}}}"
 }
 
-fn mir_frame_retention_json(row: MirFrameRetention) -> String Never! {
+fn mir_frame_retention_json(row: MIRFrameRetention) -> String Never! {
     token := if row.completion_token == None -> "null" else -> derivation_json_quote(row.completion_token ?? "")
     "{{\"resource\":{derivation_json_quote(row.resource)},\"operation\":{derivation_json_quote(row.operation.to_string())},\"owner\":{derivation_json_quote(row.owner)},\"completion_token\":{token},\"completed\":{derivation_json_bool(row.completed)}}}"
 }

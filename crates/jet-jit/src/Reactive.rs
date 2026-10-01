@@ -1117,19 +1117,6 @@ fn jet_jit_decision_hook_run(hook: i64, payload: i64) -> i64 {
     })
 }
 
-fn jet_jit_hook_decision_continue() -> i64 {
-    0
-}
-fn jet_jit_hook_decision_transform(v: i64) -> i64 {
-    (v << 8) | 1
-}
-fn jet_jit_hook_decision_cancel() -> i64 {
-    2
-}
-fn jet_jit_hook_decision_fail(msg: i64) -> i64 {
-    (msg << 8) | 3
-}
-
 // ── Async event host: canonical scheduler-backed Event lifecycle ─────────────
 
 fn enum_variant_handle(

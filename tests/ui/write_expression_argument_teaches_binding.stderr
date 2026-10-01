@@ -1,8 +1,8 @@
-Error [E0202]: The write-access marker `&` needs a plain named binding after it
-  --> tests/ui/write_expression_argument_teaches_binding.jet:6:11
+Error [E0202]: The write-access marker `&` needs a place after it
+  --> write_expression_argument_teaches_binding.jet:6:11
     |
   6 |     edit(&(1 + 2))
     |           ^
- Why: Write access from the write-access marker `&` can only be granted to a named binding, not an expression
+ Why: Write access reaches only a place: a name, optionally followed by field, index, or range projections such as `buf.items[0]`; a temporary expression has no storage for the edit to land in
  Fix: Bind the value first: `x := ...` then pass `&x` with the write-access marker `&`
 More: jet-lang.dev/e/E0202

@@ -593,32 +593,6 @@ impl EditorHostTransport {
             .unwrap_or_default()
     }
 
-
-    pub fn from_session<I, S>(
-        workbench_url: impl Into<String>,
-        session: &ResidentDevSession,
-        source_id: impl Into<String>,
-        source_path: impl Into<String>,
-        revision: impl Into<String>,
-        grants: I,
-    ) -> Result<Self, EditorHostError>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        let mut transport = Self::new(
-            workbench_url,
-            session.id().to_string(),
-            source_id,
-            source_path,
-            revision,
-            grants,
-        )?;
-        let projection = session.devtools_events_since(None);
-        transport.replace_projection(&projection)?;
-        Ok(transport)
-    }
-
     /// Return the shared foundation view state carried by this editor host.
     pub fn view(&self) -> &JetDevtoolsViewState {
         &self.view

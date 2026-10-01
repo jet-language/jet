@@ -8,47 +8,47 @@ pub enum Loadable<T, E> {
     Failed(E)
 }
 
-pub fn idle<T, E>() -> Loadable<T, E> { Loadable.Idle }
+pub fn idle<T, E>() -> Loadable<T, E> Never! { Loadable.Idle }
 
-pub fn loading<T, E>() -> Loadable<T, E> { Loadable.Loading }
+pub fn loading<T, E>() -> Loadable<T, E> Never! { Loadable.Loading }
 
-pub fn loaded<T, E>(value: T) -> Loadable<T, E> { Loadable.Loaded(value) }
+pub fn loaded<T, E>(value: T) -> Loadable<T, E> Never! { Loadable.Loaded(value) }
 
-pub fn failed<T, E>(reason: E) -> Loadable<T, E> { Loadable.Failed(reason) }
+pub fn failed<T, E>(reason: E) -> Loadable<T, E> Never! { Loadable.Failed(reason) }
 
-pub fn is_idle<T, E>(state: Loadable<T, E>) -> Bool {
+pub fn is_idle<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Idle -> true
         else -> false
     }
 }
-pub fn is_loading<T, E>(state: Loadable<T, E>) -> Bool {
+pub fn is_loading<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Loading -> true
         else -> false
     }
 }
-pub fn is_loaded<T, E>(state: Loadable<T, E>) -> Bool {
+pub fn is_loaded<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Loaded(_) -> true
         else -> false
     }
 }
-pub fn is_failed<T, E>(state: Loadable<T, E>) -> Bool {
+pub fn is_failed<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Failed(_) -> true
         else -> false
     }
 }
 
-pub fn value<T, E>(state: Loadable<T, E>) -> T? {
+pub fn value<T, E>(state: Loadable<T, E>) -> T? Never! {
     if state == {
         .Loaded(value) -> Val(value)
         else -> None
     }
 }
 
-pub fn reason<T, E>(state: Loadable<T, E>) -> E? {
+pub fn reason<T, E>(state: Loadable<T, E>) -> E? Never! {
     if state == {
         .Failed(message) -> Val(message)
         else -> None
@@ -57,7 +57,7 @@ pub fn reason<T, E>(state: Loadable<T, E>) -> E? {
 
 // Retry starts a fresh attempt only from an idle or failed state.  A loaded
 // result is stable, and retrying an in-flight request must not discard it.
-pub fn retry<T, E>(state: Loadable<T, E>) -> Loadable<T, E> {
+pub fn retry<T, E>(state: Loadable<T, E>) -> Loadable<T, E> Never! {
     if is_failed<T, E>(state) || is_idle<T, E>(state) -> return Loadable.Loading
     ~state
 }

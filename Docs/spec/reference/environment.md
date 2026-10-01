@@ -52,9 +52,11 @@ one exists instead of adding another spelling for the same job.
 
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
+| `JET_CANDIDATE_COMPILER` | executable path | Names the candidate compiler (for example the self-hosted `jetc0`). When set, `Tools/agent/verify-full.sh` runs `Tools/agent/compiler-diff.mjs` (canary, then all corpora) against the reference compiler. |
 | `JET_CANVAS_PREREQUISITES` | `strict` | Makes Canvas scenario verification fail instead of skip when a prerequisite is absent. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |
+| `JET_REFERENCE_COMPILER` | executable path | Names the pinned reference compiler for `Tools/agent/compiler-diff.mjs`; defaults to `target/debug/jet`. |
 | `JET_REQUIRE_RUSTC` | `1` | Fails tests when rustc is unavailable instead of skipping rustc-backed proof. |
 | `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget; `Tools/agent/verify-full.sh` defaults it to 6. |
 | `JET_UI_FILTER` | repository-relative fixture substring | Selects UI diagnostic or lint fixtures. |

@@ -9,6 +9,7 @@ use jet_foundation::App::AppGraph;
 use jet_foundation::Names::{
     NameAlias, NameDeclaration, NameLedger, NameVisibility, StructureFact, StructureFactKind,
 };
+use std::collections::HashMap;
 
 struct LivenessCandidate {
     code: &'static str,
@@ -38,6 +39,71 @@ impl LivenessCandidate {
     }
 }
 
+/// The bundle and ledger lookups every declaration verdict makes, built in
+/// one pass: scanning every reference and item per declaration made the pass
+/// quadratic in unit size.
+struct LivenessIndex<'a> {
+    /// Functions and methods by (module, name span). The first in item order
+    /// wins, as a walk of the module's items finds it.
+    functions: HashMap<(usize, Span), &'a Func>,
+    /// Reference sites by the declaration they name: (defining module path,
+    /// definition span).
+    references: HashMap<(&'a str, Span), Vec<ReferenceSite<'a>>>,
+    /// Module display name to the first module carrying it.
+    modules: HashMap<&'a str, usize>,
+}
+
+struct ReferenceSite<'a> {
+    /// Ledger path of the module holding the reference.
+    source: &'a str,
+    start: usize,
+    end: usize,
+    kind: &'a str,
+}
+
+impl<'a> LivenessIndex<'a> {
+    fn new(bundle: &'a ProgramBundle, ledger: &'a NameLedger) -> Self {
+        let mut functions = HashMap::new();
+        for (module_idx, module) in bundle.modules.iter().enumerate() {
+            index_functions(module_idx, &module.items, &mut functions);
+        }
+        let mut references = HashMap::<_, Vec<_>>::new();
+        for ((source, start, end), reference) in ledger.references() {
+            references
+                .entry((reference.module_path.as_str(), reference.def_span))
+                .or_default()
+                .push(ReferenceSite {
+                    source: source.as_str(),
+                    start: *start,
+                    end: *end,
+                    kind: reference.kind.as_str(),
+                });
+        }
+        let mut modules = HashMap::new();
+        for (module_idx, module) in bundle.modules.iter().enumerate() {
+            modules.entry(module.display.as_str()).or_insert(module_idx);
+        }
+        Self {
+            functions,
+            references,
+            modules,
+        }
+    }
+
+    fn function(&self, module: usize, name_span: Span) -> Option<&'a Func> {
+        self.functions.get(&(module, name_span)).copied()
+    }
+
+    fn references_to<'s>(&'s self, module_path: &'s str, def_span: Span) -> &'s [ReferenceSite<'a>] {
+        // The key's path lifetime narrows to the query's (the map is
+        // covariant in its key).
+        let references: &'s HashMap<(&'s str, Span), Vec<ReferenceSite<'a>>> = &self.references;
+        references
+            .get(&(module_path, def_span))
+            .map_or(&[][..], Vec::as_slice)
+    }
+}
+
 pub(super) fn check_liveness(
     bundle: &ProgramBundle,
     ledger: &mut NameLedger,
@@ -45,9 +111,13 @@ pub(super) fn check_liveness(
 ) -> Vec<Diagnostic> {
     let mut candidates = Vec::new();
     record_materialized_comptime_alias_uses(bundle, ledger);
-    collect_unused_imports(bundle, ledger, &mut candidates);
-    collect_unused_private_functions(bundle, ledger, app_graph, &mut candidates);
-    collect_unreachable_exports(bundle, ledger, app_graph, &mut candidates);
+    {
+        let ledger = &*ledger;
+        let index = LivenessIndex::new(bundle, ledger);
+        collect_unused_imports(bundle, ledger, &mut candidates);
+        collect_unused_private_functions(bundle, ledger, &index, app_graph, &mut candidates);
+        collect_unreachable_exports(bundle, ledger, &index, app_graph, &mut candidates);
+    }
 
     candidates.sort_by(|a, b| {
         bundle.modules[a.module].display
@@ -85,15 +155,16 @@ pub(super) fn check_liveness(
 /// warnings.
 fn record_materialized_comptime_alias_uses(bundle: &ProgramBundle, ledger: &mut NameLedger) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let imports = module
-            .imports
-            .iter()
-            .filter_map(|import| {
-                import
-                    .core_module_path()
-                    .map(|path| (import.import_alias(), path))
-            })
-            .collect::<std::collections::HashMap<_, _>>();
+        // Every local import name a `prep` initializer can read: Core and
+        // file module aliases, and member-import bindings (`use b.[f]`).
+        let mut imports = std::collections::HashMap::new();
+        for import in &module.imports {
+            let path = import.core_module_path().unwrap_or_default();
+            for binding in import.walk_bindings() {
+                imports.insert(binding.local, path.clone());
+            }
+            imports.insert(import.import_alias(), path);
+        }
         if imports.is_empty() {
             continue;
         }
@@ -203,6 +274,7 @@ fn collect_unused_imports(
 fn collect_unused_private_functions(
     bundle: &ProgramBundle,
     ledger: &NameLedger,
+    index: &LivenessIndex<'_>,
     app_graph: Option<&AppGraph>,
     candidates: &mut Vec<LivenessCandidate>,
 ) {
@@ -214,16 +286,17 @@ fn collect_unused_private_functions(
         {
             continue;
         }
-        if function_is_root(bundle, declaration, app_graph)
-            || private_function_used(bundle, ledger, declaration)
+        if function_is_root(bundle, index, declaration, app_graph)
+            || private_function_used(bundle, ledger, index, declaration)
         {
             continue;
         }
-        let Some(module) = bundle.modules.get(declaration.module) else {
+        if bundle.modules.get(declaration.module).is_none() {
             continue;
-        };
+        }
         let name = display_name(declaration);
-        let edit = find_function_by_name_span(&module.items, declaration.span)
+        let edit = index
+            .function(declaration.module, declaration.span)
             .filter(|function| removable_private_function(function))
             .map(|function| crate::Diagnostics::TextEdit {
                 span: function.span,
@@ -244,6 +317,7 @@ fn collect_unused_private_functions(
 fn collect_unreachable_exports(
     bundle: &ProgramBundle,
     ledger: &NameLedger,
+    index: &LivenessIndex<'_>,
     app_graph: Option<&AppGraph>,
     candidates: &mut Vec<LivenessCandidate>,
 ) {
@@ -256,8 +330,8 @@ fn collect_unreachable_exports(
         {
             continue;
         }
-        if function_is_root(bundle, declaration, app_graph)
-            || declaration_reached_from_package(bundle, ledger, declaration)
+        if function_is_root(bundle, index, declaration, app_graph)
+            || declaration_reached_from_package(bundle, ledger, index, declaration)
         {
             continue;
         }
@@ -372,6 +446,7 @@ fn alias_used(ledger: &NameLedger, alias: &NameAlias) -> bool {
 fn private_function_used(
     bundle: &ProgramBundle,
     ledger: &NameLedger,
+    index: &LivenessIndex<'_>,
     declaration: &NameDeclaration,
 ) -> bool {
     let Some(target_path) = bundle
@@ -381,47 +456,53 @@ fn private_function_used(
     else {
         return false;
     };
-    let function_span =
-        find_function_by_name_span(&bundle.modules[declaration.module].items, declaration.span)
-            .map(|function| function.span);
-    ledger
-        .references()
+    let function_span = index
+        .function(declaration.module, declaration.span)
+        .map(|function| function.span);
+    // D-MOD-CYCLE1=A: a package is one namespace, so a call from another
+    // file of the same package reaches a private function too.
+    let siblings = ledger
+        .namespace_siblings(declaration.module)
+        .into_iter()
+        .filter_map(|sibling| bundle.modules.get(sibling))
+        .map(|module| module.display.as_str())
+        .collect::<Vec<_>>();
+    index
+        .references_to(target_path, declaration.span)
         .iter()
-        .any(|((source, start, end), reference)| {
-            source == target_path
-                && reference.module_path == target_path
-                && reference.kind == "function"
-                && reference.def_span == declaration.span
-                && !function_span.is_some_and(|span| *start >= span.start && *end <= span.end)
+        .any(|site| {
+            site.kind == "function"
+                && if site.source == target_path {
+                    !function_span
+                        .is_some_and(|span| site.start >= span.start && site.end <= span.end)
+                } else {
+                    siblings.contains(&site.source)
+                }
         })
 }
 
 fn declaration_reached_from_package(
     bundle: &ProgramBundle,
     ledger: &NameLedger,
+    index: &LivenessIndex<'_>,
     declaration: &NameDeclaration,
 ) -> bool {
     let Some(target_module) = bundle.modules.get(declaration.module) else {
         return false;
     };
-    ledger
-        .references()
+    let Some(target) = ledger.module(declaration.module) else {
+        return false;
+    };
+    index
+        .references_to(&target_module.display, declaration.span)
         .iter()
-        .any(|((source, _, _), reference)| {
-            let Some(source_idx) = bundle
-                .modules
-                .iter()
-                .position(|module| module.display == *source)
-            else {
-                return false;
-            };
-            source_idx != declaration.module
-                && ledger
-                    .module(source_idx)
-                    .zip(ledger.module(declaration.module))
-                    .is_some_and(|(source, target)| source.package == target.package)
-                && reference.module_path == target_module.display
-                && reference.def_span == declaration.span
+        .any(|site| {
+            index.modules.get(site.source).is_some_and(|&source_idx| {
+                source_idx != declaration.module
+                    && ledger
+                        .module(source_idx)
+                        .is_some_and(|source| source.package == target.package)
+            })
         })
 }
 
@@ -452,12 +533,11 @@ fn alias_reached_from_package(
 
 fn function_is_root(
     bundle: &ProgramBundle,
+    index: &LivenessIndex<'_>,
     declaration: &NameDeclaration,
     app_graph: Option<&AppGraph>,
 ) -> bool {
-    let Some(function) =
-        find_function_by_name_span(&bundle.modules[declaration.module].items, declaration.span)
-    else {
+    let Some(function) = index.function(declaration.module, declaration.span) else {
         return false;
     };
     if super::is_build_entry(function) {
@@ -484,62 +564,43 @@ fn function_is_root(
         || graph.mounts.iter().any(|mount| handler(&mount.handler))
 }
 
-fn find_function_by_name_span(items: &[Item], span: Span) -> Option<&Func> {
+/// Add every function and method of `items` under its name span, keeping the
+/// first in item order.
+fn index_functions<'a>(
+    module: usize,
+    items: &'a [Item],
+    functions: &mut HashMap<(usize, Span), &'a Func>,
+) {
     for item in items {
-        match item {
-            Item::Func(function) if function.name_span == span => return Some(function),
-            Item::Struct(definition) => {
-                if let Some(function) = definition
-                    .methods
-                    .iter()
-                    .find(|function| function.name_span == span)
-                {
-                    return Some(function);
+        let methods: Box<dyn Iterator<Item = &'a Func>> = match item {
+            Item::Func(function) => Box::new(std::iter::once(function)),
+            Item::Struct(definition) => Box::new(
+                definition.methods.iter().chain(
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter()),
+                ),
+            ),
+            Item::Enum(definition) => Box::new(
+                definition.methods.iter().chain(
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter()),
+                ),
+            ),
+            Item::Impl(implementation) => Box::new(implementation.methods.iter()),
+            Item::CodeModule(code_module) => {
+                if let Some(body) = &code_module.body {
+                    index_functions(module, body, functions);
                 }
-                if let Some(function) = definition
-                    .trait_impls
-                    .iter()
-                    .flat_map(|implementation| implementation.methods.iter())
-                    .find(|function| function.name_span == span)
-                {
-                    return Some(function);
-                }
+                continue;
             }
-            Item::Enum(definition) => {
-                if let Some(function) = definition
-                    .methods
-                    .iter()
-                    .find(|function| function.name_span == span)
-                {
-                    return Some(function);
-                }
-                if let Some(function) = definition
-                    .trait_impls
-                    .iter()
-                    .flat_map(|implementation| implementation.methods.iter())
-                    .find(|function| function.name_span == span)
-                {
-                    return Some(function);
-                }
-            }
-            Item::Impl(implementation) => {
-                if let Some(function) = implementation
-                    .methods
-                    .iter()
-                    .find(|function| function.name_span == span)
-                {
-                    return Some(function);
-                }
-            }
-            Item::CodeModule(module) => {
-                if let Some(body) = &module.body {
-                    if let Some(function) = find_function_by_name_span(body, span) {
-                        return Some(function);
-                    }
-                }
-            }
-            _ => {}
+            _ => continue,
+        };
+        for function in methods {
+            functions.entry((module, function.name_span)).or_insert(function);
         }
     }
-    None
 }

@@ -1,6 +1,41 @@
 // Distinct nominal types and quantity/unit-family declarations.  The shared
 // type parser supplies the carrier and this file owns declaration-only metadata
 // such as ranges, dimensions, exact conversion ratios, and provenance.
+use jet_foundation.[
+    CallLabel,
+    DistinctDef,
+    IntegerRange,
+    Item,
+    Marker,
+    MarkerCallArg,
+    NamedSpan,
+    Span,
+    UnitDimensionDecl,
+    UnitFamilyDef,
+    UnitFamilyMember,
+    UnitRatio,
+    UnitScaleProvenance,
+]
+use jet_lexer.[
+    TOKEN_COLON,
+    TOKEN_COLON_COLON,
+    TOKEN_COMMA,
+    TOKEN_DOT_DOT,
+    TOKEN_EOF,
+    TOKEN_FLOAT,
+    TOKEN_HASH,
+    TOKEN_IDENT,
+    TOKEN_INT,
+    TOKEN_LBRACE,
+    TOKEN_LPAREN,
+    TOKEN_MINUS,
+    TOKEN_RAW_STRING,
+    TOKEN_RBRACE,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+    TOKEN_SLASH,
+    TOKEN_STRING,
+]
 
 fn parser_distinct_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_lookahead(&state, 2).payload.decoded == "distinct"

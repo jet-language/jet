@@ -1,6 +1,11 @@
 // Canonical statement-tail query for consuming ownership decisions.
 // The tail store and context frames are populated by sema_check_statements;
 // this module only reads those existing frames and the source AST.
+use jet_foundation.[
+    Expr,
+    LValue,
+    Stmt,
+]
 
 fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
     if expr == {
@@ -139,7 +144,7 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
 fn sema_ownership_last_use_lvalue(target: LValue, name: String) -> Bool {
     if target == {
         .Local(candidate, _) -> return candidate == name
-        .Index(base, index, _) -> return sema_ownership_last_use_expr(base, name) || sema_ownership_last_use_expr(index, name)
+        .Index(base, index, _, _) -> return sema_ownership_last_use_expr(base, name) || sema_ownership_last_use_expr(index, name)
         .Field(base, _, _) -> return sema_ownership_last_use_expr(base, name)
     }
 }

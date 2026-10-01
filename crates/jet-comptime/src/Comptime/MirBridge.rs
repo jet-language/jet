@@ -25,8 +25,9 @@ pub struct MirFragmentCoreSourceSignature {
     pub return_type: Option<Type>,
 }
 
-/// Loaded source-owned Core module whose bodies a comptime fragment lowers
-/// on demand, exactly as runtime lowering does for a reachable Core call.
+/// Loaded source module whose bodies a comptime fragment lowers on demand,
+/// exactly as runtime lowering does for a reachable call: a source-owned Core
+/// module, or a user file module a `prep` initializer reaches.
 #[derive(Clone, Debug)]
 pub struct MirFragmentCoreSourceModule {
     /// Loader alias of the defining module (`CoreSourceModule::alias`).
@@ -39,6 +40,21 @@ pub struct MirFragmentCoreSourceModule {
     /// Every top-level function of the module by name, private helpers
     /// included, so a demanded body can call its same-module helpers.
     pub functions: HashMap<String, Func>,
+    /// Every top-level constant of the module, so a demanded body reads its
+    /// same-module tables (`C_SHA256_K[t]`) as runtime lowering does.
+    pub constants: Vec<crate::AST::ConstDef>,
+    /// User file module: its own `use` aliases, source alias to the imported
+    /// module's `core_source_bodies` key (its loader alias). Empty for Core.
+    pub module_imports: HashMap<String, String>,
+    /// User file module: member-imported functions (`use c.[f]`), local name
+    /// to (`core_source_bodies` key, function name). Empty for Core.
+    pub imported_functions: HashMap<String, (String, String)>,
+    /// User file module: declared signatures of its cross-module callees,
+    /// keyed by (source alias or local name, function name).
+    pub import_signatures: HashMap<(String, String), MirFragmentCoreSourceSignature>,
+    /// User file module: its source type spellings (`Point`, `c.Shape`) to
+    /// canonical `package::module::Type` identities. Empty for Core.
+    pub nominal_identities: HashMap<String, String>,
 }
 
 /// Checked nominal facts retained for a comptime fragment.
@@ -65,6 +81,12 @@ pub struct MirFragmentNominalFacts {
     /// (`core.math`); the owner of every `core_source_sigs` row is here.
     /// Shared: every evaluation request clones these facts.
     pub core_source_bodies: std::sync::Arc<HashMap<String, MirFragmentCoreSourceModule>>,
+    /// The evaluated module's member-imported user functions (`use b.[f]`):
+    /// local name to (`core_source_bodies` key, function name).
+    pub imported_functions: HashMap<String, (String, String)>,
+    /// Declared signatures of the evaluated module's user-module callees,
+    /// keyed by (source alias or local name, function name).
+    pub import_signatures: HashMap<(String, String), MirFragmentCoreSourceSignature>,
 }
 
 pub struct ExprEvalRequest<'a> {
@@ -232,7 +254,7 @@ pub fn run_bundle_at_stage(
 /// rewritten reflected field reads into `ComptimeName` nodes, so a nested
 /// `@fact`/index/collection-length path must still use the same CtValue
 /// projection semantics without forcing a synthetic MIR method dispatch.
-fn static_ct_value(
+pub(super) fn static_ct_value(
     expr: &Expr,
     globals: &HashMap<String, CtValue>,
     mutated: Option<&HashMap<String, CtValue>>,
@@ -323,17 +345,17 @@ fn static_ct_value(
             .or_else(|| globals.get(name))
             .cloned(),
         Expr::Field(base, member, _) => {
-            let value = static_ct_value(base, globals, mutated)?;
-            if let Some(read) = jet_foundation::Registry::fact_read(member) {
-                return crate::Comptime::reflected_fact_field(&value, read).cloned();
-            }
-            let CtValue::Struct { fields, .. } = value else {
-                return None;
+            // Project through a borrowed place when the base is one, so
+            // `variant.$index` does not copy the whole reflected value.
+            let owned;
+            let value = match static_ct_place(base, globals, mutated) {
+                Some(value) => value,
+                None => {
+                    owned = static_ct_value(base, globals, mutated)?;
+                    &owned
+                }
             };
-            fields
-                .iter()
-                .find(|(field, _)| field == member.trim_start_matches('$'))
-                .map(|(_, value)| value.clone())
+            static_ct_field(value, member).cloned()
         }
         Expr::Index { base, index, .. } => {
             let value = static_ct_value(base, globals, mutated)?;
@@ -381,6 +403,44 @@ fn static_ct_value(
         }
         _ => None,
     }
+}
+
+/// The value a scope already owns at a name or field path, borrowed.
+fn static_ct_place<'v>(
+    expr: &'v Expr,
+    globals: &'v HashMap<String, CtValue>,
+    mutated: Option<&'v HashMap<String, CtValue>>,
+) -> Option<&'v CtValue> {
+    match expr {
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => static_ct_place(inner, globals, mutated),
+        Expr::Ident(name, _)
+        | Expr::ComptimeName {
+            name, value: None, ..
+        } => mutated
+            .and_then(|values| values.get(name))
+            .or_else(|| globals.get(name)),
+        Expr::ComptimeName {
+            value: Some(value), ..
+        } => Some(value),
+        Expr::Field(base, member, _) => {
+            static_ct_field(static_ct_place(base, globals, mutated)?, member)
+        }
+        _ => None,
+    }
+}
+
+/// One reflected fact or struct field of a compile-time value.
+fn static_ct_field<'v>(value: &'v CtValue, member: &str) -> Option<&'v CtValue> {
+    if let Some(read) = jet_foundation::Registry::fact_read(member) {
+        return crate::Comptime::reflected_fact_field(value, read);
+    }
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    fields
+        .iter()
+        .find(|(field, _)| field == member.trim_start_matches('$'))
+        .map(|(_, value)| value)
 }
 
 /// Run one expression through the canonical evaluator, retaining the pure

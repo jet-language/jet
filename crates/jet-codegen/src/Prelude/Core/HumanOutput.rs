@@ -51,13 +51,6 @@ impl JetOutputChannel {
         matches!(self, Self::Hidden)
     }
 
-    pub(crate) const fn is_stdout(self) -> bool {
-        matches!(self, Self::HumanStdout | Self::MachineStdout)
-    }
-
-    pub(crate) const fn is_stderr(self) -> bool {
-        matches!(self, Self::HumanStderr)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,37 +142,6 @@ impl JetOutputCapabilities {
     pub(crate) const fn allows(self, kind: JetOutputKind) -> bool {
         !self.channel_for(kind).is_hidden()
     }
-}
-
-/// Build a capability profile from facts supplied by a host or test. Width
-/// and height are clamped because a zero terminal dimension cannot lay out a
-/// row and should not turn into an unbounded fallback.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn jet_output_capabilities(
-    channel: JetOutputChannel,
-    color_mode: &str,
-    stdin_is_terminal: bool,
-    stdout_is_terminal: bool,
-    stderr_is_terminal: bool,
-    term: Option<&str>,
-    no_color: bool,
-    force_color: bool,
-    width: i64,
-    height: i64,
-) -> JetOutputCapabilities {
-    jet_output_capabilities_with_mode(
-        channel,
-        JetOutputColorMode::parse(color_mode),
-        stdin_is_terminal,
-        stdout_is_terminal,
-        stderr_is_terminal,
-        term,
-        no_color,
-        force_color,
-        width,
-        height,
-        true,
-    )
 }
 
 /// Resolve the one presentation policy from explicit host facts. This is the
@@ -376,37 +338,6 @@ pub(crate) fn jet_output_render(
     })
 }
 
-pub(crate) fn jet_output_style(
-    capabilities: JetOutputCapabilities,
-    style: &str,
-    text: &str,
-) -> String {
-    if capabilities.color_enabled {
-        jet_output_style_force(style, text)
-    } else {
-        jet_output_strip_ansi(text)
-    }
-}
-
-pub(crate) fn jet_output_style_force(style: &str, text: &str) -> String {
-    let code = match style {
-        "black" => Some("30"),
-        "red" => Some("31"),
-        "green" => Some("32"),
-        "yellow" => Some("33"),
-        "blue" => Some("34"),
-        "magenta" => Some("35"),
-        "cyan" => Some("36"),
-        "white" => Some("37"),
-        "bold" => Some("1"),
-        "dim" => Some("2"),
-        _ => None,
-    };
-    code.map_or_else(
-        || text.to_string(),
-        |code| format!("\x1b[{code}m{text}\x1b[0m"),
-    )
-}
 pub(crate) const JET_OUTPUT_MAX_TASKS: usize = 64;
 pub(crate) const JET_OUTPUT_MAX_COLUMNS: usize = 8;
 pub(crate) const JET_OUTPUT_MAX_TEXT: usize = 256;
@@ -1478,13 +1409,6 @@ pub(crate) fn jet_output_machine_table_only(
     table: &JetOutputTable,
 ) -> Option<String> {
     channel.is_machine().then(|| jet_output_table_json(table))
-}
-
-pub(crate) fn jet_output_machine_status_only(
-    channel: JetOutputChannel,
-    status: &JetOutputStatus,
-) -> Option<String> {
-    channel.is_machine().then(|| jet_output_status_json(status))
 }
 
 fn jet_output_json_escape(text: &str) -> String {

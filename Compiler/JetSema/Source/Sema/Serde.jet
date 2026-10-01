@@ -1,3 +1,9 @@
+use jet_foundation.[
+    TField,
+    TTypeDef,
+    Type,
+]
+
 pub enum SemaSerdeDirection {
     Encode
     Decode
@@ -38,11 +44,13 @@ fn sema_serde_has_name(values: [String], name: String) -> Bool Never! {
 
 fn sema_serde_implementation(environment: SemaScopeEnvironment, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool Never! {
     if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") -> return true
-    graph :: environment.registration_graph ?? return false
-    wanted := if direction == SemaSerdeDirection.Encode -> TSerdeCodec.Encode else -> TSerdeCodec.Decode
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
+    wanted :: sema_serde_codec_name(direction)
     loop module_row in graph.modules {
         loop implementation in module_row.impls {
-            if implementation.serde != (Val(wanted)) -> next
+            trait_name :: implementation.trait_name ?? next
+            if sema_serde_named_leaf(trait_name) != wanted -> next
             target_module := implementation.target_module_identity ?? implementation.source_module_identity
             if target_module == definition.module_identity && implementation.target_type_name == definition.name -> return true
         }
@@ -138,7 +146,8 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, name: String, di
     if name != "DataTree" && name != "JSON" && name != "TOML" && name != "YAML" && name != "CSV" -> return false
     if direction == SemaSerdeDirection.Decode && name != "DataTree" -> return false
     definition :: sema_serde_type_definition(environment, name) ?? return true
-    graph :: environment.registration_graph ?? return true
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return true
     loop module_row in graph.modules {
         if module_row.module_identity == definition.module_identity -> return module_row.module_name == "core.data" || module_row.module_name == "core.encoding"
     }

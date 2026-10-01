@@ -1,6 +1,31 @@
 // Source-semantic checks for the Core service APIs. Core identities and row
 // signatures come from the shared registry; this file only applies the
 // service-specific source contract before constructing the registered call.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    CoreCallRecord,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    SymbolID,
+    SymbolKind,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    TFunc,
+    THandleOp,
+    TStmt,
+    TStrPart,
+    Type,
+    UnOp,
+    expr_span,
+    tir_expr_children,
+    tir_stmt_children,
+]
 
 pub struct SemaServiceCoreMethodContract {
     pub member: String
@@ -60,7 +85,7 @@ fn sema_services_valid_name(value: String) -> Bool Never! {
     }
     true
 }
-fn sema_services_const_symbol(value: TExpr) -> SymbolId? {
+fn sema_services_const_symbol(value: TExpr) -> SymbolID? {
     return if value.kind == {
         .ConstRef(symbol) -> Val(symbol)
         else -> None
@@ -122,7 +147,7 @@ fn sema_services_bind_labels(api: String, args: &[CallArg], labels: [String], sp
 
 fn sema_services_apply_access(value: TExpr, access: AccessConvention) -> TExpr Never! {
     if access == AccessConvention.Move -> return sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
-    value
+    ~value
 }
 
 fn sema_services_record_direct_effect(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, effect_name: String, api: String, span: Span, diagnostics: &[Diagnostic]) Never! {
@@ -212,7 +237,7 @@ fn sema_services_contract(member: String, parameters: [Type], result_type: Type,
 fn sema_services_tree_contract(method: String) -> SemaServiceCoreMethodContract? {
     read := AccessConvention.Read
     write := AccessConvention.Write
-    unit_result := sema_services_result_type(Type.Unit)
+    unit_result := sema_services_result_type(Type.Named{name: "Unit"})
     service_name := Type.String
     if method == "set_restart" -> return Val(sema_services_contract("set_restart", [Type]{Type.Named{name: "ServiceRestart"}}, unit_result, write))
     if method == "set_delivery" -> return Val(sema_services_contract("set_delivery", [Type]{Type.Named{name: "ServiceDelivery"}}, unit_result, write))
@@ -240,7 +265,7 @@ fn sema_services_tree_contract(method: String) -> SemaServiceCoreMethodContract?
     if method == "replay_events" -> return Val(sema_services_contract("replay_events", [Type]{}, Type.String, read))
     if method == "observe" -> return Val(sema_services_contract("observe", [Type]{}, Type.String, read))
     if method == "workflow_start" -> return Val(sema_services_contract("workflow_start", [Type]{Type.String, Type.Int}, sema_services_result_type(Type.Named{name: "ServiceWorkflow"}), write))
-    if method == "workflow_step" -> return Val(sema_services_contract("workflow_step", [Type]{Type.Union{members: [Type]{Type.Int, Type.Named{name: "ServiceWorkflow"}}}, Type.String}, sema_services_result_type(Type.Unit), write))
+    if method == "workflow_step" -> return Val(sema_services_contract("workflow_step", [Type]{Type.Union{members: [Type]{Type.Int, Type.Named{name: "ServiceWorkflow"}}}, Type.String}, sema_services_result_type(Type.Named{name: "Unit"}), write))
     if method == "workflow_activity" -> return Val(sema_services_contract("workflow_activity", [Type]{Type.Union{members: [Type]{Type.Int, Type.Named{name: "ServiceWorkflow"}}}, Type.String, Type.String, Type.Int}, sema_services_result_type(Type.Named{name: "TaskStatus"}), write))
     if method == "workflow_activity_retry" -> return Val(sema_services_contract("workflow_activity_retry", [Type]{Type.Union{members: [Type]{Type.Int, Type.Named{name: "ServiceWorkflow"}}}, Type.String, Type.Named{name: "TaskOutcome"}}, sema_services_result_type(Type.Named{name: "TaskStatus"}), write))
     if method == "workflow_activity_complete" -> return Val(sema_services_contract("workflow_activity_complete", [Type]{Type.Union{members: [Type]{Type.Int, Type.Named{name: "ServiceWorkflow"}}}, Type.String, Type.Named{name: "TaskOutcome"}}, sema_services_result_type(Type.Named{name: "TaskOutcome"}), write))
@@ -255,14 +280,14 @@ fn sema_services_tree_contract(method: String) -> SemaServiceCoreMethodContract?
 }
 
 fn sema_services_workflow_contract(method: String) -> SemaServiceCoreMethodContract? {
-    if method == "sleep" -> return Val(sema_services_contract("workflow_sleep", [Type]{Type.Named{name: "Duration"}}, sema_services_result_type(Type.Unit), AccessConvention.Read))
+    if method == "sleep" -> return Val(sema_services_contract("workflow_sleep", [Type]{Type.Named{name: "Duration"}}, sema_services_result_type(Type.Named{name: "Unit"}), AccessConvention.Read))
     if method == "activity" -> return Val(sema_services_contract("workflow_activity_wait", [Type]{Type.String, Type.String}, sema_services_result_type(Type.String), AccessConvention.Read))
     if method == "all" -> return Val(sema_services_contract("workflow_all", [Type]{Type.List{element: Type.String}}, sema_services_result_type(Type.List{element: Type.String}), AccessConvention.Read))
     None
 }
 
 fn sema_services_endpoint_contract(method: String) -> SemaServiceCoreMethodContract? {
-    if method == "send" -> return Val(sema_services_contract("endpoint_send", [Type]{Type.String}, sema_services_result_type(Type.Unit), AccessConvention.Read))
+    if method == "send" -> return Val(sema_services_contract("endpoint_send", [Type]{Type.String}, sema_services_result_type(Type.Named{name: "Unit"}), AccessConvention.Read))
     if method == "receive" -> return Val(sema_services_contract("endpoint_receive", [Type]{}, sema_services_result_type(Type.String), AccessConvention.Read))
     if method == "show" -> return Val(sema_services_contract("endpoint_show", [Type]{}, Type.String, AccessConvention.Read))
     None
@@ -347,7 +372,7 @@ pub fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_v
         return Val(sema_services_core_call(record, core_args, fallbacks, true, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, environment, &scopes, &context, &diagnostics))
     }
     if method == "group" {
-        contract := sema_services_contract("group", [Type]{Type.String, Type.List{element: Type.String}}, sema_services_result_type(Type.Unit), AccessConvention.Write)
+        contract := sema_services_contract("group", [Type]{Type.String, Type.List{element: Type.String}}, sema_services_result_type(Type.Named{name: "Unit"}), AccessConvention.Write)
         values := sema_services_check_core_method("ServiceTree.group", contract, receiver, receiver_value, updated_args, [String]{}, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if updated_args.len() == 2 && !sema_services_valid_name(sema_services_literal_string(updated_args[0].expr) ?? "") {
             &diagnostics.push(sema_error("E0112", expr_span(updated_args[0].expr), "service group name is outside the checked builder shape", "group names must be non-empty visible literals of at most 256 bytes", "use a literal visible group name"))
@@ -439,7 +464,7 @@ pub fn sema_check_service_runtime_method(method: String, receiver: Expr, receive
     if !ownership.accepted || !ownership.complete -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     result_type := if {
         method == "send" -> sema_services_result_type(Type.Named{name: "Delivery"})
-        method == "commit" -> sema_services_result_type(Type.Unit)
+        method == "commit" -> sema_services_result_type(Type.Named{name: "Unit"})
         else -> sema_services_result_type(Type.Named{name: "Delivery"})
     }
     handle_args := [TExpr]{}

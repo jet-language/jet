@@ -17,7 +17,6 @@ use jet_foundation::Devtools::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Path.rs");
@@ -65,13 +64,6 @@ fn jet_log_process_exit(code: i64) {
 
 include!("../../jet-codegen/src/Prelude/Core/LogState.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/Log.rs");
-
-// #2027 / I8+I9: the resident host reaches the one signal mechanism through the
-// single in-binary instance of `Prelude/CoreLib/Top/Interrupt.rs` that the TIR
-// evaluator ambient also uses. A private `include!` here compiled a second
-// pending count, and its `signal(SIGINT, …)` install disarmed whichever tier
-// armed first.
-use jet_codegen::interrupt_runtime;
 
 // The Prelude owns every core.sys fact. This module supplies only the small
 // type/ambient surface needed to include that exact source; wrappers below
@@ -320,160 +312,8 @@ mod fs_write_prelude {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
 }
 
-// The resident JIT cannot hand a Rust `Rc` callback to the process signal
-// boundary. TIR gives it one Send-safe record containing a function address and
-// environment handle. This adapter owns only that raw-code invocation boundary
-// and the handler storage; the pending count, the platform handler, the arm path
-// and the count-first additive ordering all come from the shared Prelude owner.
-mod jit_os_interrupt {
-    use super::{interrupt_runtime, mpsc, Concurrency, OnceLock};
-
-    static DISPATCH: OnceLock<Result<mpsc::Sender<DispatchCommand>, String>> = OnceLock::new();
-
-    struct Command {
-        callback: usize,
-        env: i64,
-        has_env: bool,
-        ready: mpsc::SyncSender<()>,
-    }
-
-    enum DispatchCommand {
-        Register(Command),
-        Reset(mpsc::SyncSender<()>),
-    }
-
-    fn dispatcher() -> Result<&'static mpsc::Sender<DispatchCommand>, String> {
-        match DISPATCH.get_or_init(|| {
-            interrupt_runtime::jet_interrupt_arm()?;
-            let (tx, rx) = mpsc::channel::<DispatchCommand>();
-            std::thread::Builder::new()
-                .name("jet-jit-interrupt".to_string())
-                .spawn(move || {
-                    let mut handlers: Vec<(usize, i64, bool)> = Vec::new();
-                    loop {
-                        match rx.recv_timeout(interrupt_runtime::jet_interrupt_poll_interval()) {
-                            Ok(DispatchCommand::Register(command)) => {
-                                handlers.push((command.callback, command.env, command.has_env));
-                                let _ = command.ready.send(());
-                            }
-                            Ok(DispatchCommand::Reset(ready)) => {
-                                handlers.clear();
-                                interrupt_runtime::jet_interrupt_clear();
-                                let _ = ready.send(());
-                            }
-                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
-                            Err(mpsc::RecvTimeoutError::Timeout) => {}
-                        }
-                        interrupt_runtime::jet_interrupt_dispatch(
-                            &handlers,
-                            |&(callback, environment, has_env)| {
-                                Concurrency::with_http_jet_runtime(|| {
-                                    unsafe {
-                                        if has_env {
-                                            let callback: extern "C" fn(i64) =
-                                                std::mem::transmute(callback);
-                                            callback(environment);
-                                        } else {
-                                            let callback: extern "C" fn() =
-                                                std::mem::transmute(callback);
-                                            callback();
-                                        }
-                                    }
-                                });
-                            },
-                        );
-                    }
-                })
-                .map_err(interrupt_runtime::jet_interrupt_dispatcher_start_error)?;
-            Ok(tx)
-        }) {
-            Ok(tx) => Ok(tx),
-            Err(message) => Err(message.clone()),
-        }
-    }
-
-    fn register_parts(callback: usize, env: i64, has_env: bool) -> Result<(), String> {
-        if callback == 0 {
-            return Err(interrupt_runtime::jet_interrupt_invalid_callback_value_error().to_string());
-        }
-        let tx = dispatcher()?;
-        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
-        tx.send(DispatchCommand::Register(Command {
-            callback,
-            env,
-            has_env,
-            ready: ready_tx,
-        }))
-        .map_err(|_| interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string())?;
-        ready_rx.recv().map_err(|_| {
-            interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string()
-        })
-    }
-
-    pub(super) fn register(callback_record: i64) {
-        let result = (|| {
-            let (callback, environment) = Concurrency::with_runtime_mut(|rt| {
-                (
-                    rt.heap.record_get_int(callback_record, 0).unwrap_or(0),
-                    rt.heap.record_get_int(callback_record, 1).unwrap_or(0),
-                )
-            });
-            register_parts(callback as usize, environment, true).map_err(|message| {
-                if callback == 0 {
-                    interrupt_runtime::jet_interrupt_invalid_callback_record_error().to_string()
-                } else {
-                    message
-                }
-            })
-        })();
-        if let Err(message) = result {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap(&interrupt_runtime::jet_interrupt_core_error(&message));
-            });
-        }
-    }
-
-    pub(super) fn register_callable(callable: i64) -> i64 {
-        let slot = Concurrency::with_runtime_mut(|rt| {
-            super::super::runtime_host::jit_callable_parts(rt, callable)
-        });
-        let Some(slot) = slot else {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_host_fault("MIR interrupt closure has an invalid callable handle");
-                true
-            });
-            return 0;
-        };
-        if let Err(message) = register_parts(slot.fn_ptr as usize, slot.env, slot.has_env) {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_host_fault(&interrupt_runtime::jet_interrupt_core_error(&message));
-                true
-            });
-        }
-        0
-    }
-
-    pub(super) fn reset() {
-        let Some(Ok(tx)) = DISPATCH.get() else {
-            return;
-        };
-        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
-        if tx.send(DispatchCommand::Reset(ready_tx)).is_ok() {
-            let _ = ready_rx.recv();
-        }
-    }
-}
-
-
-fn jet_jit_core_os_on_interrupt(callable: i64) -> i64 {
-    jit_os_interrupt::register_callable(callable)
-}
-fn jet_jit_os_on_interrupt(callback_record: i64) {
-    jit_os_interrupt::register(callback_record);
-}
-
-pub(crate) fn reset_jit_interrupts() {
-    jit_os_interrupt::reset();
+/// Resident teardown drops the file handles opened by the finished run.
+pub(crate) fn reset_jit_fs_owners() {
     JIT_FS_OWNERS.with(|owners| owners.borrow_mut().clear());
 }
 
@@ -696,21 +536,6 @@ pub(crate) fn set_cli_log_level(level: &str) {
     jet_ring_log_set_level(&level.to_string());
 }
 
-pub(crate) fn ambient_log_set_level(level: &str) {
-    jet_ring_log_set_level(&level.to_string());
-}
-pub(crate) fn ambient_log_set_trace_id(trace_id: &str) {
-    jet_ring_log_set_trace_id(trace_id);
-}
-
-pub(crate) fn ambient_log_enabled(level: &str) -> bool {
-    jet_ring_log_enabled(&level.to_string())
-}
-
-pub(crate) fn ambient_log_fatal(message: &str) {
-    jet_ring_log_fatal(&message.to_string());
-}
-
 fn jet_jit_log_set_level(msg: i64) {
     jet_ring_log_set_level(&clone_string(msg));
 }
@@ -903,64 +728,6 @@ fn jet_jit_log_error_fields(msg: i64, fields: i64) {
     let msg = clone_string(msg);
     let fields = read_log_fields(fields);
     jet_ring_log_error_fields(&msg, &fields);
-}
-
-pub(crate) fn ambient_log_span(name: &str) -> i64 {
-    jet_ring_log_span(&name.to_string()).id
-}
-
-pub(crate) fn ambient_log_enter(id: i64, name: &str) {
-    jet_ring_log_enter(&jet_std::LogSpan {
-        id,
-        name: name.to_string(),
-    });
-}
-
-pub(crate) fn ambient_log_close(id: i64, name: &str) {
-    jet_ring_log_close(&jet_std::LogSpan {
-        id,
-        name: name.to_string(),
-    });
-}
-
-pub(crate) fn ambient_log_set_sink(kind: &str, path: &str) {
-    jet_ring_log_set_sink(&kind.to_string(), &path.to_string());
-}
-
-pub(crate) fn ambient_log_sample_every(n: i64) {
-    jet_ring_log_sample_every(n);
-}
-
-pub(crate) fn ambient_log_otlp_file(path: &str) {
-    jet_ring_log_otlp_file(&path.to_string());
-}
-
-pub(crate) fn ambient_log_disable() {
-    jet_ring_log_disable();
-}
-pub(crate) fn ambient_log_emit(level: &str, message: &str, fields: &[(String, String, String)]) {
-    let fields = fields
-        .iter()
-        .map(|(key, value, kind)| jet_std::LogField {
-            key: key.clone(),
-            value: value.clone(),
-            kind: kind.clone(),
-            redacted: kind == "redacted",
-        })
-        .collect::<Vec<_>>();
-    let message = message.to_string();
-    match level {
-        "debug" => jet_ring_log_debug_fields(&message, &fields),
-        "info" => jet_ring_log_info_fields(&message, &fields),
-        "warn" => jet_ring_log_warn_fields(&message, &fields),
-        "error" => jet_ring_log_error_fields(&message, &fields),
-        "critical" => jet_ring_log_critical(&message),
-        _ => {}
-    }
-}
-
-pub(crate) fn ambient_log_flush() {
-    jet_ring_log_flush();
 }
 
 // ── core.files and typed Path (mirrors jet_std_fs_* / jet_std_path_*) ────────
@@ -1369,10 +1136,6 @@ fn path_record(path: String) -> i64 {
 
 fn path_string_from_record(rec: i64) -> String {
     clone_path_arg(rec)
-}
-
-pub(crate) fn show_path(rt: &crate::JitRuntime, rec: i64) -> String {
-    rt.heap.record_clone_string(rec, 0).unwrap_or_default()
 }
 
 fn option_string_bits(s: Option<String>) -> i64 {
@@ -2370,6 +2133,7 @@ host_fns! {
     os_wait: "jet_jit_os_wait" => jet_jit_os_wait: sig_i64;
     os_waitpid: "jet_jit_os_waitpid" => jet_jit_os_waitpid: sig_i64_i64_i64;
     os_utime: "jet_jit_os_utime" => jet_jit_os_utime: sig_i64_i64_i64_i64;
+    os_atexit: "jet_jit_os_atexit" => jet_jit_os_atexit: sig_unary_i64;
     os_stop: "jet_jit_os_stop" => jet_jit_os_stop: sig_void_i64;
     log_set_level: "jet_jit_log_set_level" => jet_jit_log_set_level: sig_void_str;
     log_set_trace_id: "jet_jit_log_set_trace_id" => jet_jit_log_set_trace_id: sig_void_str;

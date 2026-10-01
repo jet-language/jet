@@ -81,7 +81,7 @@ fn jet_net_tls_config(
         return Err("TLS trust mode is invalid".to_string());
     }
     if min_version > max_version || !matches!(min_version, 12 | 13) || !matches!(max_version, 12 | 13) {
-        return Err("TLS version bounds must be between Tls12 and Tls13 with min <= max".to_string());
+        return Err("TLS version bounds must be between TLS12 and TLS13 with min <= max".to_string());
     }
     let versions: Vec<&'static rustls::SupportedProtocolVersion> = match (min_version, max_version) {
         (12, 12) => vec![&rustls::version::TLS12],

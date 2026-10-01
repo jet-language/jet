@@ -1,0 +1,25 @@
+// A variant test whose payload binds nothing is a Bool value in expression
+// position, including a field-path subject and an or-pattern.
+enum Shape {
+    Scalar(bits: Int)
+    Pair(left: Int, right: Int)
+    Empty
+}
+
+struct Layout {
+    shape: Shape
+}
+
+fn is_scalar(layout: Layout) -> Bool { layout.shape == .Scalar(_) }
+
+fn has_payload(shape: Shape) -> Bool {
+    found :: shape == .Scalar(_) | .Pair(_, _)
+    found
+}
+
+fn run() {
+    print(is_scalar(Layout{shape: Shape.Scalar{bits: 8}}))
+    print(is_scalar(Layout{shape: Shape.Empty}))
+    print(has_payload(Shape.Pair{left: 1, right: 2}))
+    print(has_payload(Shape.Empty))
+}

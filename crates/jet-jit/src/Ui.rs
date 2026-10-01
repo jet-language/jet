@@ -190,19 +190,19 @@ fn ui_push_tui_color(
     color: ui_rt::JetTuiColor,
 ) -> i64 {
     let record = rt.heap.alloc_record(match color {
-        ui_rt::JetTuiColor::Rgb(..) => 4,
+        ui_rt::JetTuiColor::RGB(..) => 4,
         _ => 2,
     });
     match color {
-        ui_rt::JetTuiColor::Ansi16(index) => {
+        ui_rt::JetTuiColor::ANSI16(index) => {
             let _ = rt.heap.record_set_int(record, 0, 0);
             let _ = rt.heap.record_set_int(record, 1, i64::from(index));
         }
-        ui_rt::JetTuiColor::Ansi256(index) => {
+        ui_rt::JetTuiColor::ANSI256(index) => {
             let _ = rt.heap.record_set_int(record, 0, 1);
             let _ = rt.heap.record_set_int(record, 1, i64::from(index));
         }
-        ui_rt::JetTuiColor::Rgb(red, green, blue) => {
+        ui_rt::JetTuiColor::RGB(red, green, blue) => {
             let _ = rt.heap.record_set_int(record, 0, 2);
             let _ = rt.heap.record_set_int(record, 1, i64::from(red));
             let _ = rt.heap.record_set_int(record, 2, i64::from(green));
@@ -220,13 +220,13 @@ fn ui_decode_tui_color(
         return Some(color);
     }
     match rt.heap.record_get_int(handle, 0)? {
-        0 => Some(ui_rt::JetTuiColor::Ansi16(
+        0 => Some(ui_rt::JetTuiColor::ANSI16(
             rt.heap.record_get_int(handle, 1)?.clamp(0, 15) as u8,
         )),
-        1 => Some(ui_rt::JetTuiColor::Ansi256(
+        1 => Some(ui_rt::JetTuiColor::ANSI256(
             rt.heap.record_get_int(handle, 1)?.clamp(0, 255) as u8,
         )),
-        2 => Some(ui_rt::JetTuiColor::Rgb(
+        2 => Some(ui_rt::JetTuiColor::RGB(
             rt.heap.record_get_int(handle, 1)?.clamp(0, 255) as u8,
             rt.heap.record_get_int(handle, 2)?.clamp(0, 255) as u8,
             rt.heap.record_get_int(handle, 3)?.clamp(0, 255) as u8,
@@ -241,10 +241,10 @@ fn ui_push_tui_capabilities(
 ) -> i64 {
     let profile = rt.heap.alloc_record(1);
     let profile_discriminant = match capabilities.profile {
-        ui_rt::JetTuiColorProfile::Ansi16 => 0,
-        ui_rt::JetTuiColorProfile::Ansi256 => 1,
+        ui_rt::JetTuiColorProfile::ANSI16 => 0,
+        ui_rt::JetTuiColorProfile::ANSI256 => 1,
         ui_rt::JetTuiColorProfile::TrueColor => 2,
-        ui_rt::JetTuiColorProfile::Ascii => 3,
+        ui_rt::JetTuiColorProfile::ASCII => 3,
     };
     let _ = rt.heap.record_set_int(profile, 0, profile_discriminant);
     let record = rt.heap.alloc_record(8);
@@ -267,10 +267,10 @@ fn ui_decode_tui_capabilities(
         return Some(capabilities);
     }
     let profile = match rt.heap.record_get_int(rt.heap.record_get_record(handle, 0)?, 0)? {
-        0 => ui_rt::JetTuiColorProfile::Ansi16,
-        1 => ui_rt::JetTuiColorProfile::Ansi256,
+        0 => ui_rt::JetTuiColorProfile::ANSI16,
+        1 => ui_rt::JetTuiColorProfile::ANSI256,
         2 => ui_rt::JetTuiColorProfile::TrueColor,
-        3 => ui_rt::JetTuiColorProfile::Ascii,
+        3 => ui_rt::JetTuiColorProfile::ASCII,
         _ => return None,
     };
     Some(ui_rt::JetTuiCapabilities {
@@ -290,7 +290,7 @@ fn ui_push_tui_event(
     event: ui_rt::JetTuiEvent,
 ) -> i64 {
     let record = match &event {
-        ui_rt::JetTuiEvent::Key { .. } | ui_rt::JetTuiEvent::Timer { .. } | ui_rt::JetTuiEvent::Io { .. } => {
+        ui_rt::JetTuiEvent::Key { .. } | ui_rt::JetTuiEvent::Timer { .. } | ui_rt::JetTuiEvent::IO { .. } => {
             rt.heap.alloc_record(3)
         }
         ui_rt::JetTuiEvent::Resize { .. } | ui_rt::JetTuiEvent::Focus { .. } => {
@@ -318,7 +318,7 @@ fn ui_push_tui_event(
             let _ = rt.heap.record_set_string(record, 1, id);
             let _ = rt.heap.record_set_int(record, 2, *elapsed_ms);
         }
-        ui_rt::JetTuiEvent::Io { channel, payload } => {
+        ui_rt::JetTuiEvent::IO { channel, payload } => {
             let bytes = rt.heap.alloc_empty_list();
             for byte in payload {
                 let _ = rt.heap.list_push_int(bytes, i64::from(*byte));
@@ -520,20 +520,6 @@ fn ui_push_glyph_shaper(
     };
     let _ = rt.heap.record_set_int(record, 0, discriminant);
     ui_store_value(rt, record, UiValue::GlyphShaper(shaper))
-}
-
-fn ui_decode_glyph_shaper(
-    rt: &crate::runtime_host::JitRuntime,
-    handle: i64,
-) -> Option<ui_rt::JetGlyphShaper> {
-    if let Some(UiValue::GlyphShaper(shaper)) = ui_value(rt, handle) {
-        return Some(shaper);
-    }
-    match rt.heap.record_get_int(handle, 0)? {
-        0 => Some(ui_rt::JetGlyphShaper::HarfBuzz),
-        1 => Some(ui_rt::JetGlyphShaper::HeadlessFallback),
-        _ => None,
-    }
 }
 
 fn ui_push_font_face(
@@ -881,29 +867,6 @@ fn ambient_enum(
     Ok(variant.clone())
 }
 
-fn ambient_enum_arg<'a>(
-    value: &'a CtValue,
-    type_name: &str,
-    variant: &str,
-    index: usize,
-    span: Span,
-) -> Result<&'a CtValue, Diagnostic> {
-    let CtValue::Enum {
-        type_name: actual,
-        variant: actual_variant,
-        args,
-    } = value
-    else {
-        return Err(unsupported(&format!("{type_name} value expected"), span));
-    };
-    if actual != type_name || actual_variant != variant {
-        return Err(unsupported(&format!("expected {type_name}::{variant}"), span));
-    }
-    args.get(index)
-        .map(|(_, value)| value)
-        .ok_or_else(|| unsupported(&format!("malformed {type_name}::{variant} value"), span))
-}
-
 fn ambient_struct(
     type_name: &str,
     fields: Vec<(String, CtValue)>,
@@ -932,10 +895,10 @@ fn ambient_fs_access(
     value: &CtValue,
     span: Span,
 ) -> Result<ui_rt::JetUiFsAccess, Diagnostic> {
-    match ambient_enum(value, "UiFsAccess", span)?.as_str() {
+    match ambient_enum(value, "UIFSAccess", span)?.as_str() {
         "Read" => Ok(ui_rt::JetUiFsAccess::Read),
         "Write" => Ok(ui_rt::JetUiFsAccess::Write),
-        _ => Err(unsupported("unknown UiFsAccess variant", span)),
+        _ => Err(unsupported("unknown UIFSAccess variant", span)),
     }
 }
 
@@ -943,8 +906,8 @@ fn ambient_fs_rights(
     value: &CtValue,
     span: Span,
 ) -> Result<ui_rt::JetUiFsRights, Diagnostic> {
-    let bits = ambient_int(ambient_field(value, "UiFsRights", "bits", span)?, "UiFsRights.bits", span)?;
-    let bits = u8::try_from(bits).map_err(|_| unsupported("UiFsRights.bits is out of range", span))?;
+    let bits = ambient_int(ambient_field(value, "UIFSRights", "bits", span)?, "UIFSRights.bits", span)?;
+    let bits = u8::try_from(bits).map_err(|_| unsupported("UIFSRights.bits is out of range", span))?;
     Ok(ui_rt::JetUiFsRights::from_bits(bits))
 }
 
@@ -953,12 +916,12 @@ fn ambient_node_id(
     span: Span,
 ) -> Result<ui_rt::JetUiNodeId, Diagnostic> {
     let value = ambient_string(
-        ambient_field(value, "UiNodeId", "value", span)?,
-        "UiNodeId.value",
+        ambient_field(value, "UINodeID", "value", span)?,
+        "UINodeID.value",
         span,
     )?;
     ui_rt::JetUiNodeId::new(&value)
-        .map_err(|_| unsupported("UiNodeId value is invalid", span))
+        .map_err(|_| unsupported("UINodeID value is invalid", span))
 }
 
 fn ambient_file_filter(
@@ -966,22 +929,22 @@ fn ambient_file_filter(
     span: Span,
 ) -> Result<ui_rt::JetUiFileFilter, Diagnostic> {
     let label = ambient_string(
-        ambient_field(value, "UiFileFilter", "label", span)?,
-        "UiFileFilter.label",
+        ambient_field(value, "UIFileFilter", "label", span)?,
+        "UIFileFilter.label",
         span,
     )?;
     let extensions = ambient_strings(
-        ambient_field(value, "UiFileFilter", "extensions", span)?,
-        "UiFileFilter.extensions",
+        ambient_field(value, "UIFileFilter", "extensions", span)?,
+        "UIFileFilter.extensions",
         span,
     )?;
     let mime_types = ambient_strings(
-        ambient_field(value, "UiFileFilter", "mime_types", span)?,
-        "UiFileFilter.mime_types",
+        ambient_field(value, "UIFileFilter", "mime_types", span)?,
+        "UIFileFilter.mime_types",
         span,
     )?;
     ui_rt::JetUiFileFilter::new(&label, extensions, mime_types)
-        .map_err(|error| unsupported(&format!("invalid UiFileFilter: {error:?}"), span))
+        .map_err(|error| unsupported(&format!("invalid UIFileFilter: {error:?}"), span))
 }
 
 fn ambient_granted_path(
@@ -989,26 +952,26 @@ fn ambient_granted_path(
     span: Span,
 ) -> Result<ui_rt::JetUiGrantedPath, Diagnostic> {
     let path = ambient_string(
-        ambient_field(value, "UiGrantedPath", "path", span)?,
-        "UiGrantedPath.path",
+        ambient_field(value, "UIGrantedPath", "path", span)?,
+        "UIGrantedPath.path",
         span,
     )?;
     let grant_root = ambient_string(
-        ambient_field(value, "UiGrantedPath", "grant_root", span)?,
-        "UiGrantedPath.grant_root",
+        ambient_field(value, "UIGrantedPath", "grant_root", span)?,
+        "UIGrantedPath.grant_root",
         span,
     )?;
     let access = ambient_fs_access(
-        ambient_field(value, "UiGrantedPath", "access", span)?,
+        ambient_field(value, "UIGrantedPath", "access", span)?,
         span,
     )?;
     let grant = ui_rt::JetUiFsGrant::new(&grant_root, match access {
         ui_rt::JetUiFsAccess::Read => ui_rt::JetUiFsRights::read(),
         ui_rt::JetUiFsAccess::Write => ui_rt::JetUiFsRights::write(),
     })
-    .map_err(|error| unsupported(&format!("invalid UiGrantedPath grant: {error:?}"), span))?;
+    .map_err(|error| unsupported(&format!("invalid UIGrantedPath grant: {error:?}"), span))?;
     grant.scope(&path, access)
-        .map_err(|error| unsupported(&format!("invalid UiGrantedPath: {error:?}"), span))
+        .map_err(|error| unsupported(&format!("invalid UIGrantedPath: {error:?}"), span))
 }
 
 fn ambient_fs_grant(
@@ -1016,16 +979,16 @@ fn ambient_fs_grant(
     span: Span,
 ) -> Result<ui_rt::JetUiFsGrant, Diagnostic> {
     let root = ambient_string(
-        ambient_field(value, "UiFsGrant", "root", span)?,
-        "UiFsGrant.root",
+        ambient_field(value, "UIFSGrant", "root", span)?,
+        "UIFSGrant.root",
         span,
     )?;
     let rights = ambient_fs_rights(
-        ambient_field(value, "UiFsGrant", "rights", span)?,
+        ambient_field(value, "UIFSGrant", "rights", span)?,
         span,
     )?;
     ui_rt::JetUiFsGrant::new(&root, rights)
-        .map_err(|error| unsupported(&format!("invalid UiFsGrant: {error:?}"), span))
+        .map_err(|error| unsupported(&format!("invalid UIFSGrant: {error:?}"), span))
 }
 
 fn ambient_file_request(
@@ -1033,43 +996,43 @@ fn ambient_file_request(
     span: Span,
 ) -> Result<ui_rt::JetUiFileDialogRequest, Diagnostic> {
     let kind = match ambient_enum(
-        ambient_field(value, "UiFileDialogRequest", "kind", span)?,
-        "UiFileDialogKind",
+        ambient_field(value, "UIFileDialogRequest", "kind", span)?,
+        "UIFileDialogKind",
         span,
     )?
     .as_str()
     {
         "Open" => ui_rt::JetUiFileDialogKind::Open,
         "Save" => ui_rt::JetUiFileDialogKind::Save,
-        _ => return Err(unsupported("unknown UiFileDialogKind variant", span)),
+        _ => return Err(unsupported("unknown UIFileDialogKind variant", span)),
     };
     let title = ambient_string(
-        ambient_field(value, "UiFileDialogRequest", "title", span)?,
-        "UiFileDialogRequest.title",
+        ambient_field(value, "UIFileDialogRequest", "title", span)?,
+        "UIFileDialogRequest.title",
         span,
     )?;
     let grant = ambient_fs_grant(
-        ambient_field(value, "UiFileDialogRequest", "grant", span)?,
+        ambient_field(value, "UIFileDialogRequest", "grant", span)?,
         span,
     )?;
     let initial_directory = ambient_optional(
-        ambient_field(value, "UiFileDialogRequest", "initial_directory", span)?,
-        "UiGrantedPath",
+        ambient_field(value, "UIFileDialogRequest", "initial_directory", span)?,
+        "UIGrantedPath",
         span,
     )?
     .map(|value| ambient_granted_path(value, span))
     .transpose()?;
     let filters = ambient_list(
-        ambient_field(value, "UiFileDialogRequest", "filters", span)?,
-        "UiFileDialogRequest.filters",
+        ambient_field(value, "UIFileDialogRequest", "filters", span)?,
+        "UIFileDialogRequest.filters",
         span,
     )?
     .iter()
     .map(|value| ambient_file_filter(value, span))
     .collect::<Result<Vec<_>, _>>()?;
     let allow_multiple = ambient_bool(
-        ambient_field(value, "UiFileDialogRequest", "allow_multiple", span)?,
-        "UiFileDialogRequest.allow_multiple",
+        ambient_field(value, "UIFileDialogRequest", "allow_multiple", span)?,
+        "UIFileDialogRequest.allow_multiple",
         span,
     )?;
     let request = match kind {
@@ -1086,71 +1049,17 @@ fn ambient_file_request(
     })
 }
 
-fn ambient_file_selection(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiFileDialogSelection, Diagnostic> {
-    let files = ambient_list(
-        ambient_field(value, "UiFileDialogSelection", "files", span)?,
-        "UiFileDialogSelection.files",
-        span,
-    )?
-    .iter()
-    .map(|value| ambient_granted_path(value, span))
-    .collect::<Result<Vec<_>, _>>()?;
-    ui_rt::JetUiFileDialogSelection::new(files)
-        .map_err(|error| unsupported(&format!("invalid UiFileDialogSelection: {error:?}"), span))
-}
-
-fn ambient_text_range(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiTextRange, Diagnostic> {
-    let start = ambient_int(
-        ambient_field(value, "UiTextRange", "start", span)?,
-        "UiTextRange.start",
-        span,
-    )?;
-    let end = ambient_int(
-        ambient_field(value, "UiTextRange", "end", span)?,
-        "UiTextRange.end",
-        span,
-    )?;
-    let start = usize::try_from(start).map_err(|_| unsupported("UiTextRange.start is negative", span))?;
-    let end = usize::try_from(end).map_err(|_| unsupported("UiTextRange.end is negative", span))?;
-    ui_rt::JetUiTextRange::new(start, end)
-        .map_err(|error| unsupported(&format!("invalid UiTextRange: {error:?}"), span))
-}
-fn ambient_clipboard_text(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiClipboardText, Diagnostic> {
-    let text = ambient_string(
-        ambient_field(value, "UiClipboardText", "text", span)?,
-        "UiClipboardText.text",
-        span,
-    )?;
-    let selection = ambient_optional(
-        ambient_field(value, "UiClipboardText", "selection", span)?,
-        "UiTextRange",
-        span,
-    )?
-    .map(|value| ambient_text_range(value, span))
-    .transpose()?;
-    Ok(ui_rt::JetUiClipboardText { text, selection })
-}
-
 fn ambient_shortcut_modifiers(
     value: &CtValue,
     span: Span,
 ) -> Result<ui_rt::JetUiShortcutModifiers, Diagnostic> {
     let bits = ambient_int(
-        ambient_field(value, "UiShortcutModifiers", "bits", span)?,
-        "UiShortcutModifiers.bits",
+        ambient_field(value, "UIShortcutModifiers", "bits", span)?,
+        "UIShortcutModifiers.bits",
         span,
     )?;
     let bits = u8::try_from(bits)
-        .map_err(|_| unsupported("UiShortcutModifiers.bits is out of range", span))?;
+        .map_err(|_| unsupported("UIShortcutModifiers.bits is out of range", span))?;
     Ok(ui_rt::JetUiShortcutModifiers::from_bits(bits))
 }
 
@@ -1159,16 +1068,16 @@ fn ambient_shortcut(
     span: Span,
 ) -> Result<ui_rt::JetUiShortcut, Diagnostic> {
     let key = ambient_string(
-        ambient_field(value, "UiShortcut", "key", span)?,
-        "UiShortcut.key",
+        ambient_field(value, "UIShortcut", "key", span)?,
+        "UIShortcut.key",
         span,
     )?;
     let modifiers = ambient_shortcut_modifiers(
-        ambient_field(value, "UiShortcut", "modifiers", span)?,
+        ambient_field(value, "UIShortcut", "modifiers", span)?,
         span,
     )?;
     ui_rt::JetUiShortcut::new(&key, modifiers)
-        .map_err(|error| unsupported(&format!("invalid UiShortcut: {error:?}"), span))
+        .map_err(|error| unsupported(&format!("invalid UIShortcut: {error:?}"), span))
 }
 
 fn ambient_shortcut_binding(
@@ -1176,23 +1085,23 @@ fn ambient_shortcut_binding(
     span: Span,
 ) -> Result<ui_rt::JetUiShortcutBinding, Diagnostic> {
     let shortcut = ambient_shortcut(
-        ambient_field(value, "UiShortcutBinding", "shortcut", span)?,
+        ambient_field(value, "UIShortcutBinding", "shortcut", span)?,
         span,
     )?;
     let action = ambient_string(
-        ambient_field(value, "UiShortcutBinding", "action", span)?,
-        "UiShortcutBinding.action",
+        ambient_field(value, "UIShortcutBinding", "action", span)?,
+        "UIShortcutBinding.action",
         span,
     )?;
     let node = ambient_optional(
-        ambient_field(value, "UiShortcutBinding", "node", span)?,
-        "UiNodeId",
+        ambient_field(value, "UIShortcutBinding", "node", span)?,
+        "UINodeID",
         span,
     )?
     .map(|value| ambient_node_id(value, span))
     .transpose()?;
     ui_rt::JetUiShortcutBinding::new(shortcut, &action, node)
-        .map_err(|error| unsupported(&format!("invalid UiShortcutBinding: {error:?}"), span))
+        .map_err(|error| unsupported(&format!("invalid UIShortcutBinding: {error:?}"), span))
 }
 
 fn ambient_accessibility_state(
@@ -1205,29 +1114,29 @@ fn ambient_accessibility_state(
         args,
     } = value
     else {
-        return Err(unsupported("UiAccessibilityState value expected", span));
+        return Err(unsupported("UIAccessibilityState value expected", span));
     };
-    if type_name != "UiAccessibilityState" {
-        return Err(unsupported("UiAccessibilityState value expected", span));
+    if type_name != "UIAccessibilityState" {
+        return Err(unsupported("UIAccessibilityState value expected", span));
     }
     match variant.as_str() {
         "Disabled" if args.is_empty() => Ok(ui_rt::JetUiAccessibilityState::Disabled),
         "Busy" if args.is_empty() => Ok(ui_rt::JetUiAccessibilityState::Busy),
         "Required" if args.is_empty() => Ok(ui_rt::JetUiAccessibilityState::Required),
         "Expanded" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Expanded(
-            ambient_bool(&args[0].1, "UiAccessibilityState.Expanded", span)?,
+            ambient_bool(&args[0].1, "UIAccessibilityState.Expanded", span)?,
         )),
         "Checked" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Checked(
-            ambient_bool(&args[0].1, "UiAccessibilityState.Checked", span)?,
+            ambient_bool(&args[0].1, "UIAccessibilityState.Checked", span)?,
         )),
         "Selected" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Selected(
-            ambient_bool(&args[0].1, "UiAccessibilityState.Selected", span)?,
+            ambient_bool(&args[0].1, "UIAccessibilityState.Selected", span)?,
         )),
         "Value" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Value(
-            ambient_string(&args[0].1, "UiAccessibilityState.Value", span)?,
+            ambient_string(&args[0].1, "UIAccessibilityState.Value", span)?,
         )),
         _ => Err(unsupported(
-            "unknown or malformed UiAccessibilityState variant",
+            "unknown or malformed UIAccessibilityState variant",
             span,
         )),
     }
@@ -1238,22 +1147,22 @@ fn ambient_accessibility(
     span: Span,
 ) -> Result<ui_rt::JetUiAccessibility, Diagnostic> {
     let name = ambient_optional(
-        ambient_field(value, "UiAccessibility", "name", span)?,
+        ambient_field(value, "UIAccessibility", "name", span)?,
         "String",
         span,
     )?
-    .map(|value| ambient_string(value, "UiAccessibility.name", span))
+    .map(|value| ambient_string(value, "UIAccessibility.name", span))
     .transpose()?;
     let description = ambient_optional(
-        ambient_field(value, "UiAccessibility", "description", span)?,
+        ambient_field(value, "UIAccessibility", "description", span)?,
         "String",
         span,
     )?
-    .map(|value| ambient_string(value, "UiAccessibility.description", span))
+    .map(|value| ambient_string(value, "UIAccessibility.description", span))
     .transpose()?;
     let states = ambient_list(
-        ambient_field(value, "UiAccessibility", "states", span)?,
-        "UiAccessibility.states",
+        ambient_field(value, "UIAccessibility", "states", span)?,
+        "UIAccessibility.states",
         span,
     )?
     .iter()
@@ -1267,7 +1176,7 @@ fn ambient_accessibility(
 }
 fn ambient_fs_access_value(access: ui_rt::JetUiFsAccess) -> CtValue {
     ambient_enum_value(
-        "UiFsAccess",
+        "UIFSAccess",
         match access {
             ui_rt::JetUiFsAccess::Read => "Read",
             ui_rt::JetUiFsAccess::Write => "Write",
@@ -1278,21 +1187,21 @@ fn ambient_fs_access_value(access: ui_rt::JetUiFsAccess) -> CtValue {
 
 fn ambient_fs_rights_value(rights: ui_rt::JetUiFsRights) -> CtValue {
     ambient_struct(
-        "UiFsRights",
+        "UIFSRights",
         vec![("bits".to_string(), CtValue::Int(i64::from(rights.bits())))],
     )
 }
 
 fn ambient_node_id_value(node_id: ui_rt::JetUiNodeId) -> CtValue {
     ambient_struct(
-        "UiNodeId",
+        "UINodeID",
         vec![("value".to_string(), CtValue::Str(node_id.as_str().to_string()))],
     )
 }
 
 fn ambient_file_filter_value(filter: ui_rt::JetUiFileFilter) -> CtValue {
     ambient_struct(
-        "UiFileFilter",
+        "UIFileFilter",
         vec![
             ("label".to_string(), CtValue::Str(filter.label)),
             (
@@ -1309,7 +1218,7 @@ fn ambient_file_filter_value(filter: ui_rt::JetUiFileFilter) -> CtValue {
 
 fn ambient_granted_path_value(path: ui_rt::JetUiGrantedPath) -> CtValue {
     ambient_struct(
-        "UiGrantedPath",
+        "UIGrantedPath",
         vec![
             ("path".to_string(), CtValue::Str(path.path().to_string())),
             (
@@ -1323,7 +1232,7 @@ fn ambient_granted_path_value(path: ui_rt::JetUiGrantedPath) -> CtValue {
 
 fn ambient_fs_grant_value(grant: ui_rt::JetUiFsGrant) -> CtValue {
     ambient_struct(
-        "UiFsGrant",
+        "UIFSGrant",
         vec![
             ("root".to_string(), CtValue::Str(grant.root().to_string())),
             ("rights".to_string(), ambient_fs_rights_value(grant.rights())),
@@ -1333,7 +1242,7 @@ fn ambient_fs_grant_value(grant: ui_rt::JetUiFsGrant) -> CtValue {
 
 fn ambient_file_request_value(request: ui_rt::JetUiFileDialogRequest) -> CtValue {
     let kind = ambient_enum_value(
-        "UiFileDialogKind",
+        "UIFileDialogKind",
         match request.kind {
             ui_rt::JetUiFileDialogKind::Open => "Open",
             ui_rt::JetUiFileDialogKind::Save => "Save",
@@ -1344,14 +1253,14 @@ fn ambient_file_request_value(request: ui_rt::JetUiFileDialogRequest) -> CtValue
         .initial_directory
         .map(ambient_granted_path_value);
     ambient_struct(
-        "UiFileDialogRequest",
+        "UIFileDialogRequest",
         vec![
             ("kind".to_string(), kind),
             ("title".to_string(), CtValue::Str(request.title)),
             ("grant".to_string(), ambient_fs_grant_value(request.grant)),
             (
                 "initial_directory".to_string(),
-                ambient_option_value("UiGrantedPath", initial_directory),
+                ambient_option_value("UIGrantedPath", initial_directory),
             ),
             (
                 "filters".to_string(),
@@ -1370,7 +1279,7 @@ fn ambient_file_request_value(request: ui_rt::JetUiFileDialogRequest) -> CtValue
 
 fn ambient_file_selection_value(selection: ui_rt::JetUiFileDialogSelection) -> CtValue {
     ambient_struct(
-        "UiFileDialogSelection",
+        "UIFileDialogSelection",
         vec![(
             "files".to_string(),
             CtValue::List(
@@ -1386,7 +1295,7 @@ fn ambient_file_selection_value(selection: ui_rt::JetUiFileDialogSelection) -> C
 
 fn ambient_text_range_value(range: ui_rt::JetUiTextRange) -> CtValue {
     ambient_struct(
-        "UiTextRange",
+        "UITextRange",
         vec![
             ("start".to_string(), CtValue::Int(i64::try_from(range.start).unwrap_or(i64::MAX))),
             ("end".to_string(), CtValue::Int(i64::try_from(range.end).unwrap_or(i64::MAX))),
@@ -1396,12 +1305,12 @@ fn ambient_text_range_value(range: ui_rt::JetUiTextRange) -> CtValue {
 
 fn ambient_clipboard_text_value(value: ui_rt::JetUiClipboardText) -> CtValue {
     ambient_struct(
-        "UiClipboardText",
+        "UIClipboardText",
         vec![
             ("text".to_string(), CtValue::Str(value.text)),
             (
                 "selection".to_string(),
-                ambient_option_value("UiTextRange", value.selection.map(ambient_text_range_value)),
+                ambient_option_value("UITextRange", value.selection.map(ambient_text_range_value)),
             ),
         ],
     )
@@ -1409,7 +1318,7 @@ fn ambient_clipboard_text_value(value: ui_rt::JetUiClipboardText) -> CtValue {
 
 fn ambient_clipboard_write_value(value: ui_rt::JetUiClipboardWrite) -> CtValue {
     ambient_struct(
-        "UiClipboardWrite",
+        "UIClipboardWrite",
         vec![(
             "characters".to_string(),
             CtValue::Int(i64::try_from(value.characters).unwrap_or(i64::MAX)),
@@ -1421,14 +1330,14 @@ fn ambient_shortcut_modifiers_value(
     modifiers: ui_rt::JetUiShortcutModifiers,
 ) -> CtValue {
     ambient_struct(
-        "UiShortcutModifiers",
+        "UIShortcutModifiers",
         vec![("bits".to_string(), CtValue::Int(i64::from(modifiers.bits())))],
     )
 }
 
 fn ambient_shortcut_value(shortcut: ui_rt::JetUiShortcut) -> CtValue {
     ambient_struct(
-        "UiShortcut",
+        "UIShortcut",
         vec![
             ("key".to_string(), CtValue::Str(shortcut.key)),
             (
@@ -1441,7 +1350,7 @@ fn ambient_shortcut_value(shortcut: ui_rt::JetUiShortcut) -> CtValue {
 
 fn ambient_shortcut_binding_value(binding: ui_rt::JetUiShortcutBinding) -> CtValue {
     ambient_struct(
-        "UiShortcutBinding",
+        "UIShortcutBinding",
         vec![
             (
                 "shortcut".to_string(),
@@ -1450,7 +1359,7 @@ fn ambient_shortcut_binding_value(binding: ui_rt::JetUiShortcutBinding) -> CtVal
             ("action".to_string(), CtValue::Str(binding.action)),
             (
                 "node".to_string(),
-                ambient_option_value("UiNodeId", binding.node.map(ambient_node_id_value)),
+                ambient_option_value("UINodeID", binding.node.map(ambient_node_id_value)),
             ),
         ],
     )
@@ -1459,12 +1368,12 @@ fn ambient_shortcut_binding_value(binding: ui_rt::JetUiShortcutBinding) -> CtVal
 fn ambient_shortcut_dispatch_value(dispatch: ui_rt::JetUiShortcutDispatch) -> CtValue {
     match dispatch {
         ui_rt::JetUiShortcutDispatch::Dispatched(binding) => ambient_enum_value(
-            "UiShortcutDispatch",
+            "UIShortcutDispatch",
             "Dispatched",
             vec![(None, ambient_shortcut_binding_value(binding))],
         ),
         ui_rt::JetUiShortcutDispatch::Unhandled => {
-            ambient_enum_value("UiShortcutDispatch", "Unhandled", Vec::new())
+            ambient_enum_value("UIShortcutDispatch", "Unhandled", Vec::new())
         }
     }
 }
@@ -1472,15 +1381,15 @@ fn ambient_ime_mode(
     value: &CtValue,
     span: Span,
 ) -> Result<ui_rt::JetUiImeMode, Diagnostic> {
-    match ambient_enum(value, "UiImeMode", span)?.as_str() {
+    match ambient_enum(value, "UIIMEMode", span)?.as_str() {
         "Native" => Ok(ui_rt::JetUiImeMode::Native),
         "Disabled" => Ok(ui_rt::JetUiImeMode::Disabled),
-        _ => Err(unsupported("unknown UiImeMode variant", span)),
+        _ => Err(unsupported("unknown UIIMEMode variant", span)),
     }
 }
 fn ambient_ime_mode_value(mode: ui_rt::JetUiImeMode) -> CtValue {
     ambient_enum_value(
-        "UiImeMode",
+        "UIIMEMode",
         match mode {
             ui_rt::JetUiImeMode::Native => "Native",
             ui_rt::JetUiImeMode::Disabled => "Disabled",
@@ -1489,174 +1398,16 @@ fn ambient_ime_mode_value(mode: ui_rt::JetUiImeMode) -> CtValue {
     )
 }
 
-fn ambient_ime_phase(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiImePhase, Diagnostic> {
-    match ambient_enum(value, "UiImePhase", span)?.as_str() {
-        "Start" => Ok(ui_rt::JetUiImePhase::Start),
-        "Update" => Ok(ui_rt::JetUiImePhase::Update),
-        "Commit" => Ok(ui_rt::JetUiImePhase::Commit),
-        "Cancel" => Ok(ui_rt::JetUiImePhase::Cancel),
-        _ => Err(unsupported("unknown UiImePhase variant", span)),
-    }
-}
-
-fn ambient_ime_composition(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiImeComposition, Diagnostic> {
-    let text = ambient_string(
-        ambient_field(value, "UiImeComposition", "text", span)?,
-        "UiImeComposition.text",
-        span,
-    )?;
-    let selection = ambient_text_range(
-        ambient_field(value, "UiImeComposition", "selection", span)?,
-        span,
-    )?;
-    let marked = ambient_optional(
-        ambient_field(value, "UiImeComposition", "marked", span)?,
-        "UiTextRange",
-        span,
-    )?
-    .map(|value| ambient_text_range(value, span))
-    .transpose()?;
-    Ok(ui_rt::JetUiImeComposition {
-        text,
-        selection,
-        marked,
-    })
-}
-
-fn ambient_ime_event(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiImeEvent, Diagnostic> {
-    let target = ambient_node_id(
-        ambient_field(value, "UiImeEvent", "target", span)?,
-        span,
-    )?;
-    let phase = ambient_ime_phase(
-        ambient_field(value, "UiImeEvent", "phase", span)?,
-        span,
-    )?;
-    let composition = ambient_optional(
-        ambient_field(value, "UiImeEvent", "composition", span)?,
-        "UiImeComposition",
-        span,
-    )?
-    .map(|value| ambient_ime_composition(value, span))
-    .transpose()?;
-    Ok(ui_rt::JetUiImeEvent {
-        target,
-        phase,
-        composition,
-    })
-}
-
-fn ambient_drag_phase(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiDragPhase, Diagnostic> {
-    match ambient_enum(value, "UiDragPhase", span)?.as_str() {
-        "Enter" => Ok(ui_rt::JetUiDragPhase::Enter),
-        "Over" => Ok(ui_rt::JetUiDragPhase::Over),
-        "Drop" => Ok(ui_rt::JetUiDragPhase::Drop),
-        "Leave" => Ok(ui_rt::JetUiDragPhase::Leave),
-        "Cancel" => Ok(ui_rt::JetUiDragPhase::Cancel),
-        _ => Err(unsupported("unknown UiDragPhase variant", span)),
-    }
-}
-
-fn ambient_drag_operation(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiDragOperation, Diagnostic> {
-    match ambient_enum(value, "UiDragOperation", span)?.as_str() {
-        "Copy" => Ok(ui_rt::JetUiDragOperation::Copy),
-        "Move" => Ok(ui_rt::JetUiDragOperation::Move),
-        "Link" => Ok(ui_rt::JetUiDragOperation::Link),
-        _ => Err(unsupported("unknown UiDragOperation variant", span)),
-    }
-}
-
-fn ambient_drop_item(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiDropItem, Diagnostic> {
-    let CtValue::Enum {
-        type_name,
-        variant,
-        args,
-    } = value
-    else {
-        return Err(unsupported("UiDropItem value expected", span));
-    };
-    if type_name != "UiDropItem" || args.len() != 1 {
-        return Err(unsupported("malformed UiDropItem value", span));
-    }
-    match variant.as_str() {
-        "Text" => Ok(ui_rt::JetUiDropItem::Text(ambient_string(
-            &args[0].1,
-            "UiDropItem.Text",
-            span,
-        )?)),
-        "Uri" => Ok(ui_rt::JetUiDropItem::Uri(ambient_string(
-            &args[0].1,
-            "UiDropItem.Uri",
-            span,
-        )?)),
-        "File" => Ok(ui_rt::JetUiDropItem::File(ambient_granted_path(
-            &args[0].1,
-            span,
-        )?)),
-        _ => Err(unsupported("unknown UiDropItem variant", span)),
-    }
-}
-
-fn ambient_drag_event(
-    value: &CtValue,
-    span: Span,
-) -> Result<ui_rt::JetUiDragEvent, Diagnostic> {
-    let target = ambient_node_id(
-        ambient_field(value, "UiDragEvent", "target", span)?,
-        span,
-    )?;
-    let phase = ambient_drag_phase(
-        ambient_field(value, "UiDragEvent", "phase", span)?,
-        span,
-    )?;
-    let operation = ambient_drag_operation(
-        ambient_field(value, "UiDragEvent", "operation", span)?,
-        span,
-    )?;
-    let items = ambient_list(
-        ambient_field(value, "UiDragEvent", "items", span)?,
-        "UiDragEvent.items",
-        span,
-    )?
-    .iter()
-    .map(|value| ambient_drop_item(value, span))
-    .collect::<Result<Vec<_>, _>>()?;
-    Ok(ui_rt::JetUiDragEvent {
-        target,
-        phase,
-        operation,
-        items,
-    })
-}
-
 fn ambient_aria_role(
     value: &CtValue,
     span: Span,
 ) -> Result<ui_rt::JetUiAriaRole, Diagnostic> {
-    match ambient_enum(value, "UiAriaRole", span)?.as_str() {
+    match ambient_enum(value, "UIAriaRole", span)?.as_str() {
         "Button" => Ok(ui_rt::JetUiAriaRole::Button),
         "TextInput" => Ok(ui_rt::JetUiAriaRole::TextInput),
         "Label" => Ok(ui_rt::JetUiAriaRole::Label),
         "Container" => Ok(ui_rt::JetUiAriaRole::Container),
-        _ => Err(unsupported("unknown UiAriaRole variant", span)),
+        _ => Err(unsupported("unknown UIAriaRole variant", span)),
     }
 }
 
@@ -1665,51 +1416,51 @@ fn ambient_node(
     span: Span,
 ) -> Result<ui_rt::JetUiNode, Diagnostic> {
     let label = ambient_string(
-        ambient_field(value, "UiNode", "label", span)?,
-        "UiNode.label",
+        ambient_field(value, "UINode", "label", span)?,
+        "UINode.label",
         span,
     )?;
     let width = ambient_float(
-        ambient_field(value, "UiNode", "width", span)?,
-        "UiNode.width",
+        ambient_field(value, "UINode", "width", span)?,
+        "UINode.width",
         span,
     )?;
     let height = ambient_float(
-        ambient_field(value, "UiNode", "height", span)?,
-        "UiNode.height",
+        ambient_field(value, "UINode", "height", span)?,
+        "UINode.height",
         span,
     )?;
     let role = ambient_optional(
-        ambient_field(value, "UiNode", "role", span)?,
-        "UiAriaRole",
+        ambient_field(value, "UINode", "role", span)?,
+        "UIAriaRole",
         span,
     )?
     .map(|value| ambient_aria_role(value, span))
     .transpose()?;
     let accessibility = ambient_optional(
-        ambient_field(value, "UiNode", "accessibility", span)?,
-        "UiAccessibility",
+        ambient_field(value, "UINode", "accessibility", span)?,
+        "UIAccessibility",
         span,
     )?
     .map(|value| ambient_accessibility(value, span))
     .transpose()?;
     let ime = ambient_optional(
-        ambient_field(value, "UiNode", "ime", span)?,
-        "UiImeMode",
+        ambient_field(value, "UINode", "ime", span)?,
+        "UIIMEMode",
         span,
     )?
     .map(|value| ambient_ime_mode(value, span))
     .transpose()?;
     let color = ambient_optional(
-        ambient_field(value, "UiNode", "color", span)?,
+        ambient_field(value, "UINode", "color", span)?,
         "String",
         span,
     )?
-    .map(|value| ambient_string(value, "UiNode.color", span))
+    .map(|value| ambient_string(value, "UINode.color", span))
     .transpose()?;
     let kind = match ambient_enum(
-        ambient_field(value, "UiNode", "kind", span)?,
-        "UiNodeKind",
+        ambient_field(value, "UINode", "kind", span)?,
+        "UINodeKind",
         span,
     )?
     .as_str()
@@ -1719,19 +1470,19 @@ fn ambient_node(
         "Box" => ui_rt::JetUiNodeKind::Box,
         "Button" => ui_rt::JetUiNodeKind::Button,
         "TextInput" => ui_rt::JetUiNodeKind::TextInput,
-        _ => return Err(unsupported("unknown UiNodeKind variant", span)),
+        _ => return Err(unsupported("unknown UINodeKind variant", span)),
     };
     let children = ambient_list(
-        ambient_field(value, "UiNode", "children", span)?,
-        "UiNode.children",
+        ambient_field(value, "UINode", "children", span)?,
+        "UINode.children",
         span,
     )?
     .iter()
     .map(|value| ambient_node(value, span))
     .collect::<Result<Vec<_>, _>>()?;
     let shortcut = ambient_optional(
-        ambient_field(value, "UiNode", "shortcut", span)?,
-        "UiShortcut",
+        ambient_field(value, "UINode", "shortcut", span)?,
+        "UIShortcut",
         span,
     )?
     .map(|value| ambient_shortcut(value, span))
@@ -1773,12 +1524,12 @@ fn ambient_accessibility_state_value(
             ("Value", vec![(None, CtValue::Str(value))])
         }
     };
-    ambient_enum_value("UiAccessibilityState", variant, args)
+    ambient_enum_value("UIAccessibilityState", variant, args)
 }
 
 fn ambient_accessibility_value(value: ui_rt::JetUiAccessibility) -> CtValue {
     ambient_struct(
-        "UiAccessibility",
+        "UIAccessibility",
         vec![
             (
                 "name".to_string(),
@@ -1804,11 +1555,11 @@ fn ambient_accessibility_value(value: ui_rt::JetUiAccessibility) -> CtValue {
 
 fn ambient_capability_value(capability: ui_rt::JetUiCapability) -> CtValue {
     ambient_enum_value(
-        "UiCapability",
+        "UICapability",
         match capability {
             ui_rt::JetUiCapability::FileDialog => "FileDialog",
             ui_rt::JetUiCapability::Clipboard => "Clipboard",
-            ui_rt::JetUiCapability::Ime => "Ime",
+            ui_rt::JetUiCapability::IME => "IME",
             ui_rt::JetUiCapability::DragDrop => "DragDrop",
             ui_rt::JetUiCapability::Shortcuts => "Shortcuts",
             ui_rt::JetUiCapability::Accessibility => "Accessibility",
@@ -1824,7 +1575,7 @@ fn ambient_capability_facts_value(facts: ui_rt::JetUiCapabilityFacts) -> CtValue
         .into_iter()
         .map(|fact| {
             ambient_struct(
-                "UiCapabilityFact",
+                "UICapabilityFact",
                 vec![
                     ("capability".to_string(), ambient_capability_value(fact.capability)),
                     ("granted".to_string(), CtValue::Bool(fact.granted)),
@@ -1832,7 +1583,7 @@ fn ambient_capability_facts_value(facts: ui_rt::JetUiCapabilityFacts) -> CtValue
             )
         })
         .collect();
-    ambient_struct("UiCapabilityFacts", vec![("facts".to_string(), CtValue::List(facts))])
+    ambient_struct("UICapabilityFacts", vec![("facts".to_string(), CtValue::List(facts))])
 }
 
 fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
@@ -1843,7 +1594,7 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
         .collect();
     let role = node.role.map(|role| {
         ambient_enum_value(
-            "UiAriaRole",
+            "UIAriaRole",
             match role {
                 ui_rt::JetUiAriaRole::Button => "Button",
                 ui_rt::JetUiAriaRole::TextInput => "TextInput",
@@ -1854,7 +1605,7 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
         )
     });
     let kind = ambient_enum_value(
-        "UiNodeKind",
+        "UINodeKind",
         match node.kind {
             ui_rt::JetUiNodeKind::Custom => "Custom",
             ui_rt::JetUiNodeKind::Text => "Text",
@@ -1865,25 +1616,25 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
         Vec::new(),
     );
     ambient_struct(
-        "UiNode",
+        "UINode",
         vec![
             ("label".to_string(), CtValue::Str(node.label)),
             ("width".to_string(), CtValue::Float(CtFloat::f64(node.width))),
             ("height".to_string(), CtValue::Float(CtFloat::f64(node.height))),
             (
                 "role".to_string(),
-                ambient_option_value("UiAriaRole", role),
+                ambient_option_value("UIAriaRole", role),
             ),
             (
                 "accessibility".to_string(),
                 ambient_option_value(
-                    "UiAccessibility",
+                    "UIAccessibility",
                     node.accessibility.map(ambient_accessibility_value),
                 ),
             ),
             (
                 "ime".to_string(),
-                ambient_option_value("UiImeMode", node.ime.map(ambient_ime_mode_value)),
+                ambient_option_value("UIIMEMode", node.ime.map(ambient_ime_mode_value)),
             ),
             (
                 "color".to_string(),
@@ -1893,7 +1644,7 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
             ("children".to_string(), CtValue::List(children)),
             (
                 "shortcut".to_string(),
-                ambient_option_value("UiShortcut", node.shortcut.map(ambient_shortcut_value)),
+                ambient_option_value("UIShortcut", node.shortcut.map(ambient_shortcut_value)),
             ),
         ],
     )
@@ -1901,7 +1652,7 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
 
 fn ambient_ime_phase_value(phase: ui_rt::JetUiImePhase) -> CtValue {
     ambient_enum_value(
-        "UiImePhase",
+        "UIIMEPhase",
         match phase {
             ui_rt::JetUiImePhase::Start => "Start",
             ui_rt::JetUiImePhase::Update => "Update",
@@ -1916,7 +1667,7 @@ fn ambient_ime_composition_value(
     value: ui_rt::JetUiImeComposition,
 ) -> CtValue {
     ambient_struct(
-        "UiImeComposition",
+        "UIIMEComposition",
         vec![
             ("text".to_string(), CtValue::Str(value.text)),
             (
@@ -1925,7 +1676,7 @@ fn ambient_ime_composition_value(
             ),
             (
                 "marked".to_string(),
-                ambient_option_value("UiTextRange", value.marked.map(ambient_text_range_value)),
+                ambient_option_value("UITextRange", value.marked.map(ambient_text_range_value)),
             ),
         ],
     )
@@ -1933,14 +1684,14 @@ fn ambient_ime_composition_value(
 
 fn ambient_ime_event_value(value: ui_rt::JetUiImeEvent) -> CtValue {
     ambient_struct(
-        "UiImeEvent",
+        "UIIMEEvent",
         vec![
             ("target".to_string(), ambient_node_id_value(value.target)),
             ("phase".to_string(), ambient_ime_phase_value(value.phase)),
             (
                 "composition".to_string(),
                 ambient_option_value(
-                    "UiImeComposition",
+                    "UIIMEComposition",
                     value.composition.map(ambient_ime_composition_value),
                 ),
             ),
@@ -1950,7 +1701,7 @@ fn ambient_ime_event_value(value: ui_rt::JetUiImeEvent) -> CtValue {
 
 fn ambient_drag_phase_value(phase: ui_rt::JetUiDragPhase) -> CtValue {
     ambient_enum_value(
-        "UiDragPhase",
+        "UIDragPhase",
         match phase {
             ui_rt::JetUiDragPhase::Enter => "Enter",
             ui_rt::JetUiDragPhase::Over => "Over",
@@ -1964,7 +1715,7 @@ fn ambient_drag_phase_value(phase: ui_rt::JetUiDragPhase) -> CtValue {
 
 fn ambient_drag_operation_value(operation: ui_rt::JetUiDragOperation) -> CtValue {
     ambient_enum_value(
-        "UiDragOperation",
+        "UIDragOperation",
         match operation {
             ui_rt::JetUiDragOperation::Copy => "Copy",
             ui_rt::JetUiDragOperation::Move => "Move",
@@ -1977,17 +1728,17 @@ fn ambient_drag_operation_value(operation: ui_rt::JetUiDragOperation) -> CtValue
 fn ambient_drop_item_value(item: ui_rt::JetUiDropItem) -> CtValue {
     match item {
         ui_rt::JetUiDropItem::Text(value) => ambient_enum_value(
-            "UiDropItem",
+            "UIDropItem",
             "Text",
             vec![(None, CtValue::Str(value))],
         ),
-        ui_rt::JetUiDropItem::Uri(value) => ambient_enum_value(
-            "UiDropItem",
-            "Uri",
+        ui_rt::JetUiDropItem::URI(value) => ambient_enum_value(
+            "UIDropItem",
+            "URI",
             vec![(None, CtValue::Str(value))],
         ),
         ui_rt::JetUiDropItem::File(value) => ambient_enum_value(
-            "UiDropItem",
+            "UIDropItem",
             "File",
             vec![(None, ambient_granted_path_value(value))],
         ),
@@ -1996,7 +1747,7 @@ fn ambient_drop_item_value(item: ui_rt::JetUiDropItem) -> CtValue {
 
 fn ambient_drag_event_value(value: ui_rt::JetUiDragEvent) -> CtValue {
     ambient_struct(
-        "UiDragEvent",
+        "UIDragEvent",
         vec![
             ("target".to_string(), ambient_node_id_value(value.target)),
             ("phase".to_string(), ambient_drag_phase_value(value.phase)),
@@ -2016,7 +1767,7 @@ fn ambient_projection_value(
     projection: ui_rt::JetUiAccessibilityProjection,
 ) -> CtValue {
     ambient_struct(
-        "UiAccessibilityProjection",
+        "UIAccessibilityProjection",
         vec![
             ("node".to_string(), ambient_node_id_value(projection.node().clone())),
             (
@@ -2029,7 +1780,7 @@ fn ambient_projection_value(
 
 fn ambient_ui_cancellation_value(reason: ui_rt::JetUiCancellation) -> CtValue {
     ambient_enum_value(
-        "UiCancellation",
+        "UICancellation",
         match reason {
             ui_rt::JetUiCancellation::User => "User",
             ui_rt::JetUiCancellation::Closed => "Closed",
@@ -2044,27 +1795,27 @@ fn ambient_ui_cancellation_value(reason: ui_rt::JetUiCancellation) -> CtValue {
 fn ambient_ui_host_error_value(error: ui_rt::JetUiHostError) -> CtValue {
     match error {
         ui_rt::JetUiHostError::Cancelled(reason) => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "Cancelled",
             vec![(None, ambient_ui_cancellation_value(reason))],
         ),
         ui_rt::JetUiHostError::CapabilityUnavailable { capability } => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "CapabilityUnavailable",
             vec![(None, CtValue::Str(capability.to_string()))],
         ),
         ui_rt::JetUiHostError::CapabilityDenied { capability } => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "CapabilityDenied",
             vec![(None, ambient_capability_value(capability))],
         ),
         ui_rt::JetUiHostError::InvalidRequest(message) => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "InvalidRequest",
             vec![(None, CtValue::Str(message))],
         ),
         ui_rt::JetUiHostError::HostFailure { service, message } => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "HostFailure",
             vec![
                 (None, CtValue::Str(service.to_string())),
@@ -2072,7 +1823,7 @@ fn ambient_ui_host_error_value(error: ui_rt::JetUiHostError) -> CtValue {
             ],
         ),
         ui_rt::JetUiHostError::ResourceDenied(message) => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "ResourceDenied",
             vec![(None, CtValue::Str(message))],
         ),
@@ -2080,7 +1831,7 @@ fn ambient_ui_host_error_value(error: ui_rt::JetUiHostError) -> CtValue {
             shortcut,
             existing_action,
         } => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "ShortcutConflict",
             vec![
                 (None, ambient_shortcut_value(shortcut)),
@@ -2088,7 +1839,7 @@ fn ambient_ui_host_error_value(error: ui_rt::JetUiHostError) -> CtValue {
             ],
         ),
         ui_rt::JetUiHostError::QueueFull { service } => ambient_enum_value(
-            "UiHostError",
+            "UIHostError",
             "QueueFull",
             vec![(None, CtValue::Str(service.to_string()))],
         ),
@@ -2137,7 +1888,7 @@ fn ui_mir_enum(type_name: &str, variant: &str) -> MirRuntimeValue {
 
 fn ui_mir_role(role: Option<ui_rt::JetUiAriaRole>) -> MirRuntimeValue {
     role.map_or_else(
-        || ui_mir_absent("UiAriaRole"),
+        || ui_mir_absent("UIAriaRole"),
         |role| {
             let variant = match role {
                 ui_rt::JetUiAriaRole::Button => "Button",
@@ -2145,19 +1896,19 @@ fn ui_mir_role(role: Option<ui_rt::JetUiAriaRole>) -> MirRuntimeValue {
                 ui_rt::JetUiAriaRole::Label => "Label",
                 ui_rt::JetUiAriaRole::Container => "Container",
             };
-            MirRuntimeValue::Present(Box::new(ui_mir_enum("UiAriaRole", variant)))
+            MirRuntimeValue::Present(Box::new(ui_mir_enum("UIAriaRole", variant)))
         },
     )
 }
 fn ui_mir_ime(ime: Option<ui_rt::JetUiImeMode>) -> MirRuntimeValue {
     ime.map_or_else(
-        || ui_mir_absent("UiImeMode"),
+        || ui_mir_absent("UIIMEMode"),
         |ime| {
             let variant = match ime {
                 ui_rt::JetUiImeMode::Native => "Native",
                 ui_rt::JetUiImeMode::Disabled => "Disabled",
             };
-            MirRuntimeValue::Present(Box::new(ui_mir_enum("UiImeMode", variant)))
+            MirRuntimeValue::Present(Box::new(ui_mir_enum("UIIMEMode", variant)))
         },
     )
 }
@@ -2170,14 +1921,14 @@ fn ui_mir_kind(kind: &ui_rt::JetUiNodeKind) -> MirRuntimeValue {
         ui_rt::JetUiNodeKind::Button => "Button",
         ui_rt::JetUiNodeKind::TextInput => "TextInput",
     };
-    ui_mir_enum("UiNodeKind", variant)
+    ui_mir_enum("UINodeKind", variant)
 }
 
 fn ui_mir_accessibility(
     accessibility: Option<ui_rt::JetUiAccessibility>,
 ) -> MirRuntimeValue {
     let Some(accessibility) = accessibility else {
-        return ui_mir_absent("UiAccessibility");
+        return ui_mir_absent("UIAccessibility");
     };
     let optional_string = |value: Option<String>| {
         value.map_or_else(
@@ -2208,14 +1959,14 @@ fn ui_mir_accessibility(
                 }
             };
             MirRuntimeValue::Enum {
-                type_name: "UiAccessibilityState".to_string(),
+                type_name: "UIAccessibilityState".to_string(),
                 variant: variant.to_string(),
                 args,
             }
         })
         .collect();
     MirRuntimeValue::Present(Box::new(MirRuntimeValue::Struct {
-        type_name: "UiAccessibility".to_string(),
+        type_name: "UIAccessibility".to_string(),
         fields: vec![
             ("name".to_string(), optional_string(accessibility.name)),
             (
@@ -2235,7 +1986,7 @@ fn ui_mir_node_value(
     let children = node
         .children
         .into_iter()
-        .map(|child| ui_mir_node_value(child, ui_mir_absent("UiShortcut"), None))
+        .map(|child| ui_mir_node_value(child, ui_mir_absent("UIShortcut"), None))
         .collect();
     let mut fields = vec![
         ("label".to_string(), MirRuntimeValue::String(node.label)),
@@ -2274,7 +2025,7 @@ fn ui_mir_node_value(
         fields.push((name.to_string(), callback));
     }
     MirRuntimeValue::Struct {
-        type_name: "UiNode".to_string(),
+        type_name: "UINode".to_string(),
         fields,
     }
 }
@@ -2288,13 +2039,13 @@ fn ui_mir_optional_shortcut(
         MirRuntimeValue::Present(inner)
             if matches!(
                 inner.as_ref(),
-                MirRuntimeValue::Struct { type_name, .. } if type_name == "UiShortcut"
+                MirRuntimeValue::Struct { type_name, .. } if type_name == "UIShortcut"
             ) =>
         {
             Ok(MirRuntimeValue::Present(inner.clone()))
         }
         _ => Err(unsupported(
-            "core.ui.button() expects an optional UiShortcut",
+            "core.ui.button() expects an optional UIShortcut",
             span,
         )),
     }
@@ -2329,12 +2080,12 @@ fn ui_mir_ime_mode(
             type_name,
             variant,
             args,
-        } if type_name == "UiImeMode" && args.is_empty() => match variant.as_str() {
+        } if type_name == "UIIMEMode" && args.is_empty() => match variant.as_str() {
             "Native" => Ok(ui_rt::JetUiImeMode::Native),
             "Disabled" => Ok(ui_rt::JetUiImeMode::Disabled),
-            _ => Err(unsupported("unknown UiImeMode variant", span)),
+            _ => Err(unsupported("unknown UIIMEMode variant", span)),
         },
-        _ => Err(unsupported("core.ui.text_input() expects UiImeMode", span)),
+        _ => Err(unsupported("core.ui.text_input() expects UIIMEMode", span)),
     }
 }
 
@@ -2354,7 +2105,7 @@ fn ui_mir_preview_source(kind: &MirCoreClosureKind) -> Option<MirRuntimeValue> {
     };
     let source_id = source_file.clone();
     Some(MirRuntimeValue::Struct {
-        type_name: "UiPreviewSource".to_string(),
+        type_name: "UIPreviewSource".to_string(),
         fields: vec![
             (
                 "source_id".to_string(),
@@ -2453,9 +2204,9 @@ fn jet_ui_core_closure_ambient_call(
                 ));
             }
             Ok(MirRuntimeValue::Struct {
-                type_name: "UiPreview".to_string(),
+                type_name: "UIPreview".to_string(),
                 fields: vec![
-                    ("kind".to_string(), ui_mir_enum("UiPreviewKind", "Preview")),
+                    ("kind".to_string(), ui_mir_enum("UIPreviewKind", "Preview")),
                     ("name".to_string(), MirRuntimeValue::String(name)),
                     ("viewport".to_string(), viewport.clone()),
                     ("callback".to_string(), callback),
@@ -2463,7 +2214,7 @@ fn jet_ui_core_closure_ambient_call(
                         "source".to_string(),
                         preview_source
                             .clone()
-                            .expect("UiPreview kind carries compiler source"),
+                            .expect("UIPreview kind carries compiler source"),
                     ),
                 ],
             })
@@ -2504,11 +2255,11 @@ fn jet_ui_core_closure_ambient_call(
                 ));
             }
             Ok(MirRuntimeValue::Struct {
-                type_name: "UiPreview".to_string(),
+                type_name: "UIPreview".to_string(),
                 fields: vec![
                     (
                         "kind".to_string(),
-                        ui_mir_enum("UiPreviewKind", "Playground"),
+                        ui_mir_enum("UIPreviewKind", "Playground"),
                     ),
                     ("name".to_string(), MirRuntimeValue::String(name)),
                     ("viewport".to_string(), viewport.clone()),
@@ -2516,7 +2267,7 @@ fn jet_ui_core_closure_ambient_call(
                     (
                         "source".to_string(),
                         preview_source
-                            .expect("UiPreview kind carries compiler source"),
+                            .expect("UIPreview kind carries compiler source"),
                     ),
                 ],
             })
@@ -2586,7 +2337,7 @@ fn jet_ui_core_closure_ambient_call(
                 })?;
                 Ok(ui_mir_node_value(
                     node,
-                    ui_mir_absent("UiShortcut"),
+                    ui_mir_absent("UIShortcut"),
                     Some(("on_drop", callback)),
                 ))
             })())
@@ -2622,8 +2373,8 @@ fn jet_ui_host_ambient_core_call(
 ) -> Option<Result<CtValue, Diagnostic>> {
     if matches!(module, "JetUiShortcut" | "::JetUiShortcut") && method == "cmd" {
         return Some((|| {
-            ambient_expect_arity(&args, 1, "UiShortcut.cmd", span)?;
-            let key = ambient_string(&args[0], "UiShortcut.cmd", span)?;
+            ambient_expect_arity(&args, 1, "UIShortcut.cmd", span)?;
+            let key = ambient_string(&args[0], "UIShortcut.cmd", span)?;
             Ok(ambient_shortcut_value(ui_rt::JetUiShortcut::cmd(&key)))
         })());
     }
@@ -2770,7 +2521,7 @@ fn jet_ui_host_ambient_core_call(
             ambient_expect_arity(&args, 0, "core.ui.host.ime.poll", span)?;
             Ok(ambient_option_result(
                 with_ui_host(|| ui_rt::jet_ui_host_ime_poll()),
-                "UiImeEvent",
+                "UIIMEEvent",
                 ambient_ime_event_value,
             ))
         })()),
@@ -2778,7 +2529,7 @@ fn jet_ui_host_ambient_core_call(
             ambient_expect_arity(&args, 0, "core.ui.host.drag_drop.poll", span)?;
             Ok(ambient_option_result(
                 with_ui_host(|| ui_rt::jet_ui_host_drag_poll()),
-                "UiDragEvent",
+                "UIDragEvent",
                 ambient_drag_event_value,
             ))
         })()),
@@ -2822,7 +2573,7 @@ fn jet_ui_host_ambient_core_call(
             let node_id = ambient_node_id(&args[1], span)?;
             Ok(ambient_option_result(
                 with_ui_host(|| ui_rt::jet_ui_host_project_accessibility(node, node_id)),
-                "UiAccessibilityProjection",
+                "UIAccessibilityProjection",
                 ambient_projection_value,
             ))
         })()),
@@ -2959,16 +2710,6 @@ fn ui_push_file_filter(
     let _ = rt.heap.record_set_int(record, 1, extensions);
     let _ = rt.heap.record_set_int(record, 2, mime_types);
     ui_store_value(rt, record, UiValue::FileFilter(filter))
-}
-
-fn ui_decode_file_filter(
-    rt: &crate::runtime_host::JitRuntime,
-    handle: i64,
-) -> Option<ui_rt::JetUiFileFilter> {
-    match ui_value(rt, handle)? {
-        UiValue::FileFilter(filter) => Some(filter),
-        _ => None,
-    }
 }
 
 fn ui_push_fs_grant(
@@ -3488,7 +3229,7 @@ fn ui_push_drop_item(
             let _ = rt.heap.record_set_int(record, 0, 0);
             let _ = rt.heap.record_set_string(record, 1, text);
         }
-        ui_rt::JetUiDropItem::Uri(uri) => {
+        ui_rt::JetUiDropItem::URI(uri) => {
             let uri = rt.heap.alloc_string(uri.clone());
             let _ = rt.heap.record_set_int(record, 0, 1);
             let _ = rt.heap.record_set_string(record, 1, uri);
@@ -3538,7 +3279,7 @@ fn ui_push_drag_event(
 fn jet_jit_ui_shortcut_command(key: i64) -> i64 {
     with_rt(|rt| {
         let Some(key) = rt.heap.clone_string(key) else {
-            rt.set_host_fault("JIT UiShortcut.cmd received a non-string key handle");
+            rt.set_host_fault("JIT UIShortcut.cmd received a non-string key handle");
             return 0;
         };
         ui_push_shortcut(rt, ui_rt::JetUiShortcut::cmd(&key))
@@ -3641,75 +3382,6 @@ fn jet_jit_ui_host_shortcuts_dispatch(shortcut: i64) -> i64 {
     };
     let result = with_ui_host(|| ui_rt::jet_ui_host_shortcuts_dispatch(shortcut));
     with_rt(|rt| ui_result(rt, result, ui_push_shortcut_dispatch))
-}
-
-fn jet_jit_ui_host_attach_accessibility(node: i64, accessibility: i64) -> i64 {
-    let Some((node_value, accessibility)) = with_rt(|rt| {
-        let Some(node_value) = rt.ui.nodes.get(node.saturating_sub(1) as usize).cloned() else {
-            rt.set_host_fault("JIT ui.host.accessibility.attach received invalid node");
-            return None;
-        };
-        let Some(UiValue::Accessibility(accessibility)) = ui_value(rt, accessibility) else {
-            rt.set_host_fault("JIT ui.host.accessibility.attach received invalid metadata");
-            return None;
-        };
-        Some((node_value, accessibility))
-    }) else {
-        return 0;
-    };
-    let result = with_ui_host(|| {
-        ui_rt::jet_ui_host_attach_accessibility(node_value, accessibility)
-    });
-    with_rt(|rt| {
-        ui_result(rt, result, |rt, node| {
-            rt.ui.nodes.push(node);
-            rt.ui.nodes.len() as i64
-        })
-    })
-}
-
-fn ui_push_accessibility_projection(
-    rt: &mut crate::runtime_host::JitRuntime,
-    projection: Option<ui_rt::JetUiAccessibilityProjection>,
-) -> i64 {
-    let payload = projection
-        .as_ref()
-        .map(|projection| {
-            let node = rt.heap.alloc_string(projection.node().as_str().to_string());
-            let metadata = ui_push_accessibility(rt, projection.metadata().clone());
-            let record = rt.heap.alloc_record(2);
-            let _ = rt.heap.record_set_string(record, 0, node);
-            let _ = rt.heap.record_set_record(record, 1, metadata);
-            record.wrapping_add(1)
-        })
-        .unwrap_or(0);
-    let record = rt.heap.alloc_record(1);
-    let _ = rt.heap.record_set_int(record, 0, payload);
-    ui_store_value(rt, record, UiValue::AccessibilityProjection(projection))
-}
-
-fn jet_jit_ui_host_project_accessibility(node: i64, node_id: i64) -> i64 {
-    let Some((node_value, node_id)) = with_rt(|rt| {
-        let Some(node_value) = rt.ui.nodes.get(node.saturating_sub(1) as usize).cloned() else {
-            rt.set_host_fault("JIT ui.host.accessibility.project received invalid node");
-            return None;
-        };
-        let Some(node_id) = rt
-            .heap
-            .clone_string(node_id)
-            .and_then(|value| ui_rt::JetUiNodeId::new(&value).ok())
-        else {
-            rt.set_host_fault("JIT ui.host.accessibility.project received invalid node ID");
-            return None;
-        };
-        Some((node_value, node_id))
-    }) else {
-        return 0;
-    };
-    let result = with_ui_host(|| {
-        ui_rt::jet_ui_host_project_accessibility(node_value, node_id)
-    });
-    with_rt(|rt| ui_result(rt, result, ui_push_accessibility_projection))
 }
 
 fn jet_jit_ui_node_dim(node: i64, which: i64) -> f64 {

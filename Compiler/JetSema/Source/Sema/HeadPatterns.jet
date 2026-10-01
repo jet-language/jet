@@ -1,5 +1,22 @@
 // Whole-program multi-head normalization. Variant names are collected across
 // every input Program; function heads are grouped only within their Program.
+use jet_foundation.[
+    AccessConvention,
+    Diagnostic,
+    Expr,
+    Func,
+    Item,
+    Param,
+    ParamZone,
+    Pattern,
+    Program,
+    Span,
+    Stmt,
+    SwitchArm,
+    Type,
+    VariantPayload,
+    type_name,
+]
 
 pub struct SemaHeadPatternDesugarResult {
     pub programs: [Program]
@@ -40,7 +57,7 @@ fn sema_head_pattern_payload_types(payload: VariantPayload) -> [Type] Never! {
 
 fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: &[Diagnostic], complete: &Bool) -> Func {
     folded := heads[0]
-    enum_name := None
+    enum_name := String?{None}
     invalid := false
     arms := [SwitchArm]{}
 
@@ -50,7 +67,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
             next
         }
         pattern_span := sema_head_pattern_pattern_span(pattern)
-        variant_name := None
+        variant_name := String?{None}
         if pattern == {
             .Variant(name, _, _, _) -> variant_name = Val(name)
             else -> {}
@@ -62,7 +79,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
         }
         variant :: variant_name ?? ""
 
-        candidate := None
+        candidate := SemaHeadPatternVariant?{None}
         candidate_enum := ""
         candidate_payload := VariantPayload.Unit
         ambiguous := false

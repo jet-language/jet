@@ -1440,19 +1440,6 @@ pub fn find_published(
         .map_err(|error| super::Advisory::e2607("registry index", &error.to_string()))
 }
 
-/// Fetch-side resolution: clone/pull the registry index and return the versions
-/// of `name` a resolver may still pick (yanked versions filtered out).
-pub fn resolve_from_index(
-    registry: &RegistryConfig,
-    name: &str,
-) -> Result<Vec<IndexEntry>, Diagnostic> {
-    // Keep this older convenience API on the same trust path as the live
-    // resolver. It must not expose a TUF/OCI-verified entry while bypassing
-    // the publisher signature and community gate checks.
-    let (entries, _warnings) = resolve_and_verify(registry, name)?;
-    Ok(entries.into_iter().filter(|entry| !entry.yanked).collect())
-}
-
 /// Registry source artifact convention. The git index and the source tree are
 /// one publish transaction: `artifacts/<name>/<version>` is committed beside
 /// the immutable index line. The artifact is deliberately a plain source tree

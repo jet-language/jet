@@ -2575,7 +2575,7 @@ fn render_value(v: &Json) -> String {
     }
 }
 
-fn json_str(value: &str) -> String {
+pub(crate) fn json_str(value: &str) -> String {
     let mut out = String::from("\"");
     for ch in value.chars() {
         match ch {
@@ -2610,12 +2610,6 @@ pub(crate) fn emit_prove_diag(code: &str, what: &str, why: &str, fix: &str, json
         fix.to_string(),
         json_mode,
     );
-}
-
-#[allow(dead_code)]
-pub(crate) fn fail_usage(message: &str) -> ! {
-    crate::cli_error!("E2104", "{message}");
-    exit(ExitCodes::USAGE);
 }
 
 #[cfg(test)]

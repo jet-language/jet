@@ -190,7 +190,7 @@ fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
     Some(match name {
         "ABI" => "write it only inside `#ABI(name: system)`",
         "Effect" => "write it only inside `#FX(Net, FS)` or another `#FX(...)` effect scope",
-        "FfiLanguage" => "write it only inside `#FFI(language: c)`",
+        "FFILanguage" => "write it only inside `#FFI(language: c)`",
         "InlineMode" => "write it only inside `#Inline(mode: Always)`",
         "IntType" => "write it only inside `#Layout(tag: I32)`",
         "KernelMode" => "write it only inside `#Kernel(mode: parallel)`",
@@ -274,14 +274,14 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
         | Syntax::TYPE_AUTHORITY
-        | "Clock" | "Rng" | Syntax::DETERMINISTIC_WORLD_TYPE | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition"
+        | "Clock" | "RNG" | Syntax::DETERMINISTIC_WORLD_TYPE | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition"
         // D-SHARED-REVISION1=A: the opaque owner-bound snapshot carrier and
         // its typed wrong-owner/exhaustion failures.
         | Syntax::TYPE_SHARED_SNAPSHOT | Syntax::TYPE_SHARED_REVISION_ERROR
         | "Path"
         | "StreamEventTime" | "KeyedStream" | "Window" | "LateEventDisposition"
-        | "TestSuite" | "TestComparison" | "Count" | "HandleId" | "TaskId" | "EventId"
-        | "HistoryRng" | "HistoryValue" | "HistoryPrecondition" | "HistoryCase"
+        | "TestSuite" | "TestComparison" | "Count" | "HandleID" | "TaskID" | "EventID"
+        | "HistoryRNG" | "HistoryValue" | "HistoryPrecondition" | "HistoryCase"
         | "HistoryOperation" | "HistoryScheduleChoice" | "HistoryBounds"
         | "HistoryDistribution" | "HistoryStrategy" | "TypedHistoryCase"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
@@ -335,12 +335,12 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | Syntax::TYPE_BITS | Syntax::TYPE_BYTES
         // E2-M10: networking opaque types.
         | "TCPListener" | "TCPStream" | "IPAddr" | "SocketAddr" | "UDPSocket" | "UDPPacket"
-        | "DNSSrv" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
+        | "DNSSRV" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
-        | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VjpRun"
+        | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VJPRun"
         | "SparseTensor"
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceWorkflow" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
@@ -409,28 +409,28 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-CORE-SECRETS1=A / D-TTLVAL1=A: generic TTL plus one secret wrapper.
         | "Expired" | "ExpiringValue" | "ExpiringSecret"
         // D-RENDERTGT2=A (c133 M1): UI backend seam types.
-        | "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "InputEvent"
-        | "EventResult" | "NullBackend" | "TuiBackend"
+        | "Point" | "Size" | "Rect" | "SizeConstraint" | "UINode" | "InputEvent"
+        | "EventResult" | "NullBackend" | "TUIBackend"
         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend.
         | "GtkBackend"
         // D-A11YGATE1=B (c134 Phase 6): accessible-role opaque type.
-        | "UiAriaRole"
+        | "UIAriaRole"
         // D-FOUND-PLATFORM1=A: shared font and host service value vocabulary.
         | "FontFace" | "FontStyle" | "Glyph" | "GlyphRun" | "GlyphShaper"
-        | "UiCapability" | "UiCapabilityFact" | "UiCapabilityFacts" | "UiCancellation"
-        | "UiHostError" | "UiServiceResult" | "UiFileDialogKind" | "UiFsAccess"
-        | "UiFsRights" | "UiFsGrant" | "UiGrantedPath" | "UiFileFilter"
-        | "UiClipboardWrite" | "UiTextRange" | "UiImeMode"
-        | "UiPreview" | "UiPreviewAccessibility" | "UiPreviewAuthority"
-        | "UiPreviewContext" | "UiPreviewDevice" | "UiPreviewEffect"
-        | "UiPreviewInputOverride" | "UiPreviewInputValue" | "UiPreviewKind"
-        | "UiPreviewLifecycle" | "UiPreviewRegistry" | "UiPreviewSource"
-        | "UiPreviewTheme" | "UiPreviewTraits" | "UiPreviewViewport"
-        | "UiImePhase"
-        | "UiDragPhase" | "UiDragEvent" | "UiShortcutModifier" | "UiShortcutModifiers"
-        | "UiShortcut" | "UiShortcutBinding" | "UiShortcutDispatch"
-        | "UiAccessibilityState" | "UiAccessibility" | "UiNodeId"
-        | "UiAccessibilityProjection"
+        | "UICapability" | "UICapabilityFact" | "UICapabilityFacts" | "UICancellation"
+        | "UIHostError" | "UIServiceResult" | "UIFileDialogKind" | "UIFSAccess"
+        | "UIFSRights" | "UIFSGrant" | "UIGrantedPath" | "UIFileFilter"
+        | "UIClipboardWrite" | "UITextRange" | "UIIMEMode"
+        | "UIPreview" | "UIPreviewAccessibility" | "UIPreviewAuthority"
+        | "UIPreviewContext" | "UIPreviewDevice" | "UIPreviewEffect"
+        | "UIPreviewInputOverride" | "UIPreviewInputValue" | "UIPreviewKind"
+        | "UIPreviewLifecycle" | "UIPreviewRegistry" | "UIPreviewSource"
+        | "UIPreviewTheme" | "UIPreviewTraits" | "UIPreviewViewport"
+        | "UIIMEPhase"
+        | "UIDragPhase" | "UIDragEvent" | "UIShortcutModifier" | "UIShortcutModifiers"
+        | "UIShortcut" | "UIShortcutBinding" | "UIShortcutDispatch"
+        | "UIAccessibilityState" | "UIAccessibility" | "UINodeID"
+        | "UIAccessibilityProjection"
         // c-devserver (owner-directed 2026-07-01): the configurable `jet dev`
         // server value returned by `core.web.devserver.for_app(...)`.
         | "DevServer"
@@ -467,10 +467,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
         | "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
-        | "Limits" | "SMTPAuth" | "TLSTrust" | "DkimConfig" | "SMTPConfig" | "Mailer"
+        | "Limits" | "SMTPAuth" | "TLSTrust" | "DKIMConfig" | "SMTPConfig" | "Mailer"
         | "Regex" | "RegexFlags" | "Match"
         | "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName" | "HTTPHeaderValue"
-        | "Body" | "Headers" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCorsOrigins" | "HTTPCompressEncoding"
+        | "Body" | "Headers" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTLS" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCorsOrigins" | "HTTPCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
         | "BrowserIntercept"
@@ -592,29 +592,29 @@ pub(crate) fn core_history_variants(
             ("Text".to_string(), VariantPayload::Single(Type::String, zero)),
             (
                 "Handle".to_string(),
-                VariantPayload::Single(Type::Named("HandleId".to_string()), zero),
+                VariantPayload::Single(Type::Named("HandleID".to_string()), zero),
             ),
             ("Redacted".to_string(), VariantPayload::Single(Type::String, zero)),
         ],
         "HistoryPrecondition" => vec![
             (
                 "HandleLive".to_string(),
-                VariantPayload::Single(Type::Named("HandleId".to_string()), zero),
+                VariantPayload::Single(Type::Named("HandleID".to_string()), zero),
             ),
             (
                 "HandleState".to_string(),
                 VariantPayload::Named(vec![
-                    field("handle", Type::Named("HandleId".to_string())),
+                    field("handle", Type::Named("HandleID".to_string())),
                     field("state", Type::String),
                 ]),
             ),
             (
                 "TaskCompleted".to_string(),
-                VariantPayload::Single(Type::Named("TaskId".to_string()), zero),
+                VariantPayload::Single(Type::Named("TaskID".to_string()), zero),
             ),
             (
                 "EventAvailable".to_string(),
-                VariantPayload::Single(Type::Named("EventId".to_string()), zero),
+                VariantPayload::Single(Type::Named("EventID".to_string()), zero),
             ),
         ],
         _ => return None,
@@ -1936,64 +1936,64 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("GlyphRun", "advance_x" | "advance_y") => Some(Type::Float),
         ("GlyphRun", "shaper") => Some(Type::Named("GlyphShaper".to_string())),
         ("GlyphRun", "deterministic" | "approximate") => Some(Type::Bool),
-        ("UiNode", "label") => Some(Type::String),
-        ("UiNode", "width" | "height") => Some(Type::Float),
-        ("UiNode", "accessibility") => {
-            Some(Type::Option(Box::new(Type::Named("UiAccessibility".to_string()))))
+        ("UINode", "label") => Some(Type::String),
+        ("UINode", "width" | "height") => Some(Type::Float),
+        ("UINode", "accessibility") => {
+            Some(Type::Option(Box::new(Type::Named("UIAccessibility".to_string()))))
         }
-        ("UiNode", "ime") => {
-            Some(Type::Option(Box::new(Type::Named("UiImeMode".to_string()))))
+        ("UINode", "ime") => {
+            Some(Type::Option(Box::new(Type::Named("UIIMEMode".to_string()))))
         }
-        ("UiNode", "shortcut") => Some(Type::Option(Box::new(Type::Named("UiShortcut".to_string())))),
-        ("UiFileFilter", "label") => Some(Type::String),
-        ("UiFileFilter", "extensions" | "mime_types") => {
+        ("UINode", "shortcut") => Some(Type::Option(Box::new(Type::Named("UIShortcut".to_string())))),
+        ("UIFileFilter", "label") => Some(Type::String),
+        ("UIFileFilter", "extensions" | "mime_types") => {
             Some(Type::List(Box::new(Type::String)))
         }
-        ("UiFsGrant", "root") => Some(Type::String),
-        ("UiFsGrant", "rights") => Some(Type::Named("UiFsRights".to_string())),
-        ("UiGrantedPath", "path" | "grant_root") => Some(Type::String),
-        ("UiGrantedPath", "access") => Some(Type::Named("UiFsAccess".to_string())),
-        ("UiFileDialogRequest", "title") => Some(Type::String),
-        ("UiFileDialogRequest", "kind") => Some(Type::Named("UiFileDialogKind".to_string())),
-        ("UiFileDialogRequest", "grant") => Some(Type::Named("UiFsGrant".to_string())),
-        ("UiFileDialogRequest", "initial_directory") => {
-            Some(Type::Option(Box::new(Type::Named("UiGrantedPath".to_string()))))
+        ("UIFSGrant", "root") => Some(Type::String),
+        ("UIFSGrant", "rights") => Some(Type::Named("UIFSRights".to_string())),
+        ("UIGrantedPath", "path" | "grant_root") => Some(Type::String),
+        ("UIGrantedPath", "access") => Some(Type::Named("UIFSAccess".to_string())),
+        ("UIFileDialogRequest", "title") => Some(Type::String),
+        ("UIFileDialogRequest", "kind") => Some(Type::Named("UIFileDialogKind".to_string())),
+        ("UIFileDialogRequest", "grant") => Some(Type::Named("UIFSGrant".to_string())),
+        ("UIFileDialogRequest", "initial_directory") => {
+            Some(Type::Option(Box::new(Type::Named("UIGrantedPath".to_string()))))
         }
-        ("UiFileDialogRequest", "filters") => {
-            Some(Type::List(Box::new(Type::Named("UiFileFilter".to_string()))))
+        ("UIFileDialogRequest", "filters") => {
+            Some(Type::List(Box::new(Type::Named("UIFileFilter".to_string()))))
         }
-        ("UiFileDialogRequest", "allow_multiple") => Some(Type::Bool),
-        ("UiFileDialogSelection", "files") => {
-            Some(Type::List(Box::new(Type::Named("UiGrantedPath".to_string()))))
+        ("UIFileDialogRequest", "allow_multiple") => Some(Type::Bool),
+        ("UIFileDialogSelection", "files") => {
+            Some(Type::List(Box::new(Type::Named("UIGrantedPath".to_string()))))
         }
-        ("UiClipboardText", "text") => Some(Type::String),
-        ("UiClipboardText", "selection") => {
-            Some(Type::Option(Box::new(Type::Named("UiTextRange".to_string()))))
+        ("UIClipboardText", "text") => Some(Type::String),
+        ("UIClipboardText", "selection") => {
+            Some(Type::Option(Box::new(Type::Named("UITextRange".to_string()))))
         }
-        ("UiClipboardWrite", "characters") => Some(Type::Int),
-        ("UiTextRange", "start" | "end") => Some(Type::Int),
-        ("UiImeComposition", "text") => Some(Type::String),
-        ("UiImeComposition", "selection") => Some(Type::Named("UiTextRange".to_string())),
-        ("UiImeComposition", "marked") => {
-            Some(Type::Option(Box::new(Type::Named("UiTextRange".to_string()))))
+        ("UIClipboardWrite", "characters") => Some(Type::Int),
+        ("UITextRange", "start" | "end") => Some(Type::Int),
+        ("UIIMEComposition", "text") => Some(Type::String),
+        ("UIIMEComposition", "selection") => Some(Type::Named("UITextRange".to_string())),
+        ("UIIMEComposition", "marked") => {
+            Some(Type::Option(Box::new(Type::Named("UITextRange".to_string()))))
         }
-        ("UiImeEvent", "target") => Some(Type::Named("UiNodeId".to_string())),
-        ("UiImeEvent", "phase") => Some(Type::Named("UiImePhase".to_string())),
-        ("UiImeEvent", "composition") => {
-            Some(Type::Option(Box::new(Type::Named("UiImeComposition".to_string()))))
+        ("UIIMEEvent", "target") => Some(Type::Named("UINodeID".to_string())),
+        ("UIIMEEvent", "phase") => Some(Type::Named("UIIMEPhase".to_string())),
+        ("UIIMEEvent", "composition") => {
+            Some(Type::Option(Box::new(Type::Named("UIIMEComposition".to_string()))))
         }
-        ("UiDragEvent", "target") => Some(Type::Named("UiNodeId".to_string())),
-        ("UiDragEvent", "phase") => Some(Type::Named("UiDragPhase".to_string())),
-        ("UiDragEvent", "operation") => Some(Type::Named("UiDragOperation".to_string())),
-        ("UiDragEvent", "items") => Some(Type::List(Box::new(Type::Named("UiDropItem".to_string())))),
-        ("UiShortcut", "key") => Some(Type::String),
-        ("UiShortcut", "modifiers") => Some(Type::Named("UiShortcutModifiers".to_string())),
-        ("UiShortcutBinding", "shortcut") => Some(Type::Named("UiShortcut".to_string())),
-        ("UiShortcutBinding", "action") => Some(Type::String),
-        ("UiShortcutBinding", "node") => {
-            Some(Type::Option(Box::new(Type::Named("UiNodeId".to_string()))))
+        ("UIDragEvent", "target") => Some(Type::Named("UINodeID".to_string())),
+        ("UIDragEvent", "phase") => Some(Type::Named("UIDragPhase".to_string())),
+        ("UIDragEvent", "operation") => Some(Type::Named("UIDragOperation".to_string())),
+        ("UIDragEvent", "items") => Some(Type::List(Box::new(Type::Named("UIDropItem".to_string())))),
+        ("UIShortcut", "key") => Some(Type::String),
+        ("UIShortcut", "modifiers") => Some(Type::Named("UIShortcutModifiers".to_string())),
+        ("UIShortcutBinding", "shortcut") => Some(Type::Named("UIShortcut".to_string())),
+        ("UIShortcutBinding", "action") => Some(Type::String),
+        ("UIShortcutBinding", "node") => {
+            Some(Type::Option(Box::new(Type::Named("UINodeID".to_string()))))
         }
-        ("UiAccessibility", "name" | "description") => Some(Type::Option(Box::new(Type::String))),
+        ("UIAccessibility", "name" | "description") => Some(Type::Option(Box::new(Type::String))),
         // D-FOUND-REALTIME1=A: bounded callback accounting is a readable receipt.
         (
             "RealtimeReceipt",
@@ -2049,7 +2049,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("HTTPResponse", "body") => Some(Type::Named("Body".to_string())),
         ("HTTPResponse", "headers") => Some(Type::Named("Headers".to_string())),
         // D-HTTPLIB1=A: TLS constructor fields are public PEM values.
-        ("HTTPServerTls", "cert_pem" | "key_pem") => Some(Type::String),
+        ("HTTPServerTLS", "cert_pem" | "key_pem") => Some(Type::String),
         // D-LOGTRACE1=A: typed logging values are Prelude structs, so their
         // published fields are readable like every other core record.
         ("LogField", "key" | "value" | "kind") => Some(Type::String),
@@ -2347,7 +2347,7 @@ pub(crate) fn core_generic_struct_field(
         return match field {
             "generate" => Some(Type::Fn {
                 params: vec![
-                    Type::Named("HistoryRng".to_string()),
+                    Type::Named("HistoryRNG".to_string()),
                     Type::Named("Count".to_string()),
                     Type::Named("Count".to_string()),
                 ],
@@ -2555,7 +2555,7 @@ pub(crate) fn core_generic_struct_field(
             _ => None,
         };
     }
-    if type_name == "VjpRun" && args.len() == 1 {
+    if type_name == "VJPRun" && args.len() == 1 {
         return match field {
             "value" => Some(Type::Named("Tensor".to_string())),
             "pull" => Some(Type::Fn {
@@ -3031,7 +3031,7 @@ pub(crate) fn core_http_variants(
     }
     if enum_name == "WsError" {
         for name in [
-            "InvalidUrl",
+            "InvalidURL",
             "InvalidHandshake",
             "Protocol",
             "Timeout",
@@ -3072,7 +3072,7 @@ pub(crate) fn core_http_variants(
     }
     for name in [
         "InvalidMethod",
-        "InvalidUrl",
+        "InvalidURL",
         "InvalidHeader",
         "InvalidStatus",
         "BodyConsumed",
@@ -3678,7 +3678,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
                 Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
             ),
         ]),
-        "HandleId" | "TaskId" | "EventId" => Some(vec![("value".to_string(), Type::Named("Count".to_string()))]),
+        "HandleID" | "TaskID" | "EventID" => Some(vec![("value".to_string(), Type::Named("Count".to_string()))]),
         "HistoryCase" => Some(vec![
             ("case_id".to_string(), Type::String),
             ("seed".to_string(), Type::Named("Count".to_string())),
@@ -3689,17 +3689,17 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("index".to_string(), Type::Named("Count".to_string())),
             ("name".to_string(), Type::String),
             ("arguments".to_string(), Type::List(Box::new(Type::Named("HistoryValue".to_string())))),
-            ("creates".to_string(), Type::List(Box::new(Type::Named("HandleId".to_string())))),
-            ("consumes".to_string(), Type::List(Box::new(Type::Named("HandleId".to_string())))),
+            ("creates".to_string(), Type::List(Box::new(Type::Named("HandleID".to_string())))),
+            ("consumes".to_string(), Type::List(Box::new(Type::Named("HandleID".to_string())))),
             ("preconditions".to_string(), Type::List(Box::new(Type::Named("HistoryPrecondition".to_string())))),
             ("depends_on".to_string(), Type::List(Box::new(Type::Named("Count".to_string())))),
-            ("task".to_string(), Type::Option(Box::new(Type::Named("TaskId".to_string())))),
-            ("event".to_string(), Type::Option(Box::new(Type::Named("EventId".to_string())))),
+            ("task".to_string(), Type::Option(Box::new(Type::Named("TaskID".to_string())))),
+            ("event".to_string(), Type::Option(Box::new(Type::Named("EventID".to_string())))),
         ]),
         "HistoryScheduleChoice" => Some(vec![
             ("operation".to_string(), Type::Named("Count".to_string())),
-            ("task".to_string(), Type::Option(Box::new(Type::Named("TaskId".to_string())))),
-            ("event".to_string(), Type::Option(Box::new(Type::Named("EventId".to_string())))),
+            ("task".to_string(), Type::Option(Box::new(Type::Named("TaskID".to_string())))),
+            ("event".to_string(), Type::Option(Box::new(Type::Named("EventID".to_string())))),
             ("choice".to_string(), Type::String),
         ]),
         "HistoryBounds" => Some(vec![
@@ -3712,7 +3712,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("operation".to_string(), Type::String),
             ("weight".to_string(), Type::Named("Count".to_string())),
         ]),
-        "HistoryRng" => Some(vec![]),
+        "HistoryRNG" => Some(vec![]),
         "TypedHistoryCase" => None,
         "HistoryStrategy" => None,
         "TestComparison" => Some(vec![
@@ -4020,10 +4020,10 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("limits".to_string(), Type::Named("Limits".to_string())),
             (
                 "dkim".to_string(),
-                Type::Option(Box::new(Type::Named("DkimConfig".to_string()))),
+                Type::Option(Box::new(Type::Named("DKIMConfig".to_string()))),
             ),
         ]),
-        "DkimConfig" => Some(vec![
+        "DKIMConfig" => Some(vec![
             ("domain".to_string(), Type::String),
             ("selector".to_string(), Type::String),
             (
@@ -4137,34 +4137,6 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("response".to_string(), Type::String),
             ("accepted_at".to_string(), Type::String),
         ]),
-        "LocalDate" => Some(vec![
-            ("year".to_string(), Type::Int),
-            ("month".to_string(), Type::Int),
-            ("day".to_string(), Type::Int),
-        ]),
-        "LocalTime" => Some(vec![
-            ("hour".to_string(), Type::Int),
-            ("minute".to_string(), Type::Int),
-            ("second".to_string(), Type::Int),
-            ("nano".to_string(), Type::Int),
-        ]),
-        "DateTime" => Some(vec![
-            ("year".to_string(), Type::Int),
-            ("month".to_string(), Type::Int),
-            ("day".to_string(), Type::Int),
-            ("hour".to_string(), Type::Int),
-            ("minute".to_string(), Type::Int),
-            ("second".to_string(), Type::Int),
-            ("nano".to_string(), Type::Int),
-        ]),
-        "Zone" => Some(vec![
-            ("name".to_string(), Type::String),
-            ("offset_s".to_string(), Type::Int),
-        ]),
-        "ZonedDateTime" => Some(vec![
-            ("instant".to_string(), Type::Named("DateTime".to_string())),
-            ("zone".to_string(), Type::Named("Zone".to_string())),
-        ]),
 "MIME" => Some(vec![
     ("top".to_string(), Type::String),
     ("sub".to_string(), Type::String),
@@ -4178,11 +4150,6 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         ]),
         "Duration" => Some(vec![("ns".to_string(), Type::Int)]),
         "Stopwatch" => Some(vec![("start_ns".to_string(), Type::Int)]),
-        "Period" => Some(vec![
-            ("years".to_string(), Type::Int),
-            ("months".to_string(), Type::Int),
-            ("days".to_string(), Type::Int),
-        ]),
         _ => None,
     }
 }
@@ -4242,7 +4209,7 @@ pub(crate) fn core_generic_constructable_fields(
                     "generate".to_string(),
                     Type::Fn {
                         params: vec![
-                            Type::Named("HistoryRng".to_string()),
+                            Type::Named("HistoryRNG".to_string()),
                             Type::Named("Count".to_string()),
                             Type::Named("Count".to_string()),
                         ],
@@ -4296,7 +4263,7 @@ pub(crate) fn core_email_variants(
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
     let units: &[&str] = match enum_name {
-        "SMTPSecurity" => &["StartTls", "TLS"],
+        "SMTPSecurity" => &["StartTLS", "TLS"],
         "RecipientPolicy" => &["RequireAll", "DeliverAccepted"],
         "EmailError" | "SMTPAuth" | "TLSTrust" => &[],
         _ => return None,
@@ -4387,8 +4354,8 @@ pub(crate) fn core_tls_variants(
     let mut variants = std::collections::HashMap::new();
     match enum_name {
         "TLSVersion" => {
-            variants.insert("Tls12".to_string(), (zero, VariantPayload::Unit));
-            variants.insert("Tls13".to_string(), (zero, VariantPayload::Unit));
+            variants.insert("TLS12".to_string(), (zero, VariantPayload::Unit));
+            variants.insert("TLS13".to_string(), (zero, VariantPayload::Unit));
         }
         "TLSClientTrust" => {
             variants.insert("System".to_string(), (zero, VariantPayload::Unit));
@@ -4469,10 +4436,10 @@ pub(crate) fn core_encoding_variants(
         "JetDataPlotLegendPosition" => &["Top", "Bottom", "Left", "Right"],
         "JetDataPlotFacetKind" => &["Wrap", "Grid"],
         "JetDataPlotInteraction" => &["Hover", "Select", "Pan"],
-        "JetDataPlotBackend" => &["Svg", "Text"],
+        "JetDataPlotBackend" => &["SVG", "Text"],
         "JetDataPlotSupport" => &["Full", "Partial", "Unsupported"],
         "JetDataPlotErrorKind" => &["Schema", "Encoding", "Render"],
-        "JetDataPlotRenderFormat" => &["Svg", "Text", "Json"],
+        "JetDataPlotRenderFormat" => &["SVG", "Text", "JSON"],
         "CBORErrorKind" => &[
             "Syntax",
             "Truncated",
@@ -4482,9 +4449,9 @@ pub(crate) fn core_encoding_variants(
             "TrailingData",
             "NonCanonical",
         ],
-        "XMLReason" => &["Syntax", "Truncated", "ForbiddenDtd", "UnknownEntity"],
+        "XMLReason" => &["Syntax", "Truncated", "ForbiddenDTD", "UnknownEntity"],
         "XMLEntityPolicy" => &["PredefinedOnly", "Reject"],
-        "XMLEncoding" => &["Utf8", "Utf16"],
+        "XMLEncoding" => &["UTF8", "UTF16"],
         "XMLCanonicalMode" => &["Inclusive", "Exclusive"],
         _ => return None,
     };

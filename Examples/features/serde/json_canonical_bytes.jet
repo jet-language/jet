@@ -1,24 +1,32 @@
-// json.canonical: compact output with object keys sorted by UTF-8 bytes.
+// json.canonical: RFC 8785 output with object keys sorted by UTF-16 code units.
 // Each case prints the exact canonical bytes, whether re-canonicalizing the
 // canonical text is stable, and that the pretty form is a different string.
+// Input JCS cannot encode (an Int beyond 2^53) is a typed Unsupported error.
+use core.encoding as encoding
 use core.encoding.json as json
+
+fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+    if kind == {
+        .Syntax -> "Syntax"
+        .Truncated -> "Truncated"
+        .Unsupported -> "Unsupported"
+        .Limit -> "Limit"
+        .IO -> "IO"
+        .State -> "State"
+    }
+}
 
 fn show(label: String, text: String) {
     tree :: json.parse(text) ?? {
-        kind :: if err.kind == {
-            .Syntax -> "Syntax"
-            .Truncated -> "Truncated"
-            .Unsupported -> "Unsupported"
-            .Limit -> "Limit"
-            .IO -> "IO"
-            .State -> "State"
-        }
-        print("{label}: rejected {kind}: {err.reason}")
+        print("{label}: rejected {kind_name(err.kind)}: {err.reason}")
         return
     }
-    canon :: json.canonical(tree)
+    canon :: json.canonical(tree) ?? {
+        print("{label}: cannot canonicalize, {kind_name(err.kind)} at `{err.path}`: {err.reason}")
+        return
+    }
     reparsed :: json.parse(canon) ?? panic("canonical text must reparse")
-    again :: json.canonical(reparsed)
+    again :: json.canonical(reparsed) ?? panic("canonical text must canonicalize")
     print("{label}: {canon}")
     print("{label}: stable={canon == again} pretty-differs={canon != json.to_string_pretty(tree)}")
 }
@@ -27,7 +35,8 @@ fn run() {
     show("key order", "{{\"b\":1,\"a\":2,\"B\":3,\"aa\":4,\"z\":{{\"y\":1,\"x\":2}}}}")
     show("unicode keys", "{{\"é\":1,\"e\":2,\"😀\":3,\"\\u00e9x\":4}}")
     show("string escapes", "[\"tab\\t\",\"nl\\n\",\"quote\\\"\",\"ctl\\u0001\",\"slash\\/\",\"emoji\\ud83d\\ude00\",\"e\\u0301\"]")
-    show("numbers", "[1.0,1e2,-0,0.1,1E-7,100000000000000000000,9007199254740993,-1.5e300]")
+    show("numbers", "[1.0,1e2,-0,0.1,1E-7,100000000000000000000,-1.5e300]")
+    show("unsafe integer", "[9007199254740993]")
     show("literals", "{{\"t\":true,\"f\":false,\"n\":null,\"e\":[],\"o\":{{}}}}")
     show("duplicate key", "{{\"a\":1,\"a\":2}}")
     show("whitespace", " {{ \"a\" : [ 1 , 2 ] }} ")

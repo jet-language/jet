@@ -10,25 +10,25 @@ package {
 }
 use core as core
 fn round_provider(n: Float) -> Int { core.math.round(n) }
-pub fn abs(n: Int) -> Int {
+pub fn abs(n: Int) -> Int Never! {
     if n < 0 -> return -n
     n
 }
 
-pub fn abs_float(n: Float) -> Float { core.math.fabs(n) }
+pub fn abs_float(n: Float) -> Float Never! { core.math.fabs(n) }
 
 
-pub fn min(a: Int, b: Int) -> Int {
+pub fn min(a: Int, b: Int) -> Int Never! {
     if a < b -> return a
     b
 }
 
-pub fn max(a: Int, b: Int) -> Int {
+pub fn max(a: Int, b: Int) -> Int Never! {
     if a > b -> return a
     b
 }
 
-pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+pub fn clamp(x: Int, lo: Int, hi: Int) -> Int Never! {
     lower := lo
     upper := hi
     if lower > upper {
@@ -41,16 +41,16 @@ pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
     x
 }
 
-pub fn is_even(n: Int) -> Bool { n % 2 == 0 }
-pub fn is_odd(n: Int) -> Bool { n % 2 != 0 }
+pub fn is_even(n: Int) -> Bool Never! { n % 2 == 0 }
+pub fn is_odd(n: Int) -> Bool Never! { n % 2 != 0 }
 
-pub fn sign(n: Int) -> Int {
+pub fn sign(n: Int) -> Int Never! {
     if n > 0 -> return 1
     if n < 0 -> return -1
     0
 }
 
-pub fn isqrt(n: Int) -> Int? {
+pub fn isqrt(n: Int) -> Int? Never! {
     if n < 0 -> return None
     if n < 2 -> return Val(n)
     lo := 1
@@ -70,7 +70,7 @@ pub fn isqrt(n: Int) -> Int? {
     Val(ans)
 }
 
-pub fn gcd(a: Int, b: Int) -> Int {
+pub fn gcd(a: Int, b: Int) -> Int Never! {
     x := abs(a)
     y := abs(b)
     loop y != 0 {
@@ -81,7 +81,7 @@ pub fn gcd(a: Int, b: Int) -> Int {
     x
 }
 
-pub fn lcm(a: Int, b: Int) -> Int {
+pub fn lcm(a: Int, b: Int) -> Int Never! {
     if a == 0 || b == 0 -> return 0
     abs(a /% gcd(a, b) * b)
 }
@@ -89,137 +89,137 @@ pub fn lcm(a: Int, b: Int) -> Int {
 // deterministic Core primitives.  Keeping the call qualified is deliberate:
 // inside this source package it selects the primitive Core route rather than
 // recursively calling the source implementation being defined.
-pub fn acos(n: Float) -> Float { core.math.acos(n) }
-pub fn acosh(n: Float) -> Float { core.math.acosh(n) }
-pub fn asin(n: Float) -> Float { core.math.asin(n) }
-pub fn asinh(n: Float) -> Float { core.math.asinh(n) }
-pub fn atan(n: Float) -> Float { core.math.atan(n) }
-pub fn atan2(a: Float, b: Float) -> Float { core.math.atan2(a, b) }
-pub fn atanh(n: Float) -> Float { core.math.atanh(n) }
-pub fn cbrt(n: Float) -> Float { core.math.cbrt(n) }
-pub fn cos(n: Float) -> Float { core.math.cos(n) }
-pub fn cosh(n: Float) -> Float { core.math.cosh(n) }
-pub fn exp(n: Float) -> Float { core.math.exp(n) }
-pub fn exp2(n: Float) -> Float { core.math.exp2(n) }
-pub fn exp_m1(n: Float) -> Float { core.math.exp_m1(n) }
-pub fn expm1(n: Float) -> Float { exp_m1(n) }
-pub fn erf(n: Float) -> Float { core.math.erf(n) }
-pub fn erfc(n: Float) -> Float { core.math.erfc(n) }
-pub fn floor(n: Float) -> Float { core.math.floor(n) }
-pub fn ceil(n: Float) -> Float { core.math.ceil(n) }
-pub fn fract(n: Float) -> Float { core.math.fract(n) }
-pub fn gamma(n: Float) -> Float { core.math.gamma(n) }
-pub fn lgamma(n: Float) -> Float { core.math.lgamma(n) }
-pub fn hypot(a: Float, b: Float) -> Float { core.math.hypot(a, b) }
-pub fn ln(n: Float) -> Float { core.math.ln(n) }
-pub fn ln_1p(n: Float) -> Float { core.math.ln_1p(n) }
-pub fn log1p(n: Float) -> Float { ln_1p(n) }
-pub fn log(n: Float, base: Float) -> Float { core.math.log(n, base) }
-pub fn log10(n: Float) -> Float { core.math.log10(n) }
-pub fn log2(n: Float) -> Float { core.math.log2(n) }
-pub fn logb(n: Float) -> Float { core.math.logb(n) }
-pub fn pow(a: Float, b: Float) -> Float { core.math.pow(a, b) }
-pub fn sin(n: Float) -> Float { core.math.sin(n) }
-pub fn sinh(n: Float) -> Float { core.math.sinh(n) }
-pub fn sqrt(n: Float) -> Float { core.math.sqrt(n) }
-pub fn tan(n: Float) -> Float { core.math.tan(n) }
-pub fn tanh(n: Float) -> Float { core.math.tanh(n) }
-pub fn trunc(n: Float) -> Float { core.math.trunc(n) }
-pub fn truncate(n: Float) -> Float { trunc(n) }
+pub fn acos(n: Float) -> Float Never! { core.math.acos(n) }
+pub fn acosh(n: Float) -> Float Never! { core.math.acosh(n) }
+pub fn asin(n: Float) -> Float Never! { core.math.asin(n) }
+pub fn asinh(n: Float) -> Float Never! { core.math.asinh(n) }
+pub fn atan(n: Float) -> Float Never! { core.math.atan(n) }
+pub fn atan2(a: Float, b: Float) -> Float Never! { core.math.atan2(a, b) }
+pub fn atanh(n: Float) -> Float Never! { core.math.atanh(n) }
+pub fn cbrt(n: Float) -> Float Never! { core.math.cbrt(n) }
+pub fn cos(n: Float) -> Float Never! { core.math.cos(n) }
+pub fn cosh(n: Float) -> Float Never! { core.math.cosh(n) }
+pub fn exp(n: Float) -> Float Never! { core.math.exp(n) }
+pub fn exp2(n: Float) -> Float Never! { core.math.exp2(n) }
+pub fn exp_m1(n: Float) -> Float Never! { core.math.exp_m1(n) }
+pub fn expm1(n: Float) -> Float Never! { exp_m1(n) }
+pub fn erf(n: Float) -> Float Never! { core.math.erf(n) }
+pub fn erfc(n: Float) -> Float Never! { core.math.erfc(n) }
+pub fn floor(n: Float) -> Float Never! { core.math.floor(n) }
+pub fn ceil(n: Float) -> Float Never! { core.math.ceil(n) }
+pub fn fract(n: Float) -> Float Never! { core.math.fract(n) }
+pub fn gamma(n: Float) -> Float Never! { core.math.gamma(n) }
+pub fn lgamma(n: Float) -> Float Never! { core.math.lgamma(n) }
+pub fn hypot(a: Float, b: Float) -> Float Never! { core.math.hypot(a, b) }
+pub fn ln(n: Float) -> Float Never! { core.math.ln(n) }
+pub fn ln_1p(n: Float) -> Float Never! { core.math.ln_1p(n) }
+pub fn log1p(n: Float) -> Float Never! { ln_1p(n) }
+pub fn log(n: Float, base: Float) -> Float Never! { core.math.log(n, base) }
+pub fn log10(n: Float) -> Float Never! { core.math.log10(n) }
+pub fn log2(n: Float) -> Float Never! { core.math.log2(n) }
+pub fn logb(n: Float) -> Float Never! { core.math.logb(n) }
+pub fn pow(a: Float, b: Float) -> Float Never! { core.math.pow(a, b) }
+pub fn sin(n: Float) -> Float Never! { core.math.sin(n) }
+pub fn sinh(n: Float) -> Float Never! { core.math.sinh(n) }
+pub fn sqrt(n: Float) -> Float Never! { core.math.sqrt(n) }
+pub fn tan(n: Float) -> Float Never! { core.math.tan(n) }
+pub fn tanh(n: Float) -> Float Never! { core.math.tanh(n) }
+pub fn trunc(n: Float) -> Float Never! { core.math.trunc(n) }
+pub fn truncate(n: Float) -> Float Never! { trunc(n) }
 
-pub fn cot(n: Float) -> Float { core.math.cot(n) }
-pub fn copysign(value: Float, sign_value: Float) -> Float {
+pub fn cot(n: Float) -> Float Never! { core.math.cot(n) }
+pub fn copysign(value: Float, sign_value: Float) -> Float Never! {
     core.math.copysign(value, sign_value)
 }
-pub fn fma(a: Float, b: Float, c: Float) -> Float { core.math.fma(a, b, c) }
-pub fn muladd(a: Float, b: Float, c: Float) -> Float { fma(a, b, c) }
-pub fn inv(n: Float) -> Float { core.math.inv(n) }
-pub fn signum(n: Float) -> Float { core.math.signum(n) }
-pub fn degrees(n: Float) -> Float { core.math.degrees(n) }
-pub fn radians(n: Float) -> Float { core.math.radians(n) }
-pub fn lerp(a: Float, b: Float, t: Float) -> Float { core.math.lerp(a, b, t) }
-pub fn float32(n: Float) -> Float { core.math.float32(n) }
-pub fn float64(n: Float) -> Float { core.math.float64(n) }
-pub fn fabs(n: Float) -> Float { core.math.fabs(n) }
-pub fn real(n: Float) -> Float { n }
-pub fn imag(n: Float) -> Float { Float{0.0} }
-pub fn conj(n: Float) -> Float { n }
+pub fn fma(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
+pub fn muladd(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
+pub fn inv(n: Float) -> Float Never! { core.math.inv(n) }
+pub fn signum(n: Float) -> Float Never! { core.math.signum(n) }
+pub fn degrees(n: Float) -> Float Never! { core.math.degrees(n) }
+pub fn radians(n: Float) -> Float Never! { core.math.radians(n) }
+pub fn lerp(a: Float, b: Float, t: Float) -> Float Never! { core.math.lerp(a, b, t) }
+pub fn float32(n: Float) -> Float Never! { core.math.float32(n) }
+pub fn float64(n: Float) -> Float Never! { core.math.float64(n) }
+pub fn fabs(n: Float) -> Float Never! { core.math.fabs(n) }
+pub fn real(n: Float) -> Float Never! { n }
+pub fn imag(n: Float) -> Float Never! { Float{0.0} }
+pub fn conj(n: Float) -> Float Never! { n }
 
-pub fn is_nan(n: Float) -> Bool { core.math.is_nan(n) }
-pub fn is_inf(n: Float) -> Bool { core.math.is_inf(n) }
-pub fn is_finite(n: Float) -> Bool { core.math.is_finite(n) }
-pub fn isnan(n: Float) -> Bool { is_nan(n) }
-pub fn isinf(n: Float) -> Bool { is_inf(n) }
-pub fn isfinite(n: Float) -> Bool { is_finite(n) }
-pub fn is_normal(n: Float) -> Bool { core.math.is_normal(n) }
-pub fn is_subnormal(n: Float) -> Bool { core.math.is_subnormal(n) }
-pub fn is_canonical(n: Float) -> Bool { core.math.is_canonical(n) }
-pub fn is_signed(n: Float) -> Bool { core.math.is_signed(n) }
-pub fn is_zero(n: Float) -> Bool { core.math.is_zero(n) }
-pub fn is_integer(n: Float) -> Bool { core.math.is_integer(n) }
-pub fn sign_bit(n: Float) -> Bool { core.math.sign_bit(n) }
+pub fn is_nan(n: Float) -> Bool Never! { core.math.is_nan(n) }
+pub fn is_inf(n: Float) -> Bool Never! { core.math.is_inf(n) }
+pub fn is_finite(n: Float) -> Bool Never! { core.math.is_finite(n) }
+pub fn isnan(n: Float) -> Bool Never! { is_nan(n) }
+pub fn isinf(n: Float) -> Bool Never! { is_inf(n) }
+pub fn isfinite(n: Float) -> Bool Never! { is_finite(n) }
+pub fn is_normal(n: Float) -> Bool Never! { core.math.is_normal(n) }
+pub fn is_subnormal(n: Float) -> Bool Never! { core.math.is_subnormal(n) }
+pub fn is_canonical(n: Float) -> Bool Never! { core.math.is_canonical(n) }
+pub fn is_signed(n: Float) -> Bool Never! { core.math.is_signed(n) }
+pub fn is_zero(n: Float) -> Bool Never! { core.math.is_zero(n) }
+pub fn is_integer(n: Float) -> Bool Never! { core.math.is_integer(n) }
+pub fn sign_bit(n: Float) -> Bool Never! { core.math.sign_bit(n) }
 
-pub fn next_up(n: Float) -> Float { core.math.next_up(n) }
-pub fn next_down(n: Float) -> Float { core.math.next_down(n) }
-pub fn next_after(n: Float, toward: Float) -> Float {
+pub fn next_up(n: Float) -> Float Never! { core.math.next_up(n) }
+pub fn next_down(n: Float) -> Float Never! { core.math.next_down(n) }
+pub fn next_after(n: Float, toward: Float) -> Float Never! {
     core.math.next_after(n, toward)
 }
-pub fn nextafter(n: Float, toward: Float) -> Float { next_after(n, toward) }
-pub fn significand(n: Float) -> Float { core.math.significand(n) }
-pub fn ulp(n: Float) -> Float { core.math.ulp(n) }
-pub fn ilogb(n: Float) -> Int? { core.math.ilogb(n) }
-pub fn ldexp(n: Float, exponent: Int) -> Float { core.math.ldexp(n, exponent) }
-pub fn scaleb(n: Float, exponent: Int) -> Float { ldexp(n, exponent) }
-pub fn radix(n: Float) -> Int { core.math.radix(n) }
+pub fn nextafter(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
+pub fn significand(n: Float) -> Float Never! { core.math.significand(n) }
+pub fn ulp(n: Float) -> Float Never! { core.math.ulp(n) }
+pub fn ilogb(n: Float) -> Int? Never! { core.math.ilogb(n) }
+pub fn ldexp(n: Float, exponent: Int) -> Float Never! { core.math.ldexp(n, exponent) }
+pub fn scaleb(n: Float, exponent: Int) -> Float Never! { ldexp(n, exponent) }
+pub fn radix(n: Float) -> Int Never! { core.math.radix(n) }
 
-pub fn pi() -> Float { Float{3.14159265358979323846264338327950288} }
-pub fn e() -> Float { Float{2.7182818284590452354} }
-pub fn tau() -> Float { Float{6.2831853071795864769} }
-pub fn tau_const() -> Float { tau() }
-pub fn infinity() -> Float { (Float{1.0}) / (Float{0.0}) }
-pub fn nan() -> Float { (Float{0.0}) / (Float{0.0}) }
-pub fn zero() -> Float { Float{0.0} }
+pub fn pi() -> Float Never! { Float{3.14159265358979323846264338327950288} }
+pub fn e() -> Float Never! { Float{2.7182818284590452354} }
+pub fn tau() -> Float Never! { Float{6.2831853071795864769} }
+pub fn tau_const() -> Float Never! { tau() }
+pub fn infinity() -> Float Never! { (Float{1.0}) / (Float{0.0}) }
+pub fn nan() -> Float Never! { (Float{0.0}) / (Float{0.0}) }
+pub fn zero() -> Float Never! { Float{0.0} }
 
-pub fn round(n: Float) -> Int { round_provider(n) }
-pub fn to_bits(n: Float) -> Int { core.math.to_bits(n) }
-pub fn from_bits(bits: Int) -> Float { core.math.from_bits(bits) }
-pub fn sin_cos(n: Float) -> (cos: Float, sin: Float) {
+pub fn round(n: Float) -> Int Never! { round_provider(n) }
+pub fn to_bits(n: Float) -> Int Never! { core.math.to_bits(n) }
+pub fn from_bits(bits: Int) -> Float Never! { core.math.from_bits(bits) }
+pub fn sin_cos(n: Float) -> (cos: Float, sin: Float) Never! {
     pair :: core.math.sin_cos(n)
     (cos: pair.cos, sin: pair.sin)
 }
-pub fn modf(n: Float) -> (fract: Float, whole: Float) {
+pub fn modf(n: Float) -> (fract: Float, whole: Float) Never! {
     core.math.modf(n)
 }
-pub fn frexp(n: Float) -> (exp: Int, frac: Float) {
+pub fn frexp(n: Float) -> (exp: Int, frac: Float) Never! {
     pair :: core.math.frexp(n)
     (exp: pair.exp, frac: pair.frac)
 }
 
-pub fn checked_abs(n: Int) -> Int? {
+pub fn checked_abs(n: Int) -> Int? Never! {
     if n < 0 -> return Val(0 - n)
     Val(n)
 }
 
-pub fn checked_neg(n: Int) -> Int? { Val(0 - n) }
+pub fn checked_neg(n: Int) -> Int? Never! { Val(0 - n) }
 
-pub fn checked_add(a: Int, b: Int) -> Int? { Val(a + b) }
+pub fn checked_add(a: Int, b: Int) -> Int? Never! { Val(a + b) }
 
-pub fn checked_sub(a: Int, b: Int) -> Int? { Val(a - b) }
+pub fn checked_sub(a: Int, b: Int) -> Int? Never! { Val(a - b) }
 
-pub fn checked_mul(a: Int, b: Int) -> Int? { Val(a * b) }
+pub fn checked_mul(a: Int, b: Int) -> Int? Never! { Val(a * b) }
 
-pub fn checked_div(a: Int, b: Int) -> Int? {
+pub fn checked_div(a: Int, b: Int) -> Int? Never! {
     if b == 0 -> return None
     remainder :: a %% b
     Val((a - remainder) /% b)
 }
 
-pub fn checked_rem(a: Int, b: Int) -> Int? {
+pub fn checked_rem(a: Int, b: Int) -> Int? Never! {
     if b == 0 -> return None
     Val(a %% b)
 }
 
-pub fn checked_pow(base: Int, exponent: Int) -> Int? {
+pub fn checked_pow(base: Int, exponent: Int) -> Int? Never! {
     if exponent < 0 -> return None
     result := 1
     factor := base
@@ -234,7 +234,7 @@ pub fn checked_pow(base: Int, exponent: Int) -> Int? {
     Val(result)
 }
 
-pub fn int_pow(base: Int, exponent: Int) -> Int {
+pub fn int_pow(base: Int, exponent: Int) -> Int Never! {
     if exponent < 0 -> return 0
     result := 1
     factor := base
@@ -249,13 +249,13 @@ pub fn int_pow(base: Int, exponent: Int) -> Int {
     result
 }
 
-pub fn saturating_add(a: Int, b: Int) -> Int { a + b }
+pub fn saturating_add(a: Int, b: Int) -> Int Never! { a + b }
 
-pub fn saturating_sub(a: Int, b: Int) -> Int { a - b }
+pub fn saturating_sub(a: Int, b: Int) -> Int Never! { a - b }
 
-pub fn saturating_mul(a: Int, b: Int) -> Int { a * b }
+pub fn saturating_mul(a: Int, b: Int) -> Int Never! { a * b }
 
-pub fn factorial(n: Int) -> Int? {
+pub fn factorial(n: Int) -> Int? Never! {
     if n < 0 -> return None
     acc := 1
     i := 2
@@ -266,7 +266,7 @@ pub fn factorial(n: Int) -> Int? {
     Val(acc)
 }
 
-pub fn binomial(n: Int, k: Int) -> Int? {
+pub fn binomial(n: Int, k: Int) -> Int? Never! {
     if n < 0 || k < 0 || k > n -> return None
     choose_k := k
     if choose_k > n - choose_k -> choose_k = n - choose_k
@@ -281,9 +281,9 @@ pub fn binomial(n: Int, k: Int) -> Int? {
     Val(acc)
 }
 
-pub fn comb(n: Int, k: Int) -> Int? { binomial(n, k) }
+pub fn comb(n: Int, k: Int) -> Int? Never! { binomial(n, k) }
 
-pub fn perm(n: Int, k: Int) -> Int? {
+pub fn perm(n: Int, k: Int) -> Int? Never! {
     if n < 0 || k < 0 || k > n -> return None
     acc := 1
     i := 0
@@ -294,13 +294,13 @@ pub fn perm(n: Int, k: Int) -> Int? {
     Val(acc)
 }
 
-pub fn gcd_many(values: [Int]) -> Int {
+pub fn gcd_many(values: [Int]) -> Int Never! {
     acc := 0
     loop value in values -> acc = gcd(acc, value)
     acc
 }
 
-pub fn lcm_many(values: [Int]) -> Int {
+pub fn lcm_many(values: [Int]) -> Int Never! {
     if values.len() == 0 -> return 0
     acc := values[0]
     i := 1
@@ -311,7 +311,7 @@ pub fn lcm_many(values: [Int]) -> Int {
     acc
 }
 
-pub fn powmod(base: Int, exponent: Int, modulus: Int) -> Int? {
+pub fn powmod(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
     if modulus <= 0 || exponent < 0 -> return None
     result := 1 %% modulus
     factor := base %% modulus
@@ -329,7 +329,7 @@ pub fn powmod(base: Int, exponent: Int, modulus: Int) -> Int? {
     Val(result)
 }
 
-pub fn div_mod(a: Int, b: Int) -> (quot: Int, rem: Int) {
+pub fn div_mod(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
     rem := a %% b
     if rem < 0 {
         if b > 0 -> rem = rem + b
@@ -338,64 +338,64 @@ pub fn div_mod(a: Int, b: Int) -> (quot: Int, rem: Int) {
     (quot: (a - rem) /% b, rem: rem)
 }
 
-pub fn div_rem(a: Int, b: Int) -> (quot: Int, rem: Int) {
+pub fn div_rem(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
     rem :: a %% b
     (quot: (a - rem) /% b, rem: rem)
 }
 
-pub fn digits(n: Int) -> Int { core.math.digits(n) }
-pub fn leading_ones(n: Int) -> Int { core.math.leading_ones(n) }
-pub fn trailing_ones(n: Int) -> Int { core.math.trailing_ones(n) }
-pub fn cmp(a: Float, b: Float) -> Int { core.math.cmp(a, b) }
+pub fn digits(n: Int) -> Int Never! { core.math.digits(n) }
+pub fn leading_ones(n: Int) -> Int Never! { core.math.leading_ones(n) }
+pub fn trailing_ones(n: Int) -> Int Never! { core.math.trailing_ones(n) }
+pub fn cmp(a: Float, b: Float) -> Int Never! { core.math.cmp(a, b) }
 
-pub fn abs_diff(a: Int, b: Int) -> Int {
+pub fn abs_diff(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a - b
     b - a
 }
 
-pub fn even(n: Int) -> Bool { is_even(n) }
-pub fn odd(n: Int) -> Bool { is_odd(n) }
-pub fn xor(a: Int, b: Int) -> Int { core.math.xor(a, b) }
-pub fn in_range(value: Int, low: Int, high: Int) -> Bool {
+pub fn even(n: Int) -> Bool Never! { is_even(n) }
+pub fn odd(n: Int) -> Bool Never! { is_odd(n) }
+pub fn xor(a: Int, b: Int) -> Int Never! { core.math.xor(a, b) }
+pub fn in_range(value: Int, low: Int, high: Int) -> Bool Never! {
     value >= low && value < high
 }
 
-pub fn sum_int(values: [Int]) -> Int {
+pub fn sum_int(values: [Int]) -> Int Never! {
     acc := 0
     loop value in values -> acc = saturating_add(acc, value)
     acc
 }
 
-pub fn prod_int(values: [Int]) -> Int {
+pub fn prod_int(values: [Int]) -> Int Never! {
     acc := 1
     loop value in values -> acc = saturating_mul(acc, value)
     acc
 }
 
-pub fn prod(values: [Int]) -> Int { prod_int(values) }
-pub fn fmod(a: Float, b: Float) -> Float { core.math.fmod(a, b) }
-pub fn remainder(a: Float, b: Float) -> Float { core.math.remainder(a, b) }
-pub fn isclose(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool {
+pub fn prod(values: [Int]) -> Int Never! { prod_int(values) }
+pub fn fmod(a: Float, b: Float) -> Float Never! { core.math.fmod(a, b) }
+pub fn remainder(a: Float, b: Float) -> Float Never! { core.math.remainder(a, b) }
+pub fn isclose(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never! {
     core.math.isclose(a, b, rel_tol, abs_tol)
 }
 
-pub fn dist(left: [Float], right: [Float]) -> Float {
+pub fn dist(left: [Float], right: [Float]) -> Float Never! {
     core.math.dist(left, right)
 }
 
-pub fn hypot3(a: Float, b: Float, c: Float) -> Float {
+pub fn hypot3(a: Float, b: Float, c: Float) -> Float Never! {
     core.math.hypot3(a, b, c)
 }
 
-pub fn clamp_float(value: Float, low: Float, high: Float) -> Float {
+pub fn clamp_float(value: Float, low: Float, high: Float) -> Float Never! {
     core.math.clamp_float(value, low, high)
 }
 
-pub fn min_float(a: Float, b: Float) -> Float { core.math.min_float(a, b) }
-pub fn max_float(a: Float, b: Float) -> Float { core.math.max_float(a, b) }
-pub fn midpoint(a: Float, b: Float) -> Float { core.math.midpoint(a, b) }
+pub fn min_float(a: Float, b: Float) -> Float Never! { core.math.min_float(a, b) }
+pub fn max_float(a: Float, b: Float) -> Float Never! { core.math.max_float(a, b) }
+pub fn midpoint(a: Float, b: Float) -> Float Never! { core.math.midpoint(a, b) }
 
-pub fn fsum(values: [Float]) -> Float {
+pub fn fsum(values: [Float]) -> Float Never! {
     total := Float{0.0}
     compensation := Float{0.0}
     loop value in values {
@@ -407,7 +407,7 @@ pub fn fsum(values: [Float]) -> Float {
     total
 }
 
-pub fn sumprod(left: [Float], right: [Float]) -> Float {
+pub fn sumprod(left: [Float], right: [Float]) -> Float Never! {
     total := Float{0.0}
     n := left.len()
     if right.len() < n -> n = right.len()
@@ -415,12 +415,12 @@ pub fn sumprod(left: [Float], right: [Float]) -> Float {
     total
 }
 
-pub fn random() -> Float { core.math.random() }
+pub fn random() -> Float Never! { core.math.random() }
 
-pub fn fraction(numerator: Int, denominator: Int) -> Fraction? {
+pub fn fraction(numerator: Int, denominator: Int) -> Fraction? Never! {
     core.math.fraction(numerator, denominator)
 }
 
-pub fn decimal(text: String) -> Decimal {
+pub fn decimal(text: String) -> Decimal Never! {
     core.math.decimal(text)
 }

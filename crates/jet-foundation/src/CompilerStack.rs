@@ -163,3 +163,83 @@ pub fn run_on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     });
     outcome.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
 }
+
+/// Run `work` on every job on up to `workers` compiler-stack threads and
+/// return the results in job order.
+///
+/// Each worker is a compiler worker (the `COMPILER_STACK_SIZE` stack and the
+/// re-entrancy flag), so compiler entries reached from `work` run inline on
+/// it. Workers take the next unclaimed job, so uneven job sizes still spread
+/// across them; the results come back in job order whatever order the
+/// workers finished in, which keeps the caller's output deterministic.
+///
+/// As in [`run_on_compiler_stack`], this primitive carries no thread-local
+/// state: `work` installs whatever caller context it reads. A panic in any
+/// job is re-raised on the caller with `resume_unwind` after every worker has
+/// stopped; when several jobs panic, the one with the lowest job index wins,
+/// so the reported failure does not depend on scheduling either.
+///
+/// With one worker or at most one job, the jobs run inline on the calling
+/// thread, in order.
+pub fn map_on_compiler_workers<T: Send, R: Send>(
+    jobs: Vec<T>,
+    workers: usize,
+    work: impl Fn(T) -> R + Sync,
+) -> Vec<R> {
+    let count = jobs.len();
+    let workers = workers.min(count);
+    if workers <= 1 {
+        return jobs.into_iter().map(work).collect();
+    }
+    let slots = jobs
+        .into_iter()
+        .map(|job| std::sync::Mutex::new(Some(job)))
+        .collect::<Vec<_>>();
+    let results = (0..count)
+        .map(|_| std::sync::Mutex::new(None))
+        .collect::<Vec<std::sync::Mutex<Option<std::thread::Result<R>>>>>();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for index in 0..workers {
+            let (slots, results, next, work) = (&slots, &results, &next, &work);
+            std::thread::Builder::new()
+                .name(format!("jet-compiler-{index}"))
+                .stack_size(COMPILER_STACK_SIZE)
+                .spawn_scoped(scope, move || {
+                    ON_COMPILER_WORKER.with(|active| active.set(true));
+                    loop {
+                        let job_index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(slot) = slots.get(job_index) else {
+                            break;
+                        };
+                        let job = slot
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .take()
+                            .expect("each job index is claimed once");
+                        // Caught per job, so one panicking job leaves this
+                        // worker free to finish the rest of the batch.
+                        let outcome =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(job)));
+                        *results[job_index]
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outcome);
+                    }
+                })
+                .unwrap_or_else(|error| crate::ice!(None, "could not start compiler worker: {error}"));
+        }
+    });
+    results
+        .into_iter()
+        .map(|slot| {
+            match slot
+                .into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .expect("every job ran before the workers joined")
+            {
+                Ok(result) => result,
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
+        })
+        .collect()
+}

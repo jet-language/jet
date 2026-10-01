@@ -409,6 +409,38 @@ Report: [mine-for-jet-2026-09-30-roc-skip](../../research/mine-for-jet-2026-09-3
 - https://www.youtube.com/watch?v=12yVcgQHAK0
 - https://www.youtube.com/watch?v=J31LlAUtoos
 
+### Simon Peyton Jones papers (mined 2026-09-30)
+
+Report: [mine-for-jet-2026-09-30-spj-papers](../../research/mine-for-jet-2026-09-30-spj-papers.md).
+
+- The Verse Calculus (ICFP 2023) — https://simon.peytonjones.org/verse-calculus
+- Lower Your Guards (ICFP 2020) — https://simon.peytonjones.org/lower-your-guards
+- Diagnosing Type Errors with Class (PLDI 2015) — https://simon.peytonjones.org/diagnosing-type-errors
+- SHErrLoc: A Static Holistic Error Locator (TOPLAS 2017) — https://simon.peytonjones.org/sherrloc
+- Equality Proofs and Deferred Type Errors (ICFP 2012) — https://simon.peytonjones.org/equality-proofs
+- Tackling the Awkward Squad (lecture notes) — https://simon.peytonjones.org/Tackling-the-awkward-squad
+- Safe Haskell (Haskell 2012) — https://simon.peytonjones.org/safe-haskell
+- Build Systems à la Carte: Theory and Practice (JFP 2020) — https://simon.peytonjones.org/build-systems-a-la-carte-theory-and-practice
+- A History of Haskell: Being Lazy with Class (HOPL III) — https://simon.peytonjones.org/history-of-haskell
+- Linear Haskell (POPL 2018) — https://simon.peytonjones.org/linear-haskell
+- Composable Memory Transactions (PPoPP 2005) — https://www.microsoft.com/en-us/research/publication/composable-memory-transactions
+- Beautiful Concurrency (Beautiful Code, 2007) — https://www.microsoft.com/en-us/research/publication/beautiful-concurrency
+- Secrets of the Glasgow Haskell Compiler Inliner (JFP 2002; scanned, unread) — https://www.microsoft.com/en-us/research/publication/secrets-of-the-glasgow-haskell-compiler-inliner
+- Inlining in GHC: Empirical Investigation and Improvement (Hollenbeck thesis, 2025) — https://simon.peytonjones.org/hollenbeck-inlining
+- Join Points in Practice (Haskell Symposium 2025 keynote) — https://simon.peytonjones.org/join-points-hs
+- Compiling without Continuations (PLDI 2017) — https://simon.peytonjones.org/compiling-without-continuations
+- Type Inference as Constraint Solving (2019 talk) — https://simon.peytonjones.org/type-inference
+- Secrets of the GHC Typechecker (2023 talk; slides only) — https://simon.peytonjones.org/secrets-of-typechecker
+- OutsideIn(X): Modular Type Inference with Local Assumptions (JFP 2011) — https://simon.peytonjones.org/outsideinx
+- Let Should Not Be Generalised (TLDI 2010) — https://simon.peytonjones.org/let-generalised
+- Trees That Grow (JUCS 2017) — https://simon.peytonjones.org/trees-that-grow
+- Template Meta-programming for Haskell (Haskell Workshop 2002) — https://www.microsoft.com/en-us/research/publication/template-meta-programming-for-haskell
+- Kinds Are Calling Conventions (ICFP 2020) — https://simon.peytonjones.org/kinds-are-calling-conventions
+- Levity Polymorphism (PLDI 2017) — https://simon.peytonjones.org/levity-polymorphism
+- Elastic Sheet-Defined Functions (JFP 2020) — https://simon.peytonjones.org/elastic-sdfs
+- Champagne Prototyping (VL/HCC 2004) — https://www.microsoft.com/en-us/research/publication/champagne-prototyping-research-technique-early-evaluation-complex-end-user-programming-systems
+- A Monad for Deterministic Parallelism (Haskell 2011) — https://simon.peytonjones.org/deterministic-parallelism
+
 ## Developer experience (e14)
 
 Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths remain provenance records.

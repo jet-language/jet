@@ -26,31 +26,6 @@ fn workflow_wait(nanos: i64) -> jet_codegen::Comptime::ServicesLite::JetServiceW
     }
 }
 
-pub(crate) fn services_apply(
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    jet_codegen::Comptime::ServicesLite::with_workflow_wait(workflow_wait, || {
-        jet_codegen::Comptime::ServicesLite::apply(method, args, span)
-    })
-}
-
-pub(crate) fn services_runtime_apply(
-    receiver: &CtValue,
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    jet_codegen::Comptime::ServicesLite::apply_runtime_method(receiver, method, args, span)
-}
-
-pub(crate) fn services_take_mut(
-    value: CtValue,
-) -> Result<(CtValue, CtValue), CtValue> {
-    jet_codegen::Comptime::ServicesLite::take_mut_ok(value)
-}
-
 pub(crate) fn service_runtime(store: String, retention_ms: i64) -> CtValue {
     let runtime = jet_codegen::Comptime::ServicesLite::jet_services_runtime(store, retention_ms);
     CtValue::Struct {
@@ -62,21 +37,9 @@ pub(crate) fn service_runtime(store: String, retention_ms: i64) -> CtValue {
     }
 }
 
-pub(crate) fn sync_apply(
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    jet_codegen::Comptime::SyncLite::apply(method, args, span)
-}
-
 pub(crate) fn service_show(value: &CtValue) -> Option<String> {
     jet_codegen::Comptime::ServicesLite::service_show_value(value)
         .or_else(|| jet_codegen::Comptime::SyncLite::sync_show_value(value))
-}
-
-pub(crate) fn service_display(value: &CtValue) -> Option<String> {
-    service_show(value).or_else(|| jet_codegen::Comptime::display_core_pure_value(value))
 }
 
 use jet_foundation::MIR::MirRuntimeValue;

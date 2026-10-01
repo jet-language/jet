@@ -1,6 +1,9 @@
 // Private compiler numeric services.  The Source Sema asks the configured
 // native service for exact unit conversion proofs; arithmetic remains owned by
 // Foundation's canonical unit kernel.
+use jet_foundation.[
+    UnitRatio,
+]
 
 pub enum SemaNumericUnitConversionProof {
     Exact(value: Float)
@@ -9,7 +12,8 @@ pub enum SemaNumericUnitConversionProof {
 }
 
 pub fn sema_numeric_unit_conversion_exact(graph: SemaRegistrationGraph, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof Never! {
-    callback :: graph.numeric_unit_conversion_exact ?? return SemaNumericUnitConversionProof.Unavailable
+    callback_option :: graph.host_hooks.numeric_unit_conversion_exact
+    callback :: callback_option ?? return SemaNumericUnitConversionProof.Unavailable
     result :: callback(value, "{scale.numerator}", "{scale.denominator}", "{offset.numerator}", "{offset.denominator}") ?? return SemaNumericUnitConversionProof.Inexact
     SemaNumericUnitConversionProof.Exact{value: result}
 }

@@ -1796,15 +1796,6 @@ impl THandleOp {
                 Some(Effect::IO),
                 carrier,
             ),
-            StopwatchElapsedMillis => h(
-                "stopwatch.elapsed_millis",
-                "jet_stopwatch_elapsed_millis",
-                1,
-                1,
-                &[true],
-                Some(Effect::Time),
-                carrier,
-            ),
             TestSuiteRun => h(
                 "test_suite.run",
                 "jet_test_suite_run",
@@ -4803,7 +4794,7 @@ fn ui_backend_method_route(
     let name = name.rsplit('.').next().unwrap_or(name);
     let backend = match name {
         "NullBackend" => "JetNullBackend",
-        "TuiBackend" => "JetTuiBackend",
+        "TUIBackend" => "JetTuiBackend",
         "GtkBackend" => "JetGtkBackend",
         _ => {
             return Err(route_error(format!(
@@ -4821,7 +4812,7 @@ fn ui_backend_method_route(
         "set_focus_group" => ("set_focus_group", &[true, false]),
         "focused_label" => ("focused_label", &[true]),
         "commands" if name == "NullBackend" => ("paint_commands", &[true]),
-        "frame_lines" | "render_count" if name == "TuiBackend" => (method, &[true]),
+        "frame_lines" | "render_count" if name == "TUIBackend" => (method, &[true]),
         "present" if name == "GtkBackend" => ("present", &[true, false]),
         _ => {
             return Err(route_error(format!(
@@ -7162,115 +7153,6 @@ fn fixed_trap_binary_route(
         "fixed-width trap arithmetic",
     )
     .map(TRoutePlan::Prelude)
-}
-
-fn math_type_name(ty: &Type) -> Option<&str> {
-    match ty {
-        Type::Named(name) if crate::Sema::is_math_type(name) => Some(name),
-        Type::Tagged { inner, .. } => math_type_name(inner),
-        _ => None,
-    }
-}
-
-fn math_binary_operand_name(ty: &Type) -> Option<&str> {
-    math_type_name(ty).or_else(|| match ty {
-        Type::Float => Some("Float"),
-        Type::Tagged { inner, .. } => math_binary_operand_name(inner),
-        _ => None,
-    })
-}
-
-fn math_binary_route(
-    op: BinOp,
-    input: &Type,
-    rhs: &Type,
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<Option<TRoutePlan>, LowerError> {
-    let left_math = math_type_name(input);
-    let right_math = math_type_name(rhs);
-    if left_math.is_none() && right_math.is_none() {
-        return Ok(None);
-    }
-    let Some(left_name) = left_math.or_else(|| math_binary_operand_name(input)) else {
-        return Ok(None);
-    };
-    let Some(right_name) = right_math.or_else(|| math_binary_operand_name(rhs)) else {
-        return Ok(None);
-    };
-    let Some(result_name) = math_type_name(result).or_else(|| math_binary_operand_name(result))
-    else {
-        return Ok(None);
-    };
-    let Some(op_name) = (match op {
-        BinOp::Add => Some("add"),
-        BinOp::Sub => Some("sub"),
-        BinOp::Mul => Some("mul"),
-        BinOp::Div => Some("div"),
-        _ => None,
-    }) else {
-        return Ok(None);
-    };
-    let symbol = match op {
-        BinOp::Add | BinOp::Sub if left_name == right_name && result_name == left_name => {
-            format!("jet_math_{left_name}_{op_name}")
-        }
-        BinOp::Div
-            if left_name == right_name
-                && result_name == left_name
-                && crate::Sema::is_simd_lane_type(left_name) =>
-        {
-            format!("jet_math_{left_name}_{op_name}")
-        }
-        BinOp::Mul if left_name == right_name && result_name == left_name => {
-            if left_name == "Vec3" {
-                "jet_math_Vec3_hadamard_mul".to_string()
-            } else {
-                format!("jet_math_{left_name}_{op_name}")
-            }
-        }
-        BinOp::Mul if left_name == "Mat3" && right_name == "Vec3" && result_name == "Vec3" => {
-            "jet_math_Mat3_transform".to_string()
-        }
-        BinOp::Mul if left_name == "Mat4" && right_name == "Vec4" && result_name == "Vec4" => {
-            "jet_math_Mat4_transform".to_string()
-        }
-        BinOp::Mul if left_name == "Vec3" && right_name == "Float" && result_name == "Vec3" => {
-            "jet_math_Vec3_mul".to_string()
-        }
-        BinOp::Mul if left_name == "Float" && right_name == "Vec3" && result_name == "Vec3" => {
-            "jet_math_Float_mul_Vec3".to_string()
-        }
-        BinOp::Div if left_name == "Vec3" && right_name == "Float" && result_name == "Vec3" => {
-            "jet_math_Vec3_div".to_string()
-        }
-        BinOp::Div if left_name == "Float" && right_name == "Vec3" && result_name == "Vec3" => {
-            "jet_math_Float_div_Vec3".to_string()
-        }
-        _ => return Ok(None),
-    };
-    let member = format!("binary.{left_name}.{op_name}");
-    // Math helpers use the first vector/matrix operand by reference and take
-    // the second operand by value.  A scalar-left/vector-right helper reverses
-    // that ABI, so borrow only the right operand in that case.
-    let borrow_mask = [
-        left_math.is_some(),
-        right_math.is_some() && left_math.is_none(),
-    ];
-    let route = prelude_route_row(
-        MirPreludeFamily::MathBuiltin,
-        "core.math",
-        &member,
-        &symbol,
-        2,
-        2,
-        &borrow_mask,
-        None,
-        carrier,
-        MirPreludeAbi::Value,
-        "math binary",
-    )?;
-    Ok(Some(TRoutePlan::Prelude(route)))
 }
 
 pub(super) fn binary_route(
@@ -9942,6 +9824,7 @@ pub(super) fn host_method_route(
             ("guard_edit", 0) => ("Shared.guard_edit", "jet_shared_guard_edit", 1, &[true]),
             ("downgrade", 0) => ("Shared.downgrade", "jet_shared_downgrade", 1, &[true]),
             ("strong_count", 0) => ("Shared.strong_count", "jet_shared_strong_count", 1, &[true]),
+            ("same", 1) => ("Shared.same", "jet_shared_same", 2, &[true, true]),
             _ => {
                 return Err(route_error(format!(
                     "unknown checked Shared host method `{method}`"

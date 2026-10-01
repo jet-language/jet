@@ -3,13 +3,27 @@
 // This file only resolves an already-registered MIR route to the matching
 // Core source function. It does not reimplement formatting, numeric, or unit
 // policy and it never reconstructs a route from a free-form symbol.
+use jet_foundation.[
+    Effect,
+    MIRCallFallibility,
+    MIRCallSignature,
+    MIRFunctionID,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRPreludeCallID,
+    MIRPreludeFamily,
+    MIRProgram,
+    MIRSymbol,
+    mir_symbol_name,
+    stable_id,
+]
 
 pub struct JetEvalSourceTarget {
-    pub function: MirFunctionId
-    pub route: MirPreludeCallId
-    pub signature: MirCallSignature
-    pub fallibility: MirCallFallibility
-    pub abi: MirPreludeAbi
+    pub function: MIRFunctionID
+    pub route: MIRPreludeCallID
+    pub signature: MIRCallSignature
+    pub fallibility: MIRCallFallibility
+    pub abi: MIRPreludeABI
     pub module_name: String
     pub member: String
 }
@@ -23,7 +37,7 @@ pub enum JetEvalSourceLookup {
 // The optional helper is intentionally side-effect free. Callers that need to
 // distinguish an absent source module from a malformed/unsupported canonical
 // row should use jet_eval_source_lookup instead.
-pub fn jet_eval_source_target(program: MirProgram, row: MirPreludeCall) -> JetEvalSourceTarget? {
+pub fn jet_eval_source_target(program: MIRProgram, row: MIRPreludeCall) -> JetEvalSourceTarget? {
     lookup :: jet_eval_source_lookup(program, row)
     if lookup == {
         .Target(value) -> Val(value)
@@ -34,7 +48,7 @@ pub fn jet_eval_source_target(program: MirProgram, row: MirPreludeCall) -> JetEv
 // Return the registered source-compatible formatting row for a source member.
 // The source-member matcher above remains the single owner of symbol, arity,
 // and borrow-mask classification; callers retain their own value marshalling.
-pub fn jet_eval_source_row(program: MirProgram, member: String) -> MirPreludeCall? {
+pub fn jet_eval_source_row(program: MIRProgram, member: String) -> MIRPreludeCall? {
     loop row in program.prelude_calls {
         if !jet_eval_source_route_shape_valid(row) {
             next
@@ -50,7 +64,7 @@ pub fn jet_eval_source_row(program: MirProgram, member: String) -> MirPreludeCal
 // Resolve a registered Prelude row to a loaded Core source function. A route
 // in the known Core formatting family which has no source equivalent is
 // Invalid rather than silently falling through to a second evaluator policy.
-pub fn jet_eval_source_lookup(program: MirProgram, row: MirPreludeCall) -> JetEvalSourceLookup Never! {
+pub fn jet_eval_source_lookup(program: MIRProgram, row: MIRPreludeCall) -> JetEvalSourceLookup Never! {
     source_member :: jet_eval_source_member(row) ?? {
         if row.module_name == "core.text.fmt" -> return JetEvalSourceLookup.Invalid{reason: "Core formatting route has no source-backed evaluator target"}
         return JetEvalSourceLookup.Unavailable
@@ -73,13 +87,13 @@ pub fn jet_eval_source_lookup(program: MirProgram, row: MirPreludeCall) -> JetEv
 }
 
 struct JetEvalSourceFunction {
-    id: MirFunctionId
+    id: MIRFunctionID
     module_name: String
     arity: Int
     interpreter: Bool
 }
 
-fn jet_eval_source_find_function(program: MirProgram, member: String) -> JetEvalSourceFunction? {
+fn jet_eval_source_find_function(program: MIRProgram, member: String) -> JetEvalSourceFunction? {
     loop function in program.functions {
         if function.name != member -> next
         loop candidate_module in program.modules {
@@ -96,7 +110,7 @@ fn jet_eval_source_find_function(program: MirProgram, member: String) -> JetEval
     None
 }
 
-fn jet_eval_source_route_shape_valid(row: MirPreludeCall) -> Bool Never! {
+fn jet_eval_source_route_shape_valid(row: MIRPreludeCall) -> Bool Never! {
     if row.signature.arity < 0 || row.signature.max_arity != row.signature.arity -> false else -> row.signature.borrow_mask.len() == row.signature.arity
 }
 
@@ -115,7 +129,7 @@ fn jet_eval_source_mask_3(mask: [Bool], first: Bool, second: Bool, third: Bool) 
     mask.len() == 3 && mask[0] == first && mask[1] == second && mask[2] == third
 }
 
-fn jet_eval_source_member(row: MirPreludeCall) -> String? {
+fn jet_eval_source_member(row: MIRPreludeCall) -> String? {
     if row.module_name != "core.text.fmt" -> return None
     symbol :: mir_symbol_name(row.symbol)
     if {
@@ -145,7 +159,7 @@ fn jet_eval_source_member(row: MirPreludeCall) -> String? {
 // symbol, family, ABI, and stable identity are the same registry facts used by
 // jet_codegen_add_binary_prelude; the caller supplies the operation's checked
 // arity rather than inventing a route.
-pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> MirPreludeCall? {
+pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> MIRPreludeCall? {
     supported :: if member == {
         "add" | "sub" | "mul" | "div" | "rem" | "floor_div" | "mod" | "pow" | "shl" | "shr" | "bit_and" | "bit_or" | "bit_xor" | "div_euclid" | "rem_euclid" -> true
         else -> false
@@ -158,16 +172,16 @@ pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> MirPreludeCall?
     route_effect :: if arity == 4 -> Val(Effect.Panic) else -> None
     effect_identity :: if arity == 4 -> "Some(Panic)" else -> "None"
     identity :: "Overflow:core.numeric:{member}:{symbol}:{arity}:{arity}:[{mask_names.join(", ")}]:{effect_identity}:Infallible:Value"
-    Val(MirPreludeCall{
-        id: MirPreludeCallId{value: stable_id("mir-prelude-call", identity)},
-        family: MirPreludeFamily.Overflow,
+    Val(MIRPreludeCall{
+        id: MIRPreludeCallID{value: stable_id("mir-prelude-call", identity)},
+        family: MIRPreludeFamily.Overflow,
         module_name: "core.numeric",
         member: member,
-        symbol: MirSymbol.Prelude{name: symbol},
-        signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: mask},
+        symbol: MIRSymbol.Prelude{name: symbol},
+        signature: MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: mask},
         effect_kind: route_effect,
-        fallibility: MirCallFallibility.Infallible,
-        abi: MirPreludeAbi.Value,
+        fallibility: MIRCallFallibility.Infallible,
+        abi: MIRPreludeABI.Value,
         authority: None,
         db_metadata: None,
     })
@@ -176,23 +190,23 @@ pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> MirPreludeCall?
 // Comparison primitives use the checked core.compare BuiltinMethod row even
 // when MIR keeps the operation structural. This descriptor mirrors the
 // registered route exactly; it does not define a second comparison policy.
-pub fn jet_eval_exact_compare_row(member: String) -> MirPreludeCall? {
+pub fn jet_eval_exact_compare_row(member: String) -> MIRPreludeCall? {
     supported :: if member == {
         "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "compare" -> true
         else -> false
     }
     if !supported -> return None
     identity :: "BuiltinMethod:core.compare:{member}:jet_int_compare:2:2:[true, true]:None:Infallible:Value"
-    Val(MirPreludeCall{
-        id: MirPreludeCallId{value: stable_id("mir-prelude-call", identity)},
-        family: MirPreludeFamily.BuiltinMethod,
+    Val(MIRPreludeCall{
+        id: MIRPreludeCallID{value: stable_id("mir-prelude-call", identity)},
+        family: MIRPreludeFamily.BuiltinMethod,
         module_name: "core.compare",
         member: member,
-        symbol: MirSymbol.Prelude{name: "jet_int_compare"},
-        signature: MirCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, true}},
+        symbol: MIRSymbol.Prelude{name: "jet_int_compare"},
+        signature: MIRCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, true}},
         effect_kind: None,
-        fallibility: MirCallFallibility.Infallible,
-        abi: MirPreludeAbi.Value,
+        fallibility: MIRCallFallibility.Infallible,
+        abi: MIRPreludeABI.Value,
         authority: None,
         db_metadata: None,
     })

@@ -51,15 +51,15 @@ pub struct GlyphRun {
     pub approximate: Bool
 }
 
-pub fn system(style: FontStyle) -> FontFace {
+pub fn system(style: FontStyle) -> FontFace Never! {
     core.font.system(style)
 }
 
-pub fn shape(text: String, face: FontFace) -> GlyphRun {
+pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
     core.font.shape(text, face)
 }
 
-pub fn shape_with(face: FontFace, text: String) -> GlyphRun {
+pub fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
     // This is the explicit opt-in for deterministic approximate metrics.
     // `shape` is the only path that requests the FontShaping capability.
     shape_fallback(face, text)

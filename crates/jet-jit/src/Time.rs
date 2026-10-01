@@ -46,13 +46,6 @@ pub(crate) enum TimeValue {
     LocalTime(time_rt::JetLocalTime),
 }
 
-pub(crate) fn ambient_days_in_month(year: i64, month: i64) -> i64 {
-    time_rt::JetDate::days_in_month_of(year, month.clamp(1, 12))
-}
-
-pub(crate) fn ambient_is_leap_year(year: i64) -> bool {
-    time_rt::JetDate::is_leap(year)
-}
 pub(crate) fn ambient_monotonic_now_ms() -> i64 {
     jet_codegen::scheduler::jet_scheduler_world_monotonic_now_ns()
         .unwrap_or_else(jet_foundation::Monotonic::jet_time_monotonic_now_ns)
@@ -279,10 +272,6 @@ fn jet_jit_realtime_is_cancelled(handle: i64) -> i8 {
             });
             0
         })
-}
-
-fn jet_jit_stopwatch_elapsed_millis(start_ms: i64) -> i64 {
-    ambient_monotonic_now_ms().saturating_sub(start_ms)
 }
 
 pub(crate) fn push(value: TimeValue) -> i64 {
@@ -1601,7 +1590,6 @@ host_fns! {
     duration_display: "jet_jit_duration_display" => jet_jit_duration_display: unary;
     start: "jet_jit_time_start" => jet_jit_time_start: nullary;
     start_canonical: "jet_std_time_start" => jet_jit_time_start: nullary;
-    stopwatch_elapsed: "jet_jit_stopwatch_elapsed_millis" => jet_jit_stopwatch_elapsed_millis: unary;
     sleep_duration: "jet_std_time_sleep_duration" => jet_jit_time_sleep_duration_ns: unary_void;
     sleep_until: "jet_time_sleep_until" => jet_jit_time_sleep_until: unary_void;
     realtime_callback: "jet_rt_callback" => jet_jit_realtime_callback: ternary;

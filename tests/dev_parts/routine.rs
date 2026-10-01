@@ -1707,7 +1707,7 @@ use core.net.tls as tls
 fn run() {{
     roots :: tls.RootCertificates.from_pem([U8]{{ {roots} }}) ?? panic("roots")
     cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
-    cfg2 :: cfg.with_version_bounds(min: .Tls13, max: .Tls13) ?? panic("versions")
+    cfg2 :: cfg.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("versions")
     tcp :: net.tcp_connect("127.0.0.1:{port}") ?? panic("tcp")
     budget :: Duration.seconds(2) ?? panic("deadline")
     secure := tls.client(^tcp, server_name: "localhost", config: cfg2, deadline: budget) ?? panic("tls")
@@ -1717,7 +1717,7 @@ fn run() {{
     print(peer.cipher_suite)
     print(peer.tls_version)
     if !peer.cipher_suite.starts_with("TLS13_") {{ panic("cipher") }}
-    if peer.tls_version != .Tls13 {{ panic("version") }}
+    if peer.tls_version != .TLS13 {{ panic("version") }}
     crlf :: String.from_bytes([U8]{{13, 10}}) ?? panic("CRLF")
     secure.write_text("GET / HTTP/1.0{{crlf}}Host: localhost{{crlf}}{{crlf}}") ?? panic("request")
     // At most 8 * 512 bytes; preserve the marker across TLS read boundaries.
@@ -1825,7 +1825,7 @@ fn run() {{
     assert!(aot_lines
         .next()
         .is_some_and(|cipher| cipher.starts_with("TLS13_")));
-    assert_eq!(aot_lines.next(), Some("Tls13"));
+    assert_eq!(aot_lines.next(), Some("TLS13"));
     assert_eq!(aot_lines.next(), Some("tls-response-ok"));
     assert_eq!(aot_lines.next(), None);
     assert_eq!(dev.stdout, aot.stdout);
@@ -3083,7 +3083,7 @@ fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
         return;
     }
     let src = r#"
-#Numeric UserId :: distinct Int
+#Numeric UserID :: distinct Int
 #Numeric Severity :: distinct Int(0..10)
 #UnitFamily(Currency) { usd }
 
@@ -3102,8 +3102,8 @@ fn run() {
     F32.from_float(narrow_ok).drop("checked F32 conversion success proof")
     F32.from_float(narrow_bad).drop("checked F32 conversion error proof")
     user_source :: U64.from_u8(8)
-    UserId.from_u64(user_source).drop("checked distinct conversion proof")
-    print(UserId.from_u8(8).raw())
+    UserID.from_u64(user_source).drop("checked distinct conversion proof")
+    print(UserID.from_u8(8).raw())
     print(Severity.from_u8(8).raw())
     severity_source :: 7
     Severity.from_int(severity_source).drop("checked range conversion proof")
@@ -3918,8 +3918,7 @@ fn run() {{
         let got = run_cranelift_outcome(&src, tag);
         assert_eq!(got.exit_code, 1, "{tag} must fail");
         assert!(
-            got.stderr
-                .contains("core.perf.Perf.override_fidelity needs 0.0 through 1.0"),
+            got.stderr.contains("OutOfRange") && got.stderr.contains("PerfError"),
             "{tag}: {:?}",
             got.stderr
         );

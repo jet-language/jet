@@ -240,6 +240,7 @@ fn parse_for_check_inner(
         block_depth: 0,
         callable_tail_block_depth: None,
         callable_tail_expects_value: false,
+        lambda_tail_block_depth: None,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
         allow_environment_reads: false,
@@ -250,6 +251,8 @@ fn parse_for_check_inner(
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
         block_spans: Vec::new(),
+        prep_value_block: None,
+        prep_value_escape: None,
     };
     let mut prog = p.program();
     prog.fenced_statements = fenced_statements;
@@ -292,6 +295,7 @@ fn parse_inner(
         block_depth: 0,
         callable_tail_block_depth: None,
         callable_tail_expects_value: false,
+        lambda_tail_block_depth: None,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
         allow_environment_reads,
@@ -302,6 +306,8 @@ fn parse_inner(
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
         block_spans: Vec::new(),
+        prep_value_block: None,
+        prep_value_escape: None,
     };
     let mut prog = p.program();
     prog.fenced_statements = fenced_statements;
@@ -463,6 +469,11 @@ struct Parser<'a> {
     /// declares (or may infer) a result value. A unit callable's trailing
     /// `if` stays a statement, so its arm-tail loops keep statement meaning.
     callable_tail_expects_value: bool,
+    /// A depth whose final loop keeps statement meaning: the body depth of the
+    /// innermost block lambda (its result may be unit, a callback; sema alone
+    /// knows whether that tail is a value), or the enclosing depth while a
+    /// braceless arm's single statement is parsed.
+    lambda_tail_block_depth: Option<usize>,
     /// While parsing a value in `Template<...>`, a top-level `>` closes the
     /// application instead of becoming a comparison. Nested expressions can
     /// still use `>` normally.
@@ -487,6 +498,12 @@ struct Parser<'a> {
     applied_rules: Vec<crate::AST::AppliedRuleApplication>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     block_spans: Vec<Span>,
+    /// The innermost `name :: prep { … }` value block being parsed: its `{`
+    /// span and the block depth of its statements.
+    prep_value_block: Option<(Span, usize)>,
+    /// Set when a binding statement opened directly in that block shows it was
+    /// never closed: the token where the enclosing binding's parse resumes.
+    prep_value_escape: Option<usize>,
 }
 
 fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
@@ -2263,6 +2280,7 @@ fn run() {
             block_depth: 0,
             callable_tail_block_depth: None,
             callable_tail_expects_value: false,
+            lambda_tail_block_depth: None,
             module_arg_expr_depth: None,
             allow_lowercase_leading_dot: false,
             allow_environment_reads: false,
@@ -2273,6 +2291,8 @@ fn run() {
             applied_rules: Vec::new(),
             rule_facts: Vec::new(),
             block_spans: Vec::new(),
+            prep_value_block: None,
+            prep_value_escape: None,
         };
         let _prog = p.program();
         assert!(

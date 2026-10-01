@@ -356,7 +356,7 @@ pub enum JetTuiEvent {
     Key { code: String, modifiers: u8 },
     Resize { size: JetSize },
     Timer { id: String, elapsed_ms: i64 },
-    Io { channel: String, payload: Vec<u8> },
+    IO { channel: String, payload: Vec<u8> },
     Focus { focused: bool },
     Interrupt,
     Close,
@@ -391,7 +391,7 @@ impl JetTuiEvent {
     }
 
     pub fn io(channel: &str, payload: Vec<u8>) -> Self {
-        Self::Io {
+        Self::IO {
             channel: channel.to_string(),
             payload,
         }
@@ -407,28 +407,28 @@ impl JetTuiEvent {
 /// messages, and the canonical `JetUiNode` tree do not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JetTuiColorProfile {
-    Ansi16,
-    Ansi256,
+    ANSI16,
+    ANSI256,
     TrueColor,
-    Ascii,
+    ASCII,
 }
 
 impl JetTuiColorProfile {
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Ansi16 => "ansi16",
-            Self::Ansi256 => "ansi256",
+            Self::ANSI16 => "ansi16",
+            Self::ANSI256 => "ansi256",
             Self::TrueColor => "truecolor",
-            Self::Ascii => "ascii",
+            Self::ASCII => "ascii",
         }
     }
 
     fn kernel(self) -> jet_tui_kernel::ColorProfile {
         match self {
-            Self::Ansi16 => jet_tui_kernel::ColorProfile::Ansi16,
-            Self::Ansi256 => jet_tui_kernel::ColorProfile::Ansi256,
+            Self::ANSI16 => jet_tui_kernel::ColorProfile::Ansi16,
+            Self::ANSI256 => jet_tui_kernel::ColorProfile::Ansi256,
             Self::TrueColor => jet_tui_kernel::ColorProfile::TrueColor,
-            Self::Ascii => jet_tui_kernel::ColorProfile::Ascii,
+            Self::ASCII => jet_tui_kernel::ColorProfile::Ascii,
         }
     }
 }
@@ -461,10 +461,10 @@ impl JetTuiCapabilities {
     fn from_kernel(capabilities: jet_tui_kernel::Capabilities) -> Self {
         Self {
             profile: match capabilities.profile {
-                jet_tui_kernel::ColorProfile::Ansi16 => JetTuiColorProfile::Ansi16,
-                jet_tui_kernel::ColorProfile::Ansi256 => JetTuiColorProfile::Ansi256,
+                jet_tui_kernel::ColorProfile::Ansi16 => JetTuiColorProfile::ANSI16,
+                jet_tui_kernel::ColorProfile::Ansi256 => JetTuiColorProfile::ANSI256,
                 jet_tui_kernel::ColorProfile::TrueColor => JetTuiColorProfile::TrueColor,
-                jet_tui_kernel::ColorProfile::Ascii => JetTuiColorProfile::Ascii,
+                jet_tui_kernel::ColorProfile::Ascii => JetTuiColorProfile::ASCII,
             },
             color: capabilities.color,
             unicode: capabilities.unicode,
@@ -517,7 +517,7 @@ pub fn jet_tui_capabilities() -> JetTuiCapabilities {
         .to_ascii_lowercase();
     let ascii = jet_tui_env_flag("JET_TUI_ASCII") || term == "dumb";
     let profile = if ascii {
-        JetTuiColorProfile::Ascii
+        JetTuiColorProfile::ASCII
     } else if color_term == "truecolor"
         || color_term == "24bit"
         || term.contains("truecolor")
@@ -525,15 +525,15 @@ pub fn jet_tui_capabilities() -> JetTuiCapabilities {
     {
         JetTuiColorProfile::TrueColor
     } else if term.contains("256color") {
-        JetTuiColorProfile::Ansi256
+        JetTuiColorProfile::ANSI256
     } else {
-        JetTuiColorProfile::Ansi16
+        JetTuiColorProfile::ANSI16
     };
     let no_color = std::env::var_os("NO_COLOR").is_some();
     let forced = jet_tui_env_flag("FORCE_COLOR");
     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let mut capabilities = JetTuiCapabilities::for_profile(profile, width, height);
-    capabilities.color = !no_color && profile != JetTuiColorProfile::Ascii && (terminal || forced);
+    capabilities.color = !no_color && profile != JetTuiColorProfile::ASCII && (terminal || forced);
     if no_color {
         capabilities.mouse = false;
         capabilities.clipboard = false;
@@ -543,25 +543,25 @@ pub fn jet_tui_capabilities() -> JetTuiCapabilities {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JetTuiColor {
-    Ansi16(u8),
-    Ansi256(u8),
-    Rgb(u8, u8, u8),
+    ANSI16(u8),
+    ANSI256(u8),
+    RGB(u8, u8, u8),
 }
 
 impl JetTuiColor {
     fn kernel(self) -> jet_tui_kernel::Color {
         match self {
-            Self::Ansi16(index) => jet_tui_kernel::Color::Ansi16(index),
-            Self::Ansi256(index) => jet_tui_kernel::Color::Ansi256(index),
-            Self::Rgb(red, green, blue) => jet_tui_kernel::Color::Rgb(red, green, blue),
+            Self::ANSI16(index) => jet_tui_kernel::Color::Ansi16(index),
+            Self::ANSI256(index) => jet_tui_kernel::Color::Ansi256(index),
+            Self::RGB(red, green, blue) => jet_tui_kernel::Color::Rgb(red, green, blue),
         }
     }
 
     fn from_kernel(color: jet_tui_kernel::Color) -> Self {
         match color {
-            jet_tui_kernel::Color::Ansi16(index) => Self::Ansi16(index),
-            jet_tui_kernel::Color::Ansi256(index) => Self::Ansi256(index),
-            jet_tui_kernel::Color::Rgb(red, green, blue) => Self::Rgb(red, green, blue),
+            jet_tui_kernel::Color::Ansi16(index) => Self::ANSI16(index),
+            jet_tui_kernel::Color::Ansi256(index) => Self::ANSI256(index),
+            jet_tui_kernel::Color::Rgb(red, green, blue) => Self::RGB(red, green, blue),
         }
     }
 }
@@ -1424,7 +1424,7 @@ pub trait JetBackend {
             JetTuiEvent::Key { code, .. } => self.on_event(JetInputEvent::Key { code }),
             JetTuiEvent::Resize { size } => self.on_event(JetInputEvent::Resize { size }),
             JetTuiEvent::Timer { .. }
-            | JetTuiEvent::Io { .. }
+            | JetTuiEvent::IO { .. }
             | JetTuiEvent::Focus { .. }
             | JetTuiEvent::Interrupt
             | JetTuiEvent::Close => JetEventResult::Handled,

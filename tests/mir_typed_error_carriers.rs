@@ -73,7 +73,7 @@ fn optional_folds_respect_runtime_shadowing_and_reader_invalidation() {
     tir_support::assert_tiers_agree(
         "optional_fold_eligibility",
         OPTIONAL_FOLD_ELIGIBILITY_SOURCE,
-        "Zg==\ninvalid Base64 character; expected the selected RFC 4648 alphabet\n7\n9\n",
+        "Zg==\ninvalid base64 at byte 1: byte 0x3F is not in the standard base64 alphabet\n7\n9\n",
     );
 }
 
@@ -82,6 +82,6 @@ fn base64_typed_error_carrier_is_consistent_across_i9_tiers() {
     tir_support::assert_tiers_agree(
         "base64_typed_error_carrier",
         BASE64_TYPED_ERROR_SOURCE,
-        "false\ntrue\n1\n102\ntrue\ninvalid Base64 padding; expected the RFC 4648 padding for the final quantum\ninvalid Base64 character; expected the selected RFC 4648 alphabet\ninvalid Base64 encoding; non-zero unused bits\ninvalid Base64 character; expected the selected RFC 4648 alphabet\n1\n251\ntrue\ninvalid Base64url padding; '=' is not part of the canonical URL alphabet\n",
+        "false\ntrue\n1\n102\ntrue\ninvalid base64 at byte 2: expected 1 padding characters\ninvalid base64 at byte 1: byte 0x3F is not in the standard base64 alphabet\ninvalid base64 at byte 1: non-zero unused bits\ninvalid base64 at byte 0: byte 0x2D is not in the standard base64 alphabet\n1\n251\ntrue\ninvalid base64url at byte 2: padding is not allowed\n",
     );
 }

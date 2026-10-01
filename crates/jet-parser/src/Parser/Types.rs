@@ -859,9 +859,12 @@ impl<'a> Parser<'a> {
             // D-CAP9: `*T` is the canonical raw-pointer type. Lowers to the same
             // internal `Ptr<T>` (`Type::Apply { name: "Ptr", … }`). `Ptr<T>` is
             // a deprecated alias that teaches `*T` (see the `TYPE_PTR` arm).
+            // The mark takes one element type; a following `E!` or `| B`
+            // belongs to the enclosing type, so `*T Never!` is a pointer
+            // carried by a `Never!` contract, not a pointer to a contract.
             TokKind::Star => {
                 self.bump();
-                let (elem, _) = self.type_()?;
+                let (elem, _) = self.type_inner_without_union(false)?;
                 Type::Apply {
                     name: Syntax::TYPE_PTR.to_string(),
                     args: vec![elem],

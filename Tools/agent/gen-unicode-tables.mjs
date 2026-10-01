@@ -15,15 +15,13 @@
 //   auxiliary/SentenceBreakProperty.txt, DerivedCoreProperties.txt (GB9c's
 //   Indic_Conjunct_Break, added card #298 segmentation slice)
 //
-// Emits byte-identical Rust source to two paths:
-//   crates/jet-foundation/src/generated/UnicodeTables.rs   (source of truth;
-//     jet-comptime depends on jet-foundation and uses this module directly —
-//     no separate comptime copy, one table, no drift)
-//   crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs (textual
-//     duplicate: the AOT prelude is embedded into the user's compiled
-//     program via include_str!, which cannot depend on the compiler's own
-//     jet-foundation crate, so this copy carries the same data as literal
-//     prelude source)
+// Emits Rust source to these paths:
+//   crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs (the one
+//     table file: the AOT prelude embeds it as text via include_str!, and
+//     the jet-unicode crate compiles it once for jet-foundation, jet-comptime
+//     and the JIT hosts, so every in-binary tier reads one table with no drift)
+//   crates/jet-foundation/src/generated/UnicodeString.rs and
+//   crates/jet-codegen/src/Prelude/Core/UnicodeString.rs (string kernels)
 //
 // Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
@@ -653,12 +651,10 @@ pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
 
 const stringModuleOut = MODULE_HEADER + stringBody;
 const stringFlatOut = FLAT_HEADER + stringBody;
-const tablesModuleOut = MODULE_HEADER + tablesBody;
 const tablesFlatOut = FLAT_HEADER + tablesBody;
 
 const outPaths = [
   ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],
-  ["crates/jet-foundation/src/generated/UnicodeTables.rs", tablesModuleOut],
   ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
   ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
 ];

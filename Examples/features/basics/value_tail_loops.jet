@@ -1,0 +1,81 @@
+// D-TAIL-RETURN1=A: the final line of a value-expected function is in value
+// position, so a finite source loop with `->` there is a collecting loop
+// (D-LOOP-STMT-ARROW1=C), exactly as in `names :: loop … -> …`. A unit
+// function keeps a final `->` loop as an effect loop, and so does a
+// braceless arm of a dispatch statement that is not the final line.
+// Source after an all-return dispatch is unreachable; it is checked for its
+// own mistakes but never as the function's value, so a dead `None` still
+// takes its type from the declared result.
+struct Param {
+    name: String
+}
+
+enum Parsed {
+    Row(value: Int)
+    Error(text: String)
+}
+
+enum Batch {
+    One(value: Int)
+    Many(values: [Int])
+}
+
+fn params(names: [String]) -> [Param] {
+    loop name in names -> Param{name: name}
+}
+
+fn kept_params(names: [String]) -> [Param] Never! {
+    loop name in names if name != "skip" -> Param{name: name}
+}
+
+fn above(values: [Int], limit: Int) -> [Int] {
+    floor :: limit
+    loop value in values if value > floor -> value
+}
+
+fn log_all(log: &[String], names: [String]) {
+    loop name in names -> &log.push(name)
+}
+
+fn flatten(batch: Batch) -> [Int] {
+    out := [Int]{}
+    if batch == {
+        .One(value) -> &out.push(value)
+        .Many(values) -> loop value in values -> &out.push(value)
+    }
+    out
+}
+
+fn parse(n: Int) -> Parsed {
+    if n > 0 -> Parsed.Row{value: n} else -> Parsed.Error{text: "negative"}
+}
+
+fn row_value(n: Int) -> Int? {
+    parsed :: parse(n)
+    if parsed == {
+        .Row(value) -> return Val(value)
+        .Error(_) -> return None
+    }
+    None
+}
+
+fn sign(n: Int) -> Int? {
+    if n > 0 -> return Val(1)
+    return None
+    None
+}
+
+fn run() {
+    names :: [String]{"a", "skip", "b"}
+    print(params(names).len())
+    print(kept_params(names).len())
+    print(above([Int]{1, 2, 3}, 1))
+    log := [String]{}
+    log_all(&log, names)
+    print(log)
+    print(flatten(Batch.Many{values: [Int]{7, 8}}))
+    print(row_value(4) ?? 0)
+    print(row_value(-4) ?? 0)
+    print(sign(3) ?? 0)
+    print(sign(-3) ?? 0)
+}

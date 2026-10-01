@@ -240,13 +240,19 @@ impl PackageGraph {
     /// resolved file imports. Every non-Core package depends on Core when
     /// Core modules are loaded, because the prelude is implicit.
     pub fn from_bundle(bundle: &ProgramBundle) -> Self {
+        Self::from_ledger(bundle, &bundle.name_ledger)
+    }
+
+    /// `from_bundle` with the name ledger passed separately, for sema, which
+    /// holds the ledger outside the bundle while it checks.
+    pub fn from_ledger(bundle: &ProgramBundle, ledger: &crate::Names::NameLedger) -> Self {
         let mut groups: BTreeMap<String, (PackageKind, Option<PathBuf>, Vec<usize>)> =
             BTreeMap::new();
         let mut module_identity = Vec::with_capacity(bundle.modules.len());
         for (index, module) in bundle.modules.iter().enumerate() {
             let (identity, kind, root) = if module.is_core_source() {
                 (CORE_PACKAGE.to_string(), PackageKind::Core, None)
-            } else if let Some(namespace) = bundle.name_ledger.module_namespace(index) {
+            } else if let Some(namespace) = ledger.module_namespace(index) {
                 let root = PathBuf::from(namespace);
                 let label = stable_label(bundle, &root);
                 let identity = if label.starts_with("dep:") {
@@ -289,7 +295,7 @@ impl PackageGraph {
                 dependencies: Vec::new(),
             })
             .collect::<Vec<_>>();
-        for (from, to) in bundle.name_ledger.import_edges() {
+        for (from, to) in ledger.import_edges() {
             let (Some(&from), Some(&to)) = (module_package.get(from), module_package.get(to)) else {
                 continue;
             };

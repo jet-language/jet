@@ -230,7 +230,7 @@ pub const MARKER_INTERRUPT: &str = "Interrupt";
 /// D-DX-PLUGIN1=D: the shared Core module and member for typed publications.
 pub const CORE_DEVTOOLS_MODULE: &str = "core.devtools";
 pub const CORE_DEVTOOLS_PUBLISH: &str = "publish";
-pub const TYPE_UI_NODE: &str = "UiNode";
+pub const TYPE_UI_NODE: &str = "UINode";
 
 /// D-CANVASMETA1=B: `#Meta` category field name.
 pub const META_FIELD_CATEGORY: &str = "category";
@@ -650,6 +650,28 @@ impl TypedHeadKind {
     pub const fn forbids_holes(self) -> bool {
         matches!(self, Self::DateTime)
     }
+
+    /// The Core module whose runtime serves this boundary head (its usage and
+    /// linkage key), not necessarily a record of the same type.
+    pub const fn core_owner_module(self) -> Option<&'static str> {
+        match self {
+            Self::URL => Some("core.net.url"),
+            Self::Path => Some("core.files"),
+            Self::DateTime => Some("core.time"),
+            Self::SQL | Self::HTML | Self::Sh => None,
+        }
+    }
+
+    /// The Core module whose same-named record IS this built-in value: only
+    /// `core.net.url`'s `URL` declares itself the built-in carrier. Every other
+    /// Core record sharing a head's leaf (`core.files.path`'s `Path`,
+    /// `core.time`'s civil `DateTime`) is a different type.
+    pub const fn carrier_record_module(self) -> Option<&'static str> {
+        match self {
+            Self::URL => Some("core.net.url"),
+            Self::Path | Self::DateTime | Self::SQL | Self::HTML | Self::Sh => None,
+        }
+    }
 }
 
 pub fn typed_head_kind(name: &str) -> Option<TypedHeadKind> {
@@ -897,7 +919,7 @@ pub const TYPE_EMAIL_LIMITS: &str = "Limits";
 pub const TYPE_EMAIL_SMTP_AUTH: &str = "SMTPAuth";
 pub const TYPE_EMAIL_TLS_TRUST: &str = "TLSTrust";
 pub const TYPE_EMAIL_SMTP_CONFIG: &str = "SMTPConfig";
-pub const TYPE_EMAIL_DKIM_CONFIG: &str = "DkimConfig"; // D-EMAIL-DKIM-CONFIG1=A
+pub const TYPE_EMAIL_DKIM_CONFIG: &str = "DKIMConfig"; // D-EMAIL-DKIM-CONFIG1=A
 pub const TYPE_EMAIL_MAILER: &str = "Mailer";
 pub const EMAIL_LIMITS_SAFE_METHOD: &str = "safe";
 pub const CORE_EMAIL_ADDRESS_FN: &str = "address";
@@ -967,7 +989,7 @@ pub const METHOD_FRESH_NEW_RANDOM: &str = "new_random";
 /// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
 /// D-DET-CAPAPI (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
 /// / `shuffle(&list)`, mirroring the ambient `random.*` set.
-pub const RNG_TYPE: &str = "Rng";
+pub const RNG_TYPE: &str = "RNG";
 /// D-TEST-WORLD1=A (ratified 2026-09-05): scoped deterministic execution
 /// world carrying the controlled clock, scheduler, external-input providers,
 /// and seeded test randomness.

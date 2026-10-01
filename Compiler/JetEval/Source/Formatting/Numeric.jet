@@ -4,11 +4,18 @@
 // These helpers select the checked Prelude route, resolve its source-owned
 // target through JetEval's source Prelude routes, marshal materialized values,
 // and validate the returned String.
+use jet_foundation.[
+    MIRPreludeABI,
+    MIRPreludeCall,
+    Span,
+    TComptimeValue,
+    mir_symbol_name,
+]
 
 fn jet_eval_format_find_display_debug_row(
     machine: &JetEvalMachine,
     member: String,
-) -> MirPreludeCall? {
+) -> MIRPreludeCall? {
     if member != "display" && member != "debug" {
         return None
     }
@@ -30,7 +37,7 @@ fn jet_eval_format_find_display_debug_row(
 fn jet_eval_format_find_source_row(
     machine: &JetEvalMachine,
     member: String,
-) -> MirPreludeCall? {
+) -> MIRPreludeCall? {
     if member == {
         "display" | "debug" -> jet_eval_format_find_display_debug_row(&machine, member)
         else -> jet_eval_source_row(machine.program, member)
@@ -51,7 +58,7 @@ fn jet_eval_format_core_source_call(
         jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source target is unavailable")
         return None
     }
-    if target.abi != MirPreludeAbi.Value || target.signature.arity != args.len() {
+    if target.abi != MIRPreludeABI.Value || target.signature.arity != args.len() {
         jet_eval_compiler_fail(&machine, span, "core.text.fmt.{member} source target ABI does not match the route")
         return None
     }

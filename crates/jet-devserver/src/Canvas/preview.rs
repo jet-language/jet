@@ -12,8 +12,9 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 use jet_foundation::Devtools::{
-    JetDevtoolsFreshnessState, JetDevtoolsSourceIdentityFact, JetDevtoolsSourceSpan,
+    JetDevtoolsFreshnessState, JetDevtoolsSourceSpan,
 };
+use jet_foundation::JSON::json_escape as preview_json_escape;
 
 pub const CANVAS_PREVIEW_SCHEMA_VERSION: u32 = 1;
 pub const CANVAS_PREVIEW_MAX_PREVIEWS: usize = 64;
@@ -74,15 +75,6 @@ impl CanvasPreviewSourceIdentity {
             ));
         }
         Ok(())
-    }
-
-    pub fn as_devtools_fact(&self) -> JetDevtoolsSourceIdentityFact {
-        JetDevtoolsSourceIdentityFact::new(
-            Some(self.source_id.clone()),
-            Some(self.build_id.clone()),
-            Some(self.revision.clone()),
-            None,
-        )
     }
 }
 
@@ -620,12 +612,6 @@ impl CanvasPreviewDescriptor {
         Ok(())
     }
 
-    pub fn set_traits(&mut self, traits: CanvasPreviewTraits) -> Result<(), CanvasPreviewError> {
-        traits.validate()?;
-        self.traits = traits;
-        Ok(())
-    }
-
     pub fn set_authority(&mut self, authority: CanvasPreviewAuthority) {
         self.authority = authority;
     }
@@ -642,14 +628,6 @@ impl CanvasPreviewDescriptor {
             return Err(CanvasPreviewError::TooManyInputs);
         }
         self.inputs.insert(input.name, input.value);
-        Ok(())
-    }
-
-    pub fn set_context_id(&mut self, context_id: Option<String>) -> Result<(), CanvasPreviewError> {
-        if let Some(context_id) = &context_id {
-            preview_text(context_id, "preview context id", 256)?;
-        }
-        self.context_id = context_id;
         Ok(())
     }
 
@@ -847,14 +825,6 @@ pub struct CanvasPreviewSnapshot<T> {
 }
 
 impl<T: Clone> CanvasPreviewSnapshot<T> {
-    pub fn display_frame(&self) -> Option<CanvasPreviewFrame<T>> {
-        self.current.clone().or_else(|| self.last_good.clone())
-    }
-
-    pub fn has_current_output(&self) -> bool {
-        self.current.is_some() && self.freshness == JetDevtoolsFreshnessState::Fresh
-    }
-
     pub fn to_json(&self) -> String {
         let diagnostic = self
             .diagnostic
@@ -991,80 +961,6 @@ impl<T: Clone> CanvasPreviewSession<T> {
         self.resident_bytes
     }
 
-    pub fn add_preview(&mut self, descriptor: CanvasPreviewDescriptor) -> Result<(), CanvasPreviewError> {
-        self.ensure_open()?;
-        descriptor.validate()?;
-        if self.records.len() >= self.policy.max_previews {
-            return Err(CanvasPreviewError::TooManyPreviews);
-        }
-        if descriptor.inputs().len() > self.policy.max_inputs {
-            return Err(CanvasPreviewError::TooManyInputs);
-        }
-        if !self.authority.covers(descriptor.authority()) {
-            return Err(CanvasPreviewError::AuthorityWidened);
-        }
-        self.registry.insert(descriptor.clone())?;
-        self.records.insert(
-            descriptor.name().to_string(),
-            PreviewRecord {
-                descriptor,
-                status: CanvasPreviewStatus::Unrendered,
-                freshness: JetDevtoolsFreshnessState::Unknown,
-                last_good: None,
-                diagnostic: None,
-                sequence: self.sequence,
-            },
-        );
-        Ok(())
-    }
-
-    pub fn replace_preview(&mut self, descriptor: CanvasPreviewDescriptor) -> Result<(), CanvasPreviewError> {
-        self.ensure_open()?;
-        descriptor.validate()?;
-        if descriptor.inputs().len() > self.policy.max_inputs {
-            return Err(CanvasPreviewError::TooManyInputs);
-        }
-        if !self.authority.covers(descriptor.authority()) {
-            return Err(CanvasPreviewError::AuthorityWidened);
-        }
-        if !self.records.contains_key(descriptor.name()) {
-            return self.add_preview(descriptor);
-        }
-        self.registry.replace(descriptor.clone())?;
-        let sequence = self.bump_sequence();
-        let record = self
-            .records
-            .get_mut(descriptor.name())
-            .ok_or_else(|| CanvasPreviewError::UnknownPreview(descriptor.name().to_string()))?;
-        record.descriptor = descriptor;
-        record.status = if record.last_good.is_some() {
-            CanvasPreviewStatus::Stale
-        } else {
-            CanvasPreviewStatus::Unrendered
-        };
-        record.freshness = if record.last_good.is_some() {
-            JetDevtoolsFreshnessState::Stale
-        } else {
-            JetDevtoolsFreshnessState::Unknown
-        };
-        record.diagnostic = None;
-        record.sequence = sequence;
-        Ok(())
-    }
-
-    pub fn remove_preview(&mut self, name: &str) -> Result<(), CanvasPreviewError> {
-        self.ensure_open()?;
-        let record = self
-            .records
-            .remove(name)
-            .ok_or_else(|| CanvasPreviewError::UnknownPreview(name.to_string()))?;
-        self.resident_bytes = self
-            .resident_bytes
-            .saturating_sub(record.last_good.as_ref().map_or(0, |frame| frame.bytes));
-        self.registry.remove(name)?;
-        Ok(())
-    }
-
     pub fn register_context(&mut self, context: CanvasPreviewContext) -> Result<(), CanvasPreviewError> {
         self.ensure_open()?;
         if self.registry.contexts_len() >= self.policy.max_contexts {
@@ -1122,14 +1018,6 @@ impl<T: Clone> CanvasPreviewSession<T> {
         self.records
             .iter()
             .map(|(name, record)| self.snapshot_record(name, record))
-            .collect()
-    }
-
-    pub fn selected_snapshots(&self) -> Vec<CanvasPreviewSnapshot<T>> {
-        self.registry
-            .selected_names()
-            .into_iter()
-            .filter_map(|name| self.records.get(&name).map(|record| self.snapshot_record(&name, record)))
             .collect()
     }
 
@@ -1284,20 +1172,6 @@ impl<T: Clone> CanvasPreviewSession<T> {
         self.publish_inner(name, source, rendered)
     }
 
-    pub fn publish_authorized(
-        &mut self,
-        connection: &CanvasPreviewConnection,
-        name: &str,
-        requested_effects: &[CanvasPreviewEffect],
-        source: CanvasPreviewSourceIdentity,
-        rendered: CanvasPreviewRendered<T>,
-    ) -> Result<CanvasPreviewSnapshot<T>, CanvasPreviewError> {
-        self.touch(connection)?;
-        let descriptor = self.descriptor(name)?.clone();
-        self.authorize_descriptor(&descriptor, connection, requested_effects)?;
-        self.publish_inner(name, source, rendered)
-    }
-
     fn publish_inner(
         &mut self,
         name: &str,
@@ -1439,17 +1313,6 @@ impl<T: Clone> CanvasPreviewSession<T> {
             .ok_or(CanvasPreviewError::StaleConnection)?;
         lease.cursor = cursor;
         Ok(())
-    }
-
-    pub fn needs_snapshot(&self, connection: &CanvasPreviewConnection) -> Result<bool, CanvasPreviewError> {
-        let lease = self
-            .clients
-            .get(&connection.client_id)
-            .ok_or(CanvasPreviewError::StaleConnection)?;
-        if connection.session_id != self.id || lease.generation != connection.generation {
-            return Err(CanvasPreviewError::StaleConnection);
-        }
-        Ok(lease.cursor < self.sequence)
     }
 
     pub fn disconnect(&mut self, connection: &CanvasPreviewConnection) -> Result<(), CanvasPreviewError> {
@@ -1898,25 +1761,6 @@ fn preview_source_json(source: &CanvasPreviewSourceIdentity) -> String {
         source.span.end_line,
         source.span.end_column,
     )
-}
-
-fn preview_json_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control() => {
-                use std::fmt::Write as _;
-                let _ = write!(escaped, "\\u{:04x}", character as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 fn constant_time_equal(left: &str, right: &str) -> bool {

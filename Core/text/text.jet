@@ -36,12 +36,12 @@ pub struct Cursor {
 }
 
 /// Cursor at the start of `text` (offset 0, line 1, column 1).
-pub fn cursor(_text: String) -> Cursor {
+pub fn cursor(_text: String) -> Cursor Never! {
     Cursor{offset: 0, line: 1, column: 1}
 }
 
 /// Advance `cur` by one UTF-8 scalar in `text`. Past the end is a no-op.
-pub fn cursor_advance(text: String, cur: Cursor) -> Cursor {
+pub fn cursor_advance(text: String, cur: Cursor) -> Cursor Never! {
     raw :: text.bytes()
     if cur.offset < 0 -> return Cursor{offset: 0, line: 1, column: 1}
     if cur.offset >= raw.len() -> return ~cur
@@ -52,9 +52,9 @@ pub fn cursor_advance(text: String, cur: Cursor) -> Cursor {
 }
 
 /// Byte length of UTF-8 `text`. Equal to `text.bytes().len()`.
-pub fn byte_count(text: String) -> Int { text.bytes().len() }
+pub fn byte_count(text: String) -> Int Never! { text.bytes().len() }
 
-pub fn is_ascii(text: String) -> Bool {
+pub fn is_ascii(text: String) -> Bool Never! {
     loop b in text.bytes() {
         if b > (U8{127}) -> return false
     }
@@ -62,60 +62,60 @@ pub fn is_ascii(text: String) -> Bool {
 }
 
 /// Unicode scalar count (replacement character U+FFFD counts as one).
-pub fn scalar_count(text: String) -> Int { decode_scalars(text).len() }
+pub fn scalar_count(text: String) -> Int Never! { decode_scalars(text).len() }
 
-pub fn scalars(text: String) -> [String] {
+pub fn scalars(text: String) -> [String] Never! {
     out := [String]{}
     loop cp in decode_scalars(text) -> &out.push(encode_cp(cp))
     out
 }
 
-pub fn lower(text: String) -> String { map_case(text, false) }
+pub fn lower(text: String) -> String Never! { map_case(text, false) }
 
-pub fn upper(text: String) -> String { map_case(text, true) }
+pub fn upper(text: String) -> String Never! { map_case(text, true) }
 
 /// Unicode C+F case folding. Latin-1 folds through `lower`; other scalars identity.
-pub fn casefold(text: String) -> String { lower(text) }
+pub fn casefold(text: String) -> String Never! { lower(text) }
 
-pub fn caseless_eq(left: String, right: String) -> Bool { casefold(left) == casefold(right) }
+pub fn caseless_eq(left: String, right: String) -> Bool Never! { casefold(left) == casefold(right) }
 
-pub fn nfc(text: String) -> String { compose(decompose(text, false)) }
-pub fn nfd(text: String) -> String { encode_cps(decompose(text, false)) }
-pub fn nfkc(text: String) -> String { compose(decompose(text, true)) }
-pub fn nfkd(text: String) -> String { encode_cps(decompose(text, true)) }
+pub fn nfc(text: String) -> String Never! { compose(decompose(text, false)) }
+pub fn nfd(text: String) -> String Never! { encode_cps(decompose(text, false)) }
+pub fn nfkc(text: String) -> String Never! { compose(decompose(text, true)) }
+pub fn nfkd(text: String) -> String Never! { encode_cps(decompose(text, true)) }
 
-pub fn graphemes(text: String) -> [String] { split_graphemes(text) }
-pub fn words(text: String) -> [String] { split_words(text) }
-pub fn sentences(text: String) -> [String] { split_sentences(text) }
-pub fn inspect(text: String) -> [String] {
+pub fn graphemes(text: String) -> [String] Never! { split_graphemes(text) }
+pub fn words(text: String) -> [String] Never! { split_words(text) }
+pub fn sentences(text: String) -> [String] Never! { split_sentences(text) }
+pub fn inspect(text: String) -> [String] Never! {
     out := [String]{}
     loop cp in decode_scalars(text) -> &out.push(hex_cp(cp))
     out
 }
 
 /// `"index:scalar"` pairs, index in bytes.
-pub fn char_indices(text: String) -> [String] {
+pub fn char_indices(text: String) -> [String] Never! {
     out := [String]{}
     loop pair in decode_indexed(text) -> &out.push("{pair.index}:{encode_cp(pair.cp)}")
     out
 }
 
-pub fn display_width(text: String) -> Int {
+pub fn display_width(text: String) -> Int Never! {
     total := 0
     loop cluster in split_graphemes(text) -> total = total + cluster_width(decode_scalars(cluster))
     total
 }
 
-pub fn grapheme_views(text: String) -> [String] { graphemes(text) }
-pub fn word_views(text: String) -> [String] { words(text) }
-pub fn line_views(text: String) -> [String] { split_lines(text) }
-pub fn byte_views(text: String) -> [String] {
+pub fn grapheme_views(text: String) -> [String] Never! { graphemes(text) }
+pub fn word_views(text: String) -> [String] Never! { words(text) }
+pub fn line_views(text: String) -> [String] Never! { split_lines(text) }
+pub fn byte_views(text: String) -> [String] Never! {
     out := [String]{}
     loop b in text.bytes() -> &out.push("{b}")
     out
 }
 
-pub fn is_alphabetic(text: String) -> Bool {
+pub fn is_alphabetic(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     if is_ascii(text) {
         loop b in text.bytes() {
@@ -129,7 +129,7 @@ pub fn is_alphabetic(text: String) -> Bool {
     true
 }
 
-pub fn is_numeric(text: String) -> Bool {
+pub fn is_numeric(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop cp in decode_scalars(text) {
         if !is_digit_cp(cp) -> return false
@@ -137,7 +137,7 @@ pub fn is_numeric(text: String) -> Bool {
     true
 }
 
-pub fn is_whitespace(text: String) -> Bool {
+pub fn is_whitespace(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop cp in decode_scalars(text) {
         if !is_space_cp(cp) -> return false
@@ -145,9 +145,9 @@ pub fn is_whitespace(text: String) -> Bool {
     true
 }
 
-pub fn trim(text: String) -> String { trim_end(trim_start(text)) }
+pub fn trim(text: String) -> String Never! { trim_end(trim_start(text)) }
 
-pub fn trim_start(text: String) -> String {
+pub fn trim_start(text: String) -> String Never! {
     pairs :: decode_indexed(text)
     i := 0
     loop i < pairs.len() {
@@ -158,7 +158,7 @@ pub fn trim_start(text: String) -> String {
     slice_bytes(text.bytes(), pairs[i].index, text.bytes().len())
 }
 
-pub fn trim_end(text: String) -> String {
+pub fn trim_end(text: String) -> String Never! {
     pairs :: decode_indexed(text)
     end := text.bytes().len()
     i := pairs.len() - 1
@@ -173,25 +173,25 @@ pub fn trim_end(text: String) -> String {
 }
 
 /// Pad on the left until `width` UTF-8 scalars. Empty `fill` returns text unchanged.
-pub fn pad_start(text: String, width: Int, fill: String) -> String { pad_side(text, width, fill, true) }
+pub fn pad_start(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, true) }
 
-pub fn pad_end(text: String, width: Int, fill: String) -> String { pad_side(text, width, fill, false) }
+pub fn pad_end(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, false) }
 
-pub fn center(text: String, width: Int, fill: String) -> String {
+pub fn center(text: String, width: Int, fill: String) -> String Never! {
     extra :: width - scalar_count(text)
     if extra <= 0 || scalar_count(fill) == 0 -> return ~text
     left :: extra /% 2
     pad_end(pad_start(text, scalar_count(text) + left, fill), width, fill)
 }
 
-pub fn starts_any(text: String, prefixes: [String]) -> Bool {
+pub fn starts_any(text: String, prefixes: [String]) -> Bool Never! {
     loop p in prefixes {
         if starts_with(text, p) -> return true
     }
     false
 }
 
-pub fn ends_any(text: String, suffixes: [String]) -> Bool {
+pub fn ends_any(text: String, suffixes: [String]) -> Bool Never! {
     loop s in suffixes {
         if ends_with(text, s) -> return true
     }
@@ -199,9 +199,9 @@ pub fn ends_any(text: String, suffixes: [String]) -> Bool {
 }
 
 /// At most `n` parts. `n <= 0` yields an empty list.
-pub fn splitn(text: String, sep: String, n: Int) -> [String] { split_limit(text, sep, n, false) }
+pub fn splitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, false) }
 
-pub fn rsplitn(text: String, sep: String, n: Int) -> [String] { split_limit(text, sep, n, true) }
+pub fn rsplitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, true) }
 
 fn ascii_alpha(b: U8) -> Bool {
     n :: b

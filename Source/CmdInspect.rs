@@ -32,12 +32,39 @@ use jet_foundation::MIR::{
 /// The programmable-build preflight and ordinary sema check both feed this
 /// value. Consumers must project its bundle, facts, index, and check record;
 /// they must not reopen the entry file to answer the same question.
+///
+/// The semantic index is built on first use: `jet check` never reads it, and
+/// building it costs more than checking the program.
 pub(crate) struct CheckProjection {
     pub(crate) bundle: jet::AST::ProgramBundle,
     pub(crate) facts: jet::Sema::SemIndexEffectFacts,
-    pub(crate) index: jet_semindex::SemIndex,
+    index: std::sync::OnceLock<jet_semindex::SemIndex>,
+    package_facts: Option<jet_semindex::PackageFacts>,
+    workspace_overlay_policy: Option<jet_pkg_model::Overlay::OverlayPolicy>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) check: CheckResult,
+}
+
+impl CheckProjection {
+    /// The semantic index of the checked bundle, with the entry's package
+    /// facts and workspace overlay policy attached.
+    pub(crate) fn index(&self) -> &jet_semindex::SemIndex {
+        self.index.get_or_init(|| {
+            let mut index = jet_semindex::from_checked(&self.bundle, &self.facts);
+            if let Some(package_facts) = self.package_facts.clone() {
+                index.attach_package_facts(package_facts);
+            }
+            if let Some(policy) = self.workspace_overlay_policy.clone() {
+                index.attach_workspace_overlay_policy(policy);
+            }
+            index
+        })
+    }
+
+    pub(crate) fn into_index(self) -> jet_semindex::SemIndex {
+        self.index();
+        self.index.into_inner().expect("semantic index was just built")
+    }
 }
 /// The checker projection retained by `jet review --diagnostics`.
 ///
@@ -381,15 +408,8 @@ fn check_projection_with_options_and_preflight(
     };
     let package_facts = jet_semindex::package_facts_for_entry(path)
         .map_err(|error| vec![jet_semindex::package_facts_diagnostic(path, &error)])?;
-    let mut index = jet_semindex::from_checked(&bundle, &facts);
-    if let Some(package_facts) = package_facts.clone() {
-        index.attach_package_facts(package_facts);
-    }
-    if let Some(policy) = jet_semindex::workspace_overlay_policy_for_entry(path)
-        .map_err(|diagnostic| vec![diagnostic])?
-    {
-        index.attach_workspace_overlay_policy(policy);
-    }
+    let workspace_overlay_policy = jet_semindex::workspace_overlay_policy_for_entry(path)
+        .map_err(|diagnostic| vec![diagnostic])?;
     let (proof_rows, proof_diagnostics) = match scope {
         CheckScope::Project => project_proof_rows(
             &bundle,
@@ -422,7 +442,9 @@ fn check_projection_with_options_and_preflight(
     Ok(CheckProjection {
         bundle,
         facts,
-        index,
+        index: std::sync::OnceLock::new(),
+        package_facts,
+        workspace_overlay_policy,
         diagnostics,
         check,
     })
@@ -696,7 +718,7 @@ struct ProjectBundleProof {
     core_detail: String,
     tier_status: &'static str,
     tier_detail: String,
-    mir: jet_foundation::MIR::MirProgramIdentity,
+    mir_digest: String,
 }
 
 impl ProjectBundleProof {
@@ -722,6 +744,26 @@ impl ProjectBundleProof {
             bundle.project_root.display(),
         );
 
+        // #2517 S2: when dependency packages were sealed from their check
+        // records, their bodies were not checked in this run, so the program
+        // cannot be lowered here. Each sealed package was lowered by the run
+        // that checked it; per-package lowering records arrive with the build
+        // lenses (design stage S4).
+        let sealed = jet::Sema::sealed_package_count();
+        if sealed > 0 {
+            let detail = format!(
+                "{sealed} dependency package(s) reused from check records; the whole-program MIR proof runs when every package is checked"
+            );
+            return Self {
+                module_status,
+                module_detail,
+                core_status: "reused",
+                core_detail: detail.clone(),
+                tier_status: "reused",
+                tier_detail: detail,
+                mir_digest: "reused".to_string(),
+            };
+        }
         let core = jet::Codegen::core_closure_proof(bundle, false);
         let used_core = if core.used_calls.is_empty() {
             "none".to_string()
@@ -816,7 +858,7 @@ impl ProjectBundleProof {
             core_detail: format!("{core_detail} {mir_detail}"),
             tier_status,
             tier_detail,
-            mir: mir_identity,
+            mir_digest: mir_identity.identity_digest(),
         }
     }
 }
@@ -956,7 +998,7 @@ fn output_proof_rows(
         format!(
             "{}; entry={location}; mir_identity_digest={}",
             shared.module_detail,
-            shared.mir.identity_digest()
+            shared.mir_digest
         ),
         "E2390",
     );
@@ -1117,7 +1159,7 @@ fn push_proof_row(
         detail,
         diagnostic: diagnostic.to_string(),
     };
-    if !matches!(row.status.as_str(), "proven" | "not applicable") {
+    if !matches!(row.status.as_str(), "proven" | "not applicable" | "reused") {
         diagnostics.push(Diagnostic::from_row(
             row.diagnostic.as_str(),
             &[("detail", row.detail.as_str())],
@@ -1195,13 +1237,6 @@ pub(crate) fn check_result_json(check: &CheckResult) -> String {
         check.diagnostics,
         rows,
     )
-}
-
-pub(crate) fn with_check_json(mut document: String, check: &CheckResult) -> String {
-    if let Some(index) = document.rfind('}') {
-        document.insert_str(index, &format!(",\"check\":{}", check_result_json(check)));
-    }
-    document
 }
 
 pub(crate) fn check_result_text(check: &CheckResult) -> String {
@@ -4812,7 +4847,7 @@ fn run_rights(projection: &CheckProjection, scope: CheckScope, target: &str, jso
                 ),
             );
             let call_chain = projection
-                .index
+                .index()
                 .effect_of(&view.key)
                 .and_then(|fact| fact.provenance.first())
                 .map(|witness| witness.call_path.clone())
@@ -4862,7 +4897,7 @@ fn run_rights(projection: &CheckProjection, scope: CheckScope, target: &str, jso
                 .iter()
                 .map(|denial| {
                     let witness = projection
-                        .index
+                        .index()
                         .effect_of(&report.view.key)
                         .and_then(|fact| {
                             fact.provenance

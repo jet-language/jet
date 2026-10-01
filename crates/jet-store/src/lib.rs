@@ -6,7 +6,7 @@ use jet_foundation::SHA256::{sha256, sha256_hex};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -864,6 +864,17 @@ impl Store {
     }
 
     pub fn get_action(&self, action: &ActionHandle) -> Result<Option<Vec<u8>>, StoreError> {
+        let record = self.get_action_untouched(action)?;
+        if record.is_some() {
+            self.touch_actions(std::slice::from_ref(action));
+        }
+        Ok(record)
+    }
+
+    /// Read one action record without recording the use in the journal. A
+    /// caller that reads many records in one run records the uses together
+    /// with `touch_actions`.
+    pub fn get_action_untouched(&self, action: &ActionHandle) -> Result<Option<Vec<u8>>, StoreError> {
         let key = EntryKey::Action(action.key());
         let path = self.action_path(action);
         match read_file(&path)? {
@@ -873,10 +884,7 @@ impl Store {
                 Ok(None)
             }
             RawRead::Bytes(bytes) => match decode_action(*action, &bytes) {
-                Ok(record) => {
-                    self.touch_after_read(&key, bytes.len() as u64);
-                    Ok(Some(record))
-                }
+                Ok(record) => Ok(Some(record)),
                 Err(_) if is_unsupported_store_version(&bytes) => Ok(None),
                 Err(reason) => {
                     self.quarantine_after_read(&key, &path, &reason);
@@ -884,6 +892,96 @@ impl Store {
                 }
             },
         }
+    }
+
+    /// Record one use of each stored action record under one lock and one
+    /// journal write. A failure only costs eviction order.
+    pub fn touch_actions(&self, actions: &[ActionHandle]) {
+        if actions.is_empty() {
+            return;
+        }
+        let Ok(_lock) = self.acquire_lock() else {
+            return;
+        };
+        let entries = actions
+            .iter()
+            .filter_map(|action| {
+                let length = fs::metadata(self.action_path(action)).ok()?.len();
+                Some((EntryKey::Action(action.key()), length))
+            })
+            .collect::<Vec<_>>();
+        let lines = entries
+            .iter()
+            .map(|(key, length)| ("touch", key, *length))
+            .collect::<Vec<_>>();
+        let _ = self.append_journal_entries_locked(&lines);
+    }
+
+    /// Publish many action records under one lock, one capacity check and
+    /// one journal write. A key that already holds different bytes is left
+    /// as it is (the `Conflict` of `publish_action`); the others still land.
+    pub fn publish_actions(&self, records: &[(ActionHandle, Vec<u8>)]) -> Result<(), StoreError> {
+        self.publish_action_batch(records, true)
+    }
+
+    /// `publish_actions` for records that only cache recomputable results,
+    /// such as compiled functions: each record is written without its own
+    /// disk syncs, which would dominate a batch of thousands of small
+    /// records. A read verifies every record against its digest, so a record
+    /// a crash lost or tore reads as missing and its result is recomputed.
+    pub fn publish_cache_actions(&self, records: &[(ActionHandle, Vec<u8>)]) -> Result<(), StoreError> {
+        self.publish_action_batch(records, false)
+    }
+
+    fn publish_action_batch(
+        &self,
+        records: &[(ActionHandle, Vec<u8>)],
+        durable: bool,
+    ) -> Result<(), StoreError> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        self.ensure_layout()?;
+        let _lock = self.acquire_lock()?;
+        let mut journal = Vec::new();
+        let mut pending = Vec::new();
+        for (action, record) in records {
+            let path = self.action_path(action);
+            let key = EntryKey::Action(action.key());
+            match read_file(&path)? {
+                RawRead::Missing => {}
+                RawRead::Corrupt(reason) => self.quarantine_locked(&key, &path, &reason)?,
+                RawRead::Bytes(existing) => match decode_action(*action, &existing) {
+                    Ok(value) if value == *record => {
+                        journal.push(("touch", key, existing.len() as u64));
+                        continue;
+                    }
+                    Ok(_) => continue,
+                    Err(reason) => self.quarantine_locked(&key, &path, &reason)?,
+                },
+            }
+            pending.push((path, key, encode_action(*action, record)));
+        }
+        if let Some((path, ..)) = pending.first() {
+            let incoming = pending
+                .iter()
+                .map(|(_, _, encoded)| encoded.len() as u64)
+                .sum::<u64>();
+            self.ensure_capacity_locked(incoming, path)?;
+        }
+        for (path, key, encoded) in pending {
+            if durable {
+                atomic_write(&path, &encoded)?;
+            } else {
+                replace_unsynced(&path, &encoded)?;
+            }
+            journal.push(("put", key, encoded.len() as u64));
+        }
+        let lines = journal
+            .iter()
+            .map(|(operation, key, length)| (*operation, key, *length))
+            .collect::<Vec<_>>();
+        self.append_journal_entries_locked(&lines)
     }
 
     pub fn action(&self, key: &str) -> ActionHandle {
@@ -1010,7 +1108,6 @@ impl Store {
     /// Publish a file as one CAS blob and an immutable action record keyed by
     /// the caller's already-computed lower-case SHA-256 build key.
     pub fn publish_file(&self, key: &str, source: &Path) -> Result<StoredArtifact, StoreError> {
-        let action = action_for_key(key)?;
         let metadata = fs::symlink_metadata(source)?;
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(StoreError::Corrupt {
@@ -1019,16 +1116,30 @@ impl Store {
             });
         }
         let bytes = fs::read(source)?;
-        let object = self.publish_blob(&bytes)?;
-        let record = encode_artifact(object, is_executable(&metadata));
-        self.publish_action(action, &record)?;
-        match self.lookup_artifact(key)? {
-            ArtifactLookup::Hit(artifact) => Ok(artifact),
-            ArtifactLookup::Missing | ArtifactLookup::Corrupt => Err(StoreError::Corrupt {
-                path: self.action_path(&action),
-                reason: "published artifact disappeared before verification".to_string(),
-            }),
-        }
+        self.publish_bytes(key, &bytes, is_executable(&metadata))
+    }
+
+    /// Publish in-memory bytes as one CAS blob and an immutable action record
+    /// keyed by the caller's already-computed lower-case SHA-256 build key.
+    /// The bytes are hashed once; the blob is written atomically under that
+    /// digest, so the returned handle names exactly these bytes.
+    pub fn publish_bytes(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        executable: bool,
+    ) -> Result<StoredArtifact, StoreError> {
+        let action = action_for_key(key)?;
+        let object = ObjectHandle::from_bytes(bytes);
+        let path = self.object_path(&object);
+        self.publish_data(EntryKey::Blob(object.key()), path.clone(), bytes)?;
+        self.publish_action(action, &encode_artifact(object, executable))?;
+        Ok(StoredArtifact {
+            action,
+            object,
+            path,
+            executable,
+        })
     }
 
     /// Verify and locate a named artifact without copying it.
@@ -1346,18 +1457,34 @@ impl Store {
     }
 
     fn append_journal_locked(&self, operation: &str, key: &EntryKey, length: u64) -> Result<(), StoreError> {
-        let journal_path = self.root().join("journal");
-        let mut state = read_journal(&journal_path)?;
-        if !state.valid {
-            self.compact_journal_locked()?;
-            state = read_journal(&journal_path)?;
+        self.append_journal_entries_locked(&[(operation, key, length)])
+    }
+
+    /// Append one journal line per entry after one read of the journal's
+    /// final line and one synced write.
+    fn append_journal_entries_locked(&self, entries: &[(&str, &EntryKey, u64)]) -> Result<(), StoreError> {
+        if entries.is_empty() {
+            return Ok(());
         }
-        let sequence = state.last_sequence.saturating_add(1);
-        let (kind, value) = key.wire();
-        let prefix = format!("{STORE_VERSION}|{operation}|{kind}|{value}|{length}|{sequence}|");
-        let checksum = sha256_hex(prefix.as_bytes());
-        let line = format!("{prefix}{checksum}\n");
-        append_synced(&journal_path, line.as_bytes())
+        let journal_path = self.root().join("journal");
+        let last_sequence = match journal_tail_sequence(&journal_path)? {
+            Some(sequence) => sequence,
+            None => {
+                self.compact_journal_locked()?;
+                read_journal(&journal_path)?.last_sequence
+            }
+        };
+        let mut lines = String::new();
+        for (index, (operation, key, length)) in entries.iter().enumerate() {
+            let sequence = last_sequence.saturating_add(index as u64 + 1);
+            let (kind, value) = key.wire();
+            let prefix = format!("{STORE_VERSION}|{operation}|{kind}|{value}|{length}|{sequence}|");
+            let checksum = sha256_hex(prefix.as_bytes());
+            lines.push_str(&prefix);
+            lines.push_str(&checksum);
+            lines.push('\n');
+        }
+        append_synced(&journal_path, lines.as_bytes())
     }
 
     fn compact_journal_locked(&self) -> Result<(), StoreError> {
@@ -1841,61 +1968,75 @@ fn read_journal(path: &Path) -> Result<JournalState, StoreError> {
         if line.is_empty() {
             continue;
         }
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let text = match std::str::from_utf8(line) {
-            Ok(text) => text,
-            Err(_) => {
-                state.valid = false;
-                break;
-            }
-        };
-        let fields: Vec<&str> = text.split('|').collect();
-        if fields.len() != 7 || fields[0] != STORE_VERSION {
-            state.valid = false;
-            break;
-        }
-        let prefix = format!(
-            "{}|{}|{}|{}|{}|{}|",
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5]
-        );
-        if sha256_hex(prefix.as_bytes()) != fields[6] {
-            state.valid = false;
-            break;
-        }
-        let length = match fields[4].parse::<u64>() {
-            Ok(value) => value,
-            Err(_) => {
-                state.valid = false;
-                break;
-            }
-        };
-        let sequence = match fields[5].parse::<u64>() {
-            Ok(value) => value,
-            Err(_) => {
-                state.valid = false;
-                break;
-            }
-        };
-        let Some(key) = parse_wire_key(fields[2], fields[3]) else {
+        let Some((operation, key, sequence)) = parse_journal_line(line) else {
             state.valid = false;
             break;
         };
         state.last_sequence = state.last_sequence.max(sequence);
-        match fields[1] {
-            "put" | "touch" => {
-                state.entries.insert(key, JournalMeta { last_use: sequence });
-            }
-            "remove" => {
-                state.entries.remove(&key);
-            }
-            _ => {
-                state.valid = false;
-                break;
-            }
+        if operation == "remove" {
+            state.entries.remove(&key);
+        } else {
+            state.entries.insert(key, JournalMeta { last_use: sequence });
         }
-        let _ = length;
     }
     Ok(state)
+}
+
+/// One checksummed journal line as `(operation, key, sequence)`; `None` for a
+/// torn, foreign or corrupt line.
+fn parse_journal_line(line: &[u8]) -> Option<(&str, EntryKey, u64)> {
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let text = std::str::from_utf8(line).ok()?;
+    let fields: Vec<&str> = text.split('|').collect();
+    if fields.len() != 7 || fields[0] != STORE_VERSION {
+        return None;
+    }
+    // The checksum covers everything before it, trailing separator included.
+    let prefix = &text[..text.len() - fields[6].len()];
+    if sha256_hex(prefix.as_bytes()) != fields[6] {
+        return None;
+    }
+    fields[4].parse::<u64>().ok()?;
+    let sequence = fields[5].parse::<u64>().ok()?;
+    let key = parse_wire_key(fields[2], fields[3])?;
+    matches!(fields[1], "put" | "touch" | "remove").then_some((fields[1], key, sequence))
+}
+
+/// Bytes read from the journal's end to find its final line. A line is one
+/// wire key plus a few short fields, far below this.
+const JOURNAL_TAIL_WINDOW: u64 = 64 * 1024;
+
+/// The journal's last sequence number, read from its final line alone.
+///
+/// Every append numbers its lines after the previous maximum and compaction
+/// renumbers in file order, so the final line carries the maximum. An append
+/// therefore costs O(1) instead of re-verifying the whole journal, which grows
+/// with every store hit. `None` marks a torn or corrupt tail: the caller
+/// compacts. Full-journal readers (status, prune, compaction) still verify
+/// every line.
+fn journal_tail_sequence(path: &Path) -> Result<Option<u64>, StoreError> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Some(0)),
+        Err(error) => return Err(StoreError::Io(error)),
+    };
+    let length = file.metadata()?.len();
+    if length == 0 {
+        return Ok(Some(0));
+    }
+    let window = length.min(JOURNAL_TAIL_WINDOW);
+    file.seek(io::SeekFrom::Start(length - window))?;
+    let mut tail = Vec::with_capacity(window as usize);
+    file.take(window).read_to_end(&mut tail)?;
+    let Some(body) = tail.strip_suffix(b"\n") else {
+        return Ok(None);
+    };
+    let start = match body.iter().rposition(|byte| *byte == b'\n') {
+        Some(newline) => newline + 1,
+        None if window < length => return Ok(None),
+        None => 0,
+    };
+    Ok(parse_journal_line(&body[start..]).map(|(_, _, sequence)| sequence))
 }
 
 fn parse_wire_key(kind: &str, value: &str) -> Option<EntryKey> {
@@ -1959,6 +2100,16 @@ fn sorted_children(directory: &Path) -> Result<Vec<PathBuf>, StoreError> {
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    replace_file(path, bytes, true)
+}
+
+/// `atomic_write` without the disk syncs: readers still see the old file or
+/// the whole new one, but a crash may lose the new one.
+fn replace_unsynced(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    replace_file(path, bytes, false)
+}
+
+fn replace_file(path: &Path, bytes: &[u8], durable: bool) -> Result<(), StoreError> {
     let parent = path
         .parent()
         .ok_or_else(|| StoreError::Config(format!("store path has no parent: {}", path.display())))?;
@@ -1971,11 +2122,14 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let result = (|| -> Result<(), StoreError> {
         let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
         file.write_all(bytes)?;
-        file.sync_all()?;
+        if durable {
+            file.sync_all()?;
+        }
         drop(file);
         fs::rename(&temporary, path)?;
-        sync_dir(parent)?;
-
+        if durable {
+            sync_dir(parent)?;
+        }
         Ok(())
     })();
     if result.is_err() {

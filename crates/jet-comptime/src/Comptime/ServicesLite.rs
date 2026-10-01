@@ -3239,12 +3239,6 @@ pub fn service_runtime_value(store: String, retention_ms: i64) -> MirRuntimeValu
     service_runtime_to_value(&jet_services_runtime(store, retention_ms))
 }
 
-pub fn service_display_value(value: &CtValue) -> Option<String> {
-    ct_to_runtime_value(value)
-        .ok()
-        .and_then(|value| service_display_value_runtime(&value))
-}
-
 pub fn service_show_value(value: &CtValue) -> Option<String> {
     ct_to_runtime_value(value)
         .ok()
@@ -3359,17 +3353,6 @@ pub fn apply_jobs_runtime(
         Err(error) => return Ok(queue_failed(error)),
     };
     apply_jobs_runtime_for_endpoint(&endpoint, method, args, span)
-}
-
-pub fn apply_jobs_runtime_with_endpoint(
-    endpoint: &JetServiceEndpoint,
-    method: &str,
-    args: &[MirRuntimeValue],
-    span: Span,
-) -> Result<MirRuntimeValue, Diagnostic> {
-    jet_services_authority_validate(endpoint)
-        .map_err(|_| unsupported("core.jobs endpoint authority", span))?;
-    apply_jobs_runtime_for_endpoint(endpoint, method, args, span)
 }
 
 /// Apply a `JobQueue` receiver method. The receiver retains the checked

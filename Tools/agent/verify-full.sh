@@ -233,6 +233,15 @@ while IFS= read -r test_target; do
   cargo test $test_target --no-run
 done <<<"$test_targets"
 
+# #670: once a candidate compiler exists, full verification requires the
+# reference-versus-candidate behavioral comparator over the golden, UI and
+# differential corpora. Behavior only; stage artifact identity is #815's.
+# The canary proves the comparator still detects a planted divergence.
+if [ -n "${JET_CANDIDATE_COMPILER:-}" ]; then
+  node "$repo/Tools/agent/compiler-diff.mjs" --canary
+  node "$repo/Tools/agent/compiler-diff.mjs" --candidate "$JET_CANDIDATE_COMPILER" --corpus all
+fi
+
 # #211 (D-CI1=A): default run covers the complete workspace test-target
 # inventory (`--workspace` — not just the `.`/jet-driver/jetpack-bin/jetos
 # default-members plain `cargo test` silently limited itself to). CI sets

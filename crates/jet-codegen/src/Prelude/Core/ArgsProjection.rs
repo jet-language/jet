@@ -259,7 +259,7 @@ fn jet_args_guided_tui_prompt(
             modifiers: 0,
         }),
         JetTuiEvent::Timer { .. }
-        | JetTuiEvent::Io { .. }
+        | JetTuiEvent::IO { .. }
         | JetTuiEvent::Focus { .. } => None,
     });
     program.redraw();

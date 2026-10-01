@@ -1,0 +1,107 @@
+// Shared owner host routes: `Shared<T>` capture/try_replace/same/guard_read/
+// guard_edit/downgrade/strong_count, `SharedSnapshot<T, U>.value()` and
+// `Shared.Weak<T>.upgrade()`. The checked receiver type selects the canonical
+// core.host row, the same table the evaluator and the native Prelude own.
+// The read/edit callback seam stays in jet_codegen_lower_host_method.
+use jet_foundation.[
+    MIRAccess,
+    MIRCallArg,
+    MIRCallee,
+    MIROperation,
+    MIROwnershipMode,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRType,
+    MIRValueID,
+    TExpr,
+    TPlace,
+    Type,
+]
+
+struct JetCodegenSharedOwnerRoute {
+    member: String
+    symbol: String
+    borrow_mask: [Bool]
+}
+
+fn jet_codegen_shared_owner_route_row(member: String, symbol: String, borrow_mask: [Bool]) -> JetCodegenSharedOwnerRoute? {
+    Val(JetCodegenSharedOwnerRoute{member: member, symbol: symbol, borrow_mask: borrow_mask})
+}
+
+// D-CONC-STM1=A: inside a transaction a capture registers its participant
+// with the active STM, so the route carries one extra exclusive STM operand.
+fn jet_codegen_shared_owner_route(receiver: Type, method: String, arg_count: Int, transactional: Bool) -> JetCodegenSharedOwnerRoute? {
+    if receiver == {
+        .Shared(_) -> {
+            if method == "capture" && arg_count == 0 {
+                if transactional -> return jet_codegen_shared_owner_route_row("Shared.capture_txn", "jet_shared_capture_txn_plain", [Bool]{true, true})
+                return jet_codegen_shared_owner_route_row("Shared.capture", "jet_shared_capture", [Bool]{true})
+            }
+            if method == "capture" && arg_count == 1 {
+                if transactional -> return jet_codegen_shared_owner_route_row("Shared.capture_txn", "jet_shared_capture_txn", [Bool]{true, true, false})
+                return jet_codegen_shared_owner_route_row("Shared.capture", "jet_shared_capture_with", [Bool]{true, false})
+            }
+            if method == "try_replace" && arg_count == 2 -> return jet_codegen_shared_owner_route_row("Shared.try_replace", "jet_shared_try_replace", [Bool]{true, false, false})
+            if method == "same" && arg_count == 1 -> return jet_codegen_shared_owner_route_row("Shared.same", "jet_shared_same", [Bool]{true, true})
+            if arg_count != 0 -> return None
+            if method == "guard_read" -> return jet_codegen_shared_owner_route_row("Shared.guard_read", "jet_shared_guard_read", [Bool]{true})
+            if method == "guard_edit" -> return jet_codegen_shared_owner_route_row("Shared.guard_edit", "jet_shared_guard_edit", [Bool]{true})
+            if method == "downgrade" -> return jet_codegen_shared_owner_route_row("Shared.downgrade", "jet_shared_downgrade", [Bool]{true})
+            if method == "strong_count" -> return jet_codegen_shared_owner_route_row("Shared.strong_count", "jet_shared_strong_count", [Bool]{true})
+        }
+        .Apply(name, type_args) -> {
+            if arg_count != 0 -> return None
+            if name == "SharedSnapshot" && type_args.len() == 2 && method == "value" -> return jet_codegen_shared_owner_route_row("SharedSnapshot.value", "jet_shared_snapshot_value", [Bool]{true})
+            if name == "Shared.Weak" && type_args.len() == 1 && method == "upgrade" -> return jet_codegen_shared_owner_route_row("Shared.Weak.upgrade", "jet_shared_weak_upgrade", [Bool]{true})
+        }
+        else -> {}
+    }
+    None
+}
+
+fn jet_codegen_shared_owner_host_method(receiver: Type, method: String, arg_count: Int) -> Bool Never! {
+    jet_codegen_shared_owner_route(receiver, method, arg_count, false) != None
+}
+
+// A by-value operand (`borrow_mask` false) is consumed by the route: a named
+// owner moves out of its place, and a Copy value stays an ordinary read.
+fn jet_codegen_shared_owner_owned_arg(builder: &JetCodegenBuilder, argument: TExpr) -> MIRCallArg {
+    if jet_codegen_ownership(argument.ty).mode == MIROwnershipMode.Copy {
+        value := jet_codegen_lower_expr(&builder, argument)
+        return jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None)
+    }
+    move_place := if argument.kind == {
+        .Local(local) -> Val(jet_codegen_lower_local_place(&builder, local))
+        .Field(_, _) -> Val(jet_codegen_lower_place_for_access(&builder, TPlace.Expr{value: argument}, MIRAccess.Read))
+        else -> None
+    }
+    value := if move_place == {
+        None -> jet_codegen_lower_expr(&builder, argument)
+        Val(id) -> jet_codegen_emit_value(&builder, argument.span, argument.ty, MIROperation.MovePlace{place: id})
+    }
+    jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Move, None)
+}
+
+fn jet_codegen_lower_shared_owner_host_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
+    transactional := method == "capture" && builder.transactions.len() > 0
+    route :: jet_codegen_shared_owner_route(receiver.ty, method, args.len(), transactional) ?? panic("checked Shared owner method has no canonical route")
+    lowered := [MIRCallArg]{jet_codegen_method_receiver_arg(&builder, receiver, MIRAccess.Read)}
+    if transactional {
+        transaction := builder.transactions[builder.transactions.len() - 1]
+        stm_place :: transaction.stm_place ?? panic("checked Shared transaction capture has no active STM place")
+        stm := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "Stm"}, MIROperation.ReadPlace{place: stm_place})
+        &lowered.push(jet_codegen_host_call_value_arg(stm, expression.span, MIRAccess.Write, Val(stm_place)))
+    }
+    loop argument in args {
+        if {
+            route.borrow_mask[lowered.len()] -> {
+                value := jet_codegen_lower_expr(&builder, argument)
+                &lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None))
+            }
+            else -> &lowered.push(jet_codegen_shared_owner_owned_arg(&builder, argument))
+        }
+    }
+    if lowered.len() != route.borrow_mask.len() -> panic("checked Shared owner method operands disagree with its route arity")
+    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.host", route.member, route.symbol, lowered.len(), route.borrow_mask, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: lowered, type_args: [MIRType]{}})
+}

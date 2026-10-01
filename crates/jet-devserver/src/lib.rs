@@ -12,6 +12,8 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use jet_foundation::Hex::nibble as hex;
+
 /// The devserver re-exports the exact Foundation protocol source exposed by
 /// the compiler's Prelude path, then includes the same panel sources. Hosts
 /// consume this module for projection and marshalling; it is not a second
@@ -262,15 +264,6 @@ fn percent_decode(value: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
 }
 
 pub(crate) fn static_relative_path(path: &str) -> Result<PathBuf, ()> {

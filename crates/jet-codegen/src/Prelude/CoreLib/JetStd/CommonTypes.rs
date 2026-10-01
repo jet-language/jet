@@ -6809,7 +6809,7 @@ impl super::JetDebug for Clock {
 }
 impl super::JetShow for Rng {
     fn jet_show(&self) -> String {
-        format!("Rng {{ .. }}")
+        format!("RNG {{ .. }}")
     }
 }
 impl super::JetShow for Fake {

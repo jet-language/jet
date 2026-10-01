@@ -10,6 +10,32 @@
 // below a known root are open declaration leaves.  Panic and Mem are retained
 // for denial/reachability facts but are deny-only and never become positive
 // grants.
+use jet_foundation.[
+    Diagnostic,
+    EffectRowEntry,
+    Func,
+    FunctionDefaultRef,
+    Item,
+    NamedSpan,
+    Span,
+    Stmt,
+    SymbolKind,
+    TContract,
+    TEffectFacts,
+    TEffectSpan,
+    TExpr,
+    TFailureCarrier,
+    TFunc,
+    TIfCond,
+    TLambda,
+    TStmt,
+    Type,
+    diagnostic_with_rights,
+    symbol_id,
+    tir_expr_children,
+    tir_stmt_children,
+    type_name,
+]
 
 pub struct SemaEffectFunctionSource {
     pub key: String
@@ -61,6 +87,7 @@ struct SemaEffectNode {
     prohibited: [String]
     has_declared_row: Bool
     is_pure: Bool
+    is_replayable: Bool
     replayable_span: Span?
     is_unsafe: Bool
     unsafe_reason: String?
@@ -279,7 +306,8 @@ fn sema_effect_declarations_irreversible_fact(declarations: [Item], effect_name:
 // not maintain a second root allowlist: adding or removing an irreversible
 // effect in Prelude/Effects.jet changes this fact at the source boundary.
 fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, effect_name: String) -> Bool? {
-    graph :: environment.registration_graph ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
     canonical_identity :: graph.canonical_effect_module_identity
     if canonical_identity == "" -> return None
     loop module_row in graph.modules {
@@ -377,7 +405,7 @@ fn sema_effect_via_not_callback(function: TFunc, parameter: String, ty: Type, sp
 
 fn sema_effect_apply_via(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, diagnostics: &[Diagnostic]) {
     via :: nodes[node_index].effect_via ?? return
-    parameter_type := None
+    parameter_type := Type?{None}
     loop parameter in function.params {
         if parameter.name == via.name {
             parameter_type = Val(parameter.ty)
@@ -478,6 +506,7 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
         name: function.name,
         module_identity: function.module_identity,
         module_index: module_index,
+        span: function.source_span,
         direct: [String]{},
         direct_spans: [TEffectSpan]{},
         call_edges: [String]{},
@@ -487,6 +516,7 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
         prohibited: [String]{},
         has_declared_row: false,
         is_pure: function.is_pure,
+        is_replayable: false,
         replayable_span: None,
         is_unsafe: function.is_unsafe,
         unsafe_reason: None,
@@ -576,7 +606,7 @@ pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, s
         api,
         span,
         SemaCallFacts{
-            return_type: Type.Unit,
+            return_type: Type.Named{name: "Unit"},
             failure_carrier: TFailureCarrier.Infallible,
             effect_bound: Val(effect_row),
             type_args: [Type]{},
@@ -616,7 +646,7 @@ fn sema_effect_find_fact(facts: [SemaCallSiteFact], caller_key: String, span: Sp
     loop fact in facts {
         if fact.caller_key == caller_key && sema_effect_span_same(fact.span, span) -> return Val(fact)
     }
-    best := None
+    best := SemaCallSiteFact?{None}
     best_width := 2147483647
     loop fact in facts {
         if fact.caller_key != caller_key -> next
@@ -922,7 +952,7 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [Sem
             .Transact(_, _, _, body, _) -> {
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, body, audited, &diagnostics)
             }
-            .GcEdit(_, _, _, _, index_temp, nested, _) -> {
+            .GCEdit(_, _, _, _, index_temp, nested, _) -> {
                 if index_temp == .Val(index_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, index_value, audited, &diagnostics)
                 sema_effect_check_unsafe_statements_tir(&nodes, facts, caller_key, [TStmt]{nested}, audited, &diagnostics)
             }
@@ -1029,7 +1059,8 @@ fn sema_effect_solve(nodes: [SemaEffectNode]) -> [[String]] Never! {
                     next
                 }
                 target :: sema_effect_node_index(nodes, edge) ?? next
-                if sema_effect_set_union(&solved[index], solved[target]) -> changed = true
+                incoming :: ~solved[target]
+                if sema_effect_set_union(&solved[index], incoming) -> changed = true
             }
         }
         round += 1
@@ -1223,7 +1254,7 @@ pub fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Di
                 }
                 if else_body != None && !sema_effect_check_unsafe_statements(else_body, &diagnostics) -> valid = false
             }
-            .ScopeMember(_, _, _, body, _, _, _, _) -> {
+            .ScopeMember(_, _, _, _, body, _, _, _) -> {
                 if !sema_effect_check_unsafe_statements(body, &diagnostics) -> valid = false
             }
             else -> {}

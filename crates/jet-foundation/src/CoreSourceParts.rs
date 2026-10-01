@@ -29,7 +29,6 @@ pub const CORE_TEXT_STRING_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourc
         alias: CORE_TEXT_STRING_ALIAS,
         path: "Core/text/string.jet",
         owned_members: &[],
-        source: include_str!("../../../Core/text/string.jet"),
     },
 };
 

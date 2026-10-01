@@ -1,0 +1,25 @@
+// An unannotated binding takes its initializer's own type. The type that an
+// enclosing value expects (here the `U8` result of the value `if`) does not
+// reach it, so `limit` is an `Int` and 300 is in range. A binding that needs
+// a particular type, such as an absent optional, names it in a typed head.
+fn level(flag: Bool, size: Int) -> U8 {
+    if flag -> {
+        limit :: 300
+        if size > limit -> 2 else -> 1
+    } else -> 0
+}
+
+fn first(flag: Bool) -> Int? {
+    if flag -> {
+        empty :: Int?{None}
+        empty
+    } else -> Val(1)
+}
+
+fn run() {
+    print(level(true, 500))
+    print(level(true, 100))
+    print(level(false, 500))
+    print(first(true) ?? 0)
+    print(first(false) ?? 0)
+}

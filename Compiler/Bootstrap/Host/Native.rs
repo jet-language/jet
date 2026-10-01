@@ -374,6 +374,38 @@ pub(crate) fn invoke_with_authority<R>(
     Ok(with_native_prelude(|| invoke(lease.snapshot())))
 }
 
+/// The machine record store behind the self-hosted driver's
+/// `JetDriverRecordStore`. The host owns where records live; the compiler
+/// names a record only by schema and key. Every failure is a miss: an unknown
+/// schema, an unreadable or undecodable record, or a rejected publish.
+pub(crate) struct BootstrapRecordStore {
+    store: jet_store::Store,
+}
+
+impl BootstrapRecordStore {
+    /// The store configured for this process (`JET_STORE_DIR` or the default
+    /// machine store), or `None` when it cannot be opened.
+    pub(crate) fn from_env() -> Option<Self> {
+        jet_store::Store::from_env().ok().map(|store| Self { store })
+    }
+
+    pub(crate) fn record(&self, schema: &str, key: &str) -> Option<Vec<u8>> {
+        let kind = jet_store::RecordKind::from_schema(schema)?;
+        self.store.record(kind, key).ok().flatten()
+    }
+
+    pub(crate) fn put_record(&self, schema: &str, key: &str, bytes: &[u8]) -> bool {
+        jet_store::RecordKind::from_schema(schema)
+            .is_some_and(|kind| self.store.put_record(kind, key, bytes).is_ok())
+    }
+
+    /// `size:mtime_ns:ctime_ns:inode` of a regular file, the same stamp the
+    /// Rust driver keeps in its stamp table.
+    pub(crate) fn stamp(&self, path: &str) -> Option<String> {
+        jet_store::project_state::file_stamp(Path::new(path))
+    }
+}
+
 /// Failure while binding the private generated callback to the exact carriers
 /// emitted for the same MIR artifact. These failures are deliberately raised
 /// before mutating the generated source buffer.
@@ -694,50 +726,78 @@ impl<'a> BootstrapCodecSymbols<'a> {
                 ))
             })
     }
+
+    /// Every checked method of `trait_name`, in the emitter's declaration
+    /// order. The Jet trait is the only method list: host glue iterates this
+    /// set instead of keeping its own copy.
+    pub(crate) fn trait_methods(
+        &self,
+        trait_name: &str,
+    ) -> Result<Vec<&MirRustTraitMethodMetadata>, BootstrapHostCodecError> {
+        let trait_id = self
+            .metadata
+            .traits
+            .iter()
+            .find(|row| row.name == trait_name)
+            .map(|row| row.trait_id)
+            .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{trait_name}`")))?;
+        let methods = self
+            .metadata
+            .trait_methods
+            .iter()
+            .filter(|row| row.trait_id == trait_id)
+            .collect::<Vec<_>>();
+        if methods.is_empty() {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "trait `{trait_name}` has no checked methods"
+            )));
+        }
+        Ok(methods)
+    }
 }
 
 fn bootstrap_required_type_names() -> &'static [&'static str] {
     &[
-        "MirPreludeCall",
-        "MirCallSignature",
-        "MirSymbol",
-        "MirType",
-        "MirTypeKind",
-        "MirTypeId",
-        "MirMeasure",
-        "MirMeasureRule",
-        "MirDimension",
-        "MirDimensionAxis",
-        "MirLayout",
-        "MirAbi",
-        "MirScalarKind",
-        "MirSize",
-        "MirTraitId",
-        "MirTraitMethodId",
-        "MirArtifactId",
-        "MirProgram",
-        "MirNominalRef",
-        "MirTupleField",
-        "MirTagMarker",
-        "MirInternalTag",
-        "MirAccess",
-        "MirFunctionId",
-        "MirFieldId",
-        "MirParam",
-        "MirOwnership",
-        "MirOwnershipMode",
-        "MirDropKind",
-        "MirForeign",
-        "MirForeignAbi",
-        "MirForeignLanguage",
-        "MirTargetApplicability",
-        "MirEffectFacts",
-        "MirNamedSpan",
-        "MirModuleId",
-        "MirForeignId",
-        "MirLinkUnitId",
-        "MirCallbackId",
-        "MirHandleId",
+        "MIRPreludeCall",
+        "MIRCallSignature",
+        "MIRSymbol",
+        "MIRType",
+        "MIRTypeKind",
+        "MIRTypeID",
+        "MIRMeasure",
+        "MIRMeasureRule",
+        "MIRDimension",
+        "MIRDimensionAxis",
+        "MIRLayout",
+        "MIRABI",
+        "MIRScalarKind",
+        "MIRSize",
+        "MIRTraitID",
+        "MIRTraitMethodID",
+        "MIRArtifactID",
+        "MIRProgram",
+        "MIRNominalRef",
+        "MIRTupleField",
+        "MIRTagMarker",
+        "MIRInternalTag",
+        "MIRAccess",
+        "MIRFunctionID",
+        "MIRFieldID",
+        "MIRParam",
+        "MIROwnership",
+        "MIROwnershipMode",
+        "MIRDropKind",
+        "MIRForeign",
+        "MIRForeignABI",
+        "MIRForeignLanguage",
+        "MIRTargetApplicability",
+        "MIREffectFacts",
+        "MIRNamedSpan",
+        "MIRModuleID",
+        "MIRForeignID",
+        "MIRLinkUnitID",
+        "MIRCallbackID",
+        "MIRHandleID",
         "JetEvalHostWriteback",
         "TComptimeValue",
         "JetEvalRuntimeValue",
@@ -789,10 +849,10 @@ fn bootstrap_required_type_names() -> &'static [&'static str] {
         "JetWebArtifacts",
         "JetReleaseDevtoolsPolicy",
         "JetTargetLayout",
-        "MirArtifactBuildMode",
+        "MIRArtifactBuildMode",
         "JetEvalHostCoreOwner",
-        "MirCoreOwner",
-"MirSourceFile",
+        "MIRCoreOwner",
+"MIRSourceFile",
     ]
 }
 
@@ -970,14 +1030,14 @@ fn validate_bootstrap_numeric_callable_type(
         jet_foundation::MIR::MirTypeKind::Option(callback) => callback,
         _ => {
             return Err(BootstrapHostCodecError::InvalidMetadata(
-                "JetEvalConfig.numeric_unit_conversion_exact must be an optional checked function type"
+                "SemaRegistrationHostHooks.numeric_unit_conversion_exact must be an optional checked function type"
                     .to_string(),
             ));
         }
     };
     let signature = callback.function_signature().ok_or_else(|| {
         BootstrapHostCodecError::InvalidMetadata(
-            "JetEvalConfig.numeric_unit_conversion_exact must contain a checked Fn type".to_string(),
+            "SemaRegistrationHostHooks.numeric_unit_conversion_exact must contain a checked Fn type".to_string(),
         )
     })?;
     let parameter_types = signature
@@ -993,7 +1053,7 @@ fn validate_bootstrap_numeric_callable_type(
             .any(|(actual, expected)| actual != expected)
     {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "JetEvalConfig.numeric_unit_conversion_exact must have its exact checked (Float, String, String, String, String) parameter types"
+            "SemaRegistrationHostHooks.numeric_unit_conversion_exact must have its exact checked (Float, String, String, String, String) parameter types"
                 .to_string(),
         ));
     }
@@ -1003,7 +1063,7 @@ fn validate_bootstrap_numeric_callable_type(
     );
     if !returns_optional_float {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "JetEvalConfig.numeric_unit_conversion_exact must return the exact checked optional Float"
+            "SemaRegistrationHostHooks.numeric_unit_conversion_exact must return the exact checked optional Float"
                 .to_string(),
         ));
     }
@@ -1022,7 +1082,7 @@ pub(crate) fn append_bootstrap_host_glue(
 ) -> Result<(), BootstrapHostCodecError> {
     let symbols = BootstrapCodecSymbols::new(bindings)?;
     validate_bootstrap_numeric_callable_type(
-        symbols.field_binding("JetEvalConfig", "numeric_unit_conversion_exact")?,
+        symbols.field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?,
     )?;
     for name in bootstrap_required_type_names() {
         let _ = symbols.type_symbol(name)?;
@@ -1198,7 +1258,7 @@ fn emit_bootstrap_native_execution_helpers(
     _program: &MirProgram,
     helpers: &BootstrapNativeHelperRoots,
 ) -> Result<(), BootstrapHostCodecError> {
-    let source_program = symbols.type_symbol("MirProgram")?;
+    let source_program = symbols.type_symbol("MIRProgram")?;
     let eval_config = symbols.type_symbol("JetEvalConfig")?;
     let span_type = symbols.type_symbol("Span")?;
     let task_callback_root = symbols.field_binding("JetEvalTaskCallbackInvokeResult", "root")?;
@@ -2764,9 +2824,13 @@ fn emit_bootstrap_native_compile_entry(
     let eval_config = symbols.type_symbol("JetEvalConfig")?;
     let request_eval_config = symbols.field_symbol("JetDriverCompileRequest", "eval_config")?;
     let request_host_adapter = symbols.field_symbol("JetEvalConfig", "host_adapter")?;
-    let request_numeric = symbols.field_symbol("JetEvalConfig", "numeric_unit_conversion_exact")?;
+    let request_record_store = symbols.field_symbol("JetDriverCompileRequest", "record_store")?;
+    let request_host_hooks = symbols.field_symbol("JetEvalConfig", "host_hooks")?;
+    let host_hooks_type = symbols.type_symbol("SemaRegistrationHostHooks")?;
+    let hook_numeric = symbols.field_symbol("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
+    let hook_boundary = symbols.field_symbol("SemaRegistrationHostHooks", "typed_boundary_literal_validate")?;
     let host_field = symbols.field_binding("JetEvalConfig", "host_adapter")?;
-    let numeric_field = symbols.field_binding("JetEvalConfig", "numeric_unit_conversion_exact")?;
+    let numeric_field = symbols.field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
     let native_callable_binding = symbols.type_symbol("JetEvalNativeCallableBinding")?;
     let native_binding_identity = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
     let native_callable_key = symbols.field_symbol("JetEvalNativeCallableBinding", "key")?;
@@ -3005,7 +3069,7 @@ pub fn __jet_bootstrap_compile_with_native(
             &__jet_root_lease,
             __jet_compiler_image.program.as_ref(),
             __jet_compiler_image.header.artifact,
-            vec!["JetEvalConfig".to_string(), "numeric_unit_conversion_exact".to_string()],
+            vec!["SemaRegistrationHostHooks".to_string(), "numeric_unit_conversion_exact".to_string()],
             __NATIVE_BINDING_IDENTITY__::Callable(__jet_numeric_binding),
             ::jet_jit::SourceResources::SourceNativeBindingIdentity::Callable(
                 __jet_numeric_identity,
@@ -3072,8 +3136,11 @@ pub fn __jet_bootstrap_compile_with_native(
         )?;
         __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_HOST_ADAPTER__ =
             Ok(Box::new(__jet_native_adapter.clone()));
-        __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_NUMERIC__ =
-            Ok(__jet_bootstrap_native_numeric_wrapper_for_adapter(&__jet_native_adapter)?);
+        __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_HOST_HOOKS__ =
+            crate::jet_std::JetShared::new(__HOOKS_TYPE__ {
+                __HOOK_NUMERIC__: Ok(__jet_bootstrap_native_numeric_wrapper_for_adapter(&__jet_native_adapter)?),
+                __HOOK_BOUNDARY__: Err(::jet_foundation::Outcome::JetAbsent),
+            });
         __jet_runtime_config = Some(__RUNTIME_CONFIG__(&__jet_request.__REQUEST_EVAL_CONFIG__));
         let __jet_source_helper_context = __jet_runtime_config.as_ref()
             .ok_or_else(|| "Source runtime config disappeared before helper execution".to_string())?;
@@ -3089,6 +3156,10 @@ pub fn __jet_bootstrap_compile_with_native(
             ),
             crate::BootstrapFactoryTier::CraneliftJit
             | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
+                // The record store is a typed Rust trait object with no
+                // native interface binding, so it cannot cross into Source
+                // execution. There every lookup misses and checks run in full.
+                __jet_request.__REQUEST_RECORD_STORE__ = Err(Default::default());
                 let __jet_physical = __JetBootstrapNativePhysicalBindings::new(&__jet_native_adapter);
                 let __jet_request_value = __jet_bootstrap_entry_request_to_runtime(
                     __jet_request,
@@ -3190,13 +3261,87 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__NATIVE_CALLABLE_TYPE__", native_callable_type)
         .replace("__REQUEST_EVAL_CONFIG__", request_eval_config)
         .replace("__REQUEST_HOST_ADAPTER__", request_host_adapter)
-        .replace("__REQUEST_NUMERIC__", request_numeric)
+        .replace("__REQUEST_RECORD_STORE__", request_record_store)
+        .replace("__REQUEST_HOST_HOOKS__", request_host_hooks)
+        .replace("__HOOKS_TYPE__", host_hooks_type)
+        .replace("__HOOK_NUMERIC__", hook_numeric)
+        .replace("__HOOK_BOUNDARY__", hook_boundary)
         .replace("__RUNTIME_CONFIG__", runtime_config_symbol)
         .replace("__FACTORY_SYMBOL__", &entry.symbol);
     out.push_str(&generated);
     Ok(())
 }
 
+/// Emit the `JetDriverRecordStore` carrier over the host's
+/// `BootstrapRecordStore`, plus `__jet_bootstrap_record_store()`, which yields
+/// the request's optional store (absent when the machine store cannot open).
+/// The impl follows the checked trait's own method list.
+fn emit_bootstrap_record_store(
+    out: &mut String,
+    symbols: &BootstrapCodecSymbols<'_>,
+) -> Result<(), BootstrapHostCodecError> {
+    let trait_symbol = symbols.trait_symbol("JetDriverRecordStore")?;
+    out.push_str(
+        "#[doc(hidden)]\n\
+         struct __JetBootstrapRecordStore {\n\
+             store: crate::compiler_bootstrap_host::BootstrapRecordStore,\n\
+         }\n",
+    );
+    writeln!(out, "impl {trait_symbol} for __JetBootstrapRecordStore {{")
+        .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    for metadata in symbols.trait_methods("JetDriverRecordStore")? {
+        let receiver = match metadata.receiver_access {
+            Some(jet_foundation::MIR::MirAccess::Read) => "&self",
+            Some(jet_foundation::MIR::MirAccess::Write) => "&mut self",
+            Some(jet_foundation::MIR::MirAccess::Move) | None => {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "JetDriverRecordStore.{} has no borrowed (read or write) checked receiver",
+                    metadata.name
+                )))
+            }
+        };
+        let (arity, body) = match metadata.name.as_str() {
+            "record" => (2, "match self.store.record(&__jet_arg_0, &__jet_arg_1) { Some(bytes) => Ok(bytes), None => Err(Default::default()) }"),
+            "put_record" => (3, "self.store.put_record(&__jet_arg_0, &__jet_arg_1, &__jet_arg_2)"),
+            "stamp" => (1, "match self.store.stamp(&__jet_arg_0) { Some(stamp) => Ok(stamp), None => Err(Default::default()) }"),
+            name => {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "JetDriverRecordStore.{name} has no host implementation"
+                )))
+            }
+        };
+        if metadata.parameter_types.len() != arity {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "JetDriverRecordStore.{} does not take {arity} checked arguments",
+                metadata.name
+            )));
+        }
+        let parameters = metadata
+            .parameter_types
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| format!(", __jet_arg_{index}: {ty}"))
+            .collect::<String>();
+        writeln!(
+            out,
+            "    fn {}({receiver}{parameters}) -> {} {{ {body} }}",
+            metadata.symbol, metadata.return_type,
+        )
+        .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    }
+    writeln!(
+        out,
+        "}}\n\
+         #[doc(hidden)]\n\
+         fn __jet_bootstrap_record_store() -> crate::JetOutcome<Box<dyn {trait_symbol}>, crate::JetAbsent> {{\n\
+             match crate::compiler_bootstrap_host::BootstrapRecordStore::from_env() {{\n\
+                 Some(store) => Ok(Box::new(__JetBootstrapRecordStore {{ store }})),\n\
+                 None => Err(Default::default()),\n\
+             }}\n\
+         }}"
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
 
 fn emit_bootstrap_host_factory(
     out: &mut String,
@@ -3204,6 +3349,7 @@ fn emit_bootstrap_host_factory(
     default_symbol: &str,
     _runtime_config_symbol: &str,
 ) -> Result<(), BootstrapHostCodecError> {
+    emit_bootstrap_record_store(out, symbols)?;
     let request_type = symbols.type_symbol("JetDriverCompileRequest")?;
     let request_sources = symbols.field_symbol("JetDriverCompileRequest", "authorized_sources")?;
     let request_host_facts = symbols.field_symbol("JetDriverCompileRequest", "host_facts")?;
@@ -3211,8 +3357,16 @@ fn emit_bootstrap_host_factory(
     let request_target = symbols.field_symbol("JetDriverCompileRequest", "target")?;
     let request_effect_source = symbols.field_symbol("JetDriverCompileRequest", "canonical_effect_source")?;
     let request_record_store = symbols.field_symbol("JetDriverCompileRequest", "record_store")?;
+    let request_core_sources = symbols.field_symbol("JetDriverCompileRequest", "core_sources")?;
+    let core_source_type = symbols.type_symbol("JetDriverCoreSource")?;
+    let core_source_module_name = symbols.field_symbol("JetDriverCoreSource", "module_name")?;
+    let core_source_alias = symbols.field_symbol("JetDriverCoreSource", "alias")?;
+    let core_source_path = symbols.field_symbol("JetDriverCoreSource", "path")?;
+    let core_source_owner = symbols.field_symbol("JetDriverCoreSource", "owner")?;
+    let core_source_owned_members = symbols.field_symbol("JetDriverCoreSource", "owned_members")?;
+    let core_source_text = symbols.field_symbol("JetDriverCoreSource", "source")?;
     let target_type = symbols.type_symbol("JetDriverCompileTarget")?;
-    let mir_program_type = symbols.type_symbol("MirProgram")?;
+    let mir_program_type = symbols.type_symbol("MIRProgram")?;
     let eval_config_type = symbols.type_symbol("JetEvalConfig")?;
     let snapshot_type = symbols.type_symbol("JetDriverAuthorizedSourceSnapshot")?;
     let snapshot_roots = symbols.field_symbol(
@@ -3274,6 +3428,24 @@ fn emit_bootstrap_host_factory(
             "            {file_source}: file.source.clone(),\n",
             "        }}).collect::<Vec<_>>(),\n",
             "    }}).collect::<Vec<_>>();\n",
+            "    // The Core library bodies the Rust loader embeds: every public source\n",
+            "    // module row plus the compiler-private parts, in table order.\n",
+            "    let mut __jet_core_sources = Vec::new();\n",
+            "    for (row, owner) in ::jet_foundation::CoreModuleExports::core_source_modules().iter().map(|row| (row, \"\"))\n",
+            "        .chain(::jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS.iter().map(|part| (&part.source, part.owner)))\n",
+            "    {{\n",
+            "        let text = ::jet_driver::CoreSources::core_source_text(row.module).ok_or_else(|| {{\n",
+            "            crate::BootstrapHostCodecError::InvalidMetadata(format!(\"Core source module `{{}}` has no body text\", row.module))\n",
+            "        }})?;\n",
+            "        __jet_core_sources.push({core_source_type} {{\n",
+            "            {core_source_module_name}: row.module.to_string(),\n",
+            "            {core_source_alias}: row.alias.to_string(),\n",
+            "            {core_source_path}: row.path.to_string(),\n",
+            "            {core_source_owner}: owner.to_string(),\n",
+            "            {core_source_owned_members}: row.owned_members.iter().map(|member| member.to_string()).collect::<Vec<_>>(),\n",
+            "            {core_source_text}: text.to_string(),\n",
+            "        }});\n",
+            "    }}\n",
             "    let __jet_target = __jet_bootstrap_target_with_raw_web_assets(__jet_requested_target)\n",
             "        .map_err(crate::BootstrapHostCodecError::InvalidMetadata)?;\n",
             "    let __jet_eval_config = {default_symbol}();\n",
@@ -3289,9 +3461,10 @@ fn emit_bootstrap_host_factory(
             "            {host_compiler_identity}: option_env!(\"JET_COMPILER_BUILD_ID\").map(|value| Ok(value.to_string())).unwrap_or_else(|| Err(Default::default())),\n",
             "        }},\n",
             "        {request_effect_source}: ::jet_foundation::Effects::EFFECT_SOURCE.to_string(),\n",
+            "        {request_core_sources}: __jet_core_sources,\n",
             "        {request_eval_config}: __jet_eval_config,\n",
             "        {request_target}: __jet_target,\n",
-            "        {request_record_store}: Err(Default::default()),\n",
+            "        {request_record_store}: __jet_bootstrap_record_store(),\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
             "}}\n",
@@ -3322,6 +3495,14 @@ fn emit_bootstrap_host_factory(
         host_active_os = host_active_os,
         request_effect_source = request_effect_source,
         request_record_store = request_record_store,
+        request_core_sources = request_core_sources,
+        core_source_type = core_source_type,
+        core_source_module_name = core_source_module_name,
+        core_source_alias = core_source_alias,
+        core_source_path = core_source_path,
+        core_source_owner = core_source_owner,
+        core_source_owned_members = core_source_owned_members,
+        core_source_text = core_source_text,
         host_compiler_identity = host_compiler_identity,
         default_symbol = default_symbol,
     )
@@ -3397,8 +3578,6 @@ fn emit_bootstrap_web_asset_provider(
         "explicit_html_path",
         "source_names",
         "source_contents",
-        "onnx_runtime_js",
-        "onnx_runtime_worker_js",
     ]
     .iter()
     .map(|name| Ok::<_, BootstrapHostCodecError>((*name, symbols.field_symbol("JetWebAssets", name)?)))
@@ -3443,8 +3622,6 @@ fn emit_bootstrap_web_asset_provider(
                         {explicit_html_path}: assets.{explicit_html_path},
                         {source_names}: assets.{source_names},
                         {source_contents}: assets.{source_contents},
-                        {onnx_runtime_js}: assets.{onnx_runtime_js},
-                        {onnx_runtime_worker_js}: assets.{onnx_runtime_worker_js},
                     }};
                     Ok({target_web}(assets, release_policy, profile))
                 }}
@@ -3476,8 +3653,6 @@ fn emit_bootstrap_web_asset_provider(
         explicit_html_path = field("explicit_html_path")?,
         source_names = field("source_names")?,
         source_contents = field("source_contents")?,
-        onnx_runtime_js = field("onnx_runtime_js")?,
-        onnx_runtime_worker_js = field("onnx_runtime_worker_js")?,
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     writeln!(
@@ -3494,7 +3669,7 @@ fn emit_bootstrap_manifest_adapter(
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
     let result_type = symbols.type_symbol("JetDriverCompileResult")?;
-    let mir_program_type = symbols.type_symbol("MirProgram")?;
+    let mir_program_type = symbols.type_symbol("MIRProgram")?;
     let eval_config_type = symbols.type_symbol("JetEvalConfig")?;
     let result_source = symbols.field_symbol("JetDriverCompileResult", "emitted_source")?;
     let result_internal_problem = symbols.field_symbol("JetDriverCompileResult", "internal_problem")?;
@@ -3517,8 +3692,6 @@ fn emit_bootstrap_manifest_adapter(
     let web_source_names = symbols.field_symbol("JetWebArtifacts", "source_names")?;
     let web_source_contents = symbols.field_symbol("JetWebArtifacts", "source_contents")?;
     let web_dom_runtime = symbols.field_symbol("JetWebArtifacts", "dom_runtime")?;
-    let web_onnx_runtime_js = symbols.field_symbol("JetWebArtifacts", "onnx_runtime_js")?;
-    let web_onnx_worker_js = symbols.field_symbol("JetWebArtifacts", "onnx_runtime_worker_js")?;
     let web_index_html = symbols.field_symbol("JetWebArtifacts", "index_html")?;
     let web_explicit_html_path = symbols.field_symbol("JetWebArtifacts", "explicit_html_path")?;
     let web_command_record = symbols.field_symbol("JetWebArtifacts", "command_record")?;
@@ -3576,15 +3749,15 @@ fn emit_bootstrap_manifest_adapter(
     let type_source_name =
         symbols.field_symbol("JetRustEmitTypeMetadata", "source_name")?;
     let type_symbol = symbols.field_symbol("JetRustEmitTypeMetadata", "symbol")?;
-    let function_value = symbols.field_symbol("MirFunctionId", "value")?;
-    let type_value = symbols.field_symbol("MirTypeId", "value")?;
-    let artifact_value = symbols.field_symbol("MirArtifactId", "value")?;
-    let field_value = symbols.field_symbol("MirFieldId", "value")?;
-    let access_read = symbols.variant_path("MirAccess", "Read")?;
-    let access_write = symbols.variant_path("MirAccess", "Write")?;
-    let access_move = symbols.variant_path("MirAccess", "Move")?;
-    let trait_id_value = symbols.field_symbol("MirTraitId", "value")?;
-    let trait_method_id_value = symbols.field_symbol("MirTraitMethodId", "value")?;
+    let function_value = symbols.field_symbol("MIRFunctionID", "value")?;
+    let type_value = symbols.field_symbol("MIRTypeID", "value")?;
+    let artifact_value = symbols.field_symbol("MIRArtifactID", "value")?;
+    let field_value = symbols.field_symbol("MIRFieldID", "value")?;
+    let access_read = symbols.variant_path("MIRAccess", "Read")?;
+    let access_write = symbols.variant_path("MIRAccess", "Write")?;
+    let access_move = symbols.variant_path("MIRAccess", "Move")?;
+    let trait_id_value = symbols.field_symbol("MIRTraitID", "value")?;
+    let trait_method_id_value = symbols.field_symbol("MIRTraitMethodID", "value")?;
 
     writeln!(
         out,
@@ -3618,8 +3791,6 @@ fn emit_bootstrap_manifest_adapter(
             "        source_names: artifacts.{web_source_names}.clone(),\n",
             "        source_contents: artifacts.{web_source_contents}.clone(),\n",
             "        dom_runtime: artifacts.{web_dom_runtime}.clone(),\n",
-            "        onnx_runtime_js: artifacts.{web_onnx_runtime_js}.clone(),\n",
-            "        onnx_runtime_worker_js: artifacts.{web_onnx_worker_js}.clone(),\n",
             "        index_html: artifacts.{web_index_html}.clone(),\n",
             "        explicit_html_path: artifacts.{web_explicit_html_path}.as_ref().ok().cloned(),\n",
             "        command_record: artifacts.{web_command_record}.clone(),\n",
@@ -3724,8 +3895,6 @@ fn emit_bootstrap_manifest_adapter(
         web_source_names = web_source_names,
         web_source_contents = web_source_contents,
         web_dom_runtime = web_dom_runtime,
-        web_onnx_runtime_js = web_onnx_runtime_js,
-        web_onnx_worker_js = web_onnx_worker_js,
         web_index_html = web_index_html,
         web_explicit_html_path = web_explicit_html_path,
         web_command_record = web_command_record,
@@ -3788,62 +3957,62 @@ fn emit_bootstrap_type_codec(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let mir_type = symbols.type_symbol("MirType")?;
-    let mir_type_id = symbols.type_symbol("MirTypeId")?;
-    let mir_measure = symbols.type_symbol("MirMeasure")?;
-    let mir_dimension = symbols.type_symbol("MirDimension")?;
-    let mir_dimension_axis = symbols.type_symbol("MirDimensionAxis")?;
-    let mir_abi = symbols.type_symbol("MirAbi")?;
-    let mir_size = symbols.type_symbol("MirSize")?;
-    let mir_layout = symbols.type_symbol("MirLayout")?;
-    let mir_nominal_ref = symbols.type_symbol("MirNominalRef")?;
-    let mir_trait_ref = symbols.type_symbol("MirTraitRef")?;
-    let mir_trait_id = symbols.type_symbol("MirTraitId")?;
-    let mir_tuple_field = symbols.type_symbol("MirTupleField")?;
-    let mir_tag_marker = symbols.type_symbol("MirTagMarker")?;
+    let mir_type = symbols.type_symbol("MIRType")?;
+    let mir_type_id = symbols.type_symbol("MIRTypeID")?;
+    let mir_measure = symbols.type_symbol("MIRMeasure")?;
+    let mir_dimension = symbols.type_symbol("MIRDimension")?;
+    let mir_dimension_axis = symbols.type_symbol("MIRDimensionAxis")?;
+    let mir_abi = symbols.type_symbol("MIRABI")?;
+    let mir_size = symbols.type_symbol("MIRSize")?;
+    let mir_layout = symbols.type_symbol("MIRLayout")?;
+    let mir_nominal_ref = symbols.type_symbol("MIRNominalRef")?;
+    let mir_trait_ref = symbols.type_symbol("MIRTraitRef")?;
+    let mir_trait_id = symbols.type_symbol("MIRTraitID")?;
+    let mir_tuple_field = symbols.type_symbol("MIRTupleField")?;
+    let mir_tag_marker = symbols.type_symbol("MIRTagMarker")?;
 
-    let type_kind = symbols.field_symbol("MirType", "kind")?;
-    let type_identity = symbols.field_symbol("MirType", "identity")?;
-    let type_layout = symbols.field_symbol("MirType", "layout")?;
-    let id_value = symbols.field_symbol("MirTypeId", "value")?;
-    let dimension_axes = symbols.field_symbol("MirDimension", "axes")?;
-    let axis_name = symbols.field_symbol("MirDimensionAxis", "name")?;
-    let axis_exponent = symbols.field_symbol("MirDimensionAxis", "exponent")?;
-    let nominal_id = symbols.field_symbol("MirNominalRef", "id")?;
-    let nominal_name = symbols.field_symbol("MirNominalRef", "name")?;
-    let trait_ref_id = symbols.field_symbol("MirTraitRef", "id")?;
-    let trait_ref_name = symbols.field_symbol("MirTraitRef", "name")?;
-    let trait_id_value = symbols.field_symbol("MirTraitId", "value")?;
-    let tuple_name = symbols.field_symbol("MirTupleField", "name")?;
-    let tuple_ty = symbols.field_symbol("MirTupleField", "ty")?;
-    let layout_abi = symbols.field_symbol("MirLayout", "abi")?;
-    let layout_size = symbols.field_symbol("MirLayout", "size")?;
-    let layout_align = symbols.field_symbol("MirLayout", "align")?;
+    let type_kind = symbols.field_symbol("MIRType", "kind")?;
+    let type_identity = symbols.field_symbol("MIRType", "identity")?;
+    let type_layout = symbols.field_symbol("MIRType", "layout")?;
+    let id_value = symbols.field_symbol("MIRTypeID", "value")?;
+    let dimension_axes = symbols.field_symbol("MIRDimension", "axes")?;
+    let axis_name = symbols.field_symbol("MIRDimensionAxis", "name")?;
+    let axis_exponent = symbols.field_symbol("MIRDimensionAxis", "exponent")?;
+    let nominal_id = symbols.field_symbol("MIRNominalRef", "id")?;
+    let nominal_name = symbols.field_symbol("MIRNominalRef", "name")?;
+    let trait_ref_id = symbols.field_symbol("MIRTraitRef", "id")?;
+    let trait_ref_name = symbols.field_symbol("MIRTraitRef", "name")?;
+    let trait_id_value = symbols.field_symbol("MIRTraitID", "value")?;
+    let tuple_name = symbols.field_symbol("MIRTupleField", "name")?;
+    let tuple_ty = symbols.field_symbol("MIRTupleField", "ty")?;
+    let layout_abi = symbols.field_symbol("MIRLayout", "abi")?;
+    let layout_size = symbols.field_symbol("MIRLayout", "size")?;
+    let layout_align = symbols.field_symbol("MIRLayout", "align")?;
 
     let kind_variants = [
-        ("Int", symbols.variant_path("MirTypeKind", "Int")?),
-        ("Float", symbols.variant_path("MirTypeKind", "Float")?),
-        ("Bool", symbols.variant_path("MirTypeKind", "Bool")?),
-        ("String", symbols.variant_path("MirTypeKind", "String")?),
-        ("Char", symbols.variant_path("MirTypeKind", "Char")?),
-        ("List", symbols.variant_path("MirTypeKind", "List")?),
-        ("Map", symbols.variant_path("MirTypeKind", "Map")?),
-        ("Shared", symbols.variant_path("MirTypeKind", "Shared")?),
-        ("Option", symbols.variant_path("MirTypeKind", "Option")?),
-        ("Result", symbols.variant_path("MirTypeKind", "Result")?),
-        ("Fn", symbols.variant_path("MirTypeKind", "Fn")?),
-        ("SendFn", symbols.variant_path("MirTypeKind", "SendFn")?),
-        ("Apply", symbols.variant_path("MirTypeKind", "Apply")?),
-        ("TraitObject", symbols.variant_path("MirTypeKind", "TraitObject")?),
-        ("Tuple", symbols.variant_path("MirTypeKind", "Tuple")?),
-        ("FixedList", symbols.variant_path("MirTypeKind", "FixedList")?),
-        ("IntN", symbols.variant_path("MirTypeKind", "IntN")?),
-        ("InlineRange", symbols.variant_path("MirTypeKind", "InlineRange")?),
-        ("Float32", symbols.variant_path("MirTypeKind", "Float32")?),
-        ("Tagged", symbols.variant_path("MirTypeKind", "Tagged")?),
-        ("Union", symbols.variant_path("MirTypeKind", "Union")?),
-        ("Quantity", symbols.variant_path("MirTypeKind", "Quantity")?),
-        ("Measure", symbols.variant_path("MirTypeKind", "Measure")?),
+        ("Int", symbols.variant_path("MIRTypeKind", "Int")?),
+        ("Float", symbols.variant_path("MIRTypeKind", "Float")?),
+        ("Bool", symbols.variant_path("MIRTypeKind", "Bool")?),
+        ("String", symbols.variant_path("MIRTypeKind", "String")?),
+        ("Char", symbols.variant_path("MIRTypeKind", "Char")?),
+        ("List", symbols.variant_path("MIRTypeKind", "List")?),
+        ("Map", symbols.variant_path("MIRTypeKind", "Map")?),
+        ("Shared", symbols.variant_path("MIRTypeKind", "Shared")?),
+        ("Option", symbols.variant_path("MIRTypeKind", "Option")?),
+        ("Result", symbols.variant_path("MIRTypeKind", "Result")?),
+        ("Fn", symbols.variant_path("MIRTypeKind", "Fn")?),
+        ("SendFn", symbols.variant_path("MIRTypeKind", "SendFn")?),
+        ("Apply", symbols.variant_path("MIRTypeKind", "Apply")?),
+        ("TraitObject", symbols.variant_path("MIRTypeKind", "TraitObject")?),
+        ("Tuple", symbols.variant_path("MIRTypeKind", "Tuple")?),
+        ("FixedList", symbols.variant_path("MIRTypeKind", "FixedList")?),
+        ("IntN", symbols.variant_path("MIRTypeKind", "IntN")?),
+        ("InlineRange", symbols.variant_path("MIRTypeKind", "InlineRange")?),
+        ("Float32", symbols.variant_path("MIRTypeKind", "Float32")?),
+        ("Tagged", symbols.variant_path("MIRTypeKind", "Tagged")?),
+        ("Union", symbols.variant_path("MIRTypeKind", "Union")?),
+        ("Quantity", symbols.variant_path("MIRTypeKind", "Quantity")?),
+        ("Measure", symbols.variant_path("MIRTypeKind", "Measure")?),
     ];
     let kind = |name: &str| {
         kind_variants
@@ -3854,10 +4023,10 @@ fn emit_bootstrap_type_codec(
     };
 
     let measure_variants = [
-        ("Literal", symbols.variant_path("MirMeasure", "Literal")?),
-        ("SignedLiteral", symbols.variant_path("MirMeasure", "SignedLiteral")?),
-        ("Symbol", symbols.variant_path("MirMeasure", "Symbol")?),
-        ("Combined", symbols.variant_path("MirMeasure", "Combined")?),
+        ("Literal", symbols.variant_path("MIRMeasure", "Literal")?),
+        ("SignedLiteral", symbols.variant_path("MIRMeasure", "SignedLiteral")?),
+        ("Symbol", symbols.variant_path("MIRMeasure", "Symbol")?),
+        ("Combined", symbols.variant_path("MIRMeasure", "Combined")?),
     ];
     let measure = |name: &str| {
         measure_variants
@@ -3868,13 +4037,13 @@ fn emit_bootstrap_type_codec(
     };
 
     let abi_variants = [
-        ("Scalar", symbols.variant_path("MirAbi", "Scalar")?),
-        ("Aggregate", symbols.variant_path("MirAbi", "Aggregate")?),
-        ("Sequence", symbols.variant_path("MirAbi", "Sequence")?),
-        ("Function", symbols.variant_path("MirAbi", "Function")?),
-        ("Nominal", symbols.variant_path("MirAbi", "Nominal")?),
-        ("Dynamic", symbols.variant_path("MirAbi", "Dynamic")?),
-        ("Never", symbols.variant_path("MirAbi", "Never")?),
+        ("Scalar", symbols.variant_path("MIRABI", "Scalar")?),
+        ("Aggregate", symbols.variant_path("MIRABI", "Aggregate")?),
+        ("Sequence", symbols.variant_path("MIRABI", "Sequence")?),
+        ("Function", symbols.variant_path("MIRABI", "Function")?),
+        ("Nominal", symbols.variant_path("MIRABI", "Nominal")?),
+        ("Dynamic", symbols.variant_path("MIRABI", "Dynamic")?),
+        ("Never", symbols.variant_path("MIRABI", "Never")?),
     ];
     let abi = |name: &str| {
         abi_variants
@@ -3884,8 +4053,8 @@ fn emit_bootstrap_type_codec(
             .unwrap_or_else(|| name.to_string())
     };
     let size_variants = [
-        ("Static", symbols.variant_path("MirSize", "Static")?),
-        ("Dynamic", symbols.variant_path("MirSize", "Dynamic")?),
+        ("Static", symbols.variant_path("MIRSize", "Static")?),
+        ("Dynamic", symbols.variant_path("MIRSize", "Dynamic")?),
     ];
     let size = |name: &str| {
         size_variants
@@ -3895,12 +4064,12 @@ fn emit_bootstrap_type_codec(
             .unwrap_or_else(|| name.to_string())
     };
     let scalar_variants = [
-        ("Int", symbols.variant_path("MirScalarKind", "Int")?),
-        ("Float", symbols.variant_path("MirScalarKind", "Float")?),
-        ("Float32", symbols.variant_path("MirScalarKind", "Float32")?),
-        ("Bool", symbols.variant_path("MirScalarKind", "Bool")?),
-        ("Char", symbols.variant_path("MirScalarKind", "Char")?),
-        ("Pointer", symbols.variant_path("MirScalarKind", "Pointer")?),
+        ("Int", symbols.variant_path("MIRScalarKind", "Int")?),
+        ("Float", symbols.variant_path("MIRScalarKind", "Float")?),
+        ("Float32", symbols.variant_path("MIRScalarKind", "Float32")?),
+        ("Bool", symbols.variant_path("MIRScalarKind", "Bool")?),
+        ("Char", symbols.variant_path("MIRScalarKind", "Char")?),
+        ("Pointer", symbols.variant_path("MIRScalarKind", "Pointer")?),
     ];
     let scalar = |name: &str| {
         scalar_variants
@@ -3910,8 +4079,8 @@ fn emit_bootstrap_type_codec(
             .unwrap_or_else(|| name.to_string())
     };
     let tag_variants = [
-        ("User", symbols.variant_path("MirTagMarker", "User")?),
-        ("Internal", symbols.variant_path("MirTagMarker", "Internal")?),
+        ("User", symbols.variant_path("MIRTagMarker", "User")?),
+        ("Internal", symbols.variant_path("MIRTagMarker", "Internal")?),
     ];
     let tag = |name: &str| {
         tag_variants
@@ -3928,7 +4097,7 @@ fn emit_bootstrap_type_codec(
         "SharedGuardRead",
         "SharedGuardEdit",
         "TerminalFactSet",
-        "CppCallbackAbi",
+        "CppCallbackABI",
         "AllocatorView",
     ];
     let internal_paths = internal_names
@@ -3936,7 +4105,7 @@ fn emit_bootstrap_type_codec(
         .map(|name| {
             Ok::<_, BootstrapHostCodecError>((
                 *name,
-                symbols.variant_path("MirInternalTag", name)?,
+                symbols.variant_path("MIRInternalTag", name)?,
             ))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -4002,9 +4171,9 @@ fn emit_bootstrap_type_codec(
         signed = measure("SignedLiteral"),
         symbol = measure("Symbol"),
         combined = measure("Combined"),
-        add = symbols.variant_path("MirMeasureRule", "Add")?,
-        mul = symbols.variant_path("MirMeasureRule", "Mul")?,
-        mat = symbols.variant_path("MirMeasureRule", "Match")?,
+        add = symbols.variant_path("MIRMeasureRule", "Add")?,
+        mul = symbols.variant_path("MIRMeasureRule", "Mul")?,
+        mat = symbols.variant_path("MIRMeasureRule", "Match")?,
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
@@ -4034,9 +4203,9 @@ fn emit_bootstrap_type_codec(
         signed = measure("SignedLiteral"),
         symbol = measure("Symbol"),
         combined = measure("Combined"),
-        add = symbols.variant_path("MirMeasureRule", "Add")?,
-        mul = symbols.variant_path("MirMeasureRule", "Mul")?,
-        mat = symbols.variant_path("MirMeasureRule", "Match")?,
+        add = symbols.variant_path("MIRMeasureRule", "Add")?,
+        mul = symbols.variant_path("MIRMeasureRule", "Mul")?,
+        mat = symbols.variant_path("MIRMeasureRule", "Match")?,
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
@@ -4113,7 +4282,7 @@ fn emit_bootstrap_type_codec(
         guard_read = internal("SharedGuardRead"),
         guard_edit = internal("SharedGuardEdit"),
         terminal = internal("TerminalFactSet"),
-        cpp = internal("CppCallbackAbi"),
+        cpp = internal("CppCallbackABI"),
         allocator = internal("AllocatorView"),
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
@@ -4222,11 +4391,11 @@ fn emit_bootstrap_type_codec(
                      ok: Box::new(__jet_bootstrap_type_to_host(ok)?),
                      err: Box::new(__jet_bootstrap_type_to_host(err)?),
                  }},
-                 {fn_kind}(signature) => ::jet_foundation::MIR::MirTypeKind::Fn(__jet_bootstrap_mir_MirFunctionSignature_to_host(signature)?),
+                 {fn_kind}(signature) => ::jet_foundation::MIR::MirTypeKind::Fn(__jet_bootstrap_mir_MIRFunctionSignature_to_host(signature)?),
                  {send_fn}(params, ret, conventions) => ::jet_foundation::MIR::MirTypeKind::SendFn {{
                      params: params.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
                      ret: ret.as_ref().ok().map(|ret| __jet_bootstrap_type_to_host(ret).map(Box::new)).transpose()?,
-                     conventions.iter().map(__jet_bootstrap_mir_MirAccess_to_host).collect::<Result<Vec<_>, _>>()?,
+                     conventions.iter().map(__jet_bootstrap_mir_MIRAccess_to_host).collect::<Result<Vec<_>, _>>()?,
                  }},
                  {apply}(name, args) => ::jet_foundation::MIR::MirTypeKind::Apply {{
                      name: ::jet_foundation::MIR::MirNominalRef {{
@@ -4295,14 +4464,14 @@ fn emit_bootstrap_type_codec(
                  ::jet_foundation::MIR::MirTypeKind::Shared(inner) => {shared}(__jet_bootstrap_type_from_host(inner)?),
                  ::jet_foundation::MIR::MirTypeKind::Option(inner) => {option}(__jet_bootstrap_type_from_host(inner)?),
                  ::jet_foundation::MIR::MirTypeKind::Result {{ ok, err }} => {result}(__jet_bootstrap_type_from_host(ok)?, __jet_bootstrap_type_from_host(err)?),
-                 ::jet_foundation::MIR::MirTypeKind::Fn(signature) => {fn_kind}(__jet_bootstrap_mir_MirFunctionSignature_from_host(signature)?),
+                 ::jet_foundation::MIR::MirTypeKind::Fn(signature) => {fn_kind}(__jet_bootstrap_mir_MIRFunctionSignature_from_host(signature)?),
                  ::jet_foundation::MIR::MirTypeKind::SendFn {{ params, ret, conventions }} => {send_fn}(
                      params.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?,
                      match ret.as_deref() {{
                          Some(ret) => Ok(__jet_bootstrap_type_from_host(ret)?),
                          None => Err(::jet_foundation::Outcome::JetAbsent),
                      }},
-                     conventions.iter().map(__jet_bootstrap_mir_MirAccess_from_host).collect::<Result<Vec<_>, _>>()?,
+                     conventions.iter().map(__jet_bootstrap_mir_MIRAccess_from_host).collect::<Result<Vec<_>, _>>()?,
                  ),
                  ::jet_foundation::MIR::MirTypeKind::Apply {{ name, args }} => {apply}({mir_nominal_ref} {{
                      {nominal_id}: __jet_bootstrap_type_id_from_host(name.id)?,
@@ -4917,7 +5086,7 @@ fn emit_bootstrap_host_type_shape_codec(
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
-    let type_id_value = symbols.field_symbol("MirTypeId", "value")?;
+    let type_id_value = symbols.field_symbol("MIRTypeID", "value")?;
     let shape_nodes = symbols.field_symbol("JetEvalHostTypeShape", "nodes")?;
     let shape_root = symbols.field_symbol("JetEvalHostTypeShape", "root")?;
     let field_name = symbols.field_symbol("JetEvalHostTypeFieldShape", "name")?;
@@ -5038,7 +5207,7 @@ fn emit_bootstrap_source_resource_bridge(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let row = symbols.type_symbol("MirPreludeCall")?;
+    let row = symbols.type_symbol("MIRPreludeCall")?;
     let eval = symbols.type_symbol("JetEvalRuntimeValue")?;
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
@@ -5059,11 +5228,11 @@ fn emit_bootstrap_source_resource_bridge(
     let _host_core_owner = symbols.type_symbol("JetEvalHostCoreOwner")?;
     let host_core_owner_fact = symbols.field_symbol("JetEvalHostCoreOwner", "fact")?;
     let host_core_owner_ty = symbols.field_symbol("JetEvalHostCoreOwner", "ty")?;
-    let source_handle = symbols.type_symbol("MirHandleId")?;
-    let handle_value = symbols.field_symbol("MirHandleId", "value")?;
-    let row_module = symbols.field_symbol("MirPreludeCall", "module_name")?;
-    let row_member = symbols.field_symbol("MirPreludeCall", "member")?;
-    let row_symbol = symbols.field_symbol("MirPreludeCall", "symbol")?;
+    let source_handle = symbols.type_symbol("MIRHandleID")?;
+    let handle_value = symbols.field_symbol("MIRHandleID", "value")?;
+    let row_module = symbols.field_symbol("MIRPreludeCall", "module_name")?;
+    let row_member = symbols.field_symbol("MIRPreludeCall", "member")?;
+    let row_symbol = symbols.field_symbol("MIRPreludeCall", "symbol")?;
     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
     let shape_root = symbols.field_symbol("JetEvalHostTypeShape", "root")?;
     let shape_nodes = symbols.field_symbol("JetEvalHostTypeShape", "nodes")?;
@@ -5135,7 +5304,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                 {host_owner_core}(core_owner) => core_owner,
                 _ => return Err("checked resource shape does not declare a Core owner".to_string()),
             }};
-            let fact = __jet_bootstrap_mir_MirCoreOwner_to_host(&core_owner.{host_core_owner_fact})?;
+            let fact = __jet_bootstrap_mir_MIRCoreOwner_to_host(&core_owner.{host_core_owner_fact})?;
             let owner_type = __jet_bootstrap_type_to_host(&core_owner.{host_core_owner_ty})?;
             let {mir_type_kind}::Apply {{ name, .. }} = &owner_type.kind else {{
                 return Err("checked Core resource owner is not a nominal Apply".to_string());
@@ -5506,7 +5675,7 @@ fn emit_bootstrap_callback(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let row = symbols.type_symbol("MirPreludeCall")?;
+    let row = symbols.type_symbol("MIRPreludeCall")?;
     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
@@ -5564,7 +5733,7 @@ fn emit_bootstrap_callback(
                  Ok(value) => value,
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
-             let native_row = match __jet_bootstrap_mir_MirPreludeCall_to_host(&row) {{
+             let native_row = match __jet_bootstrap_mir_MIRPreludeCall_to_host(&row) {{
                  Ok(row) => row,
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
@@ -5604,13 +5773,13 @@ fn emit_bootstrap_foreign_callback(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let foreign = symbols.type_symbol("MirForeign")?;
-    let param = symbols.type_symbol("MirParam")?;
-    let ownership = symbols.type_symbol("MirOwnership")?;
-    let access = symbols.type_symbol("MirAccess")?;
-    let effects = symbols.type_symbol("MirEffectFacts")?;
-    let _named_span = symbols.type_symbol("MirNamedSpan")?;
-    let _applicability = symbols.type_symbol("MirTargetApplicability")?;
+    let foreign = symbols.type_symbol("MIRForeign")?;
+    let param = symbols.type_symbol("MIRParam")?;
+    let ownership = symbols.type_symbol("MIROwnership")?;
+    let access = symbols.type_symbol("MIRAccess")?;
+    let effects = symbols.type_symbol("MIREffectFacts")?;
+    let _named_span = symbols.type_symbol("MIRNamedSpan")?;
+    let _applicability = symbols.type_symbol("MIRTargetApplicability")?;
     let _eval = symbols.type_symbol("JetEvalRuntimeValue")?;
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
@@ -5619,88 +5788,88 @@ fn emit_bootstrap_foreign_callback(
     let host_writeback_argument = symbols.field_symbol("JetEvalHostWriteback", "argument")?;
     let host_writeback_value = symbols.field_symbol("JetEvalHostWriteback", "value")?;
     let span = symbols.type_symbol("Span")?;
-    let param_index = symbols.field_symbol("MirParam", "index")?;
-    let param_name = symbols.field_symbol("MirParam", "name")?;
-    let param_span = symbols.field_symbol("MirParam", "span")?;
-    let param_ty = symbols.field_symbol("MirParam", "ty")?;
-    let param_access = symbols.field_symbol("MirParam", "access")?;
-    let param_ownership = symbols.field_symbol("MirParam", "ownership")?;
-    let param_public_label = symbols.field_symbol("MirParam", "public_label")?;
-    let param_variadic = symbols.field_symbol("MirParam", "variadic")?;
-    let param_default_present = symbols.field_symbol("MirParam", "default_present")?;
-    let ownership_mode = symbols.field_symbol("MirOwnership", "mode")?;
-    let ownership_drop = symbols.field_symbol("MirOwnership", "drop")?;
-    let ownership_moved = symbols.field_symbol("MirOwnership", "moved")?;
-    let ownership_last_use = symbols.field_symbol("MirOwnership", "last_use")?;
-    let ownership_gc_root = symbols.field_symbol("MirOwnership", "gc_root")?;
-    let effects_direct = symbols.field_symbol("MirEffectFacts", "direct")?;
-    let effects_solved = symbols.field_symbol("MirEffectFacts", "solved")?;
-    let effects_call_edges = symbols.field_symbol("MirEffectFacts", "call_edges")?;
-    let effects_maximal = symbols.field_symbol("MirEffectFacts", "maximal")?;
-    let effects_direct_spans = symbols.field_symbol("MirEffectFacts", "direct_spans")?;
-    let named_span_name = symbols.field_symbol("MirNamedSpan", "name")?;
-    let named_span_span = symbols.field_symbol("MirNamedSpan", "span")?;
-    let target_rust_aot = symbols.field_symbol("MirTargetApplicability", "rust_aot")?;
-    let target_cranelift = symbols.field_symbol("MirTargetApplicability", "cranelift")?;
-    let target_interpreter = symbols.field_symbol("MirTargetApplicability", "interpreter")?;
-    let target_web = symbols.field_symbol("MirTargetApplicability", "web")?;
-    let foreign_id = symbols.field_symbol("MirForeign", "id")?;
-    let foreign_module_id = symbols.field_symbol("MirForeign", "module_id")?;
-    let foreign_key = symbols.field_symbol("MirForeign", "key")?;
-    let foreign_module_name = symbols.field_symbol("MirForeign", "module_name")?;
-    let foreign_name = symbols.field_symbol("MirForeign", "name")?;
-    let foreign_span = symbols.field_symbol("MirForeign", "span")?;
-    let foreign_symbol = symbols.field_symbol("MirForeign", "symbol")?;
-    let foreign_path = symbols.field_symbol("MirForeign", "path")?;
-    let foreign_params = symbols.field_symbol("MirForeign", "params")?;
-    let foreign_bridge_eligible = symbols.field_symbol("MirForeign", "bridge_eligible")?;
-    let foreign_raw_scalar_abi = symbols.field_symbol("MirForeign", "raw_scalar_abi")?;
-    let foreign_return_type = symbols.field_symbol("MirForeign", "return_type")?;
-    let foreign_abi = symbols.field_symbol("MirForeign", "foreign_abi")?;
-    let foreign_language = symbols.field_symbol("MirForeign", "foreign_language")?;
-    let foreign_target_applicability = symbols.field_symbol("MirForeign", "target_applicability")?;
-    let foreign_effects = symbols.field_symbol("MirForeign", "effects")?;
-    let foreign_callback_transport = symbols.field_symbol("MirForeign", "callback_transport")?;
-    let foreign_callback_plan_digest = symbols.field_symbol("MirForeign", "callback_plan_digest")?;
-    let foreign_callback_identity = symbols.field_symbol("MirForeign", "callback_identity")?;
-    let foreign_link = symbols.field_symbol("MirForeign", "link")?;
-    let foreign_callback = symbols.field_symbol("MirForeign", "callback")?;
-    let foreign_handle = symbols.field_symbol("MirForeign", "handle")?;
-    let foreign_close_function = symbols.field_symbol("MirForeign", "close_function")?;
-    let foreign_close_foreign = symbols.field_symbol("MirForeign", "close_foreign")?;
-    let foreign_undo_function = symbols.field_symbol("MirForeign", "undo_function")?;
-    let foreign_id_value = symbols.field_symbol("MirForeignId", "value")?;
-    let module_id_value = symbols.field_symbol("MirModuleId", "value")?;
-    let link_unit_id_value = symbols.field_symbol("MirLinkUnitId", "value")?;
-    let callback_id_value = symbols.field_symbol("MirCallbackId", "value")?;
-    let handle_id_value = symbols.field_symbol("MirHandleId", "value")?;
-    let function_id_value = symbols.field_symbol("MirFunctionId", "value")?;
-    let foreign_abi_c = symbols.variant_path("MirForeignAbi", "C")?;
-    let foreign_abi_c_unwind = symbols.variant_path("MirForeignAbi", "CUnwind")?;
-    let foreign_abi_system = symbols.variant_path("MirForeignAbi", "System")?;
-    let foreign_abi_stdcall = symbols.variant_path("MirForeignAbi", "Stdcall")?;
-    let foreign_abi_fastcall = symbols.variant_path("MirForeignAbi", "Fastcall")?;
-    let foreign_abi_vectorcall = symbols.variant_path("MirForeignAbi", "Vectorcall")?;
-    let foreign_abi_rust = symbols.variant_path("MirForeignAbi", "Rust")?;
-    let foreign_abi_platform = symbols.variant_path("MirForeignAbi", "Platform")?;
-    let foreign_language_c = symbols.variant_path("MirForeignLanguage", "C")?;
-    let foreign_language_cpp = symbols.variant_path("MirForeignLanguage", "Cpp")?;
-    let foreign_language_rust = symbols.variant_path("MirForeignLanguage", "Rust")?;
-    let foreign_language_assembly = symbols.variant_path("MirForeignLanguage", "Assembly")?;
-    let ownership_mode_copy = symbols.variant_path("MirOwnershipMode", "Copy")?;
-    let ownership_mode_owned = symbols.variant_path("MirOwnershipMode", "Owned")?;
-    let ownership_mode_shared = symbols.variant_path("MirOwnershipMode", "Shared")?;
-    let ownership_mode_read_borrow = symbols.variant_path("MirOwnershipMode", "ReadBorrow")?;
-    let ownership_mode_write_borrow = symbols.variant_path("MirOwnershipMode", "WriteBorrow")?;
-    let ownership_mode_move = symbols.variant_path("MirOwnershipMode", "Move")?;
-    let drop_no_drop = symbols.variant_path("MirDropKind", "NoDrop")?;
-    let drop_value = symbols.variant_path("MirDropKind", "Value")?;
-    let drop_shared = symbols.variant_path("MirDropKind", "Shared")?;
-    let drop_view = symbols.variant_path("MirDropKind", "View")?;
-    let drop_foreign_handle = symbols.variant_path("MirDropKind", "ForeignHandle")?;
-    let access_read = symbols.variant_path("MirAccess", "Read")?;
-    let access_write = symbols.variant_path("MirAccess", "Write")?;
-    let access_move = symbols.variant_path("MirAccess", "Move")?;
+    let param_index = symbols.field_symbol("MIRParam", "index")?;
+    let param_name = symbols.field_symbol("MIRParam", "name")?;
+    let param_span = symbols.field_symbol("MIRParam", "span")?;
+    let param_ty = symbols.field_symbol("MIRParam", "ty")?;
+    let param_access = symbols.field_symbol("MIRParam", "access")?;
+    let param_ownership = symbols.field_symbol("MIRParam", "ownership")?;
+    let param_public_label = symbols.field_symbol("MIRParam", "public_label")?;
+    let param_variadic = symbols.field_symbol("MIRParam", "variadic")?;
+    let param_default_present = symbols.field_symbol("MIRParam", "default_present")?;
+    let ownership_mode = symbols.field_symbol("MIROwnership", "mode")?;
+    let ownership_drop = symbols.field_symbol("MIROwnership", "drop")?;
+    let ownership_moved = symbols.field_symbol("MIROwnership", "moved")?;
+    let ownership_last_use = symbols.field_symbol("MIROwnership", "last_use")?;
+    let ownership_gc_root = symbols.field_symbol("MIROwnership", "gc_root")?;
+    let effects_direct = symbols.field_symbol("MIREffectFacts", "direct")?;
+    let effects_solved = symbols.field_symbol("MIREffectFacts", "solved")?;
+    let effects_call_edges = symbols.field_symbol("MIREffectFacts", "call_edges")?;
+    let effects_maximal = symbols.field_symbol("MIREffectFacts", "maximal")?;
+    let effects_direct_spans = symbols.field_symbol("MIREffectFacts", "direct_spans")?;
+    let named_span_name = symbols.field_symbol("MIRNamedSpan", "name")?;
+    let named_span_span = symbols.field_symbol("MIRNamedSpan", "span")?;
+    let target_rust_aot = symbols.field_symbol("MIRTargetApplicability", "rust_aot")?;
+    let target_cranelift = symbols.field_symbol("MIRTargetApplicability", "cranelift")?;
+    let target_interpreter = symbols.field_symbol("MIRTargetApplicability", "interpreter")?;
+    let target_web = symbols.field_symbol("MIRTargetApplicability", "web")?;
+    let foreign_id = symbols.field_symbol("MIRForeign", "id")?;
+    let foreign_module_id = symbols.field_symbol("MIRForeign", "module_id")?;
+    let foreign_key = symbols.field_symbol("MIRForeign", "key")?;
+    let foreign_module_name = symbols.field_symbol("MIRForeign", "module_name")?;
+    let foreign_name = symbols.field_symbol("MIRForeign", "name")?;
+    let foreign_span = symbols.field_symbol("MIRForeign", "span")?;
+    let foreign_symbol = symbols.field_symbol("MIRForeign", "symbol")?;
+    let foreign_path = symbols.field_symbol("MIRForeign", "path")?;
+    let foreign_params = symbols.field_symbol("MIRForeign", "params")?;
+    let foreign_bridge_eligible = symbols.field_symbol("MIRForeign", "bridge_eligible")?;
+    let foreign_raw_scalar_abi = symbols.field_symbol("MIRForeign", "raw_scalar_abi")?;
+    let foreign_return_type = symbols.field_symbol("MIRForeign", "return_type")?;
+    let foreign_abi = symbols.field_symbol("MIRForeign", "foreign_abi")?;
+    let foreign_language = symbols.field_symbol("MIRForeign", "foreign_language")?;
+    let foreign_target_applicability = symbols.field_symbol("MIRForeign", "target_applicability")?;
+    let foreign_effects = symbols.field_symbol("MIRForeign", "effects")?;
+    let foreign_callback_transport = symbols.field_symbol("MIRForeign", "callback_transport")?;
+    let foreign_callback_plan_digest = symbols.field_symbol("MIRForeign", "callback_plan_digest")?;
+    let foreign_callback_identity = symbols.field_symbol("MIRForeign", "callback_identity")?;
+    let foreign_link = symbols.field_symbol("MIRForeign", "link")?;
+    let foreign_callback = symbols.field_symbol("MIRForeign", "callback")?;
+    let foreign_handle = symbols.field_symbol("MIRForeign", "handle")?;
+    let foreign_close_function = symbols.field_symbol("MIRForeign", "close_function")?;
+    let foreign_close_foreign = symbols.field_symbol("MIRForeign", "close_foreign")?;
+    let foreign_undo_function = symbols.field_symbol("MIRForeign", "undo_function")?;
+    let foreign_id_value = symbols.field_symbol("MIRForeignID", "value")?;
+    let module_id_value = symbols.field_symbol("MIRModuleID", "value")?;
+    let link_unit_id_value = symbols.field_symbol("MIRLinkUnitID", "value")?;
+    let callback_id_value = symbols.field_symbol("MIRCallbackID", "value")?;
+    let handle_id_value = symbols.field_symbol("MIRHandleID", "value")?;
+    let function_id_value = symbols.field_symbol("MIRFunctionID", "value")?;
+    let foreign_abi_c = symbols.variant_path("MIRForeignABI", "C")?;
+    let foreign_abi_c_unwind = symbols.variant_path("MIRForeignABI", "CUnwind")?;
+    let foreign_abi_system = symbols.variant_path("MIRForeignABI", "System")?;
+    let foreign_abi_stdcall = symbols.variant_path("MIRForeignABI", "Stdcall")?;
+    let foreign_abi_fastcall = symbols.variant_path("MIRForeignABI", "Fastcall")?;
+    let foreign_abi_vectorcall = symbols.variant_path("MIRForeignABI", "Vectorcall")?;
+    let foreign_abi_rust = symbols.variant_path("MIRForeignABI", "Rust")?;
+    let foreign_abi_platform = symbols.variant_path("MIRForeignABI", "Platform")?;
+    let foreign_language_c = symbols.variant_path("MIRForeignLanguage", "C")?;
+    let foreign_language_cpp = symbols.variant_path("MIRForeignLanguage", "Cpp")?;
+    let foreign_language_rust = symbols.variant_path("MIRForeignLanguage", "Rust")?;
+    let foreign_language_assembly = symbols.variant_path("MIRForeignLanguage", "Assembly")?;
+    let ownership_mode_copy = symbols.variant_path("MIROwnershipMode", "Copy")?;
+    let ownership_mode_owned = symbols.variant_path("MIROwnershipMode", "Owned")?;
+    let ownership_mode_shared = symbols.variant_path("MIROwnershipMode", "Shared")?;
+    let ownership_mode_read_borrow = symbols.variant_path("MIROwnershipMode", "ReadBorrow")?;
+    let ownership_mode_write_borrow = symbols.variant_path("MIROwnershipMode", "WriteBorrow")?;
+    let ownership_mode_move = symbols.variant_path("MIROwnershipMode", "Move")?;
+    let drop_no_drop = symbols.variant_path("MIRDropKind", "NoDrop")?;
+    let drop_value = symbols.variant_path("MIRDropKind", "Value")?;
+    let drop_shared = symbols.variant_path("MIRDropKind", "Shared")?;
+    let drop_view = symbols.variant_path("MIRDropKind", "View")?;
+    let drop_foreign_handle = symbols.variant_path("MIRDropKind", "ForeignHandle")?;
+    let access_read = symbols.variant_path("MIRAccess", "Read")?;
+    let access_write = symbols.variant_path("MIRAccess", "Write")?;
+    let access_move = symbols.variant_path("MIRAccess", "Move")?;
     let result_value = symbols.variant_path("JetEvalHostOutcome", "Value")?;
     let result_failure = symbols.variant_path("JetEvalHostOutcome", "Failure")?;
     let error_source = symbols.variant_path("JetEvalErrorKind", "Source")?;

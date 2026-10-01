@@ -105,11 +105,6 @@ impl TrustStore {
         self.records.retain(|g| g.key != grant.key);
         self.records.push(grant);
     }
-
-    pub fn revoke_key(&mut self, key: &str) {
-        self.grants.remove(key);
-        self.records.retain(|g| g.key != key);
-    }
 }
 
 pub fn trust_store_path() -> PathBuf {

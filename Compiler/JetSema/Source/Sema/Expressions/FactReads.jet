@@ -1,0 +1,930 @@
+// D-FACT-READ1=A / D-META-ROOT3=A: a compiler fact is a `$` member of the
+// thing it describes (`Severity.$range`, `send_report.$effects`,
+// `Meter.$unit_scale_provenance`). Sema resolves one registered plane on the
+// subject and replaces the read with its typed compile-time value, so a fact
+// never reaches code generation as a runtime member read and cannot select
+// runtime behavior. Mirrors Rust `CheckerInfer::fold_fact_read`,
+// `reflected_fact_type`, `Comptime::reflected_fact_field` and the reflection
+// rows of `CheckerCoreLib::core_struct_field`.
+use jet_foundation.[
+    Diagnostic,
+    EnumLitArg,
+    Expr,
+    Func,
+    Item,
+    PatSlot,
+    Span,
+    StructDef,
+    Symbol,
+    SymbolKind,
+    TAppliedRule,
+    TAppliedRuleArgumentMenu,
+    TAppliedRuleCatalog,
+    TComptimeEnumArg,
+    TComptimeField,
+    TComptimeValue,
+    TEnumPayload,
+    TExpr,
+    TExprKind,
+    TFieldRef,
+    TPatternBinding,
+    TPatternBindingFact,
+    TPatternShape,
+    TStrPart,
+    Type,
+    UnitScaleProvenance,
+    ViewProvenance,
+    ViewSourcePath,
+    symbol_id,
+    type_name,
+]
+
+pub struct SemaFactReadCheck {
+    pub handled: Bool
+    pub value: TExpr?
+}
+
+fn sema_fact_read_unhandled() -> SemaFactReadCheck Never! {
+    SemaFactReadCheck{handled: false, value: None}
+}
+
+fn sema_fact_read_failed() -> SemaFactReadCheck Never! {
+    SemaFactReadCheck{handled: true, value: None}
+}
+
+// The typed reader named by a `$` member. Registered value planes without a
+// dedicated carrier (`Flow`, `Taint`, `Duty` in Prelude `Facts.jet`) read as
+// `Plane:<row>`; build facts hang off the `$build`/`$package` roots instead.
+fn sema_fact_read_kind(member: String) -> String? {
+    if {
+        member == "$layout" -> Val("Layout")
+        member == "$name" -> Val("Name")
+        member == "$fields" -> Val("Fields")
+        member == "$range" -> Val("Range")
+        member == "$dimension" -> Val("Dimension")
+        member == "$measure" -> Val("Measure")
+        member == "$exactness" -> Val("Exactness")
+        member == "$classification" -> Val("Classification")
+        member == "$obligation" -> Val("Obligation")
+        member == "$states" -> Val("States")
+        member == "$effects" -> Val("Effects")
+        member == "$sendability" -> Val("Sendability")
+        member == "$movedness" -> Val("Movedness")
+        member == "$attribution" -> Val("Attribution")
+        member == "$origin" -> Val("Origin")
+        member == "$view_provenance" -> Val("ViewProvenance")
+        member == "$unit_scale_provenance" -> Val("UnitScaleProvenance")
+        member == "$maturity" -> Val("Maturity")
+        member == "$flow" -> Val("Plane:Flow")
+        member == "$taint" -> Val("Plane:Taint")
+        member == "$duty" -> Val("Plane:Duty")
+        else -> None
+    }
+}
+
+fn sema_fact_read_plane(read: String) -> String? {
+    if !read.starts_with("Plane:") -> return None
+    Val(read.slice(6, read.len()))
+}
+
+// The closed `FactKind` carried by a reader (Rust `FactRead::reflection_kind`).
+fn sema_fact_read_reflection_kind(read: String) -> String Never! {
+    if {
+        read == "Name" -> "Nominal"
+        read == "Fields" -> "Layout"
+        else -> sema_fact_read_plane(read) ?? read
+    }
+}
+
+// The typed detail slot on a reflected `FactValue` (Rust `FactRead::detail_field`).
+fn sema_fact_read_detail_field(read: String) -> String? {
+    if {
+        read == "Range" -> Val("range")
+        read == "Dimension" -> Val("dimension")
+        read == "Measure" -> Val("measure")
+        read == "Exactness" -> Val("exactness")
+        read == "Classification" -> Val("classification")
+        read == "Obligation" -> Val("obligation")
+        read == "States" -> Val("state")
+        read == "Sendability" -> Val("sendability")
+        read == "Movedness" -> Val("movedness")
+        read == "Attribution" -> Val("attribution")
+        read == "Origin" -> Val("origin")
+        read == "ViewProvenance" -> Val("view_provenance")
+        read == "UnitScaleProvenance" -> Val("unit_scale_provenance")
+        read == "Maturity" -> Val("maturity")
+        else -> None
+    }
+}
+
+fn sema_fact_named(name: String) -> Type Never! {
+    Type.Named{name: name}
+}
+
+fn sema_fact_list_of(name: String) -> Type Never! {
+    Type.List{element: Type.Named{name: name}}
+}
+
+fn sema_fact_optional(name: String) -> Type Never! {
+    Type.Option{inner: Type.Named{name: name}}
+}
+
+// D-FACT-READ1=A: reflection fact kinds and their detail enums are closed,
+// compiler-owned menus (Rust `core_fact_kind_variants`). `FactKind` is the
+// registered plane projection: `Effect`, `State`, `Tag`, then each value
+// plane's reflection kind in Prelude `Facts.jet` row order.
+pub fn sema_fact_enum_variants(enum_name: String) -> [String]? {
+    if {
+        enum_name == "FactKind" -> Val([String]{"Effect", "State", "Tag", "Nominal", "Range", "Layout", "Measure", "Dimension", "Classification", "Exactness", "Obligation", "Flow", "Taint", "Duty", "Effects", "States", "Sendability", "ViewProvenance", "Movedness", "Attribution", "Origin", "UnitScaleProvenance", "Maturity"})
+        enum_name == "Maturity" -> Val([String]{"Experimental", "Tested", "Hardened"})
+        enum_name == "ExactnessKind" -> Val([String]{"Exact", "Approximate", "Measured"})
+        enum_name == "ParamZone" -> Val([String]{"PositionalOnly", "Either", "LabelOnly"})
+        enum_name == "UnitScaleProvenanceKind" -> Val([String]{"Rational", "SymbolicPi", "Conventional", "Measured"})
+        else -> None
+    }
+}
+
+// The fact-enum menu for `ty`, unless a declared enum of that name is in scope
+// (the compiler's own sources declare a `ParamZone`).
+fn sema_fact_enum_menu(ty: Type, environment: SemaScopeEnvironment) -> [String]? {
+    name := ""
+    if sema_expr_unwrap_tag(ty) == {
+        .Named(value) -> name = value
+        else -> return None
+    }
+    variants :: sema_fact_enum_variants(name) ?? return None
+    if environment.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal(graph, Type.Named{name: name}, environment.module_identity) != None -> return None
+    }
+    Val(variants)
+}
+
+fn sema_fact_enum_unknown_variant(owner: String, variant: String, variants: [String], span: Span) -> Diagnostic {
+    sema_error("E0302", span, "`{owner}` has no variant `{variant}`", "`{owner}` is a closed compiler fact menu: {variants.join(", ")}", "use one of the listed variants")
+}
+
+// D-FACT-ENUM-TIR: `EXACTNESS.kind == .Approximate` tests a compiler fact enum
+// against one binding-free variant. Codegen folds the test once the subject's
+// prepared value is known (Rust `fold_typed_fact_enum_pattern`).
+pub fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot], leading_dot: Bool, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaPatternValidation? {
+    variants :: sema_fact_enum_menu(subject_ty, environment) ?? return None
+    shape :: TPatternShape.Variant{variant: variant, bindings: [TPatternBinding]{}, leading_dot: leading_dot, span: span}
+    complete := true
+    if !variants.contains(variant) {
+        &diagnostics.push(sema_fact_enum_unknown_variant(type_name(subject_ty), variant, variants, span))
+        complete = false
+    } else if slots.len() != 0 {
+        &diagnostics.push(sema_error("E0306", span, "pattern `{variant}` expects no bindings", "compiler fact enum variants carry no payload", "match `.{variant}` without bindings"))
+        complete = false
+    }
+    Val(SemaPatternValidation{shape: shape, enum_type: None, bindings: [TPatternBindingFact]{}, complete: complete})
+}
+
+// A payload-free variant of a compiler fact enum (`.Approximate` where an
+// `ExactnessKind` is expected, or `ExactnessKind.Approximate`).
+pub fn sema_fact_enum_literal(enum_name: String, variant: String, args: [EnumLitArg], span: Span, variant_span: Span?, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+    ty :: Type.Named{name: enum_name}
+    variants :: sema_fact_enum_menu(ty, environment) ?? return sema_fact_read_unhandled()
+    if !variants.contains(variant) {
+        &diagnostics.push(sema_fact_enum_unknown_variant(enum_name, variant, variants, variant_span ?? span))
+        return sema_fact_read_failed()
+    }
+    if args.len() != 0 {
+        &diagnostics.push(sema_error("E0104", span, "`{enum_name}.{variant}` takes no payload", "compiler fact enum variants carry no payload", "write `.{variant}` without arguments"))
+        return sema_fact_read_failed()
+    }
+    value :: sema_tir_expr(ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)
+    SemaFactReadCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}
+
+fn sema_fact_field_when(condition: Bool, ty: Type) -> Type? {
+    if condition -> return Val(ty)
+    None
+}
+
+// The typed field rows of the compiler-owned reflection records
+// (Rust `core_struct_field`). These records exist only as compile-time values.
+pub fn sema_fact_reflection_field_type(type_name: String, field: String) -> Type? {
+    string :: Type.String
+    if type_name == "Range" -> return sema_fact_field_when(field == "start" || field == "end", Type.Int)
+    if type_name == "TypeInfo" {
+        return if {
+            field == "name" || field == "path" || field == "module" || field == "identity" || field == "kind" || field == "base" -> Val(string)
+            field == "layout" -> Val(sema_fact_named("LayoutInfo"))
+            field == "fields" -> Val(sema_fact_list_of("FieldInfo"))
+            field == "methods" -> Val(sema_fact_list_of("MethodInfo"))
+            field == "type_params" -> Val(sema_fact_list_of("TypeParamInfo"))
+            field == "markers" || field == "expanded_markers" -> Val(sema_fact_list_of("MarkerInfo"))
+            field == "implements" -> Val(Type.List{element: string})
+            field == "states" -> Val(sema_fact_list_of("StateInfo"))
+            field == "transitions" -> Val(sema_fact_list_of("TransitionInfo"))
+            field == "facts" -> Val(sema_fact_list_of("FactInfo"))
+            field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
+            else -> None
+        }
+    }
+    if type_name == "LayoutInfo" {
+        return if {
+            field == "kind" || field == "target" || field == "guarantee" || field == "source" -> Val(string)
+            field == "size" || field == "alignment" || field == "stride" || field == "requested_alignment" || field == "effective_alignment" -> Val(Type.Option{inner: Type.Int})
+            field == "fields" -> Val(sema_fact_list_of("LayoutField"))
+            else -> None
+        }
+    }
+    if type_name == "LayoutField" {
+        return if {
+            field == "name" || field == "ty" || field == "target" || field == "guarantee" || field == "source" -> Val(string)
+            field == "offset" || field == "size" -> Val(Type.Option{inner: Type.Int})
+            else -> None
+        }
+    }
+    if type_name == "MarkerInfo" {
+        return if {
+            field == "name" -> Val(string)
+            field == "args" -> Val(sema_fact_list_of("MarkerArgInfo"))
+            else -> None
+        }
+    }
+    if type_name == "StateInfo" {
+        return if {
+            field == "name" -> Val(string)
+            field == "path" -> Val(sema_fact_named("StateRef"))
+            field == "terminal" -> Val(Type.Bool)
+            field == "reachable" -> Val(Type.Option{inner: Type.Bool})
+            else -> None
+        }
+    }
+    if type_name == "StateRef" -> return sema_fact_field_when(field == "owner" || field == "name" || field == "path", string)
+    if type_name == "TransitionInfo" {
+        return if {
+            field == "operation" -> Val(string)
+            field == "from" || field == "to" -> Val(sema_fact_named("StateRef"))
+            else -> None
+        }
+    }
+    if type_name == "FactInfo" {
+        return if {
+            field == "kind" -> Val(sema_fact_named("FactKind"))
+            field == "name" || field == "path" -> Val(string)
+            field == "value" -> Val(sema_fact_named("FactValue"))
+            else -> None
+        }
+    }
+    if type_name == "FactValue" {
+        return if {
+            field == "kind" -> Val(sema_fact_named("FactKind"))
+            field == "name" -> Val(string)
+            field == "members" -> Val(Type.List{element: string})
+            field == "range" -> Val(sema_fact_optional("Range"))
+            field == "dimension" -> Val(sema_fact_optional("DimensionInfo"))
+            field == "measure" -> Val(sema_fact_optional("MeasureInfo"))
+            field == "exactness" -> Val(sema_fact_optional("ExactnessInfo"))
+            field == "layout" -> Val(sema_fact_optional("LayoutFact"))
+            field == "classification" -> Val(sema_fact_optional("ClassificationInfo"))
+            field == "nominal" -> Val(sema_fact_optional("NominalInfo"))
+            field == "obligation" -> Val(sema_fact_optional("ObligationInfo"))
+            field == "state" -> Val(sema_fact_optional("StateRef"))
+            field == "sendability" -> Val(sema_fact_optional("SendabilityInfo"))
+            field == "view_provenance" -> Val(sema_fact_optional("ViewProvenanceInfo"))
+            field == "movedness" -> Val(sema_fact_optional("MovednessInfo"))
+            field == "attribution" -> Val(sema_fact_optional("AttributionInfo"))
+            field == "origin" -> Val(sema_fact_optional("OriginInfo"))
+            field == "unit_scale_provenance" -> Val(sema_fact_optional("UnitScaleProvenanceInfo"))
+            field == "maturity" -> Val(sema_fact_optional("MaturityInfo"))
+            else -> None
+        }
+    }
+    if type_name == "MeasureInfo" {
+        return if {
+            field == "kind" -> Val(string)
+            field == "value" -> Val(Type.Option{inner: Type.Int})
+            field == "symbol" -> Val(Type.Option{inner: string})
+            else -> None
+        }
+    }
+    if type_name == "ExactnessInfo" {
+        return if {
+            field == "kind" -> Val(sema_fact_named("ExactnessKind"))
+            field == "precision" -> Val(Type.Option{inner: Type.Int})
+            else -> None
+        }
+    }
+    if type_name == "LayoutFact" -> return sema_fact_field_when(field == "bytes", Type.Int)
+    if type_name == "ClassificationInfo" || type_name == "NominalInfo" -> return sema_fact_field_when(field == "name", string)
+    if type_name == "ObligationParamInfo" {
+        return if {
+            field == "name" -> Val(string)
+            field == "zone" -> Val(sema_fact_named("ParamZone"))
+            else -> None
+        }
+    }
+    if type_name == "ObligationInfo" {
+        return if {
+            field == "effect_bound" -> Val(Type.List{element: string})
+            field == "param_contract" -> Val(sema_fact_list_of("ObligationParamInfo"))
+            field == "variadic" -> Val(Type.List{element: Type.Bool})
+            else -> None
+        }
+    }
+    if type_name == "SendabilityInfo" || type_name == "MovednessInfo" -> return sema_fact_field_when(field == "known", Type.Bool)
+    if type_name == "ViewProvenanceInfo" {
+        return if {
+            field == "sources" -> Val(Type.List{element: string})
+            field == "mutable" -> Val(Type.Bool)
+            else -> None
+        }
+    }
+    if type_name == "AttributionInfo" {
+        return if {
+            field == "source" -> Val(string)
+            field == "code" -> Val(Type.Option{inner: string})
+            else -> None
+        }
+    }
+    if type_name == "OriginInfo" {
+        return if {
+            field == "tracked" || field == "ambiguity" -> Val(Type.Bool)
+            field == "source" -> Val(Type.Option{inner: string})
+            field == "line" || field == "column" -> Val(Type.Option{inner: Type.Int})
+            else -> None
+        }
+    }
+    if type_name == "UnitScaleProvenanceInfo" {
+        return if {
+            field == "kind" -> Val(sema_fact_named("UnitScaleProvenanceKind"))
+            field == "value" || field == "source" || field == "uncertainty" -> Val(Type.Option{inner: string})
+            else -> None
+        }
+    }
+    if type_name == "MaturityInfo" -> return sema_fact_field_when(field == "level", sema_fact_named("Maturity"))
+    if type_name == "DimensionInfo" {
+        return if {
+            field == "axes" -> Val(sema_fact_list_of("DimensionAxis"))
+            field == "identity" || field == "display" -> Val(string)
+            else -> None
+        }
+    }
+    if type_name == "DimensionAxis" {
+        return if {
+            field == "name" -> Val(string)
+            field == "exponent" -> Val(Type.Int)
+            else -> None
+        }
+    }
+    if type_name == "FunctionInfo" {
+        return if {
+            field == "name" || field == "module" || field == "identity" -> Val(string)
+            field == "params" -> Val(Type.List{element: string})
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "effects" -> Val(sema_fact_named("EffectInfo"))
+            field == "reaches_panic" -> Val(Type.Bool)
+            field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
+            field == "facts" -> Val(sema_fact_list_of("FactInfo"))
+            else -> None
+        }
+    }
+    if type_name == "ArithmeticOperationInfo" {
+        return if {
+            field == "operation" || field == "policy" -> Val(string)
+            field == "operation_span" || field == "scope_span" -> Val(sema_fact_named("SourceSpan"))
+            else -> None
+        }
+    }
+    if type_name == "PackageInfo" {
+        return if {
+            field == "name" || field == "identity" -> Val(string)
+            field == "types" -> Val(sema_fact_list_of("TypeInfo"))
+            field == "functions" -> Val(sema_fact_list_of("FunctionInfo"))
+            else -> None
+        }
+    }
+    if type_name == "EffectInfo" -> return sema_fact_field_when(field == "values", Type.List{element: string})
+    if type_name == "MethodInfo" {
+        return if {
+            field == "name" || field == "module" || field == "identity" || field == "return_type" || field == "signature" -> Val(string)
+            field == "params" -> Val(Type.List{element: string})
+            field == "effects" -> Val(sema_fact_named("EffectInfo"))
+            field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
+            field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
+            field == "facts" -> Val(sema_fact_list_of("FactInfo"))
+            field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
+            field == "is_pub" -> Val(Type.Bool)
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
+            else -> None
+        }
+    }
+    if type_name == "FieldInfo" {
+        return if {
+            field == "name" || field == "ty" -> Val(string)
+            field == "index" -> Val(Type.Int)
+            field == "fields" -> Val(sema_fact_list_of("FieldInfo"))
+            field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
+            field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
+            field == "facts" -> Val(sema_fact_list_of("FactInfo"))
+            field == "is_pub" -> Val(Type.Bool)
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
+            else -> None
+        }
+    }
+    if type_name == "TypeParamInfo" {
+        return if {
+            field == "name" -> Val(string)
+            field == "bounds" -> Val(Type.List{element: string})
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
+            else -> None
+        }
+    }
+    if type_name == "SourceSpan" -> return sema_fact_field_when(field == "start" || field == "end", Type.Int)
+    None
+}
+
+// The type of `$fact` read over an aggregate reflection record
+// (Rust `reflected_fact_type`).
+fn sema_fact_reflected_type(base: Type, read: String) -> Type? {
+    owner := ""
+    if base == {
+        .Named(name) -> owner = name
+        else -> return None
+    }
+    if owner == "TypeInfo" && read == "States" -> return Val(sema_fact_list_of("StateInfo"))
+    if (owner == "TypeInfo" || owner == "FieldInfo") && read == "Dimension" -> return Val(sema_fact_named("DimensionInfo"))
+    if (owner == "TypeInfo" || owner == "FactInfo" || owner == "FactValue") && read == "Range" -> return Val(sema_fact_named("Range"))
+    if (owner == "FunctionInfo" || owner == "MethodInfo") && read == "Effects" -> return Val(sema_fact_named("EffectInfo"))
+    aggregate :: owner == "TypeInfo" || owner == "FunctionInfo" || owner == "MethodInfo" || owner == "FieldInfo" || owner == "FactInfo" || owner == "FactValue"
+    if aggregate && sema_fact_read_plane(read) != None -> return Val(sema_fact_named("FactValue"))
+    if owner == "TypeInfo" || owner == "FunctionInfo" || owner == "MethodInfo" || owner == "FactInfo" || owner == "FactValue" {
+        detail :: sema_fact_read_detail_field(read) ?? return None
+        if sema_fact_reflection_field_type("FactValue", detail) == .Val(.Option(inner)) -> return Val(inner)
+    }
+    None
+}
+
+fn sema_fact_struct_field(value: TComptimeValue, name: String) -> TComptimeValue? {
+    if value == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == name -> return Val(field.value)
+        }
+    }
+    None
+}
+
+fn sema_fact_value_detail(value: TComptimeValue, read: String) -> TComptimeValue? {
+    kind :: sema_fact_struct_field(value, "kind") ?? return None
+    kind_name := ""
+    if kind == {
+        .Enum(_, variant, _) -> kind_name = variant
+        else -> return None
+    }
+    if kind_name != sema_fact_read_reflection_kind(read) -> return None
+    if sema_fact_read_plane(read) != None -> return Val(value)
+    detail :: sema_fact_read_detail_field(read) ?? return None
+    if sema_fact_struct_field(value, detail) == .Val(.Present(inner)) -> return Val(inner)
+    None
+}
+
+fn sema_fact_info_detail(fact: TComptimeValue, read: String) -> TComptimeValue? {
+    sema_fact_value_detail(sema_fact_struct_field(fact, "value") ?? return None, read)
+}
+
+fn sema_fact_list_detail(facts: TComptimeValue?, read: String) -> TComptimeValue? {
+    if facts == .Val(.List(values)) {
+        loop fact in values {
+            detail :: sema_fact_info_detail(fact, read)
+            if detail != None -> return detail
+        }
+    }
+    None
+}
+
+fn sema_fact_first_dimension(value: TComptimeValue) -> TComptimeValue? {
+    if sema_fact_struct_field(value, "dimensions") == .Val(.List(values)) {
+        if values.len() > 0 -> return Val(values[0])
+    }
+    None
+}
+
+// Project one registered fact from an aggregate reflection value through its
+// typed FactInfo/FactValue carrier (Rust `Comptime::reflected_fact_field`).
+// Codegen reuses this for `$` steps of a prepared-constant path.
+pub fn sema_fact_reflected_field(value: TComptimeValue, member: String) -> TComptimeValue? {
+    read :: sema_fact_read_kind(member) ?? return None
+    sema_fact_reflected_read(value, read)
+}
+
+fn sema_fact_reflected_read(value: TComptimeValue, read: String) -> TComptimeValue? {
+    owner := ""
+    if value == {
+        .Struct(type_name, _) -> owner = type_name
+        else -> return None
+    }
+    facts :: sema_fact_struct_field(value, "facts")
+    if owner == "FactInfo" -> return sema_fact_info_detail(value, read)
+    if owner == "FactValue" -> return sema_fact_value_detail(value, read)
+    if owner == "TypeInfo" {
+        if read == "States" -> return sema_fact_struct_field(value, "states")
+        listed :: sema_fact_list_detail(facts, read)
+        if listed == None && read == "Dimension" -> return sema_fact_first_dimension(value)
+        return listed
+    }
+    if owner == "FunctionInfo" || owner == "MethodInfo" {
+        if read == "Effects" -> return sema_fact_struct_field(value, "effects")
+        return sema_fact_list_detail(facts, read)
+    }
+    if owner == "FieldInfo" {
+        if read == "Dimension" -> return sema_fact_first_dimension(value)
+        return sema_fact_list_detail(facts, read)
+    }
+    None
+}
+
+// A checked value whose content is known before code generation: a literal
+// compile-time value, a prepared constant, or a field/`[i]` projection of one.
+// Only these carry compiler-owned reflection records.
+pub fn sema_fact_constant_path(value: TExpr) -> Bool Never! {
+    if value.kind == {
+        .CtLit(_) | .ConstRef(_) -> true
+        .Field(receiver, _) -> sema_fact_constant_path(receiver)
+        .Index(base, index, _, _, _, _) -> index.kind == .IntLit(_, _) && sema_fact_constant_path(base)
+        else -> false
+    }
+}
+
+// `record.field` over a compiler-owned reflection record. The checked read
+// keeps a field reference with no nominal owner; codegen folds the prepared
+// constant path to its value.
+pub fn sema_fact_reflection_field(base: TExpr, member: String, span: Span) -> TExpr? {
+    owner_name := ""
+    if base.ty == {
+        .Named(name) -> owner_name = name
+        else -> return None
+    }
+    if !sema_fact_constant_path(base) -> return None
+    field_ty :: sema_fact_reflection_field_type(owner_name, member) ?? return None
+    reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: field_ty, boxed: false}
+    Val(sema_tir_expr(field_ty, TExprKind.Field{receiver: base, field: reference}, span))
+}
+
+fn sema_fact_path_text(base: Expr, member: String) -> String? {
+    if base == {
+        .Ident(name, _) -> return Val("{name}.{member}")
+        .Field(inner, inner_member, _) -> {
+            prefix :: sema_fact_path_text(inner, inner_member) ?? return None
+            return Val("{prefix}.{member}")
+        }
+        else -> None
+    }
+}
+
+fn sema_fact_expr_path(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _) -> return Val(name)
+        .Field(base, member, _) -> return sema_fact_path_text(base, member)
+        else -> None
+    }
+}
+
+fn sema_fact_build_rooted(base: Expr) -> Bool Never! {
+    if base == {
+        .Ident(name, _) -> return name == "$build" || name == "$package"
+        .Field(inner, _, _) -> return sema_fact_build_rooted(inner)
+        else -> return false
+    }
+}
+
+// The registered build-fact paths (Rust `Registry::build_fact_read`) and the
+// typed value each one takes from the snapshot (Rust `BuildFactSnapshot::value`).
+fn sema_fact_build_value(path: String, facts: SemaBuildFacts) -> SemaFactReadValue? {
+    if {
+        path == "$package.name" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.package_name}})
+        path == "$package.version" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.package_version}})
+        path == "$build.os" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.os}})
+        path == "$build.profile" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.profile}})
+        path == "$build.stamp.git" -> Val(SemaFactReadValue{ty: Type.Option{inner: Type.String}, value: sema_fact_optional_string(facts.stamp_git)})
+        path == "$build.stamp.dirty" -> Val(SemaFactReadValue{ty: Type.Bool, value: TComptimeValue.Bool{value: facts.stamp_dirty}})
+        path == "$build.stamp.toolchain" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_toolchain}})
+        path == "$build.stamp.at" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_at}})
+        else -> None
+    }
+}
+
+// `$build.settings.<key>` names one declared setting (Rust
+// `Registry::build_setting_key`): a single non-empty key segment.
+pub fn sema_fact_build_setting_key(path: String) -> String? {
+    prefix :: "$build.settings."
+    if !path.starts_with(prefix) -> return None
+    key :: path.slice(prefix.len(), path.len())
+    if key.len() == 0 || key.contains(".") -> return None
+    Val(key)
+}
+
+pub fn sema_fact_build_setting_undeclared(key: String, span: Span) -> Diagnostic {
+    sema_error("E0302", span, "`$build.settings.{key}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{key}: Type = default` to the package `settings: {{ … }}` block")
+}
+
+// D-BUILD-FACT3=A: a complete `$package.*` / `$build.*` path folds to its
+// typed snapshot value (Rust `fold_fact_read`, which reads build paths before
+// the compile-time-only gate). The Jet loader declares no manifest settings
+// yet, so every `$build.settings.*` read is undeclared.
+pub fn sema_fact_build_read(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+    if !sema_fact_build_rooted(base) -> return sema_fact_read_unhandled()
+    path :: sema_fact_path_text(base, member) ?? return sema_fact_read_unhandled()
+    if sema_fact_build_setting_key(path) == .Val(key) {
+        &diagnostics.push(sema_fact_build_setting_undeclared(key, span))
+        return sema_fact_read_failed()
+    }
+    graph :: environment.registration_graph ?? return sema_fact_read_unhandled()
+    resolved :: sema_fact_build_value(path, graph.build_facts) ?? return sema_fact_read_unhandled()
+    SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_fact_prepared_expr(resolved.value, resolved.ty, span), expected, environment, &diagnostics)}
+}
+
+// A prepared value as a checked expression: scalars keep their literal forms,
+// records and lists stay one compile-time literal.
+pub fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span) -> TExpr Never! {
+    kind :: if value == {
+        .Int(number) -> TExprKind.IntLit{value: number, width: None}
+        .Bool(flag) -> TExprKind.BoolLit{value: flag}
+        .String(text) -> TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}
+        else -> TExprKind.CtLit{value: value}
+    }
+    sema_tir_expr(ty, kind, span)
+}
+
+// The value of a checked prepared-constant path over a literal compile-time
+// record (`FACT.field`, `FACTS[0]`, `x.$sendability.known`). Codegen folds the
+// same paths (`PreparedConstants.jet`).
+pub fn sema_fact_constant_path_value(value: TExpr) -> TComptimeValue? {
+    if value.kind == {
+        .IntLit(number, _) -> return Val(TComptimeValue.Int{value: number})
+        .BoolLit(flag) -> return Val(TComptimeValue.Bool{value: flag})
+        .CtLit(known) -> return Val(known)
+        .Field(receiver, field) -> {
+            base :: sema_fact_constant_path_value(receiver) ?? return None
+            if field.name.starts_with("$") -> return sema_fact_reflected_field(base, field.name)
+            return sema_fact_struct_field(base, field.name)
+        }
+        .Index(receiver, index, _, _, _, _) -> {
+            base :: sema_fact_constant_path_value(receiver) ?? return None
+            position := -1
+            if index.kind == .IntLit(number, _) -> position = number
+            if base == .List(values) {
+                if position >= 0 && position < values.len() -> return Val(values[position])
+            }
+            return None
+        }
+        else -> None
+    }
+}
+
+fn sema_fact_struct(type_name: String, fields: [TComptimeField]) -> TComptimeValue Never! {
+    TComptimeValue.Struct{type_name: type_name, fields: fields}
+}
+
+fn sema_fact_optional_string(value: String?) -> TComptimeValue Never! {
+    if value == .Val(text) -> sema_comptime_reflection_some(TComptimeValue.String{value: text}) else -> sema_comptime_reflection_none()
+}
+
+fn sema_fact_unit_scale_provenance(value: UnitScaleProvenance) -> TComptimeValue Never! {
+    kind := "Rational"
+    detail := String?{None}
+    source := String?{None}
+    uncertainty := String?{None}
+    if value == {
+        .Rational -> {}
+        .SymbolicPi(numerator, denominator) -> {
+            kind = "SymbolicPi"
+            detail = Val("{sema_plugin_unit_ratio(numerator)}/{sema_plugin_unit_ratio(denominator)}")
+        }
+        .Conventional(text, origin) -> {
+            kind = "Conventional"
+            detail = Val(text)
+            source = Val(origin)
+        }
+        .Measured(central_value, standard_uncertainty, origin) -> {
+            kind = "Measured"
+            detail = Val(central_value)
+            source = Val(origin)
+            uncertainty = Val(standard_uncertainty)
+        }
+    }
+    sema_fact_struct("UnitScaleProvenanceInfo", [TComptimeField]{
+        TComptimeField{name: "kind", value: TComptimeValue.Enum{type_name: "UnitScaleProvenanceKind", variant: kind, args: [TComptimeEnumArg]{}}},
+        TComptimeField{name: "value", value: sema_fact_optional_string(detail)},
+        TComptimeField{name: "source", value: sema_fact_optional_string(source)},
+        TComptimeField{name: "uncertainty", value: sema_fact_optional_string(uncertainty)},
+    })
+}
+
+fn sema_fact_known(type_name: String, known: Bool) -> TComptimeValue Never! {
+    sema_fact_struct(type_name, [TComptimeField]{TComptimeField{name: "known", value: TComptimeValue.Bool{value: known}}})
+}
+
+fn sema_fact_untracked_origin() -> TComptimeValue Never! {
+    sema_fact_struct("OriginInfo", [TComptimeField]{
+        TComptimeField{name: "tracked", value: TComptimeValue.Bool{value: false}},
+        TComptimeField{name: "source", value: sema_comptime_reflection_none()},
+        TComptimeField{name: "line", value: sema_comptime_reflection_none()},
+        TComptimeField{name: "column", value: sema_comptime_reflection_none()},
+        TComptimeField{name: "ambiguity", value: TComptimeValue.Bool{value: false}},
+    })
+}
+
+fn sema_fact_function_view_provenance(function: Func) -> TComptimeValue Never! {
+    if function.return_view_provenance == .Val(map) {
+        if map.entries.len() > 0 -> return sema_comptime_reflection_view_provenance(map.entries[0].value)
+    }
+    sema_comptime_reflection_view_provenance(ViewProvenance{sources: [ViewSourcePath]{}, mutable: false})
+}
+
+fn sema_fact_function_effects(function: Func) -> TComptimeValue Never! {
+    names := [String]{}
+    if function.declared_effects == .Val(rows) {
+        loop row in rows -> &names.push(row.name)
+    }
+    sema_fact_struct("EffectInfo", [TComptimeField]{TComptimeField{name: "values", value: sema_comptime_reflection_string_list(names)}})
+}
+
+// The declaration a subject name resolves to, if it is a module-level item.
+fn sema_fact_subject_item(symbol: Symbol?, environment: SemaScopeEnvironment) -> Item? {
+    resolved :: symbol ?? return None
+    if resolved.kind != SymbolKind.Type && resolved.kind != SymbolKind.Function -> return None
+    sema_scope_resolve_declaration(environment, resolved.id)
+}
+
+// `TypeInfo` for a registered nominal subject. Fact reads need only the
+// type's own fact rows, so the marker catalog is empty here.
+fn sema_fact_type_info(symbol: Symbol?, name: String, environment: SemaScopeEnvironment) -> TComptimeValue? {
+    resolved :: symbol ?? return None
+    if resolved.kind != SymbolKind.Type -> return None
+    graph :: environment.registration_graph ?? return None
+    sema_comptime_reflection_type_info(graph, resolved.module_name, name, TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}})
+}
+
+fn sema_fact_state_infos(definition: StructDef, symbol: Symbol, environment: SemaScopeEnvironment) -> TComptimeValue? {
+    if definition.state == None -> return None
+    graph_fact := SemaStateGraphFact?{None}
+    if environment.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, symbol.module_name)
+        if module_index == .Val(index) {
+            loop fact in sema_state_graph_facts(graph.modules[index].program.items) {
+                if fact.type_name == definition.name {
+                    graph_fact = Val(fact)
+                    break
+                }
+            }
+        }
+    }
+    Val(sema_comptime_reflection_state_view(definition, graph_fact).states)
+}
+
+fn sema_fact_unit(name: String, environment: SemaScopeEnvironment) -> SemaRegistrationUnitFact? {
+    graph :: environment.registration_graph ?? return None
+    sema_registration_unit_fact_for_type(graph, Type.Named{name: name})
+}
+
+// One subject named by a bare identifier that is not a local: a type, a
+// function, a unit member, or the `report` attribution subject.
+fn sema_fact_subject_value(read: String, name: String, symbol: Symbol?, environment: SemaScopeEnvironment) -> SemaFactReadValue? {
+    item :: sema_fact_subject_item(symbol, environment)
+    unit :: sema_fact_unit(name, environment)
+    declared :: item != None || unit != None
+    if read == "Layout" || read == "Name" || read == "Fields" {
+        info :: sema_fact_type_info(symbol, name, environment) ?? return None
+        field :: if read == "Layout" -> "layout" else -> if read == "Name" -> "name" else -> "fields"
+        value :: sema_fact_struct_field(info, field) ?? return None
+        ty :: sema_fact_reflection_field_type("TypeInfo", field) ?? return None
+        return Val(SemaFactReadValue{ty: ty, value: value})
+    }
+    if read == "Range" {
+        if item == .Val(.Distinct(definition)) {
+            if definition.range == .Val(range) -> return Val(SemaFactReadValue{ty: sema_fact_named("Range"), value: sema_comptime_reflection_range(range.lo, range.hi)})
+        }
+        return None
+    }
+    if read == "Dimension" {
+        fact :: unit ?? return None
+        dimension :: fact.dimension ?? return None
+        return Val(SemaFactReadValue{ty: sema_fact_named("DimensionInfo"), value: sema_comptime_reflection_dimension(dimension)})
+    }
+    if read == "Measure" || read == "Exactness" || read == "Classification" || read == "Obligation" {
+        info :: sema_fact_type_info(symbol, name, environment) ?? return None
+        value :: sema_fact_reflected_read(info, read) ?? return None
+        ty :: sema_fact_reflected_type(sema_fact_named("TypeInfo"), read) ?? return None
+        return Val(SemaFactReadValue{ty: ty, value: value})
+    }
+    if read == "States" {
+        if item == .Val(.Struct(definition)) {
+            resolved :: symbol ?? return None
+            states :: sema_fact_state_infos(definition, resolved, environment) ?? return None
+            return Val(SemaFactReadValue{ty: sema_fact_list_of("StateInfo"), value: states})
+        }
+        return None
+    }
+    if read == "Effects" {
+        if item == .Val(.Func(function)) -> return Val(SemaFactReadValue{ty: sema_fact_named("EffectInfo"), value: sema_fact_function_effects(function)})
+        return None
+    }
+    if !declared && (read == "Sendability" || read == "Movedness" || read == "Origin") -> return None
+    if read == "Sendability" -> return Val(SemaFactReadValue{ty: sema_fact_named("SendabilityInfo"), value: sema_fact_known("SendabilityInfo", true)})
+    if read == "Movedness" -> return Val(SemaFactReadValue{ty: sema_fact_named("MovednessInfo"), value: sema_fact_known("MovednessInfo", false)})
+    if read == "Origin" -> return Val(SemaFactReadValue{ty: sema_fact_named("OriginInfo"), value: sema_fact_untracked_origin()})
+    if read == "Attribution" {
+        if name != "report" -> return None
+        value :: sema_fact_struct("AttributionInfo", [TComptimeField]{
+            TComptimeField{name: "source", value: TComptimeValue.String{value: "report"}},
+            TComptimeField{name: "code", value: sema_comptime_reflection_none()},
+        })
+        return Val(SemaFactReadValue{ty: sema_fact_named("AttributionInfo"), value: value})
+    }
+    if read == "ViewProvenance" {
+        if item == .Val(.Func(function)) -> return Val(SemaFactReadValue{ty: sema_fact_named("ViewProvenanceInfo"), value: sema_fact_function_view_provenance(function)})
+        return None
+    }
+    if read == "UnitScaleProvenance" {
+        fact :: unit ?? return None
+        return Val(SemaFactReadValue{ty: sema_fact_named("UnitScaleProvenanceInfo"), value: sema_fact_unit_scale_provenance(fact.scale_provenance)})
+    }
+    if read == "Maturity" {
+        if item == .Val(.Func(function)) -> return Val(SemaFactReadValue{ty: sema_fact_named("MaturityInfo"), value: sema_comptime_reflection_maturity(function)})
+        return None
+    }
+    plane :: sema_fact_read_plane(read) ?? return None
+    if name != plane -> return None
+    Val(SemaFactReadValue{ty: sema_fact_named("FactValue"), value: sema_comptime_reflection_fact_value(plane, plane, [String]{}, None, None, "", None)})
+}
+
+struct SemaFactReadValue {
+    ty: Type
+    value: TComptimeValue
+}
+
+fn sema_fact_read_no_value(member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+    &diagnostics.push(sema_error("E0302", span, "`{member}` has no registered value for this subject", "fact reads answer typed values from the subject's registered plane", "read the fact on a matching type, function, or the `$build` subject"))
+    sema_fact_read_failed()
+}
+
+// Resolve `base.$member`. `handled: false` leaves an unregistered `$` member
+// (or a nominal fact the subject cannot answer) to the ordinary field path.
+pub fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+    read :: sema_fact_read_kind(member) ?? return sema_fact_read_unhandled()
+    if scopes.comptime_execution_depth == 0 {
+        fix :: if sema_fact_path_text(base, member) == .Val(path) -> "Write `FACT :: prep {{ {path} }}`, then use `FACT` in this expression" else -> "Move the read into a prepared value `NAME :: prep {{ … }}` or a `prep {{ … }}` block"
+        &diagnostics.push(sema_error("E0302", span, "fact read `{member}` is compile-time only", "a fact is a value known before code generation; it never selects runtime behavior", fix))
+        return sema_fact_read_failed()
+    }
+    if base == .Ident(name, _) {
+        index :: sema_scope_resolve_index(scopes, name)
+        symbol := Symbol?{None}
+        if index == .Val(binding_index) -> symbol = Val(scopes.bindings[binding_index].symbol)
+        is_local := false
+        is_constant := false
+        if symbol == .Val(found) {
+            is_local = found.kind == SymbolKind.Local || found.kind == SymbolKind.Parameter
+            is_constant = found.kind == SymbolKind.Constant
+        }
+        if is_local {
+            // A bound local answers the ownership planes the checker holds for
+            // it; reading them neither uses nor moves the local.
+            bound :: symbol ?? return sema_fact_read_failed()
+            if read == "Sendability" {
+                local_ty :: bound.ty ?? return sema_fact_read_no_value(member, span, &diagnostics)
+                problem :: sema_ownership_crossing_problem_for_name(name, local_ty, SemaSendCrossing.TaskCapture, true, environment, scopes, state, context)
+                value :: sema_fact_known("SendabilityInfo", problem == None)
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(sema_fact_named("SendabilityInfo"), TExprKind.CtLit{value: value}, span), expected, environment, &diagnostics)}
+            }
+            if read == "Movedness" {
+                moved := false
+                place :: sema_ownership_place_from_expr_inner(base, scopes)
+                if place == .Val(found) -> moved = sema_ownership_place_moved(&state, found) != None
+                value :: sema_fact_known("MovednessInfo", moved)
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(sema_fact_named("MovednessInfo"), TExprKind.CtLit{value: value}, span), expected, environment, &diagnostics)}
+            }
+            if read == "Layout" || read == "Name" || read == "Fields" -> return sema_fact_read_unhandled()
+            return sema_fact_read_no_value(member, span, &diagnostics)
+        }
+        if !is_constant {
+            resolved :: sema_fact_subject_value(read, name, symbol, environment) ?? {
+                if read == "Layout" || read == "Name" || read == "Fields" -> return sema_fact_read_unhandled()
+                return sema_fact_read_no_value(member, span, &diagnostics)
+            }
+            folded :: sema_tir_expr(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, &diagnostics)}
+        }
+    }
+    checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_fact_read_failed()
+    aggregate_ty :: sema_fact_reflected_type(checked_base.ty, read)
+    if aggregate_ty == .Val(ty) {
+        if checked_base.kind == .CtLit(aggregate) {
+            value :: sema_fact_reflected_field(aggregate, member) ?? return sema_fact_read_no_value(member, span, &diagnostics)
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(ty, TExprKind.CtLit{value: value}, span), expected, environment, &diagnostics)}
+        }
+        if sema_fact_constant_path(checked_base) {
+            owner_name :: type_name(checked_base.ty)
+            reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: ty, boxed: false}
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(ty, TExprKind.Field{receiver: checked_base, field: reference}, span), expected, environment, &diagnostics)}
+        }
+        return sema_fact_read_no_value(member, span, &diagnostics)
+    }
+    if read == "Layout" || read == "Name" || read == "Fields" -> return sema_fact_read_unhandled()
+    sema_fact_read_no_value(member, span, &diagnostics)
+}

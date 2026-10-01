@@ -1357,9 +1357,6 @@ fn base_handle(handle: u64) -> u64 {
         .unwrap_or(handle)
 }
 
-fn scope_request_id(handle: u64) -> Option<String> {
-    scope_parts(handle).and_then(|(_, _, _, _, request_id)| request_id)
-}
 #[derive(Clone)]
 struct JitObservedQuery {
     session_id: String,
@@ -1839,10 +1836,6 @@ pub(crate) fn values_from_list_checked(list: i64) -> Option<Vec<wire::DBValue>> 
         .into_iter()
         .map(read_dbvalue)
         .collect()
-}
-
-pub(crate) fn values_from_list(list: i64) -> Vec<wire::DBValue> {
-    values_from_list_checked(list).unwrap_or_default()
 }
 
 pub(crate) fn alloc_dbvalue_list(values: Vec<wire::DBValue>) -> i64 {
@@ -3321,41 +3314,6 @@ impl ConsoleDbResource {
     pub fn into_parts(self) -> (String, String, ConsoleDbConnection) {
         (self.name, self.identity, self.connection)
     }
-}
-
-pub(crate) fn capture_console_resources() -> Vec<ConsoleDbResource> {
-    let direct = DB_CONNECTIONS.with(|connections| {
-        connections.borrow().iter().copied().collect::<Vec<_>>()
-    });
-    let leases = DB_LEASES.with(|leases| {
-        leases
-            .borrow()
-            .iter()
-            .map(|(id, lease)| (*id, lease.clone()))
-            .collect::<Vec<_>>()
-    });
-    let mut resources = Vec::new();
-    for handle in direct {
-        let connection = ConsoleDbConnection::from_owned_handle(handle);
-        if connection.is_live() {
-            resources.push(ConsoleDbResource {
-                name: format!("resident-db-{handle}"),
-                identity: format!("resident:db:{handle}"),
-                connection,
-            });
-        }
-    }
-    for (id, lease) in leases {
-        let connection = ConsoleDbConnection::from_pool_lease(lease);
-        if connection.is_live() {
-            resources.push(ConsoleDbResource {
-                name: format!("resident-db-lease-{id}"),
-                identity: format!("resident:db-lease:{id}"),
-                connection,
-            });
-        }
-    }
-    resources
 }
 
 /// Open in-memory SQLite (interpreter ambient host).

@@ -107,12 +107,16 @@ impl<'a> Checker<'a> {
             return None;
         };
         // D-CALLBACK-ABI: ordinary function values expose the effective
-        // executable carrier at the call boundary. A collecting loop is an
-        // immediately evaluated list value, so keep its inferred source type;
-        // result loops retain the effective callback carrier.
+        // executable carrier at the call boundary. A collecting loop and an
+        // open `(loop { … break value })` are immediately evaluated values
+        // (TIR lowers them to an inline block of their source type), so keep
+        // their inferred source type. A finite result loop retains the
+        // effective carrier until its written `??` exhaustion route consumes
+        // it (`infer_value_loop_fallback`).
         let callee_ty = if matches!(
             callee.as_ref(),
             Expr::Lambda(lam) if lam.meta.collecting_loop
+                || (lam.meta.result_loop && !lam.meta.requires_exhaustion_route)
         ) {
             callee_ty
         } else {

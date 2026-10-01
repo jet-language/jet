@@ -1,27 +1,27 @@
 base64 canonical Zg==: [102]
-base64 missing padding Zg: rejected: invalid Base64 padding; expected the RFC 4648 padding for the final quantum
-base64 extra padding Zg===: rejected: invalid Base64 padding; at most two '=' characters may trail the alphabet
-base64 interior padding Zg==Zg==: rejected: invalid Base64 padding; '=' may appear only at the end
-base64 nonzero trailing bits Zh==: rejected: invalid Base64 encoding; non-zero unused bits
-base64 url alphabet -_8=: rejected: invalid Base64 character; expected the selected RFC 4648 alphabet
-base64 space: rejected: invalid Base64 character; expected the selected RFC 4648 alphabet
-base64 newline: rejected: invalid Base64 character; expected the selected RFC 4648 alphabet
-base64 non-ASCII byte: rejected: invalid Base64 character; expected the selected RFC 4648 alphabet
-base64 single character: rejected: invalid Base64 length; encoded length cannot represent whole bytes
+base64 missing padding Zg: rejected: invalid base64 at byte 2: expected 2 padding characters
+base64 extra padding Zg===: rejected: invalid base64 at byte 2: encoded length cannot represent whole bytes
+base64 interior padding Zg==Zg==: rejected: invalid base64 at byte 4: padding may appear only at the end
+base64 nonzero trailing bits Zh==: rejected: invalid base64 at byte 1: non-zero unused bits
+base64 url alphabet -_8=: rejected: invalid base64 at byte 0: byte 0x2D is not in the standard base64 alphabet
+base64 space: rejected: invalid base64 at byte 4: ASCII whitespace is not allowed
+base64 newline: rejected: invalid base64 at byte 4: ASCII whitespace is not allowed
+base64 non-ASCII byte: rejected: invalid base64 at byte 4: byte 0xC3 is not in the standard base64 alphabet
+base64 single character: rejected: invalid base64 at byte 1: encoded length cannot represent whole bytes
 base64 empty: []
 base64url canonical Zg: [102]
-base64url padded Zg==: rejected: invalid Base64url padding; '=' is not part of the canonical URL alphabet
-base64url standard alphabet +/8: rejected: invalid Base64 character; expected the selected RFC 4648 alphabet
-base64url nonzero trailing bits Zh: rejected: invalid Base64 encoding; non-zero unused bits
+base64url padded Zg==: rejected: invalid base64url at byte 2: padding is not allowed
+base64url standard alphabet +/8: rejected: invalid base64url at byte 0: byte 0x2B is not in the URL-safe base64 alphabet
+base64url nonzero trailing bits Zh: rejected: invalid base64url at byte 1: non-zero unused bits
 base32 canonical MY======: [102]
-base32 missing padding MY: rejected: invalid Base32 length; canonical Base32 is padded to a multiple of 8 characters
-base32 lowercase my======: rejected: invalid Base32 character; expected the selected RFC 4648 alphabet
-base32 nonzero trailing bits MZ======: rejected: invalid Base32 encoding; non-zero unused bits
-base32 interior padding: rejected: invalid Base32 padding; '=' may appear only at the end
-base32 short padding MY=====: rejected: invalid Base32 length; canonical Base32 is padded to a multiple of 8 characters
+base32 missing padding MY: rejected: invalid base32 at byte 2: expected 6 padding characters
+base32 lowercase my======: rejected: invalid base32 at byte 0: byte 0x6D is not in the base32 alphabet
+base32 nonzero trailing bits MZ======: rejected: invalid base32 at byte 1: non-zero unused bits
+base32 interior padding: rejected: invalid base32 at byte 8: padding may appear only at the end
+base32 short padding MY=====: rejected: invalid base32 at byte 2: expected 1 padding characters
 base32 empty: []
 base32hex canonical CO======: [102]
-base32hex standard alphabet MY======: rejected: invalid Base32 character; expected the selected RFC 4648 alphabet
+base32hex standard alphabet MY======: rejected: invalid Base32hex character
 hex canonical 0aFF: [10, 255]
 hex odd length abc: rejected: odd-length hex string; hex text encodes whole bytes, so the length must be even
 hex bad digit zz: rejected: invalid hex digit; expected 0-9, a-f, or A-F

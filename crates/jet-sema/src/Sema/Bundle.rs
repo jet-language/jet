@@ -12,12 +12,17 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 mod Comptime;
+pub(super) mod ComptimeReuse;
 mod Units;
 
 mod GenericModules;
 mod InlineCalls;
 mod Liveness;
+mod BodyDelta;
+mod ItemReuse;
 mod Outputs;
+mod PackageSeal;
+mod Parallel;
 mod Pipeline;
 mod TargetMachine;
 mod Validation;
@@ -25,6 +30,10 @@ mod Validation;
 pub use Comptime::bundle_has_comptime_evaluation;
 use Comptime::stmts_have_comptime_evaluation;
 use Units::{inject_units_prelude, resolve_unit_dimensions};
+pub use PackageSeal::{
+    sealed_package_count, with_package_records, PackageRecordStore, PackageReuse,
+    PackageReuseRow,
+};
 
 pub(crate) use InlineCalls::{mangle_inline_sibling_calls, rewrite_inline_calls_stmts};
 
@@ -46,7 +55,7 @@ pub use TargetMachine::{
 use Validation::{apply_helper_layer_inference, qualified_effect_facts, taint_check_item};
 #[allow(unused_imports)]
 pub(crate) use Validation::{
-    checker_for_module, check_module_bodies, collect_core_expr, collect_core_lvalue,
+    checker_for_module, check_module_bodies, collect_core_expr, collect_core_lvalue, BodyProducts,
     collect_core_stmts, collect_used_core, expand_core_reachable_closure, fn_types_compatible,
     func_sig_to_fn_type, register_func_item, uses_raw_protocol_function_return,
     uses_raw_protocol_return,
@@ -73,6 +82,8 @@ pub(super) struct CachedFunctionBody {
     pub pending_diagnostics: Vec<PendingFunctionDiagnostic>,
     /// D-INTBIG1: replay the typed exact-Int reachability fact on cache hits.
     pub uses_exact_int: bool,
+    /// D-DX-PLUGIN1=D: replay the body's checked publication facts too.
+    pub devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
 }
 
 #[derive(Clone, Debug)]
@@ -1227,7 +1238,6 @@ fn builtin_type_registry() -> TypeRegistry {
         computed_fields: HashMap::new(),
         field_defaults: HashMap::new(),
         receipt_sections: HashMap::new(),
-        devtools_publications: std::cell::RefCell::new(Vec::new()),
         nominal_memo: Default::default(),
     }
 }
@@ -1829,14 +1839,24 @@ fn populate_name_ledger(
                     };
                     (target, None)
                 };
-            ledger.record_alias(
-                module_idx,
-                import_alias,
-                import_target,
-                target_module,
-                import.alias_span,
-                alias_visibility,
-            );
+            // `use dep.[names]` names members; the namespace itself is bound
+            // by the module or file import beside it (the loader's package
+            // binding), which must keep its own target and span.
+            let namespace_bound_elsewhere = matches!(import.kind, ImportKind::Unqualified { .. })
+                && module.imports.iter().any(|other| {
+                    matches!(other.kind, ImportKind::File(..) | ImportKind::Module(..))
+                        && other.import_alias() == import_alias
+                });
+            if !namespace_bound_elsewhere {
+                ledger.record_alias(
+                    module_idx,
+                    import_alias,
+                    import_target,
+                    target_module,
+                    import.alias_span,
+                    alias_visibility,
+                );
+            }
 
             for binding in import.walk_bindings() {
                 let Some(original) = binding.original else {
@@ -1859,9 +1879,18 @@ fn populate_name_ledger(
                     } else if let Some(resolved) = state.unqualified.get(local) {
                         Some((resolved.clone(), Some(module_idx)))
                     } else if let Some(target_module) = state.imports.get(binding.module_alias) {
+                        // D-MOD-CYCLE1=A: a dependency package is bound through
+                        // one member file; the name belongs to whichever member
+                        // declares it.
+                        let owner = std::iter::once(*target_module)
+                            .chain(ledger.namespace_siblings(*target_module))
+                            .find(|&candidate| {
+                                module_declares(&bundle.modules[candidate].items, original)
+                            })
+                            .unwrap_or(*target_module);
                         Some((
-                            format!("{}.{}", bundle.modules[*target_module].alias, original),
-                            Some(*target_module),
+                            format!("{}.{}", bundle.modules[owner].alias, original),
+                            Some(owner),
                         ))
                     } else {
                         None
@@ -1879,6 +1908,23 @@ fn populate_name_ledger(
             }
         }
     }
+}
+
+/// Whether `items` declare the top-level name `name`.
+fn module_declares(items: &[Item], name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Func(definition) => definition.name == name,
+        Item::Struct(definition) => definition.name == name,
+        Item::Enum(definition) => definition.name == name,
+        Item::Distinct(definition) => definition.name == name,
+        Item::TypeAlias(definition) => definition.name == name,
+        Item::Trait(definition) => definition.name == name,
+        Item::Tag(definition) => definition.name == name,
+        Item::Const(definition) => definition.name == name,
+        Item::ProtocolDecl(definition) => definition.name == name,
+        Item::UnitFamily(family) => family.distinct_defs().iter().any(|member| member.name == name),
+        _ => false,
+    })
 }
 
 /// D-MOD2: inside an inline `module math { … }`, a call to a sibling function

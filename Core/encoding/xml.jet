@@ -54,7 +54,7 @@ fn safe_xml_limits() -> XMLLimits Never! {
 pub enum XMLReason {
     Syntax
     Truncated
-    ForbiddenDtd
+    ForbiddenDTD
     UnknownEntity
 }
 
@@ -85,8 +85,8 @@ pub enum XMLCanonicalMode {
 }
 
 pub enum XMLEncoding {
-    Utf8
-    Utf16
+    UTF8
+    UTF16
 }
 
 pub enum XMLEntityPolicy {
@@ -120,7 +120,7 @@ pub struct XMLReader {
 }
 
 impl XMLReader {
-    pub fn next(&self) -> DataTree? {
+    pub fn next(&self) -> DataTree? Never! {
         if self.yielded -> return None
         self.yielded = true
         Val(self.root)
@@ -154,7 +154,7 @@ pub fn parse_with(text: String, limits: XMLLimits) -> DataTree EncodingError! {
 
 pub fn to_string(value: DataTree) -> String Never! { render_xml(value) }
 
-pub fn to_bytes(value: DataTree) -> [U8] { to_string(value).bytes() }
+pub fn to_bytes(value: DataTree) -> [U8] Never! { to_string(value).bytes() }
 
 pub fn canonical(text: String) -> String EncodingError! { to_string(parse_xml(text)) }
 
@@ -167,27 +167,27 @@ pub fn attribute(name: String, value: String) -> DataTree Never! {
     DataTree.Object(["name": DataTree.Text(~name), "value": DataTree.Text(~value)])
 }
 
-pub fn content(text: String) -> DataTree { DataTree.Text(~text) }
+pub fn content(text: String) -> DataTree Never! { DataTree.Text(~text) }
 
-pub fn expanded_name(name: String) -> String { ~name }
+pub fn expanded_name(name: String) -> String Never! { ~name }
 
-pub fn root(value: DataTree) -> DataTree { ~value }
+pub fn root(value: DataTree) -> DataTree Never! { ~value }
 
 
 pub struct XMLWriter {
     pub parts: [U8]
 }
 impl XMLWriter {
-    pub fn write(&self, value: DataTree) {
+    pub fn write(&self, value: DataTree) Never! {
         chunk :: render_xml(value).bytes()
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn to_string(self) -> String { String.from_bytes(self.parts) ?? "" }
+    pub fn to_string(self) -> String Never! { String.from_bytes(self.parts) ?? "" }
 
-    pub fn flush(&self) {}
+    pub fn flush(&self) Never! {}
 
-    pub fn finish(&self) {}
+    pub fn finish(&self) Never! {}
 }
 
 fn parse_xml(text: String) -> DataTree EncodingError! {
@@ -198,7 +198,7 @@ fn parse_xml_limited(text: String, limits: XMLLimits) -> DataTree EncodingError!
     if text.bytes().len() > limits.max_text_bytes {
         return Err(unsupported_error(EncodingFormat.XML, 0, "XML document exceeds XMLLimits.max_text_bytes"))
     }
-    p := XmlParser{
+    p := XMLParser{
         bytes: text.bytes(),
         index: 0,
         line: 1,
@@ -225,7 +225,7 @@ fn element_tree(name: String, attrs: [DataTree], children: [DataTree]) -> DataTr
     DataTree.Object(entries)
 }
 
-struct XmlParser {
+struct XMLParser {
     bytes: [U8]
     index: Int
     line: Int
@@ -238,7 +238,7 @@ struct XmlParser {
     max_name_bytes: Int
 }
 
-impl XmlParser {
+impl XMLParser {
     fn eof(self) -> Bool Never! { self.index >= self.bytes.len() }
 
     fn peek(self) -> U8? {

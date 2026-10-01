@@ -963,12 +963,6 @@ impl MirType {
         }
     }
 
-    pub fn send_fn_conventions(&self) -> Option<&[MirAccess]> {
-        match &self.kind {
-            MirTypeKind::SendFn { conventions, .. } => Some(conventions),
-            _ => None,
-        }
-    }
     pub fn display_name(&self) -> String {
         self.kind.display_name()
     }
@@ -1026,13 +1020,6 @@ impl MirType {
         }
     }
 
-    pub fn fixed_list_parts(&self) -> Option<(&MirType, &MirMeasure)> {
-        match &self.kind {
-            MirTypeKind::FixedList { elem, len } => Some((elem, len)),
-            _ => None,
-        }
-    }
-
     pub fn nominal_name(&self) -> Option<&str> {
         match &self.kind {
             MirTypeKind::Apply { name, .. } => Some(name.name.as_str()),
@@ -1064,30 +1051,9 @@ impl MirType {
         }
     }
 
-    pub fn union_members(&self) -> Option<&[MirType]> {
-        match &self.kind {
-            MirTypeKind::Union(members) => Some(members),
-            _ => None,
-        }
-    }
-
-    pub fn tagged_inner(&self) -> Option<&MirType> {
-        match &self.kind {
-            MirTypeKind::Tagged { inner, .. } => Some(inner),
-            _ => None,
-        }
-    }
-
     pub fn quantity_parts(&self) -> Option<(&MirType, &MirDimension)> {
         match &self.kind {
             MirTypeKind::Quantity { base, dimension } => Some((base, dimension)),
-            _ => None,
-        }
-    }
-
-    pub fn inline_range_parts(&self) -> Option<(&MirType, i64, i64)> {
-        match &self.kind {
-            MirTypeKind::InlineRange { base, lo, hi } => Some((base, *lo, *hi)),
             _ => None,
         }
     }
@@ -1186,16 +1152,8 @@ impl MirType {
         self.map_parts().is_some()
     }
 
-    pub fn is_fixed_list(&self) -> bool {
-        self.fixed_list_parts().is_some()
-    }
-
     pub fn is_tuple(&self) -> bool {
         self.tuple_fields().is_some()
-    }
-
-    pub fn is_union(&self) -> bool {
-        self.union_members().is_some()
     }
 
     pub fn is_measure(&self) -> bool {
@@ -3343,12 +3301,6 @@ pub struct MirVectorAccess {
     pub column_index: Option<usize>,
 }
 
-impl MirVectorAccess {
-    pub const fn field_name_required(self) -> bool {
-        self.field.is_some()
-    }
-}
-
 /// Every derived fact is either a proof-backed eligibility or an explicit
 /// conservative rejection.  Absence is not represented as an unchecked
 /// success.
@@ -3688,6 +3640,33 @@ pub enum MirProjection {
         span: Span,
     },
     Deref { span: Span },
+    /// D-SHAPE-PLACE1=A: the payload of a checked variant inside an enum,
+    /// Option, or Result place. A match on a `&place` subject binds each
+    /// payload name as a write window through this projection, so edits land
+    /// in the owner's storage. Only read or written after the variant test.
+    Payload { kind: MirPayloadKind, span: Span },
+    /// D-SHAPE-PLACE1=A: the fixed-length range window `list[a..b]` of a
+    /// list place. `range` is the checked `Range` value; the view bounds rule
+    /// is checked where the window is read and every write lands in the
+    /// owner's storage. The projected place keeps the list type, so a
+    /// length-preserving callee edits the window in place without a copy.
+    Range {
+        range: MirValueId,
+        location: MirPanicLoc,
+        span: Span,
+    },
+}
+
+/// Which carrier a `MirProjection::Payload` enters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MirPayloadKind {
+    Option,
+    Result { ok: bool },
+    Enum {
+        owner: MirTypeId,
+        variant: String,
+        index: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -7017,9 +6996,6 @@ pub struct MirPackageFacts {
     /// Checked runtime layer, concrete providers, and their artifact identity.
     pub target_dossier: crate::Facts::TargetDossier,
     pub web_app: Option<crate::App::AppGraph>,
-    /// D-MODEL-SIGNATURE1: loader-projected model output payloads consumed by
-    /// native, web, and resident hosts without compiler/package-model linkage.
-    pub model_outputs: Vec<crate::AST::ModelOutputFact>,
     /// D-PLUGIN-AUTHORITY1: package-declared guest capability needs.
     pub authority_needs: Vec<String>,
     pub hardware_use: crate::TargetMachine::TargetHardwareUse,
@@ -7468,14 +7444,13 @@ impl MirProgram {
         &self,
         id: MirArtifactId,
     ) -> Result<MirArtifactIdentity, MirIdentityError> {
-        crate::MIROptimization::require_canonical_mir_optimization(self)
+        let program_digest = crate::MIROptimization::canonical_mir_digest(self)
             .map_err(|error| MirIdentityError::Unoptimized(error.to_string()))?;
         let artifact = self
             .artifacts
             .iter()
             .find(|artifact| artifact.id == id)
             .ok_or(MirIdentityError::MissingArtifact(id))?;
-        let program_digest = crate::MIROptimization::mir_program_digest(self);
         let program_digest_hex = digest_hex(&program_digest);
         let mut function_ids = self
             .functions
@@ -8340,7 +8315,15 @@ fn validate_function(
                         });
                     }
                 }
-                MirProjection::Deref { .. } => {}
+                MirProjection::Range { location, .. } => {
+                    if !source_file_ids.contains(&location.file) {
+                        return Err(MirValidationError::MissingSourceFile {
+                            function: function.id,
+                            source_file: location.file,
+                        });
+                    }
+                }
+                MirProjection::Deref { .. } | MirProjection::Payload { .. } => {}
             }
         }
     }
@@ -8837,7 +8820,10 @@ fn place_value_uses(place: &MirPlace) -> impl Iterator<Item = MirValueId> + '_ {
     base.into_iter().chain(place.projections.iter().filter_map(|projection| {
         match projection {
             MirProjection::Index { index, .. } => Some(*index),
-            MirProjection::Field { .. } | MirProjection::Deref { .. } => None,
+            MirProjection::Range { range, .. } => Some(*range),
+            MirProjection::Field { .. }
+            | MirProjection::Deref { .. }
+            | MirProjection::Payload { .. } => None,
         }
     }))
 }

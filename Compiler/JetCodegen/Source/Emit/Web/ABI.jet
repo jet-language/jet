@@ -1,63 +1,73 @@
 // WebAssembly boundary lowering for checked Web exports.  Collection values use
 // the DOM runtime ABI; scalar values use the Wasm numeric ABI.  The checked MIR
 // reconstruction rows are expanded here, never inferred from a source type.
+use jet_foundation.[
+    MIRFunction,
+    MIRFunctionForm,
+    MIRType,
+    MIRTypeKind,
+    MIRWebBucket,
+    MIRWebParamReconstruction,
+    mir_type_display_name,
+    mir_type_is_unit,
+]
 
-fn jet_web_wasm_list_kind(ctx: &JetWebEmitContext, inner: MirType) -> String? {
+fn jet_web_wasm_list_kind(ctx: &JetWebEmitContext, inner: MIRType) -> String? {
     if inner.kind == {
         .Int -> Val("list-int")
         .String -> Val("list-string")
         .IntN(signed, bits) -> if signed && bits == 64 -> Val("list-i64") else -> None
-        .InlineRange(base, _, _) -> jet_web_wasm_list_kind(ctx, base)
-        .Tagged(_, base) -> jet_web_wasm_list_kind(ctx, base)
-        .Quantity(base, _) -> jet_web_wasm_list_kind(ctx, base)
+        .InlineRange(base, _, _) -> jet_web_wasm_list_kind(&ctx, base)
+        .Tagged(_, base) -> jet_web_wasm_list_kind(&ctx, base)
+        .Quantity(base, _) -> jet_web_wasm_list_kind(&ctx, base)
         else -> None
     }
 }
 
-fn jet_web_wasm_abi_kind(ctx: &JetWebEmitContext, ty: MirType) -> String? {
+fn jet_web_wasm_abi_kind(ctx: &JetWebEmitContext, ty: MIRType) -> String? {
     if mir_type_is_unit(ty) -> return None
     if ty.kind == {
         .Int -> Val("int")
         .String -> Val("string")
         .List(inner) -> {
-            kind :: jet_web_wasm_list_kind(ctx, inner)
+            kind :: jet_web_wasm_list_kind(&ctx, inner)
             if kind == .Val(name) -> return Val(name)
-            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export collection type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidABI, "E0003", "unsupported Web Wasm export collection type", mir_type_display_name(ty), None)
             None
         }
         .Map(key, value) -> {
-            if key.kind == MirTypeKind.String && value.kind == MirTypeKind.Int -> return Val("map-string-int")
-            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export map type", mir_type_display_name(ty), None)
+            if key.kind == MIRTypeKind.String && value.kind == MIRTypeKind.Int -> return Val("map-string-int")
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidABI, "E0003", "unsupported Web Wasm export map type", mir_type_display_name(ty), None)
             None
         }
-        .InlineRange(base, _, _) -> jet_web_wasm_abi_kind(ctx, base)
-        .Tagged(_, base) -> jet_web_wasm_abi_kind(ctx, base)
-        .Quantity(base, _) -> jet_web_wasm_abi_kind(ctx, base)
+        .InlineRange(base, _, _) -> jet_web_wasm_abi_kind(&ctx, base)
+        .Tagged(_, base) -> jet_web_wasm_abi_kind(&ctx, base)
+        .Quantity(base, _) -> jet_web_wasm_abi_kind(&ctx, base)
         .Float | .Bool | .Char | .IntN(_, _) | .Float32 -> None
         else -> {
-            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported Web Wasm export boundary type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidABI, "E0003", "unsupported Web Wasm export boundary type", mir_type_display_name(ty), None)
             None
         }
     }
 }
 
-fn jet_web_wasm_direct_argument(ctx: &JetWebEmitContext, value: String, ty: MirType) -> String {
+fn jet_web_wasm_direct_argument(ctx: &JetWebEmitContext, value: String, ty: MIRType) -> String {
     if ty.kind == {
         .Float | .Float32 -> "Number({value})"
         .Bool -> "Number(Boolean({value}))"
         .Char -> "Number(String({value}).codePointAt(0))"
         .IntN(_, bits) -> if bits <= 32 -> "Number({value})" else -> "BigInt({value})"
-        .InlineRange(base, _, _) -> jet_web_wasm_direct_argument(ctx, value, base)
-        .Tagged(_, base) -> jet_web_wasm_direct_argument(ctx, value, base)
-        .Quantity(base, _) -> jet_web_wasm_direct_argument(ctx, value, base)
+        .InlineRange(base, _, _) -> jet_web_wasm_direct_argument(&ctx, value, base)
+        .Tagged(_, base) -> jet_web_wasm_direct_argument(&ctx, value, base)
+        .Quantity(base, _) -> jet_web_wasm_direct_argument(&ctx, value, base)
         else -> {
-            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported direct Web Wasm export argument type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidABI, "E0003", "unsupported direct Web Wasm export argument type", mir_type_display_name(ty), None)
             "undefined"
         }
     }
 }
 
-fn jet_web_wasm_direct_return(ctx: &JetWebEmitContext, raw: String, ty: MirType) -> String {
+fn jet_web_wasm_direct_return(ctx: &JetWebEmitContext, raw: String, ty: MIRType) -> String {
     if ty.kind == {
         .Float | .Float32 -> "Number({raw})"
         .Bool -> "Boolean(Number({raw}))"
@@ -66,40 +76,40 @@ fn jet_web_wasm_direct_return(ctx: &JetWebEmitContext, raw: String, ty: MirType)
             mode :: if signed -> "Int" else -> "Uint"
             "BigInt.as{mode}N({bits}, BigInt({raw}))"
         }
-        .InlineRange(base, _, _) -> jet_web_wasm_direct_return(ctx, raw, base)
-        .Tagged(_, base) -> jet_web_wasm_direct_return(ctx, raw, base)
-        .Quantity(base, _) -> jet_web_wasm_direct_return(ctx, raw, base)
+        .InlineRange(base, _, _) -> jet_web_wasm_direct_return(&ctx, raw, base)
+        .Tagged(_, base) -> jet_web_wasm_direct_return(&ctx, raw, base)
+        .Quantity(base, _) -> jet_web_wasm_direct_return(&ctx, raw, base)
         else -> {
-            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidAbi, "E0003", "unsupported direct Web Wasm export return type", mir_type_display_name(ty), None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidABI, "E0003", "unsupported direct Web Wasm export return type", mir_type_display_name(ty), None)
             "undefined"
         }
     }
 }
 
-fn jet_web_wasm_argument(ctx: &JetWebEmitContext, value: String, ty: MirType) -> String {
-    kind :: jet_web_wasm_abi_kind(ctx, ty)
+fn jet_web_wasm_argument(ctx: &JetWebEmitContext, value: String, ty: MIRType) -> String {
+    kind :: jet_web_wasm_abi_kind(&ctx, ty)
     if {
         ctx.failure != None -> "undefined"
         kind != None -> "jetDom.marshalAbi({value}, {jet_web_js_quote(kind)}, __jetPreludeWasm)"
-        else -> jet_web_wasm_direct_argument(ctx, value, ty)
+        else -> jet_web_wasm_direct_argument(&ctx, value, ty)
     }
 }
 
-fn jet_web_wasm_return(ctx: &JetWebEmitContext, raw: String, ty: MirType) -> String {
-    kind :: jet_web_wasm_abi_kind(ctx, ty)
+fn jet_web_wasm_return(ctx: &JetWebEmitContext, raw: String, ty: MIRType) -> String {
+    kind :: jet_web_wasm_abi_kind(&ctx, ty)
     if {
         ctx.failure != None -> "undefined"
         kind != None -> "jetDom.unmarshalAbi({raw}, {jet_web_js_quote(kind)}, __jetPreludeWasm)"
         mir_type_is_unit(ty) -> "undefined"
-        else -> jet_web_wasm_direct_return(ctx, raw, ty)
+        else -> jet_web_wasm_direct_return(&ctx, raw, ty)
     }
 }
 
-fn jet_web_wasm_bridge_arguments(ctx: &JetWebEmitContext, function: MirFunction) -> [String] {
+fn jet_web_wasm_bridge_arguments(ctx: &JetWebEmitContext, function: MIRFunction) -> [String] {
     values := [String]{}
     loop (index, parameter) in function.params {
         value :: "args[{index}]"
-        reconstruction := None
+        reconstruction := MIRWebParamReconstruction?{None}
         loop row in function.web_param_reconstructions {
             if row.local == parameter.name -> reconstruction = Val(row)
         }
@@ -107,22 +117,22 @@ fn jet_web_wasm_bridge_arguments(ctx: &JetWebEmitContext, function: MirFunction)
             .Val(row) -> {
             loop field in row.fields {
                 field_value :: "({value})[{jet_web_js_quote(field.field)}]"
-                &values.push(jet_web_wasm_argument(ctx, field_value, field.ty))
+                &values.push(jet_web_wasm_argument(&ctx, field_value, field.ty))
             }
             }
             else -> {
-            &values.push(jet_web_wasm_argument(ctx, value, parameter.ty))
+            &values.push(jet_web_wasm_argument(&ctx, value, parameter.ty))
             }
         }
     }
     values
 }
 
-fn jet_web_wasm_export_symbol(function: MirFunction) -> String Never! { "jet_export_{function.name}" }
+fn jet_web_wasm_export_symbol(function: MIRFunction) -> String Never! { "jet_export_{function.name}" }
 
-fn jet_web_wasm_bridge_name(function: MirFunction) -> String Never! { "bridge_{function.name}" }
+fn jet_web_wasm_bridge_name(function: MIRFunction) -> String Never! { "bridge_{function.name}" }
 
-fn jet_web_wasm_export_success_type(function: MirFunction) -> MirType Never! {
+fn jet_web_wasm_export_success_type(function: MIRFunction) -> MIRType Never! {
     if function.failure == {
         .Result(success, _) -> success
         .Optional(value) -> value
@@ -130,9 +140,9 @@ fn jet_web_wasm_export_success_type(function: MirFunction) -> MirType Never! {
     }
 }
 
-fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunction, out: &[String]) {
-    if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> return
-    if function.form != MirFunctionForm.TopLevel || function.capture_params.len() != 0 {
+fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MIRFunction, out: &[String]) {
+    if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MIRWebBucket.Wasm) -> return
+    if function.form != MIRFunctionForm.TopLevel || function.capture_params.len() != 0 {
         jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export is not a top-level capture-free function", function.name, Val(function.span))
         return
     }
@@ -142,9 +152,9 @@ fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunctio
     }
     bridge :: jet_web_wasm_bridge_name(function)
     symbol :: jet_web_wasm_export_symbol(function)
-    args :: jet_web_wasm_bridge_arguments(ctx, function)
+    args :: jet_web_wasm_bridge_arguments(&ctx, function)
     if ctx.failure != None -> return
-    result :: jet_web_wasm_return(ctx, "raw", jet_web_wasm_export_success_type(function))
+    result :: jet_web_wasm_return(&ctx, "raw", jet_web_wasm_export_success_type(function))
     if ctx.failure != None -> return
     &out.push("async function {bridge}(...args) {{")
     &out.push("  if (args.length !== {function.params.len()}) throw new TypeError({jet_web_js_quote("Web Wasm export {function.name} expects {function.params.len()} arguments")});")
@@ -165,10 +175,10 @@ fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunctio
     &out.push("")
 }
 
-fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunction], out: &[String]) {
+fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, out: &[String]) {
     names := [String]{}
-    loop function in functions {
-        if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> next
+    loop function in ctx.functions {
+        if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MIRWebBucket.Wasm) -> next
         loop name in names {
             if name == function.name {
                 jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidExport, "E0003", "Web Wasm export has a duplicate JavaScript bridge name", function.name, Val(function.span))
@@ -176,6 +186,6 @@ fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunc
             }
         }
         &names.push(function.name)
-        jet_web_emit_wasm_export_bridge(ctx, function, &out)
+        jet_web_emit_wasm_export_bridge(&ctx, function, &out)
     }
 }

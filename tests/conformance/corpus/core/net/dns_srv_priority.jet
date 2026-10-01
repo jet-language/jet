@@ -20,5 +20,5 @@ fn run() {
     records :: net.dns_srv_at(address, "example.test", 1000) ?? panic("DNS SRV")
     result :: net.dns_srv_priority(records[0])
     print(result == 10)
-    responder.join() ?? panic("DNS responder")
+    (responder.join() ?? panic("DNS responder")).drop("the responder's sent byte count is not checked")
 }

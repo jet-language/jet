@@ -1,7 +1,19 @@
 // Collect canonical MIR type instances from the completed lowered rows.
+use jet_foundation.[
+    MIRConstantDef,
+    MIRForeign,
+    MIRFunction,
+    MIRImplDef,
+    MIRTraitDef,
+    MIRTraitMethod,
+    MIRType,
+    MIRTypeDef,
+    Type,
+    mir_type_with_identity,
+]
 
-fn jet_codegen_type_definition_types(definition: MirTypeDef) -> [MirType] Never! {
-    rows := [MirType]{}
+fn jet_codegen_type_definition_types(definition: MIRTypeDef) -> [MIRType] Never! {
+    rows := [MIRType]{}
     if definition.kind == {
         .Struct(fields, _) -> loop field in fields -> &rows.push(field.ty)
         .Enum(variants, _) -> loop variant in variants {
@@ -18,8 +30,8 @@ fn jet_codegen_type_definition_types(definition: MirTypeDef) -> [MirType] Never!
     rows
 }
 
-fn jet_codegen_function_type_rows(function: MirFunction) -> [MirType] Never! {
-    rows := [MirType]{}
+fn jet_codegen_function_type_rows(function: MIRFunction) -> [MIRType] Never! {
+    rows := [MIRType]{}
     loop parameter in function.params -> &rows.push(parameter.ty)
     if function.declared_return != None -> &rows.push(function.declared_return ?? function.return_type)
     &rows.push(function.return_type)
@@ -48,8 +60,8 @@ fn jet_codegen_function_type_rows(function: MirFunction) -> [MirType] Never! {
     rows
 }
 
-fn jet_codegen_trait_method_type_rows(method: MirTraitMethod) -> [MirType] Never! {
-    rows := [MirType]{}
+fn jet_codegen_trait_method_type_rows(method: MIRTraitMethod) -> [MIRType] Never! {
+    rows := [MIRType]{}
     loop parameter in method.params -> &rows.push(parameter.ty)
     if method.declared_return != None -> &rows.push(method.declared_return ?? method.return_type)
     &rows.push(method.return_type)
@@ -61,15 +73,15 @@ fn jet_codegen_trait_method_type_rows(method: MirTraitMethod) -> [MirType] Never
     rows
 }
 
-fn jet_codegen_ensure_type_instance(instances: &[MirType], instance: MirType) Never! {
+fn jet_codegen_ensure_type_instance(instances: &[MIRType], instance: MIRType) Never! {
     identity :: instance.identity ?? return
     loop existing in instances {
-        if existing.identity == Val(identity) -> return
+        if existing.identity == (Val(identity)) -> return
     }
     &instances.push(instance)
 }
 
-fn jet_codegen_merge_nested_type_instances(instances: &[MirType], ty: MirType) Never! {
+fn jet_codegen_merge_nested_type_instances(instances: &[MIRType], ty: MIRType) Never! {
     if ty.kind == {
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> jet_codegen_merge_type_instance(&instances, inner)
         .Map(key, value) | .Result(key, value) -> {
@@ -82,7 +94,7 @@ fn jet_codegen_merge_nested_type_instances(instances: &[MirType], ty: MirType) N
         }
         .SendFn(params, ret, _) -> {
             loop parameter in params -> jet_codegen_merge_type_instance(&instances, parameter)
-            if ret != None -> jet_codegen_merge_type_instance(&instances, ret ?? ty)
+            if ret != None -> jet_codegen_merge_type_instance(&instances, ret)
         }
         .Apply(_, args) -> loop argument in args -> jet_codegen_merge_type_instance(&instances, argument)
         .Tuple(fields) -> loop field in fields -> jet_codegen_merge_type_instance(&instances, field.ty)
@@ -92,11 +104,11 @@ fn jet_codegen_merge_nested_type_instances(instances: &[MirType], ty: MirType) N
     }
 }
 
-fn jet_codegen_merge_type_instance(instances: &[MirType], instance: MirType) Never! {
+fn jet_codegen_merge_type_instance(instances: &[MIRType], instance: MIRType) Never! {
     identity :: instance.identity ?? panic("checked MIR type instance has no canonical identity")
     found := false
     loop existing in instances {
-        if existing.identity == Val(identity) {
+        if existing.identity == (Val(identity)) {
             if existing != instance -> panic("conflicting canonical MIR type instance {identity.value}")
             found = true
         }
@@ -105,7 +117,7 @@ fn jet_codegen_merge_type_instance(instances: &[MirType], instance: MirType) Nev
     jet_codegen_merge_nested_type_instances(&instances, instance)
 }
 
-fn jet_codegen_sort_type_instances(instances: &[MirType]) Never! {
+fn jet_codegen_sort_type_instances(instances: &[MIRType]) Never! {
     index := 1
     loop index < instances.len() {
         current := instances[index]
@@ -125,8 +137,8 @@ fn jet_codegen_sort_type_instances(instances: &[MirType]) Never! {
 // Inputs are completed lowered rows; constants are the runtime-only rows.
 // Pass top-level and nested functions separately, plus foreign rows, so their
 // signatures participate even when they do not appear in an instruction result.
-fn jet_codegen_collect_type_instances(types: [MirTypeDef], functions: [MirFunction], nested_functions: [MirFunction], foreign: [MirForeign], traits: [MirTraitDef], impls: [MirImplDef], constants: [MirConstantDef]) -> [MirType] Never! {
-    instances := [MirType]{}
+fn jet_codegen_collect_type_instances(types: [MIRTypeDef], functions: [MIRFunction], nested_functions: [MIRFunction], foreign: [MIRForeign], traits: [MIRTraitDef], impls: [MIRImplDef], constants: [MIRConstantDef]) -> [MIRType] Never! {
+    instances := [MIRType]{}
     loop definition in types {
         declared := mir_type_with_identity(jet_codegen_lower_type(Type.Named{name: definition.key}), definition.id)
         &instances.push(declared)

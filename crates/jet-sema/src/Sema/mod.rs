@@ -285,36 +285,76 @@ fn body_failure_edges(body: &[crate::AST::Stmt]) -> Option<BTreeSet<String>> {
     Some(edges)
 }
 
+/// The declaring module of the call edge `edge` that `module` writes, and the
+/// function's name there: a qualified `alias.name` through the module's
+/// imports, a bare name through the module's package, then through its
+/// selective imports. `owner_of` finds the package member declaring a name.
+fn failure_edge_owner<'a>(
+    module: usize,
+    edge: &'a str,
+    imports: &HashMap<String, usize>,
+    name_ledger: &'a jet_foundation::Names::NameLedger,
+    owner_of: &impl Fn(usize, &str) -> Option<usize>,
+) -> Option<(usize, &'a str)> {
+    if let Some((alias, leaf)) = edge.rsplit_once('.') {
+        let target = *imports.get(alias)?;
+        return owner_of(target, leaf).map(|owner| (owner, leaf));
+    }
+    if let Some(owner) = owner_of(module, edge) {
+        return Some((owner, edge));
+    }
+    let alias = name_ledger.alias(module, edge)?;
+    let leaf = alias.target.rsplit('.').next()?;
+    owner_of(alias.target_module?, leaf).map(|owner| (owner, leaf))
+}
+
 /// #3708 (D-FAILURE-FOUNDATION1=A): "Every function has the structured Error
 /// route by default. Sema removes it when impossible." After every body is
-/// checked, a greatest fixpoint over same-module call edges finds the
+/// checked, a greatest fixpoint over the bundle's call edges finds the
 /// unannotated functions whose failure set is empty; each is projected onto
 /// the `T Never!` carrier (reported as `inferred: none`), which every tier
 /// lowers as a plain return (#3740). A function used as a value keeps its
 /// declared callable type. E2404 obligations recorded against a callee are
 /// then discharged or emitted. Returns each module's inferred-infallible
 /// function names (indexed like `bundle.modules`) for later solved checks.
+/// `fixed` holds the recorded sets of sealed dependency modules (#2517 S2),
+/// whose bodies were not checked in this run.
+///
+/// D-MOD-CYCLE1=A: a package is one namespace, so an edge may name a
+/// function of another member file or of an imported package. Each edge
+/// resolves to its declaring module the way the name ledger binds it; an
+/// edge with no loaded declaration keeps the caller fallible.
 pub(crate) fn solve_inferred_failure(
     bundle: &mut crate::AST::ProgramBundle,
     module_summaries: &[(String, HashMap<String, Effects::EffectSummary>)],
     address_taken: &HashSet<String>,
+    fixed: &HashMap<usize, HashSet<String>>,
+    name_ledger: &jet_foundation::Names::NameLedger,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<HashSet<String>> {
-    let mut inferred = Vec::with_capacity(bundle.modules.len());
+    let module_count = bundle.modules.len();
+    let mut declared: Vec<HashSet<&str>> = Vec::with_capacity(module_count);
+    let mut empty: Vec<HashSet<&str>> = Vec::with_capacity(module_count);
+    let mut candidates: Vec<HashMap<&str, BTreeSet<String>>> = Vec::with_capacity(module_count);
+    let mut inferred: Vec<HashSet<String>> = Vec::with_capacity(module_count);
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         let summaries = module_summaries.get(module_idx).map(|(_, rows)| rows);
         let entry = module_idx == bundle.entry;
-        let mut empty = HashSet::new();
-        let mut candidates = HashMap::new();
+        let recorded = fixed.get(&module_idx);
+        let mut module_declared = HashSet::new();
+        let mut module_empty = HashSet::new();
+        let mut module_candidates = HashMap::new();
         for item in &module.items {
             let crate::AST::Item::Func(function) = item else {
                 continue;
             };
+            module_declared.insert(function.name.as_str());
             if function.failure_contract().is_proven_unreachable() {
-                empty.insert(function.name.clone());
+                module_empty.insert(function.name.as_str());
                 continue;
             }
-            if !failure_inference_candidate(function, entry)
+            if recorded.is_some()
+                || !failure_inference_candidate(function, entry)
                 || address_taken.contains(&function.name)
                 || summaries
                     .and_then(|rows| rows.get(&function.name))
@@ -323,28 +363,86 @@ pub(crate) fn solve_inferred_failure(
                 continue;
             }
             if let Some(edges) = body_failure_edges(&function.body) {
-                candidates.insert(function.name.clone(), edges);
+                module_candidates.insert(function.name.as_str(), edges);
             }
         }
-        let mut solved: HashSet<String> = candidates.keys().cloned().collect();
-        loop {
-            let fallible: Vec<String> = solved
+        inferred.push(match recorded {
+            Some(recorded) => recorded.clone(),
+            None => module_candidates
+                .keys()
+                .map(|name: &&str| name.to_string())
+                .collect(),
+        });
+        declared.push(module_declared);
+        empty.push(module_empty);
+        candidates.push(module_candidates);
+    }
+    let imports: Vec<HashMap<String, usize>> = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(module_idx, module)| {
+            module
+                .imports
                 .iter()
-                .filter(|name| {
-                    candidates[*name]
-                        .iter()
-                        .any(|edge| !solved.contains(edge) && !empty.contains(edge))
+                .filter_map(|import| {
+                    name_ledger
+                        .import_target(module_idx, import.span)
+                        .map(|target| (import.import_alias(), target))
                 })
-                .cloned()
-                .collect();
-            if fallible.is_empty() {
-                break;
-            }
-            for name in fallible {
-                solved.remove(&name);
+                .collect()
+        })
+        .collect();
+    let members: Vec<Vec<usize>> = (0..module_count)
+        .map(|module_idx| name_ledger.namespace_siblings(module_idx))
+        .collect();
+    let owner_of = |module: usize, leaf: &str| {
+        if declared[module].contains(leaf) {
+            return Some(module);
+        }
+        members[module]
+            .iter()
+            .copied()
+            .find(|&member| declared[member].contains(leaf))
+    };
+    let resolved: Vec<Vec<(&str, Vec<Option<(usize, &str)>>)>> = candidates
+        .iter()
+        .enumerate()
+        .map(|(module_idx, rows)| {
+            rows.iter()
+                .map(|(name, edges)| {
+                    let edges = edges
+                        .iter()
+                        .map(|edge| {
+                            failure_edge_owner(module_idx, edge, &imports[module_idx], name_ledger, &owner_of)
+                        })
+                        .collect();
+                    (*name, edges)
+                })
+                .collect()
+        })
+        .collect();
+    loop {
+        let mut fallible = Vec::new();
+        for (module_idx, rows) in resolved.iter().enumerate() {
+            for (name, edges) in rows {
+                if inferred[module_idx].contains(*name)
+                    && edges.iter().any(|edge| {
+                        edge.is_none_or(|(owner, leaf)| {
+                            !inferred[owner].contains(leaf) && !empty[owner].contains(leaf)
+                        })
+                    })
+                {
+                    fallible.push((module_idx, *name));
+                }
             }
         }
-        inferred.push(solved);
+        if fallible.is_empty() {
+            break;
+        }
+        for (module_idx, name) in fallible {
+            inferred[module_idx].remove(name);
+        }
     }
     for (module, solved) in bundle.modules.iter_mut().zip(&inferred) {
         for item in &mut module.items {
@@ -576,12 +674,6 @@ pub(crate) struct TypeRegistry {
     /// D-DEFAULT-SHAPE1=B: struct name → field name → default expression for omitted
     /// `Type.{ … }` construction and wire/CLI absence.
     field_defaults: HashMap<String, HashMap<String, crate::AST::Expr>>,
-    /// D-DX-PLUGIN1=D: checked `core.devtools.publish` facts are owned by
-    /// the module's existing type registry until bundle completion projects
-    /// them into the shared panel registry. Interior mutability keeps the
-    /// body checker read-only over the nominal registry while still allowing
-    /// one typed fact sink.
-    devtools_publications: std::cell::RefCell<Vec<jet_foundation::AST::DevtoolsFactPublication>>,
     /// Named checked receipt declarations keyed by canonical type identity.
     receipt_sections: HashMap<String, ReceiptSectionMeta>,
     /// D-COMPILE-SPEED1 (#3661): structural answers about named types,
@@ -934,36 +1026,6 @@ impl TypeRegistry {
         }
         out
     }
-    /// Store one sema-typed publication fact in the module's canonical
-    /// semantic-facts owner. Duplicate inference visits at one source span do
-    /// not create duplicate protocol rows.
-    pub(crate) fn record_devtools_publication(
-        &self,
-        publication: jet_foundation::AST::DevtoolsFactPublication,
-    ) {
-        let mut facts = self.devtools_publications.borrow_mut();
-        if !facts.iter().any(|existing| existing.span == publication.span) {
-            facts.push(publication);
-        }
-    }
-
-    /// Snapshot the checked publication facts for bundle completion. The
-    /// caller projects these rows into the shared panel registry exactly once.
-    pub(crate) fn devtools_publications(
-        &self,
-    ) -> Vec<jet_foundation::AST::DevtoolsFactPublication> {
-        self.devtools_publications.borrow().clone()
-    }
-    /// Restore the publication facts that preceded an erased scope. The body
-    /// checker shares this per-module registry through interior mutability, so
-    /// the erased-scope boundary must roll back writes made by nested calls too.
-    pub(crate) fn restore_devtools_publications(
-        &self,
-        publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
-    ) {
-        *self.devtools_publications.borrow_mut() = publications;
-    }
-
 }
 
 fn marker_argument<'a>(marker: &'a Marker, name: &str, positional: usize) -> Option<&'a Expr> {
@@ -1817,6 +1879,30 @@ pub enum CompileMode {
     Eval,
 }
 
+/// A one-way boolean fact that parallel body checkers of one module may set
+/// concurrently. Setting is idempotent, so the final value does not depend on
+/// the order in which checkers finish.
+#[derive(Default)]
+pub(crate) struct SharedFlag(std::sync::atomic::AtomicBool);
+
+impl SharedFlag {
+    pub(crate) fn set(&self, value: bool) {
+        self.0.store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn get(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Clone for SharedFlag {
+    fn clone(&self) -> Self {
+        let flag = Self::default();
+        flag.set(self.get());
+        flag
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ModuleState {
     module_path: String,
@@ -1836,10 +1922,13 @@ pub(crate) struct ModuleState {
     /// D-INTBIG1: a checked body or sema-typed constant can reach the exact
     /// `Int` runtime. Keep this fact in sema; codegen must not rediscover it
     /// by enumerating source expression shapes.
-    exact_int_reachable: std::cell::Cell<bool>,
+    exact_int_reachable: SharedFlag,
     /// D-NEVER1=C: names whose checked bodies have no returning path. This is
     /// a compiler-only bottom fact; it never becomes a public `Never` type.
     diverging_functions: std::collections::HashSet<String>,
+    /// D-SHAPE-PLACE1=A: `(function, parameter index)` pairs whose list write
+    /// parameter is proven length-preserving, so a range window may fill it.
+    fixed_length_write_params: std::collections::HashSet<(String, usize)>,
     funcs: HashMap<String, FuncSig>,
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
@@ -1852,9 +1941,6 @@ pub(crate) struct ModuleState {
     inline_reexport_foreign: HashMap<(String, String), usize>,
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
-    /// D-MODEL-PACKAGE1=A: the Loader-owned ordinary `.Model` output registry.
-    /// Sema consumes these neutral facts; it never imports `jet-pkg-model`.
-    model_outputs: Vec<jet_foundation::AST::ModelOutputFact>,
 
     trait_reg: TraitRegistry,
     /// D-FACTMODEL1=A: the one erased fact registry visible to body folds.
@@ -1948,6 +2034,8 @@ pub(crate) struct Checker<'a> {
     /// D-NEVER1=C: sema's fixed-point bottom facts. A call consults this
     /// registry before ordinary value joining; no engine infers divergence.
     diverging_functions: &'a std::collections::HashSet<String>,
+    /// D-SHAPE-PLACE1=A: proven length-preserving list write parameters.
+    fixed_length_write_params: &'a std::collections::HashSet<(String, usize)>,
     effect_facts: &'a jet_foundation::Facts::FactRegistry,
     consts: &'a HashMap<String, Type>,
     pub(crate) devtools_registry: &'a jet_foundation::AST::DevtoolsRegistry,
@@ -1963,10 +2051,6 @@ pub(crate) struct Checker<'a> {
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
     core_imports: &'a HashMap<String, String>,
-    /// Checked ordinary `.Model` outputs available to this module's source
-    /// binding path. Kept as neutral foundation facts to preserve dependency
-    /// direction.
-    model_outputs: &'a [jet_foundation::AST::ModelOutputFact],
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     code_modules: &'a HashMap<String, String>,
     code_module_identities: &'a HashMap<String, String>,
@@ -2173,6 +2257,12 @@ pub(crate) struct Checker<'a> {
     /// D-CHOOSE-TEST1=A: distinguishes a pure pattern miss from an absent
     /// Optional while `fallback_has_err == Some(false)`.
     pub(crate) fallback_is_shape_miss: bool,
+    /// D-GENERIC-CALL1=A: the type arguments a qualified module call
+    /// (`table.sort(rows, false, key)`) inferred from its arguments. The
+    /// module-call checkers take their spelled type arguments by reference,
+    /// so the call site that owns the AST node takes this and records it
+    /// there, exactly like a direct call's inferred `call.type_args`.
+    pub(crate) inferred_call_type_args: Option<Vec<Type>>,
     /// Reads of an `invalid` binding. Such a read infers no type and emits no
     /// diagnostic, so a binding whose initializer yields no type after one of
     /// these reads is a cascade of the earlier error, not a new failure.
@@ -2297,11 +2387,6 @@ pub(crate) struct Checker<'a> {
     /// The carrier discovered for the current open callback, if its body has
     /// reached a fallible callee.
     failure_carrier: Option<Type>,
-    /// Source-nesting depth of an untyped binding initializer. That root is an
-    /// ordinary value position, so a fallible call auto-propagates even when
-    /// the enclosing function returns Result. Nested inference must not inherit
-    /// this exception.
-    ordinary_binding_root_depth: Option<usize>,
     /// True while the root expression is being checked as a statement. A
     /// dispatch nested in a value expression must keep value-tail checking;
     /// only the statement root may make a braced arm's tail Unit.
@@ -2413,6 +2498,16 @@ pub(crate) struct Checker<'a> {
     /// `global_addr_taken` parameter) so `#Inline(Always)` (E0918) can be
     /// checked once every function has run through here.
     inline_addr_taken: HashSet<String>,
+    /// D-DX-PLUGIN1=D: checked `core.devtools.publish` facts of this body.
+    /// The body's products carry them out; bundle completion projects them
+    /// into the shared panel registry in source order.
+    devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
+    /// This body handed an expression to the compile-time evaluator. The
+    /// evaluator reads `ct_checked_funcs`, which grows as the bodies before
+    /// this one are checked, so such a body's result depends on check order.
+    /// Deliberately not part of the erased-scope snapshot: an erased scope
+    /// that evaluated still made this body order-dependent.
+    ct_evaluator_ran: std::cell::Cell<bool>,
 }
 
 /// Mutable checker state that must not cross an erased `#Off`/`#DebugOnly`
@@ -2516,7 +2611,6 @@ struct ErasedScopeSnapshot {
     task_body_propagates: bool,
     failure_carrier_inference: bool,
     failure_carrier: Option<Type>,
-    ordinary_binding_root_depth: Option<usize>,
     statement_expr_inference: bool,
     statement_expr_root_depth: Option<usize>,
     http_handler_depth: usize,
@@ -2543,11 +2637,7 @@ struct ErasedScopeSnapshot {
     taskgroup_stack: Vec<TaskGroupCtx>,
     in_taskgroup_spawn: bool,
     inline_addr_taken: HashSet<String>,
-    /// D-DX-PLUGIN1=D: publication facts live in the shared per-module
-    /// TypeRegistry, so erased scopes snapshot and restore them alongside the
-    /// checker-local fact planes.
     devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
-
 }
 
 impl<'a> Checker<'a> {
@@ -2650,7 +2740,6 @@ impl<'a> Checker<'a> {
             task_body_propagates: self.task_body_propagates,
             failure_carrier_inference: self.failure_carrier_inference,
             failure_carrier: self.failure_carrier.clone(),
-            ordinary_binding_root_depth: self.ordinary_binding_root_depth,
             statement_expr_inference: self.statement_expr_inference,
             statement_expr_root_depth: self.statement_expr_root_depth,
             http_handler_depth: self.http_handler_depth,
@@ -2677,8 +2766,7 @@ impl<'a> Checker<'a> {
             taskgroup_stack: self.taskgroup_stack.clone(),
             in_taskgroup_spawn: self.in_taskgroup_spawn,
             inline_addr_taken: self.inline_addr_taken.clone(),
-            devtools_publications: self.registry.devtools_publications(),
-
+            devtools_publications: self.devtools_publications.clone(),
         }
     }
 
@@ -2780,7 +2868,6 @@ impl<'a> Checker<'a> {
         self.task_body_propagates = snapshot.task_body_propagates;
         self.failure_carrier_inference = snapshot.failure_carrier_inference;
         self.failure_carrier = snapshot.failure_carrier;
-        self.ordinary_binding_root_depth = snapshot.ordinary_binding_root_depth;
         self.statement_expr_inference = snapshot.statement_expr_inference;
         self.statement_expr_root_depth = snapshot.statement_expr_root_depth;
         self.http_handler_depth = snapshot.http_handler_depth;
@@ -2807,8 +2894,7 @@ impl<'a> Checker<'a> {
         self.taskgroup_stack = snapshot.taskgroup_stack;
         self.in_taskgroup_spawn = snapshot.in_taskgroup_spawn;
         self.inline_addr_taken = snapshot.inline_addr_taken;
-        self.registry
-            .restore_devtools_publications(snapshot.devtools_publications);
+        self.devtools_publications = snapshot.devtools_publications;
     }
 
     pub(crate) fn with_erased_scope<T>(
@@ -3505,6 +3591,8 @@ pub use Bundle::{
     target_hardware_capabilities, target_hardware_profile, target_hardware_profile_id,
     target_hardware_use, target_hardware_use_with_effect_facts, target_machine_use,
     validate_target_hardware, IncrementalSemaCache, IncrementalSemaStats,
+    sealed_package_count, with_package_records, PackageRecordStore, PackageReuse,
+    PackageReuseRow,
 };
 pub use Effects::{AuthorityDelegation, EffectSummary, SemIndexEffectFacts};
 pub use MemoryFacts::{

@@ -1,0 +1,25 @@
+// E0109: an open value loop `(loop { … break value })` is evaluated in place,
+// so its value has the break payload's own type, not a function carrier.
+// `!` and `==` accept the Bool it produces; negating it with `-` is the one
+// error here, and it names the plain Bool type.
+fn is_live(limit: Int) -> Bool {
+    live := (loop {
+        result :: limit > 0
+        break result
+    })
+    if !live -> return false
+    live == true
+}
+
+fn negated(limit: Int) -> Int {
+    live := (loop {
+        break limit > 0
+    })
+    negative :: -live
+    negative
+}
+
+fn run() {
+    print(is_live(2))
+    print(negated(2))
+}

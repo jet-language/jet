@@ -1,5 +1,36 @@
 // Parser state and token access. The lexer supplies canonical token IDs,
 // byte spans, exact spelling, nested string token streams, and diagnostics.
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    ElseArmSpan,
+    Expr,
+    Span,
+    Stmt,
+    TextEdit,
+    diagnostic_from_registry,
+    diagnostic_with_edit_grade,
+    diagnostic_with_label,
+]
+use jet_lexer.[
+    StringPart,
+    TOKEN_BLOCK_COMMENT,
+    TOKEN_EOF,
+    TOKEN_GT,
+    TOKEN_IDENT,
+    TOKEN_LBRACE,
+    TOKEN_LBRACKET,
+    TOKEN_LINE_COMMENT,
+    TOKEN_LPAREN,
+    TOKEN_RBRACE,
+    TOKEN_RBRACKET,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+    TOKEN_SHR,
+    Token,
+    TokenPayload,
+]
 
 pub struct JetParserState {
     pub tokens: [Token]

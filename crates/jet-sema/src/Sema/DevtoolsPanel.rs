@@ -135,7 +135,7 @@ pub(crate) fn check_devtools_publish(
     value_type: Option<Type>,
     span: Span,
     registry: &DevtoolsRegistry,
-    facts: &crate::Sema::TypeRegistry,
+    facts: &mut Vec<DevtoolsFactPublication>,
     diags: &mut Vec<Diagnostic>,
 ) -> bool {
     if args.len() != 2
@@ -191,10 +191,13 @@ pub(crate) fn check_devtools_publish(
         diags.push(registry_error(error));
         return false;
     }
-    // The TypeRegistry is the existing per-module semantic-facts owner. Keep
-    // this write after inference so no downstream phase needs to re-infer the
-    // publication value or reconstruct its source identity.
-    facts.record_devtools_publication(publication);
+    // The body checker keeps this row with the body's other products, after
+    // inference, so no downstream phase needs to re-infer the publication
+    // value or reconstruct its source identity. Duplicate inference visits at
+    // one source span do not create duplicate protocol rows.
+    if !facts.iter().any(|existing| existing.span == publication.span) {
+        facts.push(publication);
+    }
     true
 }
 
@@ -265,7 +268,7 @@ fn validate_panel_signature(function: &Func, diags: &mut Vec<Diagnostic>) -> Opt
             E_DEVTOOLS_INVALID_PANEL,
             &function.name,
             "a devtools panel is a public package entry point",
-            "write `pub fn panel(state: State) -> UiNode { ... }`",
+            "write `pub fn panel(state: State) -> UINode { ... }`",
             function.name_span,
         ));
         return None;
@@ -290,8 +293,8 @@ fn validate_panel_signature(function: &Func, diags: &mut Vec<Diagnostic>) -> Opt
         diags.push(panel_error(
             E_DEVTOOLS_INVALID_PANEL,
             &function.name,
-            "a devtools panel must return a `UiNode` tree",
-            "declare `UiNode` before the function body arrow",
+            "a devtools panel must return a `UINode` tree",
+            "declare `UINode` before the function body arrow",
             function.name_span,
         ));
         return None;
@@ -300,8 +303,8 @@ fn validate_panel_signature(function: &Func, diags: &mut Vec<Diagnostic>) -> Opt
         diags.push(panel_error(
             E_DEVTOOLS_INVALID_PANEL,
             &function.name,
-            &format!("a devtools panel returns `{}` instead of `UiNode`", return_type.show()),
-            "return the portable `UiNode` tree from the panel function",
+            &format!("a devtools panel returns `{}` instead of `UINode`", return_type.show()),
+            "return the portable `UINode` tree from the panel function",
             function.return_type_span.unwrap_or(function.name_span),
         ));
         return None;

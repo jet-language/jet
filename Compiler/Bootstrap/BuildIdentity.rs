@@ -9,8 +9,11 @@ pub const COMPILER_SOURCES: &[&str] = &[
     "Cargo.toml",
     "Compiler",
     "build.rs",
+    // jet-sema embeds the Core module bodies from here.
+    "Core",
     "Source",
     "crates/jet-foundation",
+    "crates/jet-unicode",
     "crates/jet-lexer",
     "crates/jet-parser",
     "crates/jet-net",

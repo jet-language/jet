@@ -186,8 +186,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 items: m.items.clone(),
                 build_facts: bundle.build_facts.clone(),
                 allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
-                exact_int_reachable: std::cell::Cell::new(false),
+                exact_int_reachable: Default::default(),
                 diverging_functions: HashSet::new(),
+                fixed_length_write_params: HashSet::new(),
                 funcs: HashMap::new(),
                 registry: builtin_type_registry(),
                 consts: HashMap::new(),
@@ -196,7 +197,6 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 inline_reexport_foreign: HashMap::new(),
                 core_imports: HashMap::new(),
                 tests: HashMap::new(),
-                model_outputs: bundle.model_outputs().to_vec(),
                 trait_reg: TraitRegistry::default(),
                 fact_registry,
                 policy_declarations: m.policy_declarations.clone(),
@@ -478,6 +478,33 @@ pub(super) fn check_bundle_opts_for_output_inner(
             !module.no_prelude,
         );
     }
+    // A `prep` initializer calls a member-imported function (`use b.[f]`)
+    // exactly as body code does. Every module's functions are registered
+    // above, so bind those names for the comptime rows; a package member
+    // lives in whichever of its files declares it (D-MOD-CYCLE1=A).
+    for idx in 0..comptime_states.len() {
+        for import in &bundle.modules[idx].imports {
+            let ImportKind::Unqualified { module_alias, .. } = &import.kind else {
+                continue;
+            };
+            let Some(&target) = comptime_states[idx].imports.get(module_alias.as_str()) else {
+                continue;
+            };
+            for binding in import.walk_bindings() {
+                let Some(original) = binding.original else {
+                    continue;
+                };
+                let owner = std::iter::once(target)
+                    .chain(name_ledger.namespace_siblings(target))
+                    .find(|&candidate| comptime_states[candidate].funcs.contains_key(original));
+                if let Some(owner) = owner {
+                    comptime_states[idx]
+                        .unqualified_file
+                        .insert(binding.local.clone(), (original.to_string(), owner));
+                }
+            }
+        }
+    }
 
     // D-MOD2: a trait named in a member import (`use types.[Named]`) is known
     // to the importing module's trait registry before its impls validate.
@@ -509,6 +536,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 let same_package =
                     jet_foundation::Names::package_scope_for(&target_module.path, &bundle.project_root)
                         == package;
+                // D-MOD-CYCLE1=A: a package is one namespace, so a sibling
+                // file's private trait is visible by bare name.
+                let same_namespace = name_ledger.same_namespace(idx, target);
                 for binding in imp.walk_bindings() {
                     let Some(original) = binding.original else {
                         continue;
@@ -517,6 +547,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         Item::Trait(definition)
                             if definition.name == original
                                 && (definition.is_pub
+                                    || same_namespace
                                     || (definition.is_package_pub && same_package)) =>
                         {
                             Some(definition)
@@ -578,43 +609,63 @@ pub(super) fn check_bundle_opts_for_output_inner(
         };
     let mut top_level_embed_inputs = Vec::new();
     let module_count = bundle.modules.len();
+    // #2517: constant values stored by earlier checks; the store work is
+    // done when this is dropped.
+    let comptime_reuse = super::super::ComptimeReuse::environment(bundle);
+    // Build-time constants fold first, for every module, in
+    // `comptime_module_order`: a `prep` initializer that reads a sibling
+    // file's constant evaluates after that file. The comptime registries and
+    // item snapshots are released before the rest of registration and body
+    // checking.
+    let mut module_comptime_types = vec![HashMap::new(); module_count];
+    if needs_comptime_checking {
+        for idx in comptime_module_order(bundle, &name_ledger) {
+            let module_diag_start = diags.len();
+            let module = &mut bundle.modules[idx];
+            let base = module
+                .path
+                .parent()
+                .map(|path| path.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            eval_comptime_items(
+                &mut module.items,
+                &mut module_comptime_types[idx],
+                &base,
+                &mut diags,
+                idx,
+                &mut name_ledger,
+                &ct_core_imports[idx],
+                &ct_core_item_imports[idx],
+                &bundle.build_facts,
+                &mut comptime_states,
+                &plugin_interfaces,
+                &devtools_registry,
+                no_os,
+                gates,
+                module.no_prelude,
+                Some(&mut top_level_embed_inputs),
+                comptime_reuse.as_ref(),
+            );
+            // Build-time evaluation reports against this module's source (its
+            // initializer checks and evaluator failures).
+            attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
+            drop_core_source_lints(module, &mut diags, module_diag_start);
+        }
+    }
+    drop(comptime_states);
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         // Registration and expansion below push bundle-level reports without
-        // a module origin. Core is library source: its lints are not the
-        // user's to act on, so this module's lints are dropped at the end of
-        // the iteration instead of rendering at a Core byte offset inside the
-        // user's entry file.
+        // a module origin. They belong to this module: a non-entry module's
+        // reports carry it as their origin at the end of the iteration. Core
+        // is library source: its lints are not the user's to act on, so they
+        // are dropped there too.
         let module_diag_start = diags.len();
         let base = module
             .path
             .parent()
             .map(|path| path.to_path_buf())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let mut comptime_types = HashMap::new();
-        eval_comptime_items(
-            &mut module.items,
-            &mut comptime_types,
-            &base,
-            &mut diags,
-            idx,
-            &mut name_ledger,
-            &ct_core_imports[idx],
-            &ct_core_item_imports[idx],
-            &bundle.build_facts,
-            &mut comptime_states,
-            &plugin_interfaces,
-            &devtools_registry,
-            no_os,
-            gates,
-            module.no_prelude,
-            Some(&mut top_level_embed_inputs),
-        );
-        // Every module has folded its build-time values once the last module
-        // has; release the comptime registries and item snapshots before the
-        // rest of registration and body checking.
-        if idx + 1 == module_count {
-            drop(std::mem::take(&mut comptime_states));
-        }
+        let comptime_types = std::mem::take(&mut module_comptime_types[idx]);
         expand_item_template_loops(&mut module.items, &base, &mut diags);
         // Checker references use the state snapshot; refresh it after root
         // expansion so generated nominal declarations are visible there too.
@@ -783,7 +834,6 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             computed_fields: st.registry.computed_fields.clone(),
                             field_defaults: st.registry.field_defaults.clone(),
                             receipt_sections: st.registry.receipt_sections.clone(),
-                            devtools_publications: std::cell::RefCell::new(Vec::new()),
                             nominal_memo: Default::default(),
                         }
                     });
@@ -1482,6 +1532,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
             &bundle.project_root,
             &st.trait_reg,
         ));
+        attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
         drop_core_source_lints(module, &mut diags, module_diag_start);
     }
     // D-MOD-CYCLE1=A: attach each package-sibling `impl` to the file that
@@ -1618,6 +1669,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
             &mut states[idx].registry,
             &mut diags,
         );
+        attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
         drop_core_source_lints(module, &mut diags, module_diag_start);
     }
     bundle.comptime_inputs.extend(top_level_embed_inputs);
@@ -1915,6 +1967,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // aliases are registered in `st.imports`. `pub use` additionally re-exports the
     // item onto this module's public surface (`reexports`).
     for (idx, module) in bundle.modules.iter().enumerate() {
+        let module_diag_start = diags.len();
         for imp in &module.imports {
             let ImportKind::Unqualified {
                 module_alias,
@@ -2223,17 +2276,20 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 }
             }
         }
+        attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
     }
 
     // D-DOTSCOPE1 / D-STRUCT-ONCE1: validate contextual `.member { … }`
     // statements after every typed template expansion. Generated tests and
     // methods must receive the same structural diagnostics as written items;
     // the marker vocabulary remains the single source of truth.
-    for module in &bundle.modules {
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        let module_diag_start = diags.len();
         diags.extend(super::super::ScopeMembers::check(
             &module.items,
             &marker_vocabulary,
         ));
+        attach_module_origin(module, idx == bundle.entry, &mut diags[module_diag_start..]);
     }
 
     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
@@ -2254,8 +2310,11 @@ pub(super) fn check_bundle_opts_for_output_inner(
     }
     let diverging_functions = super::Validation::collect_diverging_functions(&states);
     super::Validation::project_divergence_facts(bundle, &diverging_functions);
+    let fixed_length_write_params =
+        super::Validation::collect_fixed_length_write_params(&states);
     for state in &mut states {
         state.diverging_functions = diverging_functions.clone();
+        state.fixed_length_write_params = fixed_length_write_params.clone();
     }
     // D-DX-PLUGIN1=D: finish panel discovery after every explicit and
     // auto-derived registration has populated the package AST. Grouping by
@@ -2322,4 +2381,114 @@ fn drop_core_source_lints(
                 .filter(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Lint),
         );
     }
+}
+
+/// Reports pushed while one module is processed belong to that module. A
+/// non-entry module's located reports carry it as their origin, so they render
+/// against its own file instead of at a byte offset of the entry file.
+fn attach_module_origin(
+    module: &crate::AST::LoadedModule,
+    is_entry: bool,
+    diags: &mut [Diagnostic],
+) {
+    let unowned = |diagnostic: &Diagnostic| diagnostic.origin().is_none() && diagnostic.span.is_some();
+    if is_entry || !diags.iter().any(|diagnostic| unowned(diagnostic)) {
+        return;
+    }
+    let origin = std::sync::Arc::new(jet_foundation::Diagnostics::DiagnosticOrigin::new(
+        module.display.clone(),
+        module.path.to_string_lossy().into_owned(),
+        module.source.clone(),
+    ));
+    for diagnostic in diags {
+        if unowned(&*diagnostic) {
+            diagnostic.set_origin(origin.clone());
+        }
+    }
+}
+
+/// D-MOD-CYCLE1=A: a package is one namespace, so a build-time constant may
+/// read a sibling file's constant by bare name. Each module's constants fold
+/// after those of the sibling files they read; bundle order breaks ties and
+/// cycles.
+fn comptime_module_order(
+    bundle: &ProgramBundle,
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> Vec<usize> {
+    let module_count = bundle.modules.len();
+    let declared: Vec<std::collections::HashSet<&str>> = bundle
+        .modules
+        .iter()
+        .map(|module| {
+            module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Const(constant)
+                        if super::super::Registration::const_evaluated_at_build(constant) =>
+                    {
+                        Some(constant.name.as_str())
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .collect();
+    let mut reads: Vec<Vec<usize>> = vec![Vec::new(); module_count];
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        if declared[idx].is_empty() {
+            continue;
+        }
+        let siblings = name_ledger.namespace_siblings(idx);
+        if siblings.is_empty() {
+            continue;
+        }
+        let mut names = std::collections::HashSet::new();
+        for item in &module.items {
+            if let Item::Const(constant) = item {
+                if super::super::Registration::const_evaluated_at_build(constant) {
+                    constant.value.for_each_expr(|expr| {
+                        if let crate::AST::Expr::Ident(name, _) = expr {
+                            names.insert(name.clone());
+                        }
+                    });
+                }
+            }
+        }
+        for name in &names {
+            if declared[idx].contains(name.as_str()) {
+                continue;
+            }
+            if let Some(&owner) = siblings
+                .iter()
+                .find(|&&sibling| declared[sibling].contains(name.as_str()))
+            {
+                if !reads[idx].contains(&owner) {
+                    reads[idx].push(owner);
+                }
+            }
+        }
+    }
+    // Depth-first post-order: a module follows every module it reads.
+    let mut order = Vec::with_capacity(module_count);
+    let mut visited = vec![false; module_count];
+    for root in 0..module_count {
+        if visited[root] {
+            continue;
+        }
+        visited[root] = true;
+        let mut stack = vec![(root, 0usize)];
+        while let Some((module, next)) = stack.pop() {
+            if let Some(&read) = reads[module].get(next) {
+                stack.push((module, next + 1));
+                if !visited[read] {
+                    visited[read] = true;
+                    stack.push((read, 0));
+                }
+            } else {
+                order.push(module);
+            }
+        }
+    }
+    order
 }

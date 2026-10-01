@@ -246,7 +246,7 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
             bits
         ),
         (Type::String, _) => "put the value in text with interpolation: \"{x}\"".to_string(),
-        (Type::Named(name), _) if name.ends_with(".Rng") => {
+        (Type::Named(name), _) if name.ends_with(".RNG") => {
             format!("use {} here", Syntax::RNG_TYPE)
         }
         _ => format!("use {} here", want.show()),
@@ -260,8 +260,8 @@ mod polish_tests {
     #[test]
     fn rng_type_fix_uses_the_bare_type_name() {
         assert_eq!(
-            type_fix_hint(&Type::Named("random.Rng".to_string()), &Type::Int),
-            "use Rng here"
+            type_fix_hint(&Type::Named("random.RNG".to_string()), &Type::Int),
+            "use RNG here"
         );
     }
 
@@ -415,6 +415,38 @@ pub(crate) fn binder_ambiguous_call(
                 .join("\n")
         ),
         format!("name the arguments to choose one candidate: `{callee}({rewrite})`"),
+        Some(span),
+    )
+}
+
+/// E0202: `&` grants write access only to a place — a name followed by field,
+/// index, or range projections (D-SHAPE-PLACE1=A). A temporary has no storage
+/// the callee's edits could reach.
+pub(crate) fn write_place_required(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0202",
+        format!("{WRITE_ACCESS_MARKER} needs a place after it"),
+        "write access reaches only a place: a name, optionally followed by field, index, or range projections such as `buf.items[0]`; a temporary expression has no storage for the edit to land in".to_string(),
+        format!(
+            "bind the value first: `x {} ...` then pass `{}x` with the write-access marker `&`",
+            Syntax::SIGIL_BIND_MUT,
+            Syntax::SIGIL_WRITE,
+        ),
+        Some(span),
+    )
+}
+
+/// E0202: a range write window is fixed-length (D-SHAPE-PLACE1=A), while this
+/// callee may resize its list write parameter; the window cannot fill it.
+pub(crate) fn write_range_window_argument(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0202",
+        "a range write window can't fill a list parameter that may resize".to_string(),
+        "a range window has a fixed length, but this function may grow or shrink the list it receives through the write-access marker `&`".to_string(),
+        format!(
+            "pass the whole list with the write-access marker `&`: `fill({}values)`",
+            Syntax::SIGIL_WRITE,
+        ),
         Some(span),
     )
 }
@@ -832,7 +864,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk
             let _ = args;
             true
         }
-        Type::Apply { name, .. } if name == "Id" => false,
+        Type::Apply { name, .. } if name == "ID" => false,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             args.iter().any(|a| type_owns_heap_rec(a, registry, walk))
@@ -1593,9 +1625,12 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
 pub fn is_core_error_family_type(name: &str) -> bool {
     matches!(
         core_error_family_leaf(name),
-        "BuildError"
+        "AppError"
+            | "ArchiveError"
+            | "BuildError"
             | "BrowserError"
             | "CBORError"
+            | "ComputeError"
             | "CryptoError"
             | "DBError"
             | "DataError"
@@ -1605,9 +1640,14 @@ pub fn is_core_error_family_type(name: &str) -> bool {
             | "FileCryptoError"
             | "HTTPError"
             | "IOError"
+            | "MIMEError"
+            | "ModError"
             | "NetError"
+            | "PerfError"
             | "RangeError"
             | "TextError"
+            | "TimeError"
+            | "URLError"
             | "UTF8Error"
             | "UUIDError"
             | "WsError"
@@ -1650,7 +1690,7 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
             | "FileCryptoError"
             | "HTTPError"
             | "IOError"
-            | "UiHostError"
+            | "UIHostError"
             | "KeyWrapError"
             | "NetError"
             | "RangeError"
@@ -1923,7 +1963,7 @@ pub(crate) fn is_equatable(
         }
         Type::Named(name) => trait_reg.implements_trait(name, Generics::EQUATABLE),
         Type::Apply { name, .. } if name == "KeyRef" => true,
-        Type::Apply { name, .. } if name == "Id" => {
+        Type::Apply { name, .. } if name == "ID" => {
             trait_reg.implements_trait(name, Generics::EQUATABLE)
         }
         Type::Apply { name, .. }

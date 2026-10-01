@@ -61,7 +61,7 @@ pub struct SparseTensor {
 // The source-tier transform is the eager dense MSE contract.  Higher-order
 // transforms (arbitrary loss closures, pullbacks, and wrt records) are owned by
 // the native dispatcher; this record remains useful and honest for source use.
-pub struct VjpRun {
+pub struct VJPRun {
     pub value: Tensor
     pub gradient: Tensor
 }
@@ -77,16 +77,16 @@ ABILITIES_F64_JSON :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\"
 ABILITIES_F32_JSON :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"]"
 C_MASK64 :: 18446744073709551615
 
-pub fn device_cpu() -> ComputeDevice { ComputeDevice{kind: "CPU", index: 0} }
-pub fn device_auto() -> ComputeDevice { ComputeDevice{kind: "Auto", index: 0} }
-pub fn device_cuda() -> ComputeDevice { ComputeDevice{kind: "CUDA", index: 0} }
-pub fn device_metal() -> ComputeDevice { ComputeDevice{kind: "Metal", index: 0} }
-pub fn device_vulkan() -> ComputeDevice { ComputeDevice{kind: "Vulkan", index: 0} }
-pub fn device_webgpu() -> ComputeDevice { ComputeDevice{kind: "WebGPU", index: 0} }
+pub fn device_cpu() -> ComputeDevice Never! { ComputeDevice{kind: "CPU", index: 0} }
+pub fn device_auto() -> ComputeDevice Never! { ComputeDevice{kind: "Auto", index: 0} }
+pub fn device_cuda() -> ComputeDevice Never! { ComputeDevice{kind: "CUDA", index: 0} }
+pub fn device_metal() -> ComputeDevice Never! { ComputeDevice{kind: "Metal", index: 0} }
+pub fn device_vulkan() -> ComputeDevice Never! { ComputeDevice{kind: "Vulkan", index: 0} }
+pub fn device_webgpu() -> ComputeDevice Never! { ComputeDevice{kind: "WebGPU", index: 0} }
 
 // Device is an accessor, not a string-to-device constructor.  Unknown device
 // strings are rejected when a tensor is validated rather than silently mapped.
-pub fn device(tensor: Tensor) -> String {
+pub fn device(tensor: Tensor) -> String Never! {
     tensor_device_name(tensor.device)
 }
 
@@ -140,12 +140,12 @@ pub fn matrix(rows: Int, cols: Int, value: Float) -> Tensor ComputeError! {
     Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
-pub fn to_list(tensor: Tensor) -> [Float] { copy_f(tensor.data) }
-pub fn shape(tensor: Tensor) -> [Int] { copy_i(tensor.shape) }
-pub fn rank(tensor: Tensor) -> Int { tensor.shape.len() }
-pub fn numel(tensor: Tensor) -> Int { tensor.data.len() }
+pub fn to_list(tensor: Tensor) -> [Float] Never! { copy_f(tensor.data) }
+pub fn shape(tensor: Tensor) -> [Int] Never! { copy_i(tensor.shape) }
+pub fn rank(tensor: Tensor) -> Int Never! { tensor.shape.len() }
+pub fn numel(tensor: Tensor) -> Int Never! { tensor.data.len() }
 
-pub fn placement(tensor: Tensor) -> String {
+pub fn placement(tensor: Tensor) -> String Never! {
     profile_placement(tensor_device_name(tensor.device), tensor_profile(tensor))
 }
 
@@ -160,13 +160,13 @@ pub fn transfer(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeErr
     on_device(tensor, target)
 }
 
-pub fn transfer_show(tensor: Tensor) -> String {
+pub fn transfer_show(tensor: Tensor) -> String Never! {
     name :: tensor_device_name(tensor.device)
     "Transfer(from={name}, to={name}, bytes=0, fallback=none)"
 }
 
-pub fn profile_f32_strict() -> String { c_profile_f32_receipt() }
-pub fn profile_show() -> String { c_profile_f32_receipt() }
+pub fn profile_f32_strict() -> String Never! { c_profile_f32_receipt() }
+pub fn profile_show() -> String Never! { c_profile_f32_receipt() }
 
 pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool ComputeError! {
     _ :: checked_numel(shape)
@@ -329,7 +329,7 @@ pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor ComputeError
     Ok(make_tensor(copy_i(weights.shape), data, weights.device, profile))
 }
 
-pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun ComputeError! {
+pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VJPRun ComputeError! {
     loss :: mse_loss(pred, target)
     _ :: validate_same_tensor_inputs(pred, target)
     n :: pred.data.len()
@@ -342,10 +342,10 @@ pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun ComputeError! 
         &data.push(value)
     }
     gradient :: make_tensor(copy_i(pred.shape), data, pred.device, tensor_profile(pred))
-    Ok(VjpRun{value: loss, gradient: gradient})
+    Ok(VJPRun{value: loss, gradient: gradient})
 }
 
-pub fn vjp(pred: Tensor, target: Tensor) -> VjpRun ComputeError! { value_and_gradient(pred, target) }
+pub fn vjp(pred: Tensor, target: Tensor) -> VJPRun ComputeError! { value_and_gradient(pred, target) }
 
 pub fn gradient(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
     run :: value_and_gradient(pred, target)
@@ -619,9 +619,9 @@ pub fn to_sparse(tensor: Tensor) -> SparseTensor ComputeError! {
     Ok(SparseTensor{rows: m, cols: n, values: values, col_idx: col_idx, row_ptr: row_ptr})
 }
 
-pub fn sparse_nnz(sp: SparseTensor) -> Int { sp.values.len() }
+pub fn sparse_nnz(sp: SparseTensor) -> Int Never! { sp.values.len() }
 
-pub fn sparse_show(sp: SparseTensor) -> String {
+pub fn sparse_show(sp: SparseTensor) -> String Never! {
     "SparseCsr({sp.rows}x{sp.cols}, nnz={sp.values.len()})"
 }
 
@@ -737,7 +737,7 @@ pub fn deserialize(text: String) -> Tensor ComputeError! {
     Ok(make_tensor(shape, data, "CPU", profile))
 }
 
-pub fn stream_new() -> ComputeStream { ComputeStream{id: 1, device: "CPU"} }
+pub fn stream_new() -> ComputeStream Never! { ComputeStream{id: 1, device: "CPU"} }
 
 pub fn stream_new_on(target: ComputeDevice) -> ComputeStream ComputeError! {
     selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
@@ -745,7 +745,7 @@ pub fn stream_new_on(target: ComputeDevice) -> ComputeStream ComputeError! {
     Ok(ComputeStream{id: 1, device: selected})
 }
 
-pub fn stream_show(stream: ComputeStream) -> String {
+pub fn stream_show(stream: ComputeStream) -> String Never! {
     "ComputeStream(device={tensor_device_name(stream.device)})"
 }
 

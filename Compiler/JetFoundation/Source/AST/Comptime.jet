@@ -79,6 +79,30 @@ pub enum FailureContract {
     ProvenUnreachable(success: Type)
 }
 
+// The failure route a callable exposes to its callers.
+pub fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
+    if contract == {
+        .DeclaredNever -> Type.Named{name: "Never"}
+        .Default(success, error) | .Explicit(success, error) -> Type.Result{ok: success, err: error}
+        .Optional(success) -> Type.Option{inner: success}
+        .Converted(success, _, target) -> Type.Result{ok: success, err: target}
+        .ProvenUnreachable(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
+    }
+}
+
+// Stable tooling projection of where the effective failure route came from;
+// consumers read this fact instead of reconstructing it from the rendered type.
+pub fn failure_contract_source(contract: FailureContract) -> String Never! {
+    if contract == {
+        .Default(_, _) -> "implicit default !Err"
+        .Optional(_) -> "optional success"
+        .Explicit(_, error) -> "explicit !{type_name(error)}"
+        .Converted(_, source, target) -> "converted {type_name(source)} -> {type_name(target)}"
+        .DeclaredNever -> "declared Never return"
+        .ProvenUnreachable(_) -> "explicit !Never (proven unreachable)"
+    }
+}
+
 pub fn ast_comptime_key_type(key: CtKey) -> Type Never! {
     if key == {
         .Int(_) -> Type.Int

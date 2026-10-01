@@ -1,6 +1,68 @@
 // Module, code-module, and role-module declaration grammar.
 // Module names and role payloads use a contextual head contract; nested
 // expressions and types still use the canonical parser.
+use jet_foundation.[
+    BudgetDecl,
+    BudgetField,
+    CodeModule,
+    CompileWorkloadDecl,
+    ContribValue,
+    Contribution,
+    EnvLit,
+    Expr,
+    FleetField,
+    FleetFieldValue,
+    FleetLit,
+    GenericModuleDef,
+    GenericModuleParam,
+    HostEntry,
+    ImageField,
+    ImageFieldValue,
+    ImageFromRef,
+    ImageLit,
+    ImportDecl,
+    Item,
+    ModuleAliasDef,
+    ModuleArg,
+    ModuleDecl,
+    NamedExpr,
+    NamedSpan,
+    Namespace,
+    OptionEntry,
+    PerfLit,
+    ProfileLit,
+    ServiceEntry,
+    SourceDecl,
+    Span,
+    SystemField,
+    SystemFieldValue,
+    SystemLit,
+    Type,
+    VMTestField,
+    VMTestFieldValue,
+    VMTestLit,
+    expr_span,
+]
+use jet_lexer.[
+    TOKEN_COLON,
+    TOKEN_COLON_COLON,
+    TOKEN_COMMA,
+    TOKEN_DOT,
+    TOKEN_EOF,
+    TOKEN_GT,
+    TOKEN_IDENT,
+    TOKEN_KW_MODULE,
+    TOKEN_LBRACE,
+    TOKEN_LBRACKET,
+    TOKEN_LPAREN,
+    TOKEN_LT,
+    TOKEN_MINUS,
+    TOKEN_RBRACE,
+    TOKEN_RBRACKET,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+    Token,
+]
 
 fn parser_module_dashed_name(state: &JetParserState, context: String) -> NamedSpan {
     first :: parser_expect_name(&state, context)
@@ -22,7 +84,7 @@ fn parser_module_namespace(name: String) -> Namespace? {
         "system" -> Val(Namespace.System)
         "image" -> Val(Namespace.Image)
         "fleet" -> Val(Namespace.Fleet)
-        "vmtest" -> Val(Namespace.VmTest)
+        "vmtest" -> Val(Namespace.VMTest)
         "profile" -> Val(Namespace.Profile)
         "perf" -> Val(Namespace.Perf)
         else -> None
@@ -131,7 +193,7 @@ fn parser_parse_module_contribution(state: &JetParserState) -> Contribution {
         .System -> ContribValue.System{value: parser_parse_module_system_lit(&state)}
         .Image -> ContribValue.Image{value: parser_parse_module_image_lit(&state)}
         .Fleet -> ContribValue.Fleet{value: parser_parse_module_fleet_lit(&state)}
-        .VmTest -> ContribValue.VmTest{value: parser_parse_module_vmtest_lit(&state)}
+        .VMTest -> ContribValue.VMTest{value: parser_parse_module_vmtest_lit(&state)}
         .Perf -> {
             parser_module_error(&state, "E2903", namespace_token.span, "performance contributions use a role module", "performance budgets need one typed budgets list and are not ordinary namespace values", "write `module perf.name {{ budgets: [...] }}`")
             ContribValue.Expr{value: parser_parse_expression(&state, 1, 0).expr}
@@ -149,7 +211,7 @@ fn parser_module_contribution_end(value: ContribValue) -> Span {
         .System(lit) -> lit.span
         .Image(lit) -> lit.span
         .Fleet(lit) -> lit.span
-        .VmTest(lit) -> lit.span
+        .VMTest(lit) -> lit.span
         .Profile(lit) -> lit.span
         .Perf(lit) -> lit.span
     }
@@ -215,7 +277,7 @@ fn parser_parse_module_fleet_lit(state: &JetParserState) -> FleetLit {
     FleetLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
 }
 
-fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VmTestLit {
+fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VMTestLit {
     explicit_type := Span?{None}
     record_start := parser_current(&state).span
     if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "VmTest" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
@@ -224,7 +286,7 @@ fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VmTestLit {
         record_start = explicit.span
     }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a VM-test record")
-    fields := [VmTestField]{}
+    fields := [VMTestField]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
@@ -232,7 +294,7 @@ fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VmTestLit {
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a VM-test record")
-    VmTestLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
+    VMTestLit{explicit_type: explicit_type, fields: fields, span: parser_cover(record_start, close.span)}
 }
 
 fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
@@ -397,7 +459,7 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
     system_fields := [SystemField]{}
     image_fields := [ImageField]{}
     fleet_fields := [FleetField]{}
-    vmtest_fields := [VmTestField]{}
+    vmtest_fields := [VMTestField]{}
     profile_fields := [NamedExpr]{}
     perf_budgets := [BudgetDecl]{}
     perf_budgets_span := namespace_head.span
@@ -434,7 +496,7 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
             .System -> &system_fields.push(parser_module_system_field(&state))
             .Image -> &image_fields.push(parser_module_image_field(&state))
             .Fleet -> &fleet_fields.push(parser_module_fleet_field(&state))
-            .VmTest -> &vmtest_fields.push(parser_module_vmtest_field(&state))
+            .VMTest -> &vmtest_fields.push(parser_module_vmtest_field(&state))
             .Profile -> {
                 field :: parser_expect_name(&state, "for a profile field")
                 parser_expect(&state, TOKEN_COLON, "after a profile field")
@@ -476,7 +538,7 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
         .System -> ContribValue.System{value: SystemLit{explicit_type: None, fields: system_fields, span: body_span}}
         .Image -> ContribValue.Image{value: ImageLit{explicit_type: None, fields: image_fields, span: body_span}}
         .Fleet -> ContribValue.Fleet{value: FleetLit{explicit_type: None, fields: fleet_fields, span: body_span}}
-        .VmTest -> ContribValue.VmTest{value: VmTestLit{explicit_type: None, fields: vmtest_fields, span: body_span}}
+        .VMTest -> ContribValue.VMTest{value: VMTestLit{explicit_type: None, fields: vmtest_fields, span: body_span}}
         .Profile -> ContribValue.Profile{value: ProfileLit{fields: profile_fields, span: body_span}}
         else -> ContribValue.Perf{value: PerfLit{budgets: perf_budgets, budgets_span: perf_budgets_span, compile_workloads: perf_compile_workloads, compile_workloads_span: perf_compile_workloads_span, list_span: perf_list_span, span: body_span}}
     }
@@ -775,11 +837,11 @@ fn parser_module_fleet_field(state: &JetParserState) -> FleetField {
     FleetField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
-fn parser_module_vmtest_field(state: &JetParserState) -> VmTestField {
+fn parser_module_vmtest_field(state: &JetParserState) -> VMTestField {
     name :: parser_expect_name(&state, "for a VM-test field")
     parser_expect(&state, TOKEN_COLON, "after a VM-test field")
     value :: if name.payload.decoded == {
-        "hosts" -> VmTestFieldValue.Hosts{entries: parser_module_hosts_map(&state)}
+        "hosts" -> VMTestFieldValue.Hosts{entries: parser_module_hosts_map(&state)}
         "run" -> {
             start :: parser_expect_name(&state, "for `test` before a VM-test body")
             if start.payload.decoded != "test" {
@@ -799,16 +861,16 @@ fn parser_module_vmtest_field(state: &JetParserState) -> VmTestField {
                     else -> {}
                 }
             }
-            VmTestFieldValue.Run{span: parser_cover(start.span, end)}
+            VMTestFieldValue.Run{span: parser_cover(start.span, end)}
         }
-        else -> VmTestFieldValue.Other{value: parser_parse_expression(&state, 1, 0).expr}
+        else -> VMTestFieldValue.Other{value: parser_parse_expression(&state, 1, 0).expr}
     }
     end :: if value == {
         .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span }
         .Run(span) -> span
         .Other(expr) -> expr_span(expr)
     }
-    VmTestField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+    VMTestField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
 fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {

@@ -1,12 +1,17 @@
 // Canonical core.net.tls carriers keep endpoint policy and negotiated version
 // typed without manufacturing transport fields on TLSStream.
+package {
+    name: "tls_peer_identity"
+    authority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }
+}
+
 use core.net.tls as tls
 
 fn run() -[Net]> {
     cfg :: tls.with_alpn(tls.config("localhost"), "h2")
     print(tls.has_alpn(cfg, "h2"))
     print(tls.flags(cfg).len() == 1)
-    print(tls.version_name(TLSVersion.Tls13))
+    print(tls.version_name(TLSVersion.TLS13))
     print(tls.client("localhost", 0) == .Err(_))
     print(tls.peer_port(TLSStream{}) == .Err(_))
 }

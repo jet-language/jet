@@ -4,6 +4,19 @@
 // It receives the immutable semantic environment and the caller's proven
 // string-view fact; it does not read a mutable scope singleton or guess
 // nominal capabilities from a successful lowering.
+use jet_foundation.[
+    CORE_MODULE_EXPORTS,
+    Diagnostic,
+    InternalTag,
+    Span,
+    TDeclarationOwnership,
+    TGenericParam,
+    TagMarker,
+    Type,
+    core_module_export_has_name,
+    core_module_type_leaf,
+    type_name,
+]
 
 pub enum SemaCopyIntent {
     Explicit
@@ -203,7 +216,7 @@ fn sema_copy_generic_bindings(nominal: SemaRegistrationNominal, actual: Type) ->
 fn sema_copy_nominal_declared_types(nominal: SemaRegistrationNominal, bindings: [SemaInferenceBinding]) -> [Type] Never! {
     types := [Type]{}
     if nominal.source == {
-        .SourceAst(item) -> {
+        .SourceAST(item) -> {
             if item == {
                 .TypeAlias(definition) -> &types.push(sema_inference_substitute_type_bindings(definition.target, bindings))
                 .Distinct(definition) -> &types.push(sema_inference_substitute_type_bindings(definition.base, bindings))
@@ -369,6 +382,11 @@ fn sema_copy_type_facts(
     }
 }
 
+fn sema_copy_graph_nominal(graph: SemaRegistrationGraph?, ty: Type, caller_module_identity: String) -> SemaRegistrationNominal? {
+    registered :: graph ?? return None
+    sema_type_resolve_nominal(registered, ty, caller_module_identity)
+}
+
 fn sema_copy_named_facts(
     ty: Type,
     name: String,
@@ -377,10 +395,8 @@ fn sema_copy_named_facts(
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
-    if graph == .Val(registered) {
-        if sema_type_resolve_nominal(registered, ty, caller_module_identity) == .Val(nominal) {
-            return sema_copy_nominal_facts(nominal, ty, graph, caller_module_identity, generic_params, &walk)
-        }
+    if sema_copy_graph_nominal(graph, ty, caller_module_identity) == .Val(nominal) {
+        return sema_copy_nominal_facts(nominal, ty, graph, caller_module_identity, generic_params, &walk)
     }
     if {
         sema_copy_named_is_builtin_resource(name) -> sema_copy_type_facts_known(false, false, false, false, true, false, true)
@@ -403,7 +419,7 @@ fn sema_copy_nominal_facts(
     if nominal.kind == SemaRegistrationNominalKind.ForeignHandle {
         if nominal.source == {
             .ForeignHandle(facts) -> return sema_copy_foreign_handle_facts(nominal, facts)
-            .SourceAst(_) -> return sema_copy_type_facts_known(false, false, false, false, false, false, false)
+            .SourceAST(_) -> return sema_copy_type_facts_known(false, false, false, false, false, false, false)
         }
     }
     finished_key :: sema_copy_walk_key(key, actual)
@@ -441,7 +457,7 @@ fn sema_copy_nominal_facts(
         complete: complete,
     }
     _ := &walk.active.pop()
-    walk.finished.add(finished_key, result)
+    walk.finished[finished_key] = result
     result
 }
 
@@ -491,18 +507,16 @@ fn sema_copy_apply_facts(
         "Rotation" -> return sema_copy_type_facts_known(false, true, nested.heap, nested.observable_clock, false, nested.dynamic_loan, true)
         else -> {}
     }
-    if graph == .Val(registered) {
-        if sema_type_resolve_nominal(registered, ty, caller_module_identity) == .Val(nominal) {
-            nominal_facts :: sema_copy_nominal_facts(nominal, ty, graph, caller_module_identity, generic_params, &walk)
-            return SemaCopyTypeFacts{
-                copyable: sema_copy_copyable_scalar(ty),
-                cloneable: nominal_facts.cloneable && nested.cloneable,
-                heap: nominal_facts.heap || nested.heap,
-                observable_clock: nominal_facts.observable_clock || nested.observable_clock,
-                resource: nominal_facts.resource,
-                dynamic_loan: dynamic_loan || nested.dynamic_loan || nominal_facts.dynamic_loan,
-                complete: nominal_facts.complete && nested.complete,
-            }
+    if sema_copy_graph_nominal(graph, ty, caller_module_identity) == .Val(nominal) {
+        nominal_facts :: sema_copy_nominal_facts(nominal, ty, graph, caller_module_identity, generic_params, &walk)
+        return SemaCopyTypeFacts{
+            copyable: sema_copy_copyable_scalar(ty),
+            cloneable: nominal_facts.cloneable && nested.cloneable,
+            heap: nominal_facts.heap || nested.heap,
+            observable_clock: nominal_facts.observable_clock || nested.observable_clock,
+            resource: nominal_facts.resource,
+            dynamic_loan: dynamic_loan || nested.dynamic_loan || nominal_facts.dynamic_loan,
+            complete: nominal_facts.complete && nested.complete,
         }
     }
     // Native generic applications derive Clone from their arguments. A

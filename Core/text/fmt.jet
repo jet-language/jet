@@ -1,14 +1,14 @@
 use core.text as unicode
 // core.text.fmt — deterministic number, quantity, and display formatting.
 // Radix helpers use lowercase digits; text padding counts UTF-8 scalars.
-pub fn number(n: Int) -> String { grouped_int(n) }
-pub fn bin(n: Int) -> String { radix_signed(n, 2) }
-pub fn oct(n: Int) -> String { radix_signed(n, 8) }
+pub fn number(n: Int) -> String Never! { grouped_int(n) }
+pub fn bin(n: Int) -> String Never! { radix_signed(n, 2) }
+pub fn oct(n: Int) -> String Never! { radix_signed(n, 8) }
 
 /// `width` is the minimum digit count, zero-padded. Negative `n` keeps sign.
-pub fn hex(n: Int, width: Int) -> String { radix_signed_width(n, 16, width) }
+pub fn hex(n: Int, width: Int) -> String Never! { radix_signed_width(n, 16, width) }
 
-pub fn ordinal(n: Int) -> String {
+pub fn ordinal(n: Int) -> String Never! {
     abs :: abs_int(n)
     mod100 :: abs % 100
     suffix := "th"
@@ -21,20 +21,20 @@ pub fn ordinal(n: Int) -> String {
     "{grouped_int(n)}{suffix}"
 }
 
-pub fn plural(n: Int, singular: String, many: String) -> String {
+pub fn plural(n: Int, singular: String, many: String) -> String Never! {
     word :: if abs_int(n) == 1 -> singular else -> many
     "{grouped_int(n)} {word}"
 }
 
-pub fn pad_left(text: String, width: Int, fill: String) -> String { pad_mode(text, width, fill, 0) }
-pub fn pad_right(text: String, width: Int, fill: String) -> String { pad_mode(text, width, fill, 1) }
-pub fn pad_center(text: String, width: Int, fill: String) -> String { pad_mode(text, width, fill, 2) }
-pub fn pad(text: String, width: Int, fill: String) -> String { pad_right(text, width, fill) }
+pub fn pad_left(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 0) }
+pub fn pad_right(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 1) }
+pub fn pad_center(text: String, width: Int, fill: String) -> String Never! { pad_mode(text, width, fill, 2) }
+pub fn pad(text: String, width: Int, fill: String) -> String Never! { pad_right(text, width, fill) }
 
-pub fn grouped(n: Float, frac: Int) -> String { group_decimal(float_fixed(n, frac)) }
-pub fn decimal(n: Float, frac: Int) -> String { float_fixed(n, frac) }
-pub fn percent(n: Float, frac: Int) -> String { "{float_fixed(n * 100.0, frac)}%" }
-pub fn sci(n: Float, frac: Int) -> String {
+pub fn grouped(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed(n, frac)) }
+pub fn decimal(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
+pub fn percent(n: Float, frac: Int) -> String Never! { "{float_fixed(n * 100.0, frac)}%" }
+pub fn sci(n: Float, frac: Int) -> String Never! {
     if n == 0.0 -> return "{float_fixed(0.0, frac)}e+00"
     sign := ""
     value := n
@@ -58,7 +58,7 @@ pub fn sci(n: Float, frac: Int) -> String {
     "{sign}{float_fixed(value, frac)}e{exp_sign}{exp_text}"
 }
 
-pub fn pretty(value: String) -> String {
+pub fn pretty(value: String) -> String Never! {
     out := ""
     indent := 0
     quoted := false
@@ -90,7 +90,7 @@ pub fn pretty(value: String) -> String {
     trim_right(out)
 }
 
-pub fn bytes(n: Int) -> String {
+pub fn bytes(n: Int) -> String Never! {
     sign := ""
     value := n
     if value < 0 {
@@ -105,7 +105,7 @@ pub fn bytes(n: Int) -> String {
 }
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.
-pub fn duration(n: Int) -> String {
+pub fn duration(n: Int) -> String Never! {
     sign := ""
     rest := n
     if rest < 0 {
@@ -193,7 +193,7 @@ fn radix(n: Int, base: Int) -> String {
     String.from_bytes(out) ?? "0"
 }
 
-fn float_fixed(n: Float, frac: Int) -> String {
+fn float_fixed(n: Float, frac: Int) -> String Never! {
     precision := frac
     if precision < 0 -> precision = 0
     scale := Float{1}
@@ -251,7 +251,7 @@ fn grouped_digits(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String {
+fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String Never! {
     need := width - unicode.scalar_count(text)
     units :: unicode.scalars(fill)
     if need <= 0 || units.len() == 0 -> return ~text
@@ -284,7 +284,7 @@ fn trim_right(text: String) -> String {
     String.from_bytes(slice_b(raw, 0, i)) ?? text
 }
 
-fn slice(text: String, start: Int, end: Int) -> String {
+fn slice(text: String, start: Int, end: Int) -> String Never! {
     units :: unicode.scalars(text)
     out := ""
     i := start

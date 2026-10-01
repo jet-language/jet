@@ -18,5 +18,5 @@ fn run() {
     }
     result :: net.dns_txt_at(address, "example.test", 1000) ?? panic("DNS TXT")
     print(result.len() == 1 && result[0] == "jet")
-    responder.join() ?? panic("DNS responder")
+    (responder.join() ?? panic("DNS responder")).drop("the responder's sent byte count is not checked")
 }

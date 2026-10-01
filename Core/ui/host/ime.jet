@@ -1,26 +1,26 @@
 use core as core
-use core.ui.host.[UiHostError, UiNodeId, UiTextRange]
+use core.ui.host.[UIHostError, UINodeID, UITextRange]
 
 // core.ui.host.ime — typed input-method editor events.
-pub enum UiImePhase {
+pub enum UIIMEPhase {
     Start
     Update
     Commit
     Cancel
 }
 
-pub struct UiImeComposition {
+pub struct UIIMEComposition {
     pub text: String
-    pub selection: UiTextRange
-    pub marked: UiTextRange?
+    pub selection: UITextRange
+    pub marked: UITextRange?
 }
 
-pub struct UiImeEvent {
-    pub target: UiNodeId
-    pub phase: UiImePhase
-    pub composition: UiImeComposition?
+pub struct UIIMEEvent {
+    pub target: UINodeID
+    pub phase: UIIMEPhase
+    pub composition: UIIMEComposition?
 }
 
-pub fn poll() -[IO]> UiImeEvent? UiHostError! {
+pub fn poll() -[IO]> UIIMEEvent? UIHostError! {
     core.ui.host.ime.poll()
 }

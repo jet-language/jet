@@ -1,20 +1,19 @@
-use "units"
 
 fn run() {
     target :: 10meter
     elapsed :: 1s
-    acceleration :: units.acceleration_for(target, elapsed)
-    speed := units.speed_after(acceleration, elapsed)
+    acceleration :: acceleration_for(target, elapsed)
+    speed := speed_after(acceleration, elapsed)
     position := 0meter
     tick := 0
 
     // Integrate one second of the measured acceleration on each control tick.
     loop tick < 4 {
-        speed = units.speed_after(acceleration, elapsed)
-        increment :: units.distance_after(speed, elapsed)
+        speed = speed_after(acceleration, elapsed)
+        increment :: distance_after(speed, elapsed)
         // Preserve the fallible cross-file helper so #2776 remains an honest
         // native-tier gate instead of being hidden behind a local shortcut.
-        position = units.checked_meters_add(position, increment) ?? panic("meter sum")
+        position = checked_meters_add(position, increment) ?? panic("meter sum")
         tick += 1
     }
 

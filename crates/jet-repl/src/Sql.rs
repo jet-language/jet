@@ -100,18 +100,6 @@ impl SqlSession {
         Ok(())
     }
 
-    /// Drop all generated row declarations and query bindings.
-    pub fn clear_items(&mut self) {
-        self.session.item_srcs.clear();
-        self.session.func_defs.clear();
-        self.session.struct_defs.clear();
-        self.session.scope.clear();
-        self.session.sema_stmts.clear();
-        self.session.binding_types.clear();
-        self.session.moved_names.clear();
-        self.session.stmt_srcs.clear();
-    }
-
     /// Reset the shared session and its effect grants, matching REPL reset
     /// semantics without leaving stale query bindings behind.
     pub fn reset(&mut self) {

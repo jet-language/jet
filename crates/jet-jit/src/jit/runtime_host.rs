@@ -30,7 +30,7 @@ use jet_foundation::MatchScan::{
     jet_binary_pattern_match, jet_text_pattern_match, JetBinMatchPart, JetPatternCapture,
     JetTextHoleKind, JetTextMatchPart,
 };
-use jet_pkg_model::{ModelPackageCompiler, Package::ReleaseDevtoolsPolicy};
+use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -480,7 +480,7 @@ fn jit_testing_failure_handles(
 /// `try_with`, not `with`: a panic can be raised from a thread-local
 /// destructor, when this key is already destroyed, and `with` would panic
 /// again from inside the hook.
-fn jit_panic_window_open() -> bool {
+pub(crate) fn jit_panic_window_open() -> bool {
     JIT_PANIC_WINDOW
         .try_with(|depth| depth.get() != 0)
         .unwrap_or(false)
@@ -497,10 +497,10 @@ fn record_silenced_jit_panic(text: String) {
 }
 
 /// Marks its thread as running resident JIT work for the hook's benefit.
-struct JitPanicWindow;
+pub(crate) struct JitPanicWindow;
 
 impl JitPanicWindow {
-    fn enter() -> Self {
+    pub(crate) fn enter() -> Self {
         JIT_PANIC_WINDOW.with(|depth| {
             let outer = depth.get();
             if outer == 0 {
@@ -1672,6 +1672,16 @@ pub(crate) fn runtime_type_descriptors(program: &MirProgram) -> Vec<RuntimeTypeD
                 descriptor.kind = RuntimeValueKind::Handle;
                 descriptor.abi = RuntimeValueAbi::Handle;
                 descriptor.fields.clear();
+            }
+            MirTypeDefKind::Enum { .. }
+                if super::functions_compile::is_core_ui_handle_type_id(program, definition.id) =>
+            {
+                // The resident value is a `rt.ui.roles`/`rt.ui.events` table
+                // index, not an enum record; drop and copy treat it as an
+                // opaque handle.
+                descriptor.kind = RuntimeValueKind::Handle;
+                descriptor.abi = RuntimeValueAbi::Handle;
+                descriptor.variants.clear();
             }
             MirTypeDefKind::Struct { fields, .. } => {
                 descriptor.kind = RuntimeValueKind::Record;
@@ -3101,12 +3111,6 @@ pub(crate) struct JitRuntime {
     /// indices into this resident-owned vector; each slot owns the Foundation
     /// LoaderState and the checked row type key.
     pub(crate) data_loaders: Vec<crate::Data::DataLoaderSlot>,
-    /// Checked model output bindings projected by the loader.  The JIT keeps
-    /// these neutral facts and opens through the runtime-owned model provider.
-    pub(crate) model_outputs: Vec<jet_foundation::AST::ModelOutputFact>,
-    /// Resident model sessions. Handles are one-based indices into this
-    /// vector and are returned as the checked trait-object carrier.
-    pub(crate) model_sessions: Vec<jet_rt::model::provider::OnnxRuntimeSession>,
     /// Stable backing buffers for resident pure integer-list loops. A list
     /// already using `JetVal::IntList` is borrowed directly; erased list
     /// carriers are copied here once before native lowering reads them.
@@ -3761,29 +3765,6 @@ impl JitRuntime {
         self.hardware_host = None;
     }
 
-    /// Construct the resident replay adapter from the canonical target profile
-    /// registry. No target name or triple is interpreted as hardware identity.
-    pub(crate) fn install_canonical_hardware_host(
-        &mut self,
-        profile_id: &str,
-        facts: Option<jet_foundation::TargetMachine::TargetHardwareFacts>,
-    ) -> Result<(), String> {
-        hardware_bridge::jet_hardware_clear_pending();
-        self.clear_hardware_interrupt_handlers();
-        if profile_id.is_empty() {
-            self.clear_hardware_host();
-            return Ok(());
-        }
-        let Some(facts) = facts else {
-            return Err(format!(
-                "no checked hardware profile facts for `{profile_id}`"
-            ));
-        };
-        let host = JitHardwareReplayHost::new(profile_id.to_string(), facts);
-        self.install_hardware_host(Box::new(host));
-        Ok(())
-    }
-
     /// Register one finalized, checked zero-argument handler for a target
     /// vector. The callback pointer is never exposed as a user value.
     pub(crate) fn register_hardware_interrupt_handler(
@@ -3920,16 +3901,25 @@ impl JitRuntime {
     pub(crate) fn snapshot_compile_strings(&mut self) {
         // The disk format restores strings, not other compile-time arenas.
         // Check before invocation so runtime allocations do not affect admission.
-        if self.heap.has_non_string_state()
-            || !self.pattern_descriptors.is_empty()
-            || !self.dma_types.is_empty()
-            || !self.iterable_hooks.is_empty()
-            || !self.hardware_setups.is_empty()
-            || !self.task_labels.is_empty()
-            || !self.zip_plans.is_empty()
-            || !self.model_outputs.is_empty()
-        {
-            super::tier_cache::abort_capture();
+        let refusal = if self.heap.has_non_string_state() {
+            Some("the compile-time heap holds values other than strings")
+        } else if !self.pattern_descriptors.is_empty() {
+            Some("the compiled code holds text or binary pattern descriptors")
+        } else if !self.dma_types.is_empty() {
+            Some("the compiled code holds DMA buffer types")
+        } else if !self.iterable_hooks.is_empty() {
+            Some("the compiled code installs Iterable hooks")
+        } else if !self.hardware_setups.is_empty() {
+            Some("the program installs hardware setups")
+        } else if !self.task_labels.is_empty() {
+            Some("the compiled code holds task labels")
+        } else if !self.zip_plans.is_empty() {
+            Some("the compiled code holds zip plans")
+        } else {
+            None
+        };
+        if let Some(reason) = refusal {
+            super::tier_cache::refuse_capture(reason);
         }
         self.compile_strings = self.heap.string_slots();
         if let Some(host) = self.hardware_host.as_mut() {
@@ -7394,6 +7384,19 @@ fn nominal_handle_text(
         }
         RuntimeValueKind::Record => {
             let slots = rt.heap.clone_record_values(handle)?;
+            // The general `Err` displays as its message on every tier, as
+            // AOT's `JetDisplay for JetErr` does; Debug keeps the fields.
+            if !debug && runtime_source_name(&descriptor.name) == jet_foundation::Syntax::TYPE_ERR {
+                let message = descriptor
+                    .fields
+                    .iter()
+                    .find(|field| field.source_name == "message")?;
+                return match slots.get(message.index)? {
+                    JetVal::String(text) => Some(text.to_string()),
+                    JetVal::Int(raw) | JetVal::RecordRef(raw) => rt.heap.clone_string(*raw),
+                    _ => None,
+                };
+            }
             let mut parts = Vec::new();
             let mut debug_fields = Vec::new();
             let fields = descriptor
@@ -14058,10 +14061,6 @@ pub(crate) fn jit_result_parts(rt: &JitRuntime, handle: i64) -> Option<(bool, u6
     jit_result(rt, handle).map(|result| (result.ok, result.bits))
 }
 
-pub(crate) fn jit_result_i64(rt: &JitRuntime, handle: i64) -> Option<i64> {
-    jit_result(rt, handle).map(|result| result.bits as i64)
-}
-
 pub(crate) fn jit_result_is_ok(rt: &JitRuntime, handle: i64) -> Option<bool> {
     jit_result(rt, handle).map(|result| result.ok)
 }
@@ -15661,7 +15660,7 @@ fn history_rng_pointer(
 fn jet_testing_history_rng_next_u64(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(pointer) = history_rng_pointer(rt, handle) else {
-            rt.set_host_fault("core.testing.histories received an invalid HistoryRng");
+            rt.set_host_fault("core.testing.histories received an invalid HistoryRNG");
             return 0;
         };
         // SAFETY: explicit strategy generation installs this pointer immediately
@@ -15674,15 +15673,15 @@ fn jet_testing_history_rng_next_u64(handle: i64) -> i64 {
 fn jet_testing_history_rng_below(handle: i64, bound: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(bound) = rt.heap.int_to_i64(bound) else {
-            rt.set_host_fault("core.testing.histories HistoryRng bound is not an Int");
+            rt.set_host_fault("core.testing.histories HistoryRNG bound is not an Int");
             return 0;
         };
         let Ok(bound) = u64::try_from(bound) else {
-            rt.set_host_fault("core.testing.histories HistoryRng bound is negative");
+            rt.set_host_fault("core.testing.histories HistoryRNG bound is negative");
             return 0;
         };
         let Some(pointer) = history_rng_pointer(rt, handle) else {
-            rt.set_host_fault("core.testing.histories received an invalid HistoryRng");
+            rt.set_host_fault("core.testing.histories received an invalid HistoryRNG");
             return 0;
         };
         // SAFETY: see `jet_testing_history_rng_next_u64`.
@@ -16097,16 +16096,6 @@ fn history_u64_from_runtime(
         .ok_or_else(|| format!("core.testing.histories {label} is not an Int"))?;
     u64::try_from(value)
         .map_err(|_| format!("core.testing.histories {label} is negative"))
-}
-
-fn history_string_from_runtime(
-    rt: &JitRuntime,
-    raw: i64,
-    label: &str,
-) -> Result<String, String> {
-    rt.heap
-        .clone_string(raw)
-        .ok_or_else(|| format!("core.testing.histories {label} is not a String"))
 }
 
 fn history_id_to_runtime(
@@ -17720,152 +17709,6 @@ fn jet_hardware_interrupt_poll() -> i64 {
     });
     hardware_bridge::jet_hardware_invoke_pending(callbacks) as i64
 }
-fn model_error_result(runtime: &mut JitRuntime, message: impl Into<String>) -> i64 {
-    let message = runtime.heap.alloc_string(message.into());
-    alloc_jit_result(runtime, false, message as u64)
-}
-
-/// Open one checked model output for the resident JIT.  The model package
-/// adapter only projects loader facts; execution itself stays in `jet_rt`.
-fn jet_jit_model_open(output: i64, trait_name: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| {
-        let output = runtime.heap.get_string(output).unwrap_or("").to_owned();
-        let trait_name = runtime.heap.get_string(trait_name).unwrap_or("").to_owned();
-        let trait_leaf = trait_name
-            .rsplit("::")
-            .next()
-            .unwrap_or(&trait_name)
-            .rsplit('.')
-            .next()
-            .unwrap_or(&trait_name)
-            .to_owned();
-        let Some(fact) = runtime
-            .model_outputs
-            .iter()
-            .find(|fact| fact.output == output && fact.signature_name.as_deref() == Some(trait_leaf.as_str()))
-            .cloned()
-        else {
-            return model_error_result(
-                runtime,
-                format!("model output `{output}` has no checked `{trait_name}` binding"),
-            );
-        };
-        let control = match jet_scheduler_current_task_control() {
-            Some(control) => control,
-            None => return model_error_result(runtime, "model execution requires an active scheduler task"),
-        };
-        let cancellation =
-            jet_rt::model::provider::CancellationToken::from_cancel_flag(control.cancelled.clone());
-        let _cancel_bridge = {
-            let cancellation = cancellation.clone();
-            control.register_cancel_callback(std::sync::Arc::new(move || cancellation.cancel()))
-        };
-        let package = match jet_pkg_model::ModelPackage::load(&fact.package_root, &fact.output) {
-            Ok(package) => package,
-            Err(error) => return model_error_result(runtime, error.to_string()),
-        };
-        let graph = match package.artifacts.first() {
-            Some(artifact) => match package.read_artifact(&fact.package_root, artifact) {
-                Ok(bytes) => bytes,
-                Err(error) => return model_error_result(runtime, error.to_string()),
-            },
-            None => return model_error_result(runtime, "model package has no graph artifact"),
-        };
-        let policy = match jet_rt::model::provider::OnnxRuntimePolicy::cpu_for_graph(&graph) {
-            Ok(policy) => policy,
-            Err(error) => return model_error_result(runtime, error.to_string()),
-        };
-        let runtime_path = match std::env::var_os("JET_ONNX_RUNTIME_LIBRARY") {
-            Some(path) => path,
-            None => {
-                return model_error_result(
-                    runtime,
-                    "JET_ONNX_RUNTIME_LIBRARY is required for model execution",
-                )
-            }
-        };
-        let pin = match jet_rt::model::provider::RuntimePin::official_linux_x64(runtime_path) {
-            Ok(pin) => pin,
-            Err(error) => return model_error_result(runtime, error.to_string()),
-        };
-        let provider = match jet_rt::model::provider::OnnxRuntimeProvider::native(pin, policy) {
-            Ok(provider) => provider,
-            Err(error) => return model_error_result(runtime, error.to_string()),
-        };
-        let session = match jet_rt::model::provider::run_ready(package.open_with(
-            jet_rt::model::ModelSource::Directory(&fact.package_root),
-            &provider,
-            &cancellation,
-        )) {
-            Ok(session) => session,
-            Err(error) => return model_error_result(runtime, error.to_string()),
-        };
-        runtime.model_sessions.push(session);
-        let handle = runtime.model_sessions.len() as i64;
-        alloc_jit_result(runtime, true, handle as u64)
-    })
-}
-
-/// Execute a checked embedding method through a resident model session.
-fn jet_jit_model_embed(session: i64, documents: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| {
-        let Some(length) = runtime.heap.list_len(documents) else {
-            return model_error_result(runtime, "model embed expects a string list");
-        };
-        let mut source = Vec::with_capacity(length as usize);
-        for index in 0..length {
-            let Some(document) = runtime.heap.list_get_string(documents, index) else {
-                return model_error_result(runtime, "model embed received a non-string document");
-            };
-            source.push(document);
-        }
-        let control = match jet_scheduler_current_task_control() {
-            Some(control) => control,
-            None => return model_error_result(runtime, "model execution requires an active scheduler task"),
-        };
-        let cancellation =
-            jet_rt::model::provider::CancellationToken::from_cancel_flag(control.cancelled.clone());
-        let _cancel_bridge = {
-            let cancellation = cancellation.clone();
-            control.register_cancel_callback(std::sync::Arc::new(move || cancellation.cancel()))
-        };
-        let Some(slot) = session
-            .checked_sub(1)
-            .and_then(|index| usize::try_from(index).ok())
-            .and_then(|index| runtime.model_sessions.get_mut(index))
-        else {
-            return model_error_result(runtime, "model embed received an unknown session handle");
-        };
-        let batch = match jet_rt::model::provider::run_ready(slot.embed_documents(&source, &cancellation)) {
-            Ok(batch) => batch,
-            Err(error) => return model_error_result(runtime, error.to_string()),
-        };
-        let values = runtime.heap.alloc_empty_list();
-        for row in batch.values() {
-            let row_handle = runtime.heap.alloc_empty_list();
-            for value in row {
-                let _ = runtime.heap.list_push_float(row_handle, f64::from(*value));
-            }
-            if let Some(entries) = runtime.heap.list_values_mut(values) {
-                entries.push(JetVal::RecordRef(row_handle));
-            } else {
-                return model_error_result(runtime, "model output list carrier is invalid");
-            }
-        }
-        let space = runtime.heap.alloc_record_cells(vec![
-            JetVal::String(batch.space().model_digest().to_owned()),
-            JetVal::Int(batch.space().dimension() as i64),
-            JetVal::String(batch.space().metric().to_owned()),
-            JetVal::String(batch.space().normalization().to_owned()),
-        ]);
-        let result = runtime.heap.alloc_record_cells(vec![
-            JetVal::RecordRef(values),
-            JetVal::RecordRef(space),
-        ]);
-        alloc_jit_result(runtime, true, result as u64)
-    })
-}
-
 
 fn jet_hardware_replay_interrupt(vector: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.trigger_hardware_interrupt(vector))
@@ -17907,10 +17750,6 @@ host_fns! {
             .extend([AbiParam::new(types::I64); 3]);
 
 
-        let mut sig_model_open = Signature::new(cc);
-        sig_model_open.params.extend([AbiParam::new(types::I64); 2]);
-        sig_model_open.returns.push(AbiParam::new(types::I64));
-        let sig_model_embed = sig_model_open.clone();
         let mut sig_reflect_finish = Signature::new(cc);
         for _ in 0..4 {
             sig_reflect_finish.params.push(AbiParam::new(types::I64));
@@ -18484,8 +18323,6 @@ host_fns! {
     pow_f64: "jet_jit_pow_f64" => jet_jit_pow_f64: sig_pow_f64;
     intn_binop: "jet_jit_intn_binop" => jet_jit_intn_binop: sig_intn_binop;
     intn_to_string: "jet_jit_intn_to_string" => jet_jit_intn_to_string: sig_i64_i64_i64;
-    model_open: "jet_jit_model_open" => jet_jit_model_open: sig_model_open;
-    model_embed: "jet_jit_model_embed" => jet_jit_model_embed: sig_model_embed;
     print_i64: "jet_jit_print_i64" => jet_jit_print_i64: sig_i64;
     print_f64: "jet_jit_print_f64" => jet_jit_print_f64: sig_f64;
     print_bool: "jet_jit_print_bool" => jet_jit_print_bool: sig_i8;
@@ -18772,6 +18609,7 @@ host_fns! {
     testing_test_suite_new: "jet_jit_testing_test_suite_new" => jet_jit_testing_test_suite_new: sig_str_begin;
     testing_test_suite_new_aot: "jet_test_suite_new" => jet_jit_testing_test_suite_new: sig_str_begin;
     testing_test_suite_run: "jet_jit_testing_test_suite_run" => jet_jit_testing_test_suite_run: sig_str_unary_i64;
+    testing_test_suite_run_aot: "jet_test_suite_run" => jet_jit_testing_test_suite_run: sig_str_unary_i64;
     testing_compare: "jet_jit_testing_compare" => jet_jit_testing_compare: sig_testing_compare;
     testing_assert_equal: "jet_jit_testing_assert_equal" => jet_jit_testing_assert_equal: sig_testing_assert_equal;
     testing_status: "jet_jit_testing_status" => jet_jit_testing_status: sig_testing_status;

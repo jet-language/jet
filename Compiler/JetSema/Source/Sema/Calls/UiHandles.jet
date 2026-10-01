@@ -1,5 +1,25 @@
 // Source producers for retained UI callbacks, UI backend methods, sketches, and
 // Browser handle methods. Operation choices mirror the native TIR producers.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    CallLabel,
+    CoreCallRecord,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    SymbolKind,
+    TCoreClosureKind,
+    TExpr,
+    TExprKind,
+    THandleOp,
+    TLambda,
+    Type,
+    type_name,
+]
 
 fn sema_ui_handle_unit() -> Type Never! {
     Type.Named{name: "Unit"}
@@ -186,7 +206,7 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
     }
     if args.len() == 1 {
         label :: sema_ui_handle_typed_arg(args[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        result_type := Type.Named{name: "UiNode"}
+        result_type := Type.Named{name: "UINode"}
         value :: sema_call_core_tir(record, [TExpr]{label}, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, &diagnostics)
         if value == None -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -194,7 +214,7 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
     }
     params := [SemaCallParam]{
         sema_ui_handle_callback_param("display", "display", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
-        sema_ui_handle_callback_param("shortcut", "shortcut", Type.Option{inner: Type.Named{name: "UiShortcut"}}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
+        sema_ui_handle_callback_param("shortcut", "shortcut", Type.Option{inner: Type.Named{name: "UIShortcut"}}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
         sema_ui_handle_callback_param("label", "label", Type.Option{inner: Type.String}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
         sema_ui_handle_callback_param("on_click", "on_click", sema_ui_handle_callback_type([Type]{}), span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
     }
@@ -208,16 +228,16 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
         else -> false
     }
     if !bound[3].flags.is_trailing_block || callback_absent {
-        &diagnostics.push(sema_error("E0335", bound[3].span, "button callbacks use a trailing block", "the callback is the button's trailing closure, after its labeled metadata", "write `button(\"Save\") { save() }`"))
+        &diagnostics.push(sema_error("E0335", bound[3].span, "button callbacks use a trailing block", "the callback is the button's trailing closure, after its labeled metadata", "write `button(\"Save\") {{ save() }}`"))
         _ := sema_ui_handle_infer_args(bound, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     label :: sema_ui_handle_typed_arg(bound[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    shortcut :: sema_ui_handle_optional_arg(bound[1], Type.Named{name: "UiShortcut"}, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    shortcut :: sema_ui_handle_optional_arg(bound[1], Type.Named{name: "UIShortcut"}, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     accessible_label :: sema_ui_handle_optional_arg(bound[2], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     callback :: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    result_type := Type.Named{name: "UiNode"}
-    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UiButtonOnClick{label: label, shortcut: shortcut, accessible_label: accessible_label, executable: callback, site: span.start}}, span)
+    result_type := Type.Named{name: "UINode"}
+    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIButtonOnClick{label: label, shortcut: shortcut, accessible_label: accessible_label, executable: callback, site: span.start}}, span)
     checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
@@ -230,8 +250,8 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
     }
     params := [SemaCallParam]{
         sema_ui_handle_callback_param("state", "state", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
-        sema_ui_handle_callback_param("ime", "ime", Type.Named{name: "UiImeMode"}, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
-        sema_ui_handle_callback_param("on_drop", "on_drop", Type.Option{inner: sema_ui_handle_callback_type([Type]{Type.Named{name: "UiDropItem"}})}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
+        sema_ui_handle_callback_param("ime", "ime", Type.Named{name: "UIIMEMode"}, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
+        sema_ui_handle_callback_param("on_drop", "on_drop", Type.Option{inner: sema_ui_handle_callback_type([Type]{Type.Named{name: "UIDropItem"}})}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span})),
     }
     bound :: sema_ui_handle_bind_callback_args("text_input", args, span, "on_drop", params, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if bound.len() != 3 {
@@ -239,8 +259,8 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     state_value :: sema_ui_handle_typed_arg(bound[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    ime_value :: sema_ui_handle_typed_arg(bound[1], Type.Named{name: "UiImeMode"}, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    result_type := Type.Named{name: "UiNode"}
+    ime_value :: sema_ui_handle_typed_arg(bound[1], Type.Named{name: "UIIMEMode"}, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    result_type := Type.Named{name: "UINode"}
     on_drop_absent :: if bound[2].expr == {
         .Absent(_) -> true
         else -> false
@@ -251,8 +271,8 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
         if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: value}
     }
-    callback :: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UiDropItem"}}, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UiTextInputOnDrop{state: state_value, ime: ime_value, executable: callback, site: span.start}}, span)
+    callback :: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UIDropItem"}}, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UITextInputOnDrop{state: state_value, ime: ime_value, executable: callback, site: span.start}}, span)
     checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_core_record_effects(record, span, type_args, result_type, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
@@ -270,19 +290,19 @@ pub fn sema_call_try_ui_core_call(module_name: String, member: String, args: [Ca
 }
 
 fn sema_ui_backend_owner(owner: String) -> Bool Never! {
-    owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend"
+    owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend"
 }
 
 fn sema_ui_backend_known_method(owner: String, method: String) -> Bool Never! {
-    if (owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
+    if (owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
     if owner == "NullBackend" && method == "commands" -> return true
-    if owner == "TuiBackend" && (method == "frame_lines" || method == "render_count") -> return true
+    if owner == "TUIBackend" && (method == "frame_lines" || method == "render_count") -> return true
     if owner == "GtkBackend" && (method == "label" || method == "button" || method == "set_text" || method == "set_size" || method == "set_color" || method == "on_click" || method == "present") -> return true
     false
 }
 
 fn sema_ui_backend_result(owner: String, method: String, argc: Int) -> Type? {
-    if owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend" {
+    if owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend" {
         if method == "measure" && argc == 2 -> return Val(Type.Named{name: "Size"})
         if method == "layout" && argc == 2 -> return Val(sema_ui_handle_unit())
         if method == "paint" && argc == 1 -> return Val(sema_ui_handle_unit())
@@ -292,8 +312,8 @@ fn sema_ui_backend_result(owner: String, method: String, argc: Int) -> Type? {
         if method == "focused_label" && argc == 0 -> return Val(Type.String)
     }
     if owner == "NullBackend" && method == "commands" && argc == 0 -> return Val(Type.List{element: Type.String})
-    if owner == "TuiBackend" && method == "frame_lines" && argc == 0 -> return Val(Type.List{element: Type.String})
-    if owner == "TuiBackend" && method == "render_count" && argc == 0 -> return Val(Type.Int)
+    if owner == "TUIBackend" && method == "frame_lines" && argc == 0 -> return Val(Type.List{element: Type.String})
+    if owner == "TUIBackend" && method == "render_count" && argc == 0 -> return Val(Type.Int)
     if owner == "GtkBackend" {
         if (method == "label" || method == "button") && argc == 1 -> return Val(Type.Int)
         if (method == "set_text" || method == "set_color" || method == "on_click") && argc == 2 -> return Val(sema_ui_handle_unit())
@@ -311,7 +331,7 @@ pub fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, met
         }
         if method == "set_focus_group" -> sema_call_core_ui_focus_group_lint(args, span, environment, &scopes, &diagnostics)
         typed_args :: sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UiBackendMethod{method: method}, args: typed_args}, span)
+        value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.UIBackendMethod{method: method}, args: typed_args}, span)
         checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
     }

@@ -2,6 +2,11 @@
 // Unit-result sends and closes are effects on the shared channel: every tier
 // must deliver them, and `try_receive` must keep a `-1` payload distinct from
 // an empty channel.
+package {
+    name: "channel_builtin_1560"
+    authority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }
+}
+
 fn run() {
     (tx, rx) :: channel<Int>(capacity: 8)
     tx.send(-1)

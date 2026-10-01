@@ -1,0 +1,26 @@
+// A generic function takes a named function as its callback just like a
+// lambda. A callback that cannot fail (`Never!`) fits a callback slot that
+// may fail, and a lambda passed to a `Never!` slot needs no annotation once
+// the earlier arguments fix the type parameters.
+fn total_length<T>(rows: [T], key_fn: fn(T) -> String) -> Int {
+    total := 0
+    loop row in rows -> total += key_fn(row).len()
+    total
+}
+
+fn keys<T>(rows: [T], key_fn: fn(T) -> String Never!) -> [String] Never! {
+    out := [String]{ }
+    loop row in rows -> &out.push(key_fn(row))
+    out
+}
+
+fn plain_key(name: String) -> String { ~name }
+
+fn sure_key(name: String) -> String Never! { ~name }
+
+fn run() {
+    print(total_length(["bb", "a"], plain_key))
+    print(total_length(["bb", "a"], sure_key))
+    print(keys([3, 1], n -> "#{n}").join(" "))
+    print(keys(["x", "y"], sure_key).join(" "))
+}

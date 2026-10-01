@@ -1,0 +1,35 @@
+// D-FLOWTYPE1=A: after an `x == None` guard that always leaves, the rest of
+// the block reads `x` as its payload.
+fn same(left: [Int]?, right: [Int]?) -> Bool {
+    if left == None -> return right == None
+    if right == None -> return false
+    if left.len() != right.len() -> return false
+    loop (i, item) in left {
+        if item != right[i] -> return false
+    }
+    true
+}
+
+fn plus_one(x: Int?) -> Int {
+    if x == None {
+        print("no value")
+        return 0
+    }
+    x + 1
+}
+
+fn total(values: [Int?]) -> Int {
+    sum := 0
+    loop value in values {
+        if value == None -> next
+        sum += value
+    }
+    sum
+}
+
+fn run() {
+    print("{same(Val([1, 2]), Val([1, 2]))} {same(Val([1]), None)} {same(None, None)}")
+    print(plus_one(Val(4)))
+    print(plus_one(None))
+    print(total([Val(1), Int?{None}, Val(5)]))
+}

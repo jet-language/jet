@@ -84,7 +84,18 @@ impl<'a> Checker<'a> {
             .into_iter()
             .chain(self.consts.keys().cloned())
             .collect();
-        let suggestion = suggest_field(name, &candidates);
+        // A rename changes what the program means, so it is never a safe
+        // edit, and a candidate whose type cannot fill this position is no
+        // suggestion at all.
+        let suggestion = suggest_field(name, &candidates).filter(|cand| {
+            match (
+                self.expected_type.as_ref(),
+                self.lookup(cand).map(|info| &info.ty),
+            ) {
+                (Some(expected), Some(ty)) => ty == expected,
+                _ => true,
+            }
+        });
         if let Some(cand) = suggestion.as_deref() {
             fix = format!("did you mean `{}`?", cand);
         }
@@ -96,10 +107,14 @@ impl<'a> Checker<'a> {
             Some(span),
         );
         if let Some(cand) = suggestion {
-            diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
-                span,
-                new_text: cand,
-            });
+            diagnostic = diagnostic.with_edit_grade(
+                crate::Diagnostics::TextEdit {
+                    span,
+                    new_text: cand,
+                },
+                crate::Diagnostics::FixApplicability::Suggested,
+                crate::Diagnostics::FixSafety::NeedsReview,
+            );
         }
         self.diags.push(diagnostic);
     }

@@ -46,6 +46,18 @@
         jetRuntimeLibraryHook = ''
           export ${jetRuntimeLibraryVariable}="${jetRuntimeLibraryPath}:''${${jetRuntimeLibraryVariable}:-}"
         '';
+        # Cargo builds in the dev shells link through lld: GNU ld links the
+        # multi-hundred-MB debug `jet` (and every integration test binary)
+        # single-threaded. The wrapped lld keeps Nix's dynamic-linker and
+        # rpath handling; bare `pkgs.lld` would emit binaries that cannot find
+        # libgcc_s. Set per shell, not in .cargo/config.toml, so `nix build`
+        # and plain cargo outside the shell keep the stdenv linker.
+        jetCargoLinker = pkgs.writeShellScript "jet-cargo-linker" ''
+          exec ${pkgs.stdenv.cc}/bin/cc -B${pkgs.llvmPackages.bintools}/bin/ -fuse-ld=lld "$@"
+        '';
+        jetCargoLinkerHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+          export CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER="${jetCargoLinker}"
+        '';
         # pkgs.vitejs calls fetchPnpmDeps without pinning `pnpm`, defaulting
         # to pnpm_11 (fetcherVersion 3), which nixpkgs rejects; pin pnpm_10.
         jetVite = pkgs.vitejs.override {
@@ -65,6 +77,10 @@
 
           postInstall = ''
             mv $out/bin/jet-cxx $out/bin/jet-c++
+            # Ship the runtime rlib for the default build facts beside `jet`
+            # (jet-runtime/<key>/), so a first `jet build` links it instead of
+            # compiling the ~130k-line runtime (crates/jet-store/src/runtime.rs).
+            PATH="${jetRuntimePath}:$PATH" bash Tools/packaging/prebuild-runtime.sh $out/bin/jet
             wrapProgram $out/bin/jet \
               --prefix PATH : "${jetRuntimePath}" \
               --prefix ${jetRuntimeLibraryVariable} : "${jetRuntimeLibraryPath}" \
@@ -200,6 +216,7 @@
             fi
             export TZDIR="${jetTzdb}"
             ${jetRuntimeLibraryHook}
+            ${jetCargoLinkerHook}
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"
             ''}
@@ -318,6 +335,7 @@
             fi
             export TZDIR="${jetTzdb}"
             ${jetRuntimeLibraryHook}
+            ${jetCargoLinkerHook}
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"

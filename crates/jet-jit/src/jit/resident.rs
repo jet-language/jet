@@ -206,8 +206,6 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
         data_loaders: Vec::new(),
-        model_outputs: Vec::new(),
-        model_sessions: Vec::new(),
         int_list_views: Vec::new(),
         mapped_files: Vec::new(),
         file_scopes: Vec::new(),
@@ -427,7 +425,7 @@ fn take_host_fault_outcome(runtime: &mut JitRuntime) -> Option<RunOutcome> {
 }
 
 pub(crate) fn resident_teardown() {
-    crate::CoreHost::reset_jit_interrupts();
+    crate::CoreHost::reset_jit_fs_owners();
     crate::Mod::clear();
     clear_deopt_state();
     crate::Collections::clear_packed_enum_show();
@@ -671,19 +669,6 @@ pub(crate) fn resident_invoke_with_words_and_value(
         resident_invoke_inner(None, Some(words), Some(return_type), Some(invocation_started))?;
     let value = value
         .ok_or_else(|| "typed Cranelift entry did not produce a typed return value".to_string())?;
-    Ok((outcome, value))
-}
-
-pub(crate) fn resident_invoke_function_with_words_and_value(
-    target: cranelift_module::FuncId,
-    typed_target: Option<cranelift_module::FuncId>,
-    words: &[i64],
-    return_type: &MirType,
-) -> Result<(RunOutcome, MirRuntimeValue), String> {
-    let (outcome, value) =
-        resident_invoke_inner(Some((target, typed_target)), Some(words), Some(return_type), None)?;
-    let value = value
-        .ok_or_else(|| "typed Cranelift helper did not produce a typed return value".to_string())?;
     Ok((outcome, value))
 }
 
@@ -1510,37 +1495,6 @@ fn resident_selective_function_ids(
     Ok(Some(selected_ids))
 }
 
-fn install_selected_cli_function_pointers(
-    module: &JITModule,
-    selected_ids: &BTreeSet<MirFunctionId>,
-) -> Result<(), String> {
-    let function_pointer = |function_id: MirFunctionId| -> Result<*const u8, String> {
-        let Some(FuncOrDataId::Func(id)) = module.get_name(&mir_fn_name(function_id)) else {
-            return Err(format!("JIT CLI function {:?} was not compiled", function_id));
-        };
-        let ptr = module.get_finalized_function(id);
-        if ptr.is_null() {
-            return Err(format!(
-                "JIT CLI function {:?} has no finalized address",
-                function_id
-            ));
-        }
-        Ok(ptr)
-    };
-    if let Some(user_run) = crate::CLI::cli_user_run_target() {
-        if selected_ids.contains(&user_run) {
-            crate::CLI::install_cli_run_ptr(function_pointer(user_run)?);
-        }
-    }
-    for command in crate::CLI::cli_command_targets() {
-        if selected_ids.contains(&command) {
-            crate::CLI::install_cli_command_ptr(command, function_pointer(command)?);
-        }
-    }
-    Ok(())
-}
-
-
 fn resident_redefine(
     program: &MirProgram,
     artifact: MirArtifactId,
@@ -1614,7 +1568,7 @@ pub(crate) fn resident_hot_swap(
 ) -> Result<RunOutcome, String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     crate::net_http_rt::clear_net_http_handles();
-    crate::CoreHost::reset_jit_interrupts();
+    crate::CoreHost::reset_jit_fs_owners();
 
     if let Some(plan) = take_resident_hot_swap_plan() {
         let status = RESIDENT_MODULE.with(|mod_slot| {

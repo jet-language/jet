@@ -604,24 +604,6 @@ fn jet_process_verify_launch_plan(
     Ok(())
 }
 
-// Pipelines use ordinary pipe edges. A PTY session is one bidirectional byte
-// stream with one controlling process group, so it cannot be silently coerced
-// into a pipeline edge. Keep the failure explicit and direct callers to
-// `spawn()` for the terminal-backed child.
-fn jet_process_command_with_identity(
-    spec: &jet_std::ProcessSpec,
-    executable_identity: Option<&str>,
-) -> Result<std::process::Command, jet_std::IOError> {
-    if spec.terminal.is_some() {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Resolve,
-            spec.cmd.first().cloned(),
-            "terminal sessions cannot be used as pipeline stages; spawn the session directly",
-        ));
-    }
-    jet_process_command_base_with_identity(spec, executable_identity)
-}
-
 fn jet_process_pipeline_resource_limits_check(
     spec: &jet_std::ProcessSpec,
 ) -> Result<(), jet_std::IOError> {

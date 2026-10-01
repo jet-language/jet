@@ -412,21 +412,21 @@ pub(crate) fn ui_backend_method_return(
     let size_ty = Type::Named("Size".to_string());
     let unit = unit_ty();
     match (backend, method, n_args) {
-        ("NullBackend" | "TuiBackend" | "GtkBackend", "measure", 2) => Some(Some(size_ty)),
-        ("NullBackend" | "TuiBackend" | "GtkBackend", "layout", 2) => Some(Some(unit)),
-        ("NullBackend" | "TuiBackend" | "GtkBackend", "paint", 1) => Some(Some(unit)),
+        ("NullBackend" | "TUIBackend" | "GtkBackend", "measure", 2) => Some(Some(size_ty)),
+        ("NullBackend" | "TUIBackend" | "GtkBackend", "layout", 2) => Some(Some(unit)),
+        ("NullBackend" | "TUIBackend" | "GtkBackend", "paint", 1) => Some(Some(unit)),
         // D-UI-MOUNT1=A: one-call measure→layout→paint (optional constraint).
-        ("NullBackend" | "TuiBackend" | "GtkBackend", "mount", 1 | 2) => Some(Some(unit)),
-        ("NullBackend" | "TuiBackend" | "GtkBackend", "on_event", 1) => {
+        ("NullBackend" | "TUIBackend" | "GtkBackend", "mount", 1 | 2) => Some(Some(unit)),
+        ("NullBackend" | "TUIBackend" | "GtkBackend", "on_event", 1) => {
             Some(Some(Type::Named("EventResult".to_string())))
         }
         ("NullBackend", "commands", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-        ("TuiBackend", "frame_lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-        ("TuiBackend", "render_count", 0) => Some(Some(Type::Int)),
+        ("TUIBackend", "frame_lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("TUIBackend", "render_count", 0) => Some(Some(Type::Int)),
         // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing over a flat
         // list of interactive nodes.
-        ("NullBackend" | "TuiBackend" | "GtkBackend", "set_focus_group", 1) => Some(Some(unit)),
-        ("NullBackend" | "TuiBackend" | "GtkBackend", "focused_label", 0) => {
+        ("NullBackend" | "TUIBackend" | "GtkBackend", "set_focus_group", 1) => Some(Some(unit)),
+        ("NullBackend" | "TUIBackend" | "GtkBackend", "focused_label", 0) => {
             Some(Some(Type::String))
         }
         // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 retained-widget surface.

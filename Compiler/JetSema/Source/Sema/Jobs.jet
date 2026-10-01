@@ -1,3 +1,28 @@
+use core.math as math
+use jet_foundation.[
+    Diagnostic,
+    EveryArg,
+    EverySchedule,
+    EveryScheduleError,
+    Expr,
+    Func,
+    Item,
+    JobScope,
+    Param,
+    Span,
+    SymbolKind,
+    TFunc,
+    TFunctionRef,
+    TJobArgumentFact,
+    TJobFact,
+    Type,
+    ast_job_metadata,
+    expr_span,
+    symbol_id,
+    tir_job_artifact_fact,
+    type_name,
+]
+
 pub struct SemaJobArtifactCheckResult {
     pub fact: TJobFact?
     pub schedule: EverySchedule?
@@ -11,7 +36,8 @@ pub struct SemaJobScheduleResolution {
 }
 
 fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment) -> SemaRegistrationUnitFact? {
-    graph :: environment.registration_graph ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
     sema_expression_unit_literal_time_fact(suffix, graph)
 }
 
@@ -35,8 +61,8 @@ fn sema_job_schedule_duration_int(value: Int, unit: SemaRegistrationUnitFact) ->
     if value <= 0 -> return None
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return None
     max_int :: 9223372036854775807
-    if value > max_int / unit.scale.numerator -> return None
-    nanos := value * unit.scale.numerator / unit.scale.denominator
+    if value > max_int /% unit.scale.numerator -> return None
+    nanos := value * unit.scale.numerator /% unit.scale.denominator
     if nanos <= 0 || nanos > max_int -> return None
     Val(nanos)
 }
@@ -45,7 +71,7 @@ fn sema_job_schedule_duration_float(value: Float, unit: SemaRegistrationUnitFact
     if !math.is_finite(value) || value <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
     nanos := value * Float.from_int(unit.scale.numerator) / Float.from_int(unit.scale.denominator)
-    max_int_exclusive := 9223372036854775808.0
+    max_int_exclusive :: Float{9223372036854775808.0}
     if !math.is_finite(nanos) || nanos >= max_int_exclusive -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
     if nanos <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     integer_nanos := sema_job_schedule_float_to_int(nanos)
@@ -113,8 +139,8 @@ fn sema_job_default_text(expression: Expr) -> String? {
         .Paren(value, _) -> return sema_job_default_text(value)
         .Int(value, _, _, _) -> return Val("{value}")
         .Float(value, _, _, raw) -> {
-            text := raw ?? "{value}"
-            return Val(&text.replace("_", ""))
+            text :: raw ?? "{value}"
+            return Val(text.replace("_", ""))
         }
         .Bool(value, _) -> return Val("{value}")
         .Str(parts, _) -> {
@@ -183,20 +209,19 @@ fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] Never! {
     arguments
 }
 
-pub fn sema_check_job_artifact(function: &[Func], checked_function: TFunc, environment: SemaScopeEnvironment) -> SemaJobArtifactCheckResult {
+pub fn sema_check_job_artifact(function: Func, checked_function: TFunc, environment: SemaScopeEnvironment) -> SemaJobArtifactCheckResult {
     diagnostics := [Diagnostic]{}
-    schedule := None
+    schedule := EverySchedule?{None}
     complete := true
     if function.every == .Val(every) {
         resolution := sema_job_resolve_every_arg(every.arg, environment)
-        function.every.resolved = resolution.schedule
         schedule = resolution.schedule
         if resolution.error == .Val(reason) {
             &diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(every.arg)))
             complete = false
         }
     }
-    fact := None
+    fact := TJobFact?{None}
     if function.is_job {
         // A bare `#Job` carries no marker arguments; it is still a job with
         // the default metadata, so it can run and be an `after:` predecessor.

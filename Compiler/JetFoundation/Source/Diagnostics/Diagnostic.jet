@@ -14,7 +14,7 @@ pub enum DiagnosticMoment { Compile Run Test Tool }
 
 pub enum DiagnosticFixApplicability { Safe Suggested }
 
-pub enum DiagnosticFixSafety { Formatting BehaviorPreserving ApiChanging TargetChanging NeedsReview }
+pub enum DiagnosticFixSafety { Formatting BehaviorPreserving APIChanging TargetChanging NeedsReview }
 
 pub enum DiagnosticNoFixReasonKind { Behavior Design Ambiguous }
 
@@ -131,7 +131,7 @@ pub struct Diagnostic {
     pub no_fix_reason: DiagnosticNoFixReason?{None}
     pub detail: String?{None}
     pub structured: DiagnosticStructured?{None}
-    pub decision_row: MirDecisionRow?{None}
+    pub decision_row: MIRDecisionRow?{None}
     pub denial_kind: String?{None}
     pub call_chain: [String]{[String]{}}
     pub scope_chain: [String]{[String]{}}
@@ -227,7 +227,7 @@ pub fn diagnostic_with_structured(diagnostic: ^Diagnostic, structured: Diagnosti
     updated
 }
 
-pub fn diagnostic_with_decision_row(diagnostic: ^Diagnostic, decision_row: MirDecisionRow) -> Diagnostic Never! {
+pub fn diagnostic_with_decision_row(diagnostic: ^Diagnostic, decision_row: MIRDecisionRow) -> Diagnostic Never! {
     updated := diagnostic
     updated.decision_row = Val(decision_row)
     updated
@@ -242,5 +242,5 @@ pub fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call
     updated
 }
 
-DIAGNOSTIC_ERROR :: 1
-DIAGNOSTIC_LINT :: 2
+pub DIAGNOSTIC_ERROR :: 1
+pub DIAGNOSTIC_LINT :: 2

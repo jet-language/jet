@@ -319,11 +319,13 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         };
     }
     // D-BROWSER-AUTO1=A: profile/timeout validate pure values; locked reads the
-    // project lock (FS). Connecting and handle I/O remain Net effects.
+    // project lock (FS); config_from_env reads the environment (Env).
+    // Connecting and handle I/O remain Net effects.
     if module == "core.web.browser" {
         return match method {
             "profile" | "timeout" => None,
             "locked" => Some(Effect::FS),
+            "config_from_env" => Some(Effect::Env),
             _ => Some(Effect::Net),
         };
     }

@@ -1,0 +1,105 @@
+// Enum variants may share names with builtin types. The variant belongs to
+// its enum: construction, equality, ordering and patterns resolve it through
+// the enum's own variant table, never as the builtin type or as a prelude enum
+// (`DataTree`, `Key`) that spells a variant the same way.
+#Comparable
+enum Ty {
+    Int
+    Float
+    Bool
+    String
+    Char
+    U8
+    Unit
+    Never
+    List(element: Ty)
+    Map(key: Ty, value: Ty)
+    Leaf
+}
+
+enum Literal {
+    Int(value: Int)
+    Text(value: String)
+    Null
+    Pair(lo: Int, hi: Int)
+}
+
+fn show(ty: Ty) -> String {
+    if ty == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .String -> "String"
+        .Char -> "Char"
+        .U8 -> "U8"
+        .Unit -> "Unit"
+        .Never -> "Never"
+        .List(element) -> "[{show(element)}]"
+        .Map(key, value) -> "[{show(key)}: {show(value)}]"
+        .Leaf -> "Leaf"
+    }
+}
+
+fn is_scalar(ty: Ty) -> Bool {
+    if ty == {
+        .Int -> true
+        .Float -> true
+        .Bool -> true
+        else -> false
+    }
+}
+
+fn describe(literal: Literal) -> String {
+    if literal == {
+        .Int(value) -> "int {value}"
+        .Text(value) -> "text {value}"
+        .Null -> "null"
+        .Pair(lo, hi) -> "pair {lo}..{hi}"
+    }
+}
+
+fn order(ordering: Ordering) -> String {
+    if ordering == {
+        .Less -> "less"
+        .Greater -> "greater"
+        .Equal -> "equal"
+    }
+}
+
+fn run() {
+    all :: [Ty]{Ty.Int, Ty.Float, Ty.Bool, Ty.String, Ty.Char, Ty.U8, Ty.Unit, Ty.Never, Ty.Leaf}
+    loop ty in all {
+        print(show(ty))
+    }
+    print(show(Ty.List{element: Ty.Int}))
+    print(show(Ty.Map{key: Ty.String, value: Ty.List{element: Ty.Bool}}))
+
+    int :: Ty.Int
+    float :: Ty.Float
+    leaf :: Ty.Leaf
+    print(Ty.Int == Ty.Int)
+    print(Ty.Int == Ty.Float)
+    print(Ty.Float == Ty.Bool)
+    print(Ty.Char == Ty.Leaf)
+    print(Ty.List{element: Ty.Int} == Ty.List{element: Ty.Int})
+    print(Ty.List{element: Ty.Int} == Ty.List{element: Ty.Float})
+    print(order(int.compare(float)))
+    print(order(leaf.compare(int)))
+
+    ty :: Ty.Bool
+    if ty == .Bool {
+        print("bool test")
+    }
+    if ty == .Int {
+        print("wrong")
+    }
+    print(is_scalar(Ty.Float))
+    print(is_scalar(Ty.String))
+
+    print(describe(Literal.Int{value: 42}))
+    print(describe(Literal.Text{value: "hi"}))
+    print(describe(Literal.Null))
+    print(describe(Literal.Pair{lo: 1, hi: 9}))
+    print(Literal.Int{value: 1} == Literal.Int{value: 1})
+    print(Literal.Int{value: 1} == Literal.Null)
+}

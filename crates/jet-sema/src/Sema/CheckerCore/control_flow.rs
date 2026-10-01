@@ -23,7 +23,7 @@ impl<'a> Checker<'a> {
             let globals = self.current_ct_globals();
             crate::Comptime::run_block_with_imports(
                 body,
-                self.ct_checked_funcs,
+                self.ct_checked_funcs_for_evaluation(),
                 self.ct_externs,
                 self.ct_base_dir,
                 globals.as_ref(),
@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
             let globals = self.current_ct_globals();
             crate::Comptime::evaluate_owned_with_imports_opts(
                 cond,
-                self.ct_checked_funcs,
+                self.ct_checked_funcs_for_evaluation(),
                 self.ct_externs,
                 self.ct_base_dir,
                 globals.as_ref(),

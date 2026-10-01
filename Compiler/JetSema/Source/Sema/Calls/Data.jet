@@ -1,3 +1,22 @@
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    CoreCallRecord,
+    Diagnostic,
+    Expr,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    StrPart,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    THandleOp,
+    THostCall,
+    Type,
+    type_name,
+]
+
 fn sema_data_tree_type() -> Type Never! { Type.Named{name: "DataTree"} }
 fn sema_data_value_type() -> Type Never! { Type.Named{name: "DBValue"} }
 fn sema_data_decode_error() -> Type Never! { Type.List{element: Type.Named{name: "FieldError"}} }
@@ -181,6 +200,27 @@ pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: 
                 ret := if method == "template" -> Type.String else -> Type.List{element: sema_data_value_type()}
                 return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(sema_tir_expr(ret, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{}}}, span), expected, environment, &diagnostics)}
             }
+            if name == "RealtimeStream" {
+                ret := if {
+                    method == "next_deadline" && args.len() == 0 -> Val(Type.Named{name: "Instant"})
+                    method == "receipt" && args.len() == 0 -> Val(Type.Named{name: "RealtimeReceipt"})
+                    method == "cancel" && args.len() == 0 -> Val(Type.Named{name: "Unit"})
+                    method == "is_cancelled" && args.len() == 0 -> Val(Type.Bool)
+                    else -> None
+                }
+                if ret != None {
+                    if type_args.len() != 0 -> sema_data_check_explicit_type_args("RealtimeStream.{method}", type_args, 0, span, &diagnostics)
+                    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                    operation := if {
+                        method == "next_deadline" -> THandleOp.RealtimeNextDeadline
+                        method == "receipt" -> THandleOp.RealtimeReceipt
+                        method == "cancel" -> THandleOp.RealtimeCancel
+                        else -> THandleOp.RealtimeIsCancelled
+                    }
+                    value := sema_tir_expr(ret ?? Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+                    return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+                }
+            }
         }
         .Apply(name, parameters) -> {
             if name == "DataStream" && parameters.len() == 1 && method == "next" {
@@ -237,27 +277,7 @@ pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: 
                 }
             }
         }
-        .Named(name) -> if name == "RealtimeStream" {
-            ret := if {
-                method == "next_deadline" && args.len() == 0 -> Val(Type.Named{name: "Instant"})
-                method == "receipt" && args.len() == 0 -> Val(Type.Named{name: "RealtimeReceipt"})
-                method == "cancel" && args.len() == 0 -> Val(Type.Named{name: "Unit"})
-                method == "is_cancelled" && args.len() == 0 -> Val(Type.Bool)
-                else -> None
-            }
-            if ret != None {
-                if type_args.len() != 0 -> sema_data_check_explicit_type_args("RealtimeStream.{method}", type_args, 0, span, &diagnostics)
-                if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                operation := if {
-                    method == "next_deadline" -> THandleOp.RealtimeNextDeadline
-                    method == "receipt" -> THandleOp.RealtimeReceipt
-                    method == "cancel" -> THandleOp.RealtimeCancel
-                    else -> THandleOp.RealtimeIsCancelled
-                }
-                value := sema_tir_expr(ret ?? Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
-                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
-            }
-        }
+        else -> {}
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
@@ -326,7 +346,7 @@ pub fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], sp
         sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    payload := None
+    payload := TExpr?{None}
     clone_arg := false
     if expected_payload == .Val(want) {
         argument :: args[0]
@@ -367,7 +387,7 @@ pub fn sema_call_try_data_stream_core_call(module_name: String, member: String, 
     }
     if updated_args.len() == 0 -> return SemaDirectSpecialCheck{handled: true, value: None}
     typed := [TExpr]{}
-    row := None
+    row := Type?{None}
     if {
         member == "from_items" -> {
             if type_args.len() == 1 -> row = Val(if environment.registration_graph == .Val(graph) -> sema_type_resolve_declared_with_generics(graph, type_args[0], environment.module_identity, environment.generic_params) else -> type_args[0])
@@ -490,6 +510,9 @@ fn sema_data_core_decode_contract(module_name: String, member: String, target: T
     if module_name == "core.db" && member == "decode" {
         return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}}}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
     }
+    if module_name == "core.sys" && member == "decode" {
+        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String, Type.String, Type.List{element: Type.String}}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
+    }
     if module_name == "core.encoding.json" && member == "decode" {
         return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
     }
@@ -513,7 +536,7 @@ fn sema_data_core_decode_contract(module_name: String, member: String, target: T
 
 fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
-    if module_name != "core.db" && !module_name.starts_with("core.encoding.") -> return None
+    if module_name != "core.db" && module_name != "core.sys" && !module_name.starts_with("core.encoding.") -> return None
     if member != "decode" && !(module_name == "core.encoding.xml" && member == "decode_bytes") -> return None
     if module_name == "core.encoding.json" && type_args.len() == 0 {
         if updated_args.len() != 1 {
@@ -537,6 +560,20 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     argument_types := contract.argument_types
     result_type := contract.result_type
     effective_type_args := contract.type_args
+    // D-CONFIG-ENV1: `env.decode<T>()` binds its labeled config fields to their
+    // registered defaults before the shared arity and argument checks.
+    if module_name == "core.sys" {
+        params := [SemaCallParam]{
+            sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span})),
+            sema_data_core_param("file", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ".env"}}, span: span})),
+            sema_data_core_param("allow", Type.List{element: Type.String}, AccessConvention.Read, ParamZone.Either, Val(Expr.ListLit{elements: [Expr]{}, span: span})),
+        }
+        binding :: sema_call_bind_args("{module_name}.{member}", params, &updated_args, span, &diagnostics)
+        if binding == None {
+            sema_data_check_discarded_arguments(updated_args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            return Val(SemaDirectSpecialCheck{handled: true, value: None})
+        }
+    }
     min_arity := 1
     if updated_args.len() < min_arity || updated_args.len() > argument_types.len() || (!contract.optional_options && updated_args.len() != argument_types.len()) {
         &diagnostics.push(sema_error("E0104", span, "`{module_name}.{member}` expects {if contract.optional_options -> "between 1 and {argument_types.len()}" else -> "{argument_types.len()}"} argument(s), got {updated_args.len()}", "typed decoding uses the format's registered input and optional settings shape", "pass the documented typed decoder arguments"))
@@ -744,7 +781,7 @@ fn sema_data_analytics_sql_literal(expression: Expr) -> String? {
 }
 
 fn sema_data_analytics_sql_columns(sql: String) -> [String] Never! {
-    normalized := &sql.replace("\n", " ").replace(String.from_bytes([U8]{13}) ?? "", " ").replace("\t", " ")
+    normalized := sql.replace("\n", " ").replace(String.from_bytes([U8]{13}) ?? "", " ").replace("\t", " ")
     tokens := [String]{}
     loop token in normalized.split(" ") {
         value := token.trim()
@@ -839,7 +876,7 @@ pub fn sema_call_try_data_core_call(module_name: String, member: String, args: [
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
         first :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        row := None
+        row := Type?{None}
         first_expected := first.ty
         if {
             module_name == "core.data" && member == "track" -> {

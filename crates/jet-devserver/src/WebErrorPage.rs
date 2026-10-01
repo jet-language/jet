@@ -7,9 +7,10 @@
 //! so their identity and digest cannot drift.
 
 use jet_foundation::Diagnostics::{Diagnostic, Span};
-use jet_foundation::JSON::json_escape;
+use jet_foundation::JSON::quote as json_string;
 use jet_foundation::Outcome::{JetErrorContextFrame, JetErrorJourneyFrame, JetErrorReport};
 use jet_foundation::SHA256::sha256_hex;
+use jet_semindex::html_escape;
 use std::fmt;
 
 pub const WEB_ERROR_PAGE_SCHEMA: &str = "jet.dev.error/v1";
@@ -1004,23 +1005,6 @@ impl WebErrorPage {
         Self::new(identity, diagnostic, Vec::new(), None, action_links).map(Some)
     }
 
-    /// Construct and negotiate a rendered failure response from `DevStatus`
-    /// facts in one call — the host-facing entry point this adapter exists
-    /// for. `Ok(None)` means there is no live error to report, distinct from
-    /// a validation failure.
-    pub fn project_dev_status<C: WebErrorCapabilityInput>(
-        identity: WebErrorPageIdentity,
-        facts: &WebErrorDevStatusFacts,
-        action_links: Vec<WebErrorActionLink>,
-        accept: &str,
-        capabilities: C,
-    ) -> Result<Option<WebErrorProjection>, WebErrorPageError> {
-        match Self::from_dev_status(identity, facts, action_links)? {
-            Some(page) => page.project(accept, capabilities).map(Some),
-            None => Ok(None),
-        }
-    }
-
     pub fn with_edits(mut self, mut edits: Vec<WebErrorEdit>) -> Result<Self, WebErrorPageError> {
         if edits.len() > MAX_WEB_ERROR_EDITS {
             return Err(WebErrorPageError::TooManyItems("fix edits"));
@@ -1691,25 +1675,6 @@ fn web_error_edit_order(left: &WebErrorEdit, right: &WebErrorEdit) -> std::cmp::
         .then_with(|| left.new_text.cmp(&right.new_text))
         .then_with(|| left.applicability.cmp(&right.applicability))
         .then_with(|| left.safety.cmp(&right.safety))
-}
-
-fn json_string(value: &str) -> String {
-    format!("\"{}\"", json_escape(value))
-}
-
-fn html_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            character => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 fn html_pair(label: &str, value: &str) -> String {

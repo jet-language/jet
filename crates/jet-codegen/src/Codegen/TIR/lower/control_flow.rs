@@ -38,7 +38,7 @@ use crate::Codegen::TIR::tir_add_pattern_bindings;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
-use crate::Codegen::is_key_variant;
+use crate::Codegen::{is_data_tree_subject, is_key_subject};
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
@@ -68,7 +68,7 @@ pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> 
     lowered.push(TStmt::SourceSpan(expr.span()));
     if cx.debug_linemap {
         lowered.push(TStmt::LineMarker(
-            crate::Diagnostics::span_line_col(&cx.src, expr.span().start).0,
+            cx.src_line_col(expr.span().start).0,
         ));
     }
     lowered.push(lower_return_value(expr, cx, env));
@@ -254,14 +254,50 @@ pub(super) fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
-        } => {
-            bindings.is_empty()
-                && !is_json_variant(variant)
-                && !is_key_variant(variant)
-                && cx.variant_owner.contains_key(variant)
-        }
+        } => bindings.is_empty() && cx.variant_owner.contains_key(variant),
         _ => false,
     }
+}
+
+/// The enum that owns a binding-free variant test. The checked subject type
+/// decides first: a `DataTree`/`Key` subject keeps its prelude owner even when a
+/// user enum declares the same variant name, and a user enum subject keeps its
+/// own owner even when the variant is spelled like a builtin (`Int`, `Char`, …).
+fn binding_free_variant_owner(
+    cx: &Cx,
+    subject_ty: &Type,
+    subject_enum: Option<String>,
+    variant: &str,
+) -> Option<String> {
+    if is_data_tree_subject(cx, subject_ty) {
+        return Some(Syntax::TYPE_DATA.to_string());
+    }
+    if is_key_subject(cx, subject_ty) {
+        return Some(Syntax::TYPE_KEY.to_string());
+    }
+    subject_enum.or_else(|| cx.variant_owner.get(variant).cloned())
+}
+
+/// The enum named by a checked subject type when that enum declares `variant`.
+/// A Core source enum imported by module (`ArchiveError`) is registered under
+/// its canonical module identity, so the canonical owner is the fallback.
+fn checked_subject_enum(cx: &Cx, subject_ty: &Type, variant: &str) -> Option<String> {
+    let (Type::Named(name) | Type::Apply { name, .. }) = subject_ty else {
+        return None;
+    };
+    let declares = |owner: &str| {
+        cx.enum_variants
+            .get(owner)
+            .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
+            || jet_foundation::CoreModuleExports::core_enum_variants(owner)
+                .is_some_and(|variants| variants.contains(&variant))
+    };
+    let resolved = cx.core_qualified_rust_type_name(name).unwrap_or(name.as_str());
+    if declares(resolved) {
+        return Some(resolved.to_string());
+    }
+    let canonical = crate::Codegen::TIR::canonical_enum_owner(cx, name);
+    declares(&canonical).then_some(canonical)
 }
 
 pub(super) fn lower_binding_free_variant_pattern_test(
@@ -275,19 +311,8 @@ pub(super) fn lower_binding_free_variant_pattern_test(
         Pattern::Variant { variant, .. } => variant,
         _ => unreachable!("binding-free variant gate admitted non-variant"),
     };
-    let subject_enum = match &subj.ty {
-        Type::Named(name) | Type::Apply { name, .. } => {
-            let resolved = cx
-                .core_qualified_rust_type_name(name)
-                .unwrap_or(name.as_str());
-            cx.enum_variants
-                .get(resolved)
-                .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
-                .then(|| resolved.to_string())
-        }
-        _ => None,
-    };
-    let enum_type = subject_enum.or_else(|| cx.variant_owner.get(variant).cloned());
+    let subject_enum = checked_subject_enum(cx, &subj.ty, variant);
+    let enum_type = binding_free_variant_owner(cx, &subj.ty, subject_enum, variant);
     // A variant known to the resolved enum layout compares against the bare
     // variant path; anything else tests as a match-arm head.
     let position = match &enum_type {
@@ -756,7 +781,7 @@ fn lower_if_cond_atom(
                 );
             }
         }
-        if is_json_variant(variant) {
+        if is_json_variant(variant) && is_data_tree_subject(cx, &subj.ty) {
             // DataTree dispatch is valid for unit and wildcard payload arms as
             // well as bound payloads. Keep all three forms in TIR so statement
             // dispatch cannot fall through to the unsupported PatternTest
@@ -840,25 +865,9 @@ fn lower_if_cond_atom(
         // pattern is the same `emit_if_let_pattern` (`__jet_E::__jet_V(user_b)`), and the
         // binding's type is the variant's first payload type from `variant_binding_types`
         // (the same total fact `add_pattern_bindings` reads on the AST path).
-        if !is_json_variant(variant) {
-            let enum_type = match &subj.ty {
-                Type::Named(enum_name)
-                | Type::Apply {
-                    name: enum_name, ..
-                } => {
-                    let resolved = cx
-                        .core_qualified_rust_type_name(enum_name)
-                        .unwrap_or(enum_name.as_str());
-                    cx.enum_variants
-                        .get(resolved)
-                        .filter(|variants| {
-                            variants.iter().any(|(candidate, _)| candidate == variant)
-                        })
-                        .map(|_| resolved.to_string())
-                }
-                _ => None,
-            }
-            .or_else(|| cx.variant_owner.get(variant).cloned());
+        if !(is_json_variant(variant) && is_data_tree_subject(cx, &subj.ty)) {
+            let subject_enum = checked_subject_enum(cx, &subj.ty, variant);
+            let enum_type = binding_free_variant_owner(cx, &subj.ty, subject_enum, variant);
             let payload_tys = enum_type
                 .as_deref()
                 .and_then(|owner| variant_binding_types_for_enum(cx, owner, variant))
@@ -905,28 +914,13 @@ fn lower_if_cond_atom(
         // fallback for subjects without a resolved enum type. Core enums
         // (`EncodingErrorKind`) are not source-registered here; their canonical
         // MIR row is keyed by the exported leaf.
-        let subject_enum = match &subj.ty {
-            Type::Named(enum_name)
-            | Type::Apply {
-                name: enum_name, ..
-            } => {
-                let resolved = cx
-                    .core_qualified_rust_type_name(enum_name)
-                    .unwrap_or(enum_name.as_str());
-                let declared = cx.enum_variants.get(resolved).is_some_and(|variants| {
-                    variants.iter().any(|(candidate, _)| candidate == variant)
-                }) || jet_foundation::CoreModuleExports::core_enum_variants(resolved)
-                    .is_some_and(|variants| variants.contains(&variant.as_str()));
-                declared.then(|| resolved.to_string())
-            }
-            _ => None,
-        };
+        let subject_enum = checked_subject_enum(cx, &subj.ty, variant);
         let subject_owned_unit_variant = bindings.is_empty()
-            && !is_json_variant(variant)
-            && !is_key_variant(variant)
-            && subject_enum.is_some();
+            && subject_enum.is_some()
+            && !is_data_tree_subject(cx, &subj.ty)
+            && !is_key_subject(cx, &subj.ty);
         if subject_owned_unit_variant || is_binding_free_user_variant_pattern_test(pattern, cx) {
-            let enum_type = subject_enum.or_else(|| cx.variant_owner.get(variant).cloned());
+            let enum_type = binding_free_variant_owner(cx, &subj.ty, subject_enum, variant);
             return (
                 TIfCond::Matches {
                     pattern: TPattern::arm(pattern.clone(), enum_type),
@@ -1113,7 +1107,13 @@ fn lower_if_cond_atom(
             } = pattern
             {
                 if !matches!(&subj.ty, Type::Option(_)) {
-                    if let Expr::Ident(source_name, _) = subject.as_ref() {
+                    // Sema wraps a non-last read of a non-Copy subject in an
+                    // implicit `Copy`; the refined name is underneath it.
+                    let source = match subject.without_parens() {
+                        Expr::Copy(inner, _) => inner.without_parens(),
+                        other => other,
+                    };
+                    if let Expr::Ident(source_name, _) = source {
                         // A same-name Present refinement already replaced the
                         // local's runtime Option with its payload. Sema still
                         // validates a later `.Val(value)` against the stable
@@ -1383,8 +1383,17 @@ pub(crate) fn lower_switch<'a>(
     // view). A non-identifier dispatch subject is represented in the AST with
     // the parser's private `it` pattern subject, so preserve the real subject
     // while lowering these arms instead of sending them through the generic
-    // user-enum match path.
-    if !arms.is_empty()
+    // user-enum match path. A user enum may declare the same variant names
+    // (`Int`, `Text`, …); an identifier subject whose checked type is not
+    // `DataTree` takes the enum-match path below.
+    let data_subject = match subject {
+        Expr::Ident(name, _) => env
+            .ty_of(name)
+            .is_none_or(|ty| is_data_tree_subject(cx, &ty)),
+        _ => true,
+    };
+    if data_subject
+        && !arms.is_empty()
         && arms.iter().all(|arm| {
             arm_variant_pattern(cx, &arm.cond, subject).is_some_and(|pattern| {
                 matches!(pattern, Pattern::Variant { ref variant, .. } if is_json_variant(variant))
@@ -1847,7 +1856,13 @@ fn lower_guard_switch<'a>(
                     .as_ref()
                     .map(|subject| replace_pattern_subject(&arm.cond, subject))
                     .unwrap_or_else(|| arm.cond.clone());
-                let (cond, bindings, prefix) = lower_if_cond(&condition, cx, branch);
+                // `condition` is a temporary copy: lower it on its own memo so
+                // unconsumed entries keyed by its node addresses cannot replay
+                // into a later temporary allocated at a recycled address.
+                let (cond, bindings, prefix) = {
+                    let _scope = super::expressions::ExprCacheScope::enter();
+                    lower_if_cond(&condition, cx, branch)
+                };
                 for (name, place, ty) in bindings {
                     branch.bind(&name, place, ty);
                 }

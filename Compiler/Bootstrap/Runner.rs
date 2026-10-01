@@ -48,8 +48,6 @@ pub(crate) struct BootstrapWebArtifacts {
     pub(crate) source_names: Vec<String>,
     pub(crate) source_contents: Vec<String>,
     pub(crate) dom_runtime: String,
-    pub(crate) onnx_runtime_js: String,
-    pub(crate) onnx_runtime_worker_js: String,
     pub(crate) index_html: String,
     pub(crate) explicit_html_path: Option<String>,
     pub(crate) command_record: Vec<u8>,
@@ -1161,7 +1159,12 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
         };
     let mut output_config = (*config).clone();
     output_config.execution.artifact = native_artifact;
-    let mut artifact = match prepare_bootstrap_artifact(source, program, &output_config, bindings) {
+    // The Jet emitter returns the user-item suffix only; the runtime/Core prefix
+    // is the same build-fact text MIRRust emits, so `jet_store::runtime::prepare`
+    // links both compilers' artifacts against one cached `jet_runtime` rlib.
+    let mut assembled = crate::Codegen::MIRRust::emit_mir_runtime_text(program, &output_config);
+    assembled.push_str(&source);
+    let mut artifact = match prepare_bootstrap_artifact(assembled, program, &output_config, bindings) {
         Ok(artifact) => artifact,
         Err(error) => {
             retire_bootstrap_resources(resources, completion_scope)?;

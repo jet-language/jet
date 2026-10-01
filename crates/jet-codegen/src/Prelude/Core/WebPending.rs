@@ -777,12 +777,6 @@ impl JetWebPendingProjection {
         &self.committed_content
     }
 
-    pub fn pending_content(&self) -> Option<&str> {
-        self.state
-            .is_pending()
-            .then_some(self.stream_content.as_str())
-    }
-
     pub fn render_json(&self) -> String {
         let hydration = self
             .hydration
@@ -970,12 +964,6 @@ impl JetWebStreamingBoundary {
         &self.staged_content
     }
 
-    pub fn pending_content(&self) -> Option<&str> {
-        self.state
-            .is_pending()
-            .then_some(self.staged_content.as_str())
-    }
-
     pub fn buffered_chunks(&self) -> usize {
         self.staged_chunks
     }
@@ -1104,13 +1092,6 @@ impl JetWebStreamingBoundary {
         self.last_rolled_back = false;
         self.last_backpressure = false;
         self.last_at_ns = at_ns;
-    }
-
-    pub fn push_chunk(
-        &mut self,
-        chunk: JetWebPendingChunk,
-    ) -> Result<JetWebPendingReceipt, JetWebPendingError> {
-        self.push_chunk_at(chunk, self.last_at_ns)
     }
 
     pub fn push_chunk_at(
@@ -2098,10 +2079,6 @@ pub fn jet_web_stream_projection_json(
         .unwrap_or_else(|error| error.into_inner());
     let entry = jet_web_stream_entry(&mut registry, boundary_id)?;
     Ok(entry.boundary.project(target).render_json())
-}
-
-pub fn jet_web_stream_id_json(stream_id: &JetWebStreamId) -> String {
-    stream_id.render_json()
 }
 
 fn jet_web_pending_validate_identity(

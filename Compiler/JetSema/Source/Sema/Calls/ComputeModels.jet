@@ -1,50 +1,32 @@
-// Canonical source-owned checking/TIR for Core compute special forms and the
-// checked model-provider boundary. Ordinary Core math/text/identity calls stay
-// in the shared Core path.
-
-pub struct SemaCallModelOutputInput {
-    pub package: String
-    pub output: String
-    pub signature_name: String?
-    pub package_version: String
-    pub license: String
-    pub package_root: String
-    pub fields: [String:String]
-}
+// Canonical source-owned checking/TIR for Core compute special forms.
+// Ordinary Core math/text/identity calls stay in the shared Core path.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    CallContractRow,
+    CoreCallRecord,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionCallMetadata,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    SymbolKind,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    Type,
+    TypeTupleField,
+    UnOp,
+    compute_shape_type,
+    expr_span,
+    is_compute_tensor_family,
+]
 
 pub struct SemaComputeModelsSpecialCheck {
     pub handled: Bool
     pub value: TExpr?
-    pub model_output: SemaCallModelOutputInput?
-}
-
-struct SemaComputeModelTrait {
-    pub module_identity: String
-    pub name: String
-    pub definition: TraitDef
-}
-
-fn sema_call_compute_models_invalid(span: Span, message: String, detail: String, fix: String, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E-MODEL-SIGNATURE", span, message, detail, fix))
-}
-
-fn sema_call_compute_model_type_name(ty: Type) -> String? {
-    return if ty == {
-        .Named(name) -> {
-            parts := name.split("::")
-            Val(parts[parts.len() - 1])
-        }
-        .TraitObject(names) -> {
-            if {
-                names.len() != 1 -> None
-                else -> {
-                    parts := names[0].split("::")
-                    Val(parts[parts.len() - 1])
-                }
-            }
-        }
-        else -> None
-    }
 }
 
 fn sema_call_compute_gradient_value_type(output: Type) -> Type? {
@@ -58,288 +40,6 @@ fn sema_call_compute_gradient_value_type(output: Type) -> Type? {
         }
         else -> None
     }
-}
-
-fn sema_call_compute_model_trait_for_name(graph: SemaRegistrationGraph, name: String) -> SemaComputeModelTrait? {
-    found := None
-    loop registration_module in graph.modules {
-        loop nominal in registration_module.nominals {
-            if nominal.kind != SemaRegistrationNominalKind.Trait || nominal.symbol.name != name -> next
-            source :: sema_registration_nominal_source_item(nominal.source) ?? next
-            if source == {
-                .Trait(definition) -> {
-                    if found != None -> return None
-                    found = Val(SemaComputeModelTrait{module_identity: registration_module.module_identity, name: name, definition: definition})
-                }
-                else -> {}
-            }
-        }
-    }
-    return found
-}
-
-fn sema_call_compute_model_trait_for_local_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaComputeModelTrait? {
-    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
-    registration_module := graph.modules[module_index]
-    loop nominal in registration_module.nominals {
-        if nominal.kind != SemaRegistrationNominalKind.Trait || nominal.symbol.name != name -> next
-        source :: sema_registration_nominal_source_item(nominal.source) ?? return None
-        if source == {
-            .Trait(definition) -> return Val(SemaComputeModelTrait{module_identity: module_identity, name: name, definition: definition})
-            else -> return None
-        }
-    }
-    return None
-}
-
-fn sema_call_compute_model_trait_for_module(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaComputeModelTrait? {
-    loop registration_module in graph.modules {
-        if registration_module.module_identity != module_identity -> next
-        loop nominal in registration_module.nominals {
-            if nominal.kind != SemaRegistrationNominalKind.Trait || nominal.symbol.name != name -> next
-            source :: sema_registration_nominal_source_item(nominal.source) ?? return None
-            if source == {
-                .Trait(definition) -> return Val(SemaComputeModelTrait{module_identity: module_identity, name: name, definition: definition})
-                else -> return None
-            }
-        }
-    }
-    return None
-}
-
-fn sema_call_compute_model_trait_for_qualified(graph: SemaRegistrationGraph, qualified: String) -> SemaComputeModelTrait? {
-    loop registration_module in graph.modules {
-        loop nominal in registration_module.nominals {
-            if nominal.kind != SemaRegistrationNominalKind.Trait -> next
-            canonical := "{registration_module.module_identity}::{nominal.symbol.name}"
-            if canonical != qualified -> next
-            source :: sema_registration_nominal_source_item(nominal.source) ?? return None
-            if source == {
-                .Trait(definition) -> return Val(SemaComputeModelTrait{module_identity: registration_module.module_identity, name: nominal.symbol.name, definition: definition})
-                else -> return None
-            }
-        }
-    }
-    return None
-}
-
-fn sema_call_compute_model_trait(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, raw: Type) -> SemaComputeModelTrait? {
-    qualified :: sema_call_compute_model_trait_qualified_name(raw)
-    if qualified == .Val(name) -> return sema_call_compute_model_trait_for_qualified(graph, name)
-    if raw == {
-        .Named(name) -> {
-            if !name.contains(".") && !name.contains("::") -> return sema_call_compute_model_trait_for_name(graph, name)
-        }
-        .TraitObject(names) -> {
-            if names.len() == 1 && !names[0].contains(".") && !names[0].contains("::") -> return sema_call_compute_model_trait_for_name(graph, names[0])
-        }
-        else -> {}
-    }
-    resolved := sema_type_resolve_declared(graph, raw, environment.module_identity)
-    if resolved == {
-        .TraitObject(bounds) -> {
-            if bounds.len() == 1 {
-                canonical :: sema_call_compute_model_trait_for_qualified(graph, bounds[0])
-                if canonical != None -> return canonical
-                leaf :: sema_call_compute_model_trait_name(Type.Named{name: bounds[0]}) ?? return None
-                return sema_call_compute_model_trait_for_name(graph, leaf)
-            }
-        }
-        .Named(name) -> {
-            leaf :: sema_call_compute_model_trait_name(Type.Named{name: name}) ?? return None
-            if name.contains(".") {
-                parts := name.split(".").to_list()
-                alias := parts[0]
-                imported_name := ""
-                loop index in 1..<parts.len() {
-                    if index == 1 -> imported_name = parts[index] else -> imported_name = "{imported_name}.{parts[index]}"
-                }
-                imported := sema_registration_lookup_qualified(graph, environment.module_identity, alias, imported_name)
-                if imported == .Val(target) {
-                    return sema_call_compute_model_trait_for_module(graph, target.symbol.module_name, target.symbol.name)
-                }
-                return None
-            }
-            if sema_call_compute_model_trait_for_local_name(graph, environment.module_identity, leaf) != None {
-                return sema_call_compute_model_trait_for_local_name(graph, environment.module_identity, leaf)
-            }
-            return sema_call_compute_model_trait_for_name(graph, leaf)
-        }
-        else -> {}
-    }
-    return None
-}
-
-
-
-fn sema_call_compute_model_trait_name(raw: Type) -> String? {
-    return if raw == {
-        .Named(name) -> {
-            parts := name.split("::").to_list()
-            if {
-                parts.len() > 1 -> Val(parts[parts.len() - 1])
-                else -> {
-                    dotted := name.split(".").to_list()
-                    if {
-                        dotted.len() > 1 -> Val(dotted[dotted.len() - 1])
-                        else -> Val(name)
-                    }
-                }
-            }
-        }
-        .TraitObject(names) -> {
-            if {
-                names.len() != 1 -> None
-                else -> {
-                    parts := names[0].split("::").to_list()
-                    if {
-                        parts.len() > 1 -> Val(parts[parts.len() - 1])
-                        else -> {
-                            dotted := names[0].split(".").to_list()
-                            if {
-                                dotted.len() > 1 -> Val(dotted[dotted.len() - 1])
-                                else -> Val(names[0])
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        else -> None
-    }
-}
-
-fn sema_call_compute_model_trait_qualified_name(raw: Type) -> String? {
-    return if raw == {
-        .Named(name) -> if name.contains("::") -> Val(name) else -> None
-        .TraitObject(names) -> if names.len() == 1 && names[0].contains("::") -> Val(names[0]) else -> None
-        else -> None
-    }
-}
-
-
-fn sema_call_compute_model_field(definition: StructDef, name: String) -> Field? {
-    loop field in definition.fields {
-        if field.name == name -> return Val(field)
-    }
-    return None
-}
-
-fn sema_call_compute_model_struct(graph: SemaRegistrationGraph, owner_module: String, ty: Type) -> StructDef? {
-    name :: sema_call_compute_model_type_name(ty) ?? return None
-    nominal :: sema_type_resolve_nominal(graph, ty, owner_module) ?? return None
-    if nominal.kind != SemaRegistrationNominalKind.Struct || nominal.symbol.module_name != owner_module || nominal.symbol.name != name || nominal.symbol.visibility < 2 -> return None
-    source :: sema_registration_nominal_source_item(nominal.source) ?? return None
-    return if source == {
-        .Struct(definition) -> Val(definition)
-        else -> None
-    }
-}
-
-fn sema_call_compute_model_validate_space_field(graph: SemaRegistrationGraph, model_trait: SemaComputeModelTrait, space: StructDef, space_name: String, required: String, expected: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    field :: sema_call_compute_model_field(space, required) ?? {
-        sema_call_compute_models_invalid(span, "model space carrier `{space_name}` is missing `{required}`", "the embedding-space identity is part of the checked carrier", "add the four private model identity fields", &diagnostics)
-        return false
-    }
-    if field.is_pub || field.is_package_pub {
-        sema_call_compute_models_invalid(span, "model space field `{required}` is public", "safe consumers cannot relabel model identity metadata", "keep model-space identity fields private", &diagnostics)
-        return false
-    }
-    field_ty := sema_type_resolve_declared(graph, field.ty, model_trait.module_identity)
-    if field_ty != expected {
-        sema_call_compute_models_invalid(span, "model space field `{required}` has an incompatible type", "model identity fields have fixed String/Int carrier types", "declare `{required}` with the checked model-space type", &diagnostics)
-        return false
-    }
-    return true
-}
-
-fn sema_call_compute_model_validate_carriers(graph: SemaRegistrationGraph, model_trait: SemaComputeModelTrait, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    method := None
-    loop candidate in model_trait.definition.methods {
-        if candidate.name == "embed" {
-            method = Val(candidate)
-            break
-        }
-    }
-    embed :: method ?? {
-        sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` has no `embed` method", "the checked model signature is document-to-batch", "declare `fn embed(self, documents: [String]) Batch !Err`", &diagnostics)
-        return false
-    }
-    if embed.params.len() != 2 || embed.params[0].name != "self" || embed.params[1].name != "documents" || embed.params[1].variadic {
-        sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` has an incompatible `embed` input", "the model boundary requires `embed(self, documents: [String])`", "use exactly one `[String]` documents parameter after `self`", &diagnostics)
-        return false
-    }
-    graph_value :: graph
-    documents := sema_type_resolve_declared(graph_value, embed.params[1].ty, model_trait.module_identity)
-    if documents != (Type.List{element: Type.String}) {
-        sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` has an incompatible `embed` input", "the model boundary requires `embed(self, documents: [String])`", "use exactly one `[String]` documents parameter after `self`", &diagnostics)
-        return false
-    }
-    declared_result :: embed.return_type ?? {
-        sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` has an incompatible `embed` result", "provider failure must remain the explicit `!Err` result domain", "declare `EmbeddingBatch !Err` as the method result", &diagnostics)
-        return false
-    }
-    result_ok := None
-    result_err := None
-    result_parts :: if declared_result == {
-        .Result(ok, err) -> Val([Type]{sema_type_resolve_declared(graph_value, ok, model_trait.module_identity), sema_type_resolve_declared(graph_value, err, model_trait.module_identity)})
-        else -> None
-    }
-    if result_parts == {
-        .Val(resolved_result) -> {
-            result_ok = Val(resolved_result[0])
-            result_err = Val(resolved_result[1])
-        }
-        else -> {
-            sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` has an incompatible `embed` result", "provider failure must remain the explicit `!Err` result domain", "declare `EmbeddingBatch !Err` as the method result", &diagnostics)
-            return false
-        }
-    }
-    ok_ty :: result_ok ?? Type.Named{name: "Unit"}
-    err_ty :: result_err ?? Type.Named{name: "Unit"}
-    batch_name :: sema_call_compute_model_type_name(ok_ty) ?? {
-        sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` has no named batch carrier", "the provider must return one exported batch struct", "return the exported batch carrier from `embed`", &diagnostics)
-        return false
-    }
-    if err_ty != (Type.Named{name: "Err"}) {
-        sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` has a non-`Err` failure domain", "model provider failures use the ordinary `Err` domain", "declare the method as `... Batch !Err`", &diagnostics)
-        return false
-    }
-    batch :: sema_call_compute_model_struct(graph_value, model_trait.module_identity, ok_ty) ?? {
-        sema_call_compute_models_invalid(span, "model batch carrier `{batch_name}` is not uniquely exported", "exactly one public source struct must carry provider vectors", "export exactly one `pub struct Batch` for this model trait", &diagnostics)
-        return false
-    }
-    values_field :: sema_call_compute_model_field(batch, "values") ?? {
-        sema_call_compute_models_invalid(span, "model batch carrier `{batch_name}` has no `values` field", "the provider returns one dense floating-point vector per document", "add a public `values: [[Float]]` field to the batch carrier", &diagnostics)
-        return false
-    }
-    values_ty := sema_type_resolve_declared(graph_value, values_field.ty, model_trait.module_identity)
-    if values_ty != (Type.List{element: Type.List{element: Type.Float}}) {
-        sema_call_compute_models_invalid(span, "model batch carrier `{batch_name}` has an incompatible `values` field", "model providers expose checked dense vectors as `[[Float]]`", "declare `pub values: [[Float]]` on the batch carrier", &diagnostics)
-        return false
-    }
-    space_field :: sema_call_compute_model_field(batch, "space") ?? {
-        sema_call_compute_models_invalid(span, "model batch carrier `{batch_name}` has no `space` witness", "embedding vectors must carry their checked model-space identity", "add a private `space: Space` field to the batch carrier", &diagnostics)
-        return false
-    }
-    if space_field.is_pub || space_field.is_package_pub {
-        sema_call_compute_models_invalid(span, "model batch carrier `{batch_name}` exposes its space witness", "safe consumers must not retag a provider-created embedding space", "keep the `space` field private and expose only checked accessors", &diagnostics)
-        return false
-    }
-    space_ty := sema_type_resolve_declared(graph_value, space_field.ty, model_trait.module_identity)
-    space_name :: sema_call_compute_model_type_name(space_ty) ?? {
-        sema_call_compute_models_invalid(span, "model batch carrier `{batch_name}` has an unnamed space type", "the space witness must be one exported source struct", "type the private `space` field as the exported space carrier", &diagnostics)
-        return false
-    }
-    space :: sema_call_compute_model_struct(graph_value, model_trait.module_identity, space_ty) ?? {
-        sema_call_compute_models_invalid(span, "model space carrier `{space_name}` is not uniquely exported", "exactly one public source struct must carry model identity", "export exactly one `pub struct Space` for this model trait", &diagnostics)
-        return false
-    }
-    if !sema_call_compute_model_validate_space_field(graph_value, model_trait, space, space_name, "model_digest", Type.String, span, &diagnostics) -> return false
-    if !sema_call_compute_model_validate_space_field(graph_value, model_trait, space, space_name, "dimension", Type.Int, span, &diagnostics) -> return false
-    if !sema_call_compute_model_validate_space_field(graph_value, model_trait, space, space_name, "metric", Type.String, span, &diagnostics) -> return false
-    if !sema_call_compute_model_validate_space_field(graph_value, model_trait, space, space_name, "normalization", Type.String, span, &diagnostics) -> return false
-    return true
 }
 
 fn sema_call_compute_literal_int(expression: Expr) -> Int? {
@@ -361,15 +61,15 @@ fn sema_call_compute_literal_int(expression: Expr) -> Int? {
 fn sema_call_compute_alias_type(member: String, args: [CallArg]) -> Type? {
     error := Type.Named{name: "ComputeError"}
     if member == "vec" {
-        length := None
+        length := Int?{None}
         if args.len() > 0 -> length = sema_call_compute_literal_int(args[0].expr)
         output := Type.Apply{name: "Vec", args: [Type]{Type.Int}}
         if length == .Val(value) && value >= 0 -> output = compute_shape_type("Vec", [Int]{value})
         return Val(Type.Result{ok: output, err: error})
     }
     if member == "matrix" {
-        rows := None
-        cols := None
+        rows := Int?{None}
+        cols := Int?{None}
         if args.len() > 0 -> rows = sema_call_compute_literal_int(args[0].expr)
         if args.len() > 1 -> cols = sema_call_compute_literal_int(args[1].expr)
         output := Type.Apply{name: "Matrix", args: [Type]{Type.Int, Type.Int}}
@@ -385,7 +85,7 @@ fn sema_call_compute_arity_error(member: String, expected: Int, actual: Int, spa
 
 fn sema_call_compute_explicit_type_args(member: String, type_args: [Type], expected: Int, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if type_args.len() == expected -> return true
-    &diagnostics.push(sema_generic_count_diagnostic("core.compute.{member}", expected, type_args.len(), span))
+    &diagnostics.push(sema_call_generic_count_diagnostic("core.compute.{member}", expected, type_args.len(), span))
     return false
 }
 
@@ -404,7 +104,7 @@ fn sema_call_compute_check_alias(member: String, record: CoreCallRecord, args: [
     if updated_args.len() != arity {
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         sema_call_compute_arity_error(member, arity, updated_args.len(), span, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     typed := [TExpr]{}
     value_types := if member == "vec" -> [Type]{Type.Int, Type.Float} else -> [Type]{Type.Int, Type.Int, Type.Float}
@@ -416,31 +116,32 @@ fn sema_call_compute_check_alias(member: String, record: CoreCallRecord, args: [
         }
         &typed.push(value)
     }
-    if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+    if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     accesses := (loop _ in value_types -> AccessConvention.Read)
     ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(value_types, accesses), &updated_args, scopes, &diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+    if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     result_type :: sema_call_compute_alias_type(member, updated_args) ?? Type.Result{ok: Type.Named{name: "Tensor"}, err: Type.Named{name: "ComputeError"}}
     fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
-    value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, None, result_type, fallibility, expected, environment, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+    value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, None, result_type, fallibility, expected, environment, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     _ := sema_call_core_record_effects(record, span, [Type]{}, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics)
-    return SemaComputeModelsSpecialCheck{handled: true, value: Val(value), model_output: None}
+    return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
+}
+
+fn sema_call_compute_wrt_name(item: Expr) -> String? {
+    if item == {
+        .Ident(name, _) -> Val(name)
+        .Paren(inner, _) -> sema_call_compute_wrt_name(inner)
+        else -> None
+    }
 }
 
 fn sema_call_compute_wrt_names(expression: Expr) -> [String]? {
-    return if expression == {
+    if expression == {
         .ListLit(items, _) -> {
             names := [String]{}
             loop item in items {
-                item_name :: if item == {
-                    .Ident(name, _) -> Val(name)
-                    .Paren(inner, _) -> if inner == {
-                        .Ident(name, _) -> Val(name)
-                        else -> None
-                    }
-                    else -> None
-                }
-                if item_name == .Val(name) -> &names.push(name) else -> return None
+                name :: sema_call_compute_wrt_name(item) ?? return None
+                &names.push(name)
             }
             Val(names)
         }
@@ -453,7 +154,7 @@ fn sema_call_compute_function_type_names(ty: Type) -> [String]? {
     if ty == {
         .Fn(params, _, _, contract, metadata, _) -> {
             if metadata == .Val(value) && value.names.len() == params.len() -> return Val(value.names)
-            if contract == .Val(rows) && rows.len() == params.len() -> return Val(loop row in rows -> row.name)
+            if contract == .Val(rows) && rows.len() == params.len() -> return Val(loop row in rows -> row.label)
         }
         else -> {}
     }
@@ -510,10 +211,10 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     _ := sema_compute_record_core_call(record, span, &context)
     if args.len() == 0 {
         sema_call_compute_arity_error(member, 1, 0, span, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     value_indexes := [Int]{}
-    wrt_expression := None
+    wrt_expression := Expr?{None}
     loop (index, argument) in args {
         if index == 0 -> next
         if argument.label == .Val(label) && label.name == "wrt" -> wrt_expression = Val(argument.expr) else -> &value_indexes.push(index)
@@ -523,10 +224,10 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
         _ := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
         loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_error("E0112", span, "`compute.jvp` is a function transform, not a direct call", "the ratified JVP surface returns a callable that accepts primal and tangent values", "bind `d_f :: compute.jvp(f)`, then call `d_f(primal..., tangent...)`"))
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     valid := true
-    wrt_names := None
+    wrt_names := [String]?{None}
     if wrt_expression == .Val(expression) -> wrt_names = sema_call_compute_wrt_names(expression)
     if wrt_expression != None && member != "gradient" && member != "value_and_gradient" {
         &diagnostics.push(sema_error("E0112", span, "`wrt:` is not supported by `compute.{member}`", "`wrt:` selects named gradients on `compute.gradient` and `compute.value_and_gradient`", "remove `wrt:` and provide the full VJP or JVP inputs"))
@@ -538,19 +239,19 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     }
     function_value :: sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, Val(!direct), &diagnostics) ?? {
         loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     is_function := if function_value.ty == {.Fn(_, _, _, _, _, _) -> true else -> false}
     if !is_function {
         &diagnostics.push(sema_error("E0112", span, "`compute.{member}` expects a function value", "autodiff transforms differentiate a function over Tensor arguments", "bind a Tensor function before passing it to the transform"))
         loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     params := [Type]{}
-    ret := None
-    effect_bound := None
-    param_contract := None
-    call_metadata := None
+    ret := Type?{None}
+    effect_bound := [EffectRowEntry]?{None}
+    param_contract := [CallContractRow]?{None}
+    call_metadata := FunctionCallMetadata?{None}
     if function_value.ty == {
         .Fn(found_params, found_ret, found_effects, found_contract, found_metadata, _) -> {
             params = found_params
@@ -594,13 +295,13 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     if names_value == None {
         &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a named Tensor function or lambda"))
         loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     names :: names_value ?? [String]{}
     if names.len() != params.len() {
         &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a callable with named Tensor parameters"))
         loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     if direct {
         expected_values := if member == "jvp" -> params.len() * 2 else -> params.len()
@@ -625,7 +326,7 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
         wrt_expression != None -> {
             if wrt_names == .Val(target_names) {
                 loop target_name in target_names {
-                    index := None
+                    index := Int?{None}
                     loop (parameter_index, parameter_name) in names {
                         if parameter_name == target_name {
                             index = Val(parameter_index)
@@ -648,13 +349,13 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
         }
     }
     if selected.len() == 0 -> loop index in 0..<params.len() -> &selected.push(index)
-    if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+    if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     gradient_names := (loop index in selected -> names[index])
     gradient_value :: gradient_value_type ?? Type.Named{name: "Tensor"}
     gradient_fields := [TypeTupleField]{}
     loop name in gradient_names -> &gradient_fields.push(TypeTupleField{name: name, ty: gradient_value})
     gradient_type := Type.Tuple{fields: gradient_fields}
-    run_type := Type.Apply{name: "VjpRun", args: [Type]{gradient_type}}
+    run_type := Type.Apply{name: "VJPRun", args: [Type]{gradient_type}}
     direct_return := if {
         member == "gradient" -> gradient_type
         member == "value_and_gradient" -> Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "gradients", ty: gradient_type}}}
@@ -711,93 +412,23 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     loop value in typed_values -> &ownership_types.push(value.ty)
     accesses := (loop _ in ownership_types -> AccessConvention.Read)
     ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), &values_args, scopes, &diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    value :: sema_call_core_tir(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, None, result_type, fallibility, expected, environment, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+    if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, None, result_type, fallibility, expected, environment, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     _ := sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics)
-    return SemaComputeModelsSpecialCheck{handled: true, value: Val(value), model_output: None}
-}
-
-fn sema_call_compute_literal_string(expression: Expr) -> String? {
-    return if expression == {
-        .Paren(inner, _) -> sema_call_compute_literal_string(inner)
-        .Str(parts, _) -> {
-            if parts.len() != 1 -> return None
-            if parts[0] == {
-                .Lit(value) -> Val(value)
-                else -> None
-            }
-        }
-        else -> None
-    }
-}
-
-fn sema_call_models_open(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, outputs: [SemaCallModelOutputInput], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    updated_args := args
-    if updated_args.len() != 1 {
-        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        sema_call_compute_arity_error("open", 1, updated_args.len(), span, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    if type_args.len() != 1 {
-        &diagnostics.push(sema_generic_count_diagnostic("models.open", 1, type_args.len(), span))
-        _ := sema_check_expression(updated_args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    argument :: sema_check_expression(updated_args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    output :: sema_call_compute_literal_string(updated_args[0].expr) ?? {
-        sema_call_compute_models_invalid(span, "`models.open` needs a literal output name", "model output selection is checked before provider execution", "write `models.open<Trait>(\"output\")` with a package output name", &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    graph :: environment.registration_graph ?? {
-        sema_call_compute_models_invalid(span, "model source binding is unavailable", "the checker has no loaded module graph", "load the package source before opening its model output", &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    model_trait :: sema_call_compute_model_trait(graph, environment, type_args[0]) ?? {
-        sema_call_compute_models_invalid(span, "cannot bind model trait `{type_name(type_args[0])}`", "model trait is not uniquely resolved to an exported source declaration", "export one public trait with the declared model signature and import its module", &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    if !model_trait.definition.is_pub {
-        sema_call_compute_models_invalid(span, "model trait `{model_trait.name}` is not public", "a model provider boundary cannot expose a private trait", "mark the source trait `pub`", &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    if !sema_call_compute_model_validate_carriers(graph, model_trait, span, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    matches := [SemaCallModelOutputInput]{}
-    loop fact in outputs {
-        if fact.output == output && fact.signature_name == (Val(model_trait.name)) -> &matches.push(fact)
-    }
-    if matches.len() == 0 {
-        sema_call_compute_models_invalid(span, "model output `{output}` does not bind trait `{model_trait.name}`", "the package output's `name` must select exactly one source trait", "declare `.Model {{ name: \"{model_trait.name}\", ... }}` for this output", &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    if matches.len() != 1 {
-        sema_call_compute_models_invalid(span, "model output `{output}` binds trait `{model_trait.name}` more than once", "missing, ambiguous, and conflicting model exports fail before execution", "keep one package output and one source trait binding", &diagnostics)
-        return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    }
-    output_fact := matches[0]
-    result_type := Type.Result{ok: Type.TraitObject{bounds: [String]{model_trait.name}}, err: Type.Named{name: "Err"}}
-    fallibility := TFailureCarrier.Result{success: Type.TraitObject{bounds: [String]{model_trait.name}}, error: Type.Named{name: "Err"}}
-    call_args := [TExpr]{argument}
-    effective_type_args := [Type]{Type.TraitObject{bounds: [String]{model_trait.name}}}
-    ownership := sema_ownership_check_call_arguments(&state, "core.models.open", sema_call_compute_owned_params([Type]{Type.String}, [AccessConvention]{AccessConvention.Read}), &updated_args, scopes, &diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    value :: sema_call_core_tir(record, call_args, span, effective_type_args, [Bool]{false}, None, result_type, fallibility, expected, environment, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
-    _ := sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics)
-    return SemaComputeModelsSpecialCheck{handled: true, value: Val(value), model_output: Val(output_fact)}
+    return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
 }
 
 // The caller owns route selection and invokes this helper before the generic
-// Core-call producer. `model_outputs` is the source-neutral package input that
-// mirrors native AST::ModelOutputFact; it must not be reconstructed from MIR.
-pub fn sema_call_try_compute_models_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, model_outputs: [SemaCallModelOutputInput], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    if record.module_name == "core.models" && record.member == "open" -> return sema_call_models_open(record, args, type_args, span, expected, model_outputs, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if record.module_name != "core.compute" -> return SemaComputeModelsSpecialCheck{handled: false, value: None, model_output: None}
+// Core-call producer.
+pub fn sema_call_try_compute_models_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+    if record.module_name != "core.compute" -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
     if record.member == "gradient" || record.member == "value_and_gradient" || record.member == "vjp" || record.member == "jvp" {
         return sema_call_compute_transform(record, record.member, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if record.member == "vec" || record.member == "matrix" {
         _ := sema_compute_record_core_call(record, span, &context)
-        if !sema_call_compute_explicit_type_args(record.member, type_args, 0, span, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None, model_output: None}
+        if !sema_call_compute_explicit_type_args(record.member, type_args, 0, span, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
         return sema_call_compute_check_alias(record.member, record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
-    return SemaComputeModelsSpecialCheck{handled: false, value: None, model_output: None}
+    return SemaComputeModelsSpecialCheck{handled: false, value: None}
 }

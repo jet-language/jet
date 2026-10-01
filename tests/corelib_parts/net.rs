@@ -1531,8 +1531,8 @@ fn run() {
     print(identity.cert == "cert")
     print(identity.key == "key")
     print(roots.path == "roots")
-    print(tls.version_name(TLSVersion.Tls13) == "TLSv1.3")
-    print(tls.is_tls12(TLSVersion.Tls12))
+    print(tls.version_name(TLSVersion.TLS13) == "TLSv1.3")
+    print(tls.is_tls12(TLSVersion.TLS12))
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "tls_carriers", source, &[], None);

@@ -12,10 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::Devtools::{
-    JetDevtoolsDatabasePanelFacts, JetDevtoolsHostKind, JetDevtoolsJobPanelFact,
-    JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError,
-    JetDevtoolsPanelProjection, JetDevtoolsRequestPanelFact, JetDevtoolsRequestPanelState,
-    JetDevtoolsTelemetryPanelState, JetDevtoolsTopologyFact, JetDevtoolsTopologyState,
+    JetDevtoolsHostKind, JetDevtoolsJobPanelFact, JetDevtoolsPanelCapability,
+    JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError, JetDevtoolsPanelProjection,
 };
 
 use jet_foundation::Devtools::{
@@ -41,7 +39,7 @@ use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::{json_escape, parse_json, parse_json_with_limit};
 use jet_foundation::Persist::PersistRejectReason;
 use crate::CapturePolicy::{CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact};
-use crate::WatchService::{HotReplaceTxn, PersistOutcome, SessionSnapshot};
+use crate::WatchService::{PersistOutcome, SessionSnapshot};
 const DEVTOOLS_TEXT_LIMIT: usize = JET_DEVTOOLS_MAX_TEXT_BYTES;
 pub(crate) const MAX_CLIENT_ID: usize = 128;
 pub(crate) const MAX_CLIENTS: usize = 256;
@@ -722,18 +720,6 @@ impl ResidentDevSession {
         self.capture_facts.lock().unwrap().clone()
     }
 
-    pub fn capture_skips(&self) -> Vec<CaptureSkip> {
-        self.capture_facts
-            .lock()
-            .unwrap()
-            .iter()
-            .filter_map(|fact| match fact {
-                CaptureSessionFact::Skip(skip) => Some(skip.clone()),
-                CaptureSessionFact::Start(_) | CaptureSessionFact::Fault(_) => None,
-            })
-            .collect()
-    }
-
     fn validate_capture_identity(&self, identity: &CaptureIdentity) -> Result<(), String> {
         if !identity.is_exact() {
             return Err("capture identity is incomplete".to_string());
@@ -790,13 +776,6 @@ impl ResidentDevSession {
             live: Some(LiveReceipt { lineage, values }),
         });
         Ok(())
-    }
-    pub fn record_hot_replace(
-        &self,
-        snapshot: &SessionSnapshot,
-        transaction: &HotReplaceTxn,
-    ) -> Result<(), String> {
-        self.record_live_transaction(snapshot, transaction.decisions())
     }
 
     pub fn mark_building(&self) {
@@ -925,13 +904,6 @@ impl ResidentDevSession {
         jet_foundation::DevtoolsControl::jet_devtools_enqueue_command(command)
     }
 
-    pub fn enqueue_project_rebuild(
-        &self,
-        request: JetDevtoolsProjectRebuildRequest,
-    ) -> Result<(), String> {
-        self.enqueue_devtools_command(JetDevtoolsCommand::ProjectRebuild(request))
-    }
-
     pub fn take_project_rebuild(
         &self,
     ) -> Result<Option<JetDevtoolsProjectRebuildRequest>, String> {
@@ -995,13 +967,6 @@ impl ResidentDevSession {
 
     pub fn publish_devtools_event_typed(&self, event: JetDevtoolsEvent) -> Result<u64, String> {
         self.push_devtools_event(event)
-    }
-
-    pub fn enqueue_database_explain(
-        &self,
-        request: JetDevtoolsDatabaseExplainRequest,
-    ) -> Result<(), String> {
-        self.enqueue_devtools_command(JetDevtoolsCommand::DatabaseExplain(request))
     }
 
     pub fn enqueue_game_control(
@@ -1306,74 +1271,6 @@ impl ResidentDevSession {
         let event = fact.to_protocol_event(source)?;
         self.publish_devtools_event_typed(event)
     }
-
-    pub fn publish_database_panel(
-        &self,
-        facts: &JetDevtoolsDatabasePanelFacts,
-        source: impl Into<String>,
-    ) -> Result<usize, String> {
-        let events = facts
-            .to_protocol_events(source)
-            .map_err(|error| error.to_string())?;
-        self.publish_panel_events(events)
-    }
-    pub fn publish_request_fact(
-        &self,
-        fact: &JetDevtoolsRequestPanelFact,
-        source: impl Into<String>,
-    ) -> Result<u64, String> {
-        self.publish_devtools_event_typed(fact.to_protocol_event(source)?)
-    }
-
-    pub fn publish_request_facts<I>(
-        &self,
-        facts: I,
-        source: impl Into<String>,
-    ) -> Result<usize, String>
-    where
-        I: IntoIterator<Item = JetDevtoolsRequestPanelFact>,
-    {
-        let source = source.into();
-        let events = facts
-            .into_iter()
-            .map(|fact| fact.to_protocol_event(source.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
-        self.publish_panel_events(events)
-    }
-
-    pub fn publish_request_panel(
-        &self,
-        panel: &JetDevtoolsRequestPanelState,
-        source: impl Into<String>,
-    ) -> Result<usize, String> {
-        self.publish_panel_events(panel.to_protocol_events(source)?)
-    }
-
-    pub fn publish_telemetry_panel(
-        &self,
-        panel: &JetDevtoolsTelemetryPanelState,
-        source: impl Into<String>,
-    ) -> Result<usize, String> {
-        self.publish_panel_events(panel.to_protocol_events(source)?)
-    }
-
-    pub fn publish_topology_fact(
-        &self,
-        fact: &JetDevtoolsTopologyFact,
-        source: impl Into<String>,
-    ) -> Result<u64, String> {
-        self.publish_devtools_event_typed(fact.to_protocol_event(source)?)
-    }
-
-    pub fn publish_topology_panel(
-        &self,
-        state: &JetDevtoolsTopologyState,
-        source: impl Into<String>,
-    ) -> Result<usize, String> {
-        self.publish_panel_events(state.to_protocol_events(source)?)
-    }
-
-
 
     /// Move the resident replay cursor to one retained sequence.
     pub fn scrub(&self, sequence: u64) -> Result<ReplayProjection, String> {
@@ -1698,18 +1595,6 @@ impl ResidentDevSession {
         };
         Ok(())
     }
-
-    pub fn set_devtools_lifecycle(
-        &self,
-        lifecycle: JetDevtoolsLifecycleState,
-        freshness: JetDevtoolsFreshnessFact,
-    ) {
-        let mut state = self.devtools_lock();
-        state.envelope.set_lifecycle(lifecycle);
-        state.envelope.set_freshness(freshness);
-    }
-
-
 
     /// Project the sema-owned HotSwap verdict into the shared devtools
     /// stream.  Compatibility and retention are facts here; this adapter

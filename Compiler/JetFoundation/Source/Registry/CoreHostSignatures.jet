@@ -140,6 +140,7 @@ pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTyp
         if member == "utime" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, integer, integer}, Val(core_sig_result(unit, io)), None))
         if member == "sync" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, None, None))
         if member == "stop" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, None, None))
+        if member == "atexit" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_fn([Type]{}, unit)}, None, None))
         if member == "set_current_dir" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(unit, io)), None))
         if core_sig_one_of(member, [String]{"fork", "setsid", "wait"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(integer, io)), None))
         if member == "waitpid" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(core_sig_result(integer, io)), None))
@@ -195,7 +196,7 @@ pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTyp
         if core_sig_one_of(member, [String]{"fixture", "temp_dir"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(Type.String), None))
         if member == "corpus" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(list_string), None))
         if member == "fake_clock" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Clock")), None))
-        if member == "fake_rng" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Rng")), None))
+        if member == "fake_rng" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("RNG")), None))
         if member == "fake_data" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Fake")), None))
         if member == "test_suite" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("TestSuite")), None))
         if member == "world" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_fn([Type]{core_sig_named("DeterministicWorld")}, unit)}, Val(unit), None))
@@ -331,7 +332,7 @@ pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTyp
         if member == "triangular" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float, float}, Val(float), None))
         if core_sig_one_of(member, [String]{"gammavariate", "betavariate", "lognormvariate", "weibullvariate", "vonmisesvariate"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(float), None))
         if member == "paretovariate" -> return Val(core_host_typed_signature(module_name, member, [Type]{float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"rng", "split"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Rng")), None))
+        if core_sig_one_of(member, [String]{"rng", "split"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("RNG")), None))
         return None
     }
     // D-CRYPTO-RNG1=A: the OS CSPRNG kernel is `None` on a missing or rejected

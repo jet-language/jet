@@ -1,14 +1,26 @@
 // Source-owned lowering for compiler query value projections.
 // Every accepted method is lowered to the same static core.host route used by
 // the evaluator; no native compiler callback is emitted.
+use jet_foundation.[
+    MIRAccess,
+    MIRCallArg,
+    MIRCallee,
+    MIROperation,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRType,
+    MIRValueID,
+    TExpr,
+    Type,
+]
 
 fn jet_codegen_compiler_value_owner(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_compiler_value_owner(inner)
         .Named(name) | .Apply(name, _) -> {
-            parts := name.split("::")
+            parts := name.split("::").to_list()
             canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
-            dotted := canonical.split(".")
+            dotted := canonical.split(".").to_list()
             leaf := if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical
             if leaf == "" -> return None
             return Val(leaf)
@@ -55,16 +67,16 @@ fn jet_codegen_compiler_value_borrow_mask(arg_count: Int) -> [Bool] Never! {
     mask
 }
 
-fn jet_codegen_lower_compiler_value_host_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MirValueId {
+fn jet_codegen_lower_compiler_value_host_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
     owner :: jet_codegen_compiler_value_owner(receiver.ty) ?? panic("checked compiler value host method has no nominal receiver")
     if !jet_codegen_compiler_value_method_supported(owner, method, args.len()) -> panic("checked compiler value host method has no canonical route")
-    receiver_arg := jet_codegen_method_receiver_arg(&builder, receiver, MirAccess.Read)
-    lowered := [MirCallArg]{receiver_arg}
+    receiver_arg := jet_codegen_method_receiver_arg(&builder, receiver, MIRAccess.Read)
+    lowered := [MIRCallArg]{receiver_arg}
     loop argument in args {
         value := jet_codegen_lower_expr(&builder, argument)
-        &lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
+        &lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None))
     }
     member := "{owner}.{method}"
-    route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", lowered.len(), jet_codegen_compiler_value_borrow_mask(lowered.len()), None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call{callee: MirCallee.Prelude{call: route}, args: lowered, type_args: [MirType]{}})
+    route := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", lowered.len(), jet_codegen_compiler_value_borrow_mask(lowered.len()), None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: route}, args: lowered, type_args: [MIRType]{}})
 }

@@ -1829,6 +1829,3 @@ fn jet_int_to_u8(n: i64) -> Result<u8, String> {
         Err("a U8 holds 0..255".to_string())
     }
 }
-fn jet_stopwatch_elapsed_millis(sw: &jet_std::Stopwatch) -> i64 {
-    sw.start.elapsed().as_millis() as i64
-}

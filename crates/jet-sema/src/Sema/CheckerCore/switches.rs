@@ -20,6 +20,93 @@ fn note_pattern_ranges(pattern: &Pattern, ranges: &mut Vec<(i64, i64)>) {
     }
 }
 
+/// D-OPT-WRITE1 (#3974): whether a pattern subject is a `&place` write window.
+pub(crate) fn is_write_window_subject(subject: &Expr) -> bool {
+    matches!(
+        subject.without_parens(),
+        Expr::Place(_, crate::AST::PlaceAccess::Write, _)
+    )
+}
+
+/// Names `pattern` binds as write windows under a `&place` subject. An
+/// or-pattern's alternatives bind plain read-only values: one name cannot
+/// alias two different payload slots.
+pub(crate) fn collect_window_names(pattern: &Pattern, out: &mut HashSet<String>) {
+    match pattern {
+        Pattern::Ok {
+            inner: Some(inner), ..
+        }
+        | Pattern::Err {
+            inner: Some(inner), ..
+        }
+        | Pattern::Present {
+            inner: Some(inner), ..
+        } => collect_window_names(inner, out),
+        Pattern::Ok { binding, .. }
+        | Pattern::Err { binding, .. }
+        | Pattern::Present { binding, .. } => {
+            out.insert(binding.clone());
+        }
+        Pattern::Variant { bindings, .. } => {
+            for slot in bindings {
+                collect_window_slot_names(slot, out);
+            }
+        }
+        Pattern::Struct { fields, .. } => {
+            for field in fields {
+                if let crate::AST::StructPatField::Bind { local, .. } = field {
+                    out.insert(local.clone());
+                }
+            }
+        }
+        Pattern::Or(..)
+        | Pattern::StrMatch { .. }
+        | Pattern::BinMatch { .. }
+        | Pattern::Absent(_)
+        | Pattern::Range { .. } => {}
+    }
+}
+
+fn collect_window_slot_names(slot: &PatSlot, out: &mut HashSet<String>) {
+    match slot {
+        PatSlot::Bind { name, .. } => {
+            out.insert(name.clone());
+        }
+        PatSlot::Nested(inner) => collect_window_names(inner, out),
+        PatSlot::Named { slot, .. } => collect_window_slot_names(slot, out),
+        PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Rest(_) => {}
+    }
+}
+
+/// Names a condition's pattern tests bind through a `&place` write window.
+/// `it_window`: the enclosing switch subject is one, so its `it` stands for it.
+pub(crate) fn condition_window_names(cond: &Expr, it_window: bool) -> HashSet<String> {
+    let mut out = HashSet::new();
+    collect_condition_window_names(cond, it_window, &mut out);
+    out
+}
+
+fn collect_condition_window_names(cond: &Expr, it_window: bool, out: &mut HashSet<String>) {
+    match cond {
+        Expr::PatternTest {
+            subject, pattern, ..
+        } => {
+            let window = is_write_window_subject(subject)
+                || (it_window
+                    && matches!(subject.without_parens(), Expr::Ident(name, _) if name == Syntax::KW_IT));
+            if window {
+                collect_window_names(pattern, out);
+            }
+        }
+        Expr::Binary(BinOp::And, left, right, _) => {
+            collect_condition_window_names(left, it_window, out);
+            collect_condition_window_names(right, it_window, out);
+        }
+        Expr::Paren(inner, _) => collect_condition_window_names(inner, it_window, out),
+        _ => {}
+    }
+}
+
 /// L0303 (#3716): the authored `else` arm that follows a table's last pattern
 /// arm, which ends at `after`. Returns the arm (from `else` through its body)
 /// and the span deleting it removes, which also takes the line break and
@@ -678,6 +765,97 @@ impl<'a> Checker<'a> {
         self.flow.sendability.set_at(name, depth, sendable);
     }
 
+    /// D-FLOWTYPE1=A: the stable Optional name a statement guard
+    /// `if x == None -> …` (one arm, no `else`) tests, when no earlier guard
+    /// has already proved its payload in this scope.
+    pub(crate) fn optional_exit_guard_subject(&self, stmt: &Stmt) -> Option<String> {
+        let Stmt::Switch {
+            subject,
+            arms,
+            else_body: None,
+            span,
+        } = stmt
+        else {
+            return None;
+        };
+        if !crate::AST::is_subjectless_guard(subject, *span) {
+            return None;
+        }
+        let [arm] = arms.as_slice() else {
+            return None;
+        };
+        let (name, _, _) = atomic_absent_optional_subject(&arm.cond)?;
+        if self.flow.narrow.get_at(&name, self.scope_depth()).is_some() {
+            return None;
+        }
+        self.flow_narrowable_optional_inner(&name)?;
+        Some(name)
+    }
+
+    /// D-FLOWTYPE1=A: once a checked `x == None` guard leaves on every path,
+    /// the fallthrough holds the payload (`check_switch` records it). Rewrite
+    /// the guard into the canonical refutable binding `x == .Val(x) ?? { arm }`
+    /// so typed IR binds the proven payload for the statements that follow,
+    /// just as the `else` form binds it through its Present test.
+    pub(crate) fn rewrite_optional_exit_guard(&self, stmt: &mut Stmt, name: &str) {
+        let Stmt::Switch { arms, span, .. } = stmt else {
+            return;
+        };
+        let [arm] = arms.as_mut_slice() else {
+            return;
+        };
+        let Some((subject, name_span, cond_span)) = atomic_absent_optional_subject(&arm.cond)
+        else {
+            return;
+        };
+        // The refutable binding requires a direct diverging miss route
+        // (E0405); keep that proof intact if the block is checked again.
+        if subject != name || !crate::Sema::Diagnostics::block_definitely_exits(&arm.body) {
+            return;
+        }
+        let span = *span;
+        let body = std::mem::take(&mut arm.body);
+        *stmt = Stmt::Val(crate::AST::Binding {
+            mutable: false,
+            markers: Vec::new(),
+            reactive_upgrade: false,
+            meta: None,
+            name: String::new(),
+            name_span: span,
+            sigil_span: None,
+            pattern: Some(crate::AST::BindPattern::Refutable {
+                pattern: Pattern::Present {
+                    binding: subject.clone(),
+                    binding_span: name_span,
+                    inner: None,
+                    span: cond_span,
+                },
+                fallback: crate::AST::OrFallback::Block {
+                    body,
+                    value: None,
+                    span,
+                },
+                names: vec![crate::AST::BindName {
+                    name: subject.clone(),
+                    span: name_span,
+                    rename: None,
+                }],
+                span,
+                synthesized: true,
+            }),
+            ty: None,
+            ty_span: None,
+            init: Expr::Ident(subject, name_span),
+            is_comptime: false,
+            ct: None,
+            uninit: false,
+            arena_view: false,
+            string_view: false,
+            gc_promotion: None,
+            gc_transferred: false,
+        });
+    }
+
     pub(crate) fn declare_condition_binding(
         &mut self,
         name: &str,
@@ -709,6 +887,47 @@ impl<'a> Checker<'a> {
             None
         };
         restore
+    }
+
+    /// D-OPT-WRITE1 (#3974): a pattern binding under a `&place` subject is a
+    /// write window into the matched payload (Rust `if let Some(s) = &mut x`).
+    /// It carries the write capability of a write parameter, so edits through
+    /// it, and `&binding.field` passes onward, reach the owner's storage. MIR
+    /// binds it as an alias of the subject place, never a copy.
+    pub(crate) fn declare_pattern_write_window(&mut self, name: &str, span: Span, ty: Type) {
+        self.declare(
+            name,
+            span,
+            LocalInfo {
+                def_span: span,
+                binding_sigil_span: None,
+                ty,
+                mutable: true,
+                param_conv: Some(crate::AST::AccessConvention::Write),
+                decl_loop_depth: self.loop_depth,
+                interrupt_sendable: false,
+                reactive_local: false,
+                reactive_shared: false,
+                single_use_span: None,
+                invalid: false,
+            },
+        );
+    }
+
+    /// Declare one pattern binding: a write window when `window`, otherwise
+    /// an ordinary read-only condition binding.
+    pub(crate) fn declare_pattern_binding(
+        &mut self,
+        name: &str,
+        span: Span,
+        ty: Type,
+        window: bool,
+    ) -> Option<(String, crate::Sema::FlowFacts::MoveOrigin)> {
+        if window {
+            self.declare_pattern_write_window(name, span, ty);
+            return None;
+        }
+        self.declare_condition_binding(name, span, ty)
     }
 
     /// D-FLOWTYPE1=A: rewrite stable `x != None` into S31 `x == Val(x)` so TIR
@@ -775,10 +994,14 @@ impl<'a> Checker<'a> {
                 let left_bindings = self.check_condition_with_bindings(l);
                 self.push_scope();
                 let mut restore_moved = Vec::new();
+                let windows = condition_window_names(l, false);
                 for (name, ty) in &left_bindings {
-                    if let Some(restored) =
-                        self.declare_condition_binding(name, l.span(), ty.clone())
-                    {
+                    if let Some(restored) = self.declare_pattern_binding(
+                        name,
+                        l.span(),
+                        ty.clone(),
+                        windows.contains(name),
+                    ) {
                         restore_moved.push(restored);
                     }
                 }
@@ -2067,10 +2290,17 @@ impl<'a> Checker<'a> {
                     arm_patterns.push(pattern.clone());
                     let bindings = self.validate_pattern(st, &pattern, pspan);
                     self.mark_pattern_subject_moved(subject, &bindings);
+                    let mut windows = HashSet::new();
+                    if is_write_window_subject(subject) {
+                        collect_window_names(&pattern, &mut windows);
+                    }
                     self.push_scope();
                     let mut restore_moved = Vec::new();
                     for (name, ty) in bindings {
-                        if let Some(restored) = self.declare_condition_binding(&name, pspan, ty) {
+                        let window = windows.contains(&name);
+                        if let Some(restored) =
+                            self.declare_pattern_binding(&name, pspan, ty, window)
+                        {
                             restore_moved.push(restored);
                         }
                     }
@@ -2090,9 +2320,11 @@ impl<'a> Checker<'a> {
             } else {
                 self.push_scope();
                 let mut restore_moved = Vec::new();
+                let windows = condition_window_names(&arm.cond, is_write_window_subject(subject));
                 for (name, ty) in bindings {
+                    let window = windows.contains(&name);
                     if let Some(restored) =
-                        self.declare_condition_binding(&name, arm.cond.span(), ty)
+                        self.declare_pattern_binding(&name, arm.cond.span(), ty, window)
                     {
                         restore_moved.push(restored);
                     }

@@ -1074,19 +1074,15 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
 /// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
 /// have their own multi-file drivers and are not single-entry dev targets.
 ///
-/// A `package.jet` beside the examples is that topic's MANIFEST, not an
-/// example. `Examples/features/modules/package.jet` declares the
-/// `settings: { cache_slots: … }` and `build:` profiles that
-/// `modules/fact_value_arguments.jet` reads through `@build.settings.*`, so it
-/// is load-bearing on disk and can never parse as a program — a manifest binds
-/// `name: "…"`, which is E0003 in source. Discovering it as an example put one
-/// permanent unjudgeable row into `out_of_universe`, the corpus gate's
-/// `frontend_rejected:`, and `typechecked_example_stems`'s rejected list at the
-/// same time (#2018). Removing it HERE, at the one discovery seam every oracle
-/// reads, removes it from all three at once, and is not a skip list: the name
-/// comes from `Syntax::PACKAGE_FILE`, the same constant the package loader
-/// resolves manifests by, so a renamed manifest cannot silently reappear as a
-/// broken example.
+/// A `package.jet` beside the examples is a package MANIFEST, not an example:
+/// a manifest binds `name: "…"`, which is E0003 in source. Discovering one as
+/// an example put a permanent unjudgeable row into `out_of_universe`, the
+/// corpus gate's `frontend_rejected:`, and `typechecked_example_stems`'s
+/// rejected list at the same time (#2018). Removing it HERE, at the one
+/// discovery seam every oracle reads, removes it from all three at once, and
+/// is not a skip list: the name comes from `Syntax::PACKAGE_FILE`, the same
+/// constant the package loader resolves manifests by, so a renamed manifest
+/// cannot silently reappear as a broken example.
 fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
     let ex_dir = root.join("Examples/features");
     let mut files = Vec::new();

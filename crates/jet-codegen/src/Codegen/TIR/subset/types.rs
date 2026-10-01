@@ -76,18 +76,18 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
-        "Effect" | "UiNode" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
+        "Effect" | "UINode" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError"
         // D-WEBAPP1 / D-RENDERTGT*: opaque UI + web graph value types (prelude hosts).
-        | "App" | "WebPage" | "DevServer" | "HTTPServerTls"
-        | "EventResult" | "NullBackend" | "TuiBackend" | "GtkBackend"
+        | "App" | "WebPage" | "DevServer" | "HTTPServerTLS"
+        | "EventResult" | "NullBackend" | "TUIBackend" | "GtkBackend"
         | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent"
         // D-UI-PREVIEW1=A: preview descriptors remain host-owned opaque values.
-        | "UiPreview" | "UiPreviewRegistry"
-        | "UiPreviewAccessibility" | "UiPreviewAuthority" | "UiPreviewContext"
-        | "UiPreviewDevice" | "UiPreviewEffect" | "UiPreviewInputOverride"
-        | "UiPreviewInputValue" | "UiPreviewKind" | "UiPreviewLifecycle"
-        | "UiPreviewSource" | "UiPreviewTheme" | "UiPreviewTraits" | "UiPreviewViewport"))
+        | "UIPreview" | "UIPreviewRegistry"
+        | "UIPreviewAccessibility" | "UIPreviewAuthority" | "UIPreviewContext"
+        | "UIPreviewDevice" | "UIPreviewEffect" | "UIPreviewInputOverride"
+        | "UIPreviewInputValue" | "UIPreviewKind" | "UIPreviewLifecycle"
+        | "UIPreviewSource" | "UIPreviewTheme" | "UIPreviewTraits" | "UIPreviewViewport"))
     {
         return true;
     }
@@ -243,7 +243,7 @@ pub(crate) fn is_covered_pool_ty(ty: &Type, cx: &Cx) -> bool {
         // `Node` is covered recurses into this field, which would recurse right
         // back into "is `Node` covered" through `concurrency_elem_covered` —
         // an infinite loop `is_covered_struct_ty` has no cycle guard for.
-        "Id" => matches!(elem, Type::Named(n) if cx.type_names.contains(n)),
+        "ID" => matches!(elem, Type::Named(n) if cx.type_names.contains(n)),
         "Pool" => concurrency_elem_covered(elem, cx),
         _ => false,
     }
@@ -593,7 +593,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"
-            | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig"
+            | "RecipientReport" | "SendReport" | "Limits" | "DKIMConfig" | "SMTPConfig"
             | "WebFormFieldSpec"
             // D-LIB-CALLGRANT1=A: the explicit load-site grant is a small
             // constructable Prelude record, so it must stay on the same TIR
@@ -816,7 +816,7 @@ pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
 pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
-        || matches!(ty, Type::Named(name) if name == "UiNode")
+        || matches!(ty, Type::Named(name) if name == "UINode")
         // c109 Phase 17: a type-variable element (`[T]` in a generic fn). A type var only
         // appears where a type param is in scope (sema guarantees), and renders by value
         // via `cx.rust_type` (`Vec<T>`), so a `[T]` list param/return/local is covered.

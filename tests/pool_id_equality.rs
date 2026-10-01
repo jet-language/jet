@@ -42,7 +42,7 @@ fn run() {
     let result = jet::compile(source);
     assert!(
         result.is_ok(),
-        "Id<T> equality must depend on Id identity, not T: {result:#?}"
+        "ID<T> equality must depend on ID identity, not T: {result:#?}"
     );
 }
 

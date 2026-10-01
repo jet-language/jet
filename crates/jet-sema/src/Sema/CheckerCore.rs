@@ -6,8 +6,9 @@ mod control_flow;
 mod statements;
 mod switches;
 pub(crate) use switches::{
-    atomic_absent_optional_subject, contextual_literal, expr_is_absent_none,
-    names_optional_state, pattern_consumes_result_carrier, ContextualLiteral,
+    atomic_absent_optional_subject, collect_window_names, condition_window_names,
+    contextual_literal, expr_is_absent_none, is_write_window_subject, names_optional_state,
+    pattern_consumes_result_carrier, ContextualLiteral,
 };
 mod bindings;
 mod types;

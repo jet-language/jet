@@ -2,6 +2,7 @@
 members = [
     ".",
     "crates/jet-foundation",
+    "crates/jet-unicode",
     "crates/jet-lexer",
     "crates/jet-parser",
     "crates/jet-comptime",
@@ -39,22 +40,39 @@ default-members = [
 ]
 resolver = "2"
 
+# Build-time policy (owner goal: beat Zig/Go on build speed). A debug `jet`
+# with full DWARF was 1.6 GB and every link and test binary paid for it.
+# Line tables keep file:line backtraces and profiler attribution; nobody
+# steps through third-party crates, so they carry no debuginfo at all.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Build scripts run on every rebuild: the root build.rs hashes ~130 MB of
+# compiler sources for the build identity, which an unoptimized SHA-256
+# turns into tens of seconds. Optimized once, cached afterwards.
+[profile.dev.build-override]
+opt-level = 3
+
 # Dev builds must not turn content-addressed hashing into the product's
 # bottleneck: an unoptimized SHA256 runs ~5-10 MB/s, so a debug `jetpack env`
 # spends tens of minutes digesting a warm multi-GB hangar (observed live).
-# Optimizing only the hashing crate keeps dev compile times intact while
-# store verification runs at release speed.
+# opt-level 1 already removes that cliff at a fraction of opt-level 3's
+# compile cost on this 145k-line crate, which every rebuild pays first.
 [profile.dev.package.jet-foundation]
-opt-level = 3
+opt-level = 1
 
 # Same reasoning: the canonical-archive walker that feeds the hasher lives in
 # jet-pkg-model; an unoptimized walk dominates once hashing is fast.
 [profile.dev.package.jet-pkg-model]
-opt-level = 3
+opt-level = 1
 
 # Same reasoning: the hangar closure WAL verifies an ed25519 receipt per
 # store record on every graph load; unoptimized field arithmetic turns 1.5k
-# verifications into ~10s of pure CPU per jetpack invocation.
+# verifications into ~10s of pure CPU per jetpack invocation. Third-party
+# crates compile once, so these keep opt-level 3.
 [profile.dev.package.ed25519-dalek]
 opt-level = 3
 [profile.dev.package.curve25519-dalek]
@@ -66,8 +84,16 @@ opt-level = 3
 
 # The env warm path (plan, verify, provider dispatch) is jetpack's own code;
 # at opt-level 0 a fully warm 28-package `jetpack env --prep` burns ~49s of
-# CPU. opt-level 1 keeps debuginfo and cheap builds while cutting that walk.
+# CPU. opt-level 1 keeps line tables and cheap builds while cutting that walk.
 [profile.dev.package.jetpack]
+opt-level = 1
+
+# The recursive-descent parser also runs on the caller's own thread (CLI
+# target/manifest probes parse before any compiler stack exists). At opt-level
+# 0 `Parser::stmt` reserves ~520 KiB per call (no stack-slot reuse across its
+# arms; ~10 KiB optimized), so ~30 nested statement blocks exhausted a 16 MiB
+# main-thread stack. opt-level 1 reuses those slots.
+[profile.dev.package.jet-parser]
 opt-level = 1
 
 [package]
@@ -81,8 +107,9 @@ path = "Source/lib.rs"
 
 [features]
 # The private self-hosting bootstrap host (Compiler/Bootstrap/Host, Runner.rs)
-# is mid-integration under #218 and does not compile yet. It is mounted only
-# with this feature; make it unconditional once it builds (#3663).
+# is mounted only with this feature, which keeps its private self-compile
+# harness out of ordinary test runs. Tools/agent/lane-check.sh checks it by
+# default so drift against the Jet compiler's traits fails fast (#3874).
 compiler-bootstrap-host = []
 
 [[bin]]
@@ -96,6 +123,12 @@ path = "Source/main.rs"
 [[bin]]
 name = "jet-cxx"
 path = "Source/main.rs"
+
+# #3953: prebuilt runner for Cranelift dev builds. `jet build` copies it and
+# appends the compiled program image.
+[[bin]]
+name = "jet-aot-rt"
+path = "Source/AotRuntime.rs"
 
 [dependencies]
 jet-driver = { path = "crates/jet-driver" }
@@ -116,6 +149,7 @@ jet-cli = { path = "crates/jet-cli" }
 jet-canvas = { path = "crates/jet-canvas" }
 jet-devserver = { path = "crates/jet-devserver" }
 jet-store = { path = "crates/jet-store" }
+jet-unicode = { path = "crates/jet-unicode" }
 
 # Card #650: `test-seam` unlocks a test-only hangar backdating API
 # (jetpack::Store::test_backdate_last_used_at) for `cargo test`'s

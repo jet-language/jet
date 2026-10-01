@@ -16,7 +16,7 @@ pub fn bundle_has_comptime_evaluation(bundle: &ProgramBundle) -> bool {
         .any(item_has_comptime_evaluation)
 }
 
-fn item_has_comptime_evaluation(item: &Item) -> bool {
+pub(super) fn item_has_comptime_evaluation(item: &Item) -> bool {
     let function = |function: &Func| stmts_have_comptime_evaluation(&function.body);
     match item {
         Item::Func(value) => function(value),

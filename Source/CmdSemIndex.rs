@@ -13,6 +13,7 @@ use jet_semindex::{
 };
 
 use crate::OutputMode;
+use crate::absolutize;
 
 pub(crate) fn run_semindex(args: &[String], json: bool) {
     let path = args
@@ -112,17 +113,6 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
             }
             exit(ExitCodes::USER_ERROR);
         }
-    }
-}
-
-fn absolutize(path: &str) -> PathBuf {
-    let p = Path::new(path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(p)
     }
 }
 
@@ -250,7 +240,7 @@ pub(crate) fn run_find(args: &[String], json: bool) {
                         crate::CmdInspect::render_check_failure(&path, &diagnostics, json, false);
                     });
             let symbols = jet_semindex::build_symbol_db(&checked.bundle, &checked.facts).symbols;
-            (symbols, checked.index.effects().to_vec())
+            (symbols, checked.index().effects().to_vec())
         }
         None => (SemanticSymbolIndex::language(), Vec::new()),
     };

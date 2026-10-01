@@ -12,7 +12,7 @@ use jet::Parser;
 use jet::AST::{BinOp, Expr, Item, Program, UnOp};
 use jet::SHA256;
 use jet_foundation::DataTree::DataTree;
-use jet_foundation::JSON::parse_json;
+use jet_foundation::JSON::{parse_json, quote as json_str};
 
 const MAX_OBLIGATIONS: usize = 10_000;
 const MAX_TERMS: usize = 50_000;
@@ -2119,23 +2119,6 @@ pub(crate) fn summarize(items: &[SolverEvidence]) -> (usize, usize, usize, usize
         }
     }
     (selected, proved, disproved, unknown, unavailable)
-}
-
-fn json_str(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 #[cfg(test)]

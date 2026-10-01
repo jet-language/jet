@@ -1,5 +1,10 @@
 // Exact Core Prelude routes for Browser handles. BrowserTest* handles share
 // the HTTPClientMethod TIR spelling, while Browser handles use HTTPServerMethod.
+use jet_foundation.[
+    Effect,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+]
 
 fn jet_codegen_browser_test_handle_kind(kind: String) -> Bool Never! {
     kind == "BrowserTestServer" || kind == "BrowserTestReport" || kind == "BrowserTestConfig"
@@ -10,7 +15,7 @@ fn jet_codegen_browser_handle_route(kind: String, method: String, argument_count
         member := "{kind}.{method}"
         symbol := ""
         mask := [Bool]{}
-        route_effect := None
+        route_effect := Effect?{None}
         if {
             kind == "Browser" -> {
             if {
@@ -408,14 +413,14 @@ fn jet_codegen_browser_handle_route(kind: String, method: String, argument_count
         }
         }
         if argument_count + 1 != mask.len() -> return None
-        return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MirPreludeAbi.Value))
+        return Val(jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MIRPreludeABI.Value))
     }
 
     if !jet_codegen_browser_test_handle_kind(kind) -> return None
     member := "{kind}.{method}"
     symbol := ""
     mask := [Bool]{}
-    route_effect := None
+    route_effect := Effect?{None}
     if {
         kind == "BrowserTestConfig" -> {
             if {
@@ -502,5 +507,5 @@ fn jet_codegen_browser_handle_route(kind: String, method: String, argument_count
         }
     }
     if server_method || argument_count + 1 != mask.len() -> return None
-    Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MirPreludeAbi.Value))
+    Val(jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.web.browser", member, symbol, mask, route_effect, MIRPreludeABI.Value))
 }

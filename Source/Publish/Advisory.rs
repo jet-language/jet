@@ -5,6 +5,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use jet_foundation::Hex::nibble as hex_nibble;
+
 use super::SemVer::{SemVer, VersionReq};
 
 // ──────────────────────────────────────────────
@@ -590,15 +592,6 @@ fn is_sha256_digest(value: &str) -> bool {
         && hex
             .bytes()
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F'))
-}
-
-fn hex_nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 pub fn advisory_feed_payload(feed: &AdvisoryFeed) -> String {

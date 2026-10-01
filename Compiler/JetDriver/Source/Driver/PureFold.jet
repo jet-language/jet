@@ -1,0 +1,738 @@
+// Pure-call folding over canonical MIR.
+//
+// Compile time is explicit in the checker (`prep`), so an ordinary immutable
+// binding such as `limit :: square(12)` reaches MIR as a runtime call. This
+// pass recovers that optimization after checking: when an immutable local is
+// initialized from effect-free work over constants, the work runs once in the
+// MIR evaluator and the result becomes a MIR constant. Every execution tier
+// consumes the folded program. It mirrors the Rust bootstrap's
+// crates/jet-codegen/src/Codegen/MIREval/PureFold.rs and runs on freshly
+// assembled MIR, before the canonical optimizer.
+//
+// Folding is optional: a callee with effects, a failure carrier, memoization,
+// captures or a generator is left alone, as is any evaluation that fails,
+// prints, exhausts its fuel or yields a value too large to inline.
+use jet_foundation.[
+    MIRBasicBlock,
+    MIRBlockID,
+    MIRCallArg,
+    MIRCallFallibility,
+    MIRCaptureParam,
+    MIRConstant,
+    MIRDropAction,
+    MIREffectFacts,
+    MIRFailureCarrier,
+    MIRFunction,
+    MIRFunctionForm,
+    MIRFunctionID,
+    MIRFunctionKind,
+    MIRGenericParam,
+    MIRInstruction,
+    MIRIntegerWidth,
+    MIRLocal,
+    MIRNamedSpan,
+    MIROpID,
+    MIROperation,
+    MIRParam,
+    MIRPhiIncoming,
+    MIRPlace,
+    MIRPlaceID,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRProgram,
+    MIRScope,
+    MIRSemanticOp,
+    MIRTerminator,
+    MIRType,
+    MIRValueFact,
+    MIRValueID,
+    MIRWebParamReconstruction,
+    Span,
+    TComptimeValue,
+    mir_empty_optimization_facts,
+    mir_operation_value_uses,
+    mir_semantic_op_prelude_calls,
+]
+use jet_eval.[
+    jet_eval_comptime_value,
+    jet_eval_default_config,
+    jet_eval_function,
+    jet_eval_retire_result,
+]
+
+JET_DRIVER_PURE_FOLD_ROUNDS :: 8
+JET_DRIVER_PURE_FOLD_OUTPUT_BUDGET :: 262144
+// Most instructions one fold may re-run to rebuild its inputs.
+JET_DRIVER_PURE_FOLD_MAX_SLICE :: 256
+
+struct JetDriverPureFoldSite {
+    function: Int
+    block: Int
+    instruction: Int
+    synthetic: MIRFunctionID
+    ty: MIRType
+}
+
+struct JetDriverPureFoldCandidates {
+    sites: [JetDriverPureFoldSite]
+    functions: [MIRFunction]
+}
+
+// Fold effect-free work that initializes immutable locals from constants.
+pub fn jet_driver_fold_pure_calls(program: &MIRProgram) {
+    declined := [String:Bool]{}
+    loop _ in 0..<JET_DRIVER_PURE_FOLD_ROUNDS {
+        candidates :: jet_driver_pure_fold_candidates(program, declined)
+        if candidates.sites.len() == 0 -> break
+        augmented := ~program
+        loop synthetic in candidates.functions -> &augmented.functions.push(synthetic)
+        changed := false
+        loop site in candidates.sites {
+            folded :: jet_driver_pure_fold_evaluate(augmented, site.synthetic, site.ty)
+            if folded == {
+                .Val(constant) -> {
+                    program.functions[site.function].blocks[site.block].instructions[site.instruction].operation = MIROperation.Constant{value: constant}
+                    changed = true
+                }
+                .None -> {
+                    _ := &declined.add(jet_driver_pure_fold_site_key(site.function, site.block, site.instruction), true)
+                }
+            }
+        }
+        if !changed -> break
+    }
+    jet_driver_pure_fold_resolve_joins(&program)
+}
+
+// Replace a scalar join whose live edges all carry one constant with that
+// constant. Folding decided the branch (`m :: if a > b -> a else -> b`, or
+// the test behind `xs.min_by(f) ?? -1`), so every tier reads a literal.
+fn jet_driver_pure_fold_resolve_joins(program: &MIRProgram) {
+    loop function_index in 0..<program.functions.len() {
+        function := program.functions[function_index]
+        initializers :: jet_driver_pure_fold_initializers(function)
+        if initializers.len() == 0 -> next
+        constants :: jet_driver_pure_fold_constants(function, initializers, jet_driver_pure_fold_root_locals(function))
+        loop block_index in 0..<function.blocks.len() {
+            loop instruction_index in 0..<function.blocks[block_index].instructions.len() {
+                instruction := function.blocks[block_index].instructions[instruction_index]
+                result :: instruction.result ?? next
+                ty :: instruction.ty ?? next
+                if !jet_driver_pure_fold_scalar(ty) -> next
+                if instruction.operation == {
+                    .Phi(_) -> {
+                        constant :: constants.get(result.value) ?? next
+                        program.functions[function_index].blocks[block_index].instructions[instruction_index].operation = MIROperation.Constant{value: constant}
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+}
+
+fn jet_driver_pure_fold_scalar(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char -> true
+        else -> false
+    }
+}
+
+fn jet_driver_pure_fold_site_key(function: Int, block: Int, instruction: Int) -> String Never! {
+    "{function}:{block}:{instruction}"
+}
+
+fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool]) -> JetDriverPureFoldCandidates {
+    next_id := 0
+    callees := [Int:Bool]{}
+    loop function in program.functions {
+        if function.id.value > next_id -> next_id = function.id.value
+        if jet_driver_pure_fold_callee(function) {
+            _ := &callees.add(function.id.value, true)
+        }
+    }
+    preludes := [Int:Bool]{}
+    loop record in program.prelude_calls {
+        if jet_driver_pure_fold_prelude(record) {
+            _ := &preludes.add(record.id.value, true)
+        }
+    }
+    sites := [JetDriverPureFoldSite]{}
+    synthetics := [MIRFunction]{}
+    loop function_index in 0..<program.functions.len() {
+        function := program.functions[function_index]
+        initializers :: jet_driver_pure_fold_initializers(function)
+        if initializers.len() == 0 -> next
+        definitions := [Int:MIROperation]{}
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                defined :: instruction.result ?? next
+                _ := &definitions.add(defined.value, instruction.operation)
+            }
+        }
+        types := [Int:MIRType]{}
+        loop fact in function.values {
+            _ := &types.add(fact.id.value, fact.ty)
+        }
+        feeding :: jet_driver_pure_fold_feeding(function, initializers, definitions)
+        roots :: jet_driver_pure_fold_root_locals(function)
+        inputs := JetDriverPureFoldInputs{
+            constants: jet_driver_pure_fold_constants(function, initializers, roots),
+            types: types,
+            definitions: definitions,
+            initializers: initializers,
+            roots: roots,
+            callees: callees,
+            preludes: preludes,
+        }
+        loop block_index in 0..<function.blocks.len() {
+            block := function.blocks[block_index]
+            loop instruction_index in 0..<block.instructions.len() {
+                if declined.get(jet_driver_pure_fold_site_key(function_index, block_index, instruction_index)) != None -> next
+                instruction := block.instructions[instruction_index]
+                result :: instruction.result ?? next
+                ty :: instruction.ty ?? next
+                if feeding.get(result.value) == None -> next
+                if inputs.constants.get(result.value) != None -> next
+                if !jet_driver_pure_fold_result_type(ty) -> next
+                if !jet_driver_pure_fold_operation(instruction.operation, callees, preludes) -> next
+                slice := JetDriverPureFoldSlice{instructions: [MIRInstruction]{}, defined: [Int:Bool]{}, visiting: [Int:Bool]{}}
+                complete := true
+                loop value in mir_operation_value_uses(instruction.operation) {
+                    if !jet_driver_pure_fold_reproduce(inputs, value, instruction, &slice) {
+                        complete = false
+                        break
+                    }
+                }
+                if !complete -> next
+                &slice.instructions.push(instruction)
+                next_id += 1
+                synthetic_id := MIRFunctionID{value: next_id}
+                &synthetics.push(jet_driver_pure_fold_synthetic(function, synthetic_id, slice.instructions, result, ty))
+                &sites.push(JetDriverPureFoldSite{function: function_index, block: block_index, instruction: instruction_index, synthetic: synthetic_id, ty: ty})
+            }
+        }
+    }
+    JetDriverPureFoldCandidates{sites: sites, functions: synthetics}
+}
+
+// What one function offers a fold: known constants, value types, the
+// operation that defines each value, and the one initializer of each
+// immutable local.
+struct JetDriverPureFoldInputs {
+    constants: [Int:MIRConstant]
+    types: [Int:MIRType]
+    definitions: [Int:MIROperation]
+    initializers: [Int:Int]
+    roots: [Int:Int]
+    callees: [Int:Bool]
+    preludes: [Int:Bool]
+}
+
+// The instructions a synthetic function runs before the folded one.
+struct JetDriverPureFoldSlice {
+    instructions: [MIRInstruction]
+    defined: [Int:Bool]
+    visiting: [Int:Bool]
+}
+
+// Append instructions that rebuild `value` without run-time input: a known
+// constant, a read of an immutable local rebuilt from its one initializer,
+// or effect-free work over values that are themselves rebuilt.
+// `Path("/tmp/a").to_string()` and `xs.reduce((a, b) -> a + b)` fold this
+// way even though the path and the closure are no literals. Any failure
+// abandons the whole candidate, so a value still being visited is a cycle.
+fn jet_driver_pure_fold_reproduce(inputs: JetDriverPureFoldInputs, value: MIRValueID, site: MIRInstruction, slice: &JetDriverPureFoldSlice) -> Bool Never! {
+    if slice.defined.get(value.value) != None -> return true
+    if slice.instructions.len() >= JET_DRIVER_PURE_FOLD_MAX_SLICE -> return false
+    if slice.visiting.get(value.value) != None -> return false
+    _ := &slice.visiting.add(value.value, true)
+    rebuilt := MIROperation?{None}
+    if inputs.constants.get(value.value) == .Val(constant) {
+        rebuilt = Val(MIROperation.Constant{value: constant})
+    } else {
+        definition :: inputs.definitions.get(value.value) ?? return false
+        rebuilt = jet_driver_pure_fold_rebuild(inputs, definition, site, &slice)
+    }
+    operation :: rebuilt ?? return false
+    _ := &slice.defined.add(value.value, true)
+    &slice.instructions.push(MIRInstruction{id: MIROpID{value: -1 - slice.instructions.len()}, span: site.span, source_line: site.source_line, result: Val(value), ty: inputs.types.get(value.value), operation: operation})
+    true
+}
+
+fn jet_driver_pure_fold_rebuild(inputs: JetDriverPureFoldInputs, operation: MIROperation, site: MIRInstruction, slice: &JetDriverPureFoldSlice) -> MIROperation? Never! {
+    if operation == {
+        .ReadPlace(place) -> return jet_driver_pure_fold_rebuild_read(inputs, place, site, &slice)
+        .MovePlace(place) -> return jet_driver_pure_fold_rebuild_read(inputs, place, site, &slice)
+        .Closure(function, captures, _) -> {
+            if captures.len() != 0 || inputs.callees.get(function.value) == None -> return None
+            return Val(operation)
+        }
+        .Copy(_, _) | .Move(_) | .BuildList(_, _) | .BuildMap(_) | .Tuple(_, _) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Absent | .Field(_, _) | .Range(_, _, _) -> {}
+        else -> {
+            if !jet_driver_pure_fold_operation(operation, inputs.callees, inputs.preludes) -> return None
+        }
+    }
+    loop used in mir_operation_value_uses(operation) {
+        if !jet_driver_pure_fold_reproduce(inputs, used, site, &slice) -> return None
+    }
+    Val(operation)
+}
+
+fn jet_driver_pure_fold_rebuild_read(inputs: JetDriverPureFoldInputs, place: MIRPlaceID, site: MIRInstruction, slice: &JetDriverPureFoldSlice) -> MIROperation? Never! {
+    local :: inputs.roots.get(place.value) ?? return None
+    initial :: inputs.initializers.get(local) ?? return None
+    initial_value :: MIRValueID{value: initial}
+    if !jet_driver_pure_fold_reproduce(inputs, initial_value, site, &slice) -> return None
+    Val(MIROperation.Copy{value: initial_value, materialize_view: false})
+}
+
+// Root places of locals, by place id.
+fn jet_driver_pure_fold_root_locals(function: MIRFunction) -> [Int:Int] Never! {
+    roots := [Int:Int]{}
+    loop place in function.places {
+        if place.projections.len() != 0 -> next
+        if place.base == {
+            .Local(local) -> {
+                _ := &roots.add(place.id.value, local.value)
+            }
+            else -> {}
+        }
+    }
+    roots
+}
+
+// Immutable locals written exactly once, at their root, mapped to the value
+// that initializes them.
+fn jet_driver_pure_fold_initializers(function: MIRFunction) -> [Int:Int] Never! {
+    immutable := [Int:Bool]{}
+    loop local in function.locals {
+        if !local.mutable && !local.uninit {
+            _ := &immutable.add(local.id.value, true)
+        }
+    }
+    // place id -> local id, and whether the place is the local's root.
+    place_locals := [Int:Int]{}
+    root_places := [Int:Bool]{}
+    loop place in function.places {
+        if place.base == {
+            .Local(local) -> {
+                if immutable.get(local.value) != None {
+                    _ := &place_locals.add(place.id.value, local.value)
+                    if place.projections.len() == 0 {
+                        _ := &root_places.add(place.id.value, true)
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    writes := [Int:Int]{}
+    write_counts := [Int:Int]{}
+    disqualified := [Int:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .WritePlace(place, value) -> {
+                    local :: place_locals.get(place.value) ?? next
+                    if root_places.get(place.value) == None {
+                        _ := &disqualified.add(local, true)
+                        next
+                    }
+                    count :: write_counts.get(local) ?? 0
+                    if count == 0 {
+                        _ := &writes.add(local, value.value)
+                        _ := &write_counts.add(local, 1)
+                    } else {
+                        _ := &disqualified.add(local, true)
+                    }
+                }
+                .ReadPlace(_) -> {}
+                .MovePlace(_) -> {}
+                else -> {
+                    loop place in jet_driver_pure_fold_operation_places(instruction.operation) {
+                        local :: place_locals.get(place.value) ?? next
+                        _ := &disqualified.add(local, true)
+                    }
+                }
+            }
+        }
+    }
+    initializers := [Int:Int]{}
+    loop local in function.locals {
+        value :: writes.get(local.id.value) ?? next
+        if disqualified.get(local.id.value) != None -> next
+        _ := &initializers.add(local.id.value, value)
+    }
+    initializers
+}
+
+// Every place an operation other than a plain read or root write touches.
+fn jet_driver_pure_fold_operation_places(operation: MIROperation) -> [MIRPlaceID] Never! {
+    if operation == {
+        .ReadPlace(place) -> [MIRPlaceID]{place}
+        .MovePlace(place) -> [MIRPlaceID]{place}
+        .WritePlace(place, _) -> [MIRPlaceID]{place}
+        .ReplacePlace(place, _) -> [MIRPlaceID]{place}
+        .InitializeUninit(place) -> [MIRPlaceID]{place}
+        .RawAddressOf(place) -> [MIRPlaceID]{place}
+        .AddressOf(place, _) -> [MIRPlaceID]{place}
+        .Closure(_, captures, _) -> {
+            places := [MIRPlaceID]{}
+            loop capture in captures {
+                if capture == .Place(place) -> &places.push(place)
+            }
+            places
+        }
+        .Call(_, args, _) -> jet_driver_pure_fold_arg_places(args)
+        .CoreCall(_, _, args, _, _, _) -> jet_driver_pure_fold_arg_places(args)
+        .IndirectCall(_, args, _) -> jet_driver_pure_fold_arg_places(args)
+        .Semantic(semantic) -> jet_driver_pure_fold_semantic_places(semantic)
+        else -> [MIRPlaceID]{}
+    }
+}
+
+fn jet_driver_pure_fold_arg_places(args: [MIRCallArg]) -> [MIRPlaceID] Never! {
+    places := [MIRPlaceID]{}
+    loop arg in args {
+        place :: arg.place ?? next
+        &places.push(place)
+    }
+    places
+}
+
+fn jet_driver_pure_fold_semantic_places(operation: MIRSemanticOp) -> [MIRPlaceID] Never! {
+    if operation == {
+        .BuiltinMethod(_, _, receiver_place, _, _) -> {
+            place :: receiver_place ?? return [MIRPlaceID]{}
+            [MIRPlaceID]{place}
+        }
+        .StaticPreludeCall(_, args, _, _) -> jet_driver_pure_fold_arg_places(args)
+        .ClosureMethod(_, args, _) -> jet_driver_pure_fold_arg_places(args)
+        .HostCall(_, args) -> jet_driver_pure_fold_arg_places(args)
+        else -> [MIRPlaceID]{}
+    }
+}
+
+// Values whose constant is known: literal constants, copies and moves of
+// them, lists built from them, reads of an immutable local whose one
+// initialization stores a known constant, and joins whose live edges all
+// carry one constant.
+fn jet_driver_pure_fold_constants(function: MIRFunction, initializers: [Int:Int], roots: [Int:Int]) -> [Int:MIRConstant] Never! {
+    constants := [Int:MIRConstant]{}
+    local_values := [Int:MIRConstant]{}
+    loop {
+        before :: constants.len() + local_values.len()
+        loop local in function.locals {
+            if local_values.get(local.id.value) != None -> next
+            value :: initializers.get(local.id.value) ?? next
+            constant :: constants.get(value) ?? next
+            _ := &local_values.add(local.id.value, constant)
+        }
+        // A branch on a known condition takes one edge; the other is dead.
+        taken := [Int:Int]{}
+        loop block in function.blocks {
+            if block.terminator == .Branch(condition, then_target, else_target) {
+                if constants.get(condition.value) == {
+                    .Val(decided) -> {
+                        if decided == (MIRConstant.Bool{value: true}) -> _ := &taken.add(block.id.value, then_target.value)
+                        if decided == (MIRConstant.Bool{value: false}) -> _ := &taken.add(block.id.value, else_target.value)
+                    }
+                    .None -> {}
+                }
+            }
+        }
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                result :: instruction.result ?? next
+                if constants.get(result.value) != None -> next
+                known := MIRConstant?{None}
+                if instruction.operation == {
+                    .Constant(constant) -> known = Val(constant)
+                    .Copy(value, _) -> known = constants.get(value.value)
+                    .Move(value) -> known = constants.get(value.value)
+                    .ReadPlace(place) -> {
+                        local :: roots.get(place.value) ?? next
+                        known = local_values.get(local)
+                    }
+                    .MovePlace(place) -> {
+                        local :: roots.get(place.value) ?? next
+                        known = local_values.get(local)
+                    }
+                    // `[1, 2, 3].len()` folds like the checker's old fold did.
+                    .BuildList(values, trait_coercion) -> {
+                        if trait_coercion == None -> known = jet_driver_pure_fold_list_constant(values, constants)
+                    }
+                    .Phi(incoming) -> known = jet_driver_pure_fold_join_constant(block.id, incoming, taken, constants)
+                    else -> {}
+                }
+                constant :: known ?? next
+                _ := &constants.add(result.value, constant)
+            }
+        }
+        if constants.len() + local_values.len() == before -> return constants
+    }
+    constants
+}
+
+// The one constant every live edge into a join carries. An edge from a
+// branch that provably goes elsewhere is dead.
+fn jet_driver_pure_fold_join_constant(join: MIRBlockID, incoming: [MIRPhiIncoming], taken: [Int:Int], constants: [Int:MIRConstant]) -> MIRConstant? Never! {
+    joined := MIRConstant?{None}
+    loop edge in incoming {
+        target :: taken.get(edge.block.value) ?? join.value
+        if target != join.value -> next
+        constant :: constants.get(edge.value.value) ?? return None
+        if joined == {
+            .Val(previous) -> if previous != constant -> return None
+            .None -> {}
+        }
+        joined = Val(constant)
+    }
+    joined
+}
+
+fn jet_driver_pure_fold_list_constant(values: [MIRValueID], constants: [Int:MIRConstant]) -> MIRConstant? Never! {
+    elements := [MIRConstant]{}
+    loop value in values {
+        element :: constants.get(value.value) ?? return None
+        &elements.push(element)
+    }
+    Val(MIRConstant.List{values: elements})
+}
+
+// Values that flow into the initializer of an immutable local, directly or
+// as an operand of other work that does, plus branch conditions, which
+// decide the joins such initializers read. Only these are folded: the pass
+// replaces the old checker fold of immutable bindings, not every call.
+fn jet_driver_pure_fold_feeding(function: MIRFunction, initializers: [Int:Int], definitions: [Int:MIROperation]) -> [Int:Bool] Never! {
+    pending := [Int]{}
+    loop local in function.locals {
+        value :: initializers.get(local.id.value) ?? next
+        &pending.push(value)
+    }
+    loop block in function.blocks {
+        if block.terminator == .Branch(condition, _, _) -> &pending.push(condition.value)
+    }
+    feeding := [Int:Bool]{}
+    loop pending.len() > 0 {
+        value :: &pending.pop() ?? break
+        if feeding.get(value) != None -> next
+        _ := &feeding.add(value, true)
+        operation :: definitions.get(value) ?? next
+        loop used in mir_operation_value_uses(operation) -> &pending.push(used.value)
+    }
+    feeding
+}
+
+fn jet_driver_pure_fold_operation(operation: MIROperation, callees: [Int:Bool], preludes: [Int:Bool]) -> Bool Never! {
+    if operation == {
+        .Call(callee, args, type_args) -> {
+            if type_args.len() != 0 || !jet_driver_pure_fold_value_args(args) -> return false
+            if callee == {
+                .User(function) -> callees.get(function.value) != None
+                .Associated(function, _) -> callees.get(function.value) != None
+                .Method(function, _) -> callees.get(function.value) != None
+                .Prelude(call) -> preludes.get(call.value) != None
+                else -> false
+            }
+        }
+        .CoreCall(_, route, args, _, _, _) -> jet_driver_pure_fold_value_args(args) && preludes.get(route.value) != None
+        .Binary(_, dispatch, _, _, _) -> {
+            if dispatch == {
+                .Primitive -> true
+                .Prelude(call, _) -> preludes.get(call.value) != None
+            }
+        }
+        .Unary(_, _) -> true
+        .BuildString(_) -> true
+        .Semantic(semantic) -> jet_driver_pure_fold_semantic(semantic, preludes)
+        // Structural reads of a rebuilt value: the test and payload behind
+        // `opt ?? fallback`, `result.ok`, a field or an enum case.
+        .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) -> true
+        .EnumIs(_, _, _) | .EnumPayload(_, _, _, _) | .Field(_, _) -> true
+        else -> false
+    }
+}
+
+// A semantic operation folds when it touches no place and every Prelude
+// route it names is pure. Its closure operands must be reproducible, which
+// the candidate's operand check decides.
+fn jet_driver_pure_fold_semantic(semantic: MIRSemanticOp, preludes: [Int:Bool]) -> Bool Never! {
+    if semantic == {
+        .HandleMethod(_, _, _, _, _) -> return false
+        else -> {}
+    }
+    if jet_driver_pure_fold_semantic_places(semantic).len() != 0 -> return false
+    calls :: mir_semantic_op_prelude_calls(semantic)
+    if calls.len() == 0 -> return false
+    loop call in calls {
+        if preludes.get(call.value) == None -> return false
+    }
+    true
+}
+
+// An argument passed by value. The folded instruction is copied whole, so
+// its representation adaptations run in the synthetic call too; only a
+// write place would reach outside it.
+fn jet_driver_pure_fold_value_args(args: [MIRCallArg]) -> Bool Never! {
+    loop arg in args {
+        if arg.place != None -> return false
+    }
+    true
+}
+
+fn jet_driver_pure_fold_callee(function: MIRFunction) -> Bool Never! {
+    function.kind == MIRFunctionKind.Jet
+        && function.effects.direct.len() == 0
+        && function.effects.solved.len() == 0
+        && !function.effects.maximal
+        && function.failure == MIRFailureCarrier.Infallible
+        && function.memo_bound == None
+        && !function.memo_unbounded
+        && function.generator == None
+        && function.capture_params.len() == 0
+        && function.generic_params.len() == 0
+        && !function.is_reactive
+        && function.foreign_language == None
+        && function.target_applicability.interpreter
+}
+
+// The same purity rule the optimizer's dead-value pass applies to a Prelude
+// route: no effect row, no authority, not an Effect-ABI row, and infallible.
+fn jet_driver_pure_fold_prelude(record: MIRPreludeCall) -> Bool Never! {
+    record.effect_kind == None
+        && record.authority == None
+        && record.abi != MIRPreludeABI.Effect
+        && record.fallibility == MIRCallFallibility.Infallible
+}
+
+// Only values every tier already writes as a literal become constants.
+fn jet_driver_pure_fold_result_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int -> true
+        .IntN(_, _) -> true
+        .Float -> true
+        .Float32 -> true
+        .Bool -> true
+        .Char -> true
+        .String -> true
+        .List(inner) -> jet_driver_pure_fold_result_type(inner)
+        else -> false
+    }
+}
+
+// A function that runs `instructions` (the rebuilt inputs, operands first,
+// then the folded instruction) and returns `result`.
+fn jet_driver_pure_fold_synthetic(host: MIRFunction, identity: MIRFunctionID, instructions: [MIRInstruction], result: MIRValueID, ty: MIRType) -> MIRFunction Never! {
+    span := host.span
+    defined := [Int:Bool]{}
+    loop instruction in instructions {
+        span = instruction.span
+        value :: instruction.result ?? next
+        _ := &defined.add(value.value, true)
+    }
+    values := [MIRValueFact]{}
+    loop fact in host.values {
+        if defined.get(fact.id.value) != None -> &values.push(fact)
+    }
+    MIRFunction{
+        id: identity,
+        module_id: host.module_id,
+        source_file: host.source_file,
+        key: "{host.key}::__jet_pure_fold_{identity.value}",
+        module_name: host.module_name,
+        name: host.name,
+        span: span,
+        kind: MIRFunctionKind.Jet,
+        form: MIRFunctionForm.TopLevel,
+        visibility: host.visibility,
+        target_applicability: host.target_applicability,
+        web_bucket: None,
+        web_marker: None,
+        generic_params: [MIRGenericParam]{},
+        capture_params: [MIRCaptureParam]{},
+        params: [MIRParam]{},
+        declared_return: Val(ty),
+        return_type: ty,
+        failure: MIRFailureCarrier.Infallible,
+        effects: MIREffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MIRNamedSpan]{}},
+        captures: None,
+        generator: None,
+        optimization: mir_empty_optimization_facts(),
+        is_unsafe: host.is_unsafe,
+        unsafe_gate: host.unsafe_gate,
+        is_pure: true,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        gc_return: false,
+        return_view_provenance: None,
+        web_param_reconstructions: [MIRWebParamReconstruction]{},
+        blocks: [MIRBasicBlock]{MIRBasicBlock{id: host.entry, span: span, instructions: instructions, terminator: MIRTerminator.Return{value: Val(result)}}},
+        entry: host.entry,
+        locals: [MIRLocal]{},
+        values: values,
+        places: [MIRPlace]{},
+        scopes: [MIRScope]{},
+        drops: [MIRDropAction]{},
+        foreign_language: None,
+    }
+}
+
+fn jet_driver_pure_fold_evaluate(program: MIRProgram, function: MIRFunctionID, ty: MIRType) -> MIRConstant? {
+    span := Span{start: 0, end: 0}
+    evaluated := jet_eval_function(~program, function, [TComptimeValue]{}, jet_eval_default_config())
+    if !evaluated.complete || evaluated.error != None || evaluated.soft_stop || evaluated.stdout != "" || evaluated.stderr != "" {
+        jet_eval_retire_result(&evaluated, span)
+        return None
+    }
+    value :: jet_eval_comptime_value(&evaluated, span) ?? return None
+    constant :: jet_driver_pure_fold_constant(value, ty) ?? return None
+    if jet_driver_pure_fold_cost(constant) > JET_DRIVER_PURE_FOLD_OUTPUT_BUDGET -> return None
+    Val(constant)
+}
+
+fn jet_driver_pure_fold_constant(value: TComptimeValue, ty: MIRType) -> MIRConstant? {
+    if ty.kind == {
+        .Int -> if value == .Int(number) -> return Val(MIRConstant.Int{value: number, width: None, spelling: None})
+        .IntN(signed, bits) -> if value == .Int(number) -> return Val(MIRConstant.Int{value: number, width: Val(MIRIntegerWidth{signed: signed, bits: bits}), spelling: None})
+        .Float -> if value == .Float(number, _) -> return Val(MIRConstant.Float{value: number, f32: false, spelling: None})
+        .Float32 -> if value == .Float(number, _) -> return Val(MIRConstant.Float{value: number, f32: true, spelling: None})
+        .Bool -> if value == .Bool(flag) -> return Val(MIRConstant.Bool{value: flag})
+        .Char -> if value == .Char(character) -> return Val(MIRConstant.Char{value: character})
+        .String -> if value == .String(text) -> return Val(MIRConstant.String{value: text})
+        .List(inner) -> {
+            if value == .List(items) {
+                lowered := [MIRConstant]{}
+                loop item in items {
+                    element :: jet_driver_pure_fold_constant(item, inner) ?? return None
+                    &lowered.push(element)
+                }
+                return Val(MIRConstant.List{values: lowered})
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+fn jet_driver_pure_fold_cost(constant: MIRConstant) -> Int Never! {
+    if constant == {
+        .String(text) -> 16 + text.len()
+        .List(values) -> {
+            cost := 16 + 8 * values.len()
+            loop value in values {
+                cost += jet_driver_pure_fold_cost(value)
+                if cost > JET_DRIVER_PURE_FOLD_OUTPUT_BUDGET -> return cost
+            }
+            cost
+        }
+        else -> 16
+    }
+}

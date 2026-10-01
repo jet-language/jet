@@ -583,7 +583,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Shared tail of `check_func_body` / `check_func_body_bundle_checked`:
+    /// Shared tail of `check_func_body` and the failure-union probe:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
         // A public fallible signature is an API boundary. Validate its error

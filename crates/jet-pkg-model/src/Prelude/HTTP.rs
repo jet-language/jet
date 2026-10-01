@@ -81,7 +81,7 @@ const HTTP_H2_ABANDONED_STREAM_LIMIT: usize = HTTP_H2_QUEUE_FRAME_LIMIT;
 /// to the public closed HTTPError without carrying backend prose across the seam.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JetHTTPBridgeError {
-    InvalidUrl,
+    InvalidURL,
     InvalidHeader,
     InvalidFraming,
     UnsupportedEncoding,
@@ -1671,17 +1671,17 @@ struct ParsedUrl {
 fn parse_url(url: &str) -> Result<ParsedUrl, JetHTTPBridgeError> {
     let (scheme, rest) = url
         .split_once("://")
-        .ok_or(JetHTTPBridgeError::InvalidUrl)?;
+        .ok_or(JetHTTPBridgeError::InvalidURL)?;
     if !matches!(scheme, "http" | "https") || rest.is_empty() {
-        return Err(JetHTTPBridgeError::InvalidUrl);
+        return Err(JetHTTPBridgeError::InvalidURL);
     }
     let split = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..split];
     if authority.is_empty() || authority.contains('@') || rest[split..].contains('#') {
-        return Err(JetHTTPBridgeError::InvalidUrl);
+        return Err(JetHTTPBridgeError::InvalidURL);
     }
     let (host, port) = if let Some(tail) = authority.strip_prefix('[') {
-        let close = tail.find(']').ok_or(JetHTTPBridgeError::InvalidUrl)?;
+        let close = tail.find(']').ok_or(JetHTTPBridgeError::InvalidURL)?;
         let host = &tail[..close];
         let suffix = &tail[close + 1..];
         let port = if suffix.is_empty() {
@@ -1690,7 +1690,7 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHTTPBridgeError> {
             Some(
                 suffix
                     .strip_prefix(':')
-                    .ok_or(JetHTTPBridgeError::InvalidUrl)?,
+                    .ok_or(JetHTTPBridgeError::InvalidURL)?,
             )
         };
         (host, port)
@@ -1705,13 +1705,13 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHTTPBridgeError> {
             .bytes()
             .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
     {
-        return Err(JetHTTPBridgeError::InvalidUrl);
+        return Err(JetHTTPBridgeError::InvalidURL);
     }
     let port = port
         .map(|value| {
             value
                 .parse::<u16>()
-                .map_err(|_| JetHTTPBridgeError::InvalidUrl)
+                .map_err(|_| JetHTTPBridgeError::InvalidURL)
         })
         .transpose()?
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
@@ -1719,13 +1719,13 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHTTPBridgeError> {
         "" => "/".to_string(),
         value if value.starts_with('?') => format!("/{value}"),
         value if value.starts_with('/') => value.to_string(),
-        _ => return Err(JetHTTPBridgeError::InvalidUrl),
+        _ => return Err(JetHTTPBridgeError::InvalidURL),
     };
     if target
         .bytes()
         .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
     {
-        return Err(JetHTTPBridgeError::InvalidUrl);
+        return Err(JetHTTPBridgeError::InvalidURL);
     }
     Ok(ParsedUrl {
         scheme: scheme.to_string(),

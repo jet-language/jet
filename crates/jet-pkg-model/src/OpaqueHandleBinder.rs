@@ -126,18 +126,6 @@ pub struct HandleFact {
     pub link_closure: LinkClosure,
 }
 
-impl HandleFact {
-    /// Alias for callers that use the more explicit C terminology.
-    pub fn c_typedef(&self) -> &str {
-        &self.typedef_name
-    }
-
-    /// Alias for callers that want the native close symbol by its role.
-    pub fn close_symbol(&self) -> &str {
-        &self.close
-    }
-}
-
 /// Internal discovery result consumed by `CBind`.
 #[derive(Debug, Clone)]
 pub(crate) struct Discovery {

@@ -1018,21 +1018,6 @@ pub fn jet_devtools_install_event_sink(
     JetDevtoolsEventSinkGuard { id }
 }
 
-/// Optional installation convenience for session owners. `None` performs no
-/// installation; an existing guard must be dropped to uninstall its sink.
-#[inline(always)]
-pub fn jet_devtools_set_event_sink(
-    sink: Option<JetDevtoolsEventSinkHandle>,
-) -> Option<JetDevtoolsEventSinkGuard> {
-    sink.map(jet_devtools_install_event_sink)
-}
-
-/// Explicitly end a scoped installation before its guard leaves scope.
-#[inline(always)]
-pub fn jet_devtools_uninstall_event_sink(guard: JetDevtoolsEventSinkGuard) {
-    drop(guard);
-}
-
 #[inline(always)]
 pub fn jet_devtools_publish_event(event: JetDevtoolsEvent) {
     let sinks = {
@@ -1426,11 +1411,6 @@ impl JetDevtoolsEnvelope {
         Ok(())
     }
 
-    pub fn mark_reset(&mut self) {
-        self.reset = true;
-        self.truncated = false;
-    }
-
     pub fn serialize(&self) -> Result<String, String> {
         jet_devtools_serialize(self)
     }
@@ -1503,12 +1483,6 @@ pub fn jet_devtools_serialize(envelope: &JetDevtoolsEnvelope) -> Result<String, 
     if out.len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
         return Err("jet.devtools.v1 envelope exceeds the Prelude byte limit".to_string());
     }
-    Ok(out)
-}
-
-pub fn jet_devtools_event_serialize(event: &JetDevtoolsEvent) -> Result<String, String> {
-    let mut out = String::new();
-    render_event(event, &mut out)?;
     Ok(out)
 }
 

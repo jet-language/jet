@@ -62,6 +62,18 @@ const MIXED_OPERATOR_FIXTURE_SOURCE: &str =
     include_str!("../../Examples/features/operators/mixed_types.jet");
 const MIXED_OPERATOR_FIXTURE_EXPECTED: &str =
     include_str!("../../Examples/features/expected/operators/mixed_types.out");
+// D-ONCE-DERIVE1=A: Equatable/Comparable bodies expand from the Prelude
+// derive templates in JetSema, including reflected enum payloads.
+const DERIVED_ORDER_FIXTURE_SOURCE: &str =
+    include_str!("../../Examples/features/types/enum_derived_order.jet");
+const DERIVED_ORDER_FIXTURE_EXPECTED: &str =
+    include_str!("../../Examples/features/expected/types/enum_derived_order.out");
+// #3740: `T Never!` / `T? Never!` functions return their success value
+// directly; calls, early returns, and function values reconcile the carrier.
+const NEVER_PLAIN_RETURN_FIXTURE_SOURCE: &str =
+    include_str!("../../Examples/features/functions/never_plain_return.jet");
+const NEVER_PLAIN_RETURN_FIXTURE_EXPECTED: &str =
+    include_str!("../../Examples/features/expected/functions/never_plain_return.out");
 const HANDLE_LIFETIME_FIXTURE_SOURCE: &str = r#"use c.close as c
 
 #Layout(c)
@@ -130,7 +142,10 @@ const EXACT_DIVISION_FIXTURE_TWO_EXPECTED: &str = "10/3\ntrue\ntrue\n";
 /// This is appended to every compiler artifact built by the private harness.
 /// It is an executable harness entry, not a compiler callback: the generated
 /// Jet factory and the packaged Runner remain the only compilation path.
+/// Text between `TASK_ROOTS_BEGIN` and `TASK_ROOTS_END` calls the task-root
+/// fixture functions and is kept only when that fixture is compiled in.
 const GENERATED_ARTIFACT_MAIN: &str = r#"
+// bootstrap:task-roots-begin
 struct BootstrapTaskRootsCursorState {
     close_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -156,6 +171,7 @@ impl Drop for BootstrapTaskRootsCursorState {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
+// bootstrap:task-roots-end
 fn assert_source_completion_retired(
     completion: ::jet_jit::SourceExecutionCompletion,
 ) {
@@ -438,6 +454,7 @@ fn main() {
             .unwrap_or_else(|error| panic!("cannot write compiler-source optimizer receipt: {error}"));
         return;
     }
+    // bootstrap:task-roots-begin
     if mode == "task-roots" {
         let compiler_image = crate::__jet_bootstrap_compiler_image()
             .unwrap_or_else(|error| panic!("task-root compiler image restore failed: {error}"));
@@ -816,6 +833,10 @@ fn main() {
             .unwrap_or_else(|error| panic!("cannot write task-root receipt: {error}"));
         return;
     }
+    // bootstrap:task-roots-end
+    if mode == "task-roots" {
+        panic!("this compiler artifact was built without the task-root fixture");
+    }
     let (complete, source, callable_count, type_count, field_count, variant_count, reports, selected_tier, actual_tier) =
         if mode == "factory" {
             let compiler_image = crate::__jet_bootstrap_compiler_image()
@@ -1015,9 +1036,20 @@ fn main() {
 }
 "#;
 
-#[test]
-fn bootstrap_private_self_compile_harness() {
-    let repo = Path::new(crate::BOOTSTRAP_CANONICAL_SOURCE_ROOT);
+/// Stage zero: the Rust reference frontend checks the assembled Jet compiler
+/// unit once, emits it as Rust, and the Host/Runner splice makes `jetc0`, the
+/// first Jet-built compiler binary.
+struct StageZero {
+    session: PathBuf,
+    compiler_project: PathBuf,
+    source_lease: crate::AuthorizedSourceLease,
+    binary: PathBuf,
+    id: String,
+}
+
+/// `task_roots` appends the task-root fixture to the compiler unit and keeps
+/// the `task-roots` harness mode; hello-world proofs build without it.
+fn build_stage_zero(repo: &Path, task_roots: bool) -> StageZero {
     let session = bootstrap_session_root();
     fs::create_dir_all(&session).unwrap_or_else(|error| {
         panic!(
@@ -1026,7 +1058,7 @@ fn bootstrap_private_self_compile_harness() {
         )
     });
 
-    assemble_compiler_sources(repo);
+    assemble_compiler_sources(repo, task_roots);
     let compiler_project = home_path().join(BOOTSTRAP_PROJECT_RELATIVE);
     let compiler_entry = compiler_project.join(BOOTSTRAP_ENTRY_RELATIVE);
     assert!(
@@ -1055,68 +1087,73 @@ fn bootstrap_private_self_compile_harness() {
     // Stage zero is the sole Rust-reference frontend invocation. It consumes
     // the authority-selected source bytes, then only the canonical MIR Rust
     // adapter and native Host/Runner splice are used to make the artifact.
-    let (reference_output, bundle) = crate::Driver::compile_bundle_path_opts_with_source_closure_and_runtime(
-        &compiler_snapshot.entry_path,
-        crate::Sema::CompileMode::Check,
-        false,
-        crate::Policy::GateSet::default(),
-        false,
-        false,
-        false,
-        false,
-        None,
-        None,
-        "dev",
-        &BTreeMap::new(),
-        false,
-        None,
-        &source_closure,
-        None,
-    )
-    .unwrap_or_else(|diagnostics| panic!("stage-zero Rust frontend rejected compiler sources: {diagnostics:?}"));
-    let reference_rust = reference_output.rust;
-    let reference_ffi = reference_output.ffi;
+    // The compiler unit has no `fn run`: the Host/Runner splice supplies the
+    // Rust `main`, so the unit lowers as a `NativeLibrary` (D4), never as an
+    // executable without an entry.
+    let (bundle, _lints, reference_ffi) =
+        crate::Driver::check_bundle_path_with_source_closure_for_artifact(
+            &compiler_snapshot.entry_path,
+            crate::Sema::CompileMode::Check,
+            "dev",
+            &source_closure,
+        )
+        .unwrap_or_else(|diagnostics| {
+            panic!("stage-zero Rust frontend rejected compiler sources: {diagnostics:?}")
+        });
     source_lease
         .revalidate()
         .unwrap_or_else(|error| panic!("compiler source authority changed after stage zero: {error:?}"));
-
-    let request = MirArtifactRequest::new(
-        MirArtifactTarget::RustAot,
-        MirArtifactKind::NativeExecutable,
-        MirArtifactBuildMode::Dev,
+    assert!(
+        !bundle.build_facts.target_triple.is_empty(),
+        "the stage-zero checked bundle has no selected target"
     );
-    let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(&bundle, request);
-    assert_evaluator_materialization_helpers_in_mir(&mir);
-    let mut execution = MirRustExecutionConfig::for_artifact(artifact);
-    execution.ffi = reference_ffi.as_ref();
-    execution.emit_types = true;
-    execution.emit_foreign = true;
-    execution.emit_metadata = false;
-    execution.emit_runtime = true;
-    execution.release_devtools_policy =
-        crate::Driver::release_devtools_policy_for_bundle(&bundle, "dev");
-    let metadata_config = MirRustConfig {
-        target: TargetLayout::from_build_facts(&bundle.build_facts),
-        target_kind: MirRustTarget::Native,
-        root_prefix: String::new(),
-        execution: execution.clone(),
-    };
-    let prepare_config = MirRustConfig {
-        target: metadata_config.target.clone(),
-        target_kind: MirRustTarget::Native,
-        root_prefix: "crate::".to_string(),
-        execution,
-    };
-    let metadata = crate::Codegen::MIRRust::mir_rust_aot_metadata(&mir, &metadata_config);
-    let prepared = crate::prepare_bootstrap_artifact_from_aot(
-        reference_rust,
-        &mir,
-        &compiler_snapshot,
-        &prepare_config,
-        &metadata,
-    )
-    .unwrap_or_else(|error| panic!("stage-zero Host/Runner packaging failed: {error}"));
-    let stage_zero_source = append_generated_artifact_main(prepared.source);
+
+    // Lowering, MIR Rust emission and Host/Runner packaging of the whole
+    // compiler recurse deeper than a test thread's stack; run them on the
+    // compiler stack the Driver uses for the same work.
+    let bundle = &bundle;
+    let compiler_snapshot = &compiler_snapshot;
+    let prepared_source = crate::with_compiler_stack(move || {
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeLibrary,
+            MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, request);
+        assert_evaluator_materialization_helpers_in_mir(&mir);
+        let mut execution = MirRustExecutionConfig::for_artifact(artifact);
+        execution.ffi = reference_ffi.as_ref();
+        execution.emit_types = true;
+        execution.emit_foreign = true;
+        execution.emit_metadata = false;
+        execution.emit_runtime = true;
+        execution.release_devtools_policy =
+            crate::Driver::release_devtools_policy_for_bundle(bundle, "dev");
+        let metadata_config = MirRustConfig {
+            target: TargetLayout::from_build_facts(&bundle.build_facts),
+            target_kind: MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution: execution.clone(),
+        };
+        let reference_rust = crate::Codegen::MIRRust::emit_mir_program(&mir, &metadata_config);
+        let prepare_config = MirRustConfig {
+            target: metadata_config.target.clone(),
+            target_kind: MirRustTarget::Native,
+            root_prefix: "crate::".to_string(),
+            execution,
+        };
+        let metadata = crate::Codegen::MIRRust::mir_rust_aot_metadata(&mir, &metadata_config);
+        crate::prepare_bootstrap_artifact_from_aot(
+            reference_rust,
+            &mir,
+            compiler_snapshot,
+            &prepare_config,
+            &metadata,
+        )
+        .unwrap_or_else(|error| panic!("stage-zero Host/Runner packaging failed: {error}"))
+        .source
+    });
+    let stage_zero_source = append_generated_artifact_main(prepared_source, task_roots);
     let stage_zero_project = session.join("stage-zero");
     let (stage_zero_binary, stage_zero_id) = build_backend_artifact(
         repo,
@@ -1124,6 +1161,48 @@ fn bootstrap_private_self_compile_harness() {
         "jet_bootstrap_stage_zero",
         &stage_zero_source,
     );
+    StageZero {
+        session,
+        compiler_project,
+        source_lease,
+        binary: stage_zero_binary,
+        id: stage_zero_id,
+    }
+}
+
+/// The shortest self-hosting proof: `jetc0` compiles hello world, the Rust
+/// backend builds the emitted source, and the program prints.
+#[test]
+fn bootstrap_stage_zero_hello() {
+    let repo = Path::new(crate::BOOTSTRAP_CANONICAL_SOURCE_ROOT);
+    let stage_zero = build_stage_zero(repo, false);
+    let hello_project = stage_zero.session.join("hello");
+    write_source_fixture_project(
+        &hello_project,
+        SOURCE_FIXTURE_MANIFEST,
+        "fn run() {\n    print(\"hello\")\n}\n",
+    );
+    compile_and_run_source_fixture(
+        &stage_zero.binary,
+        repo,
+        &stage_zero.session,
+        "jetc0_hello",
+        &hello_project,
+        "hello\n",
+    );
+}
+
+#[test]
+fn bootstrap_private_self_compile_harness() {
+    let repo = Path::new(crate::BOOTSTRAP_CANONICAL_SOURCE_ROOT);
+    let StageZero {
+        session,
+        compiler_project,
+        source_lease,
+        binary: stage_zero_binary,
+        id: stage_zero_id,
+    } = build_stage_zero(repo, true);
+    let stage_zero_project = session.join("stage-zero");
     let task_roots_output = session.join("task-roots.out");
     let task_roots_receipt = session.join("task-roots.receipt");
     run_generated_artifact(
@@ -1237,6 +1316,7 @@ fn bootstrap_private_self_compile_harness() {
         fs::read_to_string(&stage_one_raw).unwrap_or_else(|error| {
             panic!("stage-zero Runner did not produce stage one source: {error}")
         }),
+        true,
     );
     let stage_one_project = session.join("stage-one");
     let (stage_one_binary, stage_one_id) = build_backend_artifact(
@@ -1311,6 +1391,7 @@ fn bootstrap_private_self_compile_harness() {
         fs::read_to_string(&stage_two_raw).unwrap_or_else(|error| {
             panic!("stage-one Runner did not produce stage-two source: {error}")
         }),
+        true,
     );
     fs::write(&stage_two_source, &stage_two_source_text).unwrap_or_else(|error| {
         panic!("cannot retain stage-two source `{}`: {error}", stage_two_source.display())
@@ -1564,6 +1645,16 @@ fn bootstrap_private_self_compile_harness() {
             MIXED_OPERATOR_FIXTURE_SOURCE,
             MIXED_OPERATOR_FIXTURE_EXPECTED,
         ),
+        (
+            "enum_derived_order",
+            DERIVED_ORDER_FIXTURE_SOURCE,
+            DERIVED_ORDER_FIXTURE_EXPECTED,
+        ),
+        (
+            "never_plain_return",
+            NEVER_PLAIN_RETURN_FIXTURE_SOURCE,
+            NEVER_PLAIN_RETURN_FIXTURE_EXPECTED,
+        ),
     ] {
         let project = session.join(label);
         write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
@@ -1711,13 +1802,19 @@ fn bootstrap_session_root() -> PathBuf {
 }
 
 
-fn assemble_compiler_sources(repo: &Path) {
+fn assemble_compiler_sources(repo: &Path, task_roots: bool) {
+    // The assembler runs only node; the test's own CARGO_TARGET_DIR may lie
+    // outside `repo`, which jet-env rejects for cargo commands.
     let output = Command::new(repo.join("Tools/agent/jet-env"))
         .current_dir(repo)
+        .env_remove("CARGO_TARGET_DIR")
         .args(["node", "Compiler/Bootstrap/assemble.mjs"])
         .output()
         .unwrap_or_else(|error| panic!("cannot run bootstrap assembler: {error}"));
     assert_command_success("bootstrap assembler", &output);
+    if !task_roots {
+        return;
+    }
     let compiler_entry = home_path()
         .join(BOOTSTRAP_PROJECT_RELATIVE)
         .join(BOOTSTRAP_ENTRY_RELATIVE);
@@ -2212,9 +2309,24 @@ fn report_at_imported_eof(reports: &[String], path: &Path, end: usize) -> String
         })
 }
 
-fn append_generated_artifact_main(source: String) -> String {
+const TASK_ROOTS_BEGIN: &str = "// bootstrap:task-roots-begin";
+const TASK_ROOTS_END: &str = "// bootstrap:task-roots-end";
+
+fn append_generated_artifact_main(source: String, task_roots: bool) -> String {
     let mut complete = source;
-    complete.push_str(GENERATED_ARTIFACT_MAIN);
+    if task_roots {
+        complete.push_str(GENERATED_ARTIFACT_MAIN);
+        return complete;
+    }
+    let mut rest = GENERATED_ARTIFACT_MAIN;
+    while let Some(begin) = rest.find(TASK_ROOTS_BEGIN) {
+        complete.push_str(&rest[..begin]);
+        let end = rest[begin..]
+            .find(TASK_ROOTS_END)
+            .unwrap_or_else(|| panic!("generated artifact main has an unterminated task-root region"));
+        rest = &rest[begin + end + TASK_ROOTS_END.len()..];
+    }
+    complete.push_str(rest);
     complete
 }
 

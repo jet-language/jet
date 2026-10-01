@@ -37,27 +37,8 @@ where
     JetViewIter(Box::new(iter))
 }
 
-fn jet_view_iter_first<'a, T: 'a>(it: JetViewIter<'a, T>) -> Option<T> {
-    it.into_iter().next()
-}
-
 fn jet_bytes_view_iter<'a>(bytes: &'a [u8]) -> JetViewIter<'a, &'a [u8]> {
     jet_view_iter_from_iter(bytes.iter().map(std::slice::from_ref))
-}
-
-/// Split arbitrary bytes into newline-delimited borrowed windows. CRLF
-/// terminators are removed and a final newline does not create an extra item.
-fn jet_bytes_line_views<'a>(bytes: &'a [u8]) -> JetViewIter<'a, &'a [u8]> {
-    jet_view_iter_from_iter(bytes.split_inclusive(|byte| *byte == b'\n').map(|line| {
-        let mut line = line;
-        if line.last() == Some(&b'\n') {
-            line = &line[..line.len() - 1];
-        }
-        if line.last() == Some(&b'\r') {
-            line = &line[..line.len() - 1];
-        }
-        line
-    }))
 }
 
 fn jet_text_unicode_scalar_count(s: &String) -> i64 {
@@ -1481,52 +1462,6 @@ pub(crate) fn jet_text_expand_tabs(text: &String, tabsize: i64) -> String {
     }
     out
 }
-fn jet_text_wrap_int(
-    text: &String,
-    width: jet_foundation::Numeric::JetInt,
-) -> Vec<String> {
-    jet_text_wrap(
-        text,
-        width
-            .to_i64()
-            .unwrap_or_else(|| panic!("text wrapping width does not fit native i64")),
-    )
-}
-fn jet_text_fill_int(
-    text: &String,
-    width: jet_foundation::Numeric::JetInt,
-) -> String {
-    jet_text_fill(
-        text,
-        width
-            .to_i64()
-            .unwrap_or_else(|| panic!("text filling width does not fit native i64")),
-    )
-}
-fn jet_text_shorten_int(
-    text: &String,
-    width: jet_foundation::Numeric::JetInt,
-    placeholder: &String,
-) -> String {
-    jet_text_shorten(
-        text,
-        width
-            .to_i64()
-            .unwrap_or_else(|| panic!("text shortening width does not fit native i64")),
-        placeholder,
-    )
-}
-fn jet_text_expand_tabs_int(
-    text: &String,
-    tabsize: jet_foundation::Numeric::JetInt,
-) -> String {
-    jet_text_expand_tabs(
-        text,
-        tabsize
-            .to_i64()
-            .unwrap_or_else(|| panic!("text tab size does not fit native i64")),
-    )
-}
 fn jet_text_html_entity(name: &str) -> Option<String> {
     let named = match name {
         "amp" => Some('&'),
@@ -1688,12 +1623,6 @@ fn jet_text_ends_any(s: &String, suffixes: &Vec<String>) -> bool {
 fn jet_text_rindex(s: &String, needle: &String) -> i64 {
     s.rfind(needle).map(|index| index as i64).unwrap_or(-1)
 }
-fn jet_text_removeprefix(s: &String, prefix: &String) -> String {
-    s.strip_prefix(prefix).unwrap_or(s).to_string()
-}
-fn jet_text_removesuffix(s: &String, suffix: &String) -> String {
-    s.strip_suffix(suffix).unwrap_or(s).to_string()
-}
 fn jet_text_isidentifier(s: &String) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
@@ -1705,9 +1634,6 @@ fn jet_text_isidentifier(s: &String) -> bool {
 fn jet_text_encode(s: &String) -> Vec<u8> {
     s.as_bytes().to_vec()
 }
-fn jet_text_isalpha(s: &String) -> bool {
-    !s.is_empty() && s.chars().all(char::is_alphabetic)
-}
 fn jet_text_isdecimal(s: &String) -> bool {
     !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
 }
@@ -1717,17 +1643,8 @@ fn jet_text_isnumeric(s: &String) -> bool {
 fn jet_text_isalnum(s: &String) -> bool {
     !s.is_empty() && s.chars().all(char::is_alphanumeric)
 }
-fn jet_text_isascii(s: &String) -> bool {
-    s.is_ascii()
-}
 fn jet_text_isdigit(s: &String) -> bool {
     !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
-}
-fn jet_text_islower(s: &String) -> bool {
-    s.chars().any(char::is_lowercase) && !s.chars().any(char::is_uppercase)
-}
-fn jet_text_isspace(s: &String) -> bool {
-    !s.is_empty() && s.chars().all(char::is_whitespace)
 }
 fn jet_text_istitle(s: &String) -> bool {
     let mut has_cased = false;
@@ -1748,9 +1665,6 @@ fn jet_text_istitle(s: &String) -> bool {
         }
     }
     has_cased
-}
-fn jet_text_isupper(s: &String) -> bool {
-    s.chars().any(char::is_uppercase) && !s.chars().any(char::is_lowercase)
 }
 fn jet_text_isprintable(s: &String) -> bool {
     s.chars().all(|character| !character.is_control())

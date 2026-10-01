@@ -413,7 +413,7 @@ impl JetDevtoolsPanelId {
             Self::Structure => event.kind() == "Structure",
             Self::Tests => event.kind() == "Test",
             Self::Jobs => event.kind() == "Job",
-            Self::UiTree => matches!(event.kind(), "Ui" | "UiTree"),
+            Self::UiTree => matches!(event.kind(), "UI" | "UiTree"),
             Self::Database => matches!(
                 event.kind(),
                 "Database"

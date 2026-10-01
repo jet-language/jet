@@ -13,7 +13,7 @@ use super::{runtime_host, Concurrency};
 use crate::Marshal::{alloc_byte_list, clone_bytes, clone_string, result_err_msg, result_ok};
 use crate::Time::TimeValue;
 use crate::{JetDebug, JetDisplay, JetShow};
-use jet_foundation::AST::{CtKey, CtReport, CtValue, Type};
+use jet_foundation::AST::{CtReport, CtValue, Type};
 use jet_foundation::base_encoding_dispatch;
 use jet_foundation::SchemaMigration::{SchemaMigrationOp, SchemaMigrationPlan};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
@@ -179,10 +179,6 @@ pub(crate) mod json_rt {
     }
 
     pub fn parse_datatree(text: &str) -> Result<DataTree, EncodingError> {
-        parse_json_datatree(text)
-    }
-
-    pub fn parse_datatree_ordered(text: &str) -> Result<DataTree, EncodingError> {
         parse_json_datatree(text)
     }
 
@@ -779,12 +775,6 @@ fn b64_pad(text: &str) -> String {
 fn b64_unpad(text: &str) -> String {
     encoding_base_rt::jet_std_b64_unpad(&text.to_string())
 }
-fn b64_is_base64(text: &str) -> bool {
-    encoding_base_rt::jet_std_b64_is_base64(&text.to_string())
-}
-fn base32_is_base32(text: &str) -> bool {
-    encoding_base_rt::jet_std_base32_is_base32(&text.to_string())
-}
 
 fn base32_encode(bytes: &[u8]) -> String {
     encoding_base_rt::jet_std_base32_encode(&bytes.to_vec())
@@ -794,19 +784,7 @@ fn base32hex_encode(bytes: &[u8]) -> String {
 }
 
 fn base32hex_decode(text: &str) -> Result<Vec<u8>, String> {
-    const STANDARD: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    let mut canonical = String::with_capacity(text.len());
-    for ch in text.chars() {
-        let mapped = match ch {
-            '0'..='9' => STANDARD[(ch as u8 - b'0') as usize],
-            'A'..='V' => STANDARD[(ch as u8 - b'A' + 10) as usize],
-            '=' => b'=',
-            _ => return Err("invalid Base32hex character".to_string()),
-        };
-        canonical.push(mapped as char);
-    }
-    let edition = PackageEdition::package_edition();
-    base_encoding_dispatch::decode_base32(&edition, &canonical, false, false, false)
+    base_encoding_dispatch::decode_base32hex(&PackageEdition::package_edition(), text)
 }
 
 fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
@@ -820,10 +798,6 @@ fn jet_jit_hex_encode(bytes: i64) -> i64 {
 
 fn jet_jit_hex_encode_upper(bytes: i64) -> i64 {
     let encoded = hex_encode_upper(&clone_bytes(bytes));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
-}
-fn jet_jit_hex_encode_prefixed(bytes: i64) -> i64 {
-    let encoded = encoding_base_rt::jet_std_hex_encode_prefixed(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 fn jet_jit_hex_is_hex(text: i64) -> i8 {
@@ -1010,30 +984,6 @@ fn jet_jit_crc32(bytes: i64) -> i64 {
     encoding_base_rt::jet_std_crc32(&clone_bytes(bytes))
 }
 
-fn jet_jit_b2a_qp(bytes: i64) -> i64 {
-    let encoded = encoding_base_rt::jet_std_b2a_qp(&clone_bytes(bytes));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
-}
-
-fn jet_jit_a2b_qp(text: i64) -> i64 {
-    match encoding_base_rt::jet_std_a2b_qp(&clone_string(text)) {
-        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
-        Err(error) => result_err_msg(&error),
-    }
-}
-
-fn jet_jit_b2a_uu(bytes: i64) -> i64 {
-    let encoded = encoding_base_rt::jet_std_b2a_uu(&clone_bytes(bytes));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
-}
-
-fn jet_jit_a2b_uu(text: i64) -> i64 {
-    match encoding_base_rt::jet_std_a2b_uu(&clone_string(text)) {
-        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
-        Err(error) => result_err_msg(&error),
-    }
-}
-
 fn jet_jit_b64_encode(bytes: i64) -> i64 {
     let encoded = b64_encode_handle(bytes);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
@@ -1047,9 +997,6 @@ fn jet_jit_b64_encode_url_padded(bytes: i64) -> i64 {
     let encoded = b64url_encode_padded(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
-fn jet_jit_b64_decode_padded(text: i64) -> i64 {
-    jet_jit_b64_decode(text)
-}
 fn jet_jit_b64_pad(text: i64) -> i64 {
     let padded = b64_pad(&clone_string(text));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(padded))
@@ -1057,9 +1004,6 @@ fn jet_jit_b64_pad(text: i64) -> i64 {
 fn jet_jit_b64_unpad(text: i64) -> i64 {
     let unpadded = b64_unpad(&clone_string(text));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(unpadded))
-}
-fn jet_jit_b64_is_base64(text: i64) -> i8 {
-    i8::from(b64_is_base64(&clone_string(text)))
 }
 
 fn jet_jit_b64_decode(text: i64) -> i64 {
@@ -1079,15 +1023,8 @@ fn jet_jit_b64_decode_url(text: i64) -> i64 {
 }
 
 fn jet_jit_b64_encodebytes(bytes: i64) -> i64 {
-    let encoded = encoding_base_rt::jet_std_b64_encode(&clone_bytes(bytes));
-    let mut wrapped = String::with_capacity(encoded.len() + encoded.len() / 76 + 1);
-    for chunk in encoded.as_bytes().chunks(76) {
-        for &byte in chunk {
-            wrapped.push(byte as char);
-        }
-        wrapped.push('\n');
-    }
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(wrapped))
+    let encoded = encoding_base_rt::jet_std_b64_encodebytes(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
 fn jet_jit_b64_decodebytes(text: i64) -> i64 {
@@ -1096,9 +1033,6 @@ fn jet_jit_b64_decodebytes(text: i64) -> i64 {
         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(error) => result_err_msg(&error),
     }
-}
-fn jet_jit_base32_is_base32(text: i64) -> i8 {
-    i8::from(base32_is_base32(&clone_string(text)))
 }
 fn jet_jit_base32hex_encode(bytes: i64) -> i64 {
     let encoded = base32hex_encode(&clone_bytes(bytes));
@@ -1123,42 +1057,6 @@ fn jet_jit_base32_decode(text: i64) -> i64 {
     {
         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
-    }
-}
-
-fn jet_jit_a85_encode(bytes: i64) -> i64 {
-    let encoded = encoding_base_rt::jet_std_a85_encode(&clone_bytes(bytes));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
-}
-
-fn jet_jit_a85_decode(text: i64) -> i64 {
-    match encoding_base_rt::jet_std_a85_decode(&clone_string(text)) {
-        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
-        Err(error) => result_err_msg(&error),
-    }
-}
-
-fn jet_jit_b85_encode(bytes: i64) -> i64 {
-    let encoded = encoding_base_rt::jet_std_b85_encode(&clone_bytes(bytes));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
-}
-
-fn jet_jit_b85_decode(text: i64) -> i64 {
-    match encoding_base_rt::jet_std_b85_decode(&clone_string(text)) {
-        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
-        Err(error) => result_err_msg(&error),
-    }
-}
-
-fn jet_jit_z85_encode(bytes: i64) -> i64 {
-    let encoded = encoding_base_rt::jet_std_z85_encode(&clone_bytes(bytes));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
-}
-
-fn jet_jit_z85_decode(text: i64) -> i64 {
-    match encoding_base_rt::jet_std_z85_decode(&clone_string(text)) {
-        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
-        Err(error) => result_err_msg(&error),
     }
 }
 
@@ -1472,22 +1370,6 @@ fn jet_jit_uuid_v5(namespace: i64, name: i64) -> i64 {
     let s = uuid_format(&bytes);
     Concurrency::with_runtime_mut(|rt| result_ok(rt.heap.alloc_string(s) as u64))
 }
-pub(crate) fn ambient_uuid_parse(text: &str) -> Result<String, String> {
-    uuid_bytes(text).map(|bytes| uuid_format(&bytes))
-}
-
-pub(crate) fn ambient_uuid_v5(namespace: &str, name: &str) -> Result<String, String> {
-    let ns = uuid_bytes(namespace)?;
-    let mut input = ns.to_vec();
-    input.extend_from_slice(name.as_bytes());
-    let digest = uuid_sha1(&input);
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Ok(uuid_format(&bytes))
-}
-
 
 fn jet_jit_uuid_v4() -> i64 {
     let s = crate::Crypto::runtime::jet_crypto_uuid_v4();
@@ -2647,20 +2529,6 @@ fn jet_codec_decode_typed(tree: i64, type_key: i64) -> i64 {
     }
 }
 
-fn typed_tree_at(tree: &json_rt::DataTree, path: &str) -> Option<json_rt::DataTree> {
-    let mut value = tree.clone();
-    for segment in path.split('.').filter(|segment| !segment.is_empty()) {
-        value = match value {
-            json_rt::DataTree::Object(entries) => entries
-                .into_iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(segment))
-                .map(|(_, value)| value)?,
-            _ => return None,
-        };
-    }
-    Some(value)
-}
-
 fn typed_tree_insert(tree: &mut json_rt::DataTree, path: &[String], value: json_rt::DataTree) {
     let json_rt::DataTree::Object(entries) = tree else {
         return;
@@ -2759,6 +2627,44 @@ fn typed_env_error_result(
     result_err_fields(mapped)
 }
 
+fn jet_jit_env_decode(prefix: i64, file: i64, allow: i64, type_key: i64) -> i64 {
+    let prefix_text = clone_string(prefix);
+    let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+        return result_err_fields(json_rt::FieldError::one("typed env received an invalid type key"));
+    };
+    let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
+        return result_err_fields(json_rt::FieldError::one(format!(
+            "typed env has no type `{type_key}`"
+        )));
+    };
+    let result = jet_jit_env_config(prefix, file, allow);
+    let Some((tree_handle, origins_handle)) = Concurrency::with_runtime_mut(|rt| {
+        let Some((ok, bits)) = runtime_host::jit_result_parts(rt, result) else {
+            return None;
+        };
+        if !ok {
+            return None;
+        }
+        let carrier = bits as i64;
+        Some((
+            rt.heap.record_get_int(carrier, 0)?,
+            rt.heap.record_get_int(carrier, 1)?,
+        ))
+    }) else {
+        return result;
+    };
+    let Some(tree) = read_datatree(tree_handle) else {
+        return result_err_fields(json_rt::FieldError::one("typed env returned an invalid DataTree"));
+    };
+    let origins = clone_env_config_origins(origins_handle);
+    let tree = typed_env_project_tree(&tree, &descriptor, &prefix_text, &origins);
+    match typed_decode_value(&tree, &descriptor)
+        .and_then(|value| typed_slot_raw(value, &descriptor).map_err(json_rt::FieldError::one))
+    {
+        Ok(value) => result_ok(value as u64),
+        Err(errors) => typed_env_error_result(errors, &origins),
+    }
+}
 
 fn jet_jit_db_decode(row: i64, type_key: i64) -> i64 {
     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
@@ -4233,13 +4139,20 @@ fn jet_jit_encoding_error_show(handle: i64) -> i64 {
         let reason_id = rt.heap.record_get_string(handle, 6).unwrap_or(0);
         let path = rt.heap.clone_string(path_id).unwrap_or_default();
         let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
-        // Option ABI: 0 = None, else bits+1.
+        // `line` and `column` are `Int?` fields written by Jet code, so each
+        // holds a result-arena Option handle carrying `(ok, bits)`.
+        let option_field = |field: i64| match crate::runtime_host::jit_result_parts(rt, field) {
+            Some((true, bits)) => Some(bits as i64),
+            _ => None,
+        };
+        let line = option_field(line);
+        let column = option_field(column);
         let out = encoding_error_rt::jet_encoding_error_kernel_show(
             FORMAT.get(format).copied().unwrap_or("?"),
             KIND.get(kind).copied().unwrap_or("?"),
             byte_offset,
-            (line != 0).then(|| line - 1),
-            (column != 0).then(|| column - 1),
+            line,
+            column,
             &path,
             &reason,
         );
@@ -4273,11 +4186,6 @@ fn jet_jit_decode_error_show(handle: i64) -> i64 {
         rt.heap.alloc_string(shown)
     })
 }
-/// Pack a lowered DataTree literal into the heap record ABI.
-pub(crate) fn pack_datatree_host(disc: i64, payload: i64) -> i64 {
-    alloc_dt_record(disc, payload)
-}
-
 fn jet_jit_bytes_datatree(bytes: i64) -> i64 {
     alloc_dt_record(DT_BYTES, bytes)
 }
@@ -4553,7 +4461,6 @@ host_fns! {
     binary_unpack: "jet_jit_binary_unpack" => jet_jit_binary_unpack: sig_binary;
     binary_iter_unpack: "jet_jit_binary_iter_unpack" => jet_jit_binary_iter_unpack: sig_binary;
     hex_encode: "jet_jit_hex_encode" => jet_jit_hex_encode: sig_unary;
-    hex_encode_prefixed: "jet_jit_hex_encode_prefixed" => jet_jit_hex_encode_prefixed: sig_unary;
     hex_is_hex: "jet_jit_hex_is_hex" => jet_jit_hex_is_hex: sig_unary_i8;
     hex_encode_sep: "jet_jit_hex_encode_sep" => jet_jit_hex_encode_sep: sig_binary;
     hex_dump: "jet_jit_hex_dump" => jet_jit_hex_dump: sig_unary;
@@ -4561,15 +4468,9 @@ host_fns! {
     hex_decode: "jet_jit_hex_decode" => jet_jit_hex_decode: sig_unary;
     crc_hqx: "jet_jit_crc_hqx" => jet_jit_crc_hqx: sig_binary;
     crc32: "jet_jit_crc32" => jet_jit_crc32: sig_unary;
-    b2a_qp: "jet_jit_b2a_qp" => jet_jit_b2a_qp: sig_unary;
-    a2b_qp: "jet_jit_a2b_qp" => jet_jit_a2b_qp: sig_unary;
-    b2a_uu: "jet_jit_b2a_uu" => jet_jit_b2a_uu: sig_unary;
     b64_encode_url_padded: "jet_jit_b64_encode_url_padded" => jet_jit_b64_encode_url_padded: sig_unary;
-    b64_decode_padded: "jet_jit_b64_decode_padded" => jet_jit_b64_decode_padded: sig_unary;
     b64_pad: "jet_jit_b64_pad" => jet_jit_b64_pad: sig_unary;
     b64_unpad: "jet_jit_b64_unpad" => jet_jit_b64_unpad: sig_unary;
-    b64_is_base64: "jet_jit_b64_is_base64" => jet_jit_b64_is_base64: sig_unary_i8;
-    a2b_uu: "jet_jit_a2b_uu" => jet_jit_a2b_uu: sig_unary;
     b64_encode: "jet_jit_b64_encode" => jet_jit_b64_encode: sig_unary;
     b64_encode_url: "jet_jit_b64_encode_url" => jet_jit_b64_encode_url: sig_unary;
     b64_decode: "jet_jit_b64_decode" => jet_jit_b64_decode: sig_unary;
@@ -4579,14 +4480,7 @@ host_fns! {
     base32_encode: "jet_jit_base32_encode" => jet_jit_base32_encode: sig_unary;
     base32_decode: "jet_jit_base32_decode" => jet_jit_base32_decode: sig_unary;
     base32hex_encode: "jet_jit_base32hex_encode" => jet_jit_base32hex_encode: sig_unary;
-    base32_is_base32: "jet_jit_base32_is_base32" => jet_jit_base32_is_base32: sig_unary_i8;
     base32hex_decode: "jet_jit_base32hex_decode" => jet_jit_base32hex_decode: sig_unary;
-    a85_encode: "jet_jit_a85_encode" => jet_jit_a85_encode: sig_unary;
-    a85_decode: "jet_jit_a85_decode" => jet_jit_a85_decode: sig_unary;
-    b85_encode: "jet_jit_b85_encode" => jet_jit_b85_encode: sig_unary;
-    b85_decode: "jet_jit_b85_decode" => jet_jit_b85_decode: sig_unary;
-    z85_encode: "jet_jit_z85_encode" => jet_jit_z85_encode: sig_unary;
-    z85_decode: "jet_jit_z85_decode" => jet_jit_z85_decode: sig_unary;
     csv_parse: "jet_jit_csv_parse" => jet_jit_csv_parse: sig_quaternary;
     csv_rows: "jet_jit_csv_rows" => jet_jit_csv_rows: sig_quaternary;
     csv_to_string: "jet_jit_csv_to_string" => jet_jit_csv_to_string: sig_unary;
@@ -4695,16 +4589,9 @@ host_fns! {
     xml_parse_options_safe: "jet_std::XMLParseOptions::safe" => jet_jit_xml_parse_options_safe: sig_nullary;
     decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
     encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
+    env_decode: "jet_jit_env_decode" => jet_jit_env_decode: sig_quaternary;
     env_config: "jet_jit_env_config" => jet_jit_env_config: sig_ternary;
     env_config_map: "jet_jit_env_config_map" => jet_jit_env_config_map: sig_binary;
-}
-
-fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
-    alloc_dt_record(disc, payload)
-}
-
-fn jet_jit_published_schema_empty() -> i64 {
-    alloc_datatree(&json_rt::DataTree::Object(Vec::new()))
 }
 
 fn jet_jit_published_schema_merge(known: i64, original: i64) -> i64 {
@@ -4869,52 +4756,6 @@ fn decode_under_ambient_core_call(
         }
     };
     Some(Ok(result))
-}
-
-fn data_entries_to_map_diag(message: impl Into<String>, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0956",
-        message.into(),
-        "the interpreter DataTree map adapter rejected the checked operation".to_string(),
-        "report this as a compiler bug".to_string(),
-        Some(span),
-    )
-}
-
-fn data_entries_to_map_ambient_core_call(
-    module: &str,
-    method: &str,
-    args: Vec<CtValue>,
-    span: Span,
-    _resolved_ret: Option<Type>,
-    _sink: Option<&mut jet_codegen::Comptime::DevSink>,
-) -> Option<Result<CtValue, Diagnostic>> {
-    if module != "core.collections" || method != "entries_to_map" {
-        return None;
-    }
-    let [payload] = args.as_slice() else {
-        return Some(Err(data_entries_to_map_diag(
-            "core.collections.entries_to_map received the wrong number of arguments",
-            span,
-        )));
-    };
-    let entries = match payload {
-        CtValue::Map(entries) => entries.clone(),
-        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-            let mut entries = std::collections::BTreeMap::new();
-            for (key, value) in fields {
-                entries.insert(CtKey::Str(key.clone()), value.clone());
-            }
-            entries
-        }
-        _ => {
-            return Some(Err(data_entries_to_map_diag(
-                "core.collections.entries_to_map received a non-object payload",
-                span,
-            )));
-        }
-    };
-    Some(Ok(CtValue::Map(entries)))
 }
 
 pub(crate) fn register_interpreter_ambient(

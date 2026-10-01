@@ -4640,9 +4640,6 @@ impl<R: Clone> Clone for JetComputeVjpRun<R> {
 }
 
 impl<R> JetComputeVjpRun<R> {
-    fn grads_or_panic(&self) -> R {
-        (self.grads)()
-    }
 }
 
 fn jet_compute_untracked(tensor: &JetTensor) -> JetTensor {
@@ -5018,29 +5015,6 @@ fn jet_compute_view_strides(
         })?);
     }
     Ok(strides)
-}
-
-fn jet_compute_tensor_view_bounds(
-    tensor: &JetTensor,
-    offset: usize,
-    expected_len: usize,
-) -> Result<std::ops::Range<usize>, JetComputeError> {
-    let expected_strides = jet_compute_row_major_strides(&tensor.shape)?;
-    let (strides, metadata_offset) = jet_compute_view_metadata(tensor)?;
-    if strides != expected_strides || metadata_offset != offset {
-        return Err(JetComputeError::Unsupported(
-            "this operation requires a contiguous Tensor view".to_string(),
-        ));
-    }
-    let end = offset.checked_add(expected_len).ok_or_else(|| {
-        JetComputeError::InvalidShape("Tensor view end overflows backing storage".to_string())
-    })?;
-    if end > tensor.data.len() {
-        return Err(JetComputeError::InvalidShape(
-            "Tensor view exceeds backing storage".to_string(),
-        ));
-    }
-    Ok(offset..end)
 }
 
 fn jet_compute_view_storage_end(
@@ -6299,15 +6273,6 @@ fn jet_compute_view<'a>(
     }
 }
 
-fn jet_compute_view_range<'a>(
-    tensor: &'a JetTensor,
-    range: &JetRange,
-    file: &str,
-    line: u32,
-) -> &'a [f64] {
-    jet_compute_view(tensor, range.start, range.end, range.exclusive, file, line)
-}
-
 fn jet_compute_view_mut_checked<'a>(
     tensor: &'a mut JetTensor,
     start: i64,
@@ -6344,48 +6309,6 @@ fn jet_compute_view_mut<'a>(
     match jet_compute_view_mut_checked(tensor, start, end, exclusive) {
         Ok(view) => view,
         Err(error) => jet_panic(file, line, &error.jet_show()),
-    }
-}
-
-fn jet_compute_view_mut_range<'a>(
-    tensor: &'a mut JetTensor,
-    range: &JetRange,
-    file: &str,
-    line: u32,
-) -> JetComputeViewMut<'a> {
-    jet_compute_view_mut(tensor, range.start, range.end, range.exclusive, file, line)
-}
-
-fn jet_compute_window_set_view(
-    view: &mut JetComputeViewMut<'_>,
-    index: i64,
-    value: f64,
-) -> Result<(), String> {
-    jet_compute_window_set(
-        view.tensor,
-        view.start,
-        view.end,
-        view.exclusive,
-        index,
-        value,
-    )
-}
-
-fn jet_compute_window_get_view(
-    view: &JetComputeViewMut<'_>,
-    index: i64,
-    file: &str,
-    line: u32,
-) -> f64 {
-    match jet_compute_window_get(
-        view.tensor,
-        view.start,
-        view.end,
-        view.exclusive,
-        index,
-    ) {
-        Ok(value) => value,
-        Err(error) => jet_panic(file, line, &error),
     }
 }
 
@@ -8985,26 +8908,6 @@ fn jet_compute_vjp_pull_or_panic(
     }
 }
 
-fn jet_compute_gradient_or_panic(
-    state: &JetComputeVjpState,
-    targets: &[i64],
-    context: &str,
-) -> Vec<JetTensor> {
-    let seed = match jet_compute_gradient_seed(state) {
-        Ok(seed) => seed,
-        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
-    };
-    jet_compute_vjp_pull_or_panic(state, &seed, targets, context)
-}
-
-fn jet_compute_vjp_unit_grads_or_panic(
-    state: &JetComputeVjpState,
-    targets: &[i64],
-    context: &str,
-) -> Vec<JetTensor> {
-    jet_compute_gradient_or_panic(state, targets, context)
-}
-
 /// The one transform dispatcher used by AOT and the interpreter.  Engines
 /// marshal callable arguments and package the typed result; this function
 /// owns transform selection, scalar seeding, value detachment, and lazy VJP
@@ -9038,35 +8941,11 @@ fn jet_compute_transform(
     }
 }
 
-fn jet_compute_transform_or_panic(
-    method: &str,
-    state: &JetComputeVjpState,
-    tangents: &[JetTensor],
-    targets: &[i64],
-    context: &str,
-) -> JetComputeTransformResult {
-    match jet_compute_transform(method, state, tangents, targets) {
-        Ok(result) => result,
-        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
-    }
-}
-
 fn jet_compute_nested_gradient(
     states: &[JetComputeVjpState],
     targets: &[i64],
 ) -> Result<Vec<Vec<JetTensor>>, JetComputeError> {
     jet_compute_seeded_gradient_rows(states, targets)
-}
-
-fn jet_compute_nested_gradient_or_panic(
-    states: &[JetComputeVjpState],
-    targets: &[i64],
-    context: &str,
-) -> Vec<Vec<JetTensor>> {
-    match jet_compute_nested_gradient(states, targets) {
-        Ok(values) => values,
-        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
-    }
 }
 
 fn jet_compute_jvp_rule(
@@ -9238,17 +9117,6 @@ fn jet_compute_jvp(
             .and_then(Option::clone)
             .ok_or_else(|| JetComputeError::Unsupported("JVP output tangent is unavailable".to_string())),
         None => jet_compute_zero_like(&state.value),
-    }
-}
-
-fn jet_compute_jvp_or_panic(
-    state: &JetComputeVjpState,
-    input_tangents: Vec<JetTensor>,
-    context: &str,
-) -> JetTensor {
-    match jet_compute_jvp(state, input_tangents) {
-        Ok(value) => value,
-        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
     }
 }
 

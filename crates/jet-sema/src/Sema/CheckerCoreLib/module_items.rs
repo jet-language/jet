@@ -61,7 +61,7 @@ pub fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("core.email",
             "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity"
             | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError"
-            | "Limits" | "SMTPAuth" | "TLSTrust" | "DkimConfig" | "SMTPConfig"
+            | "Limits" | "SMTPAuth" | "TLSTrust" | "DKIMConfig" | "SMTPConfig"
             | "Mailer")
         | ("core.encoding",
             "DataTree" | "EncodingFormat" | "EncodingLimits" | "EncodingError" | "EncodingCause"
@@ -82,30 +82,30 @@ pub fn core_module_type_item(module: &str, item: &str) -> bool {
         // D-FOUND-PLATFORM1=A: one typed host/font value vocabulary.
         | ("core.font", "FontFace" | "FontStyle" | "Glyph" | "GlyphRun" | "GlyphShaper")
         | ("core.ui",
-            "UiImeMode" | "UiPreview" | "UiPreviewAccessibility"
-            | "UiPreviewAuthority" | "UiPreviewContext" | "UiPreviewDevice"
-            | "UiPreviewEffect" | "UiPreviewInputOverride" | "UiPreviewInputValue"
-            | "UiPreviewKind" | "UiPreviewLifecycle" | "UiPreviewRegistry"
-            | "UiPreviewSource" | "UiPreviewTheme" | "UiPreviewTraits" | "UiPreviewViewport")
+            "UIIMEMode" | "UIPreview" | "UIPreviewAccessibility"
+            | "UIPreviewAuthority" | "UIPreviewContext" | "UIPreviewDevice"
+            | "UIPreviewEffect" | "UIPreviewInputOverride" | "UIPreviewInputValue"
+            | "UIPreviewKind" | "UIPreviewLifecycle" | "UIPreviewRegistry"
+            | "UIPreviewSource" | "UIPreviewTheme" | "UIPreviewTraits" | "UIPreviewViewport")
         | ("core.tui",
-            "TuiEvent" | "TuiColorProfile" | "TuiColor" | "TuiCapabilities"
-            | "TuiStyle" | "TuiConstraint" | "TuiDirection" | "TuiListState")
+            "TUIEvent" | "TUIColorProfile" | "TUIColor" | "TUICapabilities"
+            | "TUIStyle" | "TUIConstraint" | "TUIDirection" | "TUIListState")
         | ("core.ui.host",
-            "UiCapability" | "UiCapabilityFact" | "UiCapabilityFacts" | "UiCancellation"
-            | "UiHostError" | "UiServiceResult" | "UiFileDialogKind" | "UiFsAccess"
-            | "UiFsRights" | "UiFsGrant" | "UiGrantedPath" | "UiFileFilter"
-            | "UiFileDialogRequest" | "UiFileDialogSelection" | "UiClipboardText"
-            | "UiClipboardWrite" | "UiTextRange" | "UiImeMode" | "UiImePhase"
-            | "UiImeComposition" | "UiImeEvent" | "UiDragOperation" | "UiDropItem"
-            | "UiDragPhase" | "UiDragEvent" | "UiShortcutModifier" | "UiShortcutModifiers"
-            | "UiShortcut" | "UiShortcutBinding" | "UiShortcutDispatch"
-            | "UiAccessibilityState" | "UiAccessibility" | "UiNodeId"
-            | "UiAccessibilityProjection" | "UiFileFilterResult" | "UiFsGrantResult"
-            | "UiShortcutResult" | "UiShortcutBindingResult" | "UiAccessibilityResult"
-            | "UiFileDialogResult" | "UiClipboardTextResult" | "UiClipboardWriteResult"
-            | "UiImeResult" | "UiDragResult" | "UiShortcutDispatchResult"
-            | "UiAccessibilityNodeResult" | "UiAccessibilityAttachResult"
-            | "UiAccessibilityProjectionResult")
+            "UICapability" | "UICapabilityFact" | "UICapabilityFacts" | "UICancellation"
+            | "UIHostError" | "UIServiceResult" | "UIFileDialogKind" | "UIFSAccess"
+            | "UIFSRights" | "UIFSGrant" | "UIGrantedPath" | "UIFileFilter"
+            | "UIFileDialogRequest" | "UIFileDialogSelection" | "UIClipboardText"
+            | "UIClipboardWrite" | "UITextRange" | "UIIMEMode" | "UIIMEPhase"
+            | "UIIMEComposition" | "UIIMEEvent" | "UIDragOperation" | "UIDropItem"
+            | "UIDragPhase" | "UIDragEvent" | "UIShortcutModifier" | "UIShortcutModifiers"
+            | "UIShortcut" | "UIShortcutBinding" | "UIShortcutDispatch"
+            | "UIAccessibilityState" | "UIAccessibility" | "UINodeID"
+            | "UIAccessibilityProjection" | "UIFileFilterResult" | "UIFSGrantResult"
+            | "UIShortcutResult" | "UiShortcutBindingResult" | "UIAccessibilityResult"
+            | "UIFileDialogResult" | "UIClipboardTextResult" | "UIClipboardWriteResult"
+            | "UIIMEResult" | "UIDragResult" | "UIShortcutDispatchResult"
+            | "UIAccessibilityNodeResult" | "UIAccessibilityAttachResult"
+            | "UIAccessibilityProjectionResult")
         | ("core.web.forms",
             "WebFormValueType" | "WebFormStatus" | "WebFormFieldState"
             | "WebFormState" | "WebForm" | "WebFormValidation"

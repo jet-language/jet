@@ -319,6 +319,8 @@ pub(crate) fn eval_comptime_items(
     gates: crate::Policy::GateSet,
     no_prelude: bool,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
+    // #2517: stored values of earlier checks, in a package-record session.
+    reuse: Option<&crate::Sema::Bundle::ComptimeReuse::ComptimeReuseEnv>,
 ) {
     if !items
         .iter()
@@ -327,12 +329,18 @@ pub(crate) fn eval_comptime_items(
         return;
     }
     {
-        // Comptime runs before the production serde expansion pass. Expand a
-        // clone so the canonical TIR evaluator can call the same generated
+        // Comptime runs before the production derive and serde expansion
+        // passes. Expand a clone, in the same order, so the canonical TIR
+        // evaluator can call the same generated `compare`/`equal` hooks (a
+        // checked `==` on an enum dispatches through `Comparable.compare`) and
         // Encode/Decode bodies without mutating or duplicating module items.
         let mut eval_items = items.to_vec();
-        let mut ignored_early_serde_diags = Vec::new();
-        super::Serde::expand_builtin_serde_items(&mut eval_items, &mut ignored_early_serde_diags);
+        let mut ignored_early_expansion_diags = Vec::new();
+        super::Derives::expand_builtin_derive_items(
+            &mut eval_items,
+            &mut ignored_early_expansion_diags,
+        );
+        super::Serde::expand_builtin_serde_items(&mut eval_items, &mut ignored_early_expansion_diags);
         let mut explicit_codecs = eval_items
             .iter()
             .filter_map(|item| {
@@ -499,10 +507,51 @@ pub(crate) fn eval_comptime_items(
         let mut globals: HashMap<String, crate::Comptime::CtValue> = HashMap::new();
         let (ct_funcs, ct_externs, _) = comptime_context_from_items(&eval_items);
         let ct_checked_funcs = HashMap::new();
-        // Loaded Core source signatures and bodies, projected once per module
-        // on the first constant that needs the evaluator: a `prep` fragment
-        // calls Core functions exactly as runtime code does.
-        let mut checked_core = None;
+        // The checked nominal and import projection, with the loaded Core and
+        // user module sources, built once per module on the first constant
+        // that needs the evaluator: a `prep` fragment calls another module's
+        // functions exactly as runtime code does.
+        let mut checked_nominals = None;
+        // #2517: the module's reuse inputs, built on the first constant that
+        // needs the evaluator, and the digests of the values bound so far.
+        let mut module_reuse = None;
+        let mut global_digests = std::collections::BTreeMap::new();
+        // D-MOD-CYCLE1=A: a package is one namespace, so a `prep` initializer
+        // reads a sibling file's constant by bare name. The bundle evaluates
+        // the files a module's constants read first (`comptime_module_order`)
+        // and mirrors each value onto its module's comptime state; seed those
+        // values here unless this module declares the name itself.
+        let declared_here: HashSet<String> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Const(constant) => Some(constant.name.clone()),
+                Item::Func(function) => Some(function.name.clone()),
+                _ => None,
+            })
+            .collect();
+        let mut sibling_values = Vec::new();
+        for sibling in name_ledger.namespace_siblings(module_idx) {
+            for item in &states[sibling].items {
+                let Item::Const(constant) = item else {
+                    continue;
+                };
+                if let (Some(value), Some(ty)) = (&constant.ct, &constant.ty) {
+                    if !declared_here.contains(&constant.name) {
+                        sibling_values.push((constant.name.clone(), ty.clone(), value.clone()));
+                    }
+                }
+            }
+        }
+        for (name, ty, value) in sibling_values {
+            if globals.contains_key(&name) {
+                continue;
+            }
+            states[module_idx].consts.insert(name.clone(), ty);
+            if let Some(env) = reuse {
+                global_digests.insert(name.clone(), env.value_digest(&value));
+            }
+            globals.insert(name, value);
+        }
         for index in 0..items.len() {
             let (name, value, known, known_ty, module_value) = match &items[index] {
                 Item::Const(c) if const_evaluated_at_build(c) => (
@@ -518,6 +567,10 @@ pub(crate) fn eval_comptime_items(
                 let ty = known_ty.unwrap_or_else(|| value.jet_type());
                 consts.insert(name.clone(), ty.clone());
                 states[module_idx].consts.insert(name.clone(), ty.clone());
+                if let Some(env) = reuse {
+                    global_digests.insert(name.clone(), env.value_digest(&value));
+                }
+                mirror_comptime_value(&mut states[module_idx], &name, &ty, &value);
                 globals.insert(name, value.clone());
 
                 if let Item::Const(c) = &mut items[index] {
@@ -621,33 +674,67 @@ pub(crate) fn eval_comptime_items(
             let evaluated = match plain_literal_value(&eval_value) {
                 Some(value) => Ok((value, Vec::new())),
                 None => {
-                    let checked_core = checked_core.get_or_insert_with(|| {
-                        crate::Sema::CheckerCore::checked_comptime_nominals_for_context(
-                            &*states,
-                            module_idx,
-                            &*name_ledger,
-                        )
+                    let reuse_key = reuse.and_then(|env| {
+                        module_reuse
+                            .get_or_insert_with(|| {
+                                crate::Sema::Bundle::ComptimeReuse::ModuleComptime::new(
+                                    env,
+                                    module_idx,
+                                    &eval_items,
+                                    &comptime_reuse_context(
+                                        base_dir,
+                                        core_imports,
+                                        core_item_imports,
+                                    ),
+                                )
+                            })
+                            .key(&name, &eval_value, &global_digests)
                     });
-                    crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
-                        &eval_value,
-                        &funcs,
-                        &externs,
-                        base_dir,
-                        &globals,
-                        core_imports,
-                        crate::Policy::GateSet::default(),
-                        0,
-                        &structs,
-                        &methods,
-                        &distinct_ranges,
-                        &distinct_bases,
-                        &unit_families,
-                        None,
-                        &eval_items,
-                        build_facts,
-                        &states[module_idx].fact_registry,
-                        checked_core.as_ref(),
-                    )
+                    let stored = reuse
+                        .zip(reuse_key.as_deref())
+                        .and_then(|(env, key)| env.load(key));
+                    match stored {
+                        Some(value) => Ok((value, Vec::new())),
+                        None => {
+                            let checked_nominals = checked_nominals.get_or_insert_with(|| {
+                                crate::Sema::CheckerCore::checked_comptime_nominals_for_context(
+                                    &*states,
+                                    module_idx,
+                                    &*name_ledger,
+                                )
+                            });
+                            let evaluated = crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
+                                &eval_value,
+                                &funcs,
+                                &externs,
+                                base_dir,
+                                &globals,
+                                core_imports,
+                                crate::Policy::GateSet::default(),
+                                0,
+                                &structs,
+                                &methods,
+                                &distinct_ranges,
+                                &distinct_bases,
+                                &unit_families,
+                                None,
+                                &eval_items,
+                                build_facts,
+                                &states[module_idx].fact_registry,
+                                checked_nominals.as_ref(),
+                            );
+                            // A value that read a file depends on more than
+                            // its key.
+                            if let (Some(env), Some(key), Ok((value, inputs))) =
+                                (reuse, reuse_key, &evaluated)
+                            {
+                                if inputs.is_empty() {
+                                    env.record(key, value);
+                                }
+                            }
+                            evaluated
+                        }
+                    }
                 }
             };
             match evaluated {
@@ -673,11 +760,15 @@ pub(crate) fn eval_comptime_items(
                     };
                     consts.insert(name.clone(), ty.clone());
                     states[module_idx].consts.insert(name.clone(), ty.clone());
+                    if let Some(env) = reuse {
+                        global_digests.insert(name.clone(), env.value_digest(&v));
+                    }
                     globals.insert(name.clone(), v.clone());
                     if let Item::Const(c) = &mut items[index] {
-                        c.ty = Some(ty);
-                        c.ct = Some(v);
+                        c.ty = Some(ty.clone());
+                        c.ct = Some(v.clone());
                     }
+                    mirror_comptime_value(&mut states[module_idx], &name, &ty, &v);
                     if let Some(out) = embed_inputs_out.as_deref_mut() {
                         out.extend(inputs);
                     }
@@ -686,6 +777,38 @@ pub(crate) fn eval_comptime_items(
             }
         }
     }
+}
+
+/// Keep a folded constant on the module's comptime item snapshot too, where a
+/// sibling file's `prep` initializer and fragment bodies read it.
+fn mirror_comptime_value(
+    state: &mut ModuleState,
+    name: &str,
+    ty: &Type,
+    value: &crate::Comptime::CtValue,
+) {
+    if let Some(Item::Const(constant)) = state
+        .items
+        .iter_mut()
+        .find(|item| matches!(item, Item::Const(constant) if constant.name == name))
+    {
+        constant.ty = Some(ty.clone());
+        constant.ct = Some(value.clone());
+    }
+}
+
+/// The evaluation context of one module's constants besides its items, for
+/// the reuse key: base directory and import tables, in a fixed order.
+fn comptime_reuse_context(
+    base_dir: &std::path::Path,
+    core_imports: &HashMap<String, String>,
+    core_item_imports: &HashMap<String, String>,
+) -> String {
+    let core_imports = core_imports.iter().collect::<std::collections::BTreeMap<_, _>>();
+    let core_item_imports = core_item_imports
+        .iter()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    format!("{base_dir:?}\u{0}{core_imports:?}\u{0}{core_item_imports:?}")
 }
 
 /// The value of a checked constant initializer that is a plain literal: an
@@ -1483,7 +1606,7 @@ pub(crate) fn register_const(
                 if storage {
                     "use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant"
                 } else {
-                    "write the value as literal data, such as `Rgb{r: U8{0}, g: U8{0}, b: U8{0}}`, prepare it while building with `NAME :: prep { value }`, or compute it inside a function"
+                    "write the value as literal data, such as `RGB{r: U8{0}, g: U8{0}, b: U8{0}}`, prepare it while building with `NAME :: prep { value }`, or compute it inside a function"
                 }
                 .to_string(),
                 Some(c.value.span()),

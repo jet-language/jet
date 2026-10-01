@@ -869,11 +869,11 @@ fn accept_key_matches_rfc6455_example() {
 fn hostile_url_controls_are_rejected_before_handshake_serialization() {
     assert!(matches!(
         jet_ws_parse_url("ws://127.0.0.1/path\r\nInjected: yes"),
-        Err(JetWsError::InvalidUrl)
+        Err(JetWsError::InvalidURL)
     ));
     assert!(matches!(
         jet_ws_parse_url("ws://127.0.0.1\r\nInjected: yes/path"),
-        Err(JetWsError::InvalidUrl)
+        Err(JetWsError::InvalidURL)
     ));
 }
 
@@ -904,7 +904,7 @@ fn run() {{
     if ws.connect("ws://{addr}/live\nInjected: yes") == {{
         .Ok(_) -> print("accepted")
         .Err(error) -> {{
-            if error == .InvalidUrl -> print("rejected")
+            if error == .InvalidURL -> print("rejected")
             else -> print("wrong error")
         }}
         else -> print("unexpected")

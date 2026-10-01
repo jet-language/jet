@@ -139,8 +139,7 @@ pub(crate) mod text_rt {
     }
 
     #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
-    include!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+    pub use jet_unicode::*;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/UnicodeString.rs");

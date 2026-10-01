@@ -300,7 +300,6 @@ fn output_kind_name(kind: PackageOutputKind) -> &'static str {
         PackageOutputKind::Bundle => "bundle",
         PackageOutputKind::System => "system",
         PackageOutputKind::Fleet => "fleet",
-        PackageOutputKind::Model => "model",
     }
 }
 

@@ -17,7 +17,7 @@ const JET_FONT_SHAPING_CAPABILITY: &str = "UI.FontShaping";
 pub enum JetUiCapability {
     FileDialog,
     Clipboard,
-    Ime,
+    IME,
     DragDrop,
     Shortcuts,
     Accessibility,
@@ -29,7 +29,7 @@ impl JetUiCapability {
         match self {
             Self::FileDialog => "UI.FileDialog",
             Self::Clipboard => "UI.Clipboard",
-            Self::Ime => "UI.Ime",
+            Self::IME => "UI.IME",
             Self::DragDrop => "UI.DragDrop",
             Self::Shortcuts => "UI.Shortcuts",
             Self::Accessibility => "UI.Accessibility",
@@ -41,7 +41,7 @@ impl JetUiCapability {
         match self {
             Self::FileDialog => 1 << 0,
             Self::Clipboard => 1 << 1,
-            Self::Ime => 1 << 2,
+            Self::IME => 1 << 2,
             Self::DragDrop => 1 << 3,
             Self::Shortcuts => 1 << 4,
             Self::Accessibility => 1 << 5,
@@ -53,7 +53,7 @@ impl JetUiCapability {
         [
             Self::FileDialog,
             Self::Clipboard,
-            Self::Ime,
+            Self::IME,
             Self::DragDrop,
             Self::Shortcuts,
             Self::Accessibility,
@@ -1422,7 +1422,7 @@ pub enum JetUiDragOperation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JetUiDropItem {
     Text(String),
-    Uri(String),
+    URI(String),
     File(JetUiGrantedPath),
 }
 
@@ -2230,7 +2230,7 @@ impl JetUiHeadlessHost {
     }
 
     pub fn queue_ime_event(&mut self, event: JetUiImeEvent) -> JetUiServiceResult<()> {
-        if let Err(error) = self.facts.require(JetUiCapability::Ime) {
+        if let Err(error) = self.facts.require(JetUiCapability::IME) {
             return Err(error);
         }
         if self.ime_events.len() >= JET_UI_HOST_MAX_QUEUED_EVENTS {
@@ -2329,7 +2329,7 @@ impl JetUiHost for JetUiHeadlessHost {
     }
 
     fn poll_ime_event(&mut self) -> JetUiServiceResult<Option<JetUiImeEvent>> {
-        if let Err(error) = self.facts.require(JetUiCapability::Ime) {
+        if let Err(error) = self.facts.require(JetUiCapability::IME) {
             return Err(error);
         }
         Ok(self.ime_events.pop_front())

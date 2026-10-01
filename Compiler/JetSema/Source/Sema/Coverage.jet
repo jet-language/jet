@@ -3,6 +3,23 @@
 // value dispatch chain that ends in `NoElse`, and multi-head functions. It
 // reads the checked conditions, so contextual `.Case` heads are already
 // resolved against the subject type.
+use jet_foundation.[
+    Diagnostic,
+    ElseArmSpan,
+    Expr,
+    Span,
+    Stmt,
+    TExpr,
+    TExprKind,
+    TPattern,
+    TPatternShape,
+    TStmt,
+    TextEdit,
+    Type,
+    diagnostic_with_edit,
+    expr_span,
+    type_name,
+]
 
 struct SemaCoverageTable {
     subject: TExpr
@@ -67,7 +84,8 @@ fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaSc
             if key == "Err" -> return Val(err)
         }
         .Named(_) | .Apply(_, _) -> {
-            graph :: environment.registration_graph ?? return None
+            graph_option :: environment.registration_graph
+            graph :: graph_option ?? return None
             nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? return None
             loop row in nominal.variants {
                 if row.symbol.name == key {
@@ -202,7 +220,8 @@ fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScop
     missing := [String]{}
     if subject_ty == {
         .Named(_) | .Apply(_, _) -> {
-            graph :: environment.registration_graph ?? return missing
+            graph_option :: environment.registration_graph
+            graph :: graph_option ?? return missing
             nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? return missing
             if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
             loop row in nominal.variants {
@@ -275,6 +294,12 @@ pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Sp
     &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}"))
 }
 
+// A pattern arm lowered to an IfLet condition reads, for coverage, as the
+// pattern test it was checked from.
+fn sema_coverage_if_let_value(pattern: TPattern, subject: TExpr) -> TExpr Never! {
+    sema_tir_expr(Type.Bool, TExprKind.PatternMatches{subject: subject, pattern: pattern}, subject.span)
+}
+
 // The value form arrives as a nested `if` chain sharing one span and ending in
 // `NoElse` (checked as `Never("no else arm")`). Collect its checked arm
 // conditions, or None when the chain has a real `else` value.
@@ -291,6 +316,7 @@ pub fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: 
                 if current.span != span -> return None
                 if cond == {
                     .Plain(value) -> &conditions.push(value)
+                    .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
                     else -> return None
                 }
                 current = next_value
@@ -325,6 +351,7 @@ pub fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -
                     .If(cond, _, else_stmts, _, _) -> {
                         if cond == {
                             .Plain(value) -> &conditions.push(value)
+                            .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
                             else -> return None
                         }
                         if else_value == {
@@ -366,7 +393,8 @@ fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment) -> B
         .Named(_) | .Apply(_, _) -> {}
         else -> return false
     }
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     nominal :: sema_pattern_nominal(graph, environment.module_identity, ty) ?? return false
     nominal.kind == SemaRegistrationNominalKind.Enum
 }
@@ -382,6 +410,7 @@ pub fn sema_coverage_else_chain_conditions(head_condition: TExpr, else_value: TE
             .IfExpr(cond, _, _, _, next_value) -> {
                 if cond == {
                     .Plain(value) -> &conditions.push(value)
+                    .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
                     else -> return conditions
                 }
                 current = next_value
@@ -405,6 +434,7 @@ pub fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> 
                     .If(cond, _, else_stmts, _, _) -> {
                         if cond == {
                             .Plain(value) -> &conditions.push(value)
+                            .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
                             else -> return conditions
                         }
                         nested :: else_stmts ?? return conditions

@@ -4,37 +4,39 @@ use core.data.sketch.tdigest as td_mod
 use core.data.sketch.cms as cms_mod
 use core.data.sketch.reservoir as rs_mod
 
+// Sketches update in place, so each one is a mutable binding and every
+// update marks the write with `&`.
 fn run() {
     // HyperLogLog: cardinality estimator.
     // 3 distinct items + 1 duplicate → count ≈ 3.
-    hll :: hll_mod.new()
-    hll.add("apple")
-    hll.add("banana")
-    hll.add("cherry")
-    hll.add("apple")
+    hll := hll_mod.new()
+    &hll.add("apple")
+    &hll.add("banana")
+    &hll.add("cherry")
+    &hll.add("apple")
     print(hll.count())
     // TDigest: quantile estimator.
     // p50 of [1.0, 2.0, 3.0, 4.0, 5.0] → 3.0.
-    td :: td_mod.new()
-    td.add(1.0)
-    td.add(2.0)
-    td.add(3.0)
-    td.add(4.0)
-    td.add(5.0)
+    td := td_mod.new()
+    &td.add(1.0)
+    &td.add(2.0)
+    &td.add(3.0)
+    &td.add(4.0)
+    &td.add(5.0)
     print(td.quantile(0.5))
     // CountMinSketch: frequency estimator.
     // "hello" added 3 times → count ≥ 3.
-    cms :: cms_mod.new()
-    cms.add("hello")
-    cms.add("world")
-    cms.add("hello")
-    cms.add("hello")
+    cms := cms_mod.new()
+    &cms.add("hello")
+    &cms.add("world")
+    &cms.add("hello")
+    &cms.add("hello")
     print(cms.count("hello"))
     // ReservoirSampler: uniform sample.
     // Capacity 3, exactly 3 items → all kept.
-    rs :: rs_mod.new(3)
-    rs.add("x")
-    rs.add("y")
-    rs.add("z")
+    rs := rs_mod.new(3)
+    &rs.add("x")
+    &rs.add("y")
+    &rs.add("z")
     print(rs.sample().len())
 }

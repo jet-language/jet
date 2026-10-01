@@ -29,8 +29,7 @@ fn run() {
     foreign := service.tree("outside")
     foreign_api :: &foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
     &foreign.start() ?? panic("foreign start")
-    foreign_route := &tree.send(foreign_api, "intrude")
-    if foreign_route == {
+    if &tree.send(foreign_api, "intrude") == {
         .Ok(_) -> { print("foreign:accepted") }
         .Err(_) -> { print("foreign:rejected") }
     }
@@ -38,14 +37,12 @@ fn run() {
 
     &tree.drain_worker(drained) ?? panic("drain")
     print("drained:ok")
-    expired := tree.directory_resolve("drained")
-    if expired == {
+    if tree.directory_resolve("drained") == {
         .Ok(_) -> { print("expired:accepted") }
         .Err(_) -> { print("expired:rejected") }
     }
     &tree.partition_worker(api) ?? panic("partition")
-    partition_route := api.send("intrude")
-    if partition_route == {
+    if api.send("intrude") == {
         .Ok(_) -> { print("partition_route:accepted") }
         .Err(_) -> { print("partition_route:rejected") }
     }

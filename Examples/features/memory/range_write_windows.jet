@@ -1,0 +1,26 @@
+// D-SHAPE-PLACE1=A: a range write window has a fixed length. A callee that
+// keeps its list's length edits the window in place, so the owner sees every
+// change without a copy. A callee that may push, pop, or reassign the list
+// cannot take a window; pass the whole list instead.
+fn scale(xs: &[Int], factor: Int) {
+    loop index in 0..<xs.len() {
+        xs[index] = xs[index] * factor
+    }
+}
+
+fn scale_and_sort(xs: &[Int]) {
+    scale(&xs, 10)
+    &xs.sort()
+}
+
+fn run() {
+    values := [5, 4, 3, 2, 1]
+    &values[1..3].sort()
+    print(values)
+    &values[0..<2].reverse()
+    print(values)
+    scale(&values[3..4], 100)
+    print(values)
+    scale_and_sort(&values[0..<3])
+    print(values)
+}

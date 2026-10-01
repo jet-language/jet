@@ -62,13 +62,6 @@ fn jet_path_normalize(p: &JetPath) -> JetPath {
     jet_path_from(&jet_std_path_normalize(&p.inner.to_string_lossy().into_owned()))
 }
 
-/// D-FOUND-VIEW1: typed paths enter the one shared read-only mapping carrier.
-/// Fault policy and map lifetime stay in the filesystem adapter/kernel.
-fn jet_path_map(p: &JetPath) -> Result<jet_std::JetMappedFile, jet_std::IOError> {
-    let path = p.inner.to_string_lossy().into_owned();
-    jet_std_fs_map(&path)
-}
-
 /// Lexical containment only. The receiver is the candidate and the argument
 /// is the containing path; no filesystem access or symlink resolution occurs.
 fn jet_path_is_within(path: &JetPath, base: &JetPath) -> bool {

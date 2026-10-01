@@ -1,6 +1,13 @@
 // Canonical state graph facts for reflection and semantic consumers.
 // Invalid transition labels are omitted here; the dedicated state diagnostic
 // pass remains responsible for reporting them.
+use jet_foundation.[
+    Func,
+    Item,
+    NamedSpan,
+    StateDecl,
+    StructDef,
+]
 
 pub struct SemaStateGraphNode {
     pub name: String
@@ -50,7 +57,7 @@ fn sema_state_graph_add_method_transitions(
 ) Never! {
     loop method in methods {
         transition :: method.state_transition ?? next
-        from := None
+        from := String?{None}
         if transition.from == .Val(raw_from) {
             from_leaf :: sema_state_graph_leaf(owner, raw_from) ?? next
             if !sema_state_graph_contains(state_names, from_leaf) -> next

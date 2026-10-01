@@ -2,10 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
 use jet::Diagnostics::json_str as json_string;
+use jet_foundation::Names::normalize_path;
 use jet_foundation::ExitCodes;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_semindex::{
@@ -954,19 +955,6 @@ fn absolute_normalized(path: &Path) -> PathBuf {
                 .join(path),
         )
     }
-}
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 fn change_value(change: &Change) -> StatusValue {
     StatusValue::object(

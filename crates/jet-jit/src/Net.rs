@@ -249,24 +249,6 @@ pub(crate) mod runtime {
     }
 }
 
-pub(crate) fn email_runtime_fns() -> jet_codegen::Comptime::EmailAdapter::RuntimeFns {
-    jet_codegen::Comptime::EmailAdapter::RuntimeFns {
-        tls_begin: runtime::tls::jet_net_tls_begin_impl,
-        tls_begin_ca: runtime::tls::jet_net_tls_begin_with_ca_impl,
-        tls_handshake_step: runtime::tls::jet_net_tls_handshake_step_impl,
-        tls_set_poll_timeout: runtime::tls::jet_net_tls_set_poll_timeout_impl,
-        tls_read: runtime::tls::jet_net_tls_read_bytes_impl,
-        tls_write_all: runtime::tls::jet_net_tls_write_all_bytes_impl,
-        tls_close: runtime::tls::jet_net_tls_close_impl,
-        wipe: crate::Crypto::runtime::jet_crypto_zeroize_email_impl,
-        sha256: crate::Crypto::runtime::jet_crypto_email_sha256_impl,
-        ed25519_sign: crate::Crypto::runtime::jet_crypto_email_ed25519_sign_impl,
-        cancelled: runtime::email_cancelled,
-        remaining_ms: runtime::email_remaining_ms,
-        accepted_at: runtime::jet_email::runtime_now,
-    }
-}
-
 pub(crate) enum NetValue {
     Url(runtime::JetURLParts),
     Mime(runtime::JetMIME),
@@ -396,15 +378,6 @@ fn list_of_string_pairs(rows: Vec<Vec<String>>) -> i64 {
             let _ = rt.heap.list_push_int(outer, inner);
         }
         outer
-    })
-}
-fn list_of_bytes(bytes: &[u8]) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for &byte in bytes {
-            let _ = rt.heap.list_push_int(list, i64::from(byte));
-        }
-        list
     })
 }
 
@@ -1307,7 +1280,7 @@ fn unpack_smtp_config(config: i64) -> Option<runtime::jet_email::SMTPConfig<Vec<
     let host = record_get_heap_string(config, 0)?;
     let port = record_get_i64(config, 1)?;
     let security = match record_get_i64(config, 2)? {
-        0 => runtime::jet_email::SMTPSecurity::StartTls,
+        0 => runtime::jet_email::SMTPSecurity::StartTLS,
         1 => runtime::jet_email::SMTPSecurity::TLS,
         _ => return None,
     };

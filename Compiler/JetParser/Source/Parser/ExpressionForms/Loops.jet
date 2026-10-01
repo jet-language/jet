@@ -1,5 +1,36 @@
 // Finite and collecting loop expressions. The canonical parser represents
 // both forms as immediately-called lambdas around ordinary loop statements.
+use jet_foundation.[
+    Binding,
+    CallArg,
+    Expr,
+    ForKind,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    NamedSpan,
+    Span,
+    Stmt,
+    SwitchArm,
+    ast_binding,
+    ast_empty_lambda_meta,
+    expr_span,
+]
+use jet_lexer.[
+    TOKEN_COLON_EQ,
+    TOKEN_COMMA,
+    TOKEN_DOT_DOT,
+    TOKEN_DOT_DOT_LT,
+    TOKEN_IDENT,
+    TOKEN_KW_IF,
+    TOKEN_KW_IN,
+    TOKEN_KW_IT,
+    TOKEN_LBRACE,
+    TOKEN_LPAREN,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+    TOKEN_UNIFIED_ARROW,
+]
 
 struct ParserExpressionFormLoopClause {
     pub var: String
@@ -70,7 +101,7 @@ fn parser_expression_form_loop_header_separator(state: &JetParserState, message:
     parser_expect(&state, TOKEN_COMMA, message).drop("parser_expect records the missing-token diagnostic")
 }
 
-fn parser_expression_form_loop_step(state: &JetParserState, depth: Int) -> Stmt? Err! {
+fn parser_expression_form_loop_step(state: &JetParserState, depth: Int) -> Stmt? {
     if !parser_expression_form_loop_stride_here(&state) -> return None
     parser_bump(&state)
     if parser_expression_form_loop_body_start(&state) || parser_expression_form_loop_guard_comma(&state) -> return None
@@ -124,7 +155,7 @@ fn parser_expression_form_loop_range_kind(state: &JetParserState, first: ParsedE
     ForKind.In{collection: first.expr, step: step_expr}
 }
 
-fn parser_expression_form_loop_guard(state: &JetParserState, depth: Int) -> Expr? Err! {
+fn parser_expression_form_loop_guard(state: &JetParserState, depth: Int) -> Expr? {
     if parser_expression_form_loop_guard_comma(&state) {
         comma :: parser_bump(&state)
         parser_expression_form_error(&state, "E0379", comma.span, "a guard follows its source with no comma", "the guard self-announces with `if`, so the loop head only uses commas between positional clauses", "remove the comma before `if`")

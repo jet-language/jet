@@ -2,6 +2,37 @@
 //
 // The state lives on SemaCheckContext so statement and expression walks share
 // lexical groups, pending joins, and task-lambda boundaries.
+use jet_foundation.[
+    AccessConvention,
+    Binding,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    Marker,
+    Span,
+    Stmt,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TCallArg,
+    TCapture,
+    TCaptureFacts,
+    TCoreClosureKind,
+    TEffectFacts,
+    TEffectSpan,
+    TExpr,
+    TExprKind,
+    TLambda,
+    TLambdaBody,
+    TStmt,
+    Type,
+    TypeTupleField,
+    expr_span,
+    symbol_id,
+    tir_symbol_local,
+    type_name,
+]
 
 pub enum SemaTaskGroupOrigin {
     Lexical
@@ -182,7 +213,7 @@ fn sema_taskgroup_expression_moved(state: &SemaOwnershipState, expression: Expr,
     false
 }
 
-fn sema_taskgroup_mark_spawn_owned(name: String, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
+fn sema_taskgroup_move_spawn_binding(name: String, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     expression := Expr.Ident{name: name, span: span}
     if sema_taskgroup_expression_moved(&state, expression, scopes) -> return
     places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
@@ -204,7 +235,7 @@ pub fn sema_taskgroup_mark_spawns_owned(context: &SemaCheckContext, origin: Sema
     }
     loop frame in frames {
         loop spawn in frame.pending {
-            if spawn.binding == .Val(name) -> sema_taskgroup_mark_spawn_owned(name, spawn.span, scopes, &state, &diagnostics)
+            if spawn.binding == .Val(name) -> sema_taskgroup_move_spawn_binding(name, spawn.span, scopes, &state, &diagnostics)
         }
     }
 }
@@ -213,7 +244,7 @@ pub fn sema_taskgroup_mark_spawn_owned(context: &SemaCheckContext, name: String,
     loop frame in context.taskgroups.stack {
         loop spawn in frame.pending {
             if spawn.binding == .Val(pending) && pending == name {
-                sema_taskgroup_mark_spawn_owned(name, spawn.span, scopes, &state, &diagnostics)
+                sema_taskgroup_move_spawn_binding(name, spawn.span, scopes, &state, &diagnostics)
                 return
             }
         }
@@ -288,7 +319,7 @@ pub fn sema_taskgroup_rewrite_anonymous_spawn(statement: Stmt, context: &SemaChe
 }
 
 pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
-    checked_limit := None
+    checked_limit := TExpr?{None}
     valid := true
     if limit == .Val(expression) {
         checked :: sema_check_expression(expression, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -374,7 +405,7 @@ fn sema_taskgroup_check_arity(args: [CallArg], expected: Int, label: String, spa
 fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts Never! {
     direct := [String]{}
     spans := [TEffectSpan]{}
-    effect_row := None
+    effect_row := [EffectRowEntry]?{None}
     if signature == {
         .Fn(_, _, effects, _, _, _) -> { effect_row = effects }
         else -> {}
@@ -390,7 +421,7 @@ fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts Never! {
 
 fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) -> TLambda? {
     params := [Type]{}
-    ret := None
+    ret := Type?{None}
     if signature == {.Fn(source_params, source_ret, _, _, _, _) -> {params = source_params; ret = source_ret} else -> return None}
     result_ty := ret ?? Type.Named{name: "Unit"}
     captures := [TCapture]{}
@@ -414,7 +445,7 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) ->
         effects: sema_taskgroup_callable_effects(signature),
         host_param_conventions: None,
         source_params: [String]{},
-        source_param_symbols: [SymbolId]{},
+        source_param_symbols: [SymbolID]{},
         jit_name: "task.callable@{span.start}",
         param_types: params,
         ret: ret,
@@ -453,7 +484,7 @@ fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment
         taken := sema_ownership_crossing_capture_taken(lambda, capture, environment, context.generic_params)
         frozen := sema_taskgroup_contains_name(lambda.capture_facts.frozen, capture.source)
         materialized := sema_taskgroup_contains_name(lambda.capture_facts.materialized, capture.source)
-        borrowed := None
+        borrowed := Bool?{None}
         if !taken && !frozen && !materialized {
             borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, span, scopes, &state, &context, &diagnostics)
         }
@@ -469,11 +500,11 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
     if context.taskgroups.stack[active_index].origin != SemaTaskGroupOrigin.Lexical -> return None
     name := capture.source
     expression := Expr.Ident{name: name, span: span}
-    place := None
+    place := SemaOwnershipPlace?{None}
     access := if sema_taskgroup_contains_name(facts.mutable, name) -> AccessConvention.Write else -> AccessConvention.Read
     symbol :: capture.local.symbol_id ?? return None
     loop binding in scopes.bindings {
-        if capture.local.symbol_id == .Val(symbol) && binding.symbol.id.key == symbol.key && binding.symbol.name == name {
+        if binding.symbol.id.key == symbol.key && binding.symbol.name == name {
             if binding.access == AccessConvention.Write -> access = AccessConvention.Write
         }
     }
@@ -503,7 +534,7 @@ pub fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: Stri
     active := context.taskgroups.stack[active_index]
     if active.origin != SemaTaskGroupOrigin.Lexical -> return None
     if place.root_span.start > active.handle_span.start -> return None
-    conflict_name := None
+    conflict_name := String?{None}
     loop frame in context.taskgroups.stack {
         loop held in frame.borrows {
             if sema_ownership_places_overlap(held.place, place) && (access == AccessConvention.Write || held.access == AccessConvention.Write) {
@@ -524,7 +555,7 @@ pub fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: Stri
 
 pub fn sema_taskgroup_report_scoped_loan_conflict(context: SemaCheckContext, changed: SemaOwnershipPlace, action: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if context.taskgroups.in_spawn -> return false
-    lent := None
+    lent := String?{None}
     group_name := ""
     loop frame in context.taskgroups.stack {
         loop held in frame.borrows {
@@ -589,7 +620,7 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
     branches := sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     context.taskgroups.current_binding = saved_binding
     values :: branches ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    result_ty := None
+    result_ty := Type?{None}
     if values.ty == {
         .List(inner) -> {
             elem :: sema_taskgroup_task_success(inner) ?? {
@@ -667,7 +698,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     task_result_ty := body_ty
     problem := sema_ownership_crossing_problem(task_result_ty, SemaSendCrossing.TaskResult, false, environment, scopes, context)
     if problem == .Val(value) -> &diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, args[0].span))
-    group := None
+    group := TExpr?{None}
     if sema_taskgroup_spawn_group_index(context) != None {
         group = sema_taskgroup_task_group_expr(context, environment, &scopes, &state, &tail_store, &diagnostics, span)
         if group == None -> return SemaMethodSpecialCheck{handled: true, value: None}

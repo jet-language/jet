@@ -5560,28 +5560,67 @@ fn run() { print(0) }
         .iter()
         .find(|diagnostic| diagnostic.code == "E0120")
         .expect("suggested E0120");
-    assert_eq!(
-        suggested.applicability,
-        Some(jet::Diagnostics::FixApplicability::Suggested)
-    );
-    assert_eq!(
-        suggested.safety,
-        Some(jet::Diagnostics::FixSafety::NeedsReview)
-    );
-    let suggested_edit = suggested
-        .edit
-        .as_ref()
-        .expect("suggested E0120 must carry an edit");
-    assert_eq!(suggested_edit.new_text, "~");
-    assert_eq!(
-        &suggested_src[suggested_edit.span.start..suggested_edit.span.end],
-        ""
-    );
-    let suggested_fixes = jet::LSP::fixes_from_diagnostics(suggested_diags.clone());
-    assert_eq!(suggested_fixes.len(), 1);
+    // `~` on a value that cannot be copied is itself an error (E0211), so no
+    // machine edit is offered at all.
     assert!(
-        jet::LSP::safe_fixes(&suggested_fixes).is_empty(),
-        "a review-only `~` suggestion must never be auto-applied"
+        suggested.edit.is_none(),
+        "a non-cloneable E0120 must not offer a `~` edit"
+    );
+    assert!(jet::LSP::fixes_from_diagnostics(suggested_diags.clone()).is_empty());
+}
+
+/// The `~` edit for a borrowed field or element starts at the root of the
+/// place. Field and index nodes span only their selector, so an edit anchored
+/// there produced `outer.inner.~name` and `outer.names~[0]`, which do not
+/// parse.
+#[test]
+fn ownership_copy_edit_wraps_the_whole_place() {
+    let src = r#"
+#Policy(copies: .Explicit)
+struct Inner {
+    name: String?
+}
+
+struct Outer {
+    inner: Inner
+    names: [String?]
+}
+
+fn first_name(outer: Outer) -> String {
+    picked :: outer.inner.name ?? return ""
+    picked
+}
+
+fn indexed(outer: Outer) -> String {
+    picked :: outer.names[0] ?? return ""
+    picked
+}
+
+fn run() { print(0) }
+"#;
+    let diags = jet::compile(src).expect_err("borrowed subplaces must report E0120");
+    let mut fixed = src.to_string();
+    let mut edits: Vec<_> = diags
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0120")
+        .map(|diagnostic| {
+            diagnostic
+                .edit
+                .clone()
+                .expect("a cloneable E0120 must carry the `~` edit")
+        })
+        .collect();
+    assert_eq!(edits.len(), 2);
+    edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+    for edit in &edits {
+        assert_eq!(edit.new_text, "~");
+        fixed = jet::LSP::apply_edit(&fixed, edit);
+    }
+    assert!(fixed.contains("picked :: ~outer.inner.name ?? return"), "{fixed}");
+    assert!(fixed.contains("picked :: ~outer.names[0] ?? return"), "{fixed}");
+    assert!(
+        jet::compile(&fixed).is_ok(),
+        "the `~` edits must clear the E0120 reports: {fixed}"
     );
 }
 

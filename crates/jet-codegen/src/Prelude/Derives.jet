@@ -5,32 +5,29 @@
 // Enum equality/order match `self` once per variant, then dispatch `rhs`
 // inside that arm. A cartesian product of separate `if self ==` tables
 // would consume a non-copy payload and then use `self` again (E0121).
-// Both emit only the same-variant `rhs` table per arm, keeping the generated
-// body linear in the variant count: equality lets any other `rhs` variant fall
-// through to `return false`, and ordering reads the `rhs` variant ordinal once
-// and orders different variants by ordinal before comparing payloads.
+// Both match `rhs` against the arm's own variant only (`.$left` again), so
+// expansion does one step per variant and the generated body stays linear in
+// the variant count: equality lets any other `rhs` variant fall through to
+// `return false`, and ordering reads the `rhs` variant ordinal once and orders
+// different variants by ordinal before comparing payloads.
 derive T.Equatable {
     fn equal(self, rhs: T) -> Bool {
         prep if T.$kind == "enum" {
             prep loop left in T.$fields {
                 if self == {
                     .$left -> {
-                        prep loop right in T.$fields {
-                            prep if left.$index == right.$index {
-                                if rhs == {
-                                    .$right -> {
-                                        prep loop field in left.$fields {
-                                            prep if field.$ty == T.$name {
-                                                if self.$field.equal(rhs.$field) == false -> return false
-                                            } else {
-                                                if self.$field != rhs.$field -> return false
-                                            }
-                                        }
-                                        return true
+                        if rhs == {
+                            .$left -> {
+                                prep loop field in left.$fields {
+                                    prep if field.$ty == T.$name {
+                                        if self.$field.equal(rhs.$field) == false -> return false
+                                    } else {
+                                        if self.$field != rhs.$field -> return false
                                     }
-                                    else -> {}
                                 }
+                                return true
                             }
+                            else -> {}
                         }
                         return false
                     }
@@ -70,27 +67,23 @@ derive T.Comparable {
                     .$left -> {
                         if jet_rhs_variant_index > left.$index -> return .Less
                         if jet_rhs_variant_index < left.$index -> return .Greater
-                        prep loop right in T.$fields {
-                            prep if left.$index == right.$index {
-                                if rhs == {
-                                    .$right -> {
-                                        prep loop field in left.$fields {
-                                            prep if field.$ty == T.$name {
-                                                if self.$field.compare(rhs.$field) == {
-                                                    .Less -> return .Less
-                                                    .Greater -> return .Greater
-                                                    .Equal -> {}
-                                                }
-                                            } else {
-                                                if self.$field < rhs.$field -> return .Less
-                                                if self.$field > rhs.$field -> return .Greater
-                                            }
+                        if rhs == {
+                            .$left -> {
+                                prep loop field in left.$fields {
+                                    prep if field.$ty == T.$name {
+                                        if self.$field.compare(rhs.$field) == {
+                                            .Less -> return .Less
+                                            .Greater -> return .Greater
+                                            .Equal -> {}
                                         }
-                                        return .Equal
+                                    } else {
+                                        if self.$field < rhs.$field -> return .Less
+                                        if self.$field > rhs.$field -> return .Greater
                                     }
-                                    else -> {}
                                 }
+                                return .Equal
                             }
+                            else -> {}
                         }
                         return .Equal
                     }

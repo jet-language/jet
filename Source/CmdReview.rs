@@ -876,7 +876,7 @@ fn load_side(path: &Path) -> Result<ReviewSide, String> {
         ));
     }
     ledger.sort();
-    let authority = authority_facts(&ledger, &projection.index);
+    let authority = authority_facts(&ledger, projection.index());
     let closure = match inputs.len() {
         0 => "unknown",
         1 => "entry_only",
@@ -887,7 +887,7 @@ fn load_side(path: &Path) -> Result<ReviewSide, String> {
         entry: path.display().to_string(),
         inputs,
         closure,
-        index: projection.index,
+        index: projection.into_index(),
         authority,
         source_hash,
         semantic_ops,

@@ -85,7 +85,7 @@ pub struct Message {
 }
 
 pub enum SMTPSecurity {
-    StartTls
+    StartTLS
     TLS
 }
 
@@ -108,7 +108,7 @@ pub enum TLSTrust {
     SystemPlusCa(pem: [U8])
 }
 
-pub struct DkimConfig {
+pub struct DKIMConfig {
     pub domain: String
     pub selector: String
     pub private_key: Secret
@@ -123,7 +123,7 @@ pub struct SMTPConfig {
     pub recipient_policy: RecipientPolicy
     pub trust: TLSTrust
     pub limits: Limits
-    pub dkim: DkimConfig?
+    pub dkim: DKIMConfig?
 }
 
 // Mailer is an opaque provider handle. Its send method owns the network
@@ -159,15 +159,15 @@ pub fn limits() -> Limits Never! {
     }
 }
 
-pub fn smtp_auth(user: String, password: Secret) -> SMTPAuth {
+pub fn smtp_auth(user: String, password: Secret) -> SMTPAuth Never! {
     SMTPAuth.Password{username: user, password: password}
 }
 
-pub fn dkim(domain: String, selector: String, key: Secret, signed_headers: [String]) -> DkimConfig {
-    DkimConfig{domain: domain, selector: selector, private_key: key, signed_headers: signed_headers}
+pub fn dkim(domain: String, selector: String, key: Secret, signed_headers: [String]) -> DKIMConfig Never! {
+    DKIMConfig{domain: domain, selector: selector, private_key: key, signed_headers: signed_headers}
 }
 
-pub fn send_report(server: String, accepted: [RecipientReport], rejected: [RecipientReport], response_code: Int, response: String, accepted_at: String) -> SendReport {
+pub fn send_report(server: String, accepted: [RecipientReport], rejected: [RecipientReport], response_code: Int, response: String, accepted_at: String) -> SendReport Never! {
     SendReport{
         server: server,
         accepted: accepted,
@@ -298,7 +298,7 @@ pub fn smtp(config: SMTPConfig) -[Net]> Mailer EmailError! {
 
 fn no_smtp_auth() -> SMTPAuth Never! { .None }
 
-fn no_dkim() -> DkimConfig? { None }
+fn no_dkim() -> DKIMConfig? { None }
 
 pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
     host_value :: core.sys.get("SMTP_HOST")
@@ -312,16 +312,16 @@ pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
         .None -> "starttls"
         .Val(value) -> ascii_lower(value)
     }
-    security := SMTPSecurity.StartTls
+    security := SMTPSecurity.StartTLS
     if security_text == {
-        "starttls" -> security = SMTPSecurity.StartTls
+        "starttls" -> security = SMTPSecurity.StartTLS
         "tls" -> security = SMTPSecurity.TLS
         else -> {
             return Err(email_error("smtp_from_env", "SMTP_SECURITY must be `starttls` or `tls`"))
         }
     }
     default_port := if security == {
-        .StartTls -> 587
+        .StartTLS -> 587
         .TLS -> 465
     }
     port_value :: core.sys.get("SMTP_PORT")
@@ -399,7 +399,7 @@ pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
             .None -> [String]{"from", "to", "subject", "mime-version", "content-type"}
             .Val(value) -> split_signed_headers(value)
         }
-        dkim_config :: DkimConfig{
+        dkim_config :: DKIMConfig{
             domain: domain,
             selector: selector,
             private_key: Secret.from_bytes(key_bytes),
@@ -510,7 +510,7 @@ fn validate_smtp_config(config: SMTPConfig) -> EmailError? {
         return Val(email_error("smtp", "port must be between 1 and 65535") ?? panic("total email error"))
     }
     if config.security == {
-        .StartTls -> {
+        .StartTLS -> {
             if config.port == 465 {
                 return Val(email_error("smtp", "port 465 requires TLS from connect") ?? panic("total email error"))
             }
@@ -626,7 +626,7 @@ fn bytes_at(raw: [U8], start: Int, value: [U8]) -> Bool Never! {
     true
 }
 
-fn validate_dkim_config(dkim: DkimConfig) -> EmailError? {
+fn validate_dkim_config(dkim: DKIMConfig) -> EmailError? {
     if !valid_dns_name(~dkim.domain) {
         return Val(email_error("dkim", "domain must be a valid ASCII DNS name") ?? panic("total email error"))
     }

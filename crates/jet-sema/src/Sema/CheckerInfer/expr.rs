@@ -299,6 +299,31 @@ fn is_plain_call_arg(arg: &CallArg) -> bool {
     arg.label.is_none() && !arg.spread
 }
 
+/// A bare `None` value-if arm. With `nested`, also a nested value-if (the
+/// rest of a match/decision table) whose every arm is a bare `None`; the
+/// parser's `NoElse` tail of an else-less table adds no arm. The arm
+/// is still the parsed contextual literal here (`Expr::Absent` appears only
+/// after `normalize_contextual_expr`), so match both shapes.
+fn bare_absent_arm(expr: &Expr, nested: bool) -> bool {
+    let expr = expr.without_parens();
+    if crate::Sema::CheckerCore::expr_is_absent_none(expr) {
+        return true;
+    }
+    match expr {
+        Expr::If {
+            then_value,
+            else_value,
+            ..
+        } => {
+            nested
+                && bare_absent_arm(then_value, true)
+                && (matches!(else_value.without_parens(), Expr::NoElse(_))
+                    || bare_absent_arm(else_value, true))
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn landed_core_call(module: &str, member: &str, arity: usize) -> bool {
     let Some(row) =
         Syntax::core_call_projection(module, member, Syntax::CoreCallCoverage::SEMA, arity).ok()
@@ -331,18 +356,15 @@ impl<'a> Checker<'a> {
                 } else if !self.diverging_functions.contains(&call.name) {
                     false
                 } else {
-                    // A fallible `Never !E` function returns an `Err` carrier
+                    // A fallible `Never E!` function returns an `Err` carrier
                     // that `??` can consume, so the call is not itself a
-                    // definitely-diverging expression.
+                    // definitely-diverging expression. `Never Never!` has no
+                    // failure route and diverges like `Never`.
                     !self
                         .funcs
                         .get(&call.name)
-                        .is_some_and(|sig| {
-                            matches!(
-                                sig.return_type.as_ref(),
-                                Some(Type::Result { ok, .. }) if ok.is_never()
-                            )
-                        })
+                        .and_then(|sig| sig.return_type.as_ref())
+                        .is_some_and(|ret| ret.has_never_success() && ret.is_fallible())
                 }
             }
             Expr::MethodCall {
@@ -354,9 +376,7 @@ impl<'a> Checker<'a> {
                         crate::Sema::CheckerCoreLib::core_call_signature(&module, method)
                     })
                     .and_then(|(_, ret)| ret)
-                    .is_some_and(
-                        |ret| matches!(ret, Type::Named(name) if name == Syntax::TYPE_NEVER),
-                    );
+                    .is_some_and(|ret| ret.has_never_success() && !ret.is_fallible());
                 core_diverges || self.imported_call_diverges(receiver, method)
             }
             Expr::If {
@@ -386,12 +406,11 @@ impl<'a> Checker<'a> {
             .and_then(|modules| modules.get(module_idx))
             .is_some_and(|state| {
                 state.diverging_functions.contains(method)
-                    && !state.funcs.get(method).is_some_and(|sig| {
-                        matches!(
-                            sig.return_type.as_ref(),
-                            Some(Type::Result { ok, .. }) if ok.is_never()
-                        )
-                    })
+                    && !state
+                        .funcs
+                        .get(method)
+                        .and_then(|sig| sig.return_type.as_ref())
+                        .is_some_and(|ret| ret.has_never_success() && ret.is_fallible())
             })
     }
     pub(crate) fn expr_diverges(&self, expr: &Expr) -> bool {
@@ -1998,14 +2017,7 @@ impl<'a> Checker<'a> {
             declared_call_return,
             Some(Type::Result { err, .. }) if err.is_never()
         );
-        // A statement binding (`k :: never_fails()`) is an ordinary value
-        // position even when an enclosing tail expectation is a Result: the
-        // expectation leaks into nested arm blocks, so keep the carrier only at
-        // the root depth where the Result is really expected (as :2060 does).
-        if declared_never_failure
-            && self.ordinary_binding_root_depth != Some(self.source_nesting)
-            && matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
-        {
+        if declared_never_failure && matches!(self.expected_type.as_ref(), Some(Type::Result { .. })) {
             return result;
         }
         if !declared_never_failure {
@@ -2093,14 +2105,13 @@ impl<'a> Checker<'a> {
                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
             )
             || !matches!(propagation_result, Some(Type::Result { .. }))
-            || (self.ordinary_binding_root_depth != Some(self.source_nesting)
-                && self.expected_type.as_ref().is_some_and(|expected| {
-                    matches!(
-                        expected,
-                        Type::Result { err, .. }
-                            if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
-                    )
-                }))
+            || self.expected_type.as_ref().is_some_and(|expected| {
+                matches!(
+                    expected,
+                    Type::Result { err, .. }
+                        if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+                )
+            })
         {
             // D-FAIL-CARRIER1=A: a `T !E` expectation is the carrier itself.
             // That includes a statement-nested argument (`report(import_rows())`).
@@ -2200,7 +2211,7 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .is_some_and(|ty| {
                         matches!(ty, Type::Fn { .. })
-                            || matches!(ty, Type::Named(name) if name == "UiShortcut")
+                            || matches!(ty, Type::Named(name) if name == "UIShortcut")
                     })
             {
                 // CallValue dispatch skips infer_inner; canonicalize a bare
@@ -2403,7 +2414,7 @@ impl<'a> Checker<'a> {
         {
             return Some(ty);
         }
-        if is_cloneable(&target, self.registry) {
+        if self.is_cloneable_type(&target) {
             Some(self.insert_implicit_copy(e, &ty, &target))
         } else {
             Some(ty)
@@ -2433,7 +2444,7 @@ impl<'a> Checker<'a> {
                 .push(self.with_ownership_copy_edit(diagnostic, *name_span, Some(ty)));
             return;
         }
-        if self.type_is_single_use(ty) || !is_cloneable(ty, self.registry) {
+        if self.type_is_single_use(ty) || !self.is_cloneable_type(ty) {
             return;
         }
         let span = e.span();
@@ -2842,8 +2853,11 @@ impl<'a> Checker<'a> {
                     self.implicit_copy_target(e, source)
                         .map(|target| (source.clone(), target))
                 }) {
-                    if self.expected_type.as_ref() == Some(&target)
-                        && is_cloneable(&target, self.registry)
+                    if self
+                        .expected_type
+                        .as_ref()
+                        .is_some_and(|expected| self.nominal_type_identity(expected, &target))
+                        && self.is_cloneable_type(&target)
                     {
                         return Some(self.insert_implicit_copy(e, &source, &target));
                     }
@@ -2899,7 +2913,7 @@ impl<'a> Checker<'a> {
                             );
                             self.diags.push(self.with_ownership_copy_edit(
                                 diagnostic,
-                                e.span(),
+                                crate::Sema::CheckerOwnership::copy_edit_anchor(e),
                                 Some(t),
                             ));
                             return ty;
@@ -2910,7 +2924,7 @@ impl<'a> Checker<'a> {
                     // partial-move; wrapping them in `Copy` skips the E0211
                     // check and becomes a rustc rejection the user sees as an
                     // ICE (I2).
-                    if is_cloneable(t, self.registry) {
+                    if self.is_cloneable_type(t) {
                         // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
                         // explicitly — one mechanism for "duplicate this value",
                         // whether the compiler inserts it or the user spells it.
@@ -3175,7 +3189,19 @@ impl<'a> Checker<'a> {
                 // ordinary reads inside this arm must keep their own mode.
                 self.owning_if_value_depth -= 1;
             }
-            let result = if self.statement_expr_inference || branch_diverges {
+            // Only a dispatch that is itself the statement root has statement
+            // arms. A value-if nested in a statement's argument
+            // (`print(if c -> f() else -> g())`) is an ordinary value, so its
+            // arm calls unwrap their carriers like any other value position.
+            let statement_arm = self.statement_expr_inference
+                && self.statement_expr_root_depth == Some(self.source_nesting);
+            let saved_statement_root = self.statement_expr_root_depth;
+            if statement_arm && matches!(value, Expr::If { .. }) {
+                // The next arm of a statement decision table continues the
+                // same statement root one source level deeper.
+                self.statement_expr_root_depth = Some(self.source_nesting + 1);
+            }
+            let result = if statement_arm || branch_diverges {
                 // A braced dispatch arm is a statement arm when the whole
                 // dispatch is used as a statement. Use the statement call
                 // checker for its tail so `print(...)` contributes Unit
@@ -3188,6 +3214,7 @@ impl<'a> Checker<'a> {
             } else {
                 self.infer(value)
             };
+            self.statement_expr_root_depth = saved_statement_root;
             if owning_arm {
                 self.owning_if_value_depth += 1;
                 if let Some(arm_ty) = result.clone() {
@@ -3238,7 +3265,7 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .is_some_and(|ty| {
                     matches!(ty, Type::Fn { .. })
-                        || matches!(ty, Type::Named(name) if name == "UiShortcut")
+                        || matches!(ty, Type::Named(name) if name == "UIShortcut")
                 })
         {
             normalize_bare_method_head(e);
@@ -3432,14 +3459,31 @@ impl<'a> Checker<'a> {
                 let bindings = self.check_condition_with_bindings(cond);
                 self.push_scope();
                 let mut restore_moved = Vec::new();
+                let windows = crate::Sema::CheckerCore::condition_window_names(cond, false);
                 for (name, ty) in bindings {
-                    if let Some(restored) = self.declare_condition_binding(&name, cond.span(), ty) {
+                    let window = windows.contains(&name);
+                    if let Some(restored) =
+                        self.declare_pattern_binding(&name, cond.span(), ty, window)
+                    {
                         restore_moved.push(restored);
                     }
                 }
                 self.record_condition_view_bindings(cond);
                 self.check_block(then_body, false);
-                let then_ty = self.infer_pattern_branch_value(cond, then_value);
+                // Owner rule (bare `None`): without an optional expected
+                // type, a bare `None` arm takes its optional type from the
+                // sibling arm of the same value-if/match. A leading `None`
+                // arm waits for the else arm's type; it has no flow effects
+                // to reorder.
+                let sibling_rule = !if_expected
+                    .as_ref()
+                    .is_some_and(|ty| ty.unwrap_option().is_some());
+                let defer_then = sibling_rule && bare_absent_arm(then_value, false);
+                let then_ty = if defer_then {
+                    None
+                } else {
+                    self.infer_pattern_branch_value(cond, then_value)
+                };
                 self.pop_scope();
                 for (name, at) in restore_moved {
                     self.flow.moved.set(&name, at);
@@ -3448,8 +3492,21 @@ impl<'a> Checker<'a> {
                 self.flow = before.clone();
                 self.push_scope();
                 self.check_block(else_body, false);
+                let saved_expected = self.expected_type.clone();
+                if sibling_rule && bare_absent_arm(else_value, true) {
+                    self.expected_type = then_ty.clone().filter(|ty| ty.unwrap_option().is_some());
+                }
                 let else_ty = self.infer_pattern_branch_value(cond, else_value);
                 self.pop_scope();
+                let then_ty = if defer_then {
+                    self.expected_type = else_ty.clone().filter(|ty| ty.unwrap_option().is_some());
+                    let ty = self.infer_pattern_branch_value(cond, then_value);
+                    self.expected_type = saved_expected;
+                    ty
+                } else {
+                    self.expected_type = saved_expected;
+                    then_ty
+                };
                 let else_path = self.flow.clone();
                 let then_ty = then_ty.filter(|_| then_path.reachable);
                 let else_ty = else_ty.filter(|_| else_path.reachable);
@@ -3502,7 +3559,7 @@ impl<'a> Checker<'a> {
                             || crate::Sema::Diagnostics::block_definitely_exits(then_body);
                         let else_is_diverging = self.expr_definitely_diverges(else_value)
                             || crate::Sema::Diagnostics::block_definitely_exits(else_body);
-                        if a == b || else_is_diverging {
+                        if a == b || else_is_diverging || self.nominal_type_identity(&a, &b) {
                             // Update a typed hole's expected_type to match what
                             // we know; panic/diverging branches have no hole.
                             if matches!(else_value.as_ref(), Expr::Todo { .. }) {
@@ -5564,16 +5621,22 @@ impl<'a> Checker<'a> {
                 self.infer(inner)
             }
             Expr::Present(inner, _span) => {
-                let t = if let Some(expected) = self
+                let expected = self
                     .expected_type
                     .clone()
-                    .and_then(|ty| ty.unwrap_option().cloned())
-                {
-                    self.infer_aggregate_value(inner, Some(&expected))?
-                } else {
-                    self.infer_aggregate_value(inner, None)?
+                    .and_then(|ty| ty.unwrap_option().cloned());
+                let t = self.infer_aggregate_value(inner, expected.as_ref())?;
+                // S48: a concrete payload meets a single-trait optional slot
+                // (`Val(Real{…})` into `Adapter?`). The optional holds the
+                // boxed trait value, as a trait-typed parameter does.
+                let payload = match expected {
+                    Some(slot) if self.trait_slot_accepts(&slot, &t) => match slot {
+                        Type::Named(name) => Type::TraitObject(vec![name]),
+                        trait_value => trait_value,
+                    },
+                    _ => t,
                 };
-                Some(Type::Option(Box::new(t)))
+                Some(Type::Option(Box::new(payload)))
             }
             Expr::Absent(span) => {
                 if let Some(expected) = self.expected_type.clone() {
@@ -6773,7 +6836,7 @@ impl<'a> Checker<'a> {
                 Some(Type::Int)
             }
             Type::Apply { name, args } if name == "Pool" && args.len() == 1 => Some(Type::Apply {
-                name: "Id".to_string(),
+                name: "ID".to_string(),
                 args: vec![args[0].clone()],
             }),
             ty if ty.is_compute_tensor_family() => {
@@ -6897,17 +6960,17 @@ impl<'a> Checker<'a> {
             // precedent, not a new diagnostic code — see `jet_pool_get`).
             Type::Apply { name, args } if name == "Pool" && args.len() == 1 => {
                 *kind = IndexKind::Pool;
-                let is_matching_id = matches!(&idx_ty, Type::Apply { name, args: id_args } if name == "Id" && id_args.first() == args.first());
+                let is_matching_id = matches!(&idx_ty, Type::Apply { name, args: id_args } if name == "ID" && id_args.first() == args.first());
                 if !is_matching_id {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
-                            "`Pool` indexes need a matching `Id<T>`, not {}",
+                            "`Pool` indexes need a matching `ID<T>`, not {}",
                             idx_ty.show()
                         ),
-                        "a pool slot is only reached through the `Id<T>` its own `.add()` returned"
+                        "a pool slot is only reached through the `ID<T>` its own `.add()` returned"
                             .to_string(),
-                        "index with the `Id<T>` handle from `.add(...)`".to_string(),
+                        "index with the `ID<T>` handle from `.add(...)`".to_string(),
                         Some(index.span()),
                     ));
                 }
@@ -7585,7 +7648,8 @@ impl<'a> Checker<'a> {
                             self.diags.push(soft_public_use(member, span));
                         }
                         self.record_field_reference(owner_mod, lookup_name, member, span);
-                        return Some(fty);
+                        let fty = self.owner_trait_values(owner_mod, fty);
+                        return Some(self.owner_type_for_reader(owner_mod, lookup_name, fty));
                     }
                     // D-FIELDPOL1: a computed field is never in `fields` (it's
                     // not stored) but a *read* still resolves its declared
@@ -7666,6 +7730,8 @@ impl<'a> Checker<'a> {
                             self.diags.push(soft_public_use(member, span));
                         }
                         self.record_field_reference(owner_mod, leaf, member, span);
+                        let fty = self.owner_trait_values(owner_mod, fty);
+                        let fty = self.owner_type_for_reader(owner_mod, leaf, fty);
                         return Some(self.instantiate_type_for_owner(owner_mod, &fty, &subst));
                     }
                     // D-FIELDPOL1: see the `Type::Named` branch above — a

@@ -153,7 +153,7 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
     let mut config: jet_email::SMTPConfig<()> = jet_email::SMTPConfig {
         host: "smtp.example.com".to_string(),
         port: 587,
-        security: jet_email::SMTPSecurity::StartTls,
+        security: jet_email::SMTPSecurity::StartTLS,
         auth: jet_email::SMTPAuth::None,
         recipient_policy: jet_email::RecipientPolicy::RequireAll,
         trust: jet_email::TLSTrust::SystemPlusCa { pem },
@@ -260,7 +260,7 @@ fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
     let config = jet_email::SMTPConfig {
         host: "smtp.example.com".to_string(),
         port: 587,
-        security: jet_email::SMTPSecurity::StartTls,
+        security: jet_email::SMTPSecurity::StartTLS,
         auth: jet_email::SMTPAuth::Password {
             username: "mailer".to_string(),
             password: b"secret".to_vec(),
@@ -432,7 +432,7 @@ use core.crypto as crypto
 fn run() {
     password :: crypto.Secret.from_text("not-logged")
     dkim_key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
-    dkim :: email.DkimConfig{
+    dkim :: email.DKIMConfig{
         domain: "example.com",
         selector: "login-2026",
         private_key: dkim_key,

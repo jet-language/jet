@@ -1,6 +1,20 @@
 // Exact Prelude lowering for checked typed XML decoders.
 // The Prelude owns parsing, XML projection, and FieldError translation.
-fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: TExpr, args: [TExpr], type_args: [Type], data_plan: MirDataPlan?) -> MirValueId? {
+use jet_foundation.[
+    MIRCallArg,
+    MIRDataPlan,
+    MIROperation,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRPreludeTypeArg,
+    MIRSemanticOp,
+    MIRType,
+    MIRValueID,
+    TExpr,
+    Type,
+]
+
+fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: TExpr, args: [TExpr], type_args: [Type], data_plan: MIRDataPlan?) -> MIRValueID? {
     if type_args.len() != 1 -> return None
     if data_plan != None -> panic("typed XML decode cannot carry a data plan")
     if args.len() != 2 -> panic("checked typed XML decode must materialize its XMLParseOptions argument")
@@ -13,7 +27,7 @@ fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: T
     symbol := if bytes_input -> "jet_enc_xml_decode_bytes" else -> "jet_enc_xml_decode"
     route := jet_codegen_intern_route(
         &builder,
-        MirPreludeFamily.StaticPrelude,
+        MIRPreludeFamily.StaticPrelude,
         "core.encoding.xml",
         member,
         symbol,
@@ -21,19 +35,19 @@ fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: T
         [Bool]{true, false},
         None,
         jet_codegen_failure_carrier_for_type(expression.ty),
-        MirPreludeAbi.Value,
+        MIRPreludeABI.Value,
     )
-    values := [MirValueId]{}
+    values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, argument))
-    call_args := [MirCallArg]{
+    call_args := [MIRCallArg]{
         jet_codegen_numeric_call_arg(values[0], args[0].span),
         jet_codegen_numeric_call_arg(values[1], args[1].span),
     }
-    lowered_type_args := [MirType]{jet_codegen_lower_type_for_function(type_args[0], &builder)}
+    lowered_type_args := [MIRType]{jet_codegen_lower_type_for_function(type_args[0], builder)}
     Val(jet_codegen_emit_value(
         &builder,
         expression.span,
         expression.ty,
-        MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: route, args: call_args, owner_type_args: [MirPreludeTypeArg]{}, type_args: lowered_type_args}},
+        MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: route, args: call_args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: lowered_type_args}},
     ))
 }

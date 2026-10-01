@@ -1,6 +1,5 @@
 use core.compute as compute
 use core.files as files
-use "arrays"
 
 fn image_fixture_path() -> String {
     candidates :: [
@@ -27,14 +26,14 @@ fn run() {
     if compute.to_list(summed) != [11.0, 12.0, 13.0, 14.0, 15.0, 16.0] -> panic("broadcast values")
 
     // Named dimensions and coordinates stay in a user record beside Tensor.
-    coordinates :: [arrays.Coordinate]{
-        arrays.coordinate("row", ["r0", "r1"]),
-        arrays.coordinate("col", ["c0", "c1", "c2"]),
+    coordinates :: [Coordinate]{
+        coordinate("row", ["r0", "r1"]),
+        coordinate("col", ["c0", "c1", "c2"]),
     }
-    labeled :: arrays.labeled(matrix, ["row", "col"], coordinates)
-    col_two :: &arrays.lookup(labeled, "col", "c2") ?? panic("column lookup")
-    south_margin :: arrays.cell(labeled, "r1", "c2") ?? panic("cell lookup")
-    missing :: &arrays.lookup(labeled, "col", "c9")
+    labeled :: labeled(matrix, ["row", "col"], coordinates)
+    col_two :: &lookup(labeled, "col", "c2") ?? panic("column lookup")
+    south_margin :: cell(labeled, "r1", "c2") ?? panic("cell lookup")
+    missing :: &lookup(labeled, "col", "c9")
     if col_two != 3.0 -> panic("column coordinate value")
     if south_margin != 6.0 -> panic("row/column coordinate value")
     if missing != None -> panic("missing coordinate accepted")
@@ -109,22 +108,22 @@ fn run() {
         63.0,
     ],
     ) ?? panic("chunk source")
-    plan := arrays.chunked(chunk_source, 8)
-    if arrays.chunk_count(plan) != 8 -> panic("chunk count")
-    indexed_tensor :: arrays.read_chunk(plan, 1)
+    plan := chunked(chunk_source, 8)
+    if chunk_count(plan) != 8 -> panic("chunk count")
+    indexed_tensor :: read_chunk(plan, 1)
     if compute.to_list(indexed_tensor) != [8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0] {
         panic("indexed chunk")
     }
-    first_tensor :: arrays.map_chunk(&plan, 0, arrays.double)
-    tail_tensor :: arrays.map_chunk(&plan, 7, arrays.double)
+    first_tensor :: map_chunk(&plan, 0, double)
+    tail_tensor :: map_chunk(&plan, 7, double)
     first :: compute.to_list(first_tensor)
     tail :: compute.to_list(tail_tensor)
     if first != [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0] -> panic("first chunk")
     if tail != [112.0, 114.0, 116.0, 118.0, 120.0, 122.0, 124.0, 126.0] -> panic("tail chunk")
     if plan.reads != 2 -> panic("indexed read count")
 
-    all_plan := arrays.chunked(chunk_source, 8)
-    mapped_tensor :: arrays.map_all(&all_plan, arrays.double)
+    all_plan := chunked(chunk_source, 8)
+    mapped_tensor :: map_all(&all_plan, double)
     mapped :: compute.to_list(mapped_tensor)
     expected_mapped := [Float]{}
     loop value in 0..<64 -> &expected_mapped.push(Float.from_int(value * 2))
@@ -135,14 +134,14 @@ fn run() {
     // PPM result that is decoded again for an exact storage round trip.
     fixture_path :: image_fixture_path()
     fixture :: files.read(fixture_path) ?? panic("image fixture read")
-    image :: arrays.decode_ppm(fixture) ?? panic("image decode")
+    image :: decode_ppm(fixture) ?? panic("image decode")
     source_pixels :: compute.to_list(image.pixels)
     if image.width != 2 || image.height != 2 || image.channels != 3 -> panic("image metadata")
     if source_pixels != [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0] {
         panic("image pixels")
     }
 
-    resized :: arrays.resize_nearest(image, 4, 4)
+    resized :: resize_nearest(image, 4, 4)
     resized_pixels :: compute.to_list(resized.pixels)
     corner :: compute.get(resized.pixels, [3, 3, 2]) ?? panic("resized corner")
     if resized.width != 4 || resized.height != 4 || resized.channels != 3 {
@@ -151,18 +150,18 @@ fn run() {
     if corner != 1.0 -> panic("resized nearest corner")
     if resized_pixels.len() != 48 -> panic("resized storage")
 
-    gray :: arrays.grayscale(image)
+    gray :: grayscale(image)
     gray_pixels :: compute.to_list(gray.pixels)
     if gray.width != 2 || gray.height != 2 || gray.channels != 1 -> panic("gray metadata")
     if gray_pixels != [0.3, 0.59, 0.11, 1.0] -> panic("gray pixels")
 
-    output :: arrays.encode_ppm(resized)
+    output :: encode_ppm(resized)
     temp :: files.temp_dir("arrays-image") ?? panic("image output directory")
     output_path :: Path.from(temp.path).join("resized.ppm").to_string()
     files.write(output_path, output) ?? panic("image output write")
     written :: files.read(output_path) ?? panic("image output read")
     if !files.exists(output_path) || written != output -> panic("image output round trip")
-    round_trip :: arrays.decode_ppm(written) ?? panic("image output decode")
+    round_trip :: decode_ppm(written) ?? panic("image output decode")
     if compute.shape(round_trip.pixels) != [4, 4, 3] -> panic("round-trip shape")
     if compute.to_list(round_trip.pixels) != resized_pixels -> panic("round-trip pixels")
 

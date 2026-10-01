@@ -560,7 +560,7 @@ impl<'a> Checker<'a> {
                             | "Query" | "DataGroupedQuery" | "Group"
                             // D-DATAFRAME1=A: joins remain typed list products.
                             | "DataJoin"
-                            | "Pool" | "Id"
+                            | "Pool" | "ID"
                             // D-LOCALCELL1=A: one-thread cell and projected guard types.
                             | "Cell" | "CellReadGuard" | "CellEditGuard"
                             // The one closed secret-lifetime wrapper.
@@ -845,7 +845,17 @@ impl<'a> Checker<'a> {
                 // domain that is already reported (an unknown name or the `_`
                 // hole) gets no second, dependent E2417.
                 let resolved_error = self.resolve_type((**err).clone());
-                if self.diags.len() == domain_errors && !self.is_error_domain(&resolved_error) {
+                // D-CALLBACK-ERR1=A: a type parameter may stand for a failure
+                // domain (`fn(T) -> U E!`); each call binds it to the
+                // callback's own failure type, or to `Never`.
+                let generic_domain = matches!(
+                    &resolved_error,
+                    Type::Named(name) if self.type_param_scope.iter().any(|param| param.name == *name)
+                );
+                if self.diags.len() == domain_errors
+                    && !generic_domain
+                    && !self.is_error_domain(&resolved_error)
+                {
                     let domain = resolved_error.show();
                     self.diags.push(Diagnostic::from_row(
                         "E2417",
@@ -1588,9 +1598,15 @@ impl<'a> Checker<'a> {
         let Some(modules) = self.modules else {
             return None;
         };
+        // A bare built-in spelling (`Path`) is the built-in, never a loaded
+        // record that merely shares its leaf (`core.files.path`'s `Path`).
+        let bare_builtin = namespace.is_none() && Syntax::typed_head_kind(spelling).is_some();
         for (owner, module) in modules.iter().enumerate() {
             for candidate in module.registry.types.keys() {
                 if owner != self.module_idx && !self.type_is_pub_in(owner, candidate) {
+                    continue;
+                }
+                if bare_builtin && self.record_distinct_from_builtin(owner, candidate) {
                     continue;
                 }
                 let display =
@@ -1635,7 +1651,8 @@ impl<'a> Checker<'a> {
                 jet_foundation::CoreModuleExports::core_source_modules()
                     .iter()
                     .find(|source| {
-                        module.source == source.source
+                        crate::CoreSources::core_source_text(source.module)
+                            == Some(module.source.as_str())
                             && (module.module_alias == source.alias
                                 || module.package_scope == ".")
                     })

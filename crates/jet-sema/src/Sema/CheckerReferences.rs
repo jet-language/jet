@@ -457,7 +457,13 @@ pub(crate) fn record_comptime_import_alias_uses(
 
     expression.for_each_expr(|node| {
         let alias = match node {
-            Expr::Call(call) => call.name.split_once('.').map(|(alias, _)| alias),
+            // `alias.f(…)`, or a member-imported `f(…)` whose local name is
+            // itself the import binding.
+            Expr::Call(call) => Some(
+                call.name
+                    .split_once('.')
+                    .map_or(call.name.as_str(), |(alias, _)| alias),
+            ),
             Expr::Field(base, ..)
             | Expr::Index { base, .. }
             | Expr::Slice { base, .. }

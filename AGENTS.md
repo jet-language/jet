@@ -148,8 +148,8 @@ peer, Jet/peer must be below `1.00`.
 
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
-area: web, games, CLI and scripts, data analysis, backend services, AI/ML
-applications, GUI applications, and embedded. A niche becomes required only when
+area: web, games, CLI and scripts, data analysis, backend services, GUI
+applications, and embedded. A niche becomes required only when
 Jet ships a first-party battery for it; never claim a niche win without one.
 
 Apply the comparator separately to each cell and metric. Never average away a
@@ -216,8 +216,10 @@ under `.agents/skills` and `Tools/tower/skills`.
 
 Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
 disk under `~/.cache/jet-test-scratch` and `~/.cache/jet-luna`, never in
-`/tmp`, which is RAM-backed. Share one bounded Cargo target, set
-`CARGO_INCREMENTAL=0`, and respect the default `JET_TARGET_CAP_GB=120`.
+`/tmp`, which is RAM-backed. Share one bounded Cargo target and respect the default
+`JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except in the
+orchestrator's lock-serialized build targets, which opt in with
+`JET_CARGO_INCREMENTAL=1` and are pruned between builds.
 Rebuild before compiler smoke tests. After integration, run the exact narrow
 proof the criteria name. Broad suites, unfiltered censuses, and
 `Tools/agent/verify-full.sh` are milestone or release operations and need the

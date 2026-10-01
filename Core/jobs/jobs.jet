@@ -70,7 +70,7 @@ pub fn queue() -> JobQueue Never! {
 
 /// Return a queue with a bounded retry budget. A non-positive budget is
 /// normalized to one attempt so a failed claim cannot loop forever.
-pub fn with_max_attempts(q: JobQueue, max_attempts: Int) -> JobQueue {
+pub fn with_max_attempts(q: JobQueue, max_attempts: Int) -> JobQueue Never! {
     limit := max_attempts
     if limit < 1 -> limit = 1
     if limit > 1000000 -> limit = 1000000
@@ -83,7 +83,7 @@ pub fn with_max_attempts(q: JobQueue, max_attempts: Int) -> JobQueue {
     }
 }
 
-pub fn queue_name(q: JobQueue) -> String { q.name }
+pub fn queue_name(q: JobQueue) -> String Never! { q.name }
 pub fn named(name: String) -> JobQueue JobError! {
     if !valid_queue_name(name) -> return Err(JobError.Empty)
     q :: queue()
@@ -101,7 +101,7 @@ pub fn enqueue(q: JobQueue, job: String) -> (queue: JobQueue, receipt: JobQueueR
     (queue: nq, receipt: JobQueueReceipt{id: id})
 }
 
-pub fn claim(q: JobQueue) -> (queue: JobQueue, taken: JobQueueClaim?) {
+pub fn claim(q: JobQueue) -> (queue: JobQueue, taken: JobQueueClaim?) Never! {
     recs := copy_recs(q.records)
     limit := q.max_attempts
     if limit < 1 -> limit = 1
@@ -176,7 +176,7 @@ pub fn cancel(q: JobQueue, id: String) -> JobQueue JobError! {
     if !valid_job_id(id) -> return Err(JobError.Missing)
     set_state(q, id, JobQueueState.Cancelled)
 }
-pub fn status(q: JobQueue) -> JobQueueStatus {
+pub fn status(q: JobQueue) -> JobQueueStatus Never! {
     queued := 0
     running := 0
     done := 0
@@ -211,33 +211,33 @@ fn set_state(q: JobQueue, id: String, state: JobQueueState) -> JobQueue JobError
     }
     Err(JobError.Missing)
 }
-pub fn state(q: JobQueue, id: String) -> JobQueueState? {
+pub fn state(q: JobQueue, id: String) -> JobQueueState? Never! {
     loop record in ~q.records {
         if record.id == id -> return Val(record.state)
     }
     None
 }
 
-pub fn attempts(q: JobQueue, id: String) -> Int {
+pub fn attempts(q: JobQueue, id: String) -> Int Never! {
     loop record in ~q.records {
         if record.id == id -> return record.attempts
     }
     0
 }
 
-pub fn payload(q: JobQueue, id: String) -> String? {
+pub fn payload(q: JobQueue, id: String) -> String? Never! {
     loop record in ~q.records {
         if record.id == id -> return Val(record.payload)
     }
     None
 }
 
-pub fn event(q: JobQueue, id: String) -> JobQueueEvent? {
+pub fn event(q: JobQueue, id: String) -> JobQueueEvent? Never! {
     st :: state(q, id) ?? return None
     Val(JobQueueEvent{kind: state_name(st), id: id})
 }
 
-pub fn events(q: JobQueue) -> [JobQueueEvent] {
+pub fn events(q: JobQueue) -> [JobQueueEvent] Never! {
     out := [JobQueueEvent]{}
     loop record in ~q.records {
         &out.push(JobQueueEvent{kind: state_name(record.state), id: record.id})
@@ -245,14 +245,14 @@ pub fn events(q: JobQueue) -> [JobQueueEvent] {
     out
 }
 
-pub fn is_terminal(state: JobQueueState) -> Bool {
+pub fn is_terminal(state: JobQueueState) -> Bool Never! {
     state == JobQueueState.Completed
         || state == JobQueueState.Failed
         || state == JobQueueState.DeadLettered
         || state == JobQueueState.Cancelled
 }
 
-pub fn is_cancelled(state: JobQueueState) -> Bool {
+pub fn is_cancelled(state: JobQueueState) -> Bool Never! {
     state == JobQueueState.Cancelled
 }
 

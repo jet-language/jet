@@ -26,59 +26,59 @@ pub struct LogField {
     pub redacted: Bool
 }
 
-pub fn debug(message: String) -[Log]> { emit("debug", message, [LogField]{}) }
+pub fn debug(message: String) Never! -[Log]> { emit("debug", message, [LogField]{}) }
 
-pub fn info(message: String) -[Log]> { emit("info", message, [LogField]{}) }
+pub fn info(message: String) Never! -[Log]> { emit("info", message, [LogField]{}) }
 
-pub fn warn(message: String) -[Log]> { emit("warn", message, [LogField]{}) }
+pub fn warn(message: String) Never! -[Log]> { emit("warn", message, [LogField]{}) }
 
-pub fn error(message: String) -[Log]> { emit("error", message, [LogField]{}) }
+pub fn error(message: String) Never! -[Log]> { emit("error", message, [LogField]{}) }
 /// Emit a message at a caller-selected level.
-pub fn log(level: String, message: String) -[Log]> { emit(level, message, [LogField]{}) }
+pub fn log(level: String, message: String) Never! -[Log]> { emit(level, message, [LogField]{}) }
 
 /// Python-compatible warning spelling.
-pub fn warning(message: String) -[Log]> { warn(message) }
+pub fn warning(message: String) Never! -[Log]> { warn(message) }
 
 
-pub fn critical(message: String) -[Log]> { emit("critical", message, [LogField]{}) }
+pub fn critical(message: String) Never! -[Log]> { emit("critical", message, [LogField]{}) }
 
-pub fn fatal(message: String) -[Log]> { emit("fatal", message, [LogField]{}) }
+pub fn fatal(message: String) Never! -[Log]> { emit("fatal", message, [LogField]{}) }
 
-pub fn debug_fields(message: String, fields: [LogField]) -[Log]> { emit("debug", message, fields) }
+pub fn debug_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("debug", message, fields) }
 
-pub fn info_fields(message: String, fields: [LogField]) -[Log]> { emit("info", message, fields) }
+pub fn info_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("info", message, fields) }
 
-pub fn warn_fields(message: String, fields: [LogField]) -[Log]> { emit("warn", message, fields) }
+pub fn warn_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("warn", message, fields) }
 
-pub fn error_fields(message: String, fields: [LogField]) -[Log]> { emit("error", message, fields) }
+pub fn error_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("error", message, fields) }
 
-pub fn field(key: String, value: String) -> LogField {
+pub fn field(key: String, value: String) -> LogField Never! {
     LogField{key: key, value: value, kind: "string", redacted: false}
 }
 
-pub fn int(key: String, value: Int) -> LogField {
+pub fn int(key: String, value: Int) -> LogField Never! {
     LogField{key: key, value: "{value}", kind: "int", redacted: false}
 }
 
-pub fn float(key: String, value: Float) -> LogField {
+pub fn float(key: String, value: Float) -> LogField Never! {
     LogField{key: key, value: "{value}", kind: "float", redacted: false}
 }
 
-pub fn bool(key: String, value: Bool) -> LogField {
+pub fn bool(key: String, value: Bool) -> LogField Never! {
     LogField{key: key, value: "{value}", kind: "bool", redacted: false}
 }
 
-pub fn redact(key: String) -> LogField {
+pub fn redact(key: String) -> LogField Never! {
     LogField{key: key, value: "[redacted]", kind: "redacted", redacted: true}
 }
 
-pub fn span(name: String) -[Log]> LogSpan { core.log.span(name) }
+pub fn span(name: String) -[Log]> LogSpan Never! { core.log.span(name) }
 
-pub fn enter(span: LogSpan) -[Log]> { core.log.enter(span) }
+pub fn enter(span: LogSpan) Never! -[Log]> { core.log.enter(span) }
 
-pub fn close(span: LogSpan) -[Log]> { core.log.close(span) }
+pub fn close(span: LogSpan) Never! -[Log]> { core.log.close(span) }
 
-pub fn set_sink(kind: String, path: String) -[Log]> {
+pub fn set_sink(kind: String, path: String) Never! -[Log]> {
     normalized :: ascii_lower(trim(kind))
     if normalized == "stderr" -> return core.log.set_sink("json", "")
     if normalized == "stdout" -> return
@@ -87,29 +87,29 @@ pub fn set_sink(kind: String, path: String) -[Log]> {
     core.log.set_sink(normalized, path)
 }
 
-pub fn sample_every(n: Int) -[Log]> {
+pub fn sample_every(n: Int) Never! -[Log]> {
     if n > 0 -> core.log.sample_every(n)
 }
 
-pub fn counter(name: String, value: Int) -> LogField { core.log.counter(name, value) }
+pub fn counter(name: String, value: Int) -> LogField Never! { core.log.counter(name, value) }
 
-pub fn otlp_file(path: String) -[Log, FS]> {
+pub fn otlp_file(path: String) Never! -[Log, FS]> {
     if trim(~path).len() > 0 -> core.log.otlp_file(path)
 }
 
-pub fn set_level(level: String) -[Log]> {
+pub fn set_level(level: String) Never! -[Log]> {
     normalized :: canon_level(level)
     if normalized.len() > 0 -> core.log.set_level(normalized)
 }
 
-pub fn set_trace_id(id: String) -[Log]> {
+pub fn set_trace_id(id: String) Never! -[Log]> {
     if trim(~id).len() > 0 -> core.log.set_trace_id(id)
 }
 
 /// Apply comma-separated `key=value` settings without handing the whole
 /// grammar to the host. The host owns the sink and process-global cells; Jet
 /// owns normalization and dispatch of each setting.
-pub fn setup(spec: String) -[Log]> {
+pub fn setup(spec: String) Never! -[Log]> {
     loop raw in split_csv(spec) {
         pair :: split_once(raw, "=")
         key :: ascii_lower(trim(pair.left))
@@ -137,11 +137,11 @@ pub fn setup(spec: String) -[Log]> {
     }
 }
 
-pub fn disable() -[Log]> { core.log.disable() }
+pub fn disable() Never! -[Log]> { core.log.disable() }
 
-pub fn flush() -[Log]> { core.log.flush() }
+pub fn flush() Never! -[Log]> { core.log.flush() }
 
-pub fn enabled(level: String) -[Log]> Bool {
+pub fn enabled(level: String) -[Log]> Bool Never! {
     normalized :: canon_level(level)
     if normalized.len() == 0 -> return false
     core.log.enabled(normalized)
@@ -349,29 +349,29 @@ pub struct Handler {
     pub mode: String
 }
 
-pub fn record(level: String, message: String, fields: [LogField]) -> LogRecord {
+pub fn record(level: String, message: String, fields: [LogField]) -> LogRecord Never! {
     LogRecord{level: default_level(level), message: message, fields: fields}
 }
 
-pub fn formatter(mode: String) -> Formatter {
+pub fn formatter(mode: String) -> Formatter Never! {
     Formatter{mode: canon_mode(mode)}
 }
 
-pub fn handler(level: String) -> Handler {
+pub fn handler(level: String) -> Handler Never! {
     Handler{minimum: default_level(level), mode: "json"}
 }
 
-pub fn handler_format(target: Handler, mode: String) -> Handler {
+pub fn handler_format(target: Handler, mode: String) -> Handler Never! {
     Handler{minimum: default_level(target.minimum), mode: canon_mode(mode)}
 }
 
-pub fn format(target: Formatter, event: LogRecord) -> String {
+pub fn format(target: Formatter, event: LogRecord) -> String Never! {
     mode :: canon_mode(target.mode)
     if mode == "text" -> return render_text(event)
     render_json(event)
 }
 
-pub fn handle(target: Handler, event: LogRecord) -[Log]> {
+pub fn handle(target: Handler, event: LogRecord) Never! -[Log]> {
     minimum :: default_level(target.minimum)
     if rank(event.level) < rank(minimum) -> return
     formatter :: Formatter{mode: canon_mode(target.mode)}
@@ -464,18 +464,18 @@ fn parse_int(text: String) -> Int? {
     if !any -> return None
     Val(n)
 }
-pub fn add(event: LogRecord, field: LogField) -> LogRecord {
+pub fn add(event: LogRecord, field: LogField) -> LogRecord Never! {
     fields := event.fields
     &fields.push(field)
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
-pub fn group(event: LogRecord, prefix: String) -> LogRecord {
+pub fn group(event: LogRecord, prefix: String) -> LogRecord Never! {
     fields := [LogField]{}
     loop field in event.fields -> &fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
-pub fn time(event: LogRecord, timestamp: Int) -> LogRecord { add(event, int("time", timestamp)) }
+pub fn time(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int("time", timestamp)) }
 
-pub fn clear(event: LogRecord) -> LogRecord { record(event.level, event.message, [LogField]{}) }
+pub fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }

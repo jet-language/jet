@@ -60,6 +60,53 @@ fn result_ok_bytes(bytes: Vec<u8>) -> i64 {
     })
 }
 
+/// The `Ok` payload of `take_pattern` is the checked capture tuple: one record
+/// field per hole in hole order, tagged with the tuple's MIR type, so field
+/// reads, Display and typed drops see the record `MirOperation::Tuple` builds
+/// (the evaluator's `mir_pattern_capture_result`). A hole-free pattern is Unit.
+fn result_ok_capture_tuple(
+    captures: Vec<MatchScan::JetPatternCapture>,
+    tuple_type: i64,
+    context: &str,
+) -> i64 {
+    let record = Concurrency::with_runtime_mut(|rt| {
+        if captures.is_empty() {
+            return Some(0);
+        }
+        let record = rt.heap.alloc_record(captures.len());
+        for (index, capture) in (0_i64..).zip(captures) {
+            match capture {
+                MatchScan::JetPatternCapture::Text(value) => {
+                    let value = rt.heap.alloc_string(value);
+                    rt.heap.record_set_string(record, index, value)?;
+                }
+                MatchScan::JetPatternCapture::Int(value) => {
+                    rt.heap.record_set_int(record, index, value)?;
+                }
+                MatchScan::JetPatternCapture::Float(value) => {
+                    rt.heap.record_set_float(record, index, value)?;
+                }
+                MatchScan::JetPatternCapture::Bool(value) => {
+                    rt.heap.record_set_bool(record, index, value)?;
+                }
+                MatchScan::JetPatternCapture::Bytes(bytes) => {
+                    let list = rt
+                        .heap
+                        .alloc_int_list(bytes.into_iter().map(i64::from).collect());
+                    rt.heap.record_set_int(record, index, list)?;
+                }
+            }
+        }
+        rt.trait_object_types
+            .insert(record, jet_foundation::MIR::MirTypeId(tuple_type as u64));
+        Some(record)
+    });
+    match record {
+        Some(record) => result_ok(record),
+        None => result_err(format!("{context}: capture tuple rejected a field")),
+    }
+}
+
 fn clone_byte_list(handle: i64) -> Vec<u8> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(handle).unwrap_or(0);
@@ -199,7 +246,7 @@ fn jet_jit_cursor_advance(handle: i64, nbytes: i64) {
         c.pos = (c.pos + nbytes as usize).min(c.buf.len());
     });
 }
-fn jet_jit_reader_take_pattern(handle: i64, descriptor: i64) -> i64 {
+fn jet_jit_reader_take_pattern(handle: i64, descriptor: i64, tuple_type: i64) -> i64 {
     let Some(mir_parts) = Concurrency::with_runtime_mut(|rt| {
         let index = descriptor
             .checked_sub(1)
@@ -248,18 +295,9 @@ fn jet_jit_reader_take_pattern(handle: i64, descriptor: i64) -> i64 {
         Some(Err(error)) => return result_err(error),
         None => return result_err("Reader.take_pattern: bad handle".to_string()),
     };
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for capture in captures {
-            let record = crate::runtime_host::alloc_pattern_capture(rt, capture);
-            if rt.heap.list_push_int(list, record).is_none() {
-                return result_err("Reader.take_pattern: capture list rejected".to_string());
-            }
-        }
-        result_ok(list)
-    })
+    result_ok_capture_tuple(captures, tuple_type, "Reader.take_pattern")
 }
-fn jet_jit_cursor_take_pattern(handle: i64, descriptor: i64) -> i64 {
+fn jet_jit_cursor_take_pattern(handle: i64, descriptor: i64, tuple_type: i64) -> i64 {
     let Some(mir_parts) = Concurrency::with_runtime_mut(|rt| {
         let index = descriptor
             .checked_sub(1)
@@ -317,16 +355,7 @@ fn jet_jit_cursor_take_pattern(handle: i64, descriptor: i64) -> i64 {
         Some(Err(error)) => return result_err(error),
         None => return result_err("Cursor.take_pattern: bad handle".to_string()),
     };
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for capture in captures {
-            let record = crate::runtime_host::alloc_pattern_capture(rt, capture);
-            if rt.heap.list_push_int(list, record).is_none() {
-                return result_err("Cursor.take_pattern: capture list rejected".to_string());
-            }
-        }
-        result_ok(list)
-    })
+    result_ok_capture_tuple(captures, tuple_type, "Cursor.take_pattern")
 }
 
 
@@ -341,6 +370,8 @@ host_fns! {
         sig_unary.returns.push(AbiParam::new(types::I64));
         let mut sig_binary = sig_unary.clone();
         sig_binary.params.push(AbiParam::new(types::I64));
+        let mut sig_ternary = sig_binary.clone();
+        sig_ternary.params.push(AbiParam::new(types::I64));
         let mut sig_void_unary = Signature::new(cc);
         sig_void_unary.params.push(AbiParam::new(types::I64));
         let mut sig_i8 = Signature::new(cc);
@@ -373,12 +404,12 @@ host_fns! {
     reader_seek: "jet_jit_reader_seek" => jet_jit_reader_seek: sig_binary;
     reader_skip: "jet_jit_reader_skip" => jet_jit_reader_skip: sig_binary;
     reader_take: "jet_jit_reader_take" => jet_jit_reader_take: sig_binary;
-    reader_take_pattern: "jet_jit_reader_take_pattern" => jet_jit_reader_take_pattern: sig_binary;
+    reader_take_pattern: "jet_jit_reader_take_pattern" => jet_jit_reader_take_pattern: sig_ternary;
     reader_remaining: "jet_jit_reader_remaining" => jet_jit_reader_remaining: sig_unary;
     reader_at_end: "jet_jit_reader_at_end" => jet_jit_reader_at_end: sig_i8;
     cursor_over: "jet_jit_cursor_over" => jet_jit_cursor_over: sig_unary;
     cursor_skip_ws: "jet_jit_cursor_skip_ws" => jet_jit_cursor_skip_ws: sig_void_unary;
     cursor_take_until: "jet_jit_cursor_take_until" => jet_jit_cursor_take_until: sig_binary;
-    cursor_take_pattern: "jet_jit_cursor_take_pattern" => jet_jit_cursor_take_pattern: sig_binary;
+    cursor_take_pattern: "jet_jit_cursor_take_pattern" => jet_jit_cursor_take_pattern: sig_ternary;
     cursor_advance: "jet_jit_cursor_advance" => jet_jit_cursor_advance: sig_binary;
 }

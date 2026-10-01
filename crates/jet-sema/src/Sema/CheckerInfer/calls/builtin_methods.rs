@@ -3,7 +3,7 @@ use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::CheckerCoreLib::{unit_ty, wrong_core_arity};
-use crate::Sema::Diagnostics::{is_cloneable, suggest_field, type_fix_hint, type_is_copy};
+use crate::Sema::Diagnostics::{suggest_field, type_fix_hint, type_is_copy};
 use crate::Sema::{Checker, SendCrossing, SendProblemKind, SendabilityProblem};
 use crate::Syntax;
 use crate::AST::{Call, CallArg, Expr, StrPart, Type};
@@ -230,7 +230,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if let Some(fill) = fill_ty {
-                if !is_cloneable(fill, self.registry) && !type_is_copy(fill) {
+                if !self.is_cloneable_type(fill) && !type_is_copy(fill) {
                     self.zip_type_error(
                         format!("zip fill type `{}` is not cloneable", fill.name()),
                         span,
@@ -265,7 +265,7 @@ impl<'a> Checker<'a> {
                         self.zip_type_error(format!("per-column fills omit `{name}`"), span);
                         continue;
                     };
-                    if !is_cloneable(fill, self.registry) && !type_is_copy(fill) {
+                    if !self.is_cloneable_type(fill) && !type_is_copy(fill) {
                         self.zip_type_error(
                             format!("zip fill `{name}` has non-cloneable type `{}`", fill.name()),
                             span,
@@ -636,7 +636,7 @@ impl<'a> Checker<'a> {
                         _ => Type::Int,
                     };
                     let id_ty = Type::Apply {
-                        name: "Id".to_string(),
+                        name: "ID".to_string(),
                         args: vec![elem_ty],
                     };
                     return Some(Type::List(Box::new(id_ty)));
@@ -714,6 +714,9 @@ impl<'a> Checker<'a> {
                 }
                 "try_replace" => {
                     return self.finish_shared_try_replace(inner, args, span);
+                }
+                "same" => {
+                    return self.finish_shared_same(inner, args, span);
                 }
                 // D-CONC-SHARE1=A (card #1561): the closure forms are
                 // retired at the source surface. The compiler's own

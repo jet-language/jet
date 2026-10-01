@@ -433,15 +433,7 @@ fn checked_core_type_args(
     type_args: &[Type],
     args: &[TExpr],
 ) -> Vec<Type> {
-    if module == "core.models" && method == "open" {
-        type_args
-            .iter()
-            .map(|ty| match ty {
-                Type::Named(name) => Type::TraitObject(vec![name.clone()]),
-                _ => ty.clone(),
-            })
-            .collect()
-    } else if module == "core.encoding.json" && matches!(method, "to_string" | "to_string_pretty") {
+    if module == "core.encoding.json" && matches!(method, "to_string" | "to_string_pretty") {
         // JSON rendering lowers every value to the dynamic Data carrier before
         // the direct renderer call; source type arguments must not describe
         // the pre-lowering value.
@@ -827,7 +819,7 @@ fn lower_builtin_binary_method(
         kind: TExprKind::Binary {
             op,
             overflow,
-            line: crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32,
+            line: cx.src_line_col(span.start).0 as u32,
             lhs: Box::new(recv),
             rhs: Box::new(rhs),
         },
@@ -1045,7 +1037,7 @@ fn lower_core_math_predicate(
         );
     }
     let source_name = arg.ty.name();
-    let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+    let line = cx.src_line_col(span.start).0 as u32;
     let Some(op) = resolve_numeric_op(predicate, &source_name, line) else {
         return invariant_method_expr(
             span,
@@ -1734,7 +1726,7 @@ fn lower_core_source_call(
 ) -> Option<TExpr> {
     let alias = cx.core_source_modules.get(module)?;
     if alias == &cx.module_alias
-        || !jet_foundation::CoreModuleExports::core_source_owns(module, method)
+        || !jet_foundation::CoreModuleExports::core_source_owns_call(module, method, args.len())
     {
         return None;
     }
@@ -3862,6 +3854,24 @@ fn lower_method_call_impl(
     lowered_receiver: Option<TExpr>,
     instantiated_sig: Option<&[(AccessConvention, Type)]>,
 ) -> TExpr {
+    // A declared nominal owns the methods the checker resolved on it, even when
+    // its leaf spells a builtin handle carrier (Core's `URL` or `MIME`, or a
+    // user type named the same). Only such collisions are re-keyed: route the
+    // call by its canonical identity so no builtin handle row claims it.
+    let declared_recv_type = recv_type.as_deref().and_then(|name| {
+        handle_method_op(name, method, args.len())?;
+        let owner = cx.method_metadata_name(name, method);
+        if !cx.method_sigs.contains_key(&(owner, method.to_string())) {
+            return None;
+        }
+        cx.local_type_identities
+            .get(name)
+            .cloned()
+            .or_else(|| cx.imported_type_metadata_name(name))
+            .filter(|identity| identity != name)
+    });
+    let declared_recv_type = declared_recv_type.or_else(|| recv_type.clone());
+    let recv_type = &declared_recv_type;
     if recv_type.as_deref() == Some(crate::Syntax::TYPE_STRING)
         && cx.core_source_sigs.contains_key(&(
             jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE.to_string(),
@@ -4659,7 +4669,7 @@ fn lower_method_call_impl(
             && matches!(index, 2 | 3)
         {
             let inner_ty = if index == 2 {
-                Type::Named("HTTPServerTls".to_string())
+                Type::Named("HTTPServerTLS".to_string())
             } else {
                 Type::Named("Duration".to_string())
             };
@@ -4921,7 +4931,7 @@ fn lower_method_call_impl(
                     args: targs,
                     source_first_string_literal: first_string_literal_arg(args),
                     operator_line: matches!(method, "add" | "sub" | "mul" | "div").then(|| {
-                        crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32
+                        cx.src_line_col(method_span.start).0 as u32
                     }),
                 },
             }
@@ -5079,7 +5089,7 @@ fn lower_method_call_impl(
             if call.name == Syntax::BUILTIN_EXPECT && call.args.len() == 1 {
                 return in_own_frame(|| {
                     let val = lower_expr(&call.args[0].expr, cx, env);
-                    let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+                    let line = cx.src_line_col(method_span.start).0;
                     let snap_path = format!(
                         "snapshots/{}_{}.snap",
                         cx.file.replace(['/', '\\', '.'], "_"),
@@ -5549,7 +5559,8 @@ fn lower_method_call_impl(
         });
     }
     // Calling a checked function field uses the same argument and failure
-    // carrier boundary as every other function-value invocation.
+    // carrier boundary as every other function-value invocation. The stored
+    // callable returns the effective carrier (see `struct_field_type`).
     if let Some(fn_ty @ Type::Fn { .. }) = fn_field_call_ty(method, recv_type, cx) {
         return in_own_frame(|| {
             let recv = lower_expr(receiver, cx, env);
@@ -5558,7 +5569,7 @@ fn lower_method_call_impl(
                 _ => false,
             };
             let callee = TExpr {
-                ty: fn_ty.clone(),
+                ty: fn_ty.with_effective_fn_returns(),
                 kind: TExprKind::Field {
                     recv: Box::new(recv),
                     field: method.to_string(),
@@ -6006,6 +6017,15 @@ fn lower_method_call_impl(
                 let enum_owner = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
                 if let Some(variants) = cx.enum_variants.get(&enum_owner) {
                     if variants.iter().any(|(v, _)| v == method) {
+                        // A source spelling that is not a local row (an
+                        // imported leaf, or a user module lowered for a `prep`
+                        // fragment, whose rows carry canonical identities)
+                        // names its enum by the canonical owner.
+                        let enum_type = if cx.local_type_names.contains(type_name) {
+                            type_name.clone()
+                        } else {
+                            enum_owner.clone()
+                        };
                         return in_own_frame(|| {
                             let payload = if args.is_empty() {
                                 TEnumPayload::Unit
@@ -6027,12 +6047,12 @@ fn lower_method_call_impl(
                                         args: args.clone(),
                                     }
                                 }
-                                _ => Type::Named(type_name.clone()),
+                                _ => Type::Named(enum_type.clone()),
                             };
                             return TExpr {
                                 ty,
                                 kind: TExprKind::EnumLit {
-                                    enum_type: type_name.clone(),
+                                    enum_type,
                                     variant: method.to_string(),
                                     payload,
                                 },
@@ -7299,25 +7319,6 @@ fn lower_method_call_impl(
             });
         }
     }
-    // c109 Phase 19: `Stopwatch.elapsed_millis()` (gate shape d2). The gate proved
-    // `recv_type == None` + the `elapsed_millis` name + an in-subset value receiver.
-    // Lower to the existing `THandleOp::StopwatchElapsedMillis` (`{root}jet_stopwatch_
-    // elapsed_millis(&(recv))`), the same node the Phase-13 handle shape uses — emit is
-    // byte-identical to `emit_builtin_method`'s name-keyed `elapsed_millis` arm. The
-    // result type is `Int` (`stopwatch_method_return`), kept total per the design.
-    if recv_type.is_none() && method == "elapsed_millis" && args.is_empty() {
-        return in_own_frame(|| {
-            let recv_t = lower_expr(receiver, cx, env);
-            return TExpr {
-                ty: Type::Int,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv_t),
-                    op: THandleOp::StopwatchElapsedMillis,
-                    args: Vec::new(),
-                },
-            };
-        });
-    }
     // c109 Phase 24: `Match.group(n)` (gate shape d4). The gate proved `recv_type ==
     // Some("Match")` + `group`/1 + an in-subset value receiver. Lower to `BuiltinMethod`/
     // `MatchGroup`, byte-for-byte `emit_builtin_method`'s `("Match", "group")` arm. The
@@ -7863,7 +7864,7 @@ fn lower_method_call_impl(
     // D-RENDERTGT2=A (c133 M1/M2): a UI backend method (gate shape d7b).
     if matches!(
         recv_type.as_deref(),
-        Some("NullBackend" | "TuiBackend" | "GtkBackend")
+        Some("NullBackend" | "TUIBackend" | "GtkBackend")
     ) && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
     {
         return in_own_frame(|| {
@@ -8955,7 +8956,7 @@ fn lower_method_call_impl(
                     _ => Type::Int,
                 };
                 let id_ty = Type::Apply {
-                    name: "Id".to_string(),
+                    name: "ID".to_string(),
                     args: vec![elem.clone()],
                 };
                 let ty = match method {
@@ -9159,6 +9160,21 @@ fn lower_method_call_impl(
                         recv: Box::new(lower_expr(receiver, cx, env)),
                         method: method.to_string(),
                         args: Vec::new(),
+                    })),
+                };
+            });
+        }
+        // Owner ruling: `a.same(b)` is identity only, like `Rc::ptr_eq`.
+        if is_shared && method == "same" && args.len() == 1 {
+            return in_own_frame(|| {
+                let recv_t = lower_expr(receiver, cx, env);
+                let other = lower_expr(&args[0].expr, cx, env);
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or(Type::Bool),
+                    kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                        recv: Box::new(recv_t),
+                        method: method.to_string(),
+                        args: vec![other],
                     })),
                 };
             });
@@ -9865,8 +9881,7 @@ fn lower_method_call_impl(
                             host_kind,
                             dst_rust,
                             dst_spelling,
-                            line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
-                                as u32,
+                            line: cx.src_line_col(method_span.start).0 as u32,
                         },
                     },
                 };
@@ -9878,8 +9893,7 @@ fn lower_method_call_impl(
                     op: TNumericOp::CheckedIntToFloat {
                         source_signed,
                         target_f32: target == Type::Float32,
-                        line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
-                            as u32,
+                        line: cx.src_line_col(method_span.start).0 as u32,
                     },
                 },
             };
@@ -9894,7 +9908,7 @@ fn lower_method_call_impl(
                     "integer radix conversion without a resolved return type",
                 );
             };
-            let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
+            let line = cx.src_line_col(method_span.start).0 as u32;
             TExpr {
                 ty: result_ty,
                 kind: TExprKind::BuiltinMethod {
@@ -9929,8 +9943,7 @@ fn lower_method_call_impl(
                                 "numeric overflow operation without a resolved return type",
                             );
                         };
-                        let line =
-                            crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
+                        let line = cx.src_line_col(method_span.start).0 as u32;
                         return TExpr {
                             ty: result_ty,
                             kind: TExprKind::OverflowOpt {
@@ -9945,7 +9958,7 @@ fn lower_method_call_impl(
                     });
                 }
             }
-            let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
+            let line = cx.src_line_col(method_span.start).0 as u32;
             let resolved_op = resolve_numeric_op(method, numeric_name, line);
             if let Some(op) = resolved_op {
                 return in_own_frame(|| {
@@ -10003,7 +10016,7 @@ fn lower_method_call_impl(
                 kind: TExprKind::Binary {
                     op: crate::AST::BinOp::Eq,
                     overflow: false,
-                    line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32,
+                    line: cx.src_line_col(method_span.start).0 as u32,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
                 },
@@ -10073,7 +10086,7 @@ fn lower_method_call_impl(
                     },
                 },
             });
-            let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+            let line = cx.src_line_col(method_span.start).0;
             let is_mux = recv_type.as_deref() == Some("HTTPMux");
             let Some(contract_json) =
                 route_handler_contract(verb, &args[0].expr, &args[1].expr, cx, line, is_mux)
@@ -10712,7 +10725,7 @@ fn lower_method_call_impl(
                         }
                         // `Rng.shuffle(&list)` must keep a writable place for MirBridge
                         // write-back (CallArg Write + Ident is not Expr::Borrow).
-                        if handle == "Rng" && method == "shuffle" && i == 0 {
+                        if handle == "RNG" && method == "shuffle" && i == 0 {
                             return lower_expr_as_mut_place(&a.expr, cx, env);
                         }
                         lower_expr(&a.expr, cx, env)
@@ -11190,7 +11203,7 @@ fn lower_method_call_impl(
                 // D-FOUND-PLATFORM1=A: contextual `.cmd("key")` is the
                 // checked UiShortcut constructor. It lowers through the same
                 // shared Prelude type method on every resident/AOT tier.
-                if type_name == "UiShortcut" && method == "cmd" && args.len() == 1 {
+                if type_name == "UIShortcut" && method == "cmd" && args.len() == 1 {
                     return TExpr {
                         ty: resolved_ret
                             .cloned()
@@ -11458,8 +11471,7 @@ fn lower_method_call_impl(
                 }
                 if type_name == "Int" && method == "from_radix" && args.len() == 2 {
                     return in_own_frame(|| {
-                        let line =
-                            crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
+                        let line = cx.src_line_col(method_span.start).0 as u32;
                         return TExpr {
                             ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                                 ok: Box::new(Type::Int),
@@ -11693,11 +11705,7 @@ fn lower_method_call_impl(
                                         fallible,
                                         relative_uncertainty,
                                         file: cx.file.clone(),
-                                        line: crate::Diagnostics::span_line_col(
-                                            &cx.src,
-                                            method_span.start,
-                                        )
-                                        .0 as u32,
+                                        line: cx.src_line_col(method_span.start).0 as u32,
                                     },
                                 };
                             });
@@ -11706,11 +11714,15 @@ fn lower_method_call_impl(
                 }
                 // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
                 // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
-                // `Path` itself (a type-name ident) has no value.
-                if type_name == "Path"
+                // `Path` itself (a type-name ident) has no value. A bare `Path` names the
+                // built-in unless this module declares its own; a loaded module's `Path`
+                // record (`core.files.path`) is a different nominal and never answers here.
+                if type_name == crate::Syntax::TYPE_PATH
                     && method == "from"
                     && args.len() == 1
-                    && !cx.type_names.contains("Path")
+                    && !cx.local_type_names.contains(crate::Syntax::TYPE_PATH)
+                    && resolved_ret
+                        .is_none_or(|ty| *ty == Type::Named(crate::Syntax::TYPE_PATH.to_string()))
                 {
                     return in_own_frame(|| {
                         let str_arg = lower_expr(&args[0].expr, cx, env);
@@ -12822,7 +12834,7 @@ fn lower_method_call_impl(
                 // `equal`/`compare` never trap, so they carry no line.
                 let operator_line = (builtin_operator
                     && matches!(method, "add" | "sub" | "mul" | "div"))
-                .then(|| crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32);
+                .then(|| cx.src_line_col(method_span.start).0 as u32);
                 // A specialized generic/variadic parameter can retain the trait as
                 // `recv_type` while its lowered TIR type is the exact concrete
                 // implementation. Keep that concrete ABI and dispatch directly;

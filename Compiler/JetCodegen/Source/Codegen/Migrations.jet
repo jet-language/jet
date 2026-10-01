@@ -1,8 +1,21 @@
+use jet_foundation.[
+    MIRSchemaMigrationOp,
+    MIRSchemaMigrationPlan,
+    MIRSchemaMigrationStep,
+    MigrationDecl,
+    TField,
+    TSerdeAttributeKind,
+    TTypeDef,
+]
+use jet_sema.[
+    sema_migration_wire_name,
+]
+
 fn jet_codegen_migration_insert_sorted(values: [String], value: String) -> [String] Never! {
     result := [String]{}
     inserted := false
     loop current in values {
-        if current == value -> return values
+        if current == value -> return ~values
         if !inserted && current > value {
             &result.push(value)
             inserted = true
@@ -70,32 +83,32 @@ fn jet_codegen_migration_shape(fields: [TField], blocks: [MigrationDecl], style:
     historical
 }
 
-fn jet_codegen_migration_steps(fields: [TField], blocks: [MigrationDecl], style: String?) -> [MirSchemaMigrationStep]? {
-    steps := [MirSchemaMigrationStep]{}
+fn jet_codegen_migration_steps(fields: [TField], blocks: [MigrationDecl], style: String?) -> [MIRSchemaMigrationStep]? {
+    steps := [MIRSchemaMigrationStep]{}
     loop (block_index, block) in blocks {
-        operations := [MirSchemaMigrationOp]{}
+        operations := [MIRSchemaMigrationOp]{}
         loop operation in block.ops {
             if operation == {
-                .Rename(from, _, to, _) -> &operations.push(MirSchemaMigrationOp.Rename{from_key: jet_codegen_migration_json_key(fields, style, from), to_key: jet_codegen_migration_json_key(fields, style, to)})
-                .Remove(field, _) -> &operations.push(MirSchemaMigrationOp.Remove{key: jet_codegen_migration_json_key(fields, style, field)})
+                .Rename(from, _, to, _) -> &operations.push(MIRSchemaMigrationOp.Rename{from_key: jet_codegen_migration_json_key(fields, style, from), to_key: jet_codegen_migration_json_key(fields, style, to)})
+                .Remove(field, _) -> &operations.push(MIRSchemaMigrationOp.Remove{key: jet_codegen_migration_json_key(fields, style, field)})
                 .Add(field, _, ty, _, _, _, default_fn) -> {
                     function_name :: default_fn ?? return None
                     key := jet_codegen_migration_json_key(fields, style, field)
-                    &operations.push(MirSchemaMigrationOp.Add{key: key, type_name: type_name(ty), default_fn: function_name})
+                    &operations.push(MIRSchemaMigrationOp.Add{key: key, type_name: type_name(ty), default_fn: function_name})
                 }
                 .Change(field, _, from_ty, _, to_ty, _, _, _, conv_fn) -> {
                     function_name :: conv_fn ?? return None
                     key := jet_codegen_migration_json_key(fields, style, field)
-                    &operations.push(MirSchemaMigrationOp.Change{key: key, from_type: type_name(from_ty), to_type: type_name(to_ty), converter_fn: function_name})
+                    &operations.push(MIRSchemaMigrationOp.Change{key: key, from_type: type_name(from_ty), to_type: type_name(to_ty), converter_fn: function_name})
                 }
             }
         }
-        &steps.push(MirSchemaMigrationStep{from_shape: "v{block_index + 1}", to_shape: "v{block_index + 2}", ops: operations})
+        &steps.push(MIRSchemaMigrationStep{from_shape: "v{block_index + 1}", to_shape: "v{block_index + 2}", ops: operations})
     }
     Val(steps)
 }
 
-pub fn jet_codegen_lower_migration_plan(definition: TTypeDef, migrations: &[MigrationDecl]) -> MirSchemaMigrationPlan? {
+pub fn jet_codegen_lower_migration_plan(definition: TTypeDef, migrations: &[MigrationDecl]) -> MIRSchemaMigrationPlan? {
     published := definition.published_schema
     loop derive_name in definition.derives {
         if derive_name == "PublishedSchema" -> published = true
@@ -113,5 +126,5 @@ pub fn jet_codegen_lower_migration_plan(definition: TTypeDef, migrations: &[Migr
     style := jet_codegen_migration_rename_all(definition)
     historical := jet_codegen_migration_shape(fields, blocks, style)
     steps :: jet_codegen_migration_steps(fields, blocks, style) ?? return None
-    Val(MirSchemaMigrationPlan{type_name: definition.name, historical_shapes: historical, steps: steps})
+    Val(MIRSchemaMigrationPlan{type_name: definition.name, historical_shapes: historical, steps: steps})
 }

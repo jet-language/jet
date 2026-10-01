@@ -7,10 +7,6 @@ pub const RECORD_FIELD_ADDRESS_F64: i64 = 1;
 pub const RECORD_FIELD_ADDRESS_BOOL: i64 = 2;
 pub const RECORD_FIELD_ADDRESS_CHAR: i64 = 3;
 
-/// Runtime-owned model/provider surface. The compiler projects package
-/// metadata into this neutral seam; generated applications link only `jet_rt`.
-pub mod model;
-pub use jet_foundation::{DataTree, Diagnostics, JSON, SHA256};
 
 /// Canonical exact-number carrier shared by all resident arenas and the AOT,
 /// JIT, interpreter, and web adapters. Small values remain inline; spilled
@@ -99,7 +95,7 @@ pub use exact_int_bridge::{
 mod map_key_semantics {
     include!("../../jet-codegen/src/Prelude/Core/MapKey.rs");
 }
-pub use map_key_semantics::{jet_map_key_cmp, JetMapKey, JetMapKeyEncode};
+pub use map_key_semantics::{jet_map_key_cmp, JetMapKey};
 
 fn canonical_int_map_key(key: i64) -> i64 {
     unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(key) }

@@ -2086,6 +2086,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some((module, alias, alias_span)) = self.core_module_path_from_receiver(receiver) {
+            self.inferred_call_type_args = None;
             let ret = self.infer_core_call(
                 &module,
                 method,
@@ -2096,6 +2097,7 @@ impl<'a> Checker<'a> {
                 args,
                 resolved_ret_out,
             );
+            self.record_inferred_call_type_args(type_args);
             // A source-owned call returns its effective carrier for expression
             // inference and publishes its plain declared return separately.
             if resolved_ret_out.is_none() {
@@ -2105,6 +2107,7 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
             if let Some(module) = self.core_imports.get(alias).cloned() {
+                self.inferred_call_type_args = None;
                 let ret = self.infer_core_call(
                     &module,
                     method,
@@ -2115,13 +2118,15 @@ impl<'a> Checker<'a> {
                     args,
                     resolved_ret_out,
                 );
+                self.record_inferred_call_type_args(type_args);
                 if resolved_ret_out.is_none() {
                     *resolved_ret_out = ret.clone();
                 }
                 return ret;
             }
             if let Some(&mod_idx) = self.imports.get(alias) {
-                return self.infer_import_call(
+                self.inferred_call_type_args = None;
+                let ret = self.infer_import_call(
                     alias,
                     mod_idx,
                     method,
@@ -2131,12 +2136,15 @@ impl<'a> Checker<'a> {
                     args,
                     resolved_ret_out,
                 );
+                self.record_inferred_call_type_args(type_args);
+                return ret;
             }
             // D-MOD2: inline code module call — `math.double(x)` where `math` is an
             // inline `module math { … }` in this file. Resolve via mangled name.
             if let Some(canonical) = self.code_modules.get(alias.as_str()) {
                 let mangled = jet_foundation::Names::member_name(canonical, method);
-                return self.infer_code_module_call(
+                self.inferred_call_type_args = None;
+                let ret = self.infer_code_module_call(
                     alias,
                     &mangled,
                     *alias_span,
@@ -2145,6 +2153,8 @@ impl<'a> Checker<'a> {
                     args,
                     resolved_ret_out,
                 );
+                self.record_inferred_call_type_args(type_args);
+                return ret;
             }
         }
         // D-TYPE2-SPELL1: an inline range uses the destination-owned
@@ -2247,16 +2257,16 @@ impl<'a> Checker<'a> {
         if method == "cmd"
             && matches!(
                 receiver.as_ref(),
-                Expr::Ident(name, _) if name.is_empty() || name == "UiShortcut"
+                Expr::Ident(name, _) if name.is_empty() || name == "UIShortcut"
             )
         {
             let receiver_span = receiver.span();
-            **receiver = Expr::Ident("UiShortcut".to_string(), receiver_span);
-            let shortcut_ty = Type::Named("UiShortcut".to_string());
+            **receiver = Expr::Ident("UIShortcut".to_string(), receiver_span);
+            let shortcut_ty = Type::Named("UIShortcut".to_string());
             *resolved_ret_out = Some(shortcut_ty.clone());
             if args.len() != 1 {
                 self.diags
-                    .push(wrong_core_arity("UiShortcut.cmd", 1, args.len(), span));
+                    .push(wrong_core_arity("UIShortcut.cmd", 1, args.len(), span));
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }
@@ -2270,7 +2280,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             self.expect_core_arg(
-                "UiShortcut.cmd",
+                "UIShortcut.cmd",
                 0,
                 &Type::String,
                 &mut args[0],
@@ -5922,7 +5932,7 @@ impl<'a> Checker<'a> {
                                 let globals = self.current_ct_globals();
                                 crate::Comptime::evaluate_owned_with_imports_opts_collecting(
                                     &args[0].expr,
-                                    self.ct_checked_funcs,
+                                    self.ct_checked_funcs_for_evaluation(),
                                     self.ct_externs,
                                     self.ct_base_dir,
                                     globals.as_ref(),
@@ -6205,7 +6215,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-RENDERTGT2=A (c133 M1/M2): UI backend measure/layout/paint/on_event.
-            if handle_ty == "NullBackend" || handle_ty == "TuiBackend" || handle_ty == "GtkBackend"
+            if handle_ty == "NullBackend" || handle_ty == "TUIBackend" || handle_ty == "GtkBackend"
             {
                 if let Some(ret) =
                     ui_backend_method_return(handle_ty, method, args.len(), span, &mut self.diags)
@@ -6292,10 +6302,9 @@ impl<'a> Checker<'a> {
             if matches!(
                 handle_ty.as_str(),
                 "Clock"
-                    | "Rng"
+                    | "RNG"
                     | crate::Syntax::DETERMINISTIC_WORLD_TYPE
                     | "Fake"
-                    | "Stopwatch"
                     | "Duration"
                     | "Solver"
                     | "TestSuite"

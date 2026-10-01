@@ -256,6 +256,11 @@ pub enum BindPattern {
         fallback: OrFallback,
         names: Vec<BindName>,
         span: Span,
+        /// Compiler-generated: sema's D-FLOWTYPE1 rewrite of an exiting
+        /// `x == None` guard into `x == .Val(x) ?? { … }`. Only this form
+        /// refines its Optional subject in place; a written binding that
+        /// reuses the subject's name still shadows it (E0118).
+        synthesized: bool,
     },
 }
 

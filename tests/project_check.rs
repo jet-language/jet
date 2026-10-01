@@ -71,7 +71,6 @@ fn copy_receipt_fixture(root: &Path) {
         ("workspace.jet", "workspace.jet"),
         ("lock.fixture", ".jet/lock"),
         ("packages/app/package.jet", "packages/app/package.jet"),
-        ("packages/app/entry.jet", "packages/app/entry.jet"),
         ("packages/app/app/main.jet", "packages/app/app/main.jet"),
         ("packages/app/lock.fixture", "packages/app/.jet/lock"),
         (
@@ -345,9 +344,9 @@ fn bare_project_check_enumerates_outputs_without_writing_artifacts() {
 
 #[test]
 fn frozen_dogfood_and_each_project_proof_witness_are_snapshotted() {
-    // The frozen package follows dogfood's package.jet -> entry.jet -> nested
-    // source entry shape.  The other fixtures isolate the four proof classes:
-    // named output entry resolution, a multi-hop module graph, and a direct
+    // The frozen package follows dogfood's package.jet -> nested member-file
+    // entry shape.  The other fixtures isolate the four proof classes: named
+    // output entry resolution, a multi-file package namespace, and a direct
     // Core call.  All four clean checks must expose all named proof rows.
     for name in [
         "frozen_dogfood",
@@ -422,6 +421,38 @@ fn library_package_check_needs_no_run_entry() {
         "a .Library package check must pass without `fn run`:\n{stderr}"
     );
     assert!(!stderr.contains("E0101"), "library check demanded `fn run`:\n{stderr}");
+}
+
+#[test]
+fn dependency_package_members_check_clean_and_run() {
+    // D-MOD-CYCLE1=A: `use base.[...]` reaches names from every file of the
+    // dependency package (an enum and a struct in Types.jet, an impl and a
+    // function in its sibling Sub/Ops.jet, calls both ways). Each import is
+    // read, so the check reports nothing; the run crosses both files. The
+    // app's own members cover package-wide facts: a derive cycle across two
+    // files, a compile-time table of a sibling enum, a failure-solve edge to
+    // a sibling file, a byte-0 `use` beside three sibling bindings, and the
+    // dependency's field types joining and sharing like local ones.
+    let check = run_uncached("dependency_members/app", &["check", "."]);
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(check.status.success(), "dependency member check failed:\n{report}");
+    for code in ["Warning", "Error", "internal"] {
+        assert!(!report.contains(code), "dependency member check reported {code}:\n{report}");
+    }
+    let run = run_uncached("dependency_members/app", &["run"]);
+    assert!(
+        run.status.success(),
+        "dependency member run failed:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "4\n5\n7\n9\n3\nwide\n4\n2\n2\ntrue\n"
+    );
 }
 
 #[test]
@@ -558,7 +589,7 @@ fn project_check_receipt_tracks_entry_and_authority_changes() {
         (
             "output",
             package_root.join("package.jet"),
-            "name: \"receipt-probe\"\nversion: \"0.1.0\"\noutputs: { release_alt: .Executable{ entry: app.launch } }\ndefaults: { run: release_alt }\n",
+            "name: \"receipt-probe\"\nversion: \"0.1.0\"\noutputs: { release_alt: .Executable{ entry: main.launch } }\ndefaults: { run: release_alt }\n",
         ),
         ("lock", root.join(".jet/lock"), "workspace-lock-v2\n"),
         (

@@ -1,6 +1,11 @@
 // Structural type substitution shared by inference, calls, and nominal checks.
 // Function effects, labels, defaults, and view provenance are identity metadata;
 // they survive specialization unchanged while every nested Type is rewritten.
+use jet_foundation.[
+    Type,
+    TypeTupleField,
+    type_identity_equal,
+]
 
 fn sema_inference_binding_type(name: String, bindings: [SemaInferenceBinding], seen: [String]) -> Type? {
     loop binding in bindings {
@@ -27,7 +32,7 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
     if ty == {
         .Named(name) -> {
             value :: sema_inference_binding_type(name, bindings, seen) ?? return ty
-            if type_identity_equal(value, ty) -> return ty
+            if type_identity_equal(value, ty) -> return ~ty
             sema_inference_substitute_type_inner(value, bindings, seen)
         }
         .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, [String]{})}

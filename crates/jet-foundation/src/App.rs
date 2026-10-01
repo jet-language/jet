@@ -4,6 +4,7 @@
 //! registration outside a declared `.mount` is a compile diagnostic. Optional
 //! `.routes(from:)` conventions expand only when the builder opts in.
 
+use crate::JSON::quote as json_str;
 use std::collections::BTreeMap;
 pub use crate::AppMiddleware::{AppServerMiddleware, APP_SERVER_FUNCTION_MIDDLEWARE};
 
@@ -252,17 +253,6 @@ impl Default for AppRenderFacts {
             override_mode: None,
             pending_boundary_id: None,
             island: None,
-        }
-    }
-}
-
-impl AppRenderFacts {
-    pub fn with_legacy_override(mode: AppRenderMode) -> Self {
-        Self {
-            mode: AppRenderFactMode::from_legacy(mode),
-            override_mode: Some(AppRenderFactMode::from_legacy(mode)),
-            reason: vec![format!("explicit render mode `{}`", mode.as_str())],
-            ..Self::default()
         }
     }
 }
@@ -987,22 +977,6 @@ impl AppGraph {
     }
 }
 
-fn json_str(value: &str) -> String {
-    let mut out = String::from('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
 fn json_optional_str(value: Option<&str>) -> String {
     value
         .map(json_str)

@@ -371,10 +371,6 @@ fn data_loader_bridge(operation: &str) -> CtValue {
     )
 }
 
-fn data_loader_field<'a>(loader: &'a CtValue, field: &str) -> Option<&'a CtValue> {
-    struct_field(loader, "DataLoader", field)
-}
-
 fn data_snapshot_reusable_value(left: &CtValue, right: &CtValue) -> Option<bool> {
     if let (Some(left), Some(right)) = (
         matches!(left, CtValue::Struct { type_name, .. } if type_name == "DataSnapshotIdentity")

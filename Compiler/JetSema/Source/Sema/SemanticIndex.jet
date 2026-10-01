@@ -1,6 +1,54 @@
 // Compiler-facing projection of package-wide checked Source Sema facts.
 // This never runs a second checker; callers pass the registered graph and its
 // finalized checked result so imported modules and solved effects stay intact.
+use jet_foundation.[
+    ArithmeticMode,
+    ArithmeticOperation,
+    ArithmeticPolicyFact,
+    CallArg,
+    ConstDef,
+    DerivationRecord,
+    DeriveBodyItem,
+    Expr,
+    ExprField,
+    ExprPair,
+    ForKind,
+    Func,
+    Item,
+    LValue,
+    MIRDerivationDisposition,
+    MIRDerivationMethod,
+    OutputKind,
+    ParamZone,
+    ResolvedOutput,
+    Span,
+    Stmt,
+    StructDef,
+    SwitchArm,
+    Symbol,
+    SymbolKind,
+    TComptimeField,
+    TComptimeReport,
+    TComptimeValue,
+    TFunc,
+    TLocal,
+    TStmt,
+    TupleField,
+    Type,
+    ViewProvenance,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    derivation_identity,
+    derivation_payload_json,
+    derivation_record,
+    expr_span,
+    failure_contract_effective_type,
+    failure_contract_source,
+    mir_sha256_hex,
+    type_name,
+]
+
 pub struct SemaCompilerSemanticIndexFacts {
     pub value: TComptimeValue
     pub complete: Bool
@@ -66,7 +114,7 @@ fn sema_compiler_index_module_path(registration: SemaRegistrationGraph, module_n
     loop registered_module in registration.modules {
         if registered_module.module_name == module_name -> return registered_module.module_path
     }
-    module_name
+    ~module_name
 }
 
 fn sema_compiler_index_definition_kind(symbol: Symbol, registration: SemaRegistrationGraph) -> String Never! {
@@ -109,9 +157,9 @@ fn sema_compiler_index_parameter_values(parameters: [SemaRegistrationParameter])
 fn sema_compiler_index_symbol_kind(symbol: Symbol, registered_module: SemaRegistrationModule) -> TComptimeValue Never! {
     kind := "type"
     params := TComptimeValue.List{values: [TComptimeValue]{}}
-    ret := None
+    ret := String?{None}
     parent := symbol.owner
-    ty := None
+    ty := String?{None}
     fields := [TComptimeValue]{}
     variants := [String]{}
     mutable := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Bool}}
@@ -376,8 +424,8 @@ fn sema_compiler_index_output_value(output: ResolvedOutput, binding: ConstDef, r
             TComptimeField{name: "reference_span", value: sema_compiler_index_span(output.reference)},
             TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
             TComptimeField{name: "return_type", value: sema_compiler_index_option_string(output.return_type.map((ty) -> type_name(ty)))},
-            TComptimeField{name: "failure_contract", value: sema_compiler_index_string(type_name(output.failure_contract.effective_type()))},
-            TComptimeField{name: "failure_source", value: sema_compiler_index_string(output.failure_contract.source())},
+            TComptimeField{name: "failure_contract", value: sema_compiler_index_string(type_name(failure_contract_effective_type(output.failure_contract)))},
+            TComptimeField{name: "failure_source", value: sema_compiler_index_string(failure_contract_source(output.failure_contract))},
             TComptimeField{name: "authority", value: sema_compiler_index_string("safe-jet")},
             TComptimeField{name: "effects", value: sema_compiler_index_strings(effects)},
         }}},
@@ -743,7 +791,7 @@ fn sema_compiler_index_stmt_shape(statement: Stmt) -> String Never! {
         .Region(_, _, _, _) -> 20
         .Policy(_, _, _) -> 21
         .TaskGroup(_, _, _, _, _) -> 22
-        .Layout(_, _, _) -> 23
+        .Layout(_, _, _, _) -> 23
         .AuthorityScope(_, _, _, _, _) -> 24
         .ComptimeIf(_, _, _, _, _, _) -> 25
         .ComptimeSwitch(_, _, _, _) -> 26
@@ -764,20 +812,20 @@ fn sema_compiler_index_stmt_span(statement: Stmt) -> Span {
         .Expr(value) -> expr_span(value)
         .Val(binding) -> Span{start: if binding.sigil_span == .Val(sigil) -> sigil.start else -> binding.name_span.start, end: expr_span(binding.init).end}
         .Assign(target, _, _, value) -> Span{start: sema_compiler_index_lvalue_span(target).start, end: expr_span(value).end}
-        .Return(_, span) | .While(_, _, span, _, _) | .For(_, _, _, _, _, span, _, _, _) | .Switch(_, _, _, span) | .Break(span) | .BreakValue(_, span) | .Continue(span) | .BreakLabel(_, span) | .BreakLabelValue(_, _, _, span) | .ContinueLabel(_, span) | .Loop(_, span, _, _) | .CountedLoop(_, _, _, _, span, _, _) | .Unsafe(_, _, _, span) | .Impure(_, _, _, span) | .Reactive(_, span) | .Shield(_, span) | .Switched(_, _, span) | .Region(_, _, _, span) | .Policy(_, _, span) | .TaskGroup(_, _, _, _, span) | .Layout(_, _, span) | .AuthorityScope(_, _, _, _, span) | .ComptimeIf(_, _, _, _, span, _) | .ComptimeSwitch(_, _, _, span) | .ComptimeBlock(_, _, span) | .ContextBlock(_, _, span) | .Live(_, span) | .AssumeDet(_, _, _, span) | .Transact(_, _, _, _, span) | .Yield(_, span) | .ScopeMember(_, _, _, _, _, _, _, span) | .DeferClose(_, span) -> span
+        .Return(_, span) | .While(_, _, span, _, _) | .For(_, _, _, _, _, span, _, _, _) | .Switch(_, _, _, span) | .Break(span) | .BreakValue(_, span) | .Continue(span) | .BreakLabel(_, span) | .BreakLabelValue(_, _, _, span) | .ContinueLabel(_, span) | .Loop(_, span, _, _) | .CountedLoop(_, _, _, _, span, _, _) | .Unsafe(_, _, _, span) | .Impure(_, _, _, span) | .Reactive(_, span) | .Shield(_, span) | .Switched(_, _, span) | .Region(_, _, _, span) | .Policy(_, _, span) | .TaskGroup(_, _, _, _, span) | .Layout(_, _, _, span) | .AuthorityScope(_, _, _, _, span) | .ComptimeIf(_, _, _, _, span, _) | .ComptimeSwitch(_, _, _, span) | .ComptimeBlock(_, _, span) | .ContextBlock(_, _, span) | .Live(_, span) | .AssumeDet(_, _, _, span) | .Transact(_, _, _, _, span) | .Yield(_, span) | .ScopeMember(_, _, _, _, _, _, _, span) | .DeferClose(_, span) -> span
     }
 }
 
 fn sema_compiler_index_walk_node(state: &SemaCompilerIndexWalkState, class: String, shape: String, module_path: String, span: Span) -> Int? {
     if span.end < span.start -> return None
-    parent := None
+    parent := Int?{None}
     if state.parents.len() > 0 -> parent = Val(state.parents[state.parents.len() - 1])
     ordinal := 0
     found := false
     loop index in 0..<state.ordinal_slots.len() {
         if state.ordinal_parents[index] == parent && state.ordinal_slots[index] == state.slot {
             ordinal = state.ordinal_values[index]
-            state.ordinal_values[index] += 1
+            state.ordinal_values[index] = ordinal + 1
             found = true
             break
         }
@@ -1046,7 +1094,7 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
         .Paren(value, _) -> sema_compiler_index_walk_expr_slot(&state, "inner", value, module_path)
         .StrMatchLit(_, _) | .BinMatchLit(_, _) | .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Unit(_) | .Char(_, _) | .Ident(_, _) | .UnitLit(_, _, _, _, _, _) | .Absent(_) | .Todo(_, _) | .NoElse(_) | .ReduceMarker(_, _) | .ComptimeName(_, _, _) -> {}
     }
-    &state.parents.pop()
+    _ := &state.parents.pop()
 }
 
 fn sema_compiler_index_walk_lvalue(state: &SemaCompilerIndexWalkState, target: LValue, module_path: String) {
@@ -1080,11 +1128,11 @@ fn sema_compiler_index_walk_arms(state: &SemaCompilerIndexWalkState, arms: [Swit
     state.slot = "arms"
     state.slot_is_list = true
     loop arm in arms {
-        id :: sema_compiler_index_walk_node(&state, "arm", "switch_arm", module_path, arm.span) ?? continue
+        id :: sema_compiler_index_walk_node(&state, "arm", "switch_arm", module_path, arm.span) ?? next
         &state.parents.push(id)
         sema_compiler_index_walk_expr_slot(&state, "condition", arm.cond, module_path)
         sema_compiler_index_walk_stmt_slot(&state, "body", arm.body, module_path)
-        &state.parents.pop()
+        _ := &state.parents.pop()
     }
     state.slot = old_slot
     state.slot_is_list = old_list
@@ -1153,7 +1201,7 @@ fn sema_compiler_index_walk_stmt(state: &SemaCompilerIndexWalkState, statement: 
         }
         .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
-    &state.parents.pop()
+    _ := &state.parents.pop()
 }
 
 fn sema_compiler_index_walk_type_slot(state: &SemaCompilerIndexWalkState, slot: String, span: Span, module_path: String, is_list: Bool) Never! {
@@ -1161,7 +1209,7 @@ fn sema_compiler_index_walk_type_slot(state: &SemaCompilerIndexWalkState, slot: 
     old_list := state.slot_is_list
     state.slot = slot
     state.slot_is_list = is_list
-    sema_compiler_index_walk_node(&state, "type", "type", module_path, span)
+    _ := sema_compiler_index_walk_node(&state, "type", "type", module_path, span)
     state.slot = old_slot
     state.slot_is_list = old_list
 }
@@ -1259,7 +1307,7 @@ fn sema_compiler_index_walk_item(state: &SemaCompilerIndexWalkState, item: Item,
         .GenericModule(definition) -> sema_compiler_index_walk_items_slot(&state, "body", definition.body, module_path)
         .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
-    &state.parents.pop()
+    _ := &state.parents.pop()
 }
 
 fn sema_compiler_index_param_zone(zone: ParamZone) -> String Never! {
@@ -1310,7 +1358,7 @@ fn sema_compiler_index_view_map(map: ViewProvenanceMap?) -> String Never! {
 }
 
 fn sema_compiler_index_function_signature(function: SemaRegistrationFunction) -> String Never! {
-    if function.signature == {.Fn(parameters, return_type, _, contract, _, provenance) -> {
+    if function.signature == .Fn(parameters, return_type, _, contract, _, provenance) {
         parameter_names := [String]{}
         loop parameter in parameters -> &parameter_names.push(type_name(parameter))
         contracts := [String]{}
@@ -1333,8 +1381,8 @@ fn sema_compiler_index_function_signature(function: SemaRegistrationFunction) ->
         ret := if return_type == .Val(value) -> type_name(value) else -> "()"
         view := sema_compiler_index_view_map(provenance)
         return "({parameter_names.join(",")})->{ret};call_contract=[{contracts.join(",")}];view_source={view}"
-    }}
-    if function.symbol.ty == .Val(ty) -> type_name(ty)
+    }
+    if function.symbol.ty == .Val(ty) -> return type_name(ty)
     "function"
 }
 
@@ -1355,7 +1403,7 @@ fn sema_compiler_index_definition_signature(symbol: Symbol, registered_module: S
             if nominal.kind == SemaRegistrationNominalKind.Struct {
                 fields := [String]{}
                 loop field in nominal.fields -> &fields.push(type_name(field.ty))
-                return "{{" + fields.join(",") + "}}"
+                return "{{{fields.join(",")}}}"
             }
             if nominal.kind == SemaRegistrationNominalKind.Enum -> return "variants:{nominal.variants.len()}"
         }
@@ -1370,7 +1418,8 @@ fn sema_compiler_index_derivation_definition_eligible(symbol: Symbol) -> Bool Ne
 fn sema_compiler_index_source_fragment(source: String, span: Span) -> String? {
     bytes := source.bytes()
     if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return None
-    String.from_bytes(bytes.slice(span.start, span.end))
+    text :: String.from_bytes(bytes.slice(span.start, span.end)) ?? return None
+    Val(text)
 }
 
 fn sema_compiler_index_normalize_definition(source: String) -> String Never! {
@@ -1410,20 +1459,20 @@ struct SemaCompilerIndexDerivationFacts {
 
 fn sema_compiler_index_derivation_value(record: DerivationRecord) -> TComptimeValue Never! {
     method := if {
-        record.method == MirDerivationMethod.StaticDerivation -> "static_derivation"
-        record.method == MirDerivationMethod.FormalProof -> "formal_proof"
-        record.method == MirDerivationMethod.RecordedExecution -> "recorded_execution"
-        record.method == MirDerivationMethod.SampledAgreement -> "sampled_agreement"
+        record.method == MIRDerivationMethod.StaticDerivation -> "static_derivation"
+        record.method == MIRDerivationMethod.FormalProof -> "formal_proof"
+        record.method == MIRDerivationMethod.RecordedExecution -> "recorded_execution"
+        record.method == MIRDerivationMethod.SampledAgreement -> "sampled_agreement"
         else -> "external_assumption"
     }
     disposition := if {
-        record.disposition == MirDerivationDisposition.Current -> "current"
-        record.disposition == MirDerivationDisposition.Stale -> "stale"
-        record.disposition == MirDerivationDisposition.Expired -> "expired"
-        record.disposition == MirDerivationDisposition.Redacted -> "redacted"
-        record.disposition == MirDerivationDisposition.Unavailable -> "unavailable"
-        record.disposition == MirDerivationDisposition.Unsupported -> "unsupported"
-        record.disposition == MirDerivationDisposition.BudgetExhausted -> "budget_exhausted"
+        record.disposition == MIRDerivationDisposition.Current -> "current"
+        record.disposition == MIRDerivationDisposition.Stale -> "stale"
+        record.disposition == MIRDerivationDisposition.Expired -> "expired"
+        record.disposition == MIRDerivationDisposition.Redacted -> "redacted"
+        record.disposition == MIRDerivationDisposition.Unavailable -> "unavailable"
+        record.disposition == MIRDerivationDisposition.Unsupported -> "unsupported"
+        record.disposition == MIRDerivationDisposition.BudgetExhausted -> "budget_exhausted"
         else -> "unknown"
     }
     observation := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerDerivationObservation"}}}
@@ -1479,7 +1528,7 @@ fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structur
             complete = false
             next
         }
-        symbol := None
+        symbol := Symbol?{None}
         loop candidate in registered_module.symbols {
             if !sema_compiler_index_derivation_definition_eligible(candidate) -> next
             if candidate.span.start < node.span.start || candidate.span.end > node.span.end -> next
@@ -1493,19 +1542,20 @@ fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structur
                 }
             }
         }
-        definition :: symbol ?? continue
+        definition :: symbol ?? next
         kind := sema_compiler_index_definition_kind(definition, registration)
         structural_key := "{kind}|{definition.id.key}"
-        stable_id := "def:" + mir_sha256_hex(structural_key).slice(0, 16)
+        stable_id := "def:{mir_sha256_hex(structural_key).slice(0, 16)}"
         signature := sema_compiler_index_definition_signature(definition, registered_module, registration)
-        signature_id := "sig:" + mir_sha256_hex("{kind}|{signature}").slice(0, 16)
+        signature_key := "{kind}|{signature}"
+        signature_id := "sig:{mir_sha256_hex(signature_key).slice(0, 16)}"
         normalized := sema_compiler_index_normalize_definition(definition_source)
-        content_id := "sha256:" + mir_sha256_hex(normalized)
+        content_id := "sha256:{mir_sha256_hex(normalized)}"
         record := derivation_record(
             stable_id,
             definition.id.key,
             "jet-sema",
-            MirDerivationMethod.StaticDerivation,
+            MIRDerivationMethod.StaticDerivation,
             "checked-definition",
             [String]{signature_id, content_id},
             derivation_identity(content_id, signature_id, "", registered_module.module_path),
@@ -1559,7 +1609,7 @@ fn sema_compiler_index_collect_checked_locals(body: [TStmt], module_identity: St
                 sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, functions, &definitions, &seen)
                 loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registered_module, functions, &definitions, &seen)
             }
-            .ListDestructure(temp, _, _, _, elements, _, _) -> {
+            .ListDestructure(temp, _, _, _, _, elements, _) -> {
                 sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, functions, &definitions, &seen)
                 loop local in elements -> sema_compiler_index_append_checked_local(local, module_identity, owner, registered_module, functions, &definitions, &seen)
             }
@@ -1601,7 +1651,7 @@ pub fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationG
         }
         graph_facts := sema_state_graph_facts(registered_module.program.items)
         loop fact in graph_facts {
-            definition := None
+            definition := StructDef?{None}
             loop item in registered_module.program.items {
                 if item == .Struct(value) && value.name == fact.type_name {
                     definition = Val(value)

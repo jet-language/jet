@@ -61,11 +61,33 @@ async function jetFilesUnder(directory) {
     if (entry.isSymbolicLink()) fail(`source inventory contains a symlink: ${relative(sourceRootDir, path)}`);
     if (entry.isDirectory()) {
       files.push(...await jetFilesUnder(path));
-    } else if (entry.isFile() && entry.name.endsWith(".jet")) {
+    } else if (entry.isFile() && entry.name.endsWith(".jet") && entry.name !== "package.jet") {
       files.push(path);
     }
   }
   return files;
+}
+
+// D-MOD-CYCLE1=A: each Compiler/<Pkg>/ is a package, and its files import the
+// packages they depend on with `use <package>.[names]`. The aggregate unit is
+// one namespace, so those imports are blanked to spaces of the same length:
+// every byte offset and line in the source map still matches the original.
+// Files in different packages may also repeat one single-line Core import
+// (`use core.math as math`); inside one unit the repeat is a duplicate import
+// name (E0105), so every repeat after the first is blanked the same way.
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|compiler_bootstrap)\.\[[^\]]*\]/gm;
+const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
+const seenCoreImports = new Set();
+const blank = (block) => block.replace(/[^\n]/g, " ");
+function blankPackageImports(text) {
+  return text.replace(PACKAGE_IMPORT, blank).replace(CORE_IMPORT, (line) => {
+    const key = line.trimEnd();
+    if (!seenCoreImports.has(key)) {
+      seenCoreImports.add(key);
+      return line;
+    }
+    return blank(line);
+  });
 }
 
 const manifestText = await readFile(manifestPath, "utf8").catch((error) => {
@@ -120,7 +142,7 @@ let generatedByte = 0;
 let nextLine = 1;
 const mappedSources = [];
 for (const { sourcePath, bytes, text } of entries) {
-  // Keep source bytes unchanged; provenance markers are outside each byte range.
+  // Keep source offsets unchanged; provenance markers are outside each byte range.
   const marker = `// [jet-bootstrap source: ${sourcePath}]\n`;
   output += marker;
   generatedByte += Buffer.byteLength(marker, "utf8");
@@ -128,7 +150,7 @@ for (const { sourcePath, bytes, text } of entries) {
 
   const generatedStartByte = generatedByte;
   const generatedStartLine = nextLine;
-  output += text;
+  output += blankPackageImports(text);
   generatedByte += bytes.length;
   const newlineCount = (text.match(/\n/g) ?? []).length;
   const sourceLineCount = text.length === 0 ? 0 : newlineCount + (text.endsWith("\n") ? 0 : 1);

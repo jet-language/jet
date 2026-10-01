@@ -1,9 +1,22 @@
 // Source-owned evaluation for compile-time reflection metadata predicates.
 // Metadata values are the canonical Comptime reflection structs; no native
 // Builtins callback participates in this route.
+use jet_foundation.[
+    MIRCallFallibility,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRPreludeFamily,
+    Span,
+    TComptimeField,
+    TComptimeValue,
+    mir_symbol_name,
+]
+use jet_sema.[
+    sema_comptime_reflection_has_marker,
+]
 
 fn jet_eval_reflection_metadata_member(member: String) -> [String]? {
-    parts := member.split(".")
+    parts := member.split(".").to_list()
     if parts.len() != 2 -> return None
     Val(parts)
 }
@@ -65,12 +78,12 @@ fn jet_eval_reflection_metadata_method_list_contains(fields: [TComptimeField], w
     }
 }
 
-pub fn jet_eval_route_reflection_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
-    if row.family != MirPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
+pub fn jet_eval_route_reflection_host(row: MIRPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    if row.family != MIRPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
         jet_eval_compiler_fail(&machine, span, "invalid reflection metadata Prelude route")
         return None
     }
-    if row.abi != MirPreludeAbi.Value || row.signature.arity != 2 || row.signature.max_arity != 2 || row.signature.borrow_mask != ([Bool]{true, false}) || row.fallibility != MirCallFallibility.Infallible || args.len() != 2 {
+    if row.abi != MIRPreludeABI.Value || row.signature.arity != 2 || row.signature.max_arity != 2 || row.signature.borrow_mask != ([Bool]{true, false}) || row.fallibility != MIRCallFallibility.Infallible || args.len() != 2 {
         jet_eval_compiler_fail(&machine, span, "reflection metadata Prelude route has an invalid ABI")
         return None
     }

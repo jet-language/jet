@@ -88,7 +88,7 @@ const severityValues = new Map([
 const safetyVariants = new Map([
   ["formatting", "Formatting"],
   ["behavior-preserving", "BehaviorPreserving"],
-  ["api-changing", "ApiChanging"],
+  ["api-changing", "APIChanging"],
   ["target-changing", "TargetChanging"],
   ["needs-review", "NeedsReview"],
 ]);

@@ -2,37 +2,45 @@
 //
 // The register layout is deliberately the same as the native sketch carrier:
 // `m` is the register count and `regs` stores one bounded rho value per
-// register.  Updates are persistent at this Jet boundary; native tiers may
-// keep the same state behind an opaque handle.
+// register.  `add` updates the registers in place through a write receiver,
+// so a stream of updates never copies the register table.
 use core.math as math
 
 C_REGISTERS :: 256
 C_MAX_RHO :: 57
 
 
-pub struct Hll {
+pub struct HLL {
     pub m: Int
     pub regs: [Int]
 }
 
-pub fn new() -> Hll {
-    Hll{m: C_REGISTERS, regs: zero_registers(C_REGISTERS)}
+pub fn new() -> HLL Never! {
+    HLL{m: C_REGISTERS, regs: zero_registers(C_REGISTERS)}
 }
 
-pub fn add(hll: Hll, key: String) -> Hll {
-    width :: hll_width(hll)
-    if width <= 0 -> return Hll{m: 0, regs: [Int]{}}
-    regs := normalize_registers(hll.regs, width)
-    hash :: hash64(key)
-    index :: register_index(hash, width)
-    rest :: hash >> 8
-    rho := C_MAX_RHO
-    if rest != (U64{0}) -> rho = rest.leading_zeros() + 1
-    if rho > regs[index] -> regs[index] = rho
-    Hll{m: width, regs: regs}
+impl HLL {
+    /// Record one key.
+    pub fn add(&self, key: String) Never! {
+        width := hll_width(self)
+        if width <= 0 -> width = C_REGISTERS
+        if self.m != width || self.regs.len() != width {
+            self.regs = normalize_registers(self.regs, width)
+            self.m = width
+        }
+        hash :: hash64(key)
+        index :: register_index(hash, width)
+        rest :: hash >> 8
+        rho := C_MAX_RHO
+        if rest != (U64{0}) -> rho = rest.leading_zeros() + 1
+        if rho > self.regs[index] -> self.regs[index] = rho
+    }
+
+    /// The estimated number of distinct keys.
+    pub fn count(self) -> Int Never! { hll_estimate(self) }
 }
 
-pub fn count(hll: Hll) -> Int {
+fn hll_estimate(hll: HLL) -> Int Never! {
     width :: hll_width(hll)
     if width <= 0 -> return 0
     regs :: normalize_registers(hll.regs, width)
@@ -69,7 +77,7 @@ fn register_index(hash: U64, width: Int) -> Int {
     Int.from_u64(hash %% U64{width})
 }
 
-fn hll_width(hll: Hll) -> Int {
+fn hll_width(hll: HLL) -> Int {
     if hll.m <= 0 || hll.regs.len() == 0 -> return 0
     width := hll.m
     if width > hll.regs.len() -> width = hll.regs.len()
@@ -97,7 +105,7 @@ fn normalize_registers(values: [Int], width: Int) -> [Int] {
     out
 }
 
-fn merge(a: Hll, b: Hll) -> Hll {
+fn merge(a: HLL, b: HLL) -> HLL {
     aw :: hll_width(a)
     bw :: hll_width(b)
     if aw <= 0 -> return canonical(b)
@@ -112,13 +120,13 @@ fn merge(a: Hll, b: Hll) -> Hll {
         if br[i] > value -> value = br[i]
         &regs.push(value)
     }
-    Hll{m: width, regs: regs}
+    HLL{m: width, regs: regs}
 }
 
-fn cardinality(hll: Hll) -> Int { count(hll) }
+fn cardinality(hll: HLL) -> Int { hll_estimate(hll) }
 
-fn canonical(hll: Hll) -> Hll {
+fn canonical(hll: HLL) -> HLL {
     width :: hll_width(hll)
-    if width <= 0 -> return Hll{m: 0, regs: [Int]{}}
-    Hll{m: width, regs: normalize_registers(hll.regs, width)}
+    if width <= 0 -> return HLL{m: 0, regs: [Int]{}}
+    HLL{m: width, regs: normalize_registers(hll.regs, width)}
 }

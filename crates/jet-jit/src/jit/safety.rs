@@ -1,6 +1,6 @@
 use jet_foundation::MIR::{
-    MirAbi, MirAccess, MirCallee, MirFunction, MirFunctionId, MirOperation, MirPreludeFamily,
-    MirPreludeTypeArg, MirProgram, MirSemanticOp, MirType, MirTypeKind, MirTypeDefKind,
+    MirAbi, MirAccess, MirFunction, MirFunctionId, MirOperation, MirPreludeFamily,
+    MirPreludeTypeArg, MirProgram, MirSemanticOp, MirType, MirTypeKind,
 };
 
 /// Check the canonical facts required by this adapter. Legality is decided
@@ -255,29 +255,3 @@ pub(crate) fn artifact_entry(program: &MirProgram, artifact: jet_foundation::MIR
         .function
 }
 
-
-pub(crate) fn type_def_is_record_or_enum(kind: &MirTypeDefKind) -> bool {
-    match kind {
-        MirTypeDefKind::Struct { .. } | MirTypeDefKind::Enum { .. } => true,
-        MirTypeDefKind::Distinct { .. }
-        | MirTypeDefKind::Alias { .. }
-        | MirTypeDefKind::UnitFamily { .. } => false,
-    }
-}
-
-pub(crate) fn callee_identity(callee: &MirCallee) -> String {
-    match callee {
-        MirCallee::User(id) => format!("user:{:?}", id),
-        MirCallee::Associated { function, .. } => format!("associated:{:?}", function),
-        MirCallee::Method { function, .. } => format!("method:{:?}", function),
-        MirCallee::TraitMethod {
-            method,
-            trait_ref,
-            ..
-        } => format!("trait-method:{:?}:{:?}", trait_ref.id, method),
-        MirCallee::Core(id) => format!("core:{:?}", id),
-        MirCallee::Prelude(id) => format!("prelude:{:?}", id),
-        MirCallee::Foreign(id) => format!("foreign:{:?}", id),
-        MirCallee::Indirect(value) => format!("indirect:{:?}", value),
-    }
-}

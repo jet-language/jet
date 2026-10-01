@@ -6,7 +6,7 @@ struct Label {
 
 fn label(text: String) -> Label { return Label{text: ~text} }
 
-fn label_view(value: Label) -> UiNode { ui.text(value.text) }
+fn label_view(value: Label) -> UINode { ui.text(value.text) }
 
 struct Input {
     value: String
@@ -15,7 +15,7 @@ struct Input {
 
 fn input(placeholder: String) -> Input { return Input{value: "", placeholder: ~placeholder} }
 
-fn input_view(value: Input) -> UiNode {
+fn input_view(value: Input) -> UINode {
     shown := ~value.value
     if value.value == "" -> shown = ~value.placeholder
     return ui.node_role(shown, 20.0, 1.0, ui.aria_role_text_input())
@@ -27,9 +27,9 @@ struct Button {
 
 fn button(label: String) -> Button { return Button{label: ~label} }
 
-fn button_view(value: Button) -> UiNode { ui.button(value.label) }
+fn button_view(value: Button) -> UINode { ui.button(value.label) }
 
-fn container(children: [UiNode]) -> UiNode { ui.box(children) }
+fn container(children: [UINode]) -> UINode { ui.box(children) }
 
 fn run() {
     tree := container([label_view(label("Name")), input_view(input("type")), button_view(button("Save"))])

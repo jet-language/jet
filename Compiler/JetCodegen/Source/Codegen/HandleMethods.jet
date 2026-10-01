@@ -1,30 +1,63 @@
 // Closed Prelude routing and ordinary MIR lowering for checked THandleOp nodes.
 // Special expression families stay owned by their structural codegen paths.
+use jet_foundation.[
+    Effect,
+    FrameSchedule,
+    MIRAccess,
+    MIRCallArg,
+    MIRDerivationRef,
+    MIREnumArg,
+    MIRFrameCompletion,
+    MIRFrameDependency,
+    MIRFrameOperation,
+    MIRFrameRetention,
+    MIRFrameReuse,
+    MIRFrameSchedule,
+    MIRFrameTransfer,
+    MIROperation,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRPreludeTypeArg,
+    MIRResourceAccess,
+    MIRResourceAccessMode,
+    MIRResourceIdentity,
+    MIRResourceLayout,
+    MIRResourceRegion,
+    MIRSemanticOp,
+    MIRType,
+    MIRValueID,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    THandleOp,
+    TNumericOp,
+    Type,
+]
 
 struct JetCodegenHandleRoute {
-    pub family: MirPreludeFamily
+    pub family: MIRPreludeFamily
     pub module_name: String
     pub member: String
     pub symbol: String
     pub borrow_mask: [Bool]
     pub effect_kind: Effect?
-    pub abi: MirPreludeAbi
+    pub abi: MIRPreludeABI
 }
-fn jet_codegen_handle_route(family: MirPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenHandleRoute Never! {
+fn jet_codegen_handle_route(family: MIRPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, abi: MIRPreludeABI) -> JetCodegenHandleRoute Never! {
     JetCodegenHandleRoute{family: family, module_name: module_name, member: member, symbol: symbol, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
 }
 fn jet_codegen_handle_h(member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute Never! {
-    jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.handle", member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
+    jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.handle", member, symbol, borrow_mask, route_effect, MIRPreludeABI.Value)
 }
 fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute Never! {
-    jet_codegen_handle_route(MirPreludeFamily.HandleMethod, module_name, member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
+    jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, module_name, member, symbol, borrow_mask, route_effect, MIRPreludeABI.Value)
 }
 
 
 fn jet_codegen_handle_type_without_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) | .InlineRange(inner, _, _) -> return jet_codegen_handle_type_without_tags(inner)
-        else -> return ty
+        else -> return ~ty
     }
 }
 
@@ -206,7 +239,7 @@ fn jet_codegen_handle_event_route(receiver: Type, method: String, carrier: TFail
         }
         else -> return None
     }
-    Val(jet_codegen_handle_route(MirPreludeFamily.ClosureMethod, "core.event", method, symbol, mask, None, MirPreludeAbi.Value))
+    Val(jet_codegen_handle_route(MIRPreludeFamily.ClosureMethod, "core.event", method, symbol, mask, None, MIRPreludeABI.Value))
 }
 
 fn jet_codegen_handle_watch_route(receiver: Type, method: String) -> JetCodegenHandleRoute? {
@@ -222,7 +255,7 @@ fn jet_codegen_handle_watch_route(receiver: Type, method: String) -> JetCodegenH
             "cancel" -> return Val(jet_codegen_handle_h("watch.cancel", "jet_jit_watch_cancel", [Bool]{true}, Val(Effect.IO)))
             "is_active" -> return Val(jet_codegen_handle_h("watch.is_active", "jet_jit_watch_is_active", [Bool]{true}, None))
             "summary" -> return Val(jet_codegen_handle_h("watch.summary", "jet_jit_watch_summary", [Bool]{true}, None))
-            "on" | "once" -> return Val(jet_codegen_handle_route(MirPreludeFamily.ClosureMethod, "core.watcher", method, "jet_jit_watch_{method}", [Bool]{true, true, false}, Val(Effect.IO), MirPreludeAbi.Value))
+            "on" | "once" -> return Val(jet_codegen_handle_route(MIRPreludeFamily.ClosureMethod, "core.watcher", method, "jet_jit_watch_{method}", [Bool]{true, true, false}, Val(Effect.IO), MIRPreludeABI.Value))
             else -> return None
         }
     }
@@ -247,9 +280,9 @@ fn jet_codegen_handle_reactive_name(ty: Type) -> String? {
 
 fn jet_codegen_handle_reactive_route(receiver: Type, method: String) -> JetCodegenHandleRoute? {
     name := jet_codegen_handle_reactive_name(receiver) ?? return None
-    if name == "Signal" && method == "get" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None, MirPreludeAbi.Value))
-    if (name == "Derived" || name == "Computed") && method == "get" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None, MirPreludeAbi.Value))
-    if name == "Signal" && method == "set" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Signal.set", "jet_std::JetSignal::set", [Bool]{true, false}, None, MirPreludeAbi.Value))
+    if name == "Signal" && method == "get" -> return Val(jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None, MIRPreludeABI.Value))
+    if (name == "Derived" || name == "Computed") && method == "get" -> return Val(jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None, MIRPreludeABI.Value))
+    if name == "Signal" && method == "set" -> return Val(jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.reactive", "Signal.set", "jet_std::JetSignal::set", [Bool]{true, false}, None, MIRPreludeABI.Value))
     None
 }
 
@@ -263,7 +296,7 @@ fn jet_codegen_handle_precise_route(type_name: String, method: String) -> JetCod
     }
     type_key := jet_codegen_precise_type_key(type_name)
     mask := if arity == 2 -> [Bool]{true, true} else -> [Bool]{true}
-    Val(jet_codegen_handle_route(MirPreludeFamily.PreciseBuiltin, type_name, method, "jet_{type_key}_{method}", mask, None, MirPreludeAbi.Value))
+    Val(jet_codegen_handle_route(MIRPreludeFamily.PreciseBuiltin, type_name, method, "jet_{type_key}_{method}", mask, None, MIRPreludeABI.Value))
 }
 
 fn jet_codegen_handle_is_simd_lane_type(name: String) -> Bool Never! {
@@ -362,7 +395,7 @@ fn jet_codegen_handle_math_route(type_name: String, method: String, reduce_op: S
         arity == 2 -> [Bool]{true, false}
         else -> [Bool]{true, false, false}
     }
-    if jet_codegen_handle_is_geometry_type(type_name) -> return Val(jet_codegen_handle_route(MirPreludeFamily.MathBuiltin, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None, MirPreludeAbi.Value))
+    if jet_codegen_handle_is_geometry_type(type_name) -> return Val(jet_codegen_handle_route(MIRPreludeFamily.MathBuiltin, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None, MIRPreludeABI.Value))
     Val(jet_codegen_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
@@ -400,13 +433,13 @@ fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> JetCodegenHand
         else -> return None
     }
     raw_name := jet_codegen_handle_nominal_name(receiver)
-    pieces := raw_name.split("::")
+    pieces := raw_name.split("::").to_list()
     name := if pieces.len() > 0 -> pieces[pieces.len() - 1] else -> raw_name
-    pieces = name.split(".")
+    pieces = name.split(".").to_list()
     name = if pieces.len() > 0 -> pieces[pieces.len() - 1] else -> name
     backend := if name == {
         "NullBackend" -> "JetNullBackend"
-        "TuiBackend" -> "JetTuiBackend"
+        "TUIBackend" -> "JetTuiBackend"
         "GtkBackend" -> "JetGtkBackend"
         else -> {
             return None
@@ -425,7 +458,7 @@ fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> JetCodegenHand
         else -> {}
     }
     if method == "commands" && name == "NullBackend" -> member = "paint_commands"
-    if (method == "frame_lines" || method == "render_count") && name == "TuiBackend" -> member = method
+    if (method == "frame_lines" || method == "render_count") && name == "TUIBackend" -> member = method
     if method == "present" && name == "GtkBackend" -> member = "present"
     if member == "" -> return None
     mask := if method == {
@@ -866,7 +899,7 @@ fn jet_codegen_handle_civil_time_route(kind: String, method: String) -> JetCodeg
     if kind == "DateTime" && (method == "truncate" || method == "floor" || method == "ceil") -> mask = [Bool]{true, true, false}
     if kind == "Period" && method == "total_in" -> mask = [Bool]{true, true, true}
     if kind == "ZonedDateTime" && method == "with_time" -> mask = [Bool]{true, true, true}
-    Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.time", member, "{prefix}::{symbol_method}", mask, None, MirPreludeAbi.Value))
+    Val(jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.time", member, "{prefix}::{symbol_method}", mask, None, MIRPreludeABI.Value))
 }
 
 fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> JetCodegenHandleRoute? {
@@ -911,10 +944,10 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
         .MeasurementMethod(method) -> return jet_codegen_handle_measurement_route(method)
         .LayoutMethod(method) -> return jet_codegen_handle_layout_route(method)
         .LoadableMethod(method) -> return jet_codegen_handle_loadable_route(method)
-        .UiBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)
+        .UIBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)
         .SketchMethod(sketch, method) -> return jet_codegen_handle_sketch_route(sketch, method)
         .CivilTimeMethod(kind, method) -> return jet_codegen_handle_civil_time_route(kind, method)
-        .UrlMimeMethod(kind, method) -> return jet_codegen_handle_url_mime_route(kind, method)
+        .URLMIMEMethod(kind, method) -> return jet_codegen_handle_url_mime_route(kind, method)
         .RegexMethod(kind, method) -> return jet_codegen_handle_regex_route(kind, method)
         .DevServerMethod(method) -> return jet_codegen_handle_devserver_route(method)
         .AppMethod(method, source_arg_count) -> return jet_codegen_handle_app_route(method, source_arg_count)
@@ -1047,12 +1080,12 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .StdoutWriteLine -> return Val(jet_codegen_handle_h("stdout.write_line", "jet_std_io_stdout_write_line", [Bool]{true, true}, Val(Effect.IO)))
         .StdoutWriteBytes -> return Val(jet_codegen_handle_h("stdout.write_bytes", "jet_std_io_stdout_write_bytes", [Bool]{true, true}, Val(Effect.IO)))
         .StdoutFlush -> return Val(jet_codegen_handle_h("stdout.flush", "jet_std_io_stdout_flush", [Bool]{true}, Val(Effect.IO)))
-        .StdoutIsTty -> return Val(jet_codegen_handle_h("stdout.is_tty", "jet_std_io_stdout_is_tty", [Bool]{true}, Val(Effect.IO)))
+        .StdoutIsTTY -> return Val(jet_codegen_handle_h("stdout.is_tty", "jet_std_io_stdout_is_tty", [Bool]{true}, Val(Effect.IO)))
         .StderrWrite -> return Val(jet_codegen_handle_h("stderr.write", "jet_std_io_stderr_write", [Bool]{true, true}, Val(Effect.IO)))
         .StderrWriteLine -> return Val(jet_codegen_handle_h("stderr.write_line", "jet_std_io_stderr_write_line", [Bool]{true, true}, Val(Effect.IO)))
         .StderrWriteBytes -> return Val(jet_codegen_handle_h("stderr.write_bytes", "jet_std_io_stderr_write_bytes", [Bool]{true, true}, Val(Effect.IO)))
         .StderrFlush -> return Val(jet_codegen_handle_h("stderr.flush", "jet_std_io_stderr_flush", [Bool]{true}, Val(Effect.IO)))
-        .StderrIsTty -> return Val(jet_codegen_handle_h("stderr.is_tty", "jet_std_io_stderr_is_tty", [Bool]{true}, Val(Effect.IO)))
+        .StderrIsTTY -> return Val(jet_codegen_handle_h("stderr.is_tty", "jet_std_io_stderr_is_tty", [Bool]{true}, Val(Effect.IO)))
         .StopwatchElapsedMillis -> return Val(jet_codegen_handle_h("stopwatch.elapsed_millis", "jet_stopwatch_elapsed_millis", [Bool]{true}, Val(Effect.Time)))
         .TestSuiteRun -> return Val(jet_codegen_handle_h("test_suite.run", "jet_test_suite_run", [Bool]{true}, None))
         .ClockNow -> return Val(jet_codegen_handle_h("clock.now", "jet_clock_now", [Bool]{true}, Val(Effect.Time)))
@@ -1067,21 +1100,21 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .RealtimeReceipt -> return Val(jet_codegen_handle_h("realtime.receipt", "jet_rt_receipt", [Bool]{true}, None))
         .RealtimeCancel -> return Val(jet_codegen_handle_h("realtime.cancel", "jet_rt_cancel", [Bool]{false}, Val(Effect.Time)))
         .RealtimeIsCancelled -> return Val(jet_codegen_handle_h("realtime.is_cancelled", "jet_rt_is_cancelled", [Bool]{true}, None))
-        .RngInt -> return Val(jet_codegen_handle_h("rng.int", "jet_rng_int", [Bool]{true, false, false}, Val(Effect.Rand)))
-        .RngFloat -> return Val(jet_codegen_handle_h("rng.float", "jet_rng_float", [Bool]{true}, Val(Effect.Rand)))
-        .RngFloatRange -> return Val(jet_codegen_handle_h("rng.float_range", "jet_rng_float_range", [Bool]{true, false, false}, Val(Effect.Rand)))
-        .RngBool -> return Val(jet_codegen_handle_h("rng.bool", "jet_rng_bool", [Bool]{true}, Val(Effect.Rand)))
-        .RngBoolP -> return Val(jet_codegen_handle_h("rng.bool_p", "jet_rng_bool_p", [Bool]{true, false}, Val(Effect.Rand)))
-        .RngNormal -> return Val(jet_codegen_handle_h("rng.normal", "jet_rng_normal", [Bool]{true, false, false}, Val(Effect.Rand)))
-        .RngExponential -> return Val(jet_codegen_handle_h("rng.exponential", "jet_rng_exponential", [Bool]{true, false}, Val(Effect.Rand)))
-        .RngBytes -> return Val(jet_codegen_handle_h("rng.bytes", "jet_rng_bytes", [Bool]{true, false}, Val(Effect.Rand)))
-        .RngSplit -> return Val(jet_codegen_handle_h("rng.split", "jet_rng_split", [Bool]{true}, Val(Effect.Rand)))
-        .RngPick -> return Val(jet_codegen_handle_h("rng.pick", "jet_rng_pick", [Bool]{true, true}, Val(Effect.Rand)))
-        .RngWeightedPick -> return Val(jet_codegen_handle_h("rng.weighted_pick", "jet_rng_weighted_pick", [Bool]{true, true, true}, Val(Effect.Rand)))
-        .RngSample -> return Val(jet_codegen_handle_h("rng.sample", "jet_rng_sample", [Bool]{true, true, false}, Val(Effect.Rand)))
-        .RngShuffle -> return Val(jet_codegen_handle_h("rng.shuffle", "jet_rng_shuffle", [Bool]{true, true}, Val(Effect.Rand)))
-        .HistoryRngNextU64 -> return Val(jet_codegen_handle_h("history_rng.next_u64", "jet_testing_history_rng_next_u64", [Bool]{true}, Val(Effect.Rand)))
-        .HistoryRngBelow -> return Val(jet_codegen_handle_h("history_rng.below", "jet_testing_history_rng_below", [Bool]{true, false}, Val(Effect.Rand)))
+        .RNGInt -> return Val(jet_codegen_handle_h("rng.int", "jet_rng_int", [Bool]{true, false, false}, Val(Effect.Rand)))
+        .RNGFloat -> return Val(jet_codegen_handle_h("rng.float", "jet_rng_float", [Bool]{true}, Val(Effect.Rand)))
+        .RNGFloatRange -> return Val(jet_codegen_handle_h("rng.float_range", "jet_rng_float_range", [Bool]{true, false, false}, Val(Effect.Rand)))
+        .RNGBool -> return Val(jet_codegen_handle_h("rng.bool", "jet_rng_bool", [Bool]{true}, Val(Effect.Rand)))
+        .RNGBoolP -> return Val(jet_codegen_handle_h("rng.bool_p", "jet_rng_bool_p", [Bool]{true, false}, Val(Effect.Rand)))
+        .RNGNormal -> return Val(jet_codegen_handle_h("rng.normal", "jet_rng_normal", [Bool]{true, false, false}, Val(Effect.Rand)))
+        .RNGExponential -> return Val(jet_codegen_handle_h("rng.exponential", "jet_rng_exponential", [Bool]{true, false}, Val(Effect.Rand)))
+        .RNGBytes -> return Val(jet_codegen_handle_h("rng.bytes", "jet_rng_bytes", [Bool]{true, false}, Val(Effect.Rand)))
+        .RNGSplit -> return Val(jet_codegen_handle_h("rng.split", "jet_rng_split", [Bool]{true}, Val(Effect.Rand)))
+        .RNGPick -> return Val(jet_codegen_handle_h("rng.pick", "jet_rng_pick", [Bool]{true, true}, Val(Effect.Rand)))
+        .RNGWeightedPick -> return Val(jet_codegen_handle_h("rng.weighted_pick", "jet_rng_weighted_pick", [Bool]{true, true, true}, Val(Effect.Rand)))
+        .RNGSample -> return Val(jet_codegen_handle_h("rng.sample", "jet_rng_sample", [Bool]{true, true, false}, Val(Effect.Rand)))
+        .RNGShuffle -> return Val(jet_codegen_handle_h("rng.shuffle", "jet_rng_shuffle", [Bool]{true, true}, Val(Effect.Rand)))
+        .HistoryRNGNextU64 -> return Val(jet_codegen_handle_h("history_rng.next_u64", "jet_testing_history_rng_next_u64", [Bool]{true}, Val(Effect.Rand)))
+        .HistoryRNGBelow -> return Val(jet_codegen_handle_h("history_rng.below", "jet_testing_history_rng_below", [Bool]{true, false}, Val(Effect.Rand)))
         .FakeLocale -> return Val(jet_codegen_handle_h("fake.locale", "jet_fake_locale", [Bool]{true, true}, Val(Effect.Rand)))
         .FakeName -> return Val(jet_codegen_handle_h("fake.name", "jet_fake_name", [Bool]{true}, Val(Effect.Rand)))
         .FakeEmail -> return Val(jet_codegen_handle_h("fake.email", "jet_fake_email", [Bool]{true}, Val(Effect.Rand)))
@@ -1114,30 +1147,30 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .DurationRound -> return Val(jet_codegen_handle_h("duration.round", "jet_duration_round", [Bool]{true, true, true, true}, None))
         .DurationScale -> return Val(jet_codegen_handle_h("duration.scale", "jet_duration_scale", [Bool]{true, true}, None))
         .DurationDivide -> return Val(jet_codegen_handle_h("duration.divide", "jet_duration_divide", [Bool]{true, true}, None))
-        .TcpListenerAccept -> return Val(jet_codegen_handle_h("tcp_listener.accept", "jet_net_tcp_accept", [Bool]{true}, Val(Effect.Net)))
-        .TcpListenerAcceptDeadline -> return Val(jet_codegen_handle_h("tcp_listener.accept_deadline", "jet_net_tcp_accept_deadline", [Bool]{true, true}, Val(Effect.Net)))
-        .TcpListenerLocalAddr -> return Val(jet_codegen_handle_h("tcp_listener.local_addr", "jet_net_listener_local_addr", [Bool]{true}, Val(Effect.Net)))
-        .TcpStreamRead -> return Val(jet_codegen_handle_h("tcp_stream.read", "jet_net_tcp_read", [Bool]{true}, Val(Effect.Net)))
-        .TcpStreamWrite -> return Val(jet_codegen_handle_h("tcp_stream.write", "jet_net_tcp_write", [Bool]{true, true}, Val(Effect.Net)))
-        .TcpStreamPeerAddr -> return Val(jet_codegen_handle_h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", [Bool]{true}, Val(Effect.Net)))
-        .TcpStreamLocalAddr -> return Val(jet_codegen_handle_h("tcp_stream.local_addr", "jet_net_tcp_local_addr", [Bool]{true}, Val(Effect.Net)))
-        .TcpStreamClose -> return Val(jet_codegen_handle_h("tcp_stream.close", "jet_net_tcp_close", [Bool]{true}, Val(Effect.Net)))
-        .TcpStreamReadBytes -> return Val(jet_codegen_handle_h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", [Bool]{true, false}, Val(Effect.Net)))
-        .TcpStreamReadBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.read_bytes_deadline", "jet_net_tcp_read_bytes_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
-        .TcpStreamReadText -> return Val(jet_codegen_handle_h("tcp_stream.read_text", "jet_net_tcp_read_text", [Bool]{true, false}, Val(Effect.Net)))
-        .TcpStreamReadTextDeadline -> return Val(jet_codegen_handle_h("tcp_stream.read_text_deadline", "jet_net_tcp_read_text_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
-        .TcpStreamWriteBytes -> return Val(jet_codegen_handle_h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", [Bool]{true, true}, Val(Effect.Net)))
-        .TcpStreamWriteBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_bytes_deadline", "jet_net_tcp_write_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
-        .TcpStreamWriteAllBytes -> return Val(jet_codegen_handle_h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", [Bool]{true, true}, Val(Effect.Net)))
-        .TcpStreamWriteAllBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_all_bytes_deadline", "jet_net_tcp_write_all_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
-        .TcpStreamWriteText -> return Val(jet_codegen_handle_h("tcp_stream.write_text", "jet_net_tcp_write_text", [Bool]{true, true}, Val(Effect.Net)))
-        .TcpStreamWriteTextDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_text_deadline", "jet_net_tcp_write_text_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
-        .TcpStreamShutdown -> return Val(jet_codegen_handle_h("tcp_stream.shutdown", "jet_net_tcp_shutdown", [Bool]{true, false}, Val(Effect.Net)))
-        .TcpStreamReady -> return Val(jet_codegen_handle_h("tcp_stream.ready", "jet_net_tcp_ready_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
-        .UdpSocketReady -> return Val(jet_codegen_handle_h("udp_socket.ready", "jet_net_udp_ready", [Bool]{true, false, true}, Val(Effect.Net)))
-        .UdpSocketClose -> return Val(jet_codegen_handle_h("udp_socket.close", "jet_net_udp_close", [Bool]{true}, Val(Effect.Net)))
-        .UdpSocketReceiveDeadline -> return Val(jet_codegen_handle_h("udp_socket.receive_deadline", "jet_net_udp_receive_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
-        .UdpSocketSendToDeadline -> return Val(jet_codegen_handle_h("udp_socket.send_to_deadline", "jet_net_udp_send_bytes_to_deadline", [Bool]{true, true, true, true}, Val(Effect.Net)))
+        .TCPListenerAccept -> return Val(jet_codegen_handle_h("tcp_listener.accept", "jet_net_tcp_accept", [Bool]{true}, Val(Effect.Net)))
+        .TCPListenerAcceptDeadline -> return Val(jet_codegen_handle_h("tcp_listener.accept_deadline", "jet_net_tcp_accept_deadline", [Bool]{true, true}, Val(Effect.Net)))
+        .TCPListenerLocalAddr -> return Val(jet_codegen_handle_h("tcp_listener.local_addr", "jet_net_listener_local_addr", [Bool]{true}, Val(Effect.Net)))
+        .TCPStreamRead -> return Val(jet_codegen_handle_h("tcp_stream.read", "jet_net_tcp_read", [Bool]{true}, Val(Effect.Net)))
+        .TCPStreamWrite -> return Val(jet_codegen_handle_h("tcp_stream.write", "jet_net_tcp_write", [Bool]{true, true}, Val(Effect.Net)))
+        .TCPStreamPeerAddr -> return Val(jet_codegen_handle_h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", [Bool]{true}, Val(Effect.Net)))
+        .TCPStreamLocalAddr -> return Val(jet_codegen_handle_h("tcp_stream.local_addr", "jet_net_tcp_local_addr", [Bool]{true}, Val(Effect.Net)))
+        .TCPStreamClose -> return Val(jet_codegen_handle_h("tcp_stream.close", "jet_net_tcp_close", [Bool]{true}, Val(Effect.Net)))
+        .TCPStreamReadBytes -> return Val(jet_codegen_handle_h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", [Bool]{true, false}, Val(Effect.Net)))
+        .TCPStreamReadBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.read_bytes_deadline", "jet_net_tcp_read_bytes_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .TCPStreamReadText -> return Val(jet_codegen_handle_h("tcp_stream.read_text", "jet_net_tcp_read_text", [Bool]{true, false}, Val(Effect.Net)))
+        .TCPStreamReadTextDeadline -> return Val(jet_codegen_handle_h("tcp_stream.read_text_deadline", "jet_net_tcp_read_text_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .TCPStreamWriteBytes -> return Val(jet_codegen_handle_h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", [Bool]{true, true}, Val(Effect.Net)))
+        .TCPStreamWriteBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_bytes_deadline", "jet_net_tcp_write_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .TCPStreamWriteAllBytes -> return Val(jet_codegen_handle_h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", [Bool]{true, true}, Val(Effect.Net)))
+        .TCPStreamWriteAllBytesDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_all_bytes_deadline", "jet_net_tcp_write_all_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .TCPStreamWriteText -> return Val(jet_codegen_handle_h("tcp_stream.write_text", "jet_net_tcp_write_text", [Bool]{true, true}, Val(Effect.Net)))
+        .TCPStreamWriteTextDeadline -> return Val(jet_codegen_handle_h("tcp_stream.write_text_deadline", "jet_net_tcp_write_text_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
+        .TCPStreamShutdown -> return Val(jet_codegen_handle_h("tcp_stream.shutdown", "jet_net_tcp_shutdown", [Bool]{true, false}, Val(Effect.Net)))
+        .TCPStreamReady -> return Val(jet_codegen_handle_h("tcp_stream.ready", "jet_net_tcp_ready_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UDPSocketReady -> return Val(jet_codegen_handle_h("udp_socket.ready", "jet_net_udp_ready", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UDPSocketClose -> return Val(jet_codegen_handle_h("udp_socket.close", "jet_net_udp_close", [Bool]{true}, Val(Effect.Net)))
+        .UDPSocketReceiveDeadline -> return Val(jet_codegen_handle_h("udp_socket.receive_deadline", "jet_net_udp_receive_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
+        .UDPSocketSendToDeadline -> return Val(jet_codegen_handle_h("udp_socket.send_to_deadline", "jet_net_udp_send_bytes_to_deadline", [Bool]{true, true, true, true}, Val(Effect.Net)))
         .UnixListenerAcceptDeadline -> return Val(jet_codegen_handle_h("unix_listener.accept_deadline", "jet_net_unix_accept_deadline", [Bool]{true, true}, Val(Effect.Net)))
         .UnixStreamReadDeadline -> return Val(jet_codegen_handle_h("unix_stream.read_deadline", "jet_net_unix_read_bytes_deadline", [Bool]{true, false, true}, Val(Effect.Net)))
         .UnixStreamWriteAllDeadline -> return Val(jet_codegen_handle_h("unix_stream.write_all_deadline", "jet_net_unix_write_all_bytes_deadline", [Bool]{true, true, true}, Val(Effect.Net)))
@@ -1151,9 +1184,9 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .TLSStreamCloseWrite -> return Val(jet_codegen_handle_h("tls_stream.close_write", "jet_net_tls_close_write", [Bool]{true, true}, Val(Effect.Net)))
         .TLSStreamPeerIdentity -> return Val(jet_codegen_handle_h("tls_stream.peer_identity", "jet_net_tls_peer_identity", [Bool]{true}, Val(Effect.Net)))
         .TLSClientConfigDefault -> return Val(jet_codegen_handle_h("tls.config_default", "jet_tls_client_config_default", [Bool]{}, Val(Effect.Net)))
-        .TLSClientConfigWithAlpn -> return Val(jet_codegen_handle_h("tls.config_with_alpn", "jet_tls_client_config_with_alpn", [Bool]{false, true}, Val(Effect.Net)))
-        .TLSRootCertificatesFromPem -> return Val(jet_codegen_handle_h("tls.root_certificates_from_pem", "jet_tls_root_certificates_from_pem", [Bool]{true}, Val(Effect.Net)))
-        .TLSClientIdentityFromPem -> return Val(jet_codegen_handle_h("tls.client_identity_from_pem", "jet_tls_client_identity_from_pem", [Bool]{true, true}, Val(Effect.Net)))
+        .TLSClientConfigWithALPN -> return Val(jet_codegen_handle_h("tls.config_with_alpn", "jet_tls_client_config_with_alpn", [Bool]{false, true}, Val(Effect.Net)))
+        .TLSRootCertificatesFromPEM -> return Val(jet_codegen_handle_h("tls.root_certificates_from_pem", "jet_tls_root_certificates_from_pem", [Bool]{true}, Val(Effect.Net)))
+        .TLSClientIdentityFromPEM -> return Val(jet_codegen_handle_h("tls.client_identity_from_pem", "jet_tls_client_identity_from_pem", [Bool]{true, true}, Val(Effect.Net)))
         .TLSClientConfigWithTrust -> return Val(jet_codegen_handle_h("tls.config_with_trust", "jet_tls_client_config_with_trust", [Bool]{false, false}, Val(Effect.Net)))
         .TLSClientConfigWithIdentity -> return Val(jet_codegen_handle_h("tls.config_with_identity", "jet_tls_client_config_with_client_identity", [Bool]{false, true}, Val(Effect.Net)))
         .TLSClientConfigWithVersionBounds -> return Val(jet_codegen_handle_h("tls.config_with_version_bounds", "jet_tls_client_config_with_version_bounds", [Bool]{false, false, false}, Val(Effect.Net)))
@@ -1250,7 +1283,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .ReflectValueFields -> return Val(jet_codegen_handle_core("core.reflect", "value.fields", "jet_jit_reflect_fields", [Bool]{true}, None))
         .ReflectFieldName -> return Val(jet_codegen_handle_core("core.reflect", "field.name", "jet_jit_reflect_field_name", [Bool]{true}, None))
         .ReflectFieldValue -> return Val(jet_codegen_handle_core("core.reflect", "field.value", "jet_jit_reflect_field_value", [Bool]{true}, None))
-        .FfiCallbackEventStop -> return Val(jet_codegen_handle_core("core.ffi", "callback_event_stop", "jet_ffi_callback_event_stop_unit", [Bool]{}, Val(Effect.FFI)))
+        .FFICallbackEventStop -> return Val(jet_codegen_handle_core("core.ffi", "callback_event_stop", "jet_ffi_callback_event_stop_unit", [Bool]{}, Val(Effect.FFI)))
         .WebVirtualWindowFacts -> return Val(jet_codegen_handle_core("core.web.virtual", "facts_json", "jet_web_virtual_window_facts", [Bool]{true}, None))
         .TaskDetach -> return Val(jet_codegen_handle_core("core.tasks", "detach", "jet_std::JetTask::detach", [Bool]{false}, None))
         .TaskPause -> return Val(jet_codegen_handle_h("task.pause", "jet_std::JetTask::pause", [Bool]{true}, None))
@@ -1294,7 +1327,7 @@ fn jet_codegen_handle_arg_is_host_borrow_callback(argument: TExpr) -> Bool Never
     }
 }
 
-fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, operation: THandleOp, index: Int, argument: TExpr) -> MirValueId {
+fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, operation: THandleOp, index: Int, argument: TExpr) -> MIRValueID {
     if operation == {
         .EventMethod(method) -> {
             if method == "on_priority" {
@@ -1304,7 +1337,7 @@ fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, operation: THa
         else -> {}
     }
     if operation == {
-        .TcpStreamReadBytes | .TcpStreamReadBytesDeadline | .TcpStreamReadText | .TcpStreamReadTextDeadline | .UdpSocketReceiveDeadline | .UnixStreamReadDeadline | .TLSStreamReadDeadline -> {
+        .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .UDPSocketReceiveDeadline | .UnixStreamReadDeadline | .TLSStreamReadDeadline -> {
             if index == 0 -> return jet_codegen_lower_handle_native_int(&builder, argument)
         }
         else -> {}
@@ -1312,8 +1345,8 @@ fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, operation: THa
     jet_codegen_lower_expr(&builder, argument)
 }
 
-fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: THandleOp, args: [TExpr]) -> [MirValueId] {
-    values := [MirValueId?]{}
+fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: THandleOp, args: [TExpr]) -> [MIRValueID] {
+    values := [MIRValueID?]{}
     loop _ in args -> &values.push(None)
     index := 0
     loop index < args.len() {
@@ -1325,12 +1358,12 @@ fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: TH
         if jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, operation, index, args[index]))
         index += 1
     }
-    lowered := [MirValueId]{}
+    lowered := [MIRValueID]{}
     loop value in values -> &lowered.push(value ?? panic("checked handle argument lowering left a hole"))
     lowered
 }
 
-fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr) -> MirValueId {
+fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr) -> MIRValueID {
     if !jet_codegen_numeric_plain_int(value.ty) -> return jet_codegen_lower_expr(&builder, value)
     location := jet_codegen_source_location_at(&builder, value.span, false)
     converted := TExpr{
@@ -1343,49 +1376,49 @@ fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr
     jet_codegen_lower_expr(&builder, converted)
 }
 
-fn jet_codegen_lower_frame_schedule(schedule: FrameSchedule?) -> MirFrameSchedule? {
+fn jet_codegen_lower_frame_schedule(schedule: FrameSchedule?) -> MIRFrameSchedule? {
     if schedule == None -> return None
-    source :: schedule ?? panic("checked frame schedule disappeared")
-    operations := [MirFrameOperation]{}
+    source :: schedule
+    operations := [MIRFrameOperation]{}
     loop operation in source.operations {
-        accesses := [MirResourceAccess]{}
+        accesses := [MIRResourceAccess]{}
         loop access in operation.accesses {
             resource := if access.resource == {
-                .Named(name) -> MirResourceIdentity.Named{name: name}
-                .Unknown -> MirResourceIdentity.Unknown
+                .Named(name) -> MIRResourceIdentity.Named{name: name}
+                .Unknown -> MIRResourceIdentity.Unknown
             }
             mode := if access.mode == {
-                .Read -> MirResourceAccessMode.Read
-                .Write -> MirResourceAccessMode.Write
-                .Move -> MirResourceAccessMode.Move
+                .Read -> MIRResourceAccessMode.Read
+                .Write -> MIRResourceAccessMode.Write
+                .Move -> MIRResourceAccessMode.Move
             }
             region := if access.region == {
-                .Whole -> MirResourceRegion.Whole
-                .Bytes(start, length) -> MirResourceRegion.Bytes{start: start, length: length}
-                .Unknown -> MirResourceRegion.Unknown
+                .Whole -> MIRResourceRegion.Whole
+                .Bytes(start, length) -> MIRResourceRegion.Bytes{start: start, length: length}
+                .Unknown -> MIRResourceRegion.Unknown
             }
             layout := if access.layout == {
                 None -> None
-                Val(value) -> Val(MirResourceLayout{size: value.size, align: value.align, layout: value.layout, device: value.device})
+                Val(value) -> Val(MIRResourceLayout{size: value.size, align: value.align, layout: value.layout, device: value.device})
             }
-            &accesses.push(MirResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary})
+            &accesses.push(MIRResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary})
         }
         completion := if operation.completion == {
-            .Synchronous -> MirFrameCompletion.Synchronous
-            .Pending(token) -> MirFrameCompletion.Pending{token: token}
-            .Event(token) -> MirFrameCompletion.Event{token: token}
+            .Synchronous -> MIRFrameCompletion.Synchronous
+            .Pending(token) -> MIRFrameCompletion.Pending{token: token}
+            .Event(token) -> MIRFrameCompletion.Event{token: token}
         }
-        &operations.push(MirFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: completion, completion_provider: operation.completion_provider, external_effect: operation.external_effect})
+        &operations.push(MIRFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: completion, completion_provider: operation.completion_provider, external_effect: operation.external_effect})
     }
-    dependencies := [MirFrameDependency]{}
-    loop dependency in source.dependencies -> &dependencies.push(MirFrameDependency{before: dependency.before, after: dependency.after, resource: dependency.resource, reason: dependency.reason})
-    transfers := [MirFrameTransfer]{}
-    loop transfer in source.transfers -> &transfers.push(MirFrameTransfer{before: transfer.before, after: transfer.after, resource: transfer.resource, from_device: transfer.from_device, to_device: transfer.to_device})
-    reuse := [MirFrameReuse]{}
-    loop item in source.reuse -> &reuse.push(MirFrameReuse{previous_resource: item.previous_resource, next_resource: item.next_resource, previous_last_use: item.previous_last_use, next_first_use: item.next_first_use, legal: item.legal, reason: item.reason})
-    retentions := [MirFrameRetention]{}
-    loop item in source.retentions -> &retentions.push(MirFrameRetention{resource: item.resource, operation: item.operation, owner: item.owner, completion_token: item.completion_token, completed: item.completed})
-    Val(MirFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: source.conservative})
+    dependencies := [MIRFrameDependency]{}
+    loop dependency in source.dependencies -> &dependencies.push(MIRFrameDependency{before: dependency.before, after: dependency.after, resource: dependency.resource, reason: dependency.reason})
+    transfers := [MIRFrameTransfer]{}
+    loop transfer in source.transfers -> &transfers.push(MIRFrameTransfer{before: transfer.before, after: transfer.after, resource: transfer.resource, from_device: transfer.from_device, to_device: transfer.to_device})
+    reuse := [MIRFrameReuse]{}
+    loop item in source.reuse -> &reuse.push(MIRFrameReuse{previous_resource: item.previous_resource, next_resource: item.next_resource, previous_last_use: item.previous_last_use, next_first_use: item.next_first_use, legal: item.legal, reason: item.reason})
+    retentions := [MIRFrameRetention]{}
+    loop item in source.retentions -> &retentions.push(MIRFrameRetention{resource: item.resource, operation: item.operation, owner: item.owner, completion_token: item.completion_token, completed: item.completed})
+    Val(MIRFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: source.conservative})
 }
 
 fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! {
@@ -1394,18 +1427,18 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
         else -> {}
     }
     if operation == {
-        .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TcpStreamRead | .TcpStreamWrite | .TcpStreamClose | .TcpStreamReadBytes | .TcpStreamReadBytesDeadline | .TcpStreamReadText | .TcpStreamReadTextDeadline | .TcpStreamWriteBytes | .TcpStreamWriteBytesDeadline | .TcpStreamWriteAllBytes | .TcpStreamWriteAllBytesDeadline | .TcpStreamWriteText | .TcpStreamWriteTextDeadline | .TcpStreamShutdown | .TcpStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
         else -> false
     }
 }
 
-fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MirValueId {
+fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     route_value := jet_codegen_general_handle_route(operation, receiver.ty, args.len(), carrier)
     if route_value == None -> panic("checked THandleOp requires a dedicated lowering body or an unregistered closed route")
     route :: route_value ?? panic("checked general handle route disappeared")
     static_call := if operation == {
-        .TLSClientConfigDefault | .TLSRootCertificatesFromPem | .TLSClientIdentityFromPem | .HTTPClientNew -> {
+        .TLSClientConfigDefault | .TLSRootCertificatesFromPEM | .TLSClientIdentityFromPEM | .HTTPClientNew -> {
             true
         }
         else -> {
@@ -1414,37 +1447,37 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
     }
     if static_call {
         if args.len() != route.borrow_mask.len() -> panic("checked static handle constructor arity disagrees with its closed route")
-        values := [MirCallArg]{}
+        values := [MIRCallArg]{}
         index := 0
         loop index < args.len() {
             value := jet_codegen_lower_expr(&builder, args[index])
-            access := if route.borrow_mask[index] -> MirAccess.Read else -> MirAccess.Move
+            access := if route.borrow_mask[index] -> MIRAccess.Read else -> MIRAccess.Move
             &values.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
             index += 1
         }
         call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: values, owner_type_args: [MirPreludeTypeArg]{}, type_args: [MirType]{}}})
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: values, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
     }
 
     if operation == THandleOp.TaskJoin || operation == THandleOp.TaskDetach {
         if args.len() != 0 -> panic("checked consuming task operation takes no arguments")
         receiver_value := jet_codegen_lower_consuming_task_value(&builder, receiver)
         call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: call, receiver: receiver_value, args: [MirValueId]{}, frame_schedule: None, frame_schedule_derivation: None}})
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: call, receiver: receiver_value, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
     }
 
     lowered_receiver := if {
         jet_codegen_handle_receiver_is_mutating(operation) -> {
-            jet_codegen_method_receiver_arg(&builder, receiver, MirAccess.Write).value
+            jet_codegen_method_receiver_arg(&builder, receiver, MIRAccess.Write).value
         }
         else -> {
             jet_codegen_lower_expr(&builder, receiver)
         }
     }
     lowered_args := jet_codegen_lower_handle_arguments(&builder, operation, args)
-    if route.family == MirPreludeFamily.ClosureMethod {
+    if route.family == MIRPreludeFamily.ClosureMethod {
         if route.borrow_mask.len() != args.len() + 1 -> panic("checked closure-style handle route has an invalid operand count")
-        closure_args := [MirCallArg]{}
+        closure_args := [MIRCallArg]{}
         index := 0
         loop index < args.len() {
             value := lowered_args[index]
@@ -1453,13 +1486,13 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
             index += 1
         }
         call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.ClosureMethod{receiver: lowered_receiver, args: closure_args, call: call}})
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: lowered_receiver, args: closure_args, call: call}})
     }
     if operation == {
         .DurationNew(unit, _) -> {
             if route.borrow_mask.len() != 2 -> panic("checked Duration constructor route has an invalid closed ABI")
             type_id := jet_codegen_type_instance_id(Type.Named{name: "DurationUnit"}, builder.modules, builder.function.module_identity, builder.generic_type_names)
-            unit_value := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "DurationUnit"}, MirOperation.Enum{type_id: type_id, variant: unit, args: [MirEnumArg]{}})
+            unit_value := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "DurationUnit"}, MIROperation.Enum{type_id: type_id, variant: unit, args: [MIREnumArg]{}})
             &lowered_args.push(unit_value)
         }
         else -> {}
@@ -1473,9 +1506,9 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
     }
     frame_schedule_derivation := if operation == {
         .GameSceneOnFrame(_, derivation) -> {
-            if derivation == None -> None else -> Val(MirDerivationRef{id: (derivation ?? DerivationRef{id: ""}).id})
+            if derivation == None -> None else -> Val(MIRDerivationRef{id: (derivation).id})
         }
         else -> None
     }
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: call, receiver: lowered_receiver, args: lowered_args, frame_schedule: frame_schedule, frame_schedule_derivation: frame_schedule_derivation}})
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: call, receiver: lowered_receiver, args: lowered_args, frame_schedule: frame_schedule, frame_schedule_derivation: frame_schedule_derivation}})
 }

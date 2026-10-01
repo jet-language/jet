@@ -301,10 +301,6 @@ impl JetGameScriptRevisionFact {
         })
     }
 
-    pub fn changed_body_from(&self, prior: &Self) -> bool {
-        self.body_revision != prior.body_revision
-    }
-
     pub fn render_json(&self) -> String {
         format!(
             "{{\"name\":{},\"identity\":{},\"type_revision\":{},\"body_revision\":{}}}",

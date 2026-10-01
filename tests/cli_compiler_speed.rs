@@ -462,7 +462,7 @@ mod production_path {
             .into_iter()
             .find(|args| has_pair(args, "--crate-name", "main"))
             .expect("recorded final rustc invocation");
-        for flag in ["opt-level=2", "lto=thin", "strip=symbols"] {
+        for flag in ["opt-level=2", "lto=off", "strip=symbols"] {
             assert!(
                 final_args.iter().any(|arg| arg == flag),
                 "default profile omitted {flag}: {final_args:?}"
@@ -736,10 +736,7 @@ mod production_path {
         assert_content_metadata_and_remap(final_args);
         let runtime_args = recorded
             .iter()
-            .filter(|args| {
-                has_pair(args, "--crate-name", "jet_runtime")
-                    || has_pair(args, "--crate-name", "jet_runtime_core")
-            })
+            .filter(|args| has_pair(args, "--crate-name", "jet_runtime"))
             .collect::<Vec<_>>();
         assert!(
             !runtime_args.is_empty(),
@@ -748,6 +745,14 @@ mod production_path {
         for args in runtime_args {
             assert_content_metadata_and_remap(args);
         }
+        // The program must link the cached runtime, not fall back to compiling
+        // the inline monolith after a rejected runtime crate.
+        assert!(
+            final_args
+                .windows(2)
+                .any(|pair| pair[0] == "--extern" && pair[1].starts_with("jet_runtime=")),
+            "final rustc invocation did not link the cached runtime rlib: {final_args:?}"
+        );
         for flag in ["codegen-units=256", "opt-level=0", "lto=off", "debuginfo=2"] {
             assert!(
                 final_args.iter().any(|arg| arg == flag),
@@ -1557,15 +1562,34 @@ fn run() {
         peak
     }
 
-    /// Wall time and peak memory of one `jet check`, capped at `limit`.
+    /// #3661: an enum's auto-derived `Equatable`/`Comparable` expand the
+    /// Prelude provider templates, which pair every variant with every other
+    /// one. Each pairing condition must read the reflected variants in place:
+    /// copying the whole reflected enum per condition made an enum with V
+    /// variants cost V^3 (the self-hosted compiler's AST enums took minutes).
+    #[cfg(target_os = "linux")]
+    fn wide_enum_program(variants: usize) -> String {
+        let mut source = String::from("enum Wide {\n");
+        for variant in 0..variants {
+            source.push_str(&format!("    Case{variant}(first: Int, second: String)\n"));
+        }
+        source.push_str(
+            "}\n\nfn run() {\n    same :: Wide.Case0{first: 1, second: \"a\"} == Wide.Case1{first: 2, second: \"b\"}\n    print(same)\n}\n",
+        );
+        source
+    }
+
+    /// Wall time and peak memory of one `jet check` of `program`, capped at
+    /// `limit`; `label` names the program's size in failure messages.
     #[cfg(target_os = "linux")]
     fn timed_check(
         name: &str,
-        uses: usize,
+        label: &str,
+        program: String,
         limit: std::time::Duration,
     ) -> (std::time::Duration, u64) {
         let scratch = Scratch::new(name);
-        fs::write(scratch.join("main.jet"), recursive_enum_program(uses)).unwrap();
+        fs::write(scratch.join("main.jet"), program).unwrap();
         let stderr_path = scratch.join("check.stderr");
         let started = std::time::Instant::now();
         let mut child = Command::new(jet())
@@ -1587,9 +1611,7 @@ fn run() {
             if started.elapsed() > limit {
                 let _ = child.kill();
                 let _ = child.wait();
-                panic!(
-                    "`jet check` with {uses} layered use sites ran past {limit:?}: the type walks are super-linear again"
-                );
+                panic!("`jet check` with {label} ran past {limit:?}: checking is super-linear again");
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         };
@@ -1597,7 +1619,7 @@ fn run() {
         let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
         assert!(
             status.success(),
-            "`jet check` rejected the {uses}-layer program:\n{stderr}"
+            "`jet check` rejected the program with {label}:\n{stderr}"
         );
         (elapsed, peak)
     }
@@ -1608,8 +1630,18 @@ fn run() {
         const USES: usize = 6;
         const MEMORY_CEILING_KIB: u64 = 1024 * 1024;
         let limit = std::time::Duration::from_secs(120);
-        let (small, small_peak) = timed_check("recursive-enum-scaling-n", USES, limit);
-        let (large, large_peak) = timed_check("recursive-enum-scaling-4n", 4 * USES, limit);
+        let (small, small_peak) = timed_check(
+            "recursive-enum-scaling-n",
+            &format!("{USES} layered use sites"),
+            recursive_enum_program(USES),
+            limit,
+        );
+        let (large, large_peak) = timed_check(
+            "recursive-enum-scaling-4n",
+            &format!("{} layered use sites", 4 * USES),
+            recursive_enum_program(4 * USES),
+            limit,
+        );
         assert!(
             large <= small * 5,
             "4x the use sites took {large:?} against {small:?} for N: checking must stay near linear"
@@ -1619,6 +1651,105 @@ fn run() {
                 peak <= MEMORY_CEILING_KIB,
                 "`jet check` with {uses} layered use sites peaked at {peak} KiB, over the {MEMORY_CEILING_KIB} KiB ceiling"
             );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wide_enum_derive_check_scales_linearly() {
+        const VARIANTS: usize = 40;
+        let limit = std::time::Duration::from_secs(120);
+        let (small, _) = timed_check(
+            "wide-enum-scaling-n",
+            &format!("{VARIANTS} enum variants"),
+            wide_enum_program(VARIANTS),
+            limit,
+        );
+        let (large, _) = timed_check(
+            "wide-enum-scaling-4n",
+            &format!("{} enum variants", 4 * VARIANTS),
+            wide_enum_program(4 * VARIANTS),
+            limit,
+        );
+        assert!(
+            large <= small * 5,
+            "4x the enum variants took {large:?} against {small:?} for N: derive expansion must stay near linear"
+        );
+    }
+
+    /// `jet check` output for `target`, run from `dir` with `threads` body
+    /// checkers and a private store, so neither run reuses the other's work.
+    fn check_output(dir: &Path, target: &str, threads: &str, store: &Path) -> (Vec<u8>, Vec<u8>) {
+        let output = Command::new(jet())
+            .args(["check", target])
+            .current_dir(dir)
+            .env("JET_CHECK_THREADS", threads)
+            .env("JET_RECEIPT_BYPASS", "1")
+            .env("JET_STORE_DIR", store)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        (output.stdout, output.stderr)
+    }
+
+    /// Parallel body checking merges worker products in source order, so the
+    /// worker count must never change a diagnostic, its order or its text.
+    #[test]
+    fn parallel_check_matches_serial_check() {
+        let scratch = Scratch::new("parallel-check-identity");
+        fs::write(scratch.join("package.jet"), "name: \"parallel_identity\"\nversion: \"0.1.0\"\n")
+            .unwrap();
+        fs::write(
+            scratch.join("helper.jet"),
+            "pub fn double(value: Int) -> Int { value * 2 }\n\
+             pub fn label(value: Int) -> String { value }\n\
+             pub fn ratio(total: Int, count: Int) -> Int { total / count + missing }\n\
+             pub fn flag(value: Int) -> Bool { value + 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            scratch.join("main.jet"),
+            "use helper\n\
+             fn first() -> Int { helper.double(\"two\") }\n\
+             fn second() -> String { helper.label(4) + 1 }\n\
+             fn third() -> Int { unknown_call(3) }\n\
+             fn fourth() -> Bool { helper.flag(2) == \"yes\" }\n\
+             fn run() {\n    print(first())\n    print(second())\n    print(third())\n    print(fourth())\n}\n",
+        )
+        .unwrap();
+        let repository = repository_file("");
+        let mut cases = vec![(scratch.path.clone(), "main.jet".to_string())];
+        for example in [
+            "Examples/features/modules/imports/run.jet",
+            "Examples/features/modules/generic_modules.jet",
+            "Examples/features/errors/inferred_failure_union.jet",
+            "Examples/features/errors/typed_error_families.jet",
+            "Examples/features/generics/generic_callback_values.jet",
+            "Examples/features/traits/impl_shape_matrix.jet",
+        ] {
+            cases.push((repository.clone(), example.to_string()));
+        }
+        for (index, (dir, target)) in cases.iter().enumerate() {
+            let serial = check_output(dir, target, "1", &scratch.join(&format!("store-{index}-serial")));
+            let parallel =
+                check_output(dir, target, "8", &scratch.join(&format!("store-{index}-parallel")));
+            assert_eq!(
+                String::from_utf8_lossy(&serial.1),
+                String::from_utf8_lossy(&parallel.1),
+                "`jet check {target}` stderr differs between 1 and 8 check threads"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&serial.0),
+                String::from_utf8_lossy(&parallel.0),
+                "`jet check {target}` stdout differs between 1 and 8 check threads"
+            );
+            if index == 0 {
+                assert!(
+                    String::from_utf8_lossy(&serial.1).matches("Error [").count() >= 4,
+                    "the multi-module fixture must report errors from several bodies in both modules:\n{}",
+                    String::from_utf8_lossy(&serial.1)
+                );
+            }
         }
     }
 }

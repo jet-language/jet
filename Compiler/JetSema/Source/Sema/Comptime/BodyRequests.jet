@@ -1,6 +1,11 @@
 // Body-level staged values share the canonical Sema item checker/evaluator.
 // A site has no typed value until its expression is staged and its owner body
 // is checked again with that value available.
+use jet_foundation.[
+    Expr,
+    Span,
+    Type,
+]
 
 pub fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{function_key}::body-comptime::{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
@@ -49,7 +54,7 @@ pub fn sema_comptime_body_value_find(
     site_span: Span,
 ) -> SemaComptimeBodyValue? {
     key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
-    found := None
+    found := SemaComptimeBodyValue?{None}
     loop value in values {
         if value.module_identity == module_identity && value.key == key {
             if found != None -> return None

@@ -1,0 +1,26 @@
+{
+  "agree": [
+    { "case": "a_agree_output.jet", "phase": "run", "status": "exit 0", "stdout": "canary agrees: 5" },
+    { "case": "b_agree_error.jet", "phase": "check", "status": "exit 1", "code": "E0109" }
+  ],
+  "plants": [
+    {
+      "case": "c_planted_diagnostic.jet",
+      "phase": "check",
+      "field": "diagnostics",
+      "stream": "stderr",
+      "replace": ["[E0109]", "[E0110]"]
+    },
+    {
+      "case": "d_planted_status.jet",
+      "phase": "run",
+      "field": "status",
+      "exit": 3
+    }
+  ],
+  "first": {
+    "case": "tests/compiler-diff/canary/c_planted_diagnostic.jet",
+    "phase": "check",
+    "field": "diagnostics"
+  }
+}

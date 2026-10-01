@@ -5,17 +5,17 @@ use core as core
 // scoped provider.  Request construction and validation remain pure Jet code;
 // cancellation, headless, and denied outcomes stay typed.
 
-pub enum UiCapability {
+pub enum UICapability {
     FileDialog
     Clipboard
-    Ime
+    IME
     DragDrop
     Shortcuts
     Accessibility
     FontShaping
 }
 
-pub enum UiCancellation {
+pub enum UICancellation {
     User
     Closed
     Headless
@@ -23,18 +23,18 @@ pub enum UiCancellation {
     Programmatic
 }
 
-pub enum UiFileDialogKind {
+pub enum UIFileDialogKind {
     Open
     Save
 }
 
-pub enum UiFsAccess {
+pub enum UIFSAccess {
     Read
     Write
 }
 
 #Error
-pub enum UiHostError {
+pub enum UIHostError {
     Cancelled
     Headless
     Denied
@@ -48,141 +48,141 @@ pub enum UiHostError {
     QueueFull
 }
 
-pub struct UiCapabilityFact {
-    pub capability: UiCapability
+pub struct UICapabilityFact {
+    pub capability: UICapability
     pub available: Bool
 }
 
-pub struct UiCapabilityFacts {
-    pub facts: [UiCapabilityFact]
+pub struct UICapabilityFacts {
+    pub facts: [UICapabilityFact]
 }
 
-pub struct UiFsRights {
+pub struct UIFSRights {
     pub read: Bool
     pub write: Bool
 }
 
-pub struct UiFsGrant {
+pub struct UIFSGrant {
     pub root: String
-    pub rights: UiFsRights
+    pub rights: UIFSRights
 }
 
-pub struct UiGrantedPath {
+pub struct UIGrantedPath {
     pub path: String
     pub grant_root: String
-    pub access: UiFsAccess
+    pub access: UIFSAccess
 }
 
-pub struct UiFileFilter {
+pub struct UIFileFilter {
     pub label: String
     pub extensions: [String]
     pub mime_types: [String]
 }
 
-pub struct UiFileDialogRequest {
-    pub kind: UiFileDialogKind
+pub struct UIFileDialogRequest {
+    pub kind: UIFileDialogKind
     pub title: String
-    pub grant: UiFsGrant
-    pub initial_directory: UiGrantedPath?
-    pub filters: [UiFileFilter]
+    pub grant: UIFSGrant
+    pub initial_directory: UIGrantedPath?
+    pub filters: [UIFileFilter]
     pub allow_multiple: Bool
 }
 
-pub struct UiFileDialogSelection {
-    pub files: [UiGrantedPath]
+pub struct UIFileDialogSelection {
+    pub files: [UIGrantedPath]
 }
 
-pub struct UiShortcutModifiers {
+pub struct UIShortcutModifiers {
     pub bits: Int
 }
 
-pub struct UiShortcut {
+pub struct UIShortcut {
     pub key: String
-    pub modifiers: UiShortcutModifiers
+    pub modifiers: UIShortcutModifiers
 }
-pub struct UiTextRange {
+pub struct UITextRange {
     pub start: Int
     pub end: Int
 }
 
-pub struct UiClipboardText {
+pub struct UIClipboardText {
     pub text: String
-    pub selection: UiTextRange?
+    pub selection: UITextRange?
 }
 
-pub struct UiClipboardWrite {
+pub struct UIClipboardWrite {
     pub characters: Int
 }
 
-pub struct UiNodeId {
+pub struct UINodeID {
     pub value: String
 }
 
-pub struct UiAccessibilityProjection {
+pub struct UIAccessibilityProjection {
     pub lines: [String]
 }
-pub struct UiShortcutBinding {
-    pub shortcut: UiShortcut
+pub struct UIShortcutBinding {
+    pub shortcut: UIShortcut
     pub action: String
-    pub node: UiNodeId?
+    pub node: UINodeID?
 }
 
-pub enum UiShortcutDispatch {
-    Dispatched(UiShortcutBinding)
+pub enum UIShortcutDispatch {
+    Dispatched(UIShortcutBinding)
     Unhandled
 }
 
 
 
-pub fn capabilities() -> UiCapabilityFacts { core.ui.host.capabilities() }
+pub fn capabilities() -> UICapabilityFacts Never! { core.ui.host.capabilities() }
 
-pub fn open_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection UiHostError! {
+pub fn open_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     core.ui.host.open_file(request)
 }
 
-pub fn save_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection UiHostError! {
+pub fn save_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     core.ui.host.save_file(request)
 }
 
-pub fn open_request(grant: UiFsGrant) -> UiFileDialogRequest {
+pub fn open_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
     core.ui.host.open_request(grant)
 }
 
-pub fn save_request(grant: UiFsGrant) -> UiFileDialogRequest {
+pub fn save_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
     core.ui.host.save_request(grant)
 }
 
-pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UiFileFilter UiHostError! {
-    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UiHostError.InvalidRequest)
+pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
+    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UIHostError.InvalidRequest)
     loop extension in extensions {
-        if extension.len() == 0 -> return Err(UiHostError.InvalidRequest)
+        if extension.len() == 0 -> return Err(UIHostError.InvalidRequest)
     }
     loop mime in mime_types {
-        if mime.len() == 0 -> return Err(UiHostError.InvalidRequest)
+        if mime.len() == 0 -> return Err(UIHostError.InvalidRequest)
     }
     core.ui.host.file_filter(label, extensions, mime_types)
 }
 
-pub fn file_filter_text() -> UiFileFilter {
+pub fn file_filter_text() -> UIFileFilter Never! {
     core.ui.host.file_filter_text()
 }
 
-pub fn fs_grant(path: String, rights: UiFsRights) -> UiFsGrant UiHostError! {
-    if path.trim() == "" || (!rights.read && !rights.write) -> return Err(UiHostError.InvalidRequest)
+pub fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
+    if path.trim() == "" || (!rights.read && !rights.write) -> return Err(UIHostError.InvalidRequest)
     core.ui.host.fs_grant(path, rights)
 }
 
-pub fn fs_rights_read() -> UiFsRights { core.ui.host.fs_rights_read() }
-pub fn fs_rights_write() -> UiFsRights { core.ui.host.fs_rights_write() }
-pub fn fs_rights_read_write() -> UiFsRights { core.ui.host.fs_rights_read_write() }
+pub fn fs_rights_read() -> UIFSRights Never! { core.ui.host.fs_rights_read() }
+pub fn fs_rights_write() -> UIFSRights Never! { core.ui.host.fs_rights_write() }
+pub fn fs_rights_read_write() -> UIFSRights Never! { core.ui.host.fs_rights_read_write() }
 
-pub fn shortcut(key: String, modifiers: UiShortcutModifiers) -[IO]> UiShortcut UiHostError! {
-    if key.trim() == "" -> return Err(UiHostError.InvalidRequest)
+pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
+    if key.trim() == "" -> return Err(UIHostError.InvalidRequest)
     core.ui.host.shortcut(key, modifiers)
 }
 
-pub fn accessibility(role: String, label: String) -[IO]> UiAccessibility UiHostError! {
-    if role.trim() == "" || label.trim() == "" -> return Err(UiHostError.InvalidRequest)
+pub fn accessibility(role: String, label: String) -[IO]> UIAccessibility UIHostError! {
+    if role.trim() == "" || label.trim() == "" -> return Err(UIHostError.InvalidRequest)
     core.ui.host.accessibility(role, label)
 }
 

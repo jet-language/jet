@@ -1,19 +1,35 @@
 // Effect-preserving scalar simplification, constant folding, and CFG transforms.
-fn mir_pass_eliminate_unreachable(program: &MirProgram) Never! {
+use jet_foundation.[
+    MIRBasicBlock,
+    MIRBinaryOp,
+    MIRConstant,
+    MIRFunction,
+    MIRIntegerWidth,
+    MIROperation,
+    MIRPhiIncoming,
+    MIRProgram,
+    MIRTerminator,
+    MIRType,
+    MIRUnaryOp,
+    MIRValueFact,
+    MIRValueID,
+]
+
+fn mir_pass_eliminate_unreachable(program: &MIRProgram) Never! {
     loop function_index in 0..<program.functions.len() {
         function_window := &program.functions[function_index]
         mir_pass_eliminate_unreachable_function(&function_window)
     }
 }
 
-fn mir_pass_eliminate_unreachable_function(function: &MirFunction) Never! {
+fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     reachable :: mir_pass_reachable(function)
-    kept_blocks := [MirBasicBlock]{}
+    kept_blocks := [MIRBasicBlock]{}
     loop block in function.blocks {
         if mir_pass_block_id_seen(reachable, block.id) -> &kept_blocks.push(block)
     }
     function.blocks = kept_blocks
-    live_values := [MirValueId]{}
+    live_values := [MIRValueID]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.result == .Val(result) -> &live_values.push(result)
@@ -28,7 +44,7 @@ fn mir_pass_eliminate_unreachable_function(function: &MirFunction) Never! {
         value :: scope.deadline ?? next
         if !mir_pass_value_id_seen(live_values, value) -> &live_values.push(value)
     }
-    kept_values := [MirValueFact]{}
+    kept_values := [MIRValueFact]{}
     loop value in function.values {
         if mir_pass_value_id_seen(live_values, value.id) -> &kept_values.push(value)
     }
@@ -44,7 +60,7 @@ fn mir_pass_eliminate_unreachable_function(function: &MirFunction) Never! {
             if instruction.operation == {
                 .Phi(incoming) -> {
                     filtered :: loop row in incoming if mir_pass_block_id_seen(expected, row.block) -> row
-                    instructions[instruction_index].operation = MirOperation.Phi{incoming: filtered}
+                    instructions[instruction_index].operation = MIROperation.Phi{incoming: filtered}
                 }
                 else -> {}
             }
@@ -55,7 +71,7 @@ fn mir_pass_eliminate_unreachable_function(function: &MirFunction) Never! {
     }
 }
 
-fn mir_pass_simplify_cfg(program: &MirProgram) Never! {
+fn mir_pass_simplify_cfg(program: &MIRProgram) Never! {
     loop function_index in 0..<program.functions.len() {
         function_window := &program.functions[function_index]
         mir_pass_simplify_cfg_function(&function_window)
@@ -63,7 +79,7 @@ fn mir_pass_simplify_cfg(program: &MirProgram) Never! {
     mir_pass_eliminate_unreachable(&program)
 }
 
-fn mir_pass_simplify_cfg_function(function: &MirFunction) Never! {
+fn mir_pass_simplify_cfg_function(function: &MIRFunction) Never! {
     constants :: mir_pass_collect_scalar_constants(function)
     loop block_index in 0..<function.blocks.len() {
         replacement :: mir_pass_simplified_terminator(function.blocks[block_index].terminator, constants)
@@ -71,13 +87,13 @@ fn mir_pass_simplify_cfg_function(function: &MirFunction) Never! {
     }
 }
 
-fn mir_pass_simplified_terminator(terminator: MirTerminator, constants: [MirPassConstantFact]) -> MirTerminator? {
+fn mir_pass_simplified_terminator(terminator: MIRTerminator, constants: [MIRPassConstantFact]) -> MIRTerminator? {
     if terminator == {
         .Branch(condition, then_target, else_target) -> {
-            if then_target == else_target -> return Val(MirTerminator.Jump{target: then_target})
+            if then_target == else_target -> return Val(MIRTerminator.Jump{target: then_target})
             constant :: mir_pass_constant_for(constants, condition) ?? return None
             if constant == {
-                .Bool(flag) -> if flag -> Val(MirTerminator.Jump{target: then_target}) else -> Val(MirTerminator.Jump{target: else_target})
+                .Bool(flag) -> if flag -> Val(MIRTerminator.Jump{target: then_target}) else -> Val(MIRTerminator.Jump{target: else_target})
                 else -> None
             }
         }
@@ -85,7 +101,7 @@ fn mir_pass_simplified_terminator(terminator: MirTerminator, constants: [MirPass
     }
 }
 
-fn mir_pass_fold_exact_constants(program: &MirProgram) -> Int Never! {
+fn mir_pass_fold_exact_constants(program: &MIRProgram) -> Int Never! {
     folded := 0
     loop function_index in 0..<program.functions.len() {
         function_window := &program.functions[function_index]
@@ -95,7 +111,7 @@ fn mir_pass_fold_exact_constants(program: &MirProgram) -> Int Never! {
     folded
 }
 
-fn mir_pass_fold_function_constants(function: &MirFunction) -> Int Never! {
+fn mir_pass_fold_function_constants(function: &MIRFunction) -> Int Never! {
     folded := 0
     limit := 1
     loop block in function.blocks -> limit += block.instructions.len()
@@ -109,7 +125,7 @@ fn mir_pass_fold_function_constants(function: &MirFunction) -> Int Never! {
                 replacement :: mir_pass_fold_operation(instruction.operation, constants, instruction.ty)
                 if {
                     replacement == .Val(constant) -> {
-                        function.blocks[block_index].instructions[instruction_index].operation = MirOperation.Constant{value: constant}
+                        function.blocks[block_index].instructions[instruction_index].operation = MIROperation.Constant{value: constant}
                         changed = true
                         folded += 1
                     }
@@ -131,7 +147,7 @@ fn mir_pass_fold_function_constants(function: &MirFunction) -> Int Never! {
     folded
 }
 
-fn mir_pass_fold_operation(operation: MirOperation, constants: [MirPassConstantFact], ty: MirType?) -> MirConstant? {
+fn mir_pass_fold_operation(operation: MIROperation, constants: [MIRPassConstantFact], ty: MIRType?) -> MIRConstant? {
     if operation == {
         .Phi(incoming) -> mir_pass_fold_phi(incoming, constants)
         .Unary(op, value) -> {
@@ -150,8 +166,8 @@ fn mir_pass_fold_operation(operation: MirOperation, constants: [MirPassConstantF
     }
 }
 
-fn mir_pass_collect_scalar_constants(function: MirFunction) -> [MirPassConstantFact] Never! {
-    constants := [MirPassConstantFact]{}
+fn mir_pass_collect_scalar_constants(function: MIRFunction) -> [MIRPassConstantFact] Never! {
+    constants := [MIRPassConstantFact]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.result == .Val(result) {
@@ -172,14 +188,14 @@ fn mir_pass_collect_scalar_constants(function: MirFunction) -> [MirPassConstantF
     constants
 }
 
-fn mir_pass_constant_for(constants: [MirPassConstantFact], value: MirValueId) -> MirConstant? {
+fn mir_pass_constant_for(constants: [MIRPassConstantFact], value: MIRValueID) -> MIRConstant? {
     loop fact in constants {
         if fact.value == value -> return Val(fact.constant)
     }
     None
 }
 
-fn mir_pass_constant_put(constants: &[MirPassConstantFact], value: MirValueId, constant: MirConstant) Never! {
+fn mir_pass_constant_put(constants: &[MIRPassConstantFact], value: MIRValueID, constant: MIRConstant) Never! {
     index := 0
     loop index < constants.len() {
         if constants[index].value == value {
@@ -188,19 +204,19 @@ fn mir_pass_constant_put(constants: &[MirPassConstantFact], value: MirValueId, c
         }
         index += 1
     }
-    &constants.push(MirPassConstantFact{value: value, constant: constant})
+    &constants.push(MIRPassConstantFact{value: value, constant: constant})
 }
 
-fn mir_pass_scalar_constant(constant: MirConstant) -> MirConstant? {
+fn mir_pass_scalar_constant(constant: MIRConstant) -> MIRConstant? {
     if constant == {
-        .Int(value, width, _) -> Val(MirConstant.Int{value: value, width: width, spelling: None})
-        .Bool(value) -> Val(MirConstant.Bool{value: value})
-        .Char(value) -> Val(MirConstant.Char{value: value})
+        .Int(value, width, _) -> Val(MIRConstant.Int{value: value, width: width, spelling: None})
+        .Bool(value) -> Val(MIRConstant.Bool{value: value})
+        .Char(value) -> Val(MIRConstant.Char{value: value})
         else -> None
     }
 }
 
-fn mir_pass_same_scalar(left: MirConstant, right: MirConstant) -> Bool Never! {
+fn mir_pass_same_scalar(left: MIRConstant, right: MIRConstant) -> Bool Never! {
     if left == {
         .Int(left_value, left_width, _) -> {
             if right == {
@@ -224,7 +240,7 @@ fn mir_pass_same_scalar(left: MirConstant, right: MirConstant) -> Bool Never! {
     }
 }
 
-fn mir_pass_fold_phi(incoming: [MirPhiIncoming], constants: [MirPassConstantFact]) -> MirConstant? {
+fn mir_pass_fold_phi(incoming: [MIRPhiIncoming], constants: [MIRPassConstantFact]) -> MIRConstant? {
     if incoming.len() == 0 -> return None
     first :: mir_pass_constant_for(constants, incoming[0].value) ?? return None
     loop index in 1..<incoming.len() {
@@ -234,11 +250,11 @@ fn mir_pass_fold_phi(incoming: [MirPhiIncoming], constants: [MirPassConstantFact
     Val(first)
 }
 
-fn mir_pass_fold_unary(op: MirUnaryOp, value: MirConstant, ty: MirType) -> MirConstant? {
+fn mir_pass_fold_unary(op: MIRUnaryOp, value: MIRConstant, ty: MIRType) -> MIRConstant? {
     if op == {
         .Not -> {
             if value == {
-                .Bool(flag) -> Val(MirConstant.Bool{value: !flag})
+                .Bool(flag) -> Val(MIRConstant.Bool{value: !flag})
                 else -> None
             }
         }
@@ -247,7 +263,7 @@ fn mir_pass_fold_unary(op: MirUnaryOp, value: MirConstant, ty: MirType) -> MirCo
                 .Int(number, width, _) -> {
                     result :: mir_pass_checked_sub(0, number) ?? return None
                     output_width :: mir_pass_integer_width(ty, width)
-                    if mir_pass_fits_integer(result, output_width) -> Val(MirConstant.Int{value: result, width: output_width, spelling: None}) else -> None
+                    if mir_pass_fits_integer(result, output_width) -> Val(MIRConstant.Int{value: result, width: output_width, spelling: None}) else -> None
                 }
                 else -> None
             }
@@ -256,16 +272,16 @@ fn mir_pass_fold_unary(op: MirUnaryOp, value: MirConstant, ty: MirType) -> MirCo
     }
 }
 
-fn mir_pass_fold_binary(op: MirBinaryOp, left: MirConstant, right: MirConstant, ty: MirType) -> MirConstant? {
+fn mir_pass_fold_binary(op: MIRBinaryOp, left: MIRConstant, right: MIRConstant, ty: MIRType) -> MIRConstant? {
     if left == {
         .Bool(left_value) -> {
             if right == {
                 .Bool(right_value) -> {
                     if op == {
-                        .And -> Val(MirConstant.Bool{value: left_value && right_value})
-                        .Or -> Val(MirConstant.Bool{value: left_value || right_value})
-                        .Eq -> Val(MirConstant.Bool{value: left_value == right_value})
-                        .Ne -> Val(MirConstant.Bool{value: left_value != right_value})
+                        .And -> Val(MIRConstant.Bool{value: left_value && right_value})
+                        .Or -> Val(MIRConstant.Bool{value: left_value || right_value})
+                        .Eq -> Val(MIRConstant.Bool{value: left_value == right_value})
+                        .Ne -> Val(MIRConstant.Bool{value: left_value != right_value})
                         else -> None
                     }
                 }
@@ -276,12 +292,12 @@ fn mir_pass_fold_binary(op: MirBinaryOp, left: MirConstant, right: MirConstant, 
             if right == {
                 .Char(right_value) -> {
                     if op == {
-                        .Eq -> Val(MirConstant.Bool{value: left_value == right_value})
-                        .Ne -> Val(MirConstant.Bool{value: left_value != right_value})
-                        .Lt -> Val(MirConstant.Bool{value: left_value < right_value})
-                        .Gt -> Val(MirConstant.Bool{value: left_value > right_value})
-                        .Le -> Val(MirConstant.Bool{value: left_value <= right_value})
-                        .Ge -> Val(MirConstant.Bool{value: left_value >= right_value})
+                        .Eq -> Val(MIRConstant.Bool{value: left_value == right_value})
+                        .Ne -> Val(MIRConstant.Bool{value: left_value != right_value})
+                        .Lt -> Val(MIRConstant.Bool{value: left_value < right_value})
+                        .Gt -> Val(MIRConstant.Bool{value: left_value > right_value})
+                        .Le -> Val(MIRConstant.Bool{value: left_value <= right_value})
+                        .Ge -> Val(MIRConstant.Bool{value: left_value >= right_value})
                         else -> None
                     }
                 }
@@ -292,16 +308,16 @@ fn mir_pass_fold_binary(op: MirBinaryOp, left: MirConstant, right: MirConstant, 
             if right == {
                 .Int(right_value, _, _) -> {
                     if op == {
-                        .Eq -> Val(MirConstant.Bool{value: left_value == right_value})
-                        .Ne -> Val(MirConstant.Bool{value: left_value != right_value})
-                        .Lt -> Val(MirConstant.Bool{value: left_value < right_value})
-                        .Gt -> Val(MirConstant.Bool{value: left_value > right_value})
-                        .Le -> Val(MirConstant.Bool{value: left_value <= right_value})
-                        .Ge -> Val(MirConstant.Bool{value: left_value >= right_value})
+                        .Eq -> Val(MIRConstant.Bool{value: left_value == right_value})
+                        .Ne -> Val(MIRConstant.Bool{value: left_value != right_value})
+                        .Lt -> Val(MIRConstant.Bool{value: left_value < right_value})
+                        .Gt -> Val(MIRConstant.Bool{value: left_value > right_value})
+                        .Le -> Val(MIRConstant.Bool{value: left_value <= right_value})
+                        .Ge -> Val(MIRConstant.Bool{value: left_value >= right_value})
                         else -> {
                             result :: mir_pass_integer_result(op, left_value, right_value) ?? return None
                             width :: mir_pass_integer_width(ty, left_width)
-                            if mir_pass_fits_integer(result, width) -> Val(MirConstant.Int{value: result, width: width, spelling: None}) else -> None
+                            if mir_pass_fits_integer(result, width) -> Val(MIRConstant.Int{value: result, width: width, spelling: None}) else -> None
                         }
                     }
                 }
@@ -312,7 +328,7 @@ fn mir_pass_fold_binary(op: MirBinaryOp, left: MirConstant, right: MirConstant, 
     }
 }
 
-fn mir_pass_integer_result(op: MirBinaryOp, left: Int, right: Int) -> Int? {
+fn mir_pass_integer_result(op: MIRBinaryOp, left: Int, right: Int) -> Int? {
     if op == {
         .Add -> mir_pass_checked_add(left, right)
         .Sub -> mir_pass_checked_sub(left, right)
@@ -398,9 +414,9 @@ fn mir_pass_floor_mod(left: Int, right: Int) -> Int? {
     Val(left % right)
 }
 
-fn mir_pass_integer_width(ty: MirType, fallback: MirIntegerWidth?) -> MirIntegerWidth? {
+fn mir_pass_integer_width(ty: MIRType, fallback: MIRIntegerWidth?) -> MIRIntegerWidth? {
     if ty.kind == {
-        .IntN(signed, bits) -> if bits > 0 && bits <= 64 -> Val(MirIntegerWidth{signed: signed, bits: bits}) else -> None
+        .IntN(signed, bits) -> if bits > 0 && bits <= 64 -> Val(MIRIntegerWidth{signed: signed, bits: bits}) else -> None
         .InlineRange(base, _, _) -> mir_pass_integer_width(base, fallback)
         .Tagged(_, inner) -> mir_pass_integer_width(inner, fallback)
         .Quantity(base, _) -> mir_pass_integer_width(base, fallback)
@@ -408,7 +424,7 @@ fn mir_pass_integer_width(ty: MirType, fallback: MirIntegerWidth?) -> MirInteger
     }
 }
 
-fn mir_pass_fits_integer(value: Int, width: MirIntegerWidth?) -> Bool Never! {
+fn mir_pass_fits_integer(value: Int, width: MIRIntegerWidth?) -> Bool Never! {
     row :: width ?? return true
     bits :: row.bits
     if {

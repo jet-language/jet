@@ -13,12 +13,6 @@ use crate::runtime_host::fixed_arithmetic_kernel::{
 };
 use jet_foundation::Numeric::{CtBigInt, CtDecimal, CtFraction};
 
-fn trap_decimal(msg: &str) {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.set_trap(msg);
-    });
-}
-
 fn trap_fraction(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
         rt.set_trap(msg);

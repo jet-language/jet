@@ -9,6 +9,7 @@
 //! that intent for receipts without creating a second game-specific bundler.
 
 use crate::SHA256;
+use jet_foundation::Hex::nibble as hex_nibble;
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -2312,7 +2313,7 @@ fn windows_manifest(
     out.push_str("</Properties>\n<Applications>\n");
     let _ = writeln!(
         out,
-        "<Application Id=\"App\" Executable=\"{}\" EntryPoint=\"Windows.FullTrustApplication\">",
+        "<Application ID=\"App\" Executable=\"{}\" EntryPoint=\"Windows.FullTrustApplication\">",
         xml_escape(executable)
     );
     let _ = write!(
@@ -2405,15 +2406,6 @@ fn sha256_base64(hex: &str) -> String {
         }
     }
     encoded
-}
-
-fn hex_nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 fn windows_block_map(files: &[BundleFile]) -> Vec<u8> {

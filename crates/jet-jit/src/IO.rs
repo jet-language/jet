@@ -738,43 +738,6 @@ fn progress_remove_state(list: i64) {
         .remove(&list);
 }
 
-fn prefix_plan(plan: &[usize], n: usize) -> Vec<usize> {
-    plan.iter().copied().take(n).collect()
-}
-
-pub(crate) fn progress_transfer_take_state(source: i64, target: i64, n: i64) {
-    let Some((plan, old_tail)) = source_plan(source) else {
-        return;
-    };
-    let n = n.max(0) as usize;
-    let output_len = n.min(plan.len());
-    let tail = if n != 0 && n >= plan.len() {
-        old_tail
-    } else {
-        0
-    };
-    install_plan(source, target, prefix_plan(&plan, output_len), tail);
-}
-
-pub(crate) fn progress_transfer_skip_state(source: i64, target: i64, n: i64) {
-    let Some((plan, old_tail)) = source_plan(source) else {
-        return;
-    };
-    let n = n.max(0) as usize;
-    if n >= plan.len() {
-        install_plan(
-            source,
-            target,
-            Vec::new(),
-            plan.iter().sum::<usize>() + old_tail,
-        );
-        return;
-    }
-    let mut output = plan[n..].to_vec();
-    output[0] = plan[..=n].iter().sum();
-    install_plan(source, target, output, old_tail);
-}
-
 pub(crate) fn progress_transfer_step_state(source: i64, target: i64, n: i64) {
     let Some((plan, old_tail)) = source_plan(source) else {
         return;

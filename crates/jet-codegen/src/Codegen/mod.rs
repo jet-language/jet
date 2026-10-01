@@ -2032,7 +2032,7 @@ fn core_source_closure_fingerprint(used_core: &std::collections::HashSet<String>
         }
         append_identity_field(&mut bytes, source_module.module.as_bytes());
         append_identity_field(&mut bytes, source_module.path.as_bytes());
-        append_identity_field(&mut bytes, source_module.source.as_bytes());
+        append_identity_field(&mut bytes, core_source_body(source_module.module).as_bytes());
     }
     // Private source parts are attached to their public owner for cache
     // identity, but never enter the public Core source-module registry.
@@ -2047,9 +2047,14 @@ fn core_source_closure_fingerprint(used_core: &std::collections::HashSet<String>
         append_identity_field(&mut bytes, part.source.module.as_bytes());
         append_identity_field(&mut bytes, part.source.alias.as_bytes());
         append_identity_field(&mut bytes, part.source.path.as_bytes());
-        append_identity_field(&mut bytes, part.source.source.as_bytes());
+        append_identity_field(&mut bytes, core_source_body(part.source.module).as_bytes());
     }
     crate::SHA256::sha256_hex(&bytes)
+}
+
+fn core_source_body(module: &str) -> &'static str {
+    jet_sema::CoreSources::core_source_text(module)
+        .unwrap_or_else(|| panic!("Core source module `{module}` has no body text"))
 }
 
 fn corelib_emission_identity(body: &str, used_core: &std::collections::HashSet<String>) -> String {

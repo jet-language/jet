@@ -1995,6 +1995,11 @@ macro_rules! jet_lane_show {
             self.0.logical_owner_count() as i64
         }
 
+        /// Identity only, like `Rc::ptr_eq`: both handles name one cell.
+        pub fn same(&self, other: &JetShared<T>) -> bool {
+            std::sync::Arc::ptr_eq(&self.0, &other.0)
+        }
+
         /// A non-counting capability for physical cross-tier root transport.
         pub(crate) fn physical_owner(&self) -> JetSharedPhysicalOwner<T>
         where
@@ -3239,7 +3244,7 @@ macro_rules! jet_lane_show {
     }
     impl<T> std::fmt::Debug for JetId<T> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "Id(#{}@{})", self.index, self.generation)
+            write!(f, "ID(#{}@{})", self.index, self.generation)
         }
     }
     // D-MEM1 S6: print/interpolation/derived-Debug support — `Id<T>` shows up as
@@ -3247,17 +3252,17 @@ macro_rules! jet_lane_show {
     // generated `jet_debug()` calls `.jet_debug()` on every field.
     impl<T> super::JetShow for JetId<T> {
         fn jet_show(&self) -> String {
-            format!("Id(#{}@{})", self.index, self.generation)
+            format!("ID(#{}@{})", self.index, self.generation)
         }
     }
     impl<T> super::JetDisplay for JetId<T> {
         fn jet_display(&self) -> String {
-            format!("Id(#{}@{})", self.index, self.generation)
+            format!("ID(#{}@{})", self.index, self.generation)
         }
     }
     impl<T> super::JetDebug for JetId<T> {
         fn jet_debug(&self) -> String {
-            format!("Id(#{}@{})", self.index, self.generation)
+            format!("ID(#{}@{})", self.index, self.generation)
         }
     }
 

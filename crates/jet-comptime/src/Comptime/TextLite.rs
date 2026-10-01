@@ -141,8 +141,7 @@ mod text_kernel {
 
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
-    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+    pub use jet_unicode::*;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/Core/UnicodeString.rs");

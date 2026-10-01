@@ -876,7 +876,7 @@ fn web_form_field_spec(
         "Number" => web_kernel::JetWebFormControl::Number,
         "Checkbox" => web_kernel::JetWebFormControl::Checkbox,
         "Hidden" => web_kernel::JetWebFormControl::Hidden,
-        "Url" => web_kernel::JetWebFormControl::Url,
+        "URL" => web_kernel::JetWebFormControl::URL,
         "Date" => web_kernel::JetWebFormControl::Date,
         _ => return Err(unsupported("WebFormControl", span)),
     };
@@ -1965,7 +1965,7 @@ fn web_router_value_type(
         "Int" => Ok(web_kernel::JetWebRouterValueType::Int),
         "Bool" => Ok(web_kernel::JetWebRouterValueType::Bool),
         "Float" => Ok(web_kernel::JetWebRouterValueType::Float),
-        "JSON" | "Json" => Ok(web_kernel::JetWebRouterValueType::Json),
+        "JSON" => Ok(web_kernel::JetWebRouterValueType::Json),
         _ => Err(unsupported("WebRouterValueType", span)),
     }
 }
@@ -1982,7 +1982,7 @@ fn web_router_codec(
     }
     match variant.as_str() {
         "Query" => Ok(web_kernel::JetWebRouterSearchCodec::Query),
-        "JSON" | "Json" => Ok(web_kernel::JetWebRouterSearchCodec::Json),
+        "JSON" => Ok(web_kernel::JetWebRouterSearchCodec::Json),
         _ => Err(unsupported("WebRouterSearchCodec", span)),
     }
 }

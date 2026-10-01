@@ -293,11 +293,6 @@ impl HeadlessReplay {
         &self.recording
     }
 
-    /// Return mutable access to the recording for explicit annotations.
-    pub fn recording_mut(&mut self) -> &mut Recording {
-        &mut self.recording
-    }
-
     /// Return explicit environment overrides without touching the process.
     pub fn environment(&self) -> &BTreeMap<String, String> {
         &self.environment

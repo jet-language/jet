@@ -7,7 +7,7 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    edit_distance, is_cloneable, is_debuggable, is_displayable, is_printable,
+    edit_distance, is_debuggable, is_displayable, is_printable,
     owned_type_for_read_view, type_fix_hint, type_is_copy, typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
@@ -25,6 +25,16 @@ struct GenericInferenceConflict {
     first_source: String,
     second: Type,
     second_source: String,
+}
+
+/// The type arguments one generic call's arguments determine.
+pub(crate) struct GenericArgInference {
+    pub(crate) subst: HashMap<String, Type>,
+    /// Each argument's type from the inference pass, in argument order.
+    pub(crate) pre_inferred: Vec<Option<Type>>,
+    /// Every type parameter was bound without a conflict; the caller checks
+    /// the declared bounds.
+    pub(crate) complete: bool,
 }
 
 /// E0905 for a generic call bound. A caller's own type parameter can only
@@ -223,16 +233,36 @@ fn seed_generic_type(
                     // return; two carrier values still use structural matching
                     // so explicit error domains remain checked.
                     Type::Result {
-                        ok: expected_ok, ..
-                    } if !matches!(found.as_ref(), Type::Result { .. }) => seed_generic_type(
-                        expected_ok.as_ref(),
-                        found.as_ref(),
-                        "the lambda return",
-                        type_params,
-                        subst,
-                        origins,
-                        conflict,
-                    ),
+                        ok: expected_ok,
+                        err: expected_err,
+                    } if !matches!(found.as_ref(), Type::Result { .. }) => {
+                        let ok = seed_generic_type(
+                            expected_ok.as_ref(),
+                            found.as_ref(),
+                            "the lambda return",
+                            type_params,
+                            subst,
+                            origins,
+                            conflict,
+                        );
+                        // D-CALLBACK-ERR1=A: a raw callable return carries the
+                        // implicit default `Err`, so a failure-domain type
+                        // parameter it fills binds to `Err`.
+                        if let Type::Named(param) = expected_err.as_ref() {
+                            if type_params.contains(param) && !subst.contains_key(param) {
+                                bind_inferred_type(
+                                    param,
+                                    &Type::Named(Syntax::TYPE_ERR.to_string()),
+                                    "the lambda return",
+                                    type_params,
+                                    subst,
+                                    origins,
+                                    conflict,
+                                );
+                            }
+                        }
+                        ok
+                    }
                     _ => seed_generic_type(
                         expected.as_ref(),
                         found.as_ref(),
@@ -394,7 +424,7 @@ impl<'a> Checker<'a> {
                 "a resource has one cleanup owner and cannot be duplicated into a snapshot"
                     .to_string(),
             )
-        } else if !is_cloneable(&result_ty, self.registry) {
+        } else if !self.is_cloneable_type(&result_ty) {
             Some("the value contains a resource, function, trait value, or mutable view that Jet cannot duplicate".to_string())
         } else {
             None
@@ -659,7 +689,21 @@ impl<'a> Checker<'a> {
             }
         }
         let source = self.source;
-        let value_text = source.get(value_span.start..value_span.end).unwrap_or_default();
+        // Method-call, field, index, and binary nodes span only their own
+        // suffix or operator, so the traced text starts at the leftmost
+        // operand: `word.len() * 3`, not `len() * 3`.
+        fn trace_start(expr: &Expr) -> usize {
+            match expr {
+                Expr::Binary(_, left, _, _) => trace_start(left),
+                Expr::Index { base, .. } | Expr::Slice { base, .. } => trace_start(base),
+                Expr::Field(base, _, _) => trace_start(base),
+                Expr::OptField { base, .. } => trace_start(base),
+                Expr::MethodCall { receiver, .. } => trace_start(receiver),
+                _ => crate::Sema::source_expr_start(expr),
+            }
+        }
+        let text_start = trace_start(&call.args[0].expr).min(value_span.start);
+        let value_text = source.get(text_start..value_span.end).unwrap_or_default();
         let expr_text = value_text
             .lines()
             .map(str::trim)
@@ -819,6 +863,220 @@ impl<'a> Checker<'a> {
         ]);
         call.resolved_ret = Some(result.clone());
         Some(result)
+    }
+
+    /// Infer a generic call's type arguments from its arguments. Local,
+    /// file-module, inline-module and source-owned Core calls share this one
+    /// rule, so a callback argument binds the same parameters on every route:
+    /// a lambda is checked against its callable parameter once the earlier
+    /// arguments pin the type parameters, and a failure-domain parameter
+    /// (`fn(T) -> U E!`, D-CALLBACK-ERR1=A) binds to the callback's own
+    /// failure type. Conflicts and unresolved parameters are reported here;
+    /// the caller checks the declared bounds when `complete` is true.
+    pub(crate) fn infer_generic_call_args(
+        &mut self,
+        sig: &crate::AST::FuncSig,
+        fn_type_params: &[crate::AST::TypeParam],
+        args: &mut [crate::AST::CallArg],
+        call_access: &mut crate::Sema::CallAccessFrame,
+        name_span: Span,
+        owned_access: bool,
+    ) -> GenericArgInference {
+        let mut pre_inferred: Vec<Option<Type>> = Vec::new();
+        let prepass_type_params: HashSet<String> = fn_type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        for (index, arg) in args.iter_mut().enumerate() {
+            let param_conv = sig.params.get(index).map(|(conv, _)| *conv);
+            // A lambda argument is checked against its callable parameter
+            // once the arguments before it pin every type parameter. Its
+            // parameters then need no annotation, and a body that cannot
+            // fail meets a `Never!` callback slot, as it does at a
+            // non-generic call.
+            let lambda_expected = match (&arg.expr, sig.params.get(index)) {
+                (Expr::Lambda(_), Some((_, param_ty @ Type::Fn { .. }))) => {
+                    let mut subst = HashMap::new();
+                    let mut origins = HashMap::new();
+                    let mut conflict = None;
+                    for (earlier, found) in pre_inferred.iter().enumerate() {
+                        let (Some(found), Some((_, earlier_ty))) =
+                            (found, sig.params.get(earlier))
+                        else {
+                            continue;
+                        };
+                        if !matches!(earlier_ty, Type::Fn { .. }) {
+                            seed_generic_type(
+                                earlier_ty,
+                                found,
+                                &format!("argument {}", earlier + 1),
+                                &prepass_type_params,
+                                &mut subst,
+                                &mut origins,
+                                &mut conflict,
+                            );
+                        }
+                    }
+                    // D-CALLBACK-ERR1=A: a failure-domain parameter the
+                    // callback itself fills is checked as `Never`; the lambda
+                    // then publishes the failure its body really has, and
+                    // that binds the parameter below.
+                    if let Type::Fn { ret: Some(ret), .. } = param_ty {
+                        if let Type::Result { err, .. } = ret.as_ref() {
+                            if let Type::Named(param) = err.as_ref() {
+                                if prepass_type_params.contains(param)
+                                    && !subst.contains_key(param)
+                                {
+                                    subst.insert(
+                                        param.clone(),
+                                        Type::Named(Syntax::TYPE_NEVER.to_string()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    (conflict.is_none() && subst.len() == prepass_type_params.len())
+                        .then(|| substitute_type(param_ty, &subst))
+                }
+                _ => None,
+            };
+            pre_inferred.push(self.with_call_access(call_access, |checker| {
+                if let Some((param_conv, param_ty)) = sig.params.get(index) {
+                    checker.check_call_argument_access(arg, *param_conv, param_ty, owned_access);
+                }
+                // Move sites are diagnosed as E0219 (pin/change), not E0220.
+                let suppress = checker.suppress_partial_move_root_read;
+                if arg.convention == AccessConvention::Move {
+                    checker.suppress_partial_move_root_read = true;
+                }
+                let saved_string_view_read = checker.allow_string_view_read;
+                if !checker.copies_explicit() && param_conv == Some(AccessConvention::Move) {
+                    // Generic inference has not resolved the owning
+                    // destination yet. Permit the read-only view to be typed
+                    // now; the concrete Move parameter decides whether this
+                    // exact value gets the shared implicit-copy node.
+                    checker.allow_string_view_read = true;
+                }
+                let saved_expected =
+                    lambda_expected.map(|expected| checker.expected_type.replace(expected));
+                let inferred = checker.infer(&mut arg.expr);
+                if let Some(saved) = saved_expected {
+                    checker.expected_type = saved;
+                }
+                checker.allow_string_view_read = saved_string_view_read;
+                checker.suppress_partial_move_root_read = suppress;
+                checker.check_call_argument_captures(&arg.expr);
+                inferred
+            }));
+        }
+        let mut inference = GenericArgInference {
+            subst: HashMap::new(),
+            pre_inferred,
+            complete: false,
+        };
+        let arg_types: Vec<Type> = inference
+            .pre_inferred
+            .iter()
+            .filter_map(|t| t.clone())
+            .collect();
+        if arg_types.len() != args.len() {
+            return inference;
+        }
+        let mut inferred_subst = HashMap::new();
+        let mut origins = HashMap::new();
+        let mut conflict = None;
+        // Ordinary arguments establish the first concrete candidate. This
+        // makes a later lambda return report the actual argument that
+        // disagrees with it, instead of suggesting a generic annotation that
+        // cannot repair the call.
+        for (index, arg_ty) in arg_types.iter().enumerate() {
+            let Some((_, param_ty)) = sig.params.get(index) else {
+                continue;
+            };
+            if !matches!(param_ty, Type::Fn { .. }) {
+                seed_generic_type(
+                    param_ty,
+                    arg_ty,
+                    &format!("argument {}", index + 1),
+                    &prepass_type_params,
+                    &mut inferred_subst,
+                    &mut origins,
+                    &mut conflict,
+                );
+            }
+        }
+        // Function types are structural inference sources too. The lambda
+        // prepass has already made both its annotated parameter and return
+        // types concrete, so use those slots to bind the callee's generic
+        // parameters.
+        for (index, arg_ty) in arg_types.iter().enumerate() {
+            let Some((_, param_ty)) = sig.params.get(index) else {
+                continue;
+            };
+            if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. }) {
+                seed_generic_type(
+                    param_ty,
+                    arg_ty,
+                    "the lambda",
+                    &prepass_type_params,
+                    &mut inferred_subst,
+                    &mut origins,
+                    &mut conflict,
+                );
+            }
+        }
+        if let Some(conflict) = conflict {
+            self.diags.push(generic_conflict_diagnostic(name_span, &conflict));
+            // Keep the non-conflicting candidates so the final pass checks
+            // each argument once against the most informative partial
+            // signature.
+            inference.subst = inferred_subst;
+            return inference;
+        }
+        let remaining_params: Vec<_> = fn_type_params
+            .iter()
+            .filter(|param| !inferred_subst.contains_key(&param.name))
+            .cloned()
+            .collect();
+        let mut inference_sig = sig.clone();
+        for (index, (_, param_ty)) in sig.params.iter().enumerate() {
+            let Some(arg_ty) = arg_types.get(index) else {
+                continue;
+            };
+            if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. }) {
+                inference_sig.params[index].1 = arg_ty.clone();
+            } else {
+                inference_sig.params[index].1 = substitute_type(param_ty, &inferred_subst);
+            }
+        }
+        inference_sig.return_type = sig
+            .return_type
+            .as_ref()
+            .map(|ret| substitute_type(ret, &inferred_subst));
+        match self.trait_reg.infer_fn_subst_without_bounds(
+            &inference_sig,
+            &arg_types,
+            &remaining_params,
+            self.expected_type.as_ref(),
+        ) {
+            Ok(s) => {
+                inferred_subst.extend(s);
+                inference.complete = true;
+            }
+            Err(p) => self.diags.push(e0904(name_span, &p)),
+        }
+        inference.subst = inferred_subst;
+        inference
+    }
+
+    /// Record a qualified module call's inferred type arguments on the call's
+    /// AST node (D-GENERIC-CALL1=A); spelled type arguments stay as written.
+    pub(crate) fn record_inferred_call_type_args(&mut self, type_args: &mut Vec<Type>) {
+        if let Some(inferred) = self.inferred_call_type_args.take() {
+            if type_args.is_empty() {
+                *type_args = inferred;
+            }
+        }
     }
 
     pub(crate) fn check_call(&mut self, call: &mut Call, as_value: bool) -> Option<Option<Type>> {
@@ -1432,6 +1690,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some((alias, mod_idx, fn_name)) = self.resolve_import_call_path(&call.name) {
+                self.inferred_call_type_args = None;
                 let result = self.infer_import_call(
                     &alias,
                     mod_idx,
@@ -1442,6 +1701,7 @@ impl<'a> Checker<'a> {
                     &mut call.args,
                     &mut call.resolved_ret,
                 );
+                self.record_inferred_call_type_args(&mut call.type_args);
                 return Some(result);
             }
             // D-NAME-WALK1=A: an inline body overlays its enclosing file's
@@ -1465,6 +1725,7 @@ impl<'a> Checker<'a> {
                     self.record_import_alias_reference(&call.name, call.name_span);
                 }
                 let alias = mangled.split("__").next().unwrap_or(&mangled).to_string();
+                self.inferred_call_type_args = None;
                 let result = self.infer_code_module_call(
                     &alias,
                     &mangled,
@@ -1474,6 +1735,7 @@ impl<'a> Checker<'a> {
                     &mut call.args,
                     &mut call.resolved_ret,
                 );
+                self.record_inferred_call_type_args(&mut call.type_args);
                 return Some(result);
             }
             let inline_file = self
@@ -1488,6 +1750,7 @@ impl<'a> Checker<'a> {
             if let Some((fn_name, mod_idx)) =
                 inline_file.or_else(|| self.unqualified_file.get(&call.name).cloned())
             {
+                self.inferred_call_type_args = None;
                 let result = self.infer_import_call(
                     &call.name,
                     mod_idx,
@@ -1498,6 +1761,7 @@ impl<'a> Checker<'a> {
                     &mut call.args,
                     &mut call.resolved_ret,
                 );
+                self.record_inferred_call_type_args(&mut call.type_args);
                 return Some(result);
             }
         }
@@ -1973,7 +2237,11 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in fn_type_params.iter().zip(&call.type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    self.check_declared_type(&actual, call.name_span);
+                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain
+                    // parameter (`apply<Never>(plain)`).
+                    if !actual.is_never() {
+                        self.check_declared_type(&actual, call.name_span);
+                    }
                     for bound in &param.bounds {
                         if !self.type_satisfies_bound(&actual, bound) {
                             let diagnostic =
@@ -1985,149 +2253,29 @@ impl<'a> Checker<'a> {
                 }
             }
         } else if !fn_type_params.is_empty() {
-            for (index, arg) in call.args.iter_mut().enumerate() {
-                let param_conv = sig.params.get(index).map(|(conv, _)| *conv);
-                pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
-                    if let Some((param_conv, param_ty)) = sig.params.get(index) {
-                        checker.check_call_argument_access(
-                            arg,
-                            *param_conv,
-                            param_ty,
-                            !sig.is_extern,
-                        );
-                    }
-                    // Move sites are diagnosed as E0219 (pin/change), not E0220.
-                    let suppress = checker.suppress_partial_move_root_read;
-                    if arg.convention == AccessConvention::Move {
-                        checker.suppress_partial_move_root_read = true;
-                    }
-                    let saved_string_view_read = checker.allow_string_view_read;
-                    if !checker.copies_explicit() && param_conv == Some(AccessConvention::Move) {
-                        // Generic inference has not resolved the owning
-                        // destination yet. Permit the read-only view to
-                        // be typed now; the concrete Move parameter below
-                        // decides whether this exact value gets the
-                        // shared implicit-copy node.
-                        checker.allow_string_view_read = true;
-                    }
-                    let inferred = checker.infer(&mut arg.expr);
-                    checker.allow_string_view_read = saved_string_view_read;
-                    checker.suppress_partial_move_root_read = suppress;
-                    checker.check_call_argument_captures(&arg.expr);
-                    inferred
-                }));
-            }
-            let arg_types: Vec<Type> = pre_inferred.iter().filter_map(|t| t.clone()).collect();
-            if arg_types.len() == call.args.len() {
-                let type_param_names: HashSet<String> = fn_type_params
-                    .iter()
-                    .map(|param| param.name.clone())
-                    .collect();
-                let mut inferred_subst = HashMap::new();
-                let mut origins = HashMap::new();
-                let mut conflict = None;
-
-                // Ordinary arguments establish the first concrete candidate.
-                // This makes a later lambda return report the actual argument
-                // that disagrees with it, instead of suggesting a generic
-                // annotation that cannot repair the call.
-                for (index, arg_ty) in arg_types.iter().enumerate() {
-                    let Some((_, param_ty)) = sig.params.get(index) else {
-                        continue;
-                    };
-                    if !matches!(param_ty, Type::Fn { .. }) {
-                        seed_generic_type(
-                            param_ty,
-                            arg_ty,
-                            &format!("argument {}", index + 1),
-                            &type_param_names,
-                            &mut inferred_subst,
-                            &mut origins,
-                            &mut conflict,
-                        );
-                    }
-                }
-
-                // Function types are structural inference sources too. The
-                // lambda prepass has already made both its annotated
-                // parameter and return types concrete, so use those slots to
-                // bind the callee's generic parameters.
-                for (index, arg_ty) in arg_types.iter().enumerate() {
-                    let Some((_, param_ty)) = sig.params.get(index) else {
-                        continue;
-                    };
-                    if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. }) {
-                        seed_generic_type(
-                            param_ty,
-                            arg_ty,
-                            "the lambda",
-                            &type_param_names,
-                            &mut inferred_subst,
-                            &mut origins,
-                            &mut conflict,
-                        );
-                    }
-                }
-
-                if let Some(conflict) = conflict {
-                    self.diags
-                        .push(generic_conflict_diagnostic(call.name_span, &conflict));
-                    // Keep the non-conflicting candidates so the final pass
-                    // checks each argument once against the most informative
-                    // partial signature.
-                    generic_subst = inferred_subst;
-                } else {
-                    let remaining_params: Vec<_> = fn_type_params
+            let inference = self.infer_generic_call_args(
+                &sig,
+                &fn_type_params,
+                &mut call.args,
+                &mut call_access,
+                call.name_span,
+                !sig.is_extern,
+            );
+            if inference.complete {
+                if let Some((ty, bound)) = fn_type_params.iter().find_map(|param| {
+                    let ty = inference.subst.get(&param.name)?;
+                    param
+                        .bounds
                         .iter()
-                        .filter(|param| !inferred_subst.contains_key(&param.name))
-                        .cloned()
-                        .collect();
-                    let mut inference_sig = sig.clone();
-                    for (index, (_, param_ty)) in sig.params.iter().enumerate() {
-                        let Some(arg_ty) = arg_types.get(index) else {
-                            continue;
-                        };
-                        if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. })
-                        {
-                            inference_sig.params[index].1 = arg_ty.clone();
-                        } else {
-                            inference_sig.params[index].1 =
-                                substitute_type(param_ty, &inferred_subst);
-                        }
-                    }
-                    inference_sig.return_type = sig
-                        .return_type
-                        .as_ref()
-                        .map(|ret| substitute_type(ret, &inferred_subst));
-                    match self.trait_reg.infer_fn_subst_without_bounds(
-                        &inference_sig,
-                        &arg_types,
-                        &remaining_params,
-                        self.expected_type.as_ref(),
-                    ) {
-                        Ok(s) => {
-                            inferred_subst.extend(s);
-                            if let Some((ty, bound)) = fn_type_params.iter().find_map(|param| {
-                                let ty = inferred_subst.get(&param.name)?;
-                                param
-                                    .bounds
-                                    .iter()
-                                    .find(|bound| !self.type_satisfies_bound(ty, bound))
-                                    .map(|bound| (ty, bound))
-                            }) {
-                                let diagnostic =
-                                    generic_bound_failure(self, ty, bound, call.name_span);
-                                self.diags.push(diagnostic);
-                            }
-                            generic_subst = inferred_subst;
-                        }
-                        Err(p) => {
-                            self.diags.push(e0904(call.name_span, &p));
-                            generic_subst = inferred_subst;
-                        }
-                    }
+                        .find(|bound| !self.type_satisfies_bound(ty, bound))
+                        .map(|bound| (ty, bound))
+                }) {
+                    let diagnostic = generic_bound_failure(self, ty, bound, call.name_span);
+                    self.diags.push(diagnostic);
                 }
             }
+            pre_inferred = inference.pre_inferred;
+            generic_subst = inference.subst;
         } else if !call.type_args.is_empty() {
             self.diags.push(Diagnostic::error(
                 "E0119",
@@ -2211,6 +2359,11 @@ impl<'a> Checker<'a> {
                 crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, ty)
             });
             if let Some((param_conv, param_ty)) = effective_params.get(i) {
+                // The enclosing expectation belongs to the call, not to its
+                // arguments: a parameter the rules below give no slot fact is
+                // checked without one, so a caller's Result tail carrier cannot
+                // keep a `T Never!` argument call's carrier.
+                self.expected_type = None;
                 if matches!(param_conv, AccessConvention::Move) {
                     // D-MEM-COPYSEM1: a move parameter is an owning slot.
                     // Give read-only views the same expected destination type
@@ -2286,7 +2439,7 @@ impl<'a> Checker<'a> {
                     let param_ty = self.resolve_type(param_ty.clone());
                     if !self.copies_explicit() {
                         if let Some(target) = self.implicit_copy_target(&arg.expr, source_ty) {
-                            if target == param_ty && is_cloneable(&target, self.registry) {
+                            if target == param_ty && self.is_cloneable_type(&target) {
                                 Some(self.insert_implicit_copy(&mut arg.expr, source_ty, &target))
                             } else {
                                 inferred
@@ -2394,20 +2547,24 @@ impl<'a> Checker<'a> {
             if let (Some(bound), Some((bd, be, bm))) = (&cb_bound, &cb_snapshot) {
                 self.record_callback_obligation(bound, bd, be, *bm, arg.expr.span());
             }
-            let write_needs_a_name =
-                arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _));
-            if write_needs_a_name {
-                self.diags.push(Diagnostic::error(
-                        "E0202",
-                        format!(
-                            "{} needs a plain named binding after it",
-                            crate::Sema::Diagnostics::WRITE_ACCESS_MARKER
-                        ),
-                        "write access from the write-access marker `&` can only be granted to a named binding, not an expression"
-                            .to_string(),
-                        self.non_name_write_argument_fix(&arg.expr),
-                        Some(arg.span),
-                    ));
+            // D-SHAPE-PLACE1=A: `&place` is a name followed by field, index, or
+            // range projections; only a temporary or call result lacks a place.
+            let write_needs_a_place = arg.convention == AccessConvention::Write
+                && crate::Sema::Diagnostics::expr_root_ident(&arg.expr).is_none();
+            // A range window is fixed-length: it fills a list write parameter
+            // only when the callee is proven never to resize that list.
+            let write_range_window = arg.convention == AccessConvention::Write
+                && matches!(arg.expr, Expr::Slice { .. })
+                && !self
+                    .fixed_length_write_params
+                    .contains(&(call.name.clone(), i));
+            if write_needs_a_place {
+                self.diags
+                    .push(crate::Sema::Diagnostics::write_place_required(arg.span));
+            } else if write_range_window {
+                self.diags.push(
+                    crate::Sema::Diagnostics::write_range_window_argument(arg.span),
+                );
             }
 
             if let Some(arg_ty) = &arg_ty {
@@ -2457,9 +2614,10 @@ impl<'a> Checker<'a> {
                 arg_ty = self.lift_optional_argument(&mut arg.expr, arg_ty, &param_ty, *param_conv);
                 let reads_expiring_secret_loan = arg.convention == AccessConvention::Read
                     && crate::Sema::Diagnostics::expiring_secret_loan_matches(&param_ty, &arg_ty);
-                // E0202 already told the writer this argument needs a name;
-                // a follow-up type mismatch on the same span is noise.
-                let reported = write_needs_a_name
+                // E0202 already told the writer this argument needs a place or
+                // a whole list; a follow-up type mismatch on the same span is noise.
+                let reported = write_needs_a_place
+                    || write_range_window
                     || reads_expiring_secret_loan
                     || self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
                 // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
@@ -2543,7 +2701,7 @@ impl<'a> Checker<'a> {
                         if type_is_copy(param_ty) {
                             // Copy values cross an owning parameter by bits.
                         } else if !self.is_resource_type(param_ty)
-                            && is_cloneable(param_ty, self.registry)
+                            && self.is_cloneable_type(param_ty)
                         {
                             arg.flags.implicit_clone = true;
                             // D-MEM1/S2 (was D-L0201 lint): a hard error now,
@@ -2617,8 +2775,16 @@ impl<'a> Checker<'a> {
                     }
                 }
                 (AccessConvention::Write, AccessConvention::Write) => {
-                    // `mut x` at the call site: x itself must be changeable.
-                    if let Expr::Ident(name, span) = &arg.expr {
+                    // `&x` / `&x.field[i]` at the call site: the root binding
+                    // must be changeable.
+                    let root = crate::Sema::Diagnostics::expr_root_ident(&arg.expr).map(|name| {
+                        let span = match &arg.expr {
+                            Expr::Ident(_, span) => *span,
+                            _ => arg.span,
+                        };
+                        (name.to_string(), span)
+                    });
+                    if let Some((name, span)) = root.as_ref() {
                         if let Some(info) = self.lookup(name) {
                             if !info.mutable {
                                 let mut diagnostic = Diagnostic::error(

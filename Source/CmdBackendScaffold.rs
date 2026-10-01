@@ -14,6 +14,7 @@ use jet::ExitCodes;
 use jet::Migrations::MigrationLock;
 use jet_foundation::DataTree::DataTree;
 use jet_foundation::EncodingJson::parse_json;
+use jet_foundation::Hex::{decode as decode_hex, encode as hex_bytes};
 use jet_foundation::JSON::json_escape as json_quote;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use crate::CmdCodemod::Transaction::{self, Change};
@@ -1741,37 +1742,6 @@ fn valid_digest(digest: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut text = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        text.push(HEX[(byte >> 4) as usize] as char);
-        text.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    text
-}
-
-fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    fn nibble(byte: u8) -> Option<u8> {
-        match byte {
-            b'0'..=b'9' => Some(byte - b'0'),
-            b'a'..=b'f' => Some(byte - b'a' + 10),
-            b'A'..=b'F' => Some(byte - b'A' + 10),
-            _ => None,
-        }
-    }
-    let bytes = text.as_bytes();
-    if bytes.len() % 2 != 0 {
-        return None;
-    }
-    let mut decoded = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        decoded.push((nibble(pair[0])? << 4) | nibble(pair[1])?);
-    }
-    Some(decoded)
-}
-
 
 fn read_regular(path: &Path, mode: OutputMode) -> Option<Vec<u8>> {
     match fs::symlink_metadata(path) {

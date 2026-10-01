@@ -194,12 +194,6 @@ impl CompletionValueFact {
         self.source = Some(source.into());
         self
     }
-
-    /// Set the deterministic tie-break priority.
-    pub fn with_rank(mut self, rank: u32) -> Self {
-        self.rank = rank;
-        self
-    }
 }
 
 /// One typed value family projected for one checked CLI input.

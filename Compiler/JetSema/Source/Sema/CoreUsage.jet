@@ -4,6 +4,36 @@
 // has selected for checking. It does not resolve ordinary names and it does not
 // own target policy. Core's dependency graph and runtime-layer classification
 // remain Foundation-owned (RingLayer.jet).
+use jet_foundation.[
+    Expr,
+    ExternFn,
+    Field,
+    Func,
+    ImportDecl,
+    InternalTag,
+    Item,
+    LValue,
+    MIRRuntimeLayer,
+    Param,
+    Program,
+    Span,
+    Stmt,
+    StructDef,
+    SwitchArm,
+    SymbolKind,
+    TraitImplBlock,
+    TraitMethodSig,
+    Type,
+    TypedLitBody,
+    core_module_has_member,
+    core_module_has_type,
+    core_type_modules,
+    expr_optional_method_call_as_call,
+    expr_span,
+    jet_ring_prelude_closure_keys,
+    jet_ring_prelude_closure_layer,
+    mir_boundary_head_owner_module,
+]
 
 pub struct SemaCoreImport {
     pub alias: String
@@ -32,7 +62,7 @@ pub struct SemaCoreModuleUsageResult {
     pub usage_spans: [SemaCoreUsageSpan]
     pub ffi_callback_keys: [String]
     pub closure: [String]
-    pub inferred_layer: MirRuntimeLayer
+    pub inferred_layer: MIRRuntimeLayer
 }
 
 pub struct SemaCoreUsageResult {
@@ -40,7 +70,7 @@ pub struct SemaCoreUsageResult {
     pub usage_spans: [SemaCoreUsageSpan]
     pub ffi_callback_keys: [String]
     pub closure: [String]
-    pub inferred_layer: MirRuntimeLayer
+    pub inferred_layer: MIRRuntimeLayer
     pub modules: [SemaCoreModuleUsageResult]
 }
 
@@ -163,7 +193,7 @@ fn sema_core_generated_core_module(module_name: String) -> Bool Never! {
 
 fn sema_core_generated_core_type(module_name: String, type_name: String) -> Bool Never! {
     if module_name == {
-        "core.mem" -> type_name == "Pool" || type_name == "Cell" || type_name == "Id"
+        "core.mem" -> type_name == "Pool" || type_name == "Cell" || type_name == "ID"
         "core.compute" -> type_name == "Vec" || type_name == "Matrix"
         else -> false
     }
@@ -179,7 +209,7 @@ fn sema_core_generated_register_core_name(markers: &[String], source_name: Strin
 
 fn sema_core_generated_register_core_alias(markers: &[String], alias: String, module_name: String) Never! {
     if !sema_core_generated_core_module(module_name) -> return
-    loop type_name in ([String]{"Pool", "Cell", "Id", "Vec", "Matrix"}) {
+    loop type_name in ([String]{"Pool", "Cell", "ID", "Vec", "Matrix"}) {
         if sema_core_generated_core_type(module_name, type_name) {
             sema_core_generated_register_core_name(&markers, "{alias}.{type_name}", module_name, type_name)
             sema_core_generated_register_core_name(&markers, "{alias}::{type_name}", module_name, type_name)
@@ -256,9 +286,9 @@ fn sema_core_generated_context_markers(graph: SemaRegistrationGraph, registratio
     sema_core_generated_marker_add(&markers, sema_core_generated_context_marker("shared"))
     loop nominal in registration_module.nominals -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(nominal.symbol.name))
     if !sema_core_generated_shadowed(markers, "Shared") -> sema_core_generated_marker_add(&markers, sema_core_generated_constructor_marker("Shared"))
-    loop type_name in ([String]{"Pool", "Cell", "Id"}) -> sema_core_generated_register_unqualified(graph, registration_module, &markers, "core.mem", type_name)
+    loop type_name in ([String]{"Pool", "Cell", "ID"}) -> sema_core_generated_register_unqualified(graph, registration_module, &markers, "core.mem", type_name)
     loop type_name in ([String]{"Vec", "Matrix"}) -> sema_core_generated_register_unqualified(graph, registration_module, &markers, "core.compute", type_name)
-    loop type_name in ([String]{"Pool", "Cell", "Id"}) -> sema_core_generated_register_core_qualified(&markers, "core.mem", type_name)
+    loop type_name in ([String]{"Pool", "Cell", "ID"}) -> sema_core_generated_register_core_qualified(&markers, "core.mem", type_name)
     loop type_name in ([String]{"Vec", "Matrix"}) -> sema_core_generated_register_core_qualified(&markers, "core.compute", type_name)
     loop row in registration_module.imports -> sema_core_generated_register_import(&markers, row)
 }
@@ -288,7 +318,7 @@ fn sema_core_generated_scope_import_markers(declarations: [ImportDecl], markers:
                         sema_core_generated_register_core_alias(&markers, alias, name)
                     }
                     else -> {
-                        loop type_name in ([String]{"Pool", "Cell", "Id", "Vec", "Matrix"}) -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker("{alias}.{type_name}"))
+                        loop type_name in ([String]{"Pool", "Cell", "ID", "Vec", "Matrix"}) -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker("{alias}.{type_name}"))
                     }
                 }
             }
@@ -532,7 +562,7 @@ fn sema_core_is_crypto_nominal(name: String) -> Bool Never! {
 
 fn sema_core_is_data_type(name: String) -> Bool Never! {
     if name == {
-        "JSON" | "Json" | "YAML" | "Yaml" |
+        "JSON" | "JSON" | "YAML" | "Yaml" |
         "CSV" | "Csv" | "TOML" | "Toml" |
         "XML" | "Xml" | "DataTree" -> true
         else -> false
@@ -564,7 +594,7 @@ fn sema_core_collect_type(ty: Type, registered: [String], used: &[String], spans
             sema_core_note_builtin_math_type(name, registered, &used, &spans, span)
             if name == "Atomic" || name.ends_with(".Atomic") -> sema_core_note_usage(&used, &spans, "core.mem::atomic", span)
             if args.len() > 0 && !sema_core_generated_shadowed(registered, name) {
-                if sema_core_generated_type_marked(registered, name, "core.mem", "Pool") || sema_core_generated_type_marked(registered, name, "core.mem", "Cell") || sema_core_generated_type_marked(registered, name, "core.mem", "Id") -> sema_core_note_usage(&used, &spans, "core.mem::pool_shared", None)
+                if sema_core_generated_type_marked(registered, name, "core.mem", "Pool") || sema_core_generated_type_marked(registered, name, "core.mem", "Cell") || sema_core_generated_type_marked(registered, name, "core.mem", "ID") -> sema_core_note_usage(&used, &spans, "core.mem::pool_shared", None)
                 if sema_core_generated_type_marked(registered, name, "core.compute", "Vec") || sema_core_generated_type_marked(registered, name, "core.compute", "Matrix") -> sema_core_note_usage(&used, &spans, "core.compute::shape_alias", None)
             }
             loop arg in args -> sema_core_collect_type(arg, registered, &used, &spans, span)
@@ -607,13 +637,12 @@ fn sema_core_collect_type(ty: Type, registered: [String], used: &[String], spans
 }
 
 fn sema_core_note_typed_head(used: &[String], spans: &[SemaCoreUsageSpan], name: String, span: Span?) Never! {
-    if name == {
-        "Regex" -> sema_core_note_usage(&used, &spans, "core.regex::literal", span)
-        "URL" -> sema_core_note_usage(&used, &spans, "core.net.url::typed_head", span)
-        "Path" -> sema_core_note_usage(&used, &spans, "core.files::typed_head", span)
-        "DateTime" -> sema_core_note_usage(&used, &spans, "core.time::typed_head", span)
-        else -> {}
+    if name == "Regex" {
+        sema_core_note_usage(&used, &spans, "core.regex::literal", span)
+        return
     }
+    owner_module :: mir_boundary_head_owner_module(name) ?? return
+    sema_core_note_usage(&used, &spans, "{owner_module}::typed_head", span)
 }
 fn sema_core_is_internal_task_key(name: String, suffix: String) -> Bool Never! {
     bytes :: name.bytes()
@@ -878,7 +907,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             if sema_core_is_http_nominal(recv_type_name) || sema_core_is_http_nominal(recv_name) -> sema_core_note_usage(&used, &spans, "core.http::__nominal__", Val(method_span))
             if recv_type_name == "Duration" || recv_name == "Duration" -> sema_core_note_usage(&used, &spans, "core.time::__duration__", Val(method_span))
             if recv_type_name == "Solver" -> sema_core_note_usage(&used, &spans, "core.compute.solve::{method}", Val(method_span))
-            if method == "cmd" && (recv_name == "" || recv_name == "UiShortcut") -> sema_core_note_usage(&used, &spans, "core.ui.host::shortcut", Val(method_span))
+            if method == "cmd" && (recv_name == "" || recv_name == "UIShortcut") -> sema_core_note_usage(&used, &spans, "core.ui.host::shortcut", Val(method_span))
             if recv_name != "" {
                 row :: sema_core_import_find(imports, "{recv_name}.{method}")
                 if {

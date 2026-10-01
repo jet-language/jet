@@ -88,6 +88,16 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     )?,
                     *mutable,
                 )),
+                // D-SHAPE-PLACE1=A: `w := &list[a..b]` aliases the range
+                // window place, so `w[i] = x` lands in the owner's storage.
+                TExprKind::BuiltinMethod {
+                    recv,
+                    op: TBuiltinOp::ViewMutNew { .. },
+                    ..
+                } if matches!(recv.ty.without_user_tags(), Type::List(_)) => {
+                    super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Write)?
+                        .map(|place| (place, true))
+                }
                 _ => None,
             };
             let ty = let_binding_type(let_ty, &init.ty);
@@ -100,6 +110,9 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             };
             let local = local_for_binding(name, kw);
             let place = if let Some((alias_place, mutable)) = alias_place {
+                if mutable {
+                    ctx.window_aliases.insert(local.name.clone());
+                }
                 ctx.bind_local_alias(&local, ty, alias_place, mutable)?
             } else if matches!(let_ty, TLetTy::SendFn(_)) {
                 ctx.bind_local_send_fn(&local, ty, local.mutable, false, is_uninit)?
@@ -264,9 +277,8 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     return Err(ctx.error(ctx.span(), "missing task group limit conversion"));
                 };
                 let line = ctx
-                    .source_texts
-                    .get(&ctx.function.source_file)
-                    .map(|source| crate::Diagnostics::span_line_col(source, ctx.span().start).0)
+                    .function_source()
+                    .map(|source| source.lines.line_col(source.text, ctx.span().start).0)
                     .unwrap_or(ctx.function.line) as u32;
                 vec![call_arg(
                     TExpr {
@@ -777,6 +789,7 @@ fn lower_refutable_bind(
 ) -> Result<(), LowerError> {
     let subject = lower_expr(ctx, init)?;
     let pattern = ctx.lower_pattern(pattern)?;
+    let shadow_mark = ctx.shadow_mark();
     let test = ctx.lower_pattern_condition(subject, &pattern)?;
     let success = ctx.new_block(ctx.span(), "refutable.success")?;
     let miss = ctx.new_block(ctx.span(), "refutable.miss")?;
@@ -795,8 +808,12 @@ fn lower_refutable_bind(
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
     }
+    // The miss route still reads a same-name subject (`x == .Val(x) ?? …`)
+    // as its outer binding; the payload binding resumes at the join.
+    let payload_bindings = ctx.restore_shadowed_locals(shadow_mark);
     ctx.switch_to(miss);
     lower_stmts(ctx, fallback)?;
+    ctx.reinstate_shadowed_locals(payload_bindings);
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
     }
@@ -1384,6 +1401,8 @@ fn lower_if(
     let then_block = ctx.new_block(ctx.span(), "if.then")?;
     let else_block = ctx.new_block(ctx.span(), "if.else")?;
     let join = ctx.new_block(ctx.span(), "if.join")?;
+    // Condition bindings (`x == .Val(x)`) hold only on the then path.
+    let shadow_mark = ctx.shadow_mark();
     lower_cond(ctx, cond, then_block, else_block)?;
 
     ctx.switch_to(then_block);
@@ -1396,6 +1415,7 @@ fn lower_if(
         ctx.terminate(MirTerminator::Jump { target: join });
     }
 
+    ctx.restore_shadowed_locals(shadow_mark);
     ctx.switch_to(else_block);
     if let Some(body) = else_body {
         let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
@@ -1431,7 +1451,7 @@ fn lower_cond(
             lower_cond(ctx, right, then_target, else_target)?;
         }
         TIfCond::IfLet { pattern, subj } => {
-            let subject = lower_expr(ctx, subj)?;
+            let subject = ctx.lower_pattern_subject(subj)?;
             let pattern = ctx.lower_pattern(pattern)?;
             let test = ctx.lower_pattern_condition(subject, &pattern)?;
             ctx.terminate(MirTerminator::Branch {
@@ -1454,7 +1474,7 @@ fn lower_cond(
             });
         }
         TIfCond::Matches { pattern, subj } => {
-            let subject = lower_expr(ctx, subj)?;
+            let subject = ctx.lower_pattern_subject(subj)?;
             let pattern = ctx.lower_pattern(pattern)?;
             let test = ctx.lower_pattern_condition(subject, &pattern)?;
             ctx.terminate(MirTerminator::Branch {
@@ -1651,7 +1671,9 @@ fn lower_range_loop(
     let (cursor, item_ty, iterator) = if let Some(source) = source {
         let collection = lower_expr(ctx, source)?;
         let step_value = step.map(|step| lower_expr(ctx, step)).transpose()?;
-        let cursor_ty = Type::Named("RangeCursor".to_string());
+        // A `Range` value walks the generic iterator cursor, so its carrier
+        // type is the one `LoopIterInit` returns, never the literal-range cursor.
+        let cursor_ty = Type::Named("IterCursor".to_string());
         let cursor = ctx.emit(
             "range.iter-init",
             Some(cursor_ty),
@@ -2109,7 +2131,7 @@ fn lower_enum_match(
     else_body: Option<&[TStmt]>,
     fallthrough: bool,
 ) -> Result<(), LowerError> {
-    let mut subject = lower_expr(ctx, scrutinee)?;
+    let mut subject = ctx.lower_pattern_subject(scrutinee)?;
     if clone_subject {
         subject = ctx.emit(
             "match.subject.copy",

@@ -80,7 +80,7 @@ pub(crate) fn gc_runtime_or_exit(fault: Fault) -> ! {
 pub(crate) fn gc_record_memory_ledger(site: PromotionSite) {
     let repairs = [
         "own the value directly",
-        "represent identity-bearing links as Id<T>",
+        "represent identity-bearing links as ID<T>",
         "use Pool<T> when the lifetime is bounded",
     ];
     let _ = crate::jet_mem::jet_memory_ledger_record(crate::jet_mem::MemoryLedgerWitness {

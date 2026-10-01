@@ -282,27 +282,10 @@ pub(crate) fn install_cli_command_ptr(function: MirFunctionId, ptr: *const u8) {
     });
 }
 
-pub(crate) fn cli_function_targets() -> Vec<MirFunctionId> {
-    CLI_PLAN.with(|slot| {
-        let plan_slot = slot.borrow();
-        let Some(plan) = plan_slot.as_ref() else {
-            return Vec::new();
-        };
-        let mut targets = vec![plan.user_run];
-        targets.extend(plan.commands.iter().map(|command| command.function));
-        targets.sort();
-        targets.dedup();
-        targets
-    })
-}
-
 pub(crate) fn cli_run_requires_adapter() -> bool {
     CLI_PLAN.with(|slot| slot.borrow().is_some())
 }
 
-pub(crate) fn cli_run_frame_is_value() -> bool {
-    CLI_PLAN.with(|slot| slot.borrow().as_ref().is_some_and(|plan| plan.run_record))
-}
 pub(crate) fn cli_user_run_target() -> Option<MirFunctionId> {
     CLI_PLAN.with(|slot| slot.borrow().as_ref().map(|plan| plan.user_run))
 }

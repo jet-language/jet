@@ -121,12 +121,6 @@ pub fn str_match_consumed(subject: &str, parts: &[StrMatchPart]) -> Option<usize
     Some(i)
 }
 
-/// Bytes a successful `bin_match_scan` consumed. A pattern that ends mid-byte
-/// leaves no position a reader can hold, so it counts as a miss.
-pub fn bin_match_consumed(bit_pos: usize) -> Option<usize> {
-    (bit_pos % 8 == 0).then_some(bit_pos / 8)
-}
-
 /// Fixed-width holes use the smallest standard integer carrier that holds the
 /// declared width. This matches sema and codegen (`U24` is carried as `U32`).
 fn bin_bits_type(width: u8) -> Type {

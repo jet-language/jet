@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use jet::ExitCodes;
 use jet::REPL::Notebook::{self, ClientKind, Kernel};
+use jet_foundation::JSON::quote as json_str;
 
 const MAX_REQUEST_HEADERS: usize = 64 * 1024;
 const MAX_REQUEST_BODY: usize = 8 * 1024 * 1024;
@@ -798,23 +799,6 @@ fn write_redirect(stream: &mut TcpStream, token: &str) -> Result<(), String> {
 
 fn json_error(message: &str) -> String {
     format!("{{\"ok\":false,\"error\":{}}}", json_str(message))
-}
-
-fn json_str(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
 }
 
 #[cfg(test)]

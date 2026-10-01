@@ -60,6 +60,26 @@ impl MirOptimizationPolicy {
     }
 }
 
+/// Whether MIR legality is re-verified after every pass and at every adapter
+/// boundary, and the pass-order seal re-digested before each use.
+///
+/// Compiler test builds (debug assertions) and `jet build --verify` keep it
+/// on. A dev compile verifies the lowered program once, when it enters the
+/// optimizer, and trusts the sealed pass order after that: re-verifying and
+/// re-digesting the same program at every boundary cost more than Cranelift
+/// on `jet run` and most of every comptime fragment evaluation.
+static MIR_VERIFICATION: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(cfg!(debug_assertions));
+
+pub fn mir_verification_enabled() -> bool {
+    MIR_VERIFICATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Turn on full MIR verification for the rest of the process.
+pub fn enable_mir_verification() {
+    MIR_VERIFICATION.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MirLegalityError {
     Validation(MirValidationError),
@@ -1704,6 +1724,21 @@ fn verify_place(
                 return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: *span });
             }
             MirProjection::Deref { .. } => {}
+            MirProjection::Payload { span, .. } if span.start > span.end => {
+                return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: *span });
+            }
+            MirProjection::Payload { .. } => {}
+            MirProjection::Range { range, location, span } => {
+                if !defs.contains_key(range) {
+                    return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("range window {range:?}"), span: *span });
+                }
+                if !source_file_ids.contains(&location.file) {
+                    return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("source file {:?}", location.file), span: *span });
+                }
+                if span.start > span.end {
+                    return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: *span });
+                }
+            }
         }
     }
     if matches!(place.access, MirAccess::Read) && place.projections.iter().any(|projection| matches!(projection, MirProjection::Deref { .. })) {
@@ -3156,7 +3191,9 @@ fn verify_semantic_operation(
             let Some(place) = function.places.iter().find(|candidate| candidate.id == *receiver_place) else {
                 return invalid(format!("receiver place {receiver_place:?}"));
             };
-            if place.access != MirAccess::Write {
+            // A place that is also moved later retains Move access, which
+            // subsumes Write (the same rule a Write AddressOf checks).
+            if place.access == MirAccess::Read {
                 return invalid(format!(
                     "Cursor take_pattern receiver place {receiver_place:?} is not writable"
                 ));
@@ -3171,7 +3208,7 @@ fn verify_semantic_operation(
             let Some(place) = function.places.iter().find(|candidate| candidate.id == *receiver_place) else {
                 return invalid(format!("receiver place {receiver_place:?}"));
             };
-            if place.access != MirAccess::Write {
+            if place.access == MirAccess::Read {
                 return invalid(format!(
                     "Reader take_pattern receiver place {receiver_place:?} is not writable"
                 ));
@@ -3734,8 +3771,10 @@ fn place_value_uses(place: &MirPlace) -> Vec<MirValueId> {
         MirPlaceBase::Local(_) | MirPlaceBase::Static(_) => {}
     }
     for projection in &place.projections {
-        if let MirProjection::Index { index, .. } = projection {
-            values.push(*index);
+        match projection {
+            MirProjection::Index { index, .. } => values.push(*index),
+            MirProjection::Range { range, .. } => values.push(*range),
+            MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => {}
         }
     }
     values
@@ -3768,6 +3807,14 @@ fn mir_place_path(place: &MirPlace) -> MirPlacePath {
             MirProjection::Field { field, .. } => (0, field.0),
             MirProjection::Index { kind, index, .. } => (mir_index_kind_key(*kind), index.0),
             MirProjection::Deref { .. } => (6, 0),
+            MirProjection::Payload { kind, .. } => match kind {
+                crate::MIR::MirPayloadKind::Option => (7, 0),
+                crate::MIR::MirPayloadKind::Result { ok } => (8, u64::from(*ok)),
+                crate::MIR::MirPayloadKind::Enum { owner, index, .. } => {
+                    (9, owner.0.wrapping_mul(31).wrapping_add(*index as u64))
+                }
+            },
+            MirProjection::Range { range, .. } => (10, range.0),
         })
         .collect();
     MirPlacePath { root, projections }
@@ -4492,6 +4539,21 @@ fn verify_facts(
 pub fn require_canonical_mir_optimization(
     program: &MirProgram,
 ) -> Result<(), MirOptimizationError> {
+    canonical_mir_digest(program).map(|_| ())
+}
+
+/// The digest of a program that completed the canonical pass pipeline.
+///
+/// With full verification on, the program is re-verified and re-digested and
+/// the digest must equal the seal every function carries. Otherwise a program
+/// whose functions all carry the complete pass order and one seal answers
+/// with that seal; anything else takes the full check for its exact error.
+pub fn canonical_mir_digest(program: &MirProgram) -> Result<[u8; 32], MirOptimizationError> {
+    if !mir_verification_enabled() && !CanonicalPass::enabled() {
+        if let Some(seal) = sealed_digest(program) {
+            return Ok(seal);
+        }
+    }
     verify_mir_legality(program).map_err(|error| MirOptimizationError::Legality {
         pass: MirOptimizationPassId::LegalityVerification,
         error,
@@ -4518,7 +4580,24 @@ pub fn require_canonical_mir_optimization(
         "crates/jet-foundation/src/MIROptimization.rs",
         program,
     );
-    Ok(())
+    Ok(input_digest)
+}
+
+/// The seal shared by every function once the pipeline completed, or `None`
+/// when a function lacks the complete pass order or the seals disagree.
+fn sealed_digest(program: &MirProgram) -> Option<[u8; 32]> {
+    let mut seal = None;
+    for function in &program.functions {
+        if function.optimization.pass_ids.as_slice() != MIR_OPTIMIZATION_PASS_ORDER.as_slice() {
+            return None;
+        }
+        let digest = function.optimization.derived_from_digest?;
+        if seal.is_some_and(|seal| seal != digest) {
+            return None;
+        }
+        seal = Some(digest);
+    }
+    seal
 }
 fn run_canonical_pass<F>(
     operation_id: &str,
@@ -4609,8 +4688,13 @@ pub fn optimize_mir_program(
         "crates/jet-foundation/src/MIROptimization.rs",
         program,
     );
-    let input_digest = mir_program_digest(program);
-    if optimized_pass_order_complete(program, &input_digest) {
+    // Only an input that already carries the complete pass order and a seal
+    // can skip the pipeline; digest it only then.
+    let already_optimized = program.functions.iter().all(|function| {
+        function.optimization.pass_ids.as_slice() == MIR_OPTIMIZATION_PASS_ORDER.as_slice()
+            && function.optimization.derived_from_digest.is_some()
+    }) && optimized_pass_order_complete(program, &mir_program_digest(program));
+    if already_optimized {
         let mut optimized = program.clone();
         run_canonical_pass(
             "mir.fixed-reduction-normalization",
@@ -5696,6 +5780,19 @@ fn inline_projection(projection: &MirProjection, ids: &InlineIdMaps) -> MirProje
             span: *span,
         },
         MirProjection::Deref { span } => MirProjection::Deref { span: *span },
+        MirProjection::Payload { kind, span } => MirProjection::Payload {
+            kind: kind.clone(),
+            span: *span,
+        },
+        MirProjection::Range {
+            range,
+            location,
+            span,
+        } => MirProjection::Range {
+            range: inline_value(ids, *range),
+            location: *location,
+            span: *span,
+        },
     }
 }
 
@@ -6897,187 +6994,7 @@ fn inline_type(ty: &MirType, substitutions: &HashMap<String, MirType>) -> MirTyp
         )))
     }
 }
-#[allow(dead_code)]
-fn denormalize_fixed_reduction_loops(program: &mut MirProgram) {
-    for function in &mut program.functions {
-        let candidates = function
-            .blocks
-            .iter()
-            .filter_map(|block| {
-                let MirTerminator::Branch {
-                    then_target,
-                    else_target,
-                    ..
-                } = &block.terminator
-                else {
-                    return None;
-                };
-                normalized_fixed_reduction_shape(
-                    function,
-                    block.id,
-                    *then_target,
-                    *else_target,
-                )
-                .map(|shape| (block.id, shape))
-            })
-            .collect::<Vec<_>>();
-        for (header, shape) in candidates {
-            let Some(cursor) = shape.cursor else {
-                continue;
-            };
-            let Some(advance) = shape.advance else {
-                continue;
-            };
-            let Some(exit) = shape.exit else {
-                continue;
-            };
-            let continuation =
-                normalized_fixed_reduction_block_id(function, header, "continuation");
-            let Some(continuation_block) = function
-                .blocks
-                .iter()
-                .find(|block| block.id == continuation)
-                .cloned()
-            else {
-                continue;
-            };
-            let Some(preheader) = function.blocks.iter().find(|block| {
-                block.instructions.iter().any(|instruction| {
-                    instruction.result == Some(cursor)
-                        && matches!(&instruction.operation, MirOperation::LoopRangeInit { .. })
-                })
-            }) else {
-                continue;
-            };
-            let preheader = preheader.id;
-            let Some(generated_blocks) =
-                normalized_fixed_reduction_generated_blocks(function, header)
-            else {
-                continue;
-            };
-            let order = crate::MIROptimization::Acceleration::D_FRED1_FIXED_ORDER;
-            let mut generated_preheader_ops = HashSet::new();
-            for role in [
-                "constant-zero",
-                "constant-seen-false",
-                "constant-seen-true",
-                "seed-read",
-                "seed-seen",
-            ] {
-                generated_preheader_ops.insert(normalized_fixed_reduction_op_id(
-                    function, header, role,
-                ));
-            }
-            for lane in 0..order.lanes {
-                generated_preheader_ops.insert(normalized_fixed_reduction_op_id(
-                    function,
-                    header,
-                    &format!("seed-lane-{lane}"),
-                ));
-            }
-            let mut generated_values = HashSet::new();
-            for block in &function.blocks {
-                if generated_blocks.contains(&block.id) {
-                    generated_values.extend(
-                        block
-                            .instructions
-                            .iter()
-                            .filter_map(|instruction| instruction.result),
-                    );
-                } else if block.id == preheader {
-                    generated_values.extend(
-                        block
-                            .instructions
-                            .iter()
-                            .filter(|instruction| generated_preheader_ops.contains(&instruction.id))
-                            .filter_map(|instruction| instruction.result),
-                    );
-                }
-            }
-            let body_blocks = shape
-                .blocks
-                .iter()
-                .copied()
-                .filter(|block_id| *block_id != advance)
-                .collect::<Vec<_>>();
-            let post_entry =
-                normalized_fixed_reduction_block_id(function, header, "post-entry");
-            for block_id in &body_blocks {
-                if let Some(block) = function.blocks.iter_mut().find(|block| block.id == *block_id) {
-                    match &mut block.terminator {
-                        MirTerminator::Jump { target } if *target == post_entry => {
-                            *target = advance;
-                        }
-                        MirTerminator::Branch {
-                            then_target,
-                            else_target,
-                            ..
-                        } => {
-                            if *then_target == post_entry {
-                                *then_target = advance;
-                            }
-                            if *else_target == post_entry {
-                                *else_target = advance;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            if let Some(block) = function.blocks.iter_mut().find(|block| block.id == header) {
-                if let MirTerminator::Branch { then_target, .. } = &mut block.terminator {
-                    *then_target = shape.body;
-                }
-            }
-            if let Some(block) = function.blocks.iter_mut().find(|block| block.id == exit) {
-                block.instructions = continuation_block.instructions.clone();
-                block.terminator = continuation_block.terminator.clone();
-            }
-            if let Some(block) = function.blocks.iter_mut().find(|block| block.id == preheader) {
-                block
-                    .instructions
-                    .retain(|instruction| !generated_preheader_ops.contains(&instruction.id));
-            }
-            function
-                .blocks
-                .retain(|block| !generated_blocks.contains(&block.id));
-            let mut generated_locals = HashSet::new();
-            let mut generated_places = HashSet::new();
-            for lane in 0..order.lanes {
-                generated_locals.insert(normalized_fixed_reduction_local_id(
-                    function,
-                    header,
-                    &format!("lane-place-{lane}"),
-                ));
-                generated_places.insert(normalized_fixed_reduction_place_id(
-                    function,
-                    header,
-                    &format!("lane-place-{lane}"),
-                ));
-            }
-            generated_locals.insert(normalized_fixed_reduction_local_id(
-                function,
-                header,
-                "seen-place",
-            ));
-            generated_places.insert(normalized_fixed_reduction_place_id(
-                function,
-                header,
-                "seen-place",
-            ));
-            function
-                .locals
-                .retain(|local| !generated_locals.contains(&local.id));
-            function
-                .places
-                .retain(|place| !generated_places.contains(&place.id));
-            function
-                .values
-                .retain(|(value, ..)| !generated_values.contains(value));
-            function.optimization.derived_from_digest = None;
-        }
-    }
-}
+
 /// may still consume the retained `fixed_reduction` source row for packing,
 /// but it must not replace the semantic result with a second policy.
 fn normalize_fixed_reduction_loops(program: &mut MirProgram) {
@@ -7938,7 +7855,12 @@ fn optimized_pass_order_complete(program: &MirProgram, input_digest: &[u8; 32]) 
         })
 }
 
+/// Re-verify legality after a pass. The optimizer's input is always verified;
+/// the per-pass re-verification runs only with full verification on.
 fn validate_after(program: &MirProgram, pass: MirOptimizationPassId) -> Result<(), MirOptimizationError> {
+    if !mir_verification_enabled() {
+        return Ok(());
+    }
     verify_mir_legality(program).map_err(|error| MirOptimizationError::Legality { pass, error })
 }
 
@@ -8425,14 +8347,16 @@ fn semantic_operation_is_pure(
     // A closure method runs a checked callback, and `sort_by`/`update_first`
     // write their receiver in place; a handle method (`sender.send`,
     // `sender.close`, `receiver.close`, `clock.tick`, ...) mutates
-    // runtime-owned shared state behind its handle. None of that is part of
-    // the route's own effect row, so an unused unit or scalar result never
-    // makes the call dead.
+    // runtime-owned shared state behind its handle, and so does a host
+    // method on a runtime cell (`Shared.edit`, `Shared.set`, `Cell.edit`,
+    // `Pool.remove`, ...). None of that is part of the route's own effect
+    // row, so an unused unit or scalar result never makes the call dead.
     if matches!(
         operation,
         MirSemanticOp::ClosureMethod { .. }
             | MirSemanticOp::CoreClosureCall { .. }
             | MirSemanticOp::HandleMethod { .. }
+            | MirSemanticOp::HostCall { .. }
     ) {
         return false;
     }
@@ -9431,29 +9355,6 @@ fn normalized_fixed_reduction_shape(
         advance: Some(advance),
         blocks: body_blocks,
     })
-}
-#[allow(dead_code)]
-fn normalized_fixed_reduction_local_id(
-    function: &MirFunction,
-    header: MirBlockId,
-    role: &str,
-) -> MirLocalId {
-    MirLocalId(stable_id(
-        "mir-fixed-reduction-local",
-        &normalized_fixed_reduction_identity(function, header, role),
-    ))
-}
-
-#[allow(dead_code)]
-fn normalized_fixed_reduction_place_id(
-    function: &MirFunction,
-    header: MirBlockId,
-    role: &str,
-) -> MirPlaceId {
-    MirPlaceId(stable_id(
-        "mir-fixed-reduction-place",
-        &normalized_fixed_reduction_identity(function, header, role),
-    ))
 }
 fn normalized_fixed_reduction_generated_blocks(
     function: &MirFunction,
@@ -11648,7 +11549,11 @@ fn place_projection_has_effect(
             !prelude_call_is_pure(prelude_calls, *call)
                 || write_call.is_some_and(|call| !prelude_call_is_pure(prelude_calls, call))
         }
-        MirProjection::Field { .. } | MirProjection::Deref { .. } => false,
+        // A range window checks its bounds and may stop.
+        MirProjection::Range { .. } => true,
+        MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => {
+            false
+        }
     })
 }
 
@@ -11913,7 +11818,10 @@ fn canonicalize_program_order(program: &mut MirProgram) {
 /// explicitly; source text remains part of source-file identity, while types
 /// use only their neutral `MirTypeKind` representation.
 pub fn mir_program_bytes(program: &MirProgram) -> Vec<u8> {
-    let mut writer = CanonicalWriter::default();
+    write_mir_program(CanonicalWriter::default(), program).finish()
+}
+
+fn write_mir_program(mut writer: CanonicalWriter, program: &MirProgram) -> CanonicalWriter {
     writer.tag("mir");
     writer.u16(program.schema_version);
     writer.str(&program.package_identity);
@@ -11931,7 +11839,7 @@ pub fn mir_program_bytes(program: &MirProgram) -> Vec<u8> {
         .unwrap_or_default();
     let dossier_bytes = dossier.cache_bytes(target_triple);
     writer.len(dossier_bytes.len());
-    writer.bytes.extend_from_slice(&dossier_bytes);
+    writer.raw(&dossier_bytes);
     encode_app_graph(&mut writer, program.facts.web_app.as_ref());
     encode_hardware_setups(&mut writer, &program.facts.hardware_setups);
     writer.str(&program.facts.hardware_profile_id);
@@ -12088,55 +11996,82 @@ pub fn mir_program_bytes(program: &MirProgram) -> Vec<u8> {
         writer.span(row.span);
         encode_erasure_reason(&mut writer, row.reason);
     }
-    writer.finish()
+    writer
 }
 
-/// A deterministic 256-bit digest over [`mir_program_bytes`].
+const MIR_DIGEST_SEEDS: [u64; 4] = [
+    0xcbf29ce484222325u64,
+    0x84222325cbf29ce4u64,
+    0x9e3779b185ebca87u64,
+    0xd6e8feb86659fd93u64,
+];
+
+/// A deterministic 256-bit digest over [`mir_program_bytes`]: four FNV-1a
+/// lanes with distinct seeds, fed while the program is walked instead of
+/// over a materialized byte buffer.
 pub fn mir_program_digest(program: &MirProgram) -> [u8; 32] {
-    let bytes = mir_program_bytes(program);
-    let seeds = [
-        0xcbf29ce484222325u64,
-        0x84222325cbf29ce4u64,
-        0x9e3779b185ebca87u64,
-        0xd6e8feb86659fd93u64,
-    ];
+    let writer = write_mir_program(CanonicalWriter::hashing(), program);
+    let lanes = writer.lanes.expect("a hashing writer keeps its digest lanes");
     let mut output = [0u8; 32];
-    for (lane, seed) in seeds.into_iter().enumerate() {
-        let mut hash = seed;
-        for byte in &bytes {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
+    for (lane, hash) in lanes.into_iter().enumerate() {
         output[lane * 8..lane * 8 + 8].copy_from_slice(&hash.to_le_bytes());
     }
     output
 }
 
 impl MirProgram {
-    pub fn deterministic_bytes(&self) -> Vec<u8> {
-        mir_program_bytes(self)
-    }
-
     pub fn deterministic_digest(&self) -> [u8; 32] {
         mir_program_digest(self)
     }
 }
 
+/// Canonical byte sink: collects the bytes, or feeds the digest lanes when
+/// only the digest is wanted.
 #[derive(Default)]
 struct CanonicalWriter {
     bytes: Vec<u8>,
+    lanes: Option<[u64; 4]>,
+    /// Reused buffer for rows still encoded by their `Debug` spelling.
+    scratch: String,
 }
 
 impl CanonicalWriter {
+    fn hashing() -> Self {
+        CanonicalWriter {
+            bytes: Vec::new(),
+            lanes: Some(MIR_DIGEST_SEEDS),
+            scratch: String::new(),
+        }
+    }
+    fn raw(&mut self, data: &[u8]) {
+        match &mut self.lanes {
+            Some(lanes) => {
+                for byte in data {
+                    for lane in lanes.iter_mut() {
+                        *lane ^= u64::from(*byte);
+                        *lane = lane.wrapping_mul(0x100000001b3);
+                    }
+                }
+            }
+            None => self.bytes.extend_from_slice(data),
+        }
+    }
     fn tag(&mut self, value: &str) { self.str(value); }
-    fn str(&mut self, value: &str) { self.len(value.len()); self.bytes.extend_from_slice(value.as_bytes()); }
+    fn str(&mut self, value: &str) { self.len(value.len()); self.raw(value.as_bytes()); }
     fn len(&mut self, value: usize) { self.u64(value as u64); }
-    fn u16(&mut self, value: u16) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
-    fn u64(&mut self, value: u64) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
-    fn bool(&mut self, value: bool) { self.bytes.push(u8::from(value)); }
+    fn u16(&mut self, value: u16) { self.raw(&value.to_le_bytes()); }
+    fn u64(&mut self, value: u64) { self.raw(&value.to_le_bytes()); }
+    fn bool(&mut self, value: bool) { self.raw(&[u8::from(value)]); }
     fn span(&mut self, span: Span) { self.len(span.start); self.len(span.end); }
     fn option_u64(&mut self, value: Option<u64>) { self.bool(value.is_some()); if let Some(value) = value { self.u64(value); } }
-    fn debug<T: fmt::Debug>(&mut self, value: &T) { self.str(&format!("{value:?}")); }
+    fn debug<T: fmt::Debug>(&mut self, value: &T) {
+        let mut scratch = std::mem::take(&mut self.scratch);
+        scratch.clear();
+        fmt::Write::write_fmt(&mut scratch, format_args!("{value:?}"))
+            .expect("formatting into a String cannot fail");
+        self.str(&scratch);
+        self.scratch = scratch;
+    }
     fn option_str(&mut self, value: Option<&str>) {
         self.bool(value.is_some());
         if let Some(value) = value {
@@ -15168,6 +15103,21 @@ fn encode_place(writer: &mut CanonicalWriter, place: &MirPlace) {
                 writer.tag("deref");
                 writer.span(*span);
             }
+            MirProjection::Payload { kind, span } => {
+                writer.tag("payload");
+                writer.debug(kind);
+                writer.span(*span);
+            }
+            MirProjection::Range {
+                range,
+                location,
+                span,
+            } => {
+                writer.tag("range");
+                writer.u64(range.0);
+                writer.debug(location);
+                writer.span(*span);
+            }
         }
     }
     writer.debug(&place.access);
@@ -15454,7 +15404,7 @@ fn encode_mir_constant(writer: &mut CanonicalWriter, value: &MirConstant) {
         MirConstant::Bytes(value) => {
             writer.tag("bytes");
             writer.len(value.len());
-            writer.bytes.extend_from_slice(value);
+            writer.raw(value);
         }
         MirConstant::Unit => writer.tag("unit"),
         MirConstant::BigInt(value) => {

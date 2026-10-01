@@ -131,7 +131,7 @@ fn numeric_destination_conversions_and_parse_are_cataloged() {
 #[test]
 fn source_distinct_and_unit_conversion_members_are_cataloged() {
     let src = r#"
-#Numeric UserId :: distinct Int
+#Numeric UserID :: distinct Int
 #UnitFamily(Currency) { usd }
 
 fn run() {}
@@ -140,21 +140,21 @@ fn run() {}
     let symbols = open_symbols(&path).expect("source semantic symbols");
 
     let user = symbols
-        .lookup_qualified("UserId.from_u8")
+        .lookup_qualified("UserID.from_u8")
         .expect("source distinct conversion member");
-    assert_eq!(user.owner.as_deref(), Some("UserId"));
-    assert_eq!(user.signature, "UserId.from_u8(value: U8) -> UserId");
+    assert_eq!(user.owner.as_deref(), Some("UserID"));
+    assert_eq!(user.signature, "UserID.from_u8(value: U8) -> UserID");
 
     let unit = symbols
         .lookup_qualified("Usd.from_int")
         .expect("unit-family conversion member");
     assert_eq!(unit.owner.as_deref(), Some("Usd"));
 
-    let user_offset = src.find("#Numeric UserId").unwrap();
+    let user_offset = src.find("#Numeric UserID").unwrap();
     assert!(symbols
         .complete_visible_at(
             "from_u",
-            Some("UserId"),
+            Some("UserID"),
             jet_semindex::SemanticVisibilityAnchor {
                 module_path: path.to_string_lossy().as_ref(),
                 offset: Some(user_offset),
@@ -162,7 +162,7 @@ fn run() {}
             },
         )
         .iter()
-        .any(|symbol| symbol.qualified_name == "UserId.from_u8"));
+        .any(|symbol| symbol.qualified_name == "UserID.from_u8"));
 }
 
 #[test]

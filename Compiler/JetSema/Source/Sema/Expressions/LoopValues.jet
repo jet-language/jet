@@ -1,4 +1,20 @@
 // Loop-expression state transitions shared by statement dispatch and inline-loop lowering.
+use jet_foundation.[
+    Diagnostic,
+    Expr,
+    Span,
+    TBuiltinOp,
+    TExpr,
+    TExprKind,
+    TLetTy,
+    TLetWrapper,
+    TLocal,
+    TStmt,
+    Type,
+    tir_generated_local,
+    type_identity_equal,
+    type_name,
+]
 
 pub fn sema_loop_value_check_result_exit(context: &SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     frame :: if frame_index >= 0 && frame_index < context.loop_value_frames.len() -> Val(context.loop_value_frames[frame_index]) else -> None
@@ -113,36 +129,63 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
             .If(condition, then_body, else_body, else_is_elseif, span) -> {
                 updated_then_body := then_body
                 if !sema_loop_value_rewrite_collecting_statements(&updated_then_body, local, item_type, environment, &diagnostics) -> return false
-                if else_body != None && !sema_loop_value_rewrite_collecting_statements(else_body, local, item_type, environment, &diagnostics) -> return false
-                statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: else_body, else_is_elseif: else_is_elseif, span: span}
+                updated_else_body := else_body
+                if else_body == .Val(else_statements) {
+                    rewritten := ~else_statements
+                    if !sema_loop_value_rewrite_collecting_statements(&rewritten, local, item_type, environment, &diagnostics) -> return false
+                    updated_else_body = Val(rewritten)
+                }
+                statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
-                loop arm in arms {
-                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
-                statements[index] = TStmt.Match{subject: subject, arms: arms, exhaustive: exhaustive, span: span}
+                statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
-                loop arm in arms {
-                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
-                if else_body != None && !sema_loop_value_rewrite_collecting_statements(else_body, local, item_type, environment, &diagnostics) -> return false
-                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: arms, else_body: else_body, fallthrough: fallthrough, span: span}
+                updated_else_body := else_body
+                if else_body == .Val(else_statements) {
+                    rewritten := ~else_statements
+                    if !sema_loop_value_rewrite_collecting_statements(&rewritten, local, item_type, environment, &diagnostics) -> return false
+                    updated_else_body = Val(rewritten)
+                }
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 updated_else_body := else_body
-                loop arm in arms {
-                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
                 if !sema_loop_value_rewrite_collecting_statements(&updated_else_body, local, item_type, environment, &diagnostics) -> return false
-                statements[index] = TStmt.RangeSwitch{subject: subject, arms: arms, else_body: updated_else_body, span: span}
+                statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
-                loop arm in arms {
-                    if !sema_loop_value_rewrite_collecting_statements(&arm.body, local, item_type, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
-                if else_body != None && !sema_loop_value_rewrite_collecting_statements(else_body, local, item_type, environment, &diagnostics) -> return false
-                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: arms, else_body: else_body, span: span}
+                updated_else_body := else_body
+                if else_body == .Val(else_statements) {
+                    rewritten := ~else_statements
+                    if !sema_loop_value_rewrite_collecting_statements(&rewritten, local, item_type, environment, &diagnostics) -> return false
+                    updated_else_body = Val(rewritten)
+                }
+                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .RefutableBind(pattern, init, fallback, span) -> {
                 updated_fallback := fallback
@@ -169,10 +212,10 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 if !sema_loop_value_rewrite_collecting_statements(&updated_body, local, item_type, environment, &diagnostics) -> return false
                 statements[index] = TStmt.ContextBlock{guards: guards, body: updated_body, span: span}
             }
-            .GcEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
+            .GCEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
                 nested_body := [TStmt]{nested}
                 if !sema_loop_value_rewrite_collecting_statements(&nested_body, local, item_type, environment, &diagnostics) -> return false
-                statements[index] = TStmt.GcEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: nested_body[0], span: span}
+                statements[index] = TStmt.GCEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: nested_body[0], span: span}
             }
             .Unsafe(gate, body) -> {
                 updated_body := body
@@ -273,36 +316,63 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
             .If(condition, then_body, else_body, else_is_elseif, span) -> {
                 updated_then_body := then_body
                 if !sema_loop_value_widen_result_breaks_in(&updated_then_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
-                if else_body != None && !sema_loop_value_widen_result_breaks_in(else_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
-                statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: else_body, else_is_elseif: else_is_elseif, span: span}
+                updated_else_body := else_body
+                if else_body == .Val(else_statements) {
+                    rewritten := ~else_statements
+                    if !sema_loop_value_widen_result_breaks_in(&rewritten, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                    updated_else_body = Val(rewritten)
+                }
+                statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
-                loop arm in arms {
-                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
-                statements[index] = TStmt.Match{subject: subject, arms: arms, exhaustive: exhaustive, span: span}
+                statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
-                loop arm in arms {
-                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
-                if else_body != None && !sema_loop_value_widen_result_breaks_in(else_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
-                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: arms, else_body: else_body, fallthrough: fallthrough, span: span}
+                updated_else_body := else_body
+                if else_body == .Val(else_statements) {
+                    rewritten := ~else_statements
+                    if !sema_loop_value_widen_result_breaks_in(&rewritten, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                    updated_else_body = Val(rewritten)
+                }
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 updated_else_body := else_body
-                loop arm in arms {
-                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
                 if !sema_loop_value_widen_result_breaks_in(&updated_else_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
-                statements[index] = TStmt.RangeSwitch{subject: subject, arms: arms, else_body: updated_else_body, span: span}
+                statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
-                loop arm in arms {
-                    if !sema_loop_value_widen_result_breaks_in(&arm.body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                    updated_arms[arm_index].body = arm_body
                 }
-                if else_body != None && !sema_loop_value_widen_result_breaks_in(else_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
-                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: arms, else_body: else_body, span: span}
+                updated_else_body := else_body
+                if else_body == .Val(else_statements) {
+                    rewritten := ~else_statements
+                    if !sema_loop_value_widen_result_breaks_in(&rewritten, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
+                    updated_else_body = Val(rewritten)
+                }
+                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .RefutableBind(pattern, init, fallback, span) -> {
                 updated_fallback := fallback
@@ -329,10 +399,10 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 if !sema_loop_value_widen_result_breaks_in(&updated_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
                 statements[index] = TStmt.ContextBlock{guards: guards, body: updated_body, span: span}
             }
-            .GcEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
+            .GCEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
                 nested_body := [TStmt]{nested}
                 if !sema_loop_value_widen_result_breaks_in(&nested_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
-                statements[index] = TStmt.GcEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: nested_body[0], span: span}
+                statements[index] = TStmt.GCEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: nested_body[0], span: span}
             }
             .Inline(body, span) | .DebugOnly(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .ScopeMember(_, body, span) -> {
                 updated_body := body

@@ -1,3 +1,21 @@
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    Span,
+    SymbolKind,
+    TExpr,
+    TExprKind,
+    THandleOp,
+    THostCall,
+    TTypedTextForm,
+    Type,
+    type_name,
+]
+
 struct SemaDatabaseMethodContract {
     result_type: Type
     operation: THandleOp
@@ -145,7 +163,8 @@ fn sema_database_sql_receiver_is_core(receiver: Expr, environment: SemaScopeEnvi
                     return false
                 }
             }
-            graph :: environment.registration_graph ?? return true
+            graph_option :: environment.registration_graph
+            graph :: graph_option ?? return true
             resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return false
             loop module_row in graph.modules {
                 if module_row.module_identity == resolved.target_module_identity {

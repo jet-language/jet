@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use jet_foundation::AST::{ParamZone, Type};
 use jet_foundation::AST::{Item, ProgramBundle};
-use jet_foundation::JSON::json_escape;
+use jet_foundation::JSON::quote as json_str;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::EffectBudget::{render_effect_projection_line, render_effect_projection_object};
 use jet_pkg_model::Package::{
@@ -111,10 +111,6 @@ fn json_output(value: &OutputFact) -> String {
 
 fn json_definition_fact(f: &DefinitionFact) -> String {
     format!("{{\"stable_id\":{},\"signature_id\":{},\"content_id\":{},\"human_identity\":{},\"name\":{},\"kind\":{},\"module\":{},\"span\":{}}}", json_str(&f.stable_id), json_str(&f.signature_id), json_str(&f.content_id), json_str(&f.human_identity), json_str(&f.name), json_str(&f.kind), json_str(&f.module_path), json_span(f.span))
-}
-
-fn json_str(s: &str) -> String {
-    format!("\"{}\"", json_escape(s))
 }
 
 fn json_output_payload(value: &OutputPayload) -> String {
@@ -1056,13 +1052,6 @@ impl SemIndex {
     /// without reparsing the rendered envelope.
     pub fn to_status_envelope(&self) -> StatusEnvelope {
         self.to_status_envelope_inner(None)
-    }
-
-    /// Stable semantic-index document with one additive consumer projection.
-    /// The base fields and their order remain owned by this serializer, so a
-    /// tooling projection does not create a second top-level document.
-    pub fn to_json_with_expand(&self, expand: &ExpandProjection) -> String {
-        self.to_status_envelope_with_expand(expand).json()
     }
 
     /// Typed status boundary for the expanded semantic-index document.

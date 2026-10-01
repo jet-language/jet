@@ -947,37 +947,6 @@ impl JetGameAssetDependencyGraph {
         self.edges.keys()
     }
 
-    pub fn topological_order(
-        &self,
-    ) -> Result<Vec<JetGameAssetNodeIdentity>, JetGameAssetPipelineError> {
-        jet_game_asset_graph_order(&self.edges)
-    }
-
-    pub fn dependents_of(
-        &self,
-        dependency: &JetGameAssetDependencyIdentity,
-    ) -> Vec<JetGameAssetNodeIdentity> {
-        let wanted = dependency.node();
-        let mut pending = std::collections::BTreeSet::new();
-        let mut visited = std::collections::BTreeSet::new();
-        for (node, dependencies) in &self.edges {
-            if dependencies.iter().any(|item| item.node() == wanted) {
-                pending.insert(node.clone());
-            }
-        }
-        while let Some(node) = pending.pop_first() {
-            if !visited.insert(node.clone()) {
-                continue;
-            }
-            for (candidate, dependencies) in &self.edges {
-                if dependencies.iter().any(|item| item.node() == node) {
-                    pending.insert(candidate.clone());
-                }
-            }
-        }
-        visited.into_iter().collect()
-    }
-
     pub fn render_json(&self) -> String {
         let mut rows = Vec::new();
         for (node, dependencies) in &self.edges {
@@ -1249,18 +1218,6 @@ fn jet_game_asset_import_cache_key(
         jet_game_asset_cache_component(&dependency.logical_path, &mut material);
     }
     jet_game_asset_hash_bytes(material.as_bytes())
-}
-
-/// Public free-function form for hosts that need a cache key before building a
-/// full plan.  It hashes facts only; source path is provenance, not cache data.
-pub fn jet_game_asset_cache_key(
-    source_hash: &str,
-    recipe: &JetGameAssetRecipeIdentity,
-    tool: &JetGameAssetToolIdentity,
-    version: &JetGameAssetVersionIdentity,
-    dependencies: &[JetGameAssetDependencyIdentity],
-) -> String {
-    jet_game_asset_import_cache_key(source_hash, recipe, tool, version, dependencies)
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]

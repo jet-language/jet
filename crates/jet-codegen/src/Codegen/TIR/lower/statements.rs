@@ -1563,7 +1563,7 @@ impl<'a> LowerBlock<'a> {
         if self.markers {
             self.out.push(TStmt::SourceSpan(stmt.span()));
             if self.cx.debug_linemap {
-                let line = crate::Diagnostics::span_line_col(&self.cx.src, stmt.span().start).0;
+                let line = self.cx.src_line_col(stmt.span().start).0;
                 self.out.push(TStmt::LineMarker(line));
             }
         }
@@ -1832,6 +1832,11 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
             };
             value = preserve_typed_list_shape(value, payload, cx);
             value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+            let carrier_slot = match want {
+                Type::Result { ok, .. } => ok.as_ref(),
+                other => other,
+            };
+            value = crate::Codegen::TIR::box_present_trait_payload(value, carrier_slot, cx);
             // `??` consumes its input carrier and leaves a bare success value.
             // Restore the enclosing callable's Result carrier exactly once,
             // matching sema's implicit `Ok` for ordinary source returns.
@@ -1847,8 +1852,7 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
                 // #3713: the `Err(...)` a function returns is where its
                 // failure starts; every tier records that site as the origin.
                 if let TExprKind::Err(_, origin) = &mut value.kind {
-                    let (line, column) =
-                        crate::Diagnostics::span_line_col(&cx.src, return_expr.span().start);
+                    let (line, column) = cx.src_line_col(return_expr.span().start);
                     *origin = Some(crate::Codegen::TIR::TFailureOrigin {
                         file: crate::Codegen::escape_rust_str(&cx.file),
                         line,
@@ -2082,7 +2086,7 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
         end,
         single,
         write: matches!(access, PlaceAccess::Write),
-        line: crate::Diagnostics::span_line_col(&cx.src, binding.name_span.start).0,
+        line: cx.src_line_col(binding.name_span.start).0,
         last_use: stmt_index,
     })
 }
@@ -2703,7 +2707,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let init = lower_expr(&b.init, cx, env);
                 let canonical: Vec<(String, Type)> = match &init.ty {
                     Type::Tuple(fs) => fs.iter().map(|(n, t)| (n.clone(), (**t).clone())).collect(),
-                    Type::Apply { name, args } if name == "VjpRun" && args.len() == 1 => [
+                    Type::Apply { name, args } if name == "VJPRun" && args.len() == 1 => [
                         ("value".to_string(), Type::Named("Tensor".to_string())),
                         (
                             "pull".to_string(),
@@ -2766,7 +2770,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 };
                 let tmp = jet_format!("{jet_prefix}d{}", span.start);
                 let kw = if b.mutable { "let mut" } else { "let" };
-                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                let line = cx.src_line_col(span.start).0;
                 let mut elem_names = Vec::new();
                 for e in elems {
                     elem_names.push(mangle(&e.name));
@@ -3506,8 +3510,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             op: *op,
                             value: value_t,
                             clone_value,
-                            line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0
-                                as u32,
+                            line: cx.src_line_col(op_span.start).0 as u32,
                         }
                     })
                 });
@@ -3589,13 +3592,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // List/Map dispatch, since Pool needs its own helper + panic text.
                         if matches!(kind, IndexKind::Pool) {
                             return in_own_frame(|| {
-                                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-                                let src_line = cx
-                                    .src
-                                    .lines()
-                                    .nth(line.saturating_sub(1))
-                                    .unwrap_or_default()
-                                    .to_string();
+                                let line = cx.src_line_col(span.start).0;
+                                let src_line = cx.src_line_text(line).to_string();
                                 let elem_ty = value_t.ty.clone();
                                 ready_return!(TStmt::Assign {
                                     place: TPlace::Expr(Box::new(TExpr {
@@ -3612,8 +3610,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     op: *op,
                                     value: value_t,
                                     clone_value: false,
-                                    line: crate::Diagnostics::span_line_col(&cx.src, op_span.start)
-                                        .0 as u32,
+                                    line: cx.src_line_col(op_span.start).0 as u32,
                                 });
                             });
                         }
@@ -3674,11 +3671,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                         } else {
                                             false
                                         };
-                                        let line = crate::Diagnostics::span_line_col(
-                                            &cx.src,
-                                            index_span.start,
-                                        )
-                                        .0;
+                                        let line = cx.src_line_col(index_span.start).0;
                                         let value_t = lower_expr(value, cx, env);
                                         let value_t =
                                             preserve_typed_list_shape(value_t, &field_ty, cx);
@@ -3748,14 +3741,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         } = base.as_ref()
                         {
                             return in_own_frame(|| {
-                                let line =
-                                    crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
-                                let src_line = cx
-                                    .src
-                                    .lines()
-                                    .nth(line.saturating_sub(1))
-                                    .unwrap_or_default()
-                                    .to_string();
+                                let line = cx.src_line_col(idx_span.start).0;
+                                let src_line = cx.src_line_text(line).to_string();
                                 let pool_t = lower_expr(pool_expr, cx, env);
                                 let id_t = lower_expr(id_expr, cx, env);
                                 let elem_ty = match &pool_t.ty {
@@ -3788,8 +3775,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     op: *op,
                                     value: value_t,
                                     clone_value,
-                                    line: crate::Diagnostics::span_line_col(&cx.src, op_span.start)
-                                        .0 as u32,
+                                    line: cx.src_line_col(op_span.start).0 as u32,
                                 });
                             });
                         }
@@ -3814,8 +3800,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             op: *op,
                             value: value_t,
                             clone_value,
-                            line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0
-                                as u32,
+                            line: cx.src_line_col(op_span.start).0 as u32,
                         }
                     })
                 });
@@ -4336,7 +4321,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let scoped = clone_env(env);
                 let gate = TUnsafeGate {
                     file: cx.file.clone(),
-                    line: crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32,
+                    line: cx.src_line_col(span.start).0 as u32,
                     reason: audit.clone().unwrap_or_default(),
                     enabled: env.sentries_enabled,
                     fenced: env.sentries_fenced,

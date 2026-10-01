@@ -1,6 +1,45 @@
 // Static associated-method lookup and checked StaticCall construction.
 // The owner is a type name, never a runtime receiver; owner and method generic
 // arguments stay separate through inference and TIR construction.
+use jet_foundation.[
+    AccessConvention,
+    BuiltinStaticOwnerRule,
+    BuiltinStaticRow,
+    Call,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    Func,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TBuiltinOp,
+    TCallArg,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    THandleOp,
+    THostCall,
+    TMapEntry,
+    TMethodRef,
+    TPreludeArg,
+    TStaticOwner,
+    TStmt,
+    Type,
+    builtin_static_is_type_param,
+    builtin_static_rows,
+    core_call,
+    core_module_has_type,
+    expr_span,
+    jet_target_layout_atomic_scalar_type,
+    symbol_id,
+    type_identity_equal,
+    type_name,
+]
 
 struct SemaStaticMethodTarget {
     pub owner_name: String
@@ -10,7 +49,7 @@ struct SemaStaticMethodTarget {
     pub function: Func?
 }
 
-fn sema_call_static_symbol_nominal(graph: SemaRegistrationGraph, symbol: SymbolId) -> SemaRegistrationNominal? {
+fn sema_call_static_symbol_nominal(graph: SemaRegistrationGraph, symbol: SymbolID) -> SemaRegistrationNominal? {
     loop module_row in graph.modules {
         loop nominal in module_row.nominals {
             if nominal.symbol.id.key == symbol.key -> return Val(nominal)
@@ -72,7 +111,7 @@ fn sema_call_static_local_generic_method_exists(symbol: Symbol, method: String, 
     false
 }
 
-fn sema_call_static_has_method(targets: [SemaStaticMethodTarget], symbol: SymbolId) -> Bool Never! {
+fn sema_call_static_has_method(targets: [SemaStaticMethodTarget], symbol: SymbolID) -> Bool Never! {
     loop target in targets {
         if target.method.symbol.key == symbol.key -> return true
     }
@@ -118,7 +157,7 @@ fn sema_call_static_append_registered(output: &[SemaStaticMethodTarget], graph: 
     if function.parameters.len() > 0 && function.parameters[0].symbol.name == "self" -> return
     if !sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return
 
-    target :: sema_call_static_function_target(function.symbol, function.signature, sema_inference_registration_params(function.generic_params), type_args, environment, span, &diagnostics) ?? return
+    target := sema_call_static_function_target(function.symbol, function.signature, sema_inference_registration_params(function.generic_params), type_args, environment, span, &diagnostics) ?? return
     owner_params :: sema_inference_registration_params(nominal.generic_params)
     owner_result :: sema_call_static_owner_resolution(owner_params, owner_type_args, target.signature, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return
     if !owner_result.complete -> return
@@ -167,7 +206,7 @@ fn sema_call_static_local_target(owner_symbol: Symbol, owner_name: String, decla
     signature :: sema_function_symbol_type(function, method_id, environment.source_file, environment.source_origin, environment.source_segments)
     visibility :: if function.is_pub -> 2 else -> if function.is_package_pub -> 1 else -> 0
     method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_name: environment.module_identity, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
-    target :: sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, span, &diagnostics) ?? return None
+    target := sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, span, &diagnostics) ?? return None
     owner_result :: sema_call_static_owner_resolution(owner_params, owner_type_args, target.signature, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics) ?? return None
     owner_type :: sema_inference_substitute_type_bindings(declared_owner, owner_result.substitutions)
     target.signature = sema_inference_substitute_type_bindings(target.signature, owner_result.substitutions)
@@ -245,8 +284,9 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
                 .ExprStmt(call, statement_span) -> {
                     updated_call := call
                     if !sema_call_static_rewrite_value(&updated_call, target) -> return false
-                    statements[last] = TStmt.ExprStmt{value: updated_call, span: statement_span}
-                    value.kind = TExprKind.InlineBlock{body: statements}
+                    updated_statements := ~statements
+                    updated_statements[last] = TStmt.ExprStmt{value: updated_call, span: statement_span}
+                    value.kind = TExprKind.InlineBlock{body: updated_statements}
                     return true
                 }
                 else -> return false
@@ -256,7 +296,7 @@ fn sema_call_static_rewrite_value(value: &TExpr, target: SemaStaticMethodTarget)
     }
     false
 }
-fn sema_call_static_call_value(value: TExpr, symbol: SymbolId) -> TExpr? {
+fn sema_call_static_call_value(value: TExpr, symbol: SymbolID) -> TExpr? {
     if value.kind == {
         .Call(callee, _, _) -> if callee.key == symbol.key -> return Val(value) else -> return None
         .TraitBox(inner, _) -> return sema_call_static_call_value(inner, symbol)
@@ -270,7 +310,6 @@ fn sema_call_static_call_value(value: TExpr, symbol: SymbolId) -> TExpr? {
         }
         else -> return None
     }
-    None
 }
 
 // Built-in owners (`Int.parse`, `U8.from_int`, `Atomic<Int>.new`,
@@ -447,7 +486,7 @@ fn sema_call_builtin_static_carrier(result: Type) -> TFailureCarrier Never! {
 fn sema_call_builtin_static_call_arg(value: TExpr, argument: CallArg) -> TCallArg Never! {
     TCallArg{
         value: value,
-        template_items: [SymbolId]{},
+        template_items: [SymbolID]{},
         borrow: argument.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
         mut_borrow: argument.convention == AccessConvention.Write,
         clone: false,
@@ -569,7 +608,7 @@ pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: 
     }
     // An unbound owner can only be an ambient built-in; a value binding shadows it.
     binding_index :: sema_scope_resolve_index(scopes, type_name) ?? return sema_call_try_builtin_static(type_name, "", method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    owner_symbol :: scopes.bindings[binding_index].symbol
+    owner_symbol := scopes.bindings[binding_index].symbol
     if owner_symbol.kind != SymbolKind.Type -> return SemaMethodSpecialCheck{handled: false, value: None}
 
     diagnostics_before := diagnostics.len()

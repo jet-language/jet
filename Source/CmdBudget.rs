@@ -256,6 +256,35 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     0
 }
 
+/// Whether `spec` is a deterministic Fail gate `jet build` enforces for
+/// `target` and `profile`.
+fn is_build_gate(spec: &jet::Sema::BudgetSpec, target: &str, profile: &str) -> bool {
+    applicable(spec, target, profile)
+        && spec.enforcement == "Fail"
+        && spec.comparison_fact.kind == "Absolute"
+        && matches!(
+            provider_kind(&spec.provider),
+            "CompilerFacts" | "BuildArtifact"
+        )
+}
+
+/// Whether the checked `bundle` declares any gate `jet build` enforces for
+/// `target` and `profile`. When it declares none, `run_build_gates` has
+/// nothing to do and its second front-end check is skipped. Budget
+/// declarations that do not elaborate answer `true`, so their diagnostics
+/// still surface through `run_build_gates`.
+pub(crate) fn has_build_gates(
+    bundle: &jet::AST::ProgramBundle,
+    target: &str,
+    profile: &str,
+) -> bool {
+    jet::Sema::collect_located_budget_specs_bundle(bundle).map_or(true, |specs| {
+        specs
+            .iter()
+            .any(|located| is_build_gate(&located.spec, target, profile))
+    })
+}
+
 /// D-PERFBUDGET-INTEGRATION1: `jet build` owns deterministic Fail gates.
 /// It reuses one verified canonical report while every relevant identity
 /// remains exact, and otherwise refreshes through the same evaluator used by
@@ -323,16 +352,7 @@ pub(crate) fn run_build_gates(
     };
     let active = specs
         .into_iter()
-        .filter(|located| {
-            let spec = &located.spec;
-            applicable(spec, target, profile)
-                && spec.enforcement == "Fail"
-                && spec.comparison_fact.kind == "Absolute"
-                && matches!(
-                    provider_kind(&spec.provider),
-                    "CompilerFacts" | "BuildArtifact"
-                )
-        })
+        .filter(|located| is_build_gate(&located.spec, target, profile))
         .collect::<Vec<_>>();
     if active.is_empty() {
         return 0;

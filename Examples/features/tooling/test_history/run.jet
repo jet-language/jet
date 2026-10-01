@@ -7,10 +7,10 @@
 use core.testing as testing
 
 enum BookingCommand {
-    Reserve(creates: testing.HandleId)
-    Cancel(handle: testing.HandleId)
-    Timeout(handle: testing.HandleId)
-    Retry(handle: testing.HandleId, creates: testing.HandleId)
+    Reserve(creates: testing.HandleID)
+    Cancel(handle: testing.HandleID)
+    Timeout(handle: testing.HandleID)
+    Retry(handle: testing.HandleID, creates: testing.HandleID)
 }
 
 enum CounterCommand {
@@ -19,7 +19,7 @@ enum CounterCommand {
 }
 
 struct BookingTerminal {
-    handle: testing.HandleId
+    handle: testing.HandleID
     state: String
 }
 
@@ -43,45 +43,45 @@ fn booking_distributions() -> [testing.HistoryDistribution] {
 fn booking_operation(
     index: testing.Count,
     name: String,
-    argument: testing.HandleId?,
-    creates: testing.HandleId?,
-    consumes: testing.HandleId?,
+    argument: testing.HandleID?,
+    creates: testing.HandleID?,
+    consumes: testing.HandleID?,
     state: String?,
 ) -> testing.HistoryOperation {
-    task_id :: testing.TaskId{value: index % 2}
-    event :: testing.EventId{value: index + 1}
+    task_id :: testing.TaskID{value: index % 2}
+    event :: testing.EventID{value: index + 1}
     arguments := [testing.HistoryValue]{}
-    created_handles := [testing.HandleId]{}
-    consumed_handles := [testing.HandleId]{}
+    created_handles := [testing.HandleID]{}
+    consumed_handles := [testing.HandleID]{}
     preconditions := [testing.HistoryPrecondition]{}
 
     if argument != None {
-        handle :: argument ?? testing.HandleId{value: 0}
+        handle :: argument ?? testing.HandleID{value: 0}
         &arguments.push(testing.HistoryValue.Handle(handle))
     }
     if creates != None {
-        handle :: creates ?? testing.HandleId{value: 0}
+        handle :: creates ?? testing.HandleID{value: 0}
         &created_handles.push(handle)
     }
     if consumes != None {
-        handle :: consumes ?? testing.HandleId{value: 0}
+        handle :: consumes ?? testing.HandleID{value: 0}
         &consumed_handles.push(handle)
     }
     if index > 0 {
         previous :: index - 1
         &preconditions.push(
             testing.HistoryPrecondition.TaskCompleted(
-                testing.TaskId{value: previous % 2}
+                testing.TaskID{value: previous % 2}
             )
         )
         &preconditions.push(
             testing.HistoryPrecondition.EventAvailable(
-                testing.EventId{value: index}
+                testing.EventID{value: index}
             )
         )
     }
     if argument != None {
-        handle :: argument ?? testing.HandleId{value: 0}
+        handle :: argument ?? testing.HandleID{value: 0}
         if name != "reserve" {
             &preconditions.push(testing.HistoryPrecondition.HandleLive(handle))
         }
@@ -110,8 +110,8 @@ fn booking_operation(
 }
 
 fn booking_schedule(index: testing.Count, name: String) -> testing.HistoryScheduleChoice {
-    task_id :: testing.TaskId{value: index % 2}
-    event :: testing.EventId{value: index + 1}
+    task_id :: testing.TaskID{value: index % 2}
+    event :: testing.EventID{value: index + 1}
     choice :: if name == "timeout" -> "deliver-late" else -> "fifo"
     testing.HistoryScheduleChoice{
         operation: index,
@@ -121,7 +121,7 @@ fn booking_schedule(index: testing.Count, name: String) -> testing.HistorySchedu
     }
 }
 
-fn booking_key(handle: testing.HandleId) -> String { "{handle.value}" }
+fn booking_key(handle: testing.HandleID) -> String { "{handle.value}" }
 
 fn booking_public_state(states: [String:String]) -> DataTree {
     values := [String:DataTree]{}
@@ -192,7 +192,7 @@ fn booking_actual_correct(commands: [BookingCommand]) -> DataTree {
     booking_public_state(states)
 }
 
-fn booking_handle(operation: testing.HistoryOperation) -> testing.HandleId? {
+fn booking_handle(operation: testing.HistoryOperation) -> testing.HandleID? {
     if operation.arguments.len() != 1 -> return None
     if operation.arguments[0] == {
         .Handle(handle) -> return Val(handle)
@@ -235,7 +235,7 @@ fn booking_command_for(operation: testing.HistoryOperation) -> BookingCommand? {
 
 fn booking_has_handle_live(
     operation: testing.HistoryOperation,
-    handle: testing.HandleId,
+    handle: testing.HandleID,
 ) -> Bool {
     loop precondition in operation.preconditions {
         if precondition == {
@@ -248,7 +248,7 @@ fn booking_has_handle_live(
 
 fn booking_has_handle_state(
     operation: testing.HistoryOperation,
-    handle: testing.HandleId,
+    handle: testing.HandleID,
     state: String,
 ) -> Bool {
     loop precondition in operation.preconditions {
@@ -264,8 +264,8 @@ fn booking_has_handle_state(
 
 fn booking_has_task_event(
     operation: testing.HistoryOperation,
-    task_id: testing.TaskId,
-    event: testing.EventId,
+    task_id: testing.TaskID,
+    event: testing.EventID,
 ) -> Bool {
     task_seen := false
     event_seen := false
@@ -294,15 +294,15 @@ fn booking_valid(candidate: testing.TypedHistoryCase<BookingCommand>) -> Bool {
         return false
     }
 
-    states := [testing.HandleId:String]{}
-    known := [testing.HandleId:Bool]{}
+    states := [testing.HandleID:String]{}
+    known := [testing.HandleID:Bool]{}
     created_count := 0
     loop position in 0..<operation_count {
         index :: position
         operation :: candidate.case.operations[position]
         if operation.index != index -> return false
-        task_id :: testing.TaskId{value: index % 2}
-        event :: testing.EventId{value: index + 1}
+        task_id :: testing.TaskID{value: index % 2}
+        event :: testing.EventID{value: index + 1}
         if operation.task != Val(task_id) || operation.event != Val(event) {
             return false
         }
@@ -312,8 +312,8 @@ fn booking_valid(candidate: testing.TypedHistoryCase<BookingCommand>) -> Bool {
             if operation.depends_on != [testing.Count]{index - 1}
                 || !booking_has_task_event(
                     operation,
-                    testing.TaskId{value: (index - 1) % 2},
-                    testing.EventId{value: index},
+                    testing.TaskID{value: (index - 1) % 2},
+                    testing.EventID{value: index},
                 ) {
                 return false
             }
@@ -404,7 +404,7 @@ fn booking_rebuild(
 // The public generator always starts with the concrete defect schedule, then
 // uses the supplied deterministic RNG for bounded extension choices.
 fn booking_generate(
-    rng: testing.HistoryRng,
+    rng: testing.HistoryRNG,
     case_index: testing.Count,
     max_steps: testing.Count,
 ) -> testing.TypedHistoryCase<BookingCommand>? {
@@ -414,11 +414,11 @@ fn booking_generate(
     operations := [testing.HistoryOperation]{}
     schedule := [testing.HistoryScheduleChoice]{}
     commands := [BookingCommand]{}
-    active := [testing.HandleId]{}
+    active := [testing.HandleID]{}
     terminal := [BookingTerminal]{}
     next_id := 1
 
-    first :: testing.HandleId{value: next_id}
+    first :: testing.HandleID{value: next_id}
     next_id += 1
     &operations.push(booking_operation(
         0,
@@ -442,7 +442,7 @@ fn booking_generate(
     &schedule.push(booking_schedule(1, "timeout"))
     &commands.push(BookingCommand.Timeout{handle: first})
 
-    second :: testing.HandleId{value: next_id}
+    second :: testing.HandleID{value: next_id}
     next_id += 1
     &operations.push(booking_operation(
         2,
@@ -459,7 +459,7 @@ fn booking_generate(
     loop index in 3..<step_count {
         choice :: rng.below(8)
         if choice < 3 || (active.len() == 0 && terminal.len() == 0) {
-            handle :: testing.HandleId{value: next_id}
+            handle :: testing.HandleID{value: next_id}
             next_id += 1
             &operations.push(booking_operation(
                 index,
@@ -500,7 +500,7 @@ fn booking_generate(
             &terminal.push(BookingTerminal{handle: handle, state: "timed_out"})
         } else if terminal.len() > 0 {
             previous :: &terminal.pop() ?? return None
-            replacement :: testing.HandleId{value: next_id}
+            replacement :: testing.HandleID{value: next_id}
             next_id += 1
             &operations.push(booking_operation(
                 index,
@@ -519,7 +519,7 @@ fn booking_generate(
             )
             &active.push(replacement)
         } else {
-            handle :: testing.HandleId{value: next_id}
+            handle :: testing.HandleID{value: next_id}
             next_id += 1
             &operations.push(booking_operation(
                 index,

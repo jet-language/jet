@@ -453,17 +453,6 @@ fn simd_reduce_op(op: &str) -> Option<simd_lanes::JetSimdReduceOp> {
     })
 }
 
-fn zip_binop(op: &str, a: &[f64], b: &[f64], f32_lanes: bool) -> Option<Vec<f64>> {
-    let op = simd_binary_op(op)?;
-    if f32_lanes {
-        let left = a.iter().map(|value| *value as f32).collect::<Vec<_>>();
-        let right = b.iter().map(|value| *value as f32).collect::<Vec<_>>();
-        return simd_lanes::jet_simd_f32_binary_slice(&left, &right, op)
-            .map(|values| values.into_iter().map(f64::from).collect());
-    }
-    simd_lanes::jet_simd_f64_binary_slice(a, b, op)
-}
-
 fn binary_op_name(op: simd_lanes::JetSimdBinaryOp) -> &'static str {
     match op {
         simd_lanes::JetSimdBinaryOp::Add => "add",
@@ -645,22 +634,6 @@ fn math_binary_value(
     }
 }
 
-fn simd_kind_code(kind: jet_foundation::Syntax::SimdLaneKind) -> i64 {
-    use jet_foundation::Syntax::SimdLaneKind;
-    match kind {
-        SimdLaneKind::F32 => 0,
-        SimdLaneKind::F64 => 1,
-        SimdLaneKind::I8 => 2,
-        SimdLaneKind::I16 => 3,
-        SimdLaneKind::I32 => 4,
-        SimdLaneKind::I64 => 5,
-        SimdLaneKind::U8 => 6,
-        SimdLaneKind::U16 => 7,
-        SimdLaneKind::U32 => 8,
-        SimdLaneKind::U64 => 9,
-    }
-}
-
 fn simd_kind_from_code(code: i64) -> Option<jet_foundation::Syntax::SimdLaneKind> {
     use jet_foundation::Syntax::SimdLaneKind;
     Some(match code {
@@ -674,22 +647,6 @@ fn simd_kind_from_code(code: i64) -> Option<jet_foundation::Syntax::SimdLaneKind
         7 => SimdLaneKind::U16,
         8 => SimdLaneKind::U32,
         9 => SimdLaneKind::U64,
-        _ => return None,
-    })
-}
-
-pub(crate) fn simd_lane_type_code(type_name: &str) -> Option<(i64, usize)> {
-    let (kind, len) = jet_foundation::Syntax::simd_lane_layout(type_name)?;
-    Some((simd_kind_code(kind), len))
-}
-
-pub(crate) fn simd_reduce_op_code(op: &str) -> Option<i64> {
-    Some(match op {
-        "Add" | "sum" => 0,
-        "Mul" | "product" => 1,
-        "Min" => 2,
-        "Max" => 3,
-        "Avg" => 4,
         _ => return None,
     })
 }
@@ -1580,14 +1537,6 @@ fn typed_math_splat_int_value(type_name: &str, value: i64) -> i64 {
 
 fn typed_math_float(type_name: &str, func: &str, args: &[i64]) -> f64 {
     unpack_float(typed_math_call(type_name, func, args))
-}
-
-fn typed_math_f32(type_name: &str, func: &str, args: &[i64]) -> f32 {
-    typed_math_float(type_name, func, args) as f32
-}
-
-fn typed_math_int(type_name: &str, func: &str, args: &[i64]) -> i64 {
-    unpack_int(typed_math_call(type_name, func, args))
 }
 
 macro_rules! typed_math_new_f32 {

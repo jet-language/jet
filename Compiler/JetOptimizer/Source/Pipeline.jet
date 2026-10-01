@@ -1,25 +1,38 @@
 // Canonical checked-MIR optimization entry point and result contract.
 // The optimizer consumes the shared MIR schema and owns the one target-neutral
 // legality, transformation, proof-fact, and deterministic-order pipeline.
+use jet_foundation.[
+    MIRAccelerationFact,
+    MIRBoundsFact,
+    MIRDecisionRow,
+    MIRFunctionID,
+    MIRFusionFact,
+    MIRLoopFact,
+    MIROptimizationPassID,
+    MIRProgram,
+    MIRVectorFact,
+    Span,
+    mir_program_digest,
+]
 
-pub enum MirOptimizationErrorKind {
+pub enum MIROptimizationErrorKind {
     InvalidSchema
-    InvalidCfg
+    InvalidCFG
     InvalidDefUse
     InvalidFact
 }
 
-pub struct MirOptimizationError {
-    pub pass: MirOptimizationPassId
-    pub kind: MirOptimizationErrorKind
-    pub function: MirFunctionId?
+pub struct MIROptimizationError {
+    pub pass: MIROptimizationPassID
+    pub kind: MIROptimizationErrorKind
+    pub function: MIRFunctionID?
     pub span: Span
     pub message: String
 }
 
-pub struct MirOptimizationReport {
-    pub production_order: [MirOptimizationPassId]
-    pub completed: [MirOptimizationPassId]
+pub struct MIROptimizationReport {
+    pub production_order: [MIROptimizationPassID]
+    pub completed: [MIROptimizationPassID]
     pub inline_calls_expanded: Int
     pub reachable_blocks_removed: Int
     pub folded_values: Int
@@ -32,18 +45,18 @@ pub struct MirOptimizationReport {
     pub decision_rows: Int
 }
 
-pub struct MirOptimizationResult {
-    pub program: MirProgram?
-    pub report: MirOptimizationReport
-    pub error: MirOptimizationError?
+pub struct MIROptimizationResult {
+    pub program: MIRProgram?
+    pub report: MIROptimizationReport
+    pub error: MIROptimizationError?
     pub complete: Bool
 }
 
-pub fn mir_optimizer_production_order() -> [MirOptimizationPassId] Never! {
-    [MirOptimizationPassId]{
+pub fn mir_optimizer_production_order() -> [MIROptimizationPassID] Never! {
+    [MIROptimizationPassID]{
         .LegalityVerification,
         .UnreachableBlockElimination,
-        .CfgSimplification,
+        .CFGSimplification,
         .ExactConstantFolding,
         .BoundsCheckElimination,
         .DeadPureValueElimination,
@@ -51,10 +64,10 @@ pub fn mir_optimizer_production_order() -> [MirOptimizationPassId] Never! {
     }
 }
 
-fn mir_optimizer_empty_report() -> MirOptimizationReport Never! {
-    MirOptimizationReport{
+fn mir_optimizer_empty_report() -> MIROptimizationReport Never! {
+    MIROptimizationReport{
         production_order: mir_optimizer_production_order(),
-        completed: [MirOptimizationPassId]{},
+        completed: [MIROptimizationPassID]{},
         inline_calls_expanded: 0,
         reachable_blocks_removed: 0,
         folded_values: 0,
@@ -69,26 +82,26 @@ fn mir_optimizer_empty_report() -> MirOptimizationReport Never! {
 }
 
 fn mir_pass_error(
-    pass: MirOptimizationPassId,
-    kind: MirOptimizationErrorKind,
-    function: MirFunctionId?,
+    pass: MIROptimizationPassID,
+    kind: MIROptimizationErrorKind,
+    function: MIRFunctionID?,
     span: Span,
     message: String,
-) -> MirOptimizationError Never! {
-    MirOptimizationError{pass: pass, kind: kind, function: function, span: span, message: message}
+) -> MIROptimizationError Never! {
+    MIROptimizationError{pass: pass, kind: kind, function: function, span: span, message: message}
 }
 
-fn mir_optimizer_failed(error: MirOptimizationError, report: MirOptimizationReport) -> MirOptimizationResult Never! {
-    MirOptimizationResult{program: None, report: report, error: Val(error), complete: false}
+fn mir_optimizer_failed(error: MIROptimizationError, report: MIROptimizationReport) -> MIROptimizationResult Never! {
+    MIROptimizationResult{program: None, report: report, error: Val(error), complete: false}
 }
 
-fn mir_optimizer_succeeded(program: MirProgram, report: MirOptimizationReport) -> MirOptimizationResult Never! {
-    MirOptimizationResult{program: Val(program), report: report, error: None, complete: true}
+fn mir_optimizer_succeeded(program: MIRProgram, report: MIROptimizationReport) -> MIROptimizationResult Never! {
+    MIROptimizationResult{program: Val(program), report: report, error: None, complete: true}
 }
 
 // This is the only public optimization entry. It runs after MIR lowering and
 // before any target adapter; errors are returned rather than repaired locally.
-pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
+pub fn optimize_mir_program(program: MIRProgram) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     validation := mir_pass_validate_program(program, .LegalityVerification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
@@ -127,9 +140,9 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     before_blocks = mir_pass_block_count(&optimized)
     mir_pass_simplify_cfg(&optimized)
     report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
-    mir_pass_mark(&optimized, .CfgSimplification)
-    &report.completed.push(.CfgSimplification)
-    validation = mir_pass_validate_program(optimized, .CfgSimplification)
+    mir_pass_mark(&optimized, .CFGSimplification)
+    &report.completed.push(.CFGSimplification)
+    validation = mir_pass_validate_program(optimized, .CFGSimplification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.folded_values = mir_pass_fold_exact_constants(&optimized)
@@ -181,31 +194,36 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     mir_optimizer_succeeded(optimized, report)
 }
 
-fn mir_optimizer_has_complete_seal(program: MirProgram) -> Bool {
+// Only a program whose every function carries the complete pass order and a
+// seal can skip the pipeline, so the program is digested only then.
+fn mir_optimizer_has_complete_seal(program: MIRProgram) -> Bool {
     if program.functions.len() == 0 -> return false
-    digest :: mir_program_digest(program)
     expected :: mir_optimizer_production_order()
     loop function in program.functions {
-        if function.optimization.derived_from_digest != Val(digest) -> return false
+        if function.optimization.derived_from_digest == None -> return false
         if function.optimization.pass_ids.len() != expected.len() -> return false
         loop (index, pass_id) in expected {
             if function.optimization.pass_ids[index] != pass_id -> return false
         }
     }
+    digest :: mir_program_digest(program)
+    loop function in program.functions {
+        if function.optimization.derived_from_digest != Val(digest) -> return false
+    }
     true
 }
 
-fn mir_pass_clear_batch_facts(program: &MirProgram) Never! {
+fn mir_pass_clear_batch_facts(program: &MIRProgram) Never! {
     loop index in 0..<program.functions.len() {
-        program.functions[index].optimization.pass_ids = [MirOptimizationPassId]{}
+        program.functions[index].optimization.pass_ids = [MIROptimizationPassID]{}
         program.functions[index].optimization.derived_from_digest = None
-        program.functions[index].optimization.decision_rows = [MirDecisionRow]{}
-        program.functions[index].optimization.bounds_facts = [MirBoundsFact]{}
-        program.functions[index].optimization.loop_facts = [MirLoopFact]{}
-        program.functions[index].optimization.vector_facts = [MirVectorFact]{}
-        program.functions[index].optimization.checked_vector_facts = [MirVectorFact]{}
-        program.functions[index].optimization.fusion_facts = [MirFusionFact]{}
-        program.functions[index].optimization.acceleration_facts = [MirAccelerationFact]{}
+        program.functions[index].optimization.decision_rows = [MIRDecisionRow]{}
+        program.functions[index].optimization.bounds_facts = [MIRBoundsFact]{}
+        program.functions[index].optimization.loop_facts = [MIRLoopFact]{}
+        program.functions[index].optimization.vector_facts = [MIRVectorFact]{}
+        program.functions[index].optimization.checked_vector_facts = [MIRVectorFact]{}
+        program.functions[index].optimization.fusion_facts = [MIRFusionFact]{}
+        program.functions[index].optimization.acceleration_facts = [MIRAccelerationFact]{}
         program.functions[index].optimization.auto_vectorizable = false
         program.functions[index].optimization.no_aliasing = false
         program.functions[index].optimization.no_early_exit = false
@@ -213,11 +231,11 @@ fn mir_pass_clear_batch_facts(program: &MirProgram) Never! {
     }
 }
 
-fn mir_pass_mark(program: &MirProgram, pass: MirOptimizationPassId) Never! {
+fn mir_pass_mark(program: &MIRProgram, pass: MIROptimizationPassID) Never! {
     loop index in 0..<program.functions.len() -> &program.functions[index].optimization.pass_ids.push(pass)
 }
 
-fn mir_pass_block_count(program: &MirProgram) -> Int Never! {
+fn mir_pass_block_count(program: &MIRProgram) -> Int Never! {
     total := 0
     loop function in program.functions -> total += function.blocks.len()
     total

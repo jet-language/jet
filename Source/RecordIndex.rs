@@ -785,12 +785,31 @@ impl RecordIndex {
         self.update(entry)
     }
     pub fn update_and_store(&mut self, entry: RecordIndexEntry) -> Result<(), String> {
+        self.publish_and_store(entry, false)
+    }
+
+    /// Atomically publish `entry`, superseding any row with the same
+    /// `(kind, artifact_id)` key whatever its identity. Reserved for artifacts
+    /// rewritten in place at a stable path, such as production receipts: the
+    /// same bytes can be reproduced after an input the artifact does not
+    /// record (an imported module) changed, and the latest producer owns the
+    /// row.
+    pub fn supersede_and_store(&mut self, entry: RecordIndexEntry) -> Result<(), String> {
+        self.publish_and_store(entry, true)
+    }
+
+    fn publish_and_store(&mut self, entry: RecordIndexEntry, supersede: bool) -> Result<(), String> {
         let _lock = acquire_index_lock(&self.root)?;
         let mut candidate = if self.index_path().is_file() {
             Self::load_with_budget(self.root.clone(), self.budget)?
         } else {
             self.clone()
         };
+        if supersede {
+            candidate
+                .entries
+                .retain(|existing| existing.key() != entry.key());
+        }
         let entry = if candidate
             .entries
             .iter()

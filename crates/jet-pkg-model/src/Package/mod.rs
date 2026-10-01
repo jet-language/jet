@@ -56,7 +56,6 @@ pub enum PackageOutputKind {
     Bundle,
     System,
     Fleet,
-    Model,
 }
 
 impl PackageOutputKind {
@@ -75,7 +74,6 @@ impl PackageOutputKind {
             "Bundle" => Ok(Self::Bundle),
             "System" => Ok(Self::System),
             "Fleet" => Ok(Self::Fleet),
-            "Model" => Ok(Self::Model),
             other => Err(PackageParseError::UnknownOutputKind(other.to_string())),
         }
     }
@@ -1452,23 +1450,24 @@ impl PackageFacts {
                 }
             }));
         }
+        // D-MOD-CYCLE1=A: a package is one namespace with no file imports, so
+        // `entry: file.callable` names the member file whose stem is `file`
+        // (at any depth, like the loader's module alias) and a callable it
+        // declares. The file must be the package's only member with that stem.
         let files = self.source_files_checked(resolver)?;
         let result = parse_sources(&files).and_then(|sources| {
-            let targets = reachable_import_module_targets(resolver.root(), parts[0], &sources);
-            let matches = if targets.len() == 1 {
-                sources
-                    .iter()
-                    .filter(|source| source.path == targets[0])
-                    .filter(|source| {
-                        unique_top_level_function(&source.program, parts[1])
-                            .is_some_and(|function| function.is_pub)
-                    })
-                    .map(|source| source.path.clone())
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            };
-            (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+            let mut matches = sources.iter().filter(|source| {
+                source.path.file_name().and_then(|name| name.to_str())
+                    != Some(crate::Syntax::PACKAGE_FILE)
+                    && source.path.file_stem().and_then(|stem| stem.to_str()) == Some(parts[0])
+            });
+            let source = matches.next()?;
+            if matches.next().is_some()
+                || unique_top_level_function(&source.program, parts[1]).is_none()
+            {
+                return None;
+            }
+            Some(source.path.clone())
         });
         for file in &files {
             resolver.revalidate_file(file)?;
@@ -3648,30 +3647,6 @@ fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
             )
         }
         PackageOutputKind::Fleet => matches!(field, "name" | "hosts"),
-        PackageOutputKind::Model => matches!(
-            field,
-            "name"
-                | "graph"
-                | "graph_sha256"
-                | "weights"
-                | "weights_sha256"
-                | "tokenizer"
-                | "tokenizer_sha256"
-                | "adapter"
-                | "adapter_sha256"
-                | "inputs"
-                | "outputs"
-                | "provider"
-                | "preprocessing"
-                | "pooling"
-                | "normalization"
-                | "output_meaning"
-                | "metric"
-                | "custom_operators"
-                | "max_context"
-                | "max_batch"
-                | "max_buffer_bytes"
-        ),
     }
 }
 
@@ -4070,46 +4045,6 @@ fn unique_top_level_function<'a>(
         found = Some(function);
     }
     found
-}
-
-/// Follow the ordinary in-project import graph from root source files. Output
-/// references name the alias at any reachable import depth, while every edge
-/// still passes the same safe path and source-set checks as direct lookup.
-fn reachable_import_module_targets(
-    root: &std::path::Path,
-    wanted: &str,
-    sources: &[ParsedSource],
-) -> Vec<std::path::PathBuf> {
-    let mut pending = sources
-        .iter()
-        .filter(|source| source.path.parent() == Some(root))
-        .map(|source| source.path.clone())
-        .collect::<Vec<_>>();
-    let mut visited = std::collections::BTreeSet::new();
-    let mut targets = Vec::new();
-
-    while let Some(path) = pending.pop() {
-        if !visited.insert(normalize_discovery_path(&path)) {
-            continue;
-        }
-        let Some(source) = sources.iter().find(|source| source.path == path) else {
-            continue;
-        };
-        for import in &source.program.imports {
-            if matches!(&import.kind, crate::AST::ImportKind::Unqualified { .. }) {
-                continue;
-            }
-            let resolved = resolved_import_targets(root, source, &import.kind, sources);
-            if import.import_alias() == wanted {
-                targets.extend(resolved.iter().cloned());
-            }
-            pending.extend(resolved);
-        }
-    }
-
-    targets.sort();
-    targets.dedup();
-    targets
 }
 
 fn resolved_import_targets(
@@ -4770,18 +4705,17 @@ outputs: { app: .Executable{ entry: launch } }"#,
     }
 
     #[test]
-    fn output_entry_resolves_a_nested_main_module() {
+    fn output_entry_names_a_nested_member_file() {
         let dir = temp_dir("output-entry-nested-main");
         std::fs::create_dir_all(dir.join("src/cli")).unwrap();
-        std::fs::write(dir.join("entry.jet"), "use \"src/cli/main\" as app\n").unwrap();
         std::fs::write(
             dir.join("src/cli/main.jet"),
-            "pub fn cli_run() {}\nfn run() { cli_run() }\n",
+            "fn cli_run() {}\nfn run() { cli_run() }\n",
         )
         .unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: { app: .Executable{ entry: app.cli_run } }"#,
+outputs: { app: .Executable{ entry: main.cli_run } }"#,
             "package.jet",
         )
         .unwrap();
@@ -4798,40 +4732,17 @@ outputs: { app: .Executable{ entry: app.cli_run } }"#,
     }
 
     #[test]
-    fn output_entry_follows_a_nested_import_graph() {
-        let dir = temp_dir("output-entry-import-graph");
-        std::fs::create_dir_all(dir.join("src/cli")).unwrap();
-        std::fs::write(dir.join("entry.jet"), "use \"runner\" as runner\n").unwrap();
-        std::fs::write(dir.join("runner.jet"), "use \"bridge\" as bridge\n").unwrap();
-        std::fs::write(dir.join("bridge.jet"), "use \"src/cli/main\" as app\n").unwrap();
-        std::fs::write(dir.join("src/cli/main.jet"), "pub fn cli_run() {}\n").unwrap();
-        let facts = PackageFacts::parse(
-            r#"name: "demo"
-outputs: { app: .Executable{ entry: app.cli_run } }"#,
-            "package.jet",
-        )
-        .unwrap();
-        let output = facts.outputs.get("app").unwrap();
-        assert_eq!(
-            facts.entry_path(&dir, output).unwrap(),
-            Some(dir.join("src/cli/main.jet"))
-        );
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn nested_output_entries_fail_closed_for_missing_ambiguous_and_escaping_imports() {
-        fn assert_rejected(tag: &str, entry_source: &str, extra: &[(&str, &str)]) {
+    fn member_file_entries_fail_closed_when_missing_or_ambiguous() {
+        fn assert_rejected(tag: &str, sources: &[(&str, &str)]) {
             let dir = temp_dir(tag);
-            std::fs::write(dir.join("entry.jet"), entry_source).unwrap();
-            for &(relative, source) in extra {
+            for &(relative, source) in sources {
                 let path = dir.join(relative);
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                 std::fs::write(path, source).unwrap();
             }
             let facts = PackageFacts::parse(
                 r#"name: "demo"
-outputs: { app: .Executable{ entry: app.cli_run } }"#,
+outputs: { app: .Executable{ entry: main.cli_run } }"#,
                 "package.jet",
             )
             .unwrap();
@@ -4840,23 +4751,17 @@ outputs: { app: .Executable{ entry: app.cli_run } }"#,
             std::fs::remove_dir_all(dir).ok();
         }
 
+        assert_rejected("output-entry-member-missing", &[("src/cli/other.jet", "fn cli_run() {}\n")]);
         assert_rejected(
-            "output-entry-nested-missing",
-            "use \"src/cli/missing\" as app\n",
-            &[],
+            "output-entry-member-no-callable",
+            &[("src/cli/main.jet", "fn other() {}\n")],
         );
         assert_rejected(
-            "output-entry-nested-ambiguous",
-            "use \"src/cli/main\" as app\n",
+            "output-entry-member-ambiguous",
             &[
-                ("src/cli/main.jet", "pub fn cli_run() {}\n"),
-                ("src/cli/main/module.jet", "pub fn cli_run() {}\n"),
+                ("src/one/main.jet", "fn cli_run() {}\n"),
+                ("src/two/main.jet", "fn helper() {}\n"),
             ],
-        );
-        assert_rejected(
-            "output-entry-nested-escaping",
-            "use \"../../outside/main\" as app\n",
-            &[],
         );
     }
 

@@ -826,16 +826,13 @@ fn note_typed_head_core_usage(
         note_core_usage(used, spans, "core.regex::literal", span);
         return;
     }
-    let Some(kind) = Syntax::typed_head_kind(name).filter(|kind| kind.is_boundary()) else {
+    let Some(module) = Syntax::typed_head_kind(name)
+        .filter(|kind| kind.is_boundary())
+        .and_then(Syntax::TypedHeadKind::core_owner_module)
+    else {
         return;
     };
-    let key = match kind {
-        Syntax::TypedHeadKind::URL => "core.net.url::typed_head",
-        Syntax::TypedHeadKind::Path => "core.files::typed_head",
-        Syntax::TypedHeadKind::DateTime => "core.time::typed_head",
-        _ => unreachable!("typed boundary usage descriptor is complete"),
-    };
-    note_core_usage(used, spans, key, span);
+    note_core_usage(used, spans, &format!("{module}::typed_head"), span);
 }
 
 fn is_http_nominal_type(name: &str) -> bool {
@@ -1315,7 +1312,7 @@ pub(crate) fn collect_core_expr(
             if method == "cmd"
                 && matches!(
                     receiver.as_ref(),
-                    Expr::Ident(name, _) if name.is_empty() || name == "UiShortcut"
+                    Expr::Ident(name, _) if name.is_empty() || name == "UIShortcut"
                 )
             {
                 // `.cmd("key")` lowers to the shared JetUiShortcut constructor,

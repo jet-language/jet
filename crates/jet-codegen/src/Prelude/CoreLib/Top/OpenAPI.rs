@@ -93,13 +93,6 @@ impl JetOpenApiSchema {
         }
     }
 
-    pub fn closed_object(properties: Vec<JetOpenApiProperty>) -> Self {
-        Self::Object {
-            properties,
-            additional_properties: false,
-        }
-    }
-
 
     fn validate_definition(&self, path: &str, errors: &mut Vec<JetOpenApiValidationError>) {
         match self {
@@ -544,13 +537,6 @@ fn jet_openapi_operation_id_for_path(method: JetOpenApiHttpMethod, path: &str) -
         hash = hash.wrapping_mul(1099511628211);
     }
     format!("jet_{}_{hash:016x}", method.as_str().to_ascii_lowercase())
-}
-
-pub fn jet_web_openapi_operation_id(
-    method: JetOpenApiHttpMethod,
-    pattern: &JetHTTPRoutePattern,
-) -> String {
-    jet_openapi_operation_id_for_path(method, &jet_http_route_openapi_path(pattern))
 }
 
 impl JetOpenApiRouteFact {
@@ -1273,28 +1259,6 @@ pub fn jet_web_openapi_from_routes(
     security_schemes: Vec<JetOpenApiSecurityScheme>,
 ) -> Result<String, String> {
     Ok(jet_web_openapi_document_from_routes(inputs, title, version, security_schemes)?.json())
-}
-
-pub fn jet_web_openapi_validator_from_routes(
-    inputs: Vec<JetOpenApiRouteInput>,
-    title: String,
-    version: String,
-    security_schemes: Vec<JetOpenApiSecurityScheme>,
-) -> Result<JetOpenApiValidator, String> {
-    Ok(jet_web_openapi_document_from_routes(inputs, title, version, security_schemes)?.validator())
-}
-
-pub fn jet_web_openapi_validate_routes(
-    inputs: Vec<JetOpenApiRouteInput>,
-    title: String,
-    version: String,
-    security_schemes: Vec<JetOpenApiSecurityScheme>,
-    request: &JetOpenApiRequest,
-) -> Result<(), Vec<JetOpenApiValidationError>> {
-    match jet_web_openapi_validator_from_routes(inputs, title, version, security_schemes) {
-        Ok(validator) => validator.validate(request),
-        Err(error) => Err(vec![JetOpenApiValidationError::new("document", error)]),
-    }
 }
 
 fn jet_openapi_contract_object(

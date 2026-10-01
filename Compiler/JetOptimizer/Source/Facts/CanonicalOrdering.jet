@@ -1,5 +1,44 @@
 // Stable ordering for optimizer-produced canonical MIR.
-fn mir_pass_canonicalize_program_order(program: &MirProgram) Never! {
+use jet_foundation.[
+    MIRArtifactPlan,
+    MIRAssociatedTypeValue,
+    MIRBasicBlock,
+    MIRCallbackAdapter,
+    MIRCaptureParam,
+    MIRConstantDef,
+    MIRCoreCall,
+    MIRDropAction,
+    MIRFieldRow,
+    MIRForeign,
+    MIRFunction,
+    MIRFunctionID,
+    MIRHandleLifecycle,
+    MIRHarnessPlan,
+    MIRImplDef,
+    MIRImport,
+    MIRImportItem,
+    MIRImportKind,
+    MIRJob,
+    MIRLinkUnit,
+    MIRLinkUnitID,
+    MIRLocal,
+    MIRModule,
+    MIRPlace,
+    MIRPreludeCall,
+    MIRProgram,
+    MIRScope,
+    MIRSourceFile,
+    MIRTestCase,
+    MIRTraitDef,
+    MIRTraitMethod,
+    MIRType,
+    MIRTypeDef,
+    MIRUnreachable,
+    MIRValueFact,
+    mir_type_canonical_key,
+]
+
+fn mir_pass_canonicalize_program_order(program: &MIRProgram) Never! {
     modules_window := &program.modules
     mir_pass_sort_modules(&modules_window)
     imports_window := &program.imports
@@ -47,7 +86,7 @@ fn mir_pass_canonicalize_program_order(program: &MirProgram) Never! {
             .Unqualified(module_id, items) -> {
                 sorted_items := items
                 mir_pass_sort_import_items(&sorted_items)
-                program.imports[index].kind = MirImportKind.Unqualified{module_id: module_id, items: sorted_items}
+                program.imports[index].kind = MIRImportKind.Unqualified{module_id: module_id, items: sorted_items}
             }
             else -> {}
         }
@@ -84,7 +123,7 @@ fn mir_pass_canonicalize_program_order(program: &MirProgram) Never! {
     }
 }
 
-fn mir_pass_sort_modules(rows: &[MirModule]) Never! {
+fn mir_pass_sort_modules(rows: &[MIRModule]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -96,11 +135,11 @@ fn mir_pass_sort_modules(rows: &[MirModule]) Never! {
     }
 }
 
-fn mir_pass_module_before(left: MirModule, right: MirModule) -> Bool Never! {
+fn mir_pass_module_before(left: MIRModule, right: MIRModule) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_imports(rows: &[MirImport]) Never! {
+fn mir_pass_sort_imports(rows: &[MIRImport]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -112,11 +151,11 @@ fn mir_pass_sort_imports(rows: &[MirImport]) Never! {
     }
 }
 
-fn mir_pass_import_before(left: MirImport, right: MirImport) -> Bool Never! {
+fn mir_pass_import_before(left: MIRImport, right: MIRImport) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.module_id.value < right.module_id.value
 }
 
-fn mir_pass_sort_functions(rows: &[MirFunction]) Never! {
+fn mir_pass_sort_functions(rows: &[MIRFunction]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -128,11 +167,11 @@ fn mir_pass_sort_functions(rows: &[MirFunction]) Never! {
     }
 }
 
-fn mir_pass_function_before(left: MirFunction, right: MirFunction) -> Bool Never! {
+fn mir_pass_function_before(left: MIRFunction, right: MIRFunction) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_type_defs(rows: &[MirTypeDef]) Never! {
+fn mir_pass_sort_type_defs(rows: &[MIRTypeDef]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -144,11 +183,11 @@ fn mir_pass_sort_type_defs(rows: &[MirTypeDef]) Never! {
     }
 }
 
-fn mir_pass_type_def_before(left: MirTypeDef, right: MirTypeDef) -> Bool Never! {
+fn mir_pass_type_def_before(left: MIRTypeDef, right: MIRTypeDef) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_traits(rows: &[MirTraitDef]) Never! {
+fn mir_pass_sort_traits(rows: &[MIRTraitDef]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -160,11 +199,11 @@ fn mir_pass_sort_traits(rows: &[MirTraitDef]) Never! {
     }
 }
 
-fn mir_pass_trait_before(left: MirTraitDef, right: MirTraitDef) -> Bool Never! {
+fn mir_pass_trait_before(left: MIRTraitDef, right: MIRTraitDef) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_impls(rows: &[MirImplDef]) Never! {
+fn mir_pass_sort_impls(rows: &[MIRImplDef]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -176,11 +215,11 @@ fn mir_pass_sort_impls(rows: &[MirImplDef]) Never! {
     }
 }
 
-fn mir_pass_impl_before(left: MirImplDef, right: MirImplDef) -> Bool Never! {
+fn mir_pass_impl_before(left: MIRImplDef, right: MIRImplDef) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_constants(rows: &[MirConstantDef]) Never! {
+fn mir_pass_sort_constants(rows: &[MIRConstantDef]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -192,11 +231,11 @@ fn mir_pass_sort_constants(rows: &[MirConstantDef]) Never! {
     }
 }
 
-fn mir_pass_constant_before(left: MirConstantDef, right: MirConstantDef) -> Bool Never! {
+fn mir_pass_constant_before(left: MIRConstantDef, right: MIRConstantDef) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_type_instances(rows: &[MirType]) Never! {
+fn mir_pass_sort_type_instances(rows: &[MIRType]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -208,13 +247,13 @@ fn mir_pass_sort_type_instances(rows: &[MirType]) Never! {
     }
 }
 
-fn mir_pass_type_instance_before(left: MirType, right: MirType) -> Bool Never! {
+fn mir_pass_type_instance_before(left: MIRType, right: MIRType) -> Bool Never! {
     left_id :: left.identity.map(value -> value.value) ?? -1
     right_id :: right.identity.map(value -> value.value) ?? -1
     if left_id != right_id -> left_id < right_id else -> mir_type_canonical_key(left) < mir_type_canonical_key(right)
 }
 
-fn mir_pass_sort_fields(rows: &[MirFieldRow]) Never! {
+fn mir_pass_sort_fields(rows: &[MIRFieldRow]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -226,11 +265,11 @@ fn mir_pass_sort_fields(rows: &[MirFieldRow]) Never! {
     }
 }
 
-fn mir_pass_field_before(left: MirFieldRow, right: MirFieldRow) -> Bool Never! {
+fn mir_pass_field_before(left: MIRFieldRow, right: MIRFieldRow) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.owner.value < right.owner.value
 }
 
-fn mir_pass_sort_source_files(rows: &[MirSourceFile]) Never! {
+fn mir_pass_sort_source_files(rows: &[MIRSourceFile]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -242,7 +281,7 @@ fn mir_pass_sort_source_files(rows: &[MirSourceFile]) Never! {
     }
 }
 
-fn mir_pass_source_file_before(left: MirSourceFile, right: MirSourceFile) -> Bool Never! {
+fn mir_pass_source_file_before(left: MIRSourceFile, right: MIRSourceFile) -> Bool Never! {
     if {
         left.id.value != right.id.value -> left.id.value < right.id.value
         left.path != right.path -> left.path < right.path
@@ -250,7 +289,7 @@ fn mir_pass_source_file_before(left: MirSourceFile, right: MirSourceFile) -> Boo
     }
 }
 
-fn mir_pass_sort_core_calls(rows: &[MirCoreCall]) Never! {
+fn mir_pass_sort_core_calls(rows: &[MIRCoreCall]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -262,11 +301,11 @@ fn mir_pass_sort_core_calls(rows: &[MirCoreCall]) Never! {
     }
 }
 
-fn mir_pass_core_before(left: MirCoreCall, right: MirCoreCall) -> Bool Never! {
+fn mir_pass_core_before(left: MIRCoreCall, right: MIRCoreCall) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_prelude_calls(rows: &[MirPreludeCall]) Never! {
+fn mir_pass_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -278,7 +317,7 @@ fn mir_pass_sort_prelude_calls(rows: &[MirPreludeCall]) Never! {
     }
 }
 
-fn mir_pass_prelude_before(left: MirPreludeCall, right: MirPreludeCall) -> Bool Never! {
+fn mir_pass_prelude_before(left: MIRPreludeCall, right: MIRPreludeCall) -> Bool Never! {
     if {
         left.id.value != right.id.value -> left.id.value < right.id.value
         left.module_name != right.module_name -> left.module_name < right.module_name
@@ -286,7 +325,7 @@ fn mir_pass_prelude_before(left: MirPreludeCall, right: MirPreludeCall) -> Bool 
     }
 }
 
-fn mir_pass_sort_foreign(rows: &[MirForeign]) Never! {
+fn mir_pass_sort_foreign(rows: &[MIRForeign]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -298,11 +337,11 @@ fn mir_pass_sort_foreign(rows: &[MirForeign]) Never! {
     }
 }
 
-fn mir_pass_foreign_before(left: MirForeign, right: MirForeign) -> Bool Never! {
+fn mir_pass_foreign_before(left: MIRForeign, right: MIRForeign) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
 }
 
-fn mir_pass_sort_links(rows: &[MirLinkUnit]) Never! {
+fn mir_pass_sort_links(rows: &[MIRLinkUnit]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -314,11 +353,11 @@ fn mir_pass_sort_links(rows: &[MirLinkUnit]) Never! {
     }
 }
 
-fn mir_pass_link_before(left: MirLinkUnit, right: MirLinkUnit) -> Bool Never! {
+fn mir_pass_link_before(left: MIRLinkUnit, right: MIRLinkUnit) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.crate_spec < right.crate_spec
 }
 
-fn mir_pass_sort_callbacks(rows: &[MirCallbackAdapter]) Never! {
+fn mir_pass_sort_callbacks(rows: &[MIRCallbackAdapter]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -330,11 +369,11 @@ fn mir_pass_sort_callbacks(rows: &[MirCallbackAdapter]) Never! {
     }
 }
 
-fn mir_pass_callback_before(left: MirCallbackAdapter, right: MirCallbackAdapter) -> Bool Never! {
+fn mir_pass_callback_before(left: MIRCallbackAdapter, right: MIRCallbackAdapter) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.symbol < right.symbol
 }
 
-fn mir_pass_sort_handles(rows: &[MirHandleLifecycle]) Never! {
+fn mir_pass_sort_handles(rows: &[MIRHandleLifecycle]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -346,7 +385,7 @@ fn mir_pass_sort_handles(rows: &[MirHandleLifecycle]) Never! {
     }
 }
 
-fn mir_pass_sort_jobs(rows: &[MirJob]) Never! {
+fn mir_pass_sort_jobs(rows: &[MIRJob]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -358,11 +397,11 @@ fn mir_pass_sort_jobs(rows: &[MirJob]) Never! {
     }
 }
 
-fn mir_pass_job_before(left: MirJob, right: MirJob) -> Bool Never! {
+fn mir_pass_job_before(left: MIRJob, right: MIRJob) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.name < right.name
 }
 
-fn mir_pass_sort_tests(rows: &[MirTestCase]) Never! {
+fn mir_pass_sort_tests(rows: &[MIRTestCase]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -374,11 +413,11 @@ fn mir_pass_sort_tests(rows: &[MirTestCase]) Never! {
     }
 }
 
-fn mir_pass_test_before(left: MirTestCase, right: MirTestCase) -> Bool Never! {
+fn mir_pass_test_before(left: MIRTestCase, right: MIRTestCase) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.name < right.name
 }
 
-fn mir_pass_sort_harnesses(rows: &[MirHarnessPlan]) Never! {
+fn mir_pass_sort_harnesses(rows: &[MIRHarnessPlan]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -390,7 +429,7 @@ fn mir_pass_sort_harnesses(rows: &[MirHarnessPlan]) Never! {
     }
 }
 
-fn mir_pass_sort_artifacts(rows: &[MirArtifactPlan]) Never! {
+fn mir_pass_sort_artifacts(rows: &[MIRArtifactPlan]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -402,11 +441,11 @@ fn mir_pass_sort_artifacts(rows: &[MirArtifactPlan]) Never! {
     }
 }
 
-fn mir_pass_artifact_before(left: MirArtifactPlan, right: MirArtifactPlan) -> Bool Never! {
+fn mir_pass_artifact_before(left: MIRArtifactPlan, right: MIRArtifactPlan) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.name < right.name
 }
 
-fn mir_pass_sort_unreachable(rows: &[MirUnreachable]) Never! {
+fn mir_pass_sort_unreachable(rows: &[MIRUnreachable]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -418,7 +457,7 @@ fn mir_pass_sort_unreachable(rows: &[MirUnreachable]) Never! {
     }
 }
 
-fn mir_pass_unreachable_before(left: MirUnreachable, right: MirUnreachable) -> Bool Never! {
+fn mir_pass_unreachable_before(left: MIRUnreachable, right: MIRUnreachable) -> Bool Never! {
     if {
         left.span.start != right.span.start -> left.span.start < right.span.start
         left.span.end != right.span.end -> left.span.end < right.span.end
@@ -426,7 +465,7 @@ fn mir_pass_unreachable_before(left: MirUnreachable, right: MirUnreachable) -> B
     }
 }
 
-fn mir_pass_sort_import_items(rows: &[MirImportItem]) Never! {
+fn mir_pass_sort_import_items(rows: &[MIRImportItem]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -438,11 +477,11 @@ fn mir_pass_sort_import_items(rows: &[MirImportItem]) Never! {
     }
 }
 
-fn mir_pass_import_item_before(left: MirImportItem, right: MirImportItem) -> Bool Never! {
+fn mir_pass_import_item_before(left: MIRImportItem, right: MIRImportItem) -> Bool Never! {
     if left.local != right.local -> left.local < right.local else -> left.original < right.original
 }
 
-fn mir_pass_sort_trait_methods(rows: &[MirTraitMethod]) Never! {
+fn mir_pass_sort_trait_methods(rows: &[MIRTraitMethod]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -454,11 +493,11 @@ fn mir_pass_sort_trait_methods(rows: &[MirTraitMethod]) Never! {
     }
 }
 
-fn mir_pass_trait_method_before(left: MirTraitMethod, right: MirTraitMethod) -> Bool Never! {
+fn mir_pass_trait_method_before(left: MIRTraitMethod, right: MIRTraitMethod) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.name < right.name
 }
 
-fn mir_pass_sort_associated_types(rows: &[MirAssociatedTypeValue]) Never! {
+fn mir_pass_sort_associated_types(rows: &[MIRAssociatedTypeValue]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -470,7 +509,7 @@ fn mir_pass_sort_associated_types(rows: &[MirAssociatedTypeValue]) Never! {
     }
 }
 
-fn mir_pass_associated_type_before(left: MirAssociatedTypeValue, right: MirAssociatedTypeValue) -> Bool Never! {
+fn mir_pass_associated_type_before(left: MIRAssociatedTypeValue, right: MIRAssociatedTypeValue) -> Bool Never! {
     if {
         left.name != right.name -> left.name < right.name
         left.span.start != right.span.start -> left.span.start < right.span.start
@@ -478,7 +517,7 @@ fn mir_pass_associated_type_before(left: MirAssociatedTypeValue, right: MirAssoc
     }
 }
 
-fn mir_pass_sort_function_ids(rows: &[MirFunctionId]) Never! {
+fn mir_pass_sort_function_ids(rows: &[MIRFunctionID]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -490,7 +529,7 @@ fn mir_pass_sort_function_ids(rows: &[MirFunctionId]) Never! {
     }
 }
 
-fn mir_pass_sort_link_ids(rows: &[MirLinkUnitId]) Never! {
+fn mir_pass_sort_link_ids(rows: &[MIRLinkUnitID]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -502,7 +541,7 @@ fn mir_pass_sort_link_ids(rows: &[MirLinkUnitId]) Never! {
     }
 }
 
-fn mir_pass_sort_blocks(rows: &[MirBasicBlock]) Never! {
+fn mir_pass_sort_blocks(rows: &[MIRBasicBlock]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -514,7 +553,7 @@ fn mir_pass_sort_blocks(rows: &[MirBasicBlock]) Never! {
     }
 }
 
-fn mir_pass_sort_captures(rows: &[MirCaptureParam]) Never! {
+fn mir_pass_sort_captures(rows: &[MIRCaptureParam]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -526,11 +565,11 @@ fn mir_pass_sort_captures(rows: &[MirCaptureParam]) Never! {
     }
 }
 
-fn mir_pass_capture_before(left: MirCaptureParam, right: MirCaptureParam) -> Bool Never! {
+fn mir_pass_capture_before(left: MIRCaptureParam, right: MIRCaptureParam) -> Bool Never! {
     if left.slot != right.slot -> left.slot < right.slot else -> left.name < right.name
 }
 
-fn mir_pass_sort_values(rows: &[MirValueFact]) Never! {
+fn mir_pass_sort_values(rows: &[MIRValueFact]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -542,7 +581,7 @@ fn mir_pass_sort_values(rows: &[MirValueFact]) Never! {
     }
 }
 
-fn mir_pass_sort_locals(rows: &[MirLocal]) Never! {
+fn mir_pass_sort_locals(rows: &[MIRLocal]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -554,7 +593,7 @@ fn mir_pass_sort_locals(rows: &[MirLocal]) Never! {
     }
 }
 
-fn mir_pass_sort_places(rows: &[MirPlace]) Never! {
+fn mir_pass_sort_places(rows: &[MIRPlace]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -566,7 +605,7 @@ fn mir_pass_sort_places(rows: &[MirPlace]) Never! {
     }
 }
 
-fn mir_pass_sort_scopes(rows: &[MirScope]) Never! {
+fn mir_pass_sort_scopes(rows: &[MIRScope]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -578,7 +617,7 @@ fn mir_pass_sort_scopes(rows: &[MirScope]) Never! {
     }
 }
 
-fn mir_pass_sort_drops(rows: &[MirDropAction]) Never! {
+fn mir_pass_sort_drops(rows: &[MIRDropAction]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
@@ -590,7 +629,7 @@ fn mir_pass_sort_drops(rows: &[MirDropAction]) Never! {
     }
 }
 
-fn mir_pass_drop_before(left: MirDropAction, right: MirDropAction) -> Bool Never! {
+fn mir_pass_drop_before(left: MIRDropAction, right: MIRDropAction) -> Bool Never! {
     if {
         left.place.value != right.place.value -> left.place.value < right.place.value
         left.span.start != right.span.start -> left.span.start < right.span.start

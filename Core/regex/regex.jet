@@ -73,7 +73,7 @@ pub fn flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> R
 }
 
 /// Quote regex metacharacters in `text` so it matches as a literal.
-pub fn escape(text: String) -> String {
+pub fn escape(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         if is_meta(b) -> &out.push(U8{92})
@@ -91,20 +91,20 @@ pub fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! {
     Ok(Regex{pattern: pattern, flags: flags, nodes: p.nodes, root: root})
 }
 
-pub fn is_match(pattern: Regex, text: String) -> Bool {
+pub fn is_match(pattern: Regex, text: String) -> Bool Never! {
     m :: find(pattern, text)
     m != None
 }
 
-pub fn full_match(pattern: Regex, text: String) -> Bool {
+pub fn full_match(pattern: Regex, text: String) -> Bool Never! {
     raw :: text.bytes()
     caps := [CaptureSpan]{}
     if run_exec(pattern, raw, 0, pattern.root, &caps) != raw.len() -> return false
     true
 }
 
-pub fn match(pattern: Regex, text: String) -> Match? { find_match(pattern, text) }
-pub fn finditer(pattern: Regex, text: String) -> [Match] { matches(pattern, text) }
+pub fn match(pattern: Regex, text: String) -> Match? Never! { find_match(pattern, text) }
+pub fn finditer(pattern: Regex, text: String) -> [Match] Never! { matches(pattern, text) }
 
 /// The source-owned engine has no process-global cache to mutate. Report that
 /// capability explicitly instead of pretending a purge happened.
@@ -112,18 +112,18 @@ pub fn purge() RegexError! {
     return Err(RegexError.Cache)
 }
 
-pub fn find(pattern: Regex, text: String) -> String? {
+pub fn find(pattern: Regex, text: String) -> String? Never! {
     m :: find_match(pattern, text) ?? return None
     Val(m.text)
 }
 
-pub fn find_all(pattern: Regex, text: String) -> [String] {
+pub fn find_all(pattern: Regex, text: String) -> [String] Never! {
     out := [String]{}
     loop m in matches(pattern, text) -> &out.push(m.text)
     out
 }
 
-pub fn matches(pattern: Regex, text: String) -> [Match] {
+pub fn matches(pattern: Regex, text: String) -> [Match] Never! {
     raw :: text.bytes()
     out := [Match]{}
     i := 0
@@ -145,9 +145,9 @@ pub fn matches(pattern: Regex, text: String) -> [Match] {
     out
 }
 
-pub fn split(pattern: Regex, text: String) -> [String] { split_limit(pattern, text, 0) }
+pub fn split(pattern: Regex, text: String) -> [String] Never! { split_limit(pattern, text, 0) }
 
-pub fn split_limit(pattern: Regex, text: String, n: Int) -> [String] {
+pub fn split_limit(pattern: Regex, text: String, n: Int) -> [String] Never! {
     raw :: text.bytes()
     ms :: matches(pattern, text)
     out := [String]{}
@@ -163,11 +163,11 @@ pub fn split_limit(pattern: Regex, text: String, n: Int) -> [String] {
     out
 }
 
-pub fn replace(pattern: Regex, text: String, replacement: String) -> String { replace_n(pattern, text, replacement, false) }
+pub fn replace(pattern: Regex, text: String, replacement: String) -> String Never! { replace_n(pattern, text, replacement, false) }
 
 /// Expand numbered capture references in a replacement template.
 /// Supported forms are `\1` through `\9`, `\g<1>`, `$1`, `${1}`, and `\\`.
-pub fn expand(m: Match, template: String) -> String {
+pub fn expand(m: Match, template: String) -> String Never! {
     raw :: template.bytes()
     out := [U8]{}
     i := 0
@@ -239,7 +239,7 @@ pub fn expand(m: Match, template: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-pub fn replace_first(pattern: Regex, text: String, replacement: String) -> String { replace_n(pattern, text, replacement, true) }
+pub fn replace_first(pattern: Regex, text: String, replacement: String) -> String Never! { replace_n(pattern, text, replacement, true) }
 
 fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String {
     raw :: text.bytes()
@@ -799,15 +799,15 @@ fn is_meta(b: U8) -> Bool {
 pub fn regex(pattern: String) -> Regex RegexError! { compile(pattern) }
 
 /// Return the canonical source pattern represented by a compiled regex.
-pub fn join(pattern: Regex) -> String { pattern.pattern }
+pub fn join(pattern: Regex) -> String Never! { pattern.pattern }
 /// Python `re` spellings over the same compiled Regex carrier.
-pub fn search(pattern: Regex, text: String) -> Match? { match(pattern, text) }
-pub fn findall(pattern: Regex, text: String) -> [String] { find_all(pattern, text) }
-pub fn fullmatch(pattern: Regex, text: String) -> Bool { full_match(pattern, text) }
-pub fn sub(pattern: Regex, text: String, replacement: String) -> String {
+pub fn search(pattern: Regex, text: String) -> Match? Never! { match(pattern, text) }
+pub fn findall(pattern: Regex, text: String) -> [String] Never! { find_all(pattern, text) }
+pub fn fullmatch(pattern: Regex, text: String) -> Bool Never! { full_match(pattern, text) }
+pub fn sub(pattern: Regex, text: String, replacement: String) -> String Never! {
     replace(pattern, text, replacement)
 }
-pub fn subn(pattern: Regex, text: String, replacement: String) -> (text: String, count: Int) {
+pub fn subn(pattern: Regex, text: String, replacement: String) -> (text: String, count: Int) Never! {
     ms :: matches(pattern, text)
     (text: replace(pattern, text, replacement), count: ms.len())
 }

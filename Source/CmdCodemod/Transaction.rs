@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::os::unix::fs::MetadataExt;
 
 use super::{fail, hash_bytes, json_escape};
+use jet_foundation::Hex::encode as hex;
 
 pub struct Lock {
     project: PathBuf,
@@ -3169,13 +3170,6 @@ fn now_nanos() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
-}
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push_str(&format!("{b:02x}"));
-    }
-    out
 }
 fn unhex(s: &str) -> Vec<u8> {
     if s.len() % 2 != 0 {

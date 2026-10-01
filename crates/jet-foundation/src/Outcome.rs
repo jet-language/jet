@@ -2456,7 +2456,7 @@ pub fn jet_list_bounds_message(len: impl std::fmt::Display, index: i64) -> Strin
 /// `jet_pool_get_mut` and the JIT's pool host all reach a stale slot, and none
 /// of them owns the user-facing text.
 pub fn jet_pool_stale_message() -> &'static str {
-    "this Id no longer refers to a live value — its pool slot was removed"
+    "this ID no longer refers to a live value — its pool slot was removed"
 }
 
 /// Shared wording for a missing map key. `None` is used when the adapter cannot

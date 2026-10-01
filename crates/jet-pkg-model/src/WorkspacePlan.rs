@@ -123,7 +123,30 @@ pub fn e0995_no_workspace_module() -> Diagnostic {
 
 /// Cheap token probe for a top-level `module workspace` candidate.
 /// Full parsing stays in `jet-env-model::WorkspaceFile::evaluate`.
+///
+/// Root discovery probes every top-level `.jet` file of the directories it
+/// walks, and one command walks the same root several times; the answer is a
+/// pure function of the text, so each distinct source is lexed once.
 pub(crate) fn declares_workspace_module(src: &str) -> bool {
+    use std::hash::{Hash, Hasher};
+    static PROBED: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<(usize, u64), bool>>,
+    > = std::sync::LazyLock::new(Default::default);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    src.hash(&mut hasher);
+    let key = (src.len(), hasher.finish());
+    if let Some(&declares) = PROBED.lock().unwrap_or_else(|poison| poison.into_inner()).get(&key) {
+        return declares;
+    }
+    let declares = lex_declares_workspace_module(src);
+    PROBED
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(key, declares);
+    declares
+}
+
+fn lex_declares_workspace_module(src: &str) -> bool {
     let (tokens, _lex_diags) = crate::Lexer::lex(src);
     let tokens = crate::Lexer::without_comments(&tokens);
     let mut brace_depth = 0i32;

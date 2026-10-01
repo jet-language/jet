@@ -1,5 +1,114 @@
 // Pratt expressions and source literals. Token precedence follows the language
 // grammar: `^` is right-associative exponentiation; `~|` is bitwise XOR.
+use jet_foundation.[
+    AccessConvention,
+    BinOp,
+    ByteTextPart,
+    Call,
+    CallArg,
+    CallLabel,
+    Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    EnumLitArg,
+    Expr,
+    ExprField,
+    ExprPair,
+    IndexKind,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    NamedSpan,
+    OrFallback,
+    PlaceAccess,
+    Span,
+    Stmt,
+    StrFormat,
+    StrPart,
+    TextEdit,
+    TryConvert,
+    TupleField,
+    Type,
+    TypedLitBody,
+    UnOp,
+    UnitFormat,
+    ast_empty_call_arg_flags,
+    ast_empty_lambda_meta,
+    diagnostic_from_registry,
+    diagnostic_with_edit_grade,
+    expr_span,
+]
+use jet_lexer.[
+    STRING_PART_BYTE,
+    STRING_PART_INTERPOLATION,
+    STRING_PART_TEXT,
+    TOKEN_AMP,
+    TOKEN_AND_AND,
+    TOKEN_BANG,
+    TOKEN_BREAK,
+    TOKEN_CARET,
+    TOKEN_CHAR,
+    TOKEN_COLON,
+    TOKEN_COMMA,
+    TOKEN_COMPARE,
+    TOKEN_DOT,
+    TOKEN_DOT_DOT,
+    TOKEN_DOT_DOT_DOT,
+    TOKEN_DOT_DOT_LT,
+    TOKEN_EOF,
+    TOKEN_EQ_EQ,
+    TOKEN_FALSE,
+    TOKEN_FLOAT,
+    TOKEN_GE,
+    TOKEN_GT,
+    TOKEN_IDENT,
+    TOKEN_INT,
+    TOKEN_KW_COPY,
+    TOKEN_KW_ELSE,
+    TOKEN_KW_IF,
+    TOKEN_KW_IT,
+    TOKEN_KW_LOOP,
+    TOKEN_KW_MOVE,
+    TOKEN_KW_TAG,
+    TOKEN_KW_USE,
+    TOKEN_LAMBDA_ARROW,
+    TOKEN_LBRACE,
+    TOKEN_LBRACKET,
+    TOKEN_LE,
+    TOKEN_LPAREN,
+    TOKEN_LT,
+    TOKEN_MINUS,
+    TOKEN_MINUS_MINUS,
+    TOKEN_NOT_EQ,
+    TOKEN_NULL,
+    TOKEN_OR_OR,
+    TOKEN_PERCENT,
+    TOKEN_PERCENT_PERCENT,
+    TOKEN_PIPE,
+    TOKEN_PLUS,
+    TOKEN_PLUS_PLUS,
+    TOKEN_QUESTION,
+    TOKEN_QUESTION_DOT,
+    TOKEN_QUESTION_QUESTION,
+    TOKEN_RAW_STRING,
+    TOKEN_RBRACE,
+    TOKEN_RBRACKET,
+    TOKEN_RETURN,
+    TOKEN_RPAREN,
+    TOKEN_SELF,
+    TOKEN_SEMI,
+    TOKEN_SHL,
+    TOKEN_SHR,
+    TOKEN_SLASH,
+    TOKEN_SLASH_PERCENT,
+    TOKEN_STAR,
+    TOKEN_STRING,
+    TOKEN_TILDE,
+    TOKEN_TILDE_PIPE,
+    TOKEN_TRUE,
+    TOKEN_UNIT_NUMBER,
+    Token,
+]
 
 MAX_EXPRESSION_DEPTH :: prep { 256 }
 
@@ -405,7 +514,7 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
     ParsedExpr{expr: Expr.TypedLit{head: head, body: body, span: span}, span: span}
 }
 
-fn parser_try_parse_typed_literal(state: &JetParserState, depth: Int) -> ParsedExpr? Err! {
+fn parser_try_parse_typed_literal(state: &JetParserState, depth: Int) -> ParsedExpr? {
     saved_position := state.position
     saved_diagnostics := state.diagnostics.len()
     saved_gt := state.pending_type_gt
@@ -863,7 +972,7 @@ fn parser_parse_collection(state: &JetParserState, depth: Int) -> ParsedExpr {
 fn parser_parse_if_expression(state: &JetParserState, depth: Int) -> ParsedExpr {
     start :: parser_bump(&state)
     cond :: parser_parse_expression(&state, 1, depth + 1)
-    then_block :: parser_parse_value_block(&state, depth + 1)
+    then_block :: parser_parse_value_block(&state, depth + 1, false)
     then_value := then_block.tail ?? Expr.Unit{span: then_block.span}
     if then_block.tail == None {
         parser_add_error(&state, then_block.span, "an `if` expression branch needs a value", "the branch block's final expression is its value", "add a final expression without a semicolon")
@@ -881,7 +990,7 @@ fn parser_parse_if_expression(state: &JetParserState, depth: Int) -> ParsedExpr 
                     end = nested.span
                 }
                 else -> {
-                    else_block :: parser_parse_value_block(&state, depth + 1)
+                    else_block :: parser_parse_value_block(&state, depth + 1, false)
                     else_body = else_block.statements
                     else_value = else_block.tail ?? Expr.Unit{span: else_block.span}
                     end = else_block.span
@@ -1258,7 +1367,7 @@ fn parser_parse_variant_args(state: &JetParserState, depth: Int) -> [EnumLitArg]
 
 fn parser_parse_or_fallback(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> OrFallback {
     if parser_current_kind(&state) == TOKEN_LBRACE {
-        block :: parser_parse_value_block(&state, depth + 1)
+        block :: parser_parse_value_block(&state, depth + 1, false)
         return OrFallback.Block{body: block.statements, value: block.tail, span: block.span}
     }
     token :: parser_current(&state)

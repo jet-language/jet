@@ -1704,7 +1704,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "shuffle",
     ] {
         assert_eq!(
-            record(&records, Surface::Value, "Rng", method).class,
+            record(&records, Surface::Value, "RNG", method).class,
             Class::Covered
         );
     }

@@ -117,9 +117,6 @@ pub mod MCP;
 pub mod Merge;
 #[cfg(feature = "compiler")]
 pub mod Package;
-pub mod Model;
-/// Package parsing extensions over the runtime-owned model contract.
-pub use Model::*;
 // Deterministic desktop/game bundle layout data; platform packers stay in adapters.
 #[cfg(feature = "compiler")]
 pub mod Bundler;

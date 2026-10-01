@@ -230,20 +230,6 @@ impl JetAccelerationDecision {
         self.status.is_selected()
     }
 
-    pub fn inspect_line(self) -> String {
-        format!(
-            "accel transform={} status={} items={} sample_items={} sample_ns={} spawn_ns={} bandwidth_ns={} projected_ns={:?} required_ns={:?}",
-            self.transform.as_str(),
-            self.status.as_str(),
-            self.measurement.items,
-            self.measurement.sample_items,
-            self.measurement.sample_nanos,
-            self.measurement.spawn_nanos,
-            self.measurement.bandwidth_floor_nanos,
-            self.measurement.projected_serial_nanos,
-            self.measurement.required_serial_nanos,
-        )
-    }
 }
 
 const JET_ACCELERATION_RECEIPT_TYPE_NAME: &str = "AccelerationDecision";
@@ -736,34 +722,6 @@ where
     (result, decision)
 }
 
-/// Slice convenience wrapper for callers that already own a collection.  The
-/// range implementation above is the canonical path, so no index vector is
-/// introduced by this adapter.
-pub(crate) fn jet_list_accel_map<T, U, F>(
-    source: &[T],
-    worker_limit: usize,
-    release_build: bool,
-    cross_mode_parity_proven: bool,
-    proof_proven: bool,
-    pin: Option<JetAccelerationPin>,
-    f: F,
-) -> (Vec<U>, JetAccelerationDecision)
-where
-    T: Sync,
-    U: Send,
-    F: Fn(&T) -> U + Sync,
-{
-    jet_list_accel_range_map(
-        0..source.len(),
-        worker_limit,
-        release_build,
-        cross_mode_parity_proven,
-        proof_proven,
-        pin,
-        |index| f(&source[index]),
-    )
-}
-
 /// The source operation remains visible at the call site.  Explicit `para_*`
 /// calls and the D-ACCEL1 measured path share these operation facts.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -945,27 +903,11 @@ impl JetParallelAccessFact {
         Self::new(place, JetParallelAccessMode::Read, JetParallelAccessScope::Invariant)
     }
 
-    pub fn read_local(place: impl Into<String>) -> Self {
-        Self::new(
-            place,
-            JetParallelAccessMode::Read,
-            JetParallelAccessScope::IterationLocal,
-        )
-    }
-
     pub fn write(place: impl Into<String>) -> Self {
         Self::new(
             place,
             JetParallelAccessMode::Write,
             JetParallelAccessScope::Invariant,
-        )
-    }
-
-    pub fn write_local(place: impl Into<String>) -> Self {
-        Self::new(
-            place,
-            JetParallelAccessMode::Write,
-            JetParallelAccessScope::IterationLocal,
         )
     }
 
@@ -1069,14 +1011,6 @@ impl JetParallelEffectFact {
 
     pub fn reduction(name: impl Into<String>) -> Self {
         Self::new(name, JetParallelEffectKind::Reduction)
-    }
-
-    pub fn may_fail(name: impl Into<String>) -> Self {
-        Self::new(name, JetParallelEffectKind::MayFail)
-    }
-
-    pub fn cancellation_point(name: impl Into<String>) -> Self {
-        Self::new(name, JetParallelEffectKind::CancellationPoint)
     }
 
     pub fn shared_write(name: impl Into<String>) -> Self {
@@ -1188,34 +1122,6 @@ impl JetParallelDependencyFact {
         )
     }
 
-    pub fn read_after_write(
-        place: impl Into<String>,
-        source_iteration: Option<usize>,
-        target_iteration: Option<usize>,
-    ) -> Self {
-        Self::new(
-            place,
-            JetParallelDependencyKind::ReadAfterWrite,
-            source_iteration,
-            target_iteration,
-            "a later read observes an earlier iteration write",
-        )
-    }
-
-    pub fn write_after_read(
-        place: impl Into<String>,
-        source_iteration: Option<usize>,
-        target_iteration: Option<usize>,
-    ) -> Self {
-        Self::new(
-            place,
-            JetParallelDependencyKind::WriteAfterRead,
-            source_iteration,
-            target_iteration,
-            "a later write follows an earlier iteration read",
-        )
-    }
-
     pub fn write_after_write(
         place: impl Into<String>,
         source_iteration: Option<usize>,
@@ -1227,16 +1133,6 @@ impl JetParallelDependencyFact {
             source_iteration,
             target_iteration,
             "iterations write the same location",
-        )
-    }
-
-    pub fn loop_carried(place: impl Into<String>, detail: impl Into<String>) -> Self {
-        Self::new(
-            place,
-            JetParallelDependencyKind::LoopCarried,
-            None,
-            None,
-            detail,
         )
     }
 
@@ -1311,23 +1207,6 @@ impl JetParallelReductionFact {
         Self::new(operator, true, true)
     }
 
-    pub fn with_commutativity(mut self, commutative: bool) -> Self {
-        self.commutative = commutative;
-        self
-    }
-
-    pub fn with_order(mut self, order: JetParallelReductionOrder) -> Self {
-        self.order = order;
-        self
-    }
-
-    pub fn is_proven(&self) -> bool {
-        !self.operator.trim().is_empty()
-            && self.identity_proved
-            && self.associative
-            && matches!(self.order, JetParallelReductionOrder::StableAdjacentPair)
-    }
-
     pub fn rejection_reason(&self) -> Option<String> {
         if self.operator.trim().is_empty() {
             return Some("reduction operator is unnamed".to_string());
@@ -1396,10 +1275,6 @@ impl JetParallelResourceBounds {
 
     pub const fn with_chunk_items(self, chunk_items: usize) -> Self {
         Self { chunk_items, ..self }
-    }
-
-    pub const fn with_max_chunks(self, max_chunks: usize) -> Self {
-        Self { max_chunks, ..self }
     }
 
     pub const fn worker_limit(self) -> usize {
@@ -1565,18 +1440,6 @@ impl JetParallelPlan {
         Self::select_with_acceleration(operation, proof, resources, None)
     }
 
-    /// Select a proven operation after the D-ACCEL1 measurement has cleared
-    /// its release gate.  Execution still goes through the existing bounded
-    /// indexed kernel; this method adds no worker population.
-    pub(crate) fn select_accelerated(
-        operation: JetParallelOperation,
-        proof: JetParallelProof,
-        resources: JetParallelResourceBounds,
-        acceleration: JetAccelerationDecision,
-    ) -> Result<Self, JetParallelRejection> {
-        Self::select_with_acceleration(operation, proof, resources, Some(acceleration))
-    }
-
     fn select_with_acceleration(
         operation: JetParallelOperation,
         proof: JetParallelProof,
@@ -1629,10 +1492,6 @@ impl JetParallelPlan {
 
     pub fn chunk_count(&self) -> usize {
         self.chunks.len()
-    }
-
-    pub fn acceleration_decision(&self) -> Option<JetAccelerationDecision> {
-        self.acceleration
     }
 
     pub fn merge_tree(&self) -> Vec<(usize, usize)> {
@@ -1886,18 +1745,6 @@ impl JetParallelReceipt {
             external_effects_rolled_back: false,
             acceleration: plan.acceleration,
         }
-    }
-    pub fn acceleration_decision(&self) -> Option<JetAccelerationDecision> {
-        self.acceleration
-    }
-
-    pub fn record_chunk_started(&mut self) {
-        self.chunks_started = self.chunks_started.saturating_add(1).min(self.chunks_total);
-    }
-
-    pub fn record_chunk_completed(&mut self, items: usize) {
-        self.chunks_completed = self.chunks_completed.saturating_add(1).min(self.chunks_total);
-        self.items_completed = self.items_completed.saturating_add(items);
     }
 
     pub fn record_failure(&mut self, source_index: usize, message: impl Into<String>) {

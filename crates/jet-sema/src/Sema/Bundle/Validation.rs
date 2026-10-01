@@ -6,9 +6,11 @@ mod CoreUsage;
 mod BodyCheck;
 use BodyCheck::*;
 pub(crate) use BodyCheck::{
-    checker_for_module, fn_types_compatible, func_sig_to_fn_type,
+    checker_for_module, fn_types_compatible, func_sig_to_fn_type, BodyProducts,
 };
-pub(crate) use BodyCheck::{collect_diverging_functions, project_divergence_facts};
+pub(crate) use BodyCheck::{
+    collect_diverging_functions, collect_fixed_length_write_params, project_divergence_facts,
+};
 pub(crate) use CoreUsage::{
     apply_helper_layer_inference, check_ui_capabilities, collect_core_expr, collect_core_lvalue,
     collect_core_stmts, collect_used_core, expand_core_reachable_closure,
@@ -52,8 +54,13 @@ pub(crate) fn uses_raw_protocol_function_return(
 }
 
 
+/// `sealed` holds the recorded nodes of sealed dependency modules (#2517
+/// S2) as `(alias, [(local key, summary)])`. Their edges are already
+/// qualified, so they join the graph as recorded and take part in short-name
+/// resolution like checked nodes.
 pub(super) fn qualified_effect_facts(
     modules: &[(String, HashMap<String, EffectSummary>)],
+    sealed: &[(String, Vec<(String, EffectSummary)>)],
     taint_seeds: &HashMap<String, BTreeSet<String>>,
 ) -> (
     HashMap<String, EffectSummary>,
@@ -72,7 +79,20 @@ pub(super) fn qualified_effect_facts(
                 .push(format!("{alias}::{key}"));
         }
     }
+    for (alias, nodes) in sealed {
+        for (key, _) in nodes {
+            locations
+                .entry(key.clone())
+                .or_default()
+                .push(format!("{alias}::{key}"));
+        }
+    }
     let mut qualified = HashMap::new();
+    for (alias, nodes) in sealed {
+        for (key, summary) in nodes {
+            qualified.insert(format!("{alias}::{key}"), summary.clone());
+        }
+    }
     for (alias, summaries) in modules {
         let local_keys: HashSet<String> = summaries.keys().cloned().collect();
         for (key, summary) in summaries {
@@ -168,7 +188,7 @@ mod effect_qualification_tests {
             ),
         ];
 
-        let (summaries, _) = qualified_effect_facts(&modules, &HashMap::new());
+        let (summaries, _) = qualified_effect_facts(&modules, &[], &HashMap::new());
         let root = &summaries["main::root"];
         assert_eq!(
             root.regions[0].edges,
@@ -505,63 +525,40 @@ fn module_annotations_mention_encoding_surface(module: &crate::AST::LoadedModule
     })
 }
 
+/// Check one function body through the incremental cache. `ledger` and
+/// `products` are this body's own (a ledger `body_snapshot` and empty
+/// products), so a miss can store them as the body's cached result.
 #[allow(clippy::too_many_arguments)]
-fn check_func_body_incremental(
+fn check_func_body_cached(
+    cx: &BodyContext<'_>,
     key: String,
     function: &mut Func,
-    module_idx: usize,
-    states: &[ModuleState],
-    plugin_interfaces: &PluginInterfaceRegistry,
-    devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
-    effect_facts: &jet_foundation::Facts::FactRegistry,
     owner_type: Option<&str>,
     raw_protocol_return: bool,
-    ct_funcs: &HashMap<String, Func>,
     ct_checked_funcs: &HashMap<String, Func>,
-    ct_externs: &HashSet<String>,
-    ct_base_dir: &std::path::Path,
-    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
-    no_os: bool,
-    gates: crate::Policy::GateSet,
-    summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
-    global_addr_taken: &mut HashSet<String>,
-    no_prelude: bool,
-    name_ledger: &mut jet_foundation::Names::NameLedger,
-    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
-    mut cache: Option<&mut IncrementalSemaCache>,
+    ledger: &mut jet_foundation::Names::NameLedger,
+    products: &mut BodyProducts,
+    cache: &mut IncrementalSemaCache,
     cache_allowed: bool,
 ) -> Vec<Diagnostic> {
-    let cache_allowed = cache_allowed && !stmts_have_comptime_evaluation(&function.body);
-    let Some(cache) = cache.as_deref_mut().filter(|_| cache_allowed) else {
-        if let Some(cache) = cache.as_deref_mut() {
-            cache.record_recompute(key);
-        }
-        return check_func_body_bundle_checked(
+    let check = |function: &mut Func,
+                 ledger: &mut jet_foundation::Names::NameLedger,
+                 products: &mut BodyProducts| {
+        check_func_body(
+            cx,
             function,
-            module_idx,
-            states,
-            plugin_interfaces,
-            devtools_registry,
-            effect_facts,
             owner_type,
             raw_protocol_return,
-            ct_funcs,
-            ct_checked_funcs,
-            states[module_idx].items.as_slice(),
-            ct_externs,
-            ct_base_dir,
-            ct_globals,
-            no_os,
-            gates,
-            summaries,
-            embed_inputs_out,
-            global_addr_taken,
-            no_prelude,
-            name_ledger,
-            pending_diagnostics_out,
-        );
+            None,
+            Some(ct_checked_funcs),
+            ledger,
+            products,
+        )
     };
+    if !(cache_allowed && !stmts_have_comptime_evaluation(&function.body)) {
+        cache.record_recompute(key);
+        return check(function, ledger, products);
+    }
     // The checked function contains source spans used by diagnostics and IDE
     // facts. Include them in the cache input so whitespace-only edits cannot
     // reuse stale positions even when the canonical AST is unchanged. Build
@@ -571,55 +568,22 @@ fn check_func_body_incremental(
     let mut input = format!("{function:?}").into_bytes();
     input.push(if raw_protocol_return { 1 } else { 0 });
     if let Some(hit) = cache.get(&key, &input) {
-        if hit.uses_exact_int {
-            states[module_idx].exact_int_reachable.set(true);
-        }
         *function = hit.function;
-        summaries.extend(hit.summaries);
-        embed_inputs_out.extend(hit.comptime_inputs);
-        global_addr_taken.extend(hit.address_taken);
-        name_ledger.merge_references(&hit.name_ledger);
-        name_ledger.merge_structure_facts(&hit.name_ledger);
-        pending_diagnostics_out.extend(hit.pending_diagnostics);
+        products.summaries.extend(hit.summaries);
+        products.embed_inputs.extend(hit.comptime_inputs);
+        products.addr_taken.extend(hit.address_taken);
+        ledger.merge_references(&hit.name_ledger);
+        ledger.merge_structure_facts(&hit.name_ledger);
+        products.pending_diagnostics.extend(hit.pending_diagnostics);
+        products.uses_exact_int |= hit.uses_exact_int;
+        products
+            .devtools_publications
+            .extend(hit.devtools_publications);
         return hit.diagnostics;
     }
 
-    let mut local_summaries = HashMap::new();
-    let mut local_inputs = Vec::new();
-    let mut local_address_taken = HashSet::new();
-    let mut local_ledger = name_ledger.body_snapshot();
-    let mut local_pending_diagnostics = Vec::new();
-    let (diagnostics, uses_exact_int) = check_func_body_bundle_with_usage_checked(
-        function,
-        module_idx,
-        states,
-        plugin_interfaces,
-        devtools_registry,
-        effect_facts,
-        owner_type,
-        raw_protocol_return,
-        ct_funcs,
-        ct_checked_funcs,
-        states[module_idx].items.as_slice(),
-        ct_externs,
-        ct_base_dir,
-        ct_globals,
-        no_os,
-        gates,
-        &mut local_summaries,
-        &mut local_inputs,
-        &mut local_address_taken,
-        no_prelude,
-        &mut local_ledger,
-        &mut local_pending_diagnostics,
-    );
-    summaries.extend(local_summaries.clone());
-    embed_inputs_out.extend(local_inputs.clone());
-    global_addr_taken.extend(local_address_taken.clone());
-    name_ledger.merge_references(&local_ledger);
-    name_ledger.merge_structure_facts(&local_ledger);
-    pending_diagnostics_out.extend(local_pending_diagnostics.clone());
-    if !local_inputs.is_empty() {
+    let diagnostics = check(function, ledger, products);
+    if !products.embed_inputs.is_empty() {
         cache.record_recompute(key);
         return diagnostics;
     }
@@ -629,12 +593,13 @@ fn check_func_body_incremental(
             input,
             function: function.clone(),
             diagnostics: diagnostics.clone(),
-            summaries: local_summaries,
-            comptime_inputs: local_inputs,
-            address_taken: local_address_taken,
-            name_ledger: local_ledger,
-            pending_diagnostics: local_pending_diagnostics,
-            uses_exact_int,
+            summaries: products.summaries.clone(),
+            comptime_inputs: Vec::new(),
+            address_taken: products.addr_taken.clone(),
+            name_ledger: ledger.clone(),
+            pending_diagnostics: products.pending_diagnostics.clone(),
+            uses_exact_int: products.uses_exact_int,
+            devtools_publications: products.devtools_publications.clone(),
         },
     );
     diagnostics
@@ -642,25 +607,35 @@ fn check_func_body_incremental(
 
 /// I4: a diagnostic is a product, and a lint is advice addressed to whoever
 /// wrote the code. A compiler-generated derive body has no author and no
-/// user-typeable span — every statement in it carries the owning declaration's
-/// name span (`Registration/Derives.rs` builds `self.f == rhs.f` at
-/// `s.name_span`), so a lint from that body names a construct the user never
-/// wrote at a line that cannot contain the defect. `L0502` did exactly that for
-/// any struct or enum with a `Float` field, because the package auto-derive
-/// default gives every type an `Equatable.equal` body.
+/// user-typeable span: it is expanded from the provider template in
+/// `Prelude/Derives.jet`, so its spans are template offsets, not positions in
+/// the file that declares the type. A lint from that body names a construct
+/// the user never wrote. `L0502` did exactly that for any struct or enum with
+/// a `Float` field, because the package auto-derive default gives every type
+/// an `Equatable.equal` body.
 ///
 /// `TraitImplBlock::compiler_generated` is the parser-unforgeable provenance
 /// (a source `impl T.Trait` is always `false`; jet-foundation `AST/items.rs`),
 /// and it is the only fact consulted here — no second gate, table, or lint
-/// exemption list (I8). Errors are untouched: a generated body that fails to
-/// type-check is still an internal compiler fault, not a silent pass.
+/// exemption list (I8). Errors are kept, not silenced; they land on `anchor`,
+/// the block's trait span, which a derive sets to the type's name (the only
+/// authored location the derive has), so an edit to the template never moves
+/// them onto an unrelated line of the author's file.
 fn author_facing_diagnostics(
-    compiler_generated: bool,
+    generated_anchor: Option<crate::Diagnostics::Span>,
     mut diagnostics: Vec<Diagnostic>,
 ) -> Vec<Diagnostic> {
-    if compiler_generated {
-        diagnostics.retain(|d| matches!(d.severity, crate::Diagnostics::Severity::Error));
+    let Some(anchor) = generated_anchor else {
+        return diagnostics;
+    };
+    diagnostics.retain(|d| matches!(d.severity, crate::Diagnostics::Severity::Error));
+    for diagnostic in &mut diagnostics {
+        diagnostic.span = Some(anchor);
+        diagnostic.labels.clear();
     }
+    // Every statement of the body now reports at the same place; one report
+    // per distinct problem is enough.
+    diagnostics.dedup_by(|later, earlier| later.code == earlier.code && later.what == earlier.what);
     diagnostics
 }
 
@@ -1032,6 +1007,765 @@ fn comptime_stage_roots(
     )
 }
 
+/// The staged comptime pass: check every function a compile-time site can
+/// reach, without running any compile-time expression, so the real pass can
+/// hand them to the evaluator. Returns the staged functions that checked
+/// without errors. Staged checks run no evaluation and keep no products, so
+/// they are independent jobs on the worker pool; the table is filled in key
+/// order afterwards.
+fn stage_comptime_functions(
+    cx: &BodyContext<'_>,
+    items: &[Item],
+    ct_funcs: &HashMap<String, Func>,
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> HashMap<String, Func> {
+    let stage_jobs = comptime_stage_jobs(items);
+    let mut raw_eval_funcs = ct_funcs
+        .iter()
+        .map(|(name, function)| (name.clone(), function))
+        .collect::<HashMap<_, _>>();
+    for (key, job) in &stage_jobs {
+        raw_eval_funcs.insert(key.clone(), job.function);
+    }
+    let (stage_names, stage_all_methods) = comptime_stage_roots(items, &raw_eval_funcs);
+    let mut stage_keys = BTreeSet::new();
+    for (key, job) in &stage_jobs {
+        if stage_all_methods && job.owner.is_some()
+            || stage_names.contains(key)
+            || stage_names.contains(&job.function.name)
+        {
+            stage_keys.insert(key.clone());
+        }
+    }
+    let mut staged_unqualified = stage_names.into_iter().collect::<BTreeSet<_>>();
+    for key in &stage_keys {
+        if let Some(job) = stage_jobs.get(key) {
+            staged_unqualified.insert(job.function.name.clone());
+        }
+    }
+    let stage = |owner: Option<&str>, raw_protocol_return: bool, function: &Func| {
+        let mut function = function.clone();
+        let mut ledger = name_ledger.body_snapshot();
+        let mut products = BodyProducts::default();
+        let diagnostics = check_func_body(
+            cx,
+            &mut function,
+            owner,
+            raw_protocol_return,
+            None,
+            None,
+            &mut ledger,
+            &mut products,
+        );
+        if products.uses_exact_int {
+            cx.states[cx.module_idx].exact_int_reachable.set(true);
+        }
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error)
+            .then_some(function)
+    };
+    let keyed = stage_keys
+        .into_iter()
+        .filter_map(|key| stage_jobs.get(&key).map(|job| (key, job)))
+        .collect::<Vec<_>>();
+    let staged = super::Parallel::map_checked(keyed, |(key, job)| {
+        (
+            key,
+            job.owner.clone(),
+            stage(job.owner.as_deref(), job.raw_protocol_return, job.function),
+        )
+    });
+    let mut checked_ct_funcs = HashMap::new();
+    for (key, owner, function) in staged {
+        let Some(function) = function else {
+            continue;
+        };
+        checked_ct_funcs.insert(key, function.clone());
+        if let Some(owner) = owner {
+            checked_ct_funcs.insert(format!("{owner}::{}", function.name), function.clone());
+        }
+        checked_ct_funcs.insert(function.name.clone(), function);
+    }
+    // A direct comptime root can be a top-level function that does not need a
+    // job-specific owner context. Keep that path explicit without staging
+    // unrelated runtime helpers.
+    let unqualified = staged_unqualified
+        .into_iter()
+        .filter(|name| !checked_ct_funcs.contains_key(name))
+        .filter_map(|name| ct_funcs.get(&name).map(|function| (name, function)))
+        .collect::<Vec<_>>();
+    let staged = super::Parallel::map_checked(unqualified, |(name, function)| {
+        (name, stage(None, false, function))
+    });
+    for (name, function) in staged {
+        let Some(function) = function else {
+            continue;
+        };
+        checked_ct_funcs.insert(name, function.clone());
+        checked_ct_funcs.insert(function.name.clone(), function);
+    }
+    checked_ct_funcs
+}
+
+/// The synthetic function an error conversion body is checked as. It takes
+/// the conversion's body; the caller moves the checked body back.
+fn error_conversion_function(ec: &mut crate::AST::ErrorConvDef) -> Func {
+    Func {
+                    span: ec.body_span,
+                    is_comptime: false,
+                    is_pub: false,
+                    is_package_pub: false,
+                    external_type: None,
+                    name: format!(
+                        "__errconv_{}_to_{}",
+                        ec.from_ty.replace('.', "_"),
+                        ec.to_ty.replace('.', "_")
+                    ),
+                    name_span: ec.from_span,
+                    meta: None,
+                    type_params: Vec::new(),
+                    head_pattern: None,
+                    params: vec![Param {
+                        name: crate::Syntax::KW_SELF.to_string(),
+                        name_span: ec.from_span,
+                        ty: Type::Named(String::new()),
+                        ty_span: ec.from_span,
+                        convention: AccessConvention::Move,
+                        root: false,
+                        default: None,
+                        variadic: false,
+                        variadic_bound_list: None,
+                        declared_view_from_names: None,
+                        public_label: None,
+                        zone: crate::AST::ParamZone::Either,
+                    }],
+                    return_type: Some(Type::Named(ec.to_ty.clone())),
+                    return_type_span: Some(ec.to_span),
+                    return_view_provenance: None,
+                    declared_return_view_provenance: None,
+                    gc_return: false,
+                    diverges: false,
+                    gc_scope: false,
+                    is_unsafe: false,
+                    unsafe_reason: None,
+                    unsafe_span: None,
+                    is_pure: false,
+                    is_reactive: false,
+                    reactive_upgrades: Vec::new(),
+                    is_replayable: false,
+                    replayable_span: None,
+                    is_job: false,
+                    job_span: None,
+                    every: None,
+                    job_metadata: None,
+                    is_must_use: false,
+                    must_use_span: None,
+                    maturity: None,
+                    maturity_span: None,
+                    kernel: None,
+                    is_inline: false,
+                    is_inline_always: false,
+                    inline_span: None,
+                    is_sanitizer: false,
+                    scrub_tag: None,
+                    declared_effects: None,
+                    effect_via: None,
+                    state_requires: None,
+                    state_transition: None,
+                    web_marker: None,
+                    pre: Vec::new(),
+                    post: Vec::new(),
+                    inline_foreign: None,
+                    undo: None,
+                    markers: Vec::new(),
+                    compiler_generated: false,
+                    body: std::mem::take(&mut ec.body),
+    }
+}
+
+/// One body of a module's main checking pass.
+struct BodyJob<'m> {
+    owner: Option<String>,
+    raw_protocol_return: bool,
+    kind: BodyJobKind<'m>,
+}
+
+enum BodyJobKind<'m> {
+    /// A top-level function or a method, checked in place.
+    Function {
+        function: &'m mut Func,
+        cache_key: String,
+        /// The names under which the checked body joins `checked_ct_funcs`.
+        ct_keys: Vec<String>,
+        /// A method is checked with its owner's generic parameters in scope;
+        /// these are the parameters its declaration keeps afterwards.
+        restore_type_params: Option<Vec<crate::AST::TypeParam>>,
+        /// For a method of a compiler-generated trait-impl block, the block's
+        /// trait span (the derived type's name): where its diagnostics land.
+        generated_anchor: Option<crate::Diagnostics::Span>,
+    },
+    /// A `#Test` block, checked as a synthetic function.
+    Test {
+        test: &'m mut crate::AST::TestDef,
+        function: Func,
+        param_diagnostics: Vec<Diagnostic>,
+    },
+    /// A function of an inline code module, checked under its imports.
+    InlineModule { function: &'m mut Func, module: String },
+    /// An error conversion, checked as a synthetic function.
+    ErrorConv {
+        conversion: &'m mut crate::AST::ErrorConvDef,
+        function: Func,
+    },
+}
+
+impl BodyJob<'_> {
+    fn function(&self) -> &Func {
+        match &self.kind {
+            BodyJobKind::Function { function, .. } => &**function,
+            BodyJobKind::InlineModule { function, .. } => &**function,
+            BodyJobKind::Test { function, .. } => function,
+            BodyJobKind::ErrorConv { function, .. } => function,
+        }
+    }
+
+    fn function_mut(&mut self) -> &mut Func {
+        match &mut self.kind {
+            BodyJobKind::Function { function, .. } => &mut **function,
+            BodyJobKind::InlineModule { function, .. } => &mut **function,
+            BodyJobKind::Test { function, .. } => function,
+            BodyJobKind::ErrorConv { function, .. } => function,
+        }
+    }
+}
+
+/// The main pass's body jobs for `items`, in source order. A method gets its
+/// owner's generic parameters here, before its check; the job restores the
+/// declaration's own parameters when it is merged.
+fn collect_body_jobs<'m>(
+    items: &'m mut [Item],
+    st: &ModuleState,
+    module_key: &str,
+    mode: CompileMode,
+    invalid_serde_impls: &HashSet<(String, String)>,
+) -> Vec<BodyJob<'m>> {
+    let mut jobs = Vec::new();
+    for item in items.iter_mut() {
+        match item {
+            Item::Func(f) => jobs.push(BodyJob {
+                owner: None,
+                raw_protocol_return: false,
+                kind: BodyJobKind::Function {
+                    cache_key: format!("{module_key}::fn:{}", f.name),
+                    ct_keys: vec![f.name.clone()],
+                    restore_type_params: None,
+                    generated_anchor: None,
+                    function: f,
+                },
+            }),
+            Item::Struct(s) => {
+                push_owner_method_jobs(
+                    &mut jobs,
+                    module_key,
+                    "struct",
+                    &s.name,
+                    &s.type_params,
+                    &mut s.methods,
+                    &mut s.trait_impls,
+                );
+            }
+            Item::Enum(e) => {
+                push_owner_method_jobs(
+                    &mut jobs,
+                    module_key,
+                    "enum",
+                    &e.name,
+                    &e.type_params,
+                    &mut e.methods,
+                    &mut e.trait_impls,
+                );
+            }
+            Item::Impl(i) => {
+                if i.trait_name.as_deref().is_some_and(|trait_name| {
+                    i.is_generated_serde
+                        && invalid_serde_impls
+                            .contains(&(i.type_name.clone(), trait_name.to_string()))
+                }) {
+                    continue;
+                }
+                let owner_params = st
+                    .trait_reg
+                    .struct_params
+                    .get(&i.type_name)
+                    .or_else(|| st.trait_reg.enum_params.get(&i.type_name));
+                let type_name = i.type_name.clone();
+                let trait_name = i.trait_name.clone();
+                for m in i.methods.iter_mut() {
+                    let own_params = std::mem::take(&mut m.type_params);
+                    // An implementation method sees the owner's generic
+                    // parameters whether the impl names a trait or not. A
+                    // typed derive body can fill a method hole with `T`, and
+                    // the generated `impl Type.Trait` must have the same
+                    // scope as a hand-written trait impl.
+                    m.type_params = if own_params.is_empty() {
+                        owner_params.cloned().unwrap_or_default()
+                    } else {
+                        own_params.clone()
+                    };
+                    let raw_protocol_return =
+                        uses_raw_protocol_function_return(trait_name.as_deref(), false, m);
+                    jobs.push(BodyJob {
+                        owner: Some(type_name.clone()),
+                        raw_protocol_return,
+                        kind: BodyJobKind::Function {
+                            cache_key: format!(
+                                "{module_key}::impl:{}::{}::method:{}",
+                                type_name,
+                                trait_name.as_deref().unwrap_or("inherent"),
+                                m.name
+                            ),
+                            ct_keys: vec![format!("{}::{}", type_name, m.name), m.name.clone()],
+                            restore_type_params: Some(own_params),
+                            generated_anchor: None,
+                            function: m,
+                        },
+                    });
+                }
+            }
+            Item::Test(t) if matches!(mode, CompileMode::Test | CompileMode::TestOverride) => {
+                let Some(test_name) = t.name.clone() else {
+                    continue;
+                };
+                // D-TEST1: a parameterized `#Test fn` is a property test — its
+                // params must be generatable types so the runner can synthesize
+                // inputs. Validate before checking the body so the error points
+                // at the offending param type.
+                let param_diagnostics = t
+                    .params
+                    .iter()
+                    .filter_map(|p| property_param_unsupported(&p.ty, p.ty_span))
+                    .collect();
+                let mut function = Func::implicit_run(std::mem::take(&mut t.body), t.span);
+                function.name = format!("__test_{test_name}");
+                function.name_span = t.name_span;
+                function.params = t.params.clone();
+                jobs.push(BodyJob {
+                    owner: None,
+                    raw_protocol_return: false,
+                    kind: BodyJobKind::Test {
+                        test: t,
+                        function,
+                        param_diagnostics,
+                    },
+                });
+            }
+            Item::CodeModule(cm) => {
+                // Type-check inline-module function bodies. Sibling calls were
+                // already rewritten to mangled names by `mangle_inline_sibling_calls`,
+                // and the mangled signatures are registered in `st.funcs`.
+                let module = cm.name.clone();
+                if let Some(body) = cm.body.as_mut() {
+                    for inner in body.iter_mut() {
+                        if let Item::Func(f) = inner {
+                            jobs.push(BodyJob {
+                                owner: None,
+                                raw_protocol_return: false,
+                                kind: BodyJobKind::InlineModule {
+                                    function: f,
+                                    module: module.clone(),
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+            Item::ErrorConv(ec) => {
+                let function = error_conversion_function(ec);
+                jobs.push(BodyJob {
+                    owner: Some(ec.from_ty.clone()),
+                    raw_protocol_return: false,
+                    kind: BodyJobKind::ErrorConv {
+                        conversion: ec,
+                        function,
+                    },
+                });
+            }
+            _ => {}
+        }
+    }
+    jobs
+}
+
+/// The method jobs of one struct or enum: its own methods, then the methods
+/// of its nested trait impls. Trait impls nested in a type are real method
+/// bodies too. They inherit the type's generic parameters, just as the Rust
+/// impl emitted for them does, so those parameters are exposed to the body
+/// checker while the parsed method signature is kept for codegen.
+fn push_owner_method_jobs<'m>(
+    jobs: &mut Vec<BodyJob<'m>>,
+    module_key: &str,
+    kind: &str,
+    owner: &str,
+    owner_params: &[crate::AST::TypeParam],
+    methods: &'m mut [Func],
+    trait_impls: &'m mut [crate::AST::TraitImplBlock],
+) {
+    for m in methods.iter_mut() {
+        let own_params = std::mem::take(&mut m.type_params);
+        if own_params.is_empty() {
+            m.type_params = owner_params.to_vec();
+        }
+        jobs.push(BodyJob {
+            owner: Some(owner.to_string()),
+            raw_protocol_return: false,
+            kind: BodyJobKind::Function {
+                cache_key: format!("{module_key}::{kind}:{owner}::method:{}", m.name),
+                ct_keys: vec![format!("{owner}::{}", m.name), m.name.clone()],
+                restore_type_params: Some(own_params),
+                generated_anchor: None,
+                function: m,
+            },
+        });
+    }
+    for block in trait_impls.iter_mut() {
+        let trait_name = block.trait_name.clone();
+        let compiler_generated = block.compiler_generated;
+        let generated_anchor = compiler_generated.then_some(block.trait_span);
+        for m in block.methods.iter_mut() {
+            let own_params = std::mem::take(&mut m.type_params);
+            m.type_params = if own_params.is_empty() {
+                owner_params.to_vec()
+            } else {
+                own_params.clone()
+            };
+            // Generated serde methods temporarily carry inherited, inferred
+            // bounds solely for sema. Their Rust generics belong on the
+            // enclosing impl, not on the method.
+            let restore_type_params = if matches!(
+                trait_name.as_str(),
+                crate::Generics::ENCODE | crate::Generics::DECODE
+            ) {
+                Vec::new()
+            } else {
+                own_params
+            };
+            let raw_protocol_return =
+                uses_raw_protocol_function_return(Some(&trait_name), compiler_generated, m);
+            jobs.push(BodyJob {
+                owner: Some(owner.to_string()),
+                raw_protocol_return,
+                kind: BodyJobKind::Function {
+                    cache_key: format!(
+                        "{module_key}::{kind}:{owner}::trait:{trait_name}::method:{}",
+                        m.name
+                    ),
+                    ct_keys: vec![format!("{owner}::{}", m.name), m.name.clone()],
+                    restore_type_params: Some(restore_type_params),
+                    generated_anchor,
+                    function: m,
+                },
+            });
+        }
+    }
+}
+
+/// What one body check produced, before it is merged.
+struct BodyOutcome {
+    diagnostics: Vec<Diagnostic>,
+    products: BodyProducts,
+    ledger: jet_foundation::Names::NameLedger,
+}
+
+/// Check one job's body into fresh products and a fresh ledger snapshot.
+fn check_body_job(
+    cx: &BodyContext<'_>,
+    job: &mut BodyJob<'_>,
+    checked_ct_funcs: &HashMap<String, Func>,
+    name_ledger: &jet_foundation::Names::NameLedger,
+    cache: Option<&mut IncrementalSemaCache>,
+    cache_allowed: bool,
+) -> BodyOutcome {
+    let mut ledger = name_ledger.body_snapshot();
+    let mut products = BodyProducts::default();
+    let owner = job.owner.as_deref();
+    let raw_protocol_return = job.raw_protocol_return;
+    let diagnostics = match &mut job.kind {
+        BodyJobKind::Function {
+            function,
+            cache_key,
+            ..
+        } => {
+            // #2517 S3R: inside a package-record session, a body whose item
+            // key has a record installs the stored checked body and replays
+            // its outputs instead of being checked. A module with
+            // view-returning callables keeps checking every body, as the
+            // incremental cache does: their view pre-pass reads sibling bodies.
+            let tracked = cache_allowed && super::ItemReuse::tracks(cx.module_idx);
+            if tracked
+                && super::ItemReuse::reuse(
+                    cx.module_idx,
+                    cache_key,
+                    &mut **function,
+                    owner,
+                    raw_protocol_return,
+                    &mut ledger,
+                    &mut products,
+                )
+            {
+                return BodyOutcome {
+                    diagnostics: Vec::new(),
+                    products,
+                    ledger,
+                };
+            }
+            let pristine = tracked.then(|| (**function).clone());
+            let diagnostics = match cache {
+                Some(cache) => check_func_body_cached(
+                    cx,
+                    cache_key.clone(),
+                    &mut **function,
+                    owner,
+                    raw_protocol_return,
+                    checked_ct_funcs,
+                    &mut ledger,
+                    &mut products,
+                    cache,
+                    cache_allowed,
+                ),
+                None => check_func_body(
+                    cx,
+                    &mut **function,
+                    owner,
+                    raw_protocol_return,
+                    None,
+                    Some(checked_ct_funcs),
+                    &mut ledger,
+                    &mut products,
+                ),
+            };
+            if let Some(pristine) = pristine {
+                super::ItemReuse::record(
+                    cx.module_idx,
+                    cache_key,
+                    pristine,
+                    &**function,
+                    owner,
+                    raw_protocol_return,
+                    &diagnostics,
+                    &products,
+                    &ledger,
+                );
+            }
+            diagnostics
+        }
+        BodyJobKind::Test { function, .. } => check_func_body(
+            cx,
+            function,
+            None,
+            false,
+            None,
+            Some(checked_ct_funcs),
+            &mut ledger,
+            &mut products,
+        ),
+        BodyJobKind::InlineModule { function, module } => check_func_body(
+            cx,
+            &mut **function,
+            None,
+            false,
+            Some(module.as_str()),
+            Some(checked_ct_funcs),
+            &mut ledger,
+            &mut products,
+        ),
+        BodyJobKind::ErrorConv { function, .. } => {
+            let cx = BodyContext {
+                no_os: false,
+                gates: crate::Policy::GateSet::default(),
+                ..*cx
+            };
+            check_func_body(
+                &cx,
+                function,
+                owner,
+                false,
+                None,
+                Some(checked_ct_funcs),
+                &mut ledger,
+                &mut products,
+            )
+        }
+    };
+    BodyOutcome {
+        diagnostics,
+        products,
+        ledger,
+    }
+}
+
+/// The main pass's shared sinks. Jobs are checked, in parallel when the pass
+/// has no incremental cache, and merged into these in source order.
+struct MainBodyPass<'p, 'c> {
+    cx: &'p BodyContext<'c>,
+    checked_ct_funcs: &'p mut HashMap<String, Func>,
+    name_ledger: &'p mut jet_foundation::Names::NameLedger,
+    products: &'p mut BodyProducts,
+    diags: &'p mut Vec<Diagnostic>,
+    incremental: Option<&'p mut IncrementalSemaCache>,
+    cache_allowed: bool,
+}
+
+impl MainBodyPass<'_, '_> {
+    fn run(&mut self, jobs: Vec<BodyJob<'_>>) {
+        let workers = if self.incremental.is_some() {
+            1
+        } else {
+            super::Parallel::check_worker_count(jobs.len())
+        };
+        if workers <= 1 {
+            // Serial: each body sees every body checked before it.
+            for mut job in jobs {
+                let outcome = self.check(&mut job);
+                self.merge(job, outcome);
+            }
+            return;
+        }
+        // Parallel: every body is checked once against the staged table. A
+        // body whose check ran the compile-time evaluator depends on the
+        // bodies before it (their checked forms join `checked_ct_funcs` as
+        // they are merged), so the worker puts its pristine form back and
+        // drops that outcome at once; it is checked again below, in source
+        // order, against exactly the table a serial pass gives it. Holding
+        // only one form of each body keeps the peak near a serial pass's.
+        let checked = {
+            let cx = self.cx;
+            let staged = &*self.checked_ct_funcs;
+            let name_ledger = &*self.name_ledger;
+            let cache_allowed = self.cache_allowed;
+            super::Parallel::map_checked(jobs, |mut job| {
+                let pristine = job.function().clone();
+                let outcome =
+                    check_body_job(cx, &mut job, staged, name_ledger, None, cache_allowed);
+                if outcome.products.ran_ct_evaluator {
+                    *job.function_mut() = pristine;
+                    (job, None)
+                } else {
+                    (job, Some(outcome))
+                }
+            })
+        };
+        for (mut job, outcome) in checked {
+            let outcome = match outcome {
+                Some(outcome) => outcome,
+                None => self.check(&mut job),
+            };
+            self.merge(job, outcome);
+        }
+    }
+
+    fn check(&mut self, job: &mut BodyJob<'_>) -> BodyOutcome {
+        check_body_job(
+            self.cx,
+            job,
+            &*self.checked_ct_funcs,
+            &*self.name_ledger,
+            self.incremental.as_deref_mut(),
+            self.cache_allowed,
+        )
+    }
+
+    fn merge(&mut self, job: BodyJob<'_>, outcome: BodyOutcome) {
+        let BodyOutcome {
+            diagnostics,
+            products: mut body,
+            ledger,
+        } = outcome;
+        if body.uses_exact_int {
+            self.cx.states[self.cx.module_idx]
+                .exact_int_reachable
+                .set(true);
+        }
+        match job.kind {
+            BodyJobKind::Function {
+                function,
+                ct_keys,
+                restore_type_params,
+                generated_anchor,
+                ..
+            } => {
+                self.diags
+                    .extend(author_facing_diagnostics(generated_anchor, diagnostics));
+                self.merge_ledger(&ledger);
+                self.products.absorb(body);
+                for key in ct_keys {
+                    self.checked_ct_funcs.insert(key, function.clone());
+                }
+                if let Some(type_params) = restore_type_params {
+                    function.type_params = type_params;
+                }
+            }
+            BodyJobKind::Test {
+                test,
+                function,
+                param_diagnostics,
+            } => {
+                self.diags.extend(param_diagnostics);
+                self.diags.extend(diagnostics);
+                self.merge_ledger(&ledger);
+                self.products.absorb(body);
+                test.body = function.body;
+            }
+            BodyJobKind::InlineModule { function, module } => {
+                self.diags.extend(diagnostics);
+                self.merge_ledger(&ledger);
+                // Inline-module calls use their registered mangled identity
+                // (`__jet_module__fn`): the body's summary moves to that key and
+                // any top-level same-name summary stays in place.
+                let summary = body.summaries.remove(&function.name);
+                let function_key = jet_foundation::Names::member_name(&module, &function.name);
+                for pending in &mut body.pending_diagnostics {
+                    pending.function_key = function_key.clone();
+                }
+                self.products.absorb(body);
+                if let Some(summary) = summary {
+                    self.products.summaries.insert(
+                        crate::Sema::inline_effect_key(&module, &function.name),
+                        summary,
+                    );
+                }
+            }
+            BodyJobKind::ErrorConv {
+                conversion,
+                function,
+            } => {
+                // Error-conversion bodies are checked like functions, but they
+                // are not functions: their synthetic names and local analysis
+                // artifacts stay out of the program-wide accumulators.
+                self.diags.extend(diagnostics);
+                self.products
+                    .pending_diagnostics
+                    .extend(body.pending_diagnostics);
+                self.products
+                    .devtools_publications
+                    .extend(body.devtools_publications);
+                conversion.body = function.body;
+            }
+        }
+    }
+
+    fn merge_ledger(&mut self, ledger: &jet_foundation::Names::NameLedger) {
+        self.name_ledger.merge_references(ledger);
+        self.name_ledger.merge_structure_facts(ledger);
+    }
+}
+
+/// Check every body of one module. Bodies are independent jobs checked on a
+/// bounded worker pool (see `Parallel`) against the module's final tables;
+/// their products are merged in source order, so the checked module,
+/// diagnostics and facts equal a serial run's. `JET_CHECK_THREADS=1` runs the
+/// same jobs one by one.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_module_bodies(
     module: &mut crate::AST::LoadedModule,
     module_idx: usize,
@@ -1042,11 +1776,8 @@ pub(crate) fn check_module_bodies(
     mode: CompileMode,
     no_os: bool,
     gates: crate::Policy::GateSet,
-    summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
-    global_addr_taken: &mut HashSet<String>,
     name_ledger: &mut jet_foundation::Names::NameLedger,
-    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
+    products: &mut BodyProducts,
     mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
@@ -1055,7 +1786,6 @@ pub(crate) fn check_module_bodies(
     // heap) are remembered across bindings and functions of this module.
     let _nominal_memo = st.registry.open_nominal_memo();
     let mut diags = Vec::new();
-    let no_prelude = module.no_prelude;
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
     let invalid_serde_impls = invalid_serde_derive_impls(&module.items, &st.trait_reg);
     let ct_base_dir = module
@@ -1063,128 +1793,21 @@ pub(crate) fn check_module_bodies(
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let stage_jobs = comptime_stage_jobs(&module.items);
-    let mut raw_eval_funcs = ct_funcs
-        .iter()
-        .map(|(name, function)| (name.clone(), function))
-        .collect::<HashMap<_, _>>();
-    for (key, job) in &stage_jobs {
-        raw_eval_funcs.insert(key.clone(), job.function);
-    }
-    let (stage_names, stage_all_methods) =
-        comptime_stage_roots(&module.items, &raw_eval_funcs);
-    let mut stage_keys = HashSet::new();
-    for (key, job) in &stage_jobs {
-        if stage_all_methods && job.owner.is_some()
-            || stage_names.contains(key)
-            || stage_names.contains(&job.function.name)
-        {
-            stage_keys.insert(key.clone());
-        }
-    }
-    let mut staged_unqualified = stage_names.clone();
-    for key in &stage_keys {
-        if let Some(job) = stage_jobs.get(key) {
-            staged_unqualified.insert(job.function.name.clone());
-        }
-    }
-    let mut checked_ct_funcs = HashMap::new();
-    for key in stage_keys {
-        let Some(job) = stage_jobs.get(&key) else {
-            continue;
-        };
-        let mut function = job.function.clone();
-        let mut stage_summaries = HashMap::new();
-        let mut stage_inputs = Vec::new();
-        let mut stage_addresses = HashSet::new();
-        let mut stage_ledger = name_ledger.body_snapshot();
-        let mut stage_pending = Vec::new();
-        let (stage_diagnostics, _) = check_func_body_bundle_deferred(
-            &mut function,
-            module_idx,
-            states,
-            plugin_interfaces,
-            devtools_registry,
-            effect_facts,
-            job.owner.as_deref(),
-            job.raw_protocol_return,
-            &ct_funcs,
-            &ct_externs,
-            &ct_base_dir,
-            &ct_globals,
-            no_os,
-            gates,
-            &mut stage_summaries,
-            &mut stage_inputs,
-            &mut stage_addresses,
-            no_prelude,
-            &mut stage_ledger,
-            &mut stage_pending,
-        );
-        if stage_diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error)
-        {
-            checked_ct_funcs.insert(key.clone(), function.clone());
-            if job.owner.is_some() {
-                checked_ct_funcs.insert(
-                    format!(
-                        "{}::{}",
-                        job.owner.as_deref().unwrap_or_default(),
-                        function.name
-                    ),
-                    function.clone(),
-                );
-            }
-            checked_ct_funcs.insert(function.name.clone(), function);
-        }
-    }
-    // A direct comptime root can be a top-level function that does not need a
-    // job-specific owner context. Keep that path explicit without staging
-    // unrelated runtime helpers.
-    for name in staged_unqualified {
-        if checked_ct_funcs.contains_key(&name) {
-            continue;
-        }
-        let Some(function) = ct_funcs.get(&name) else {
-            continue;
-        };
-        let mut function = function.clone();
-        let mut stage_summaries = HashMap::new();
-        let mut stage_inputs = Vec::new();
-        let mut stage_addresses = HashSet::new();
-        let mut stage_ledger = name_ledger.body_snapshot();
-        let mut stage_pending = Vec::new();
-        let (stage_diagnostics, _) = check_func_body_bundle_deferred(
-            &mut function,
-            module_idx,
-            states,
-            plugin_interfaces,
-            devtools_registry,
-            effect_facts,
-            None,
-            false,
-            &ct_funcs,
-            &ct_externs,
-            &ct_base_dir,
-            &ct_globals,
-            no_os,
-            gates,
-            &mut stage_summaries,
-            &mut stage_inputs,
-            &mut stage_addresses,
-            no_prelude,
-            &mut stage_ledger,
-            &mut stage_pending,
-        );
-        if stage_diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error)
-        {
-            checked_ct_funcs.insert(name, function.clone());
-            checked_ct_funcs.insert(function.name.clone(), function);
-        }
-    }
+    let cx = BodyContext {
+        module_idx,
+        states,
+        plugin_interfaces,
+        devtools_registry,
+        effect_facts,
+        ct_funcs: &ct_funcs,
+        ct_externs: &ct_externs,
+        ct_base_dir: &ct_base_dir,
+        ct_globals: &ct_globals,
+        no_os,
+        gates,
+        no_prelude: module.no_prelude,
+    };
+    let checked_ct_funcs = stage_comptime_functions(&cx, &module.items, &ct_funcs, name_ledger);
     // D-MEM-VIEWRET1=B: resolve callable view summaries before the real body
     // pass so declaration order cannot affect a public owner contract. Each
     // iteration checks pristine clones and publishes only the canonical fact;
@@ -1377,35 +2000,21 @@ pub(crate) fn check_module_bodies(
         let mut round = Vec::with_capacity(view_jobs.len());
         for job in &view_jobs {
             let mut function = job.function.clone();
-            let mut scratch_summaries = HashMap::new();
-            let mut scratch_inputs = Vec::new();
-            let mut scratch_addr_taken = HashSet::new();
             let mut scratch_ledger = name_ledger.body_snapshot();
-            let mut scratch_pending_diagnostics = Vec::new();
-            let _ = check_func_body_bundle_checked(
+            let mut scratch = BodyProducts::default();
+            let _ = check_func_body(
+                &cx,
                 &mut function,
-                module_idx,
-                states,
-                plugin_interfaces,
-                devtools_registry,
-                effect_facts,
                 job.owner.as_deref(),
                 job.raw_protocol_return,
-                &ct_funcs,
-                &checked_ct_funcs,
-                st.items.as_slice(),
-                &ct_externs,
-                &ct_base_dir,
-                &ct_globals,
-                no_os,
-                gates,
-                &mut scratch_summaries,
-                &mut scratch_inputs,
-                &mut scratch_addr_taken,
-                no_prelude,
+                None,
+                Some(&checked_ct_funcs),
                 &mut scratch_ledger,
-                &mut scratch_pending_diagnostics,
+                &mut scratch,
             );
+            if scratch.uses_exact_int {
+                st.exact_int_reachable.set(true);
+            }
             round.push(function.return_view_provenance.clone());
             if let (Some(trait_name), Some(provenance)) =
                 (&job.trait_name, function.return_view_provenance)
@@ -1447,532 +2056,43 @@ pub(crate) fn check_module_bodies(
     }
     let cache_allowed = view_jobs.is_empty();
     let module_key = module.display.clone();
+    let mut checked_ct_funcs = checked_ct_funcs;
+    let mut pass = MainBodyPass {
+        cx: &cx,
+        checked_ct_funcs: &mut checked_ct_funcs,
+        name_ledger: &mut *name_ledger,
+        products: &mut *products,
+        diags: &mut diags,
+        incremental: incremental.as_deref_mut(),
+        cache_allowed,
+    };
     // D-FAIL-CONV2=A: the shipped `impl <CoreError> -> Err` conversions are
     // demand-driven — which ones a module needs is only known once every body
-    // in it has recorded its `TryConvert::Typed` facts. So the items are
-    // appended at the END of this walk (see the `index == len` arm below) and
-    // the walk keeps going, which routes each injected body through the
-    // `Item::ErrorConv` arm exactly like a user-declared conversion. Injecting
-    // after this function returns instead left the shipped bodies unchecked:
-    // `Err("{self}")` stayed an ordinary `Expr::Call`, never normalized into
-    // the default-error `Err` struct literal, and codegen's TIR gate refused
-    // it as an uncovered construct (an I2 abort, not a user diagnostic).
-    let mut index = 0;
-    let mut conversions_injected = false;
-    loop {
-        if index == module.items.len() {
-            if conversions_injected {
-                break;
-            }
-            conversions_injected = true;
-            diags.extend(super::super::Prelude::inject_exercised_error_conversions(
-                module,
-            ));
-            continue;
-        }
-        let item = &mut module.items[index];
-        index += 1;
-        match item {
-            Item::Func(f) => {
-                diags.extend(check_func_body_incremental(
-                    format!("{module_key}::fn:{}", f.name),
-                    f,
-                    module_idx,
-                    states,
-                    plugin_interfaces,
-                    devtools_registry,
-                    effect_facts,
-                    None,
-                    false,
-                    &ct_funcs,
-                    &checked_ct_funcs,
-                    &ct_externs,
-                    &ct_base_dir,
-                    &ct_globals,
-                    no_os,
-                    gates,
-                    summaries,
-                    embed_inputs_out,
-                    global_addr_taken,
-                    no_prelude,
-                    name_ledger,
-                    pending_diagnostics_out,
-                    incremental.as_deref_mut(),
-                    cache_allowed,
-                ));
-                checked_ct_funcs.insert(f.name.clone(), f.clone());
-            }
-            Item::Struct(s) => {
-                for m in &mut s.methods {
-                    let own_params = std::mem::take(&mut m.type_params);
-                    if own_params.is_empty() {
-                        m.type_params = s.type_params.clone();
-                    }
-                    diags.extend(check_func_body_incremental(
-                        format!("{module_key}::struct:{}::method:{}", s.name, m.name),
-                        m,
-                        module_idx,
-                        states,
-                        plugin_interfaces,
-                        devtools_registry,
-                        effect_facts,
-                        Some(&s.name),
-                        false,
-                        &ct_funcs,
-                        &checked_ct_funcs,
-                        &ct_externs,
-                        &ct_base_dir,
-                        &ct_globals,
-                        no_os,
-                        gates,
-                        summaries,
-                        embed_inputs_out,
-                        global_addr_taken,
-                        no_prelude,
-                        name_ledger,
-                        pending_diagnostics_out,
-                        incremental.as_deref_mut(),
-                        cache_allowed,
-                    ));
-                    checked_ct_funcs.insert(format!("{}::{}", s.name, m.name), m.clone());
-                    checked_ct_funcs.insert(m.name.clone(), m.clone());
-                    m.type_params = own_params;
-                }
-                // Trait impls nested in a struct are real method bodies too.
-                // They inherit the struct's generic parameters, just as the
-                // Rust impl emitted for them does.  Temporarily expose those
-                // parameters to the ordinary body checker while preserving the
-                // parsed method signature for codegen.
-                for block in &mut s.trait_impls {
-                    for m in &mut block.methods {
-                        let own_params = std::mem::take(&mut m.type_params);
-                        m.type_params = if own_params.is_empty() {
-                            s.type_params.clone()
-                        } else {
-                            own_params.clone()
-                        };
-                        diags.extend(author_facing_diagnostics(
-                            block.compiler_generated,
-                            check_func_body_incremental(
-                                format!(
-                                    "{module_key}::struct:{}::trait:{}::method:{}",
-                                    s.name, block.trait_name, m.name
-                                ),
-                                m,
-                                module_idx,
-                                states,
-                                plugin_interfaces,
-                                devtools_registry,
-                                effect_facts,
-                                Some(&s.name),
-                                uses_raw_protocol_function_return(
-                                    Some(&block.trait_name),
-                                    block.compiler_generated,
-                                    m,
-                                ),
-                                &ct_funcs,
-                                &checked_ct_funcs,
-                                &ct_externs,
-                                &ct_base_dir,
-                                &ct_globals,
-                                no_os,
-                                gates,
-                                summaries,
-                                embed_inputs_out,
-                                global_addr_taken,
-                                no_prelude,
-                                name_ledger,
-                                pending_diagnostics_out,
-                                incremental.as_deref_mut(),
-                                cache_allowed,
-                            ),
-                        ));
-                        checked_ct_funcs.insert(format!("{}::{}", s.name, m.name), m.clone());
-                        checked_ct_funcs.insert(m.name.clone(), m.clone());
-                        // Generated serde methods temporarily carry inherited,
-                        // inferred bounds solely for sema. Their Rust generics
-                        // belong on the enclosing impl, not on the method.
-                        m.type_params = if matches!(
-                            block.trait_name.as_str(),
-                            crate::Generics::ENCODE | crate::Generics::DECODE
-                        ) {
-                            Vec::new()
-                        } else {
-                            own_params
-                        };
-                    }
-                }
-            }
-            Item::Enum(e) => {
-                for m in &mut e.methods {
-                    let own_params = std::mem::take(&mut m.type_params);
-                    if own_params.is_empty() {
-                        m.type_params = e.type_params.clone();
-                    }
-                    diags.extend(check_func_body_incremental(
-                        format!("{module_key}::enum:{}::method:{}", e.name, m.name),
-                        m,
-                        module_idx,
-                        states,
-                        plugin_interfaces,
-                        devtools_registry,
-                        effect_facts,
-                        Some(&e.name),
-                        false,
-                        &ct_funcs,
-                        &checked_ct_funcs,
-                        &ct_externs,
-                        &ct_base_dir,
-                        &ct_globals,
-                        no_os,
-                        gates,
-                        summaries,
-                        embed_inputs_out,
-                        global_addr_taken,
-                        no_prelude,
-                        name_ledger,
-                        pending_diagnostics_out,
-                        incremental.as_deref_mut(),
-                        cache_allowed,
-                    ));
-                    checked_ct_funcs.insert(format!("{}::{}", e.name, m.name), m.clone());
-                    checked_ct_funcs.insert(m.name.clone(), m.clone());
-                    m.type_params = own_params;
-                }
-                for block in &mut e.trait_impls {
-                    for m in &mut block.methods {
-                        let own_params = std::mem::take(&mut m.type_params);
-                        m.type_params = if own_params.is_empty() {
-                            e.type_params.clone()
-                        } else {
-                            own_params.clone()
-                        };
-                        diags.extend(author_facing_diagnostics(
-                            block.compiler_generated,
-                            check_func_body_incremental(
-                                format!(
-                                    "{module_key}::enum:{}::trait:{}::method:{}",
-                                    e.name, block.trait_name, m.name
-                                ),
-                                m,
-                                module_idx,
-                                states,
-                                plugin_interfaces,
-                                devtools_registry,
-                                effect_facts,
-                                Some(&e.name),
-                                uses_raw_protocol_function_return(
-                                    Some(&block.trait_name),
-                                    block.compiler_generated,
-                                    m,
-                                ),
-                                &ct_funcs,
-                                &checked_ct_funcs,
-                                &ct_externs,
-                                &ct_base_dir,
-                                &ct_globals,
-                                no_os,
-                                gates,
-                                summaries,
-                                embed_inputs_out,
-                                global_addr_taken,
-                                no_prelude,
-                                name_ledger,
-                                pending_diagnostics_out,
-                                incremental.as_deref_mut(),
-                                cache_allowed,
-                            ),
-                        ));
-                        checked_ct_funcs.insert(format!("{}::{}", e.name, m.name), m.clone());
-                        checked_ct_funcs.insert(m.name.clone(), m.clone());
-                        m.type_params = if matches!(
-                            block.trait_name.as_str(),
-                            crate::Generics::ENCODE | crate::Generics::DECODE
-                        ) {
-                            Vec::new()
-                        } else {
-                            own_params
-                        };
-                    }
-                }
-            }
-            Item::Impl(i) => {
-                if i.trait_name.as_deref().is_some_and(|trait_name| {
-                    i.is_generated_serde
-                        && invalid_serde_impls
-                            .contains(&(i.type_name.clone(), trait_name.to_string()))
-                }) {
-                    continue;
-                }
-                let owner_params = st
-                    .trait_reg
-                    .struct_params
-                    .get(&i.type_name)
-                    .or_else(|| st.trait_reg.enum_params.get(&i.type_name));
-                for m in &mut i.methods {
-                    let own_params = std::mem::take(&mut m.type_params);
-                    // An implementation method sees the owner's generic
-                    // parameters whether the impl names a trait or not. A
-                    // typed derive body can fill a method hole with `T`, and
-                    // the generated `impl Type.Trait` must have the same
-                    // scope as a hand-written trait impl.
-                    if own_params.is_empty() {
-                        m.type_params = owner_params.cloned().unwrap_or_default();
-                    } else {
-                        m.type_params = own_params.clone();
-                    }
-                    diags.extend(check_func_body_incremental(
-                        format!(
-                            "{module_key}::impl:{}::{}::method:{}",
-                            i.type_name,
-                            i.trait_name.as_deref().unwrap_or("inherent"),
-                            m.name
-                        ),
-                        m,
-                        module_idx,
-                        states,
-                        plugin_interfaces,
-                        devtools_registry,
-                        effect_facts,
-                        Some(&i.type_name),
-                        uses_raw_protocol_function_return(
-                            i.trait_name.as_deref(),
-                            false,
-                            m,
-                        ),
-                        &ct_funcs,
-                        &checked_ct_funcs,
-                        &ct_externs,
-                        &ct_base_dir,
-                        &ct_globals,
-                        no_os,
-                        gates,
-                        summaries,
-                        embed_inputs_out,
-                        global_addr_taken,
-                        no_prelude,
-                        name_ledger,
-                        pending_diagnostics_out,
-                        incremental.as_deref_mut(),
-                        cache_allowed,
-                    ));
-                    checked_ct_funcs.insert(format!("{}::{}", i.type_name, m.name), m.clone());
-                    checked_ct_funcs.insert(m.name.clone(), m.clone());
-                    m.type_params = own_params;
-                }
-            }
-            Item::Test(t) if matches!(mode, CompileMode::Test | CompileMode::TestOverride) => {
-                let Some(test_name) = t.name.as_deref() else {
-                    continue;
-                };
-                // D-TEST1: a parameterized `#Test fn` is a property test — its
-                // params must be generatable types so the runner can synthesize
-                // inputs. Validate before checking the body so the error points at
-                // the offending param type.
-                for p in &t.params {
-                    if let Some(d) = property_param_unsupported(&p.ty, p.ty_span) {
-                        diags.push(d);
-                    }
-                }
-                let mut synthetic =
-                    Func::implicit_run(std::mem::take(&mut t.body), t.span);
-                synthetic.name = format!("__test_{test_name}");
-                synthetic.name_span = t.name_span;
-                synthetic.params = t.params.clone();
-                diags.extend(check_func_body_bundle_checked(
-                    &mut synthetic,
-                    module_idx,
-                    states,
-                    plugin_interfaces,
-                    devtools_registry,
-                    effect_facts,
-                    None,
-                    false,
-                    &ct_funcs,
-                    &checked_ct_funcs,
-                    st.items.as_slice(),
-                    &ct_externs,
-                    &ct_base_dir,
-                    &ct_globals,
-                    no_os,
-                    gates,
-                    summaries,
-                    embed_inputs_out,
-                    global_addr_taken,
-                    no_prelude,
-                    name_ledger,
-                    pending_diagnostics_out,
-                ));
-                t.body = synthetic.body;
-            }
-            Item::CodeModule(cm) => {
-                // Type-check inline-module function bodies. Sibling calls were
-                // already rewritten to mangled names by `mangle_inline_sibling_calls`,
-                // and the mangled signatures are registered in `st.funcs`.
-                if let Some(body) = &mut cm.body {
-                    for inner in body.iter_mut() {
-                        if let Item::Func(f) = inner {
-                            // Inline-module calls use their registered mangled
-                            // identity (`__jet_module__fn`). Preserve any top-level
-                            // same-name summary while the shared body checker
-                            // emits this function's local summary.
-                            let previous = summaries.remove(&f.name);
-                            let pending_start = pending_diagnostics_out.len();
-                            diags.extend(
-                                check_func_body_bundle_scoped_checked(
-                                    f,
-                                    module_idx,
-                                    states,
-                                    plugin_interfaces,
-                                    devtools_registry,
-                                    effect_facts,
-                                    None,
-                                    false,
-                                    &ct_funcs,
-                                    &checked_ct_funcs,
-                                    st.items.as_slice(),
-                                    &ct_externs,
-                                    &ct_base_dir,
-                                    &ct_globals,
-                                    no_os,
-                                    gates,
-                                    summaries,
-                                    embed_inputs_out,
-                                    global_addr_taken,
-                                    no_prelude,
-                                    name_ledger,
-                                    pending_diagnostics_out,
-                                    Some(&cm.name),
-                                )
-                                .0,
-                            );
-                            for pending in &mut pending_diagnostics_out[pending_start..] {
-                                pending.function_key =
-                                    jet_foundation::Names::member_name(&cm.name, &f.name);
-                            }
-                            if let Some(summary) = summaries.remove(&f.name) {
-                                summaries.insert(
-                                    crate::Sema::inline_effect_key(&cm.name, &f.name),
-                                    summary,
-                                );
-                            }
-                            if let Some(summary) = previous {
-                                summaries.insert(f.name.clone(), summary);
-                            }
-                        }
-                    }
-                }
-            }
-            Item::ErrorConv(ec) => {
-                let mut synthetic = Func {
-                    span: ec.body_span,
-                    is_comptime: false,
-                    is_pub: false,
-                    is_package_pub: false,
-                    external_type: None,
-                    name: format!(
-                        "__errconv_{}_to_{}",
-                        ec.from_ty.replace('.', "_"),
-                        ec.to_ty.replace('.', "_")
-                    ),
-                    name_span: ec.from_span,
-                    meta: None,
-                    type_params: Vec::new(),
-                    head_pattern: None,
-                    params: vec![Param {
-                        name: crate::Syntax::KW_SELF.to_string(),
-                        name_span: ec.from_span,
-                        ty: Type::Named(String::new()),
-                        ty_span: ec.from_span,
-                        convention: AccessConvention::Move,
-                        root: false,
-                        default: None,
-                        variadic: false,
-                        variadic_bound_list: None,
-                        declared_view_from_names: None,
-                        public_label: None,
-                        zone: crate::AST::ParamZone::Either,
-                    }],
-                    return_type: Some(Type::Named(ec.to_ty.clone())),
-                    return_type_span: Some(ec.to_span),
-                    return_view_provenance: None,
-                    declared_return_view_provenance: None,
-                    gc_return: false,
-                    diverges: false,
-                    gc_scope: false,
-                    is_unsafe: false,
-                    unsafe_reason: None,
-                    unsafe_span: None,
-                    is_pure: false,
-                    is_reactive: false,
-                    reactive_upgrades: Vec::new(),
-                    is_replayable: false,
-                    replayable_span: None,
-                    is_job: false,
-                    job_span: None,
-                    every: None,
-                    job_metadata: None,
-                    is_must_use: false,
-                    must_use_span: None,
-                    maturity: None,
-                    maturity_span: None,
-                    kernel: None,
-                    is_inline: false,
-                    is_inline_always: false,
-                    inline_span: None,
-                    is_sanitizer: false,
-                    scrub_tag: None,
-                    declared_effects: None,
-                    effect_via: None,
-                    state_requires: None,
-                    state_transition: None,
-                    web_marker: None,
-                    pre: Vec::new(),
-                    post: Vec::new(),
-                    inline_foreign: None,
-                    undo: None,
-                    markers: Vec::new(),
-                    compiler_generated: false,
-                    body: std::mem::take(&mut ec.body),
-                };
-                // Error-conversion bodies are checked like functions, but they are
-                // not functions: do not publish their synthetic names or local
-                // analysis artifacts into the program-wide accumulators.
-                let mut conversion_summaries = HashMap::new();
-                let mut conversion_inputs = Vec::new();
-                let mut conversion_addr_taken = HashSet::new();
-                let mut conversion_ledger = name_ledger.body_snapshot();
-                let mut conversion_pending_diagnostics = Vec::new();
-                diags.extend(check_func_body_bundle_checked(
-                    &mut synthetic,
-                    module_idx,
-                    states,
-                    plugin_interfaces,
-                    devtools_registry,
-                    effect_facts,
-                    Some(&ec.from_ty),
-                    false,
-                    &ct_funcs,
-                    &checked_ct_funcs,
-                    st.items.as_slice(),
-                    &ct_externs,
-                    &ct_base_dir,
-                    &ct_globals,
-                    false,
-                    crate::Policy::GateSet::default(),
-                    &mut conversion_summaries,
-                    &mut conversion_inputs,
-                    &mut conversion_addr_taken,
-                    no_prelude,
-                    &mut conversion_ledger,
-                    &mut conversion_pending_diagnostics,
-                ));
-                pending_diagnostics_out.extend(conversion_pending_diagnostics);
-                ec.body = synthetic.body;
-            }
-            _ => {}
-        }
-    }
+    // in it has recorded its `TryConvert::Typed` facts. So they are injected
+    // after the module's own bodies are checked, and each appended body then
+    // goes through the `Item::ErrorConv` job exactly like a user-declared
+    // conversion. Injecting after this function returns instead left the
+    // shipped bodies unchecked: `Err("{self}")` stayed an ordinary
+    // `Expr::Call`, never normalized into the default-error `Err` struct
+    // literal, and codegen's TIR gate refused it as an uncovered construct
+    // (an I2 abort, not a user diagnostic).
+    let declared_items = module.items.len();
+    pass.run(collect_body_jobs(
+        &mut module.items,
+        st,
+        &module_key,
+        mode,
+        &invalid_serde_impls,
+    ));
+    pass.diags
+        .extend(super::super::Prelude::inject_exercised_error_conversions(module));
+    pass.run(collect_body_jobs(
+        &mut module.items[declared_items..],
+        st,
+        &module_key,
+        mode,
+        &invalid_serde_impls,
+    ));
     // D-MEMPROVENANCE2=A: a trait method publishes the union of every
     // compatible implementation source before TIR.
     let mut trait_view_contracts: HashMap<
@@ -2150,39 +2270,30 @@ pub(crate) fn check_module_bodies(
             wrapper.declared_return_view_provenance =
                 target.declared_return_view_provenance.clone();
             wrapper.compiler_generated = true;
-            let mut wrapper_summaries = HashMap::new();
-            let mut wrapper_inputs = Vec::new();
-            let mut wrapper_addresses = HashSet::new();
             let mut wrapper_ledger = name_ledger.body_snapshot();
-            let mut wrapper_pending = Vec::new();
-            diags.extend(check_func_body_bundle_checked(
+            let mut wrapper_products = BodyProducts::default();
+            diags.extend(check_func_body(
+                &cx,
                 &mut wrapper,
-                module_idx,
-                states,
-                plugin_interfaces,
-                devtools_registry,
-                effect_facts,
                 None,
                 false,
-                &ct_funcs,
-                &checked_ct_funcs,
-                st.items.as_slice(),
-                &ct_externs,
-                &ct_base_dir,
-                &ct_globals,
-                no_os,
-                gates,
-                &mut wrapper_summaries,
-                &mut wrapper_inputs,
-                &mut wrapper_addresses,
-                no_prelude,
+                None,
+                Some(&checked_ct_funcs),
                 &mut wrapper_ledger,
-                &mut wrapper_pending,
+                &mut wrapper_products,
             ));
-            for pending in &mut wrapper_pending {
+            if wrapper_products.uses_exact_int {
+                st.exact_int_reachable.set(true);
+            }
+            for pending in &mut wrapper_products.pending_diagnostics {
                 pending.function_key = format!("policy:{}::{}", policy_name, target.name);
             }
-            pending_diagnostics_out.extend(wrapper_pending);
+            products
+                .pending_diagnostics
+                .extend(wrapper_products.pending_diagnostics);
+            products
+                .devtools_publications
+                .extend(wrapper_products.devtools_publications);
             if generated_policy_wrapper_names.insert(wrapper.name.clone()) {
                 generated_policy_wrappers.push(crate::AST::Item::Func(wrapper));
             }

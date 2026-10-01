@@ -31,21 +31,21 @@ pub struct Pool<T> {}
 pub struct Pin<T> {}
 
 
-pub fn address_of<T>(value: T) -> Int { core.mem.address_of<T>(value) }
+pub fn address_of<T>(value: T) -> Int Never! { core.mem.address_of<T>(value) }
 
-pub fn from_addr<T>(addr: Int) -> *T {
+pub fn from_addr<T>(addr: Int) -> *T Never! {
     #Unsafe("raw address is an audited typed pointer boundary") {
         return mem.Ptr<T>.from_addr(addr)
     }
 }
 
-pub fn volatile_read<T>(pointer: *T) -> T {
+pub fn volatile_read<T>(pointer: *T) -> T Never! {
     #Unsafe("volatile access requires an audited typed pointer") {
         return core.mem.volatile_read<T>(pointer)
     }
 }
 
-pub fn volatile_write<T>(pointer: *T, value: T) {
+pub fn volatile_write<T>(pointer: *T, value: T) Never! {
     #Unsafe("volatile access requires an audited typed pointer") {
         core.mem.volatile_write<T>(pointer, value)
     }

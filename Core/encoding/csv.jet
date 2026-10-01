@@ -46,7 +46,7 @@ pub struct CSVReader {
     pub rows: [CSVRow]
     pub index: Int
 
-    pub fn next(&self) -> CSVRow? {
+    pub fn next(&self) -> CSVRow? Never! {
         if self.index >= self.rows.len() -> return None
         row :: self.rows[self.index]
         self.index += 1
@@ -57,9 +57,9 @@ pub struct CSVReader {
 pub struct CSVWriter {
     pub parts: [String]
 
-    pub fn write_row(&self, fields: [String]) { &self.parts.push(encode_row(fields)) }
+    pub fn write_row(&self, fields: [String]) Never! { &self.parts.push(encode_row(fields)) }
 
-    pub fn to_string(self) -> String {
+    pub fn to_string(self) -> String Never! {
         out := ""
         loop row in self.parts -> out = "{out}{row}\n"
         out
@@ -87,7 +87,7 @@ pub fn parse(text: String) -> DataTree EncodingError! {
     Ok(DataTree.Array(items))
 }
 
-pub fn to_string(rows: [CSVRow]) -> String {
+pub fn to_string(rows: [CSVRow]) -> String Never! {
     out := ""
     loop row in rows -> out = "{out}{encode_row(row.fields)}\n"
     out
@@ -98,7 +98,7 @@ pub fn reader(text: String) -> CSVReader EncodingError! {
     Ok(CSVReader{rows: physical, index: 0})
 }
 
-pub fn writer() -> CSVWriter { {parts: [String]{}} }
+pub fn writer() -> CSVWriter Never! { {parts: [String]{}} }
 
 /// Tiny SQL: `SELECT *` (all rows as arrays) or `SELECT COUNT(*)`.
 pub fn query(path: String, sql: String) -[FS]> DataTree EncodingError! {
@@ -313,7 +313,7 @@ pub fn dict_rows(text: String) -> [DictRow] EncodingError! {
     Ok(out)
 }
 
-pub fn dict_get(row: DictRow, key: String) -> String? {
+pub fn dict_get(row: DictRow, key: String) -> String? Never! {
     i := 0
     loop i < row.fields.len() {
         if row.fields[i] == key -> return Val(row.values[i])
@@ -322,18 +322,18 @@ pub fn dict_get(row: DictRow, key: String) -> String? {
     None
 }
 
-pub fn dict_get_or(row: DictRow, key: String, fallback: String) -> String {
+pub fn dict_get_or(row: DictRow, key: String, fallback: String) -> String Never! {
     dict_get(row, key) ?? fallback
 }
 
-pub fn write_dict(rows: [DictRow]) -> String {
+pub fn write_dict(rows: [DictRow]) -> String Never! {
     if rows.len() == 0 -> return ""
     out := "{encode_row(rows[0].fields)}\n"
     loop row in rows -> out = "{out}{encode_row(row.values)}\n"
     out
 }
 
-pub fn fieldnames(rows: [DictRow]) -> [String] {
+pub fn fieldnames(rows: [DictRow]) -> [String] Never! {
     if rows.len() == 0 -> return [String]{}
     rows[0].fields
 }

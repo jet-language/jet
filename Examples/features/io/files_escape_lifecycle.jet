@@ -2,6 +2,11 @@
 // Lexical containment (`Path.is_within`) is pure path computation and cannot
 // see the link; only the filesystem-resolved path shows the escape. Early exit
 // from a line loop closes the file handle (observed through /proc/self/fd).
+package {
+    name: "files_escape_lifecycle"
+    authority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] } }
+}
+
 use core.files as files
 
 fn fd_count() -> Int {

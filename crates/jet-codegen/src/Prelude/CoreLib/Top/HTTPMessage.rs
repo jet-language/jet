@@ -13,7 +13,7 @@ enum JetHTTPOperation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetHTTPError {
     InvalidMethod,
-    InvalidUrl,
+    InvalidURL,
     InvalidHeader,
     InvalidStatus,
     BodyConsumed,
@@ -80,7 +80,7 @@ fn jet_http_error_surface_parts(error: JetHTTPError) -> JetHTTPErrorSurfaceParts
     };
     match error {
         JetHTTPError::InvalidMethod => unit("InvalidMethod", 0),
-        JetHTTPError::InvalidUrl => unit("InvalidUrl", 1),
+        JetHTTPError::InvalidURL => unit("InvalidURL", 1),
         JetHTTPError::InvalidHeader => unit("InvalidHeader", 2),
         JetHTTPError::InvalidStatus => unit("InvalidStatus", 3),
         JetHTTPError::BodyConsumed => unit("BodyConsumed", 4),
@@ -128,7 +128,7 @@ fn jet_http_error_from_surface_parts(
 ) -> Option<JetHTTPError> {
     Some(match ordinal {
         0 => JetHTTPError::InvalidMethod,
-        1 => JetHTTPError::InvalidUrl,
+        1 => JetHTTPError::InvalidURL,
         2 => JetHTTPError::InvalidHeader,
         3 => JetHTTPError::InvalidStatus,
         4 => JetHTTPError::BodyConsumed,
@@ -165,7 +165,7 @@ fn jet_http_error_from_surface_name(
 ) -> Option<JetHTTPError> {
     let ordinal = match variant {
         "InvalidMethod" => 0,
-        "InvalidUrl" => 1,
+        "InvalidURL" => 1,
         "InvalidHeader" => 2,
         "InvalidStatus" => 3,
         "BodyConsumed" => 4,
@@ -273,7 +273,7 @@ impl std::fmt::Display for JetHTTPError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidMethod => formatter.write_str("invalid HTTP method"),
-            Self::InvalidUrl => formatter.write_str("invalid HTTP URL"),
+            Self::InvalidURL => formatter.write_str("invalid HTTP URL"),
             Self::InvalidHeader => formatter.write_str("invalid HTTP header"),
             Self::InvalidStatus => formatter.write_str("invalid HTTP status"),
             Self::BodyConsumed => formatter.write_str("HTTP body was already consumed"),

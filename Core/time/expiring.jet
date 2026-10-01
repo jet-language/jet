@@ -9,10 +9,10 @@
 // a negative TTL is already expired there.  The same rule makes every
 // non-positive remaining interval return zero.
 /// True only when `now_ms` is strictly after `expires_at_ms`.
-pub fn expired(expires_at_ms: Int, now_ms: Int) -> Bool { now_ms > expires_at_ms }
+pub fn expired(expires_at_ms: Int, now_ms: Int) -> Bool Never! { now_ms > expires_at_ms }
 
 /// Remaining milliseconds, clamped at zero and saturated at `Int`'s maximum.
-pub fn remaining_ms(expires_at_ms: Int, now_ms: Int) -> Int {
+pub fn remaining_ms(expires_at_ms: Int, now_ms: Int) -> Int Never! {
     if now_ms >= expires_at_ms -> return 0
     // When `now_ms` is negative, subtraction can exceed the positive Int
     // range even though the interval is valid.  Saturate instead of wrapping.

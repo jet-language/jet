@@ -28,15 +28,7 @@ use std::rc::Rc;
 
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
-    line_at_byte_offset(&cx.src, offset)
-}
-
-fn line_at_byte_offset(src: &str, offset: usize) -> usize {
-    src.as_bytes()[..offset.min(src.len())]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count()
-        + 1
+    cx.src_line_col(offset).0
 }
 
 /// Construct the checked identity for a method implementation. The owner is
@@ -195,16 +187,18 @@ fn bind_resource_param(
 
 #[cfg(test)]
 mod tests {
-    use super::line_at_byte_offset;
+    use jet_foundation::Diagnostics::LineIndex;
 
     #[test]
     fn coverage_line_accepts_offsets_inside_multibyte_prefixes() {
         let src = "é🚀—λ\nfn run() {}\n";
+        let lines = LineIndex::new(src);
+        let line_at = |offset| lines.line_col(src, offset).0;
         for offset in 0..="é🚀—λ".len() {
-            assert_eq!(line_at_byte_offset(src, offset), 1, "offset {offset}");
+            assert_eq!(line_at(offset), 1, "offset {offset}");
         }
-        assert_eq!(line_at_byte_offset(src, "é🚀—λ\n".len()), 2);
-        assert_eq!(line_at_byte_offset(src, usize::MAX), 3);
+        assert_eq!(line_at("é🚀—λ\n".len()), 2);
+        assert_eq!(line_at(usize::MAX), 3);
     }
 }
 
@@ -229,7 +223,9 @@ fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFu
         Some(from_ty.clone()),
     );
     prepare_interrupt_callback_locals(&conversion.body, cx, &mut env);
-    let body = lower_stmts(&conversion.body, cx, &mut env);
+    // The conversion body is a value block: its trailing expression is the
+    // converted target value, exactly as in an ordinary value-returning fn.
+    let body = lower_value_block(&conversion.body, cx, &mut env);
     note_stack_sentry_in_tir(&body, &env);
     TFunc {
         name: name.clone(),
@@ -404,17 +400,26 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     note_stack_sentry_in_tir(&body, &env);
     let uses_stack_sentry = env.stack_sentry_needed();
     // #3740: an empty failure set returns its success value directly. The body
-    // above keeps the checked carrier; MIR unwraps it at each return.
+    // above keeps the checked carrier; MIR unwraps it at each return. A
+    // `Never Never!` function has no success value to return, so it keeps the
+    // `Result<Never, Never>` carrier and its callers' `Try` proves both edges
+    // unreachable.
     let plain_return = crate::Codegen::TIR::function_has_plain_return(f)
         .then(|| match &return_type {
-            Type::Result { ok, err } if err.is_never() => Some(ok.as_ref().clone()),
+            Type::Result { ok, err } if err.is_never() && !ok.is_never() => {
+                Some(ok.as_ref().clone())
+            }
             _ => None,
         })
         .flatten();
-    let failure_carrier = if plain_return.is_some() {
-        TFailureCarrier::Infallible
-    } else {
-        function_failure_carrier(f)
+    // A plain `T? Never!` return has the executable shape of a `T?` function:
+    // a `?` on an absent value inside it returns `None`.
+    let failure_carrier = match &plain_return {
+        Some(Type::Option(value)) => TFailureCarrier::Optional {
+            value: value.as_ref().clone(),
+        },
+        Some(_) => TFailureCarrier::Infallible,
+        None => function_failure_carrier(f),
     };
     TFunc {
         name: f.name.clone(),
@@ -618,7 +623,8 @@ fn lower_contract_clause(
     stack_sentry_needed: &Rc<Cell<bool>>,
     cx: &Cx,
 ) -> TContract {
-    let (_, line, _) = crate::Codegen::TIR::tir_src_line_at(&cx.src, clause.span.start);
+    let (_, line, _) =
+        crate::Codegen::TIR::tir_src_line_at(&cx.src, cx.src_lines(), clause.span.start);
     let bindings = contract_fact_bindings(f, result_binding, owner_type, cx);
     TContract {
         kind,

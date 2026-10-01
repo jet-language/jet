@@ -543,7 +543,7 @@ fn distinct_capability_marker_is_visible_in_reflection() {
             type_markers: vec![marker],
             derives: vec![("Comparable".to_string(), span())],
             quantity: None,
-            name: "CustomerId".to_string(),
+            name: "CustomerID".to_string(),
             name_span: span(),
             base: Type::Int,
             base_span: span(),

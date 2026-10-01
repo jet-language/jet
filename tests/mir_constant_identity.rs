@@ -475,3 +475,75 @@ fn checked_private_constant_identity_survives_cross_module_calls_imports_and_sha
 
     assert_web_output("mir_constant_identity_web");
 }
+
+const PURE_FOLD_SOURCE: &str = r#"
+fn square(value: Int) -> Int {
+    value * value
+}
+
+fn greet(name: String) -> String {
+    "hello {name}"
+}
+
+fn noisy() -> Int {
+    print("noisy")
+    5
+}
+
+fn run() {
+    squared :: square(12)
+    greeting :: greet("jet")
+    total :: [4, 5, 6].reduce(0, (acc: Int, n: Int) -> acc + n)
+    a :: 7
+    b :: 3
+    larger :: if a > b -> a * 2 else -> b
+    side :: noisy()
+    print("{squared} {greeting} {total} {larger} {side}")
+}
+"#;
+
+/// Compile time is explicit in the checker, so an ordinary immutable binding
+/// over pure work reaches MIR as a runtime computation. The MIR pure-call
+/// fold must turn it back into a literal for every tier, while work with an
+/// effect still runs, once, at run time.
+#[test]
+fn immutable_bindings_over_pure_work_fold_to_literals() {
+    let scratch = common::Scratch::new("mir_pure_fold");
+    fs::write(scratch.path.join("main.jet"), PURE_FOLD_SOURCE).unwrap();
+    let jet = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(args)
+            .arg("main.jet")
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .env("JET_STORE_DIR", scratch.path.join("cache"))
+            .env("JETPACK_ROOT", scratch.path.join("jetpack"))
+            .output()
+            .expect("jet should launch");
+        assert!(
+            output.status.success(),
+            "jet {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let rust = jet(&["emit", "--rust"]);
+    for literal in [
+        "JetInt::from_i64(144)",
+        "\"hello jet\".to_string()",
+        "JetInt::from_i64(15)",
+        "JetInt::from_i64(14)",
+    ] {
+        assert!(
+            rust.contains(literal),
+            "a pure immutable binding did not fold to `{literal}`"
+        );
+    }
+    assert!(
+        !rust.contains("jet_list_reduce(__jet_v_"),
+        "the pure reduce over a literal list still runs at run time"
+    );
+    for mode in [&["run"][..], &["run", "--interpret"][..]] {
+        assert_eq!(jet(mode), "noisy\n144 hello jet 15 14 5\n", "jet {mode:?}");
+    }
+}

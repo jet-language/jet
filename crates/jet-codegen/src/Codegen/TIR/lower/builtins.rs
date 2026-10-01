@@ -589,7 +589,7 @@ pub(crate) fn resolve_builtin_op(
                 };
                 // D-LISTREMOVE1/F: PriorityQueue reuses List's exact selector
                 // shape and panic-line convention (criterion c6 on #1481).
-                let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+                let line = cx.src_line_col(method_span.start).0;
                 TBuiltinOp::PriorityQueueRemove { line, mode }
             } else if is_list {
                 let Some(mode) = list_remove_mode else {
@@ -597,7 +597,7 @@ pub(crate) fn resolve_builtin_op(
                 };
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
-                let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+                let line = cx.src_line_col(method_span.start).0;
                 TBuiltinOp::RemoveList { line, mode }
             } else {
                 return None;
@@ -817,7 +817,7 @@ pub(crate) fn resolve_builtin_op(
         ("to_ascii_upper", 0) if is_string => TBuiltinOp::ToAsciiUpper,
         ("to_ascii_lower", 0) if is_string => TBuiltinOp::ToAsciiLower,
         ("slice", 2) if is_string => {
-            let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
+            let line = cx.src_line_col(receiver.span().start).0;
             TBuiltinOp::Slice { line }
         }
         ("slice", 2) => TBuiltinOp::ListSlice,
@@ -889,7 +889,7 @@ pub(crate) fn resolve_builtin_op(
         }
         // D-DYNARRAY1: `list.view(a..b)`
         ("view", 2) => {
-            let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
+            let line = cx.src_line_col(receiver.span().start).0;
             TBuiltinOp::ViewNew { line }
         }
         ("split_write", 1) => {
@@ -1076,6 +1076,7 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::TryStringPush
             | TBuiltinOp::Pop
             | TBuiltinOp::InsertMap
+            | TBuiltinOp::InsertList
             | TBuiltinOp::AddNewMap
             | TBuiltinOp::MapSetDefault
             | TBuiltinOp::MapUpdate
@@ -1091,6 +1092,7 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::SetIntersectionUpdate
             | TBuiltinOp::SetSymmetricDifferenceUpdate
             | TBuiltinOp::SetPop
+            | TBuiltinOp::SetRemove
             | TBuiltinOp::SetReplace
             | TBuiltinOp::PriorityQueuePop
             | TBuiltinOp::SortedSetInsert

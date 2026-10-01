@@ -1,0 +1,53 @@
+// D-SHAPE-PLACE1=A: `&place` is the exclusive write window for any place, a
+// name followed by field or index projections. The callee edits the owner's
+// storage directly; nothing is copied in or out.
+struct Node {
+    direct: [String]
+    count: Int
+}
+
+struct Graph {
+    nodes: [Node]
+    root: Node
+}
+
+struct Pair {
+    left: Int
+    right: Int
+}
+
+fn add(set: &[String], name: String) {
+    &set.push(name)
+}
+
+fn bump(value: &Int) {
+    value += 1
+}
+
+fn swap(a: &Int, b: &Int) {
+    held :: a
+    a = b
+    b = held
+}
+
+fn run() {
+    node := Node{direct: [String]{}, count: 0}
+    add(&node.direct, "a")
+    bump(&node.count)
+    print("field: {node.direct.len()} {node.count}")
+
+    values := [10, 20, 30]
+    bump(&values[1])
+    print("index: {values[1]}")
+
+    graph := Graph{nodes: [Node{direct: [String]{}, count: 5}], root: Node{direct: [String]{}, count: 0}}
+    add(&graph.nodes[0].direct, "x")
+    add(&graph.root.direct, "y")
+    bump(&graph.nodes[0].count)
+    print("nested: {graph.nodes[0].direct.len()} {graph.root.direct.len()} {graph.nodes[0].count}")
+
+    // Different known fields are disjoint, so both windows may be live.
+    pair := Pair{left: 1, right: 2}
+    swap(&pair.left, &pair.right)
+    print("disjoint: {pair.left} {pair.right}")
+}

@@ -13,6 +13,8 @@ use jet_foundation::Names::StructureFact;
 use jet_foundation::Registry;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
+use crate::absolutize;
+
 pub(crate) fn run_structure(args: &[String], json: bool, color: bool, gates: jet::Policy::GateSet) {
     if args.iter().any(|argument| argument == "--core") {
         if json {
@@ -73,16 +75,6 @@ fn entry_file(args: &[String]) -> Option<String> {
         .cloned()
 }
 
-fn absolutize(path: &str) -> PathBuf {
-    let path = PathBuf::from(path);
-    if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    }
-}
 fn render_core_text() {
     println!("core");
     println!("bootstrap:");

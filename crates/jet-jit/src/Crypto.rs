@@ -17,8 +17,7 @@ use jet_foundation::Prelude::{jet_as_bytes, jet_e0956_unsupported};
 
 pub(crate) mod runtime {
     #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
-    include!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+    pub use jet_unicode::*;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
@@ -97,13 +96,6 @@ pub(crate) mod runtime {
         Ok(JetSigningKey(bytes))
     }
 
-}
-
-/// Interpreter ambient: rebuild X25519SecretKey without a Cranelift heap.
-pub(crate) fn x25519_secret_from_vec(
-    bytes: Vec<u8>,
-) -> Result<runtime::JetX25519SecretKey, String> {
-    runtime::x25519_secret_from_bytes(bytes)
 }
 
 pub(crate) enum CryptoValue {

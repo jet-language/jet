@@ -1229,20 +1229,6 @@ fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
     status
 }
 
-/// Blocks until a message arrives or the channel closes — matches AOT
-/// `Channel.receive()` + `??` on `Result` (not `try_receive`).
-/// parity: guard tests/dev.rs::scheduler_spawn_runs_via_jit
-fn jet_jit_channel_receive_status(ch: i64) -> i64 {
-    let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
-    let Some(chan) = chan else {
-        host_fault("jit channel receive: bad handle");
-        return JitWaitStatus::Panicked as i64;
-    };
-    wait_status(|| match chan.receive() {
-        Some(v) => v + 1,
-        None => 0,
-    })
-}
 /// Marshal `JetReceiver::receive` as a real `Result<T, Closed>` carrier.
 /// Payload bits stay unchanged; `Closed` is the sole unit error variant.
 fn jet_jit_channel_receive_result(ch: i64) -> i64 {
@@ -1316,21 +1302,6 @@ fn jet_jit_channel_delay_ms(ch: i64) -> i64 {
     chan.delay_ms()
 
 }
-fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
-    let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
-    let Some(chan) = chan else {
-        host_fault("jit channel receive: bad handle");
-        return JitWaitStatus::Panicked as i64;
-    };
-    wait_status(|| match chan.receive() {
-        Some(v) => v,
-        None => {
-            with_runtime_mut(|rt| rt.set_trap("channel closed"));
-            0
-        }
-    })
-}
-
 fn jet_jit_panic_channel_closed(_line: u32) -> i64 {
     trap_panic("channel closed")
 }

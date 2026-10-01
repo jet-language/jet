@@ -663,25 +663,6 @@ pub struct ProgramBundle {
     pub edition: String,
 }
 
-/// One ordinary `.Model` package output projected by the loader.
-///
-/// This is deliberately a neutral fact carrier. Foundation records only the
-/// source/package identity and manifest field view; package parsing and provider
-/// execution remain outside the sema/codegen dependency direction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelOutputFact {
-    pub package: String,
-    pub output: String,
-    pub signature_name: Option<String>,
-    /// Package identity needed by the runtime-only model seam.  Keeping this
-    /// beside the one output payload lets generated programs validate the same
-    /// identity without linking the compiler/package-model crate.
-    pub package_version: String,
-    pub license: String,
-    pub package_root: std::path::PathBuf,
-    pub fields: std::collections::BTreeMap<String, String>,
-}
-
 /// The typed package-only portion of D-MEM-GUARANTEE1. These facts are kept
 /// separate from source `PolicyDeclaration`s because `contain` and `harden`
 /// govern dependency boundaries and build profiles, not lexical scopes.
@@ -718,21 +699,10 @@ pub struct PackageGuarantees {
     /// declaration facts only; the host's tightened grant is carried
     /// separately and must be checked against this set at import time.
     pub authority_needs: Vec<String>,
-    /// D-MODEL-PACKAGE1=A: ordinary `.Model` outputs visible to the checked
-    /// source graph. Every source binding consumes this one registry; no
-    /// provider or execution tier reparses package manifests.
-    pub model_outputs: Vec<ModelOutputFact>,
 
     /// D-EFFECT-AUTHORITY1: the application-boundary policy and the exact
     /// sema-projected effects carried into every execution tier.
     pub application_authority: crate::Authority::ApplicationAuthority,
-}
-
-impl ProgramBundle {
-    /// Return the checked model-output registry projected by Loader.
-    pub fn model_outputs(&self) -> &[ModelOutputFact] {
-        &self.package_guarantees.model_outputs
-    }
 }
 
 #[derive(Debug)]

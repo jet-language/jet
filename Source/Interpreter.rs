@@ -184,9 +184,13 @@ pub fn run_checked(
         Some(decision_ledger),
     );
     let config = mir_eval_config(program, try_anyway, invocation, release_devtools_policy);
-    append_parked_task_report(mir_eval_outcome(
-        crate::Codegen::MIREval::evaluate_mir_program_with_config(program, artifact, &config),
-    ))
+    // Edition-gated Core kernels read the package edition at runtime; bind the
+    // program's edition like AOT (`__JET_PACKAGE_EDITION`) and the JIT do.
+    jet_foundation::PackageEdition::with_package_edition(&program.facts.edition, || {
+        append_parked_task_report(mir_eval_outcome(
+            crate::Codegen::MIREval::evaluate_mir_program_with_config(program, artifact, &config),
+        ))
+    })
 }
 
 fn mir_eval_config(
@@ -301,6 +305,18 @@ fn prelude_schedule(schedule: crate::AST::EverySchedule) -> jet_jit::Job::JetJob
             jet_jit::Job::JetJobSchedule::WallClockTime { hour, minute }
         }
     }
+}
+
+/// Lower a checked runtime bundle for a Cranelift dev build (#3953): the same
+/// Cranelift MIR artifact `jet run` executes, so both tiers run one program.
+pub fn lower_for_dev_aot(
+    bundle: &ProgramBundle,
+    profile: &str,
+) -> (jet_foundation::MIR::MirProgram, jet_foundation::MIR::MirArtifactId) {
+    crate::lower_checked_semantic_mir_program_for(
+        bundle,
+        artifact_request_for(bundle, jet_foundation::MIR::MirArtifactTarget::Cranelift, profile),
+    )
 }
 
 pub(crate) fn artifact_request_for(
@@ -1633,23 +1649,6 @@ pub fn dev_iteration_with_gates_profile(
         gates,
         profile,
         &BTreeMap::new(),
-    )
-}
-
-pub fn dev_iteration_with_gates_and_settings(
-    file: &str,
-    try_anyway: bool,
-    use_interpreter: bool,
-    gates: jet_foundation::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-) -> RunOutcome {
-    dev_iteration_with_gates_profile_and_settings(
-        file,
-        try_anyway,
-        use_interpreter,
-        gates,
-        "dev",
-        setting_overrides,
     )
 }
 

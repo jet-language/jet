@@ -417,7 +417,7 @@ fn run() {
     if http_client.get("__HTTP_URL__/path\nInjected: yes") == {
         .Ok(_) -> print("http url accepted")
         .Err(error) -> {
-            if error == .InvalidUrl -> print("http url rejected")
+            if error == .InvalidURL -> print("http url rejected")
             else -> print("http url wrong")
         }
         else -> print("http url unexpected")
@@ -589,7 +589,7 @@ fn run() {
     if ws.connect("__WS_URL__/path\nInjected: yes") == {
         .Ok(_) -> print("ws accepted")
         .Err(error) -> {
-            if error == .InvalidUrl -> print("ws rejected")
+            if error == .InvalidURL -> print("ws rejected")
             else -> print("ws wrong error")
         }
         else -> print("ws unexpected")

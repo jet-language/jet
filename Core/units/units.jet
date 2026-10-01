@@ -10,13 +10,13 @@ package {
 }
 use core as core
 use core.math as math
-pub fn from(magnitude: Float, unit: Float) -> Measurement<Float> {
+pub fn from(magnitude: Float, unit: Float) -> Measurement<Float> Never! {
     // Measurements carry an SI value and uncertainty; the unit scale is
     // applied at construction because the carrier has no unit field.
     measurement(magnitude * unit, uncertainty: 0.0)
 }
 
-pub fn si(magnitude: Float) -> Measurement<Float> { measurement(magnitude, uncertainty: 0.0) }
+pub fn si(magnitude: Float) -> Measurement<Float> Never! { measurement(magnitude, uncertainty: 0.0) }
 
 NANO :: 0.000000001
 
@@ -32,24 +32,24 @@ MEGA :: 1000000.0
 
 GIGA :: 1000000000.0
 
-pub fn scale(m: Measurement<Float>, factor: Float) -> Measurement<Float> {
+pub fn scale(m: Measurement<Float>, factor: Float) -> Measurement<Float> Never! {
     uncertainty := m.uncertainty * math.abs_float(factor)
     measurement(m.value * factor, uncertainty: uncertainty)
 }
 
-pub fn add(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> { a + b }
+pub fn add(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { a + b }
 
-pub fn sub(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> { a - b }
+pub fn sub(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> Never! { a - b }
 
-pub fn mul(a: Measurement<Float>, n: Float) -> Measurement<Float> {
+pub fn mul(a: Measurement<Float>, n: Float) -> Measurement<Float> Never! {
     a * measurement(n, uncertainty: Float{0.0})
 }
 
-pub fn div(a: Measurement<Float>, n: Float) -> Measurement<Float> {
+pub fn div(a: Measurement<Float>, n: Float) -> Measurement<Float> Never! {
     a / measurement(n, uncertainty: Float{0.0})
 }
 
-pub fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> {
+pub fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> Never! {
     // A unit scale must be finite and non-zero.  Rejecting an invalid target
     // as an identity conversion keeps the non-fallible public carrier intact
     // without manufacturing an infinite or NaN measurement.
@@ -61,14 +61,14 @@ pub fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> {
     converted
 }
 
-pub fn to_si(m: Measurement<Float>) -> Float { m.value }
+pub fn to_si(m: Measurement<Float>) -> Float Never! { m.value }
 
-pub fn abs(m: Measurement<Float>) -> Measurement<Float> {
+pub fn abs(m: Measurement<Float>) -> Measurement<Float> Never! {
     if m.value < (Float{0.0}) -> return measurement(Float{0.0} - m.value, uncertainty: m.uncertainty)
     ~m
 }
 
-pub fn show(m: Measurement<Float>) -> String { "{m.value} ± {m.uncertainty}" }
+pub fn show(m: Measurement<Float>) -> String Never! { "{m.value} ± {m.uncertainty}" }
 
 METER :: 1.0
 // British spellings remain source-compatible with the original Core surface.
@@ -86,26 +86,26 @@ MEBIBYTE :: 1048576.0
 
 GIBIBYTE :: 1073741824.0
 
-pub fn meters(n: Float) -> Measurement<Float> { from(n, 1.0) }
+pub fn meters(n: Float) -> Measurement<Float> Never! { from(n, 1.0) }
 
-pub fn kilometers(n: Float) -> Measurement<Float> { from(n, 1000.0) }
-pub fn metres(n: Float) -> Measurement<Float> { meters(n) }
+pub fn kilometers(n: Float) -> Measurement<Float> Never! { from(n, 1000.0) }
+pub fn metres(n: Float) -> Measurement<Float> Never! { meters(n) }
 
-pub fn kilometres(n: Float) -> Measurement<Float> { kilometers(n) }
+pub fn kilometres(n: Float) -> Measurement<Float> Never! { kilometers(n) }
 
-pub fn grams(n: Float) -> Measurement<Float> { from(n, 0.001) }
+pub fn grams(n: Float) -> Measurement<Float> Never! { from(n, 0.001) }
 
-pub fn kilograms(n: Float) -> Measurement<Float> { from(n, 1.0) }
+pub fn kilograms(n: Float) -> Measurement<Float> Never! { from(n, 1.0) }
 
-pub fn seconds(n: Float) -> Measurement<Float> { from(n, 1.0) }
+pub fn seconds(n: Float) -> Measurement<Float> Never! { from(n, 1.0) }
 
-pub fn milliseconds(n: Float) -> Measurement<Float> { from(n, 0.001) }
+pub fn milliseconds(n: Float) -> Measurement<Float> Never! { from(n, 0.001) }
 
-pub fn bytes_of(n: Float) -> Measurement<Float> { from(n, 1.0) }
+pub fn bytes_of(n: Float) -> Measurement<Float> Never! { from(n, 1.0) }
 
-pub fn kibibytes(n: Float) -> Measurement<Float> { from(n, 1024.0) }
+pub fn kibibytes(n: Float) -> Measurement<Float> Never! { from(n, 1024.0) }
 
-pub fn equals(a: Measurement<Float>, b: Measurement<Float>) -> Bool {
+pub fn equals(a: Measurement<Float>, b: Measurement<Float>) -> Bool Never! {
     left :: to_si(a)
     right :: to_si(b)
     d := left - right
@@ -113,13 +113,13 @@ pub fn equals(a: Measurement<Float>, b: Measurement<Float>) -> Bool {
     d < 0.000000001
 }
 
-pub fn ratio(a: Measurement<Float>, b: Measurement<Float>) -> Float {
+pub fn ratio(a: Measurement<Float>, b: Measurement<Float>) -> Float Never! {
     den :: to_si(b)
     if den == 0.0 -> return 0.0
     to_si(a) / den
 }
 
-pub fn is_zero(m: Measurement<Float>) -> Bool {
+pub fn is_zero(m: Measurement<Float>) -> Bool Never! {
     v :: to_si(m)
     if v < 0.0 -> return v > -0.000000001
     v < 0.000000001

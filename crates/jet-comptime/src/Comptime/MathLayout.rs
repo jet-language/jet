@@ -118,55 +118,6 @@ pub fn integer_show(value: i64, signed: bool) -> String {
     }
 }
 
-pub fn integer_bound(signed: bool, bits: u8, maximum: bool) -> i64 {
-    let (lo, hi) = crate::AST::int_range(signed, bits);
-    integer_narrow(if maximum { hi } else { lo }, signed, bits)
-}
-pub fn integer_bound_value(signed: bool, bits: u8, maximum: bool) -> CtValue {
-    let (lo, hi) = crate::AST::int_range(signed, bits);
-    integer_value(
-        integer_narrow(if maximum { hi } else { lo }, signed, bits),
-        signed,
-        bits,
-    )
-}
-
-pub fn integer_bit_count(value: i64, width: u32, method: &str) -> Option<i64> {
-    let mask = if width == 64 {
-        u64::MAX
-    } else {
-        (1_u64 << width) - 1
-    };
-    let bits = (value as u64) & mask;
-    let ones = bits.count_ones();
-    let count = match method {
-        "count_ones" => ones,
-        "count_zeros" => width - ones,
-        "leading_zeros" => bits.leading_zeros() - (64 - width),
-        "trailing_zeros" => bits.trailing_zeros().min(width),
-        _ => return None,
-    };
-    Some(i64::from(count))
-}
-
-pub fn integer_shift_trap(op: BinOp, count: i128, bits: u8) -> Option<String> {
-    if !matches!(op, BinOp::Shl | BinOp::Shr) || (0..i128::from(bits)).contains(&count) {
-        return None;
-    }
-    let direction = if op == BinOp::Shl { "left" } else { "right" };
-    Some(format!(
-        "shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
-    ))
-}
-
-/// D-MODSEM1=A: the smallest value of a signed width divided by -1 leaves the
-/// width, but its REMAINDER is 0, which every width holds. Both `%` and `%%`
-/// answer 0 there — the decision says the two agree whenever they can, and a
-/// trap on one but not the other would break that. Only a zero divisor stops
-/// the program.
-pub fn integer_remainder_trap(right: i64) -> Option<&'static str> {
-    (right == 0).then_some(INTEGER_DIVIDE_ZERO)
-}
 /// The one wording for a zero divisor, shared by `%` and by `/%`
 /// (D-FLOORDIV1=A). `Prelude/Core/Division.rs` carries the same text.
 pub const INTEGER_DIVIDE_ZERO: &str = "divided by zero";
@@ -216,63 +167,6 @@ pub fn floored_mod(left: i128, right: i128) -> Option<i128> {
     } else {
         Some(remainder)
     }
-}
-
-pub fn integer_binop(
-    op: BinOp,
-    left: i64,
-    right: i64,
-    signed: bool,
-    bits: u8,
-    right_signed: bool,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    let a = integer_widen(left, signed);
-    let b = integer_widen(right, right_signed);
-    if let Some(fixed_op) = fixed_op(op) {
-        return fixed_result(
-            fixed_arithmetic::jet_fixed_arithmetic(
-                left,
-                right as i128,
-                fixed_op,
-                fixed_arithmetic::JET_FIXED_MODE_TRAP,
-                signed,
-                bits,
-                right_signed,
-            ),
-            signed,
-            bits,
-            false,
-            span,
-        );
-    }
-    match op {
-        BinOp::Eq => Ok(CtValue::Bool(a == b)),
-        BinOp::Ne => Ok(CtValue::Bool(a != b)),
-        BinOp::Lt => Ok(CtValue::Bool(a < b)),
-        BinOp::Gt => Ok(CtValue::Bool(a > b)),
-        BinOp::Le => Ok(CtValue::Bool(a <= b)),
-        BinOp::Ge => Ok(CtValue::Bool(a >= b)),
-        _ => Err(unsupported("this fixed-width integer operation", span)),
-    }
-}
-
-pub fn integer_neg(value: i64, bits: u8, span: Span) -> Result<CtValue, Diagnostic> {
-    fixed_result(
-        fixed_arithmetic::jet_fixed_arithmetic(
-            value,
-            0,
-            fixed_arithmetic::JET_FIXED_OP_NEG,
-            fixed_arithmetic::JET_FIXED_MODE_TRAP,
-            true,
-            bits,
-            true,
-        ),
-        true,
-        bits,
-        false,
-        span,
-    )
 }
 
 const MATH_TYPES: &[&str] = &[
@@ -1370,29 +1264,6 @@ pub(super) fn apply_method(
             Ok(from_lanes(name, &r))
         }
         _ => Err(unsupported(&format!("`{name}.{method}`"), span)),
-    })
-}
-
-pub fn lane_at(recv: &CtValue, index: i64, span: Span) -> Option<Result<CtValue, Diagnostic>> {
-    let (name, vals) = lanes(recv)?;
-    if !(Syntax::is_simd_lane_type(name)
-        || matches!(
-            name,
-            Syntax::LINALG_VEC2_TYPE | Syntax::LINALG_VEC3_TYPE | Syntax::LINALG_VEC4_TYPE
-        ))
-    {
-        return None;
-    }
-    let index = match simd_lanes::jet_simd_lane_index(index, name, vals.len()) {
-        Ok(index) => index,
-        Err(message) => return Some(Err(unsupported(&message, span))),
-    };
-    Some({
-        if let Some((_, int_vals)) = integer_lanes(recv) {
-            Ok(CtValue::Int(int_vals[index]))
-        } else {
-            Ok(lane_value(name, vals[index]))
-        }
     })
 }
 

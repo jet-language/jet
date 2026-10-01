@@ -16,18 +16,15 @@ pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
     clone_env(env)
 }
 
-pub(crate) fn tir_src_line_at(src: &str, offset: usize) -> (&str, u32, u32) {
-    if src.is_empty() {
-        return ("", 1, 1);
-    }
-    let offset = offset.min(src.len());
-    let (line, col) = crate::Diagnostics::span_line_col(src, offset);
-    let line_start = src[..offset].rfind('\n').map(|p| p + 1).unwrap_or(0);
-    let line_end = src[offset..]
-        .find('\n')
-        .map(|p| offset + p)
-        .unwrap_or(src.len());
-    (&src[line_start..line_end], line as u32, col as u32)
+/// Text, 1-based line and 1-based column of the line holding `offset`;
+/// `lines` indexes `src`.
+pub(crate) fn tir_src_line_at<'s>(
+    src: &'s str,
+    lines: &jet_foundation::Diagnostics::LineIndex,
+    offset: usize,
+) -> (&'s str, u32, u32) {
+    let (line, col) = lines.line_col(src, offset);
+    (lines.line_text(src, line), line as u32, col as u32)
 }
 
 fn safe_locals_snapshot(env: &LowerEnv) -> Vec<(String, TLocal)> {
@@ -49,7 +46,7 @@ fn safe_locals_snapshot(env: &LowerEnv) -> Vec<(String, TLocal)> {
 }
 
 pub(crate) fn capture_panic_loc(span: &Span, cx: &Cx, env: &LowerEnv) -> TPanicLoc {
-    let (src_line, line, col) = tir_src_line_at(&cx.src, span.start);
+    let (src_line, line, col) = tir_src_line_at(&cx.src, cx.src_lines(), span.start);
     TPanicLoc {
         file: cx.file.clone(),
         src_line: src_line.trim_end().to_string(),

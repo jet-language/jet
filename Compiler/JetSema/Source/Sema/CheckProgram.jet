@@ -1,12 +1,67 @@
 // Module-level declaration registration followed by function body checking.
 // The result explicitly reports when a source form lies beyond this checker
 // slice so consumers cannot treat its TIR as a complete semantic program.
+use jet_foundation.[
+    AccessConvention,
+    Diagnostic,
+    Expr,
+    Func,
+    Item,
+    MIRNameAlias,
+    MIRNameDeclaration,
+    MIRNameFacts,
+    MIRNameModule,
+    MIRNameReference,
+    MIRNameVisibility,
+    MIRRuntimeLayer,
+    MIRStructureFact,
+    MIRStructureFactKind,
+    MIRTargetHardwareUse,
+    Marker,
+    MetaAttr,
+    NamedSpan,
+    Param,
+    Program,
+    Span,
+    StateDecl,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TComptimeValue,
+    TContract,
+    TDeclarationFacts,
+    TEffectFacts,
+    TEffectSpan,
+    TExpr,
+    TFailureCarrier,
+    TFunc,
+    TFuncKind,
+    TGenericParam,
+    TParameter,
+    TStmt,
+    TTargetApplicability,
+    TTypeDef,
+    TUnsafeGate,
+    TVisibility,
+    TWebParamReconstruction,
+    Type,
+    ViewProvenance,
+    ViewProvenanceEntry,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    expr_span,
+    symbol_id,
+    tir_symbol_local,
+    type_with_effective_fn_returns,
+]
 
 pub struct SemaResult {
     pub module_name: String
     pub functions: [TFunc]
     pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MirTargetHardwareUse
+    pub hardware_use: MIRTargetHardwareUse
     pub name_references: [SemaNameReferenceFact]
     pub comptime_requests: [SemaComptimeRequest]
     pub comptime_body_sources: [SemaComptimeBodySource]
@@ -33,8 +88,9 @@ pub struct SemaGraphModuleResult {
     pub foreign_functions: [SemaCheckedForeignFunction]
     pub foreign_providers: [SemaCheckedForeignProvider]
     pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MirTargetHardwareUse
+    pub hardware_use: MIRTargetHardwareUse
     pub name_references: [SemaNameReferenceFact]
+    pub comptime_requests: [SemaComptimeRequest]
     pub comptime_body_sources: [SemaComptimeBodySource]
     pub compute_facts: [SemaComputeFunctionFacts]
     pub exact_int_reachable: Bool
@@ -77,7 +133,7 @@ pub struct SemaComptimeItemRequest {
     pub span: Span
     pub dependencies: [String]
     pub calls: [SemaComptimeRequest]
-    pub hardware_use: MirTargetHardwareUse
+    pub hardware_use: MIRTargetHardwareUse
     pub reachable_function_keys: [String]
 }
 
@@ -110,7 +166,7 @@ pub struct SemaRegistrationPackagePolicy {
     pub authority_allow: [String]?
     pub authority_deny: [String]?
     pub authority_needs: [String]
-    pub runtime_ceiling: MirRuntimeLayer?
+    pub runtime_ceiling: MIRRuntimeLayer?
     pub edition: String
 }
 
@@ -118,7 +174,7 @@ pub struct SemaComptimeDeclarationStage {
     pub modules: [SemaGraphModuleResult]
     pub imports: [SemaRegistrationImport]
     pub package_policies: [SemaRegistrationPackagePolicy]
-    pub names: MirNameFacts
+    pub names: MIRNameFacts
     pub sources: [SemaComptimeItemSource]
     pub diagnostics: [Diagnostic]
     pub complete: Bool
@@ -141,10 +197,11 @@ pub struct SemaComptimeFunctionResult {
     pub calls: [SemaComptimeRequest]
     pub reachable_function_keys: [String]
     pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MirTargetHardwareUse
+    pub hardware_use: MIRTargetHardwareUse
     pub name_references: [SemaNameReferenceFact]
     pub comptime_body_sources: [SemaComptimeBodySource]
     pub compute_facts: SemaComputeFunctionFacts
+    pub diagnostics: [Diagnostic]
     pub exact_int_reachable: Bool
     pub copy_events: [SemaCopyEvent]
     pub complete: Bool
@@ -158,10 +215,11 @@ pub struct SemaGraphResult {
     pub package_policies: [SemaRegistrationPackagePolicy]
     pub core_usage: SemaCoreUsageResult
     pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MirTargetHardwareUse
+    pub hardware_use: MIRTargetHardwareUse
     pub comptime_requests: [SemaComptimeRequest]
+    pub comptime_body_sources: [SemaComptimeBodySource]
     pub compute_facts: [SemaComputeFunctionFacts]
-    pub names: MirNameFacts
+    pub names: MIRNameFacts
     pub diagnostics: [Diagnostic]
     pub complete: Bool
 }
@@ -171,7 +229,7 @@ struct SemaFunctionResult {
     complete: Bool
     exact_int_reachable: Bool
     copy_events: [SemaCopyEvent]
-    hardware_use: MirTargetHardwareUse
+    hardware_use: MIRTargetHardwareUse
     comptime_body_sources: [SemaComptimeBodySource]
     compute_facts: SemaComputeFunctionFacts
 }
@@ -265,7 +323,7 @@ fn sema_function_view_contract_for_slot(map: ViewProvenanceMap, slot: [String]) 
 
 fn sema_function_return_view_provenance(func: Func, inferred: ViewProvenanceMap?, diagnostics: &[Diagnostic], complete: &Bool) -> ViewProvenanceMap? {
     declared_option := func.declared_return_view_provenance
-    if declared_option == None -> return inferred
+    if declared_option == None -> return ~inferred
     declared :: declared_option ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
     if inferred != None {
         inferred_map :: inferred
@@ -341,7 +399,7 @@ fn sema_function_view_maps_equal(left: ViewProvenanceMap?, right: ViewProvenance
     right_map :: right
     if left_map.entries.len() != right_map.entries.len() -> return false
     loop left_entry in left_map.entries {
-        right_entry := None
+        right_entry := ViewProvenanceEntry?{None}
         loop candidate in right_map.entries {
             if sema_function_view_slot_equal(left_entry.slot, candidate.slot) -> right_entry = Val(candidate)
         }
@@ -359,7 +417,7 @@ fn sema_function_view_maps_equal(left: ViewProvenanceMap?, right: ViewProvenance
     true
 }
 
-fn sema_function_publish_return_views(scopes: &[SemaScopeTable], function: TFunc) -> Bool Never! {
+fn sema_function_publish_return_views(scopes: &SemaScopeTable, function: TFunc) -> Bool Never! {
     provenance :: function.return_view_provenance ?? return false
     index := 0
     loop index < scopes.bindings.len() {
@@ -411,7 +469,7 @@ fn sema_item_symbol(item: Item, module_name: String, fallback_source_file: Strin
         else -> None
     }
 }
-fn sema_register_item(scopes: &[SemaScopeTable], declarations: &[SemaScopeDeclaration], item: Item, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Bool {
+fn sema_register_item(scopes: &SemaScopeTable, declarations: &[SemaScopeDeclaration], item: Item, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Bool {
     symbol :: sema_item_symbol(item, module_name, source_file, source_origin, source_segments) ?? return false
     if sema_scope_add_module_symbol(&scopes, symbol) {
         &declarations.push(SemaScopeDeclaration{symbol_id: symbol.id, item: item})
@@ -448,9 +506,11 @@ fn sema_failure_carrier(return_type: Type?) -> TFailureCarrier Never! {
                 .Named(name) -> {
                     if name == "Never" -> return TFailureCarrier.Infallible
                 }
+                else -> {}
             }
             return TFailureCarrier.Result{success: ok, error: err}
         }
+        else -> {}
     }
     TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
 }
@@ -464,7 +524,7 @@ fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?
     index := 0
     loop index < func.type_params.len() {
         parameter :: func.type_params[index]
-        bounds := [SymbolId]{}
+        bounds := [SymbolID]{}
         bound_index := 0
         loop bound_index < parameter.bounds.len() {
             bound := parameter.bounds[bound_index]
@@ -474,10 +534,6 @@ fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?
                 next
             }
             graph :: graph_option
-                complete = false
-                bound_index += 1
-                next
-            }
             resolved :: sema_type_graph_lookup_symbol(graph, module_identity, bound) ?? {
                 if graph.complete -> &diagnostics.push(sema_error("E0301", parameter.name_span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
                 complete = false
@@ -514,11 +570,11 @@ fn sema_function_normalize_owner_type(graph: SemaRegistrationGraph, owner_type: 
     if owner_type == {
         .Named(name) -> {
             nominal :: sema_type_resolve_nominal(graph, owner_type, caller_module_identity) ?? return owner_type
-            if nominal.generic_params.len() == 0 -> return owner_type
+            if nominal.generic_params.len() == 0 -> return ~owner_type
             args :: loop parameter in nominal.generic_params -> Type.Named{name: parameter.name}
             return Type.Apply{name: name, args: args}
         }
-        else -> return owner_type
+        else -> return ~owner_type
     }
 }
 
@@ -549,7 +605,7 @@ fn sema_function_owner_generic_params(graph: SemaRegistrationGraph, owner_type: 
             index += 1
             next
         }
-        bounds := [SymbolId]{}
+        bounds := [SymbolID]{}
         loop bound in parameter.bounds {
             resolved := sema_type_graph_lookup_symbol(graph, owner_module.module_identity, bound)
             if resolved == None {
@@ -596,7 +652,7 @@ fn sema_function_kind_owner_type(function_kind: TFuncKind) -> Type? {
 // the function is then checked again with those sites known, where each one
 // checks as the copy `~name` and leaves its source usable. A site whose type
 // does not copy stays a move, so its later use keeps E0121.
-fn sema_function_check(func: Func, owner_id: SymbolId, function_kind: TFuncKind, environment: ^SemaScopeEnvironment, module_scopes: SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+fn sema_function_check(func: Func, owner_id: SymbolID, function_kind: TFuncKind, environment: ^SemaScopeEnvironment, module_scopes: SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     updated := environment
     base_generic_params :: ~updated.generic_params
     share_known := [Span]{}
@@ -636,7 +692,7 @@ fn sema_function_accept_share_sites(share_known: &[Span], found: [SemaOwnershipS
     added
 }
 
-fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFuncKind, updated: &SemaScopeEnvironment, module_scopes: SemaScopeTable, share_known: [Span], share_found: &[SemaOwnershipShareSite], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFuncKind, updated: &SemaScopeEnvironment, module_scopes: SemaScopeTable, share_known: [Span], share_found: &[SemaOwnershipShareSite], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     if function_kind == TFuncKind.TopLevel {
         registered :: sema_scope_resolve(module_scopes, func.name) ?? return sema_function_check_unavailable(owner_id.key)
         if registered.id.key != owner_id.key || registered.span.start != func.name_span.start -> return sema_function_check_unavailable(owner_id.key)
@@ -651,16 +707,15 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFunc
     updated.generic_params = generic_params
 
     scopes := sema_scope_snapshot(module_scopes)
-    if updated.registration_graph != None {
-        graph :: updated.registration_graph ?? return sema_function_check_unavailable(owner_id.key)
+    if updated.registration_graph == .Val(graph) {
         sema_scope_apply_unit_policy_for_function(&scopes, graph, updated.module_identity, func.span)
     }
     state := sema_ownership_state_init()
+    state.fixed_length_write_params = updated.fixed_length_write_params
     state.share_known = share_known
     tail_store := sema_statement_tail_store_init()
     effective_return := sema_effective_return_type(func.return_type)
-    if updated.registration_graph != None {
-        graph :: updated.registration_graph ?? return sema_function_check_unavailable(owner_id.key)
+    if updated.registration_graph == .Val(graph) {
         effective_return = sema_type_resolve_declared_with_generics(graph, effective_return, module_identity, generic_params)
     }
     sema_scope_enter(&scopes, &state, owner_id.key)
@@ -700,7 +755,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFunc
     param_index := 0
     loop param_index < func.params.len() {
         parameter :: func.params[param_index]
-        parameter_ty :: type_with_effective_fn_returns(parameter.ty)
+        parameter_ty := type_with_effective_fn_returns(parameter.ty)
         if param_index == 0 && parameter.name == "self" {
             if function_kind == {
                 .Method(_, receiver_type) -> parameter_ty = receiver_type
@@ -709,12 +764,11 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFunc
             }
         }
         if parameter.variadic -> parameter_ty = Type.List{element: parameter_ty}
-        if updated.registration_graph != None {
-            graph :: updated.registration_graph ?? return sema_function_check_unavailable(owner_id.key)
+        if updated.registration_graph == .Val(graph) {
             parameter_ty = sema_type_resolve_declared_with_generics(graph, parameter_ty, module_identity, generic_params)
         }
         if parameter.root || parameter.variadic_bound_list != None || parameter.declared_view_from_names != None -> complete = false
-        default_expr := None
+        default_expr := TExpr?{None}
         if parameter.default != None {
             default_context := sema_check_context_init()
             default_context.unsafe_depth = context.unsafe_depth
@@ -757,7 +811,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFunc
                 }
             }
         }
-        local :: tir_symbol_local(parameter.name, parameter.name_span, param_symbol.id)
+        local := tir_symbol_local(parameter.name, parameter.name_span, param_symbol.id)
         local.mutable = param_mutable
         if !sema_function_explicit_receiver(function_kind, param_index, parameter) {
             public_label :: parameter.public_label.map((label) -> label.name) ?? parameter.name
@@ -784,14 +838,15 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFunc
     if contract.complete && contract.post.len() > 0 {
         body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
     }
-    if func.return_type != None {
-        declared_return :: func.return_type ?? Type.Named{name: "Unit"}
+    if func.return_type == .Val(declared_return) {
         declared_success := declared_return
-        if declared_return == {.Result(ok, _) -> declared_success = ok}
+        if declared_return == {
+            .Result(ok, _) -> declared_success = ok
+            else -> {}
+        }
         if declared_success != (Type.Named{name: "Unit"}) && !sema_stmt_block_has_no_fallthrough(func.body) -> complete = false
     }
     sema_ownership_finalize_references(&state, &diagnostics)
-    sema_function_reactive_apply_upgrade_flags(&func.body, context.reactive_upgrade_names)
     loop fact in context.call_facts -> &call_facts.push(fact)
     loop request in context.comptime_requests -> &comptime_requests.push(request)
     loop reference in context.name_references -> &name_references.push(reference)
@@ -806,7 +861,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolId, function_kind: TFunc
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
     effects :: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}
-    unsafe_gate := None
+    unsafe_gate := TUnsafeGate?{None}
     if func.is_unsafe && unsafe_gate_valid && func.unsafe_reason != None {
         reason :: func.unsafe_reason ?? ""
         unsafe_span :: func.unsafe_span ?? func.span
@@ -895,6 +950,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
     }
     environment := sema_scope_environment_init(None, module_name, "", module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, [TTypeDef]{}, local_declarations)
     environment.else_arms = program.else_arms
+    environment.fixed_length_write_params = sema_fixed_length_write_params(program.items)
 
     item_index = 0
     loop item_index < program.items.len() {
@@ -915,7 +971,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
                         complete = false
                     }
                 }
-                checked :: sema_function_check(memory_func, symbol_id(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, ^environment, scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+                checked :: sema_function_check(memory_func, symbol_id(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, ~environment, scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
                 sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
                 loop source in checked.comptime_body_sources -> &comptime_body_sources.push(source)
                 &compute_facts.push(checked.compute_facts)
@@ -941,7 +997,7 @@ fn sema_comptime_find_checked_function(functions: [SemaComptimeFunctionResult], 
     None
 }
 
-fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult, functions: &[TFunc], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
+pub fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult, functions: &[TFunc], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
     function :: result.function ?? return false
     &functions.push(function)
     loop fact in result.call_facts -> &call_facts.push(fact)
@@ -957,7 +1013,7 @@ struct SemaComptimeFunctionSource {
 }
 
 fn sema_comptime_method_kind(function: Func, owner_type: Type, trait_symbol: Symbol?) -> TFuncKind Never! {
-    self_convention := None
+    self_convention := AccessConvention?{None}
     if function.params.len() > 0 && function.params[0].name == "self" -> self_convention = Val(function.params[0].convention)
     if trait_symbol == {
         .Val(resolved_trait) -> return TFuncKind.TraitMethod{is_unsafe: function.is_unsafe, self_convention: self_convention, owner_type: owner_type, trait_name: resolved_trait.id, serde_codec: None}
@@ -966,7 +1022,7 @@ fn sema_comptime_method_kind(function: Func, owner_type: Type, trait_symbol: Sym
 }
 
 
-fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_identity: String, function_key: String) -> SemaComptimeFunctionSource? {
+pub fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_identity: String, function_key: String) -> SemaComptimeFunctionSource? {
     loop source_module in graph.modules {
         if source_module.module_identity != module_identity -> next
         loop function in source_module.functions {
@@ -1019,7 +1075,9 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, values: [SemaC
         complete: false,
     }
     source :: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
-    if !source.declaration.is_comptime && !source.declaration.is_pure -> return unresolved
+    // Any function a compile-time body reaches runs while building; the
+    // evaluator's effect gate (E3401) rejects an effectful call, as in the
+    // Rust interpreter. No `prep fn` or `pure` marker is required.
     resolved_graph := sema_comptime_graph_with_values(graph, values)
     module_index :: sema_name_module_index(resolved_graph, module_identity) ?? return unresolved
     source_module := resolved_graph.modules[module_index]
@@ -1109,7 +1167,7 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, values: [SemaC
     }
 }
 
-fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, scopes: SemaScopeTable, environment: SemaScopeEnvironment, comptime_functions: [SemaComptimeFunctionResult], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MirTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &[Bool], copy_events: &[SemaCopyEvent]) -> Bool {
+fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, scopes: SemaScopeTable, environment: SemaScopeEnvironment, comptime_functions: [SemaComptimeFunctionResult], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MIRTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent]) -> Bool {
     cached := sema_comptime_find_checked_function(comptime_functions, source_module.module_identity, registered.symbol.id.key)
     if cached == {
         .Val(checked_function) -> {
@@ -1190,6 +1248,16 @@ fn sema_check_foreign_handle_adapter_key(module_row: SemaRegistrationModule, pro
     None
 }
 
+// D-SHAPE-PLACE1=A: every module's items, so the length-preserving fact
+// covers calls into other modules like the Rust bundle-wide fact.
+fn sema_check_bundle_items(graph: SemaRegistrationGraph) -> [Item] Never! {
+    items := [Item]{}
+    loop source_module in graph.modules {
+        loop item in source_module.program.items -> &items.push(item)
+    }
+    items
+}
+
 fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], check_bodies: Bool, checked_types: [TTypeDef]) -> SemaGraphModuleResult {
     source_module := graph.modules[module_index]
     diagnostics := [Diagnostic]{}
@@ -1197,6 +1265,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
     call_facts := [SemaCallSiteFact]{}
     hardware_use := sema_hardware_empty_use()
     name_references := [SemaNameReferenceFact]{}
+    comptime_requests := [SemaComptimeRequest]{}
     comptime_body_sources := [SemaComptimeBodySource]{}
     compute_facts := [SemaComputeFunctionFacts]{}
     exact_int_reachable := false
@@ -1212,6 +1281,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
     environment.else_arms = source_module.program.else_arms
 
     program := source_module.program
+    environment.fixed_length_write_params = sema_fixed_length_write_params(sema_check_bundle_items(graph))
     if program.script_body.len() > 0 || program.block_spans.len() > 0 || program.fenced_statements.len() > 0 || program.web_target_ceiling != None || program.pub_file || program.no_prelude || program.default_target != None || program.html_path != None || sema_function_memory_has_unsupported_policies(program.policy_declarations) || program.user_policy_declarations.len() > 0 || program.applied_rules.len() > 0 || program.rule_facts.len() > 0 -> complete = false
     job_diagnostics := sema_check_job_names(program.items)
     if job_diagnostics.len() > 0 {
@@ -1328,7 +1398,13 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
         }
         loop nominal in source_module.nominals {
             loop method in nominal.methods {
-                if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, scopes, environment, comptime_functions, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events) -> complete = false
+                if !method.declaration.compiler_generated {
+                    if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, scopes, environment, comptime_functions, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events) -> complete = false
+                    next
+                }
+                generated_diagnostics := [Diagnostic]{}
+                if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, scopes, environment, comptime_functions, &generated_diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events) -> complete = false
+                sema_author_facing_diagnostics(nominal.symbol.span, generated_diagnostics, &diagnostics)
             }
         }
         loop implementation in source_module.impls {
@@ -1379,6 +1455,14 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
     }
     foreign_functions := sema_checked_foreign_functions(graph, source_module, foreign_providers, &diagnostics)
     if diagnostics.len() > foreign_diagnostic_count -> complete = false
+    if check_bodies && source_module.source_origin == SemaSourceOrigin.Snapshot {
+        foreign_aliases := [String]{}
+        loop edge in graph.edges {
+            if edge.source_module_identity != source_module.module_identity -> next
+            if edge.foreign_binding == .Val(binding) -> &foreign_aliases.push(binding.alias)
+        }
+        loop diagnostic in sema_liveness_unused_imports(program, foreign_aliases) -> &diagnostics.push(diagnostic)
+    }
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_module.source_segments)
     SemaGraphModuleResult{
         package_identity: source_module.package_identity,
@@ -1398,6 +1482,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
         call_facts: call_facts,
         hardware_use: hardware_use,
         name_references: name_references,
+        comptime_requests: comptime_requests,
         comptime_body_sources: comptime_body_sources,
         compute_facts: compute_facts,
         exact_int_reachable: exact_int_reachable,
@@ -1421,84 +1506,132 @@ fn sema_name_module_index(graph: SemaRegistrationGraph, module_identity: String)
     None
 }
 
-fn sema_name_visibility(value: Int) -> MirNameVisibility Never! {
-    if value >= 2 -> return MirNameVisibility.Public
-    if value == 1 -> return MirNameVisibility.Package
-    MirNameVisibility.Private
+fn sema_name_visibility(value: Int) -> MIRNameVisibility Never! {
+    if value >= 2 -> return MIRNameVisibility.Public
+    if value == 1 -> return MIRNameVisibility.Package
+    MIRNameVisibility.Private
 }
 
-fn sema_name_add_declaration(facts: &[MirNameFacts], module_index: Int, name: String, path: String, kind: String, span: Span, visibility: MirNameVisibility) Never! {
-    loop row in facts.declarations {
-        if row.module_index == module_index && row.name == name -> return
-    }
-    &facts.declarations.push(MirNameDeclaration{module_index: module_index, name: name, path: path, kind: kind, span: span, visibility: visibility})
+// Name facts keep the first row per identity. Rows are appended as found and
+// `sema_name_build_facts` drops later duplicates once, in one indexed pass.
+fn sema_name_add_declaration(facts: &MIRNameFacts, module_index: Int, name: String, path: String, kind: String, span: Span, visibility: MIRNameVisibility) Never! {
+    &facts.declarations.push(MIRNameDeclaration{module_index: module_index, name: name, path: path, kind: kind, span: span, visibility: visibility})
 }
 
-fn sema_name_add_reference(facts: &[MirNameFacts], graph: SemaRegistrationGraph, span: Span, symbol: Symbol, kind: String) Never! {
+fn sema_name_add_reference(facts: &MIRNameFacts, graph: SemaRegistrationGraph, owner_names: [String:String], span: Span, symbol: Symbol, kind: String) Never! {
     module_index :: sema_name_module_index(graph, symbol.module_name) ?? return
-    source_module := graph.modules[module_index]
+    source_module :: graph.modules[module_index]
     declaration_name := symbol.name
     owner_key :: symbol.owner ?? ""
     if owner_key != "" {
-        loop nominal in source_module.nominals {
-            if nominal.symbol.id.key == owner_key -> declaration_name = "{nominal.symbol.name}.{symbol.name}"
-        }
-        loop implementation in source_module.impls {
-            if implementation.symbol.id.key == owner_key -> declaration_name = "{implementation.target_type_name}.{symbol.name}"
-        }
+        owner_name :: owner_names.get(sema_name_owner_index_key(module_index, owner_key))
+        if owner_name == .Val(name) -> declaration_name = "{name}.{symbol.name}"
     }
-    semantic_identity := None
+    semantic_identity := String?{None}
     if kind != "local" && kind != "param" -> semantic_identity = Val("{source_module.package_identity}::{source_module.module_path}::{declaration_name}")
-    row := MirNameReference{module_path: source_module.module_path, kind: kind, def_span: symbol.span, semantic_identity: semantic_identity}
-    loop existing in facts.references {
-        if existing.module_path == row.module_path && existing.kind == row.kind && existing.def_span == row.def_span && existing.semantic_identity == row.semantic_identity -> return
-    }
-    &facts.references.push(row)
+    &facts.references.push(MIRNameReference{module_path: source_module.module_path, kind: kind, def_span: symbol.span, semantic_identity: semantic_identity})
 }
 
-fn sema_name_symbol_from_graph(graph: SemaRegistrationGraph, id: SymbolId) -> SemaNameResolvedDeclaration? {
+fn sema_name_owner_index_key(module_index: Int, owner_key: String) -> String Never! {
+    "{module_index}|{owner_key}"
+}
+
+// The display name of every member owner, keyed by module and owner symbol.
+// A later impl of the same owner key replaces an earlier row, as the ordered
+// nominal-then-impl search did.
+fn sema_name_owner_index(graph: SemaRegistrationGraph) -> [String:String] Never! {
+    names := [String:String]{}
+    module_index := 0
+    loop module_index < graph.modules.len() {
+        graph_module :: graph.modules[module_index]
+        loop nominal in graph_module.nominals -> names[sema_name_owner_index_key(module_index, nominal.symbol.id.key)] = nominal.symbol.name
+        loop implementation in graph_module.impls -> names[sema_name_owner_index_key(module_index, implementation.symbol.id.key)] = implementation.target_type_name
+        module_index += 1
+    }
+    names
+}
+
+fn sema_name_index_symbol(index: &[String:SemaNameResolvedDeclaration], symbol: Symbol, kind: String) Never! {
+    if index.get(symbol.id.key) != None -> return
+    index[symbol.id.key] = SemaNameResolvedDeclaration{symbol: symbol, kind: kind}
+}
+
+// Every declaration a call fact can name, keyed by symbol ID. The first
+// declaration in graph order wins, as the ordered search did.
+fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResolvedDeclaration] Never! {
+    index := [String:SemaNameResolvedDeclaration]{}
     loop graph_module in graph.modules {
         loop symbol in graph_module.symbols {
-            if symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: symbol, kind: if {
+            sema_name_index_symbol(&index, symbol, if {
                 symbol.kind == SymbolKind.Constant -> "const"
                 symbol.kind == SymbolKind.Function -> "function"
                 else -> "semantic"
-            }})
+            })
         }
         loop nominal in graph_module.nominals {
-            loop field in nominal.fields {
-                if field.symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: field.symbol, kind: "field"})
-            }
-            loop variant in nominal.variants {
-                if variant.symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: variant.symbol, kind: "variant"})
-            }
-            loop function in nominal.methods {
-                if function.symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: function.symbol, kind: "method"})
-            }
-            loop method in nominal.trait_methods {
-                if method.symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: method.symbol, kind: "method"})
-            }
+            loop field in nominal.fields -> sema_name_index_symbol(&index, field.symbol, "field")
+            loop variant in nominal.variants -> sema_name_index_symbol(&index, variant.symbol, "variant")
+            loop function in nominal.methods -> sema_name_index_symbol(&index, function.symbol, "method")
+            loop method in nominal.trait_methods -> sema_name_index_symbol(&index, method.symbol, "method")
         }
         loop implementation in graph_module.impls {
-            loop function in implementation.methods {
-                if function.symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: function.symbol, kind: "method"})
-            }
-            loop associated in implementation.associated_types {
-                if associated.symbol.id.key == id.key -> return Val(SemaNameResolvedDeclaration{symbol: associated.symbol, kind: "associated_type"})
-            }
+            loop function in implementation.methods -> sema_name_index_symbol(&index, function.symbol, "method")
+            loop associated in implementation.associated_types -> sema_name_index_symbol(&index, associated.symbol, "associated_type")
         }
     }
-    None
+    index
 }
 
-fn sema_name_visibility_flags(is_pub: Bool, is_package_pub: Bool) -> MirNameVisibility Never! {
-    if is_pub -> return MirNameVisibility.Public
-    if is_package_pub -> return MirNameVisibility.Package
-    MirNameVisibility.Private
+fn sema_name_first_declarations(rows: [MIRNameDeclaration]) -> [MIRNameDeclaration] Never! {
+    seen := [String:Bool]{}
+    kept := [MIRNameDeclaration]{}
+    loop row in rows {
+        key :: "{row.module_index}|{row.name}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        &kept.push(row)
+    }
+    kept
+}
+
+fn sema_name_first_aliases(rows: [MIRNameAlias]) -> [MIRNameAlias] Never! {
+    seen := [String:Bool]{}
+    kept := [MIRNameAlias]{}
+    loop row in rows {
+        key :: "{row.module_index}|{row.name}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        &kept.push(row)
+    }
+    kept
+}
+
+fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Never! {
+    seen := [String:Bool]{}
+    kept := [MIRNameReference]{}
+    loop row in rows {
+        // The path is length-prefixed and the identity is last, so no two
+        // distinct rows share a key.
+        identity :: if row.semantic_identity == {
+            .Val(value) -> "+{value}"
+            else -> "-"
+        }
+        key :: "{row.module_path.len()}:{row.module_path}|{row.kind}|{row.def_span.start}:{row.def_span.end}|{identity}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        &kept.push(row)
+    }
+    kept
+}
+
+fn sema_name_visibility_flags(is_pub: Bool, is_package_pub: Bool) -> MIRNameVisibility Never! {
+    if is_pub -> return MIRNameVisibility.Public
+    if is_package_pub -> return MIRNameVisibility.Package
+    MIRNameVisibility.Private
 }
 
 fn sema_name_scoped(prefix: String, name: String) -> String Never! {
-    if prefix == "" -> return name
+    if prefix == "" -> return ~name
     "{prefix}.{name}"
 }
 
@@ -1506,14 +1639,14 @@ fn sema_name_scoped_path(prefix: String, name: String) -> String Never! {
     "{prefix}.{name}"
 }
 
-fn sema_name_add_method(facts: &[MirNameFacts], module_index: Int, owner_name: String, owner_path: String, function: Func) Never! {
+fn sema_name_add_method(facts: &MIRNameFacts, module_index: Int, owner_name: String, owner_path: String, function: Func) Never! {
     name := sema_name_scoped(owner_name, function.name)
     path := sema_name_scoped_path(owner_path, function.name)
     visibility := sema_name_visibility_flags(function.is_pub, function.is_package_pub)
     sema_name_add_declaration(&facts, module_index, name, path, "method", function.name_span, visibility)
 }
 
-fn sema_name_add_item(facts: &[MirNameFacts], module_index: Int, module_path: String, prefix: String, item: Item) Never! {
+fn sema_name_add_item(facts: &MIRNameFacts, module_index: Int, module_path: String, prefix: String, item: Item) Never! {
     if item == {
         .Func(function) -> {
             name := sema_name_scoped(prefix, function.name)
@@ -1577,25 +1710,25 @@ fn sema_name_add_item(facts: &[MirNameFacts], module_index: Int, module_path: St
             owner := sema_name_scoped(prefix, definition.type_name)
             owner_path := sema_name_scoped_path(module_path, definition.type_name)
             loop method in definition.methods -> sema_name_add_method(&facts, module_index, owner, owner_path, method)
-            loop associated in definition.assoc_type_impls -> sema_name_add_declaration(&facts, module_index, "{owner}.{associated.name}", "{owner_path}.{associated.name}", "associated_type", associated.span, MirNameVisibility.Private)
+            loop associated in definition.assoc_type_impls -> sema_name_add_declaration(&facts, module_index, "{owner}.{associated.name}", "{owner_path}.{associated.name}", "associated_type", associated.span, MIRNameVisibility.Private)
         }
         .Const(definition) -> {
             name := sema_name_scoped(prefix, definition.name)
             path := sema_name_scoped_path(module_path, definition.name)
-            sema_name_add_declaration(&facts, module_index, name, path, "const", definition.name_span, MirNameVisibility.Private)
+            sema_name_add_declaration(&facts, module_index, name, path, "const", definition.name_span, MIRNameVisibility.Private)
         }
         .ExternRust(block) -> {
             loop function in block.functions {
                 name := sema_name_scoped(prefix, function.name)
                 path := sema_name_scoped_path(module_path, function.name)
-                sema_name_add_declaration(&facts, module_index, name, path, "extern", function.name_span, MirNameVisibility.Private)
+                sema_name_add_declaration(&facts, module_index, name, path, "extern", function.name_span, MIRNameVisibility.Private)
             }
         }
         .CModule(c_module) -> {
             loop function in c_module.functions {
                 name := sema_name_scoped(prefix, function.name)
                 path := sema_name_scoped_path(module_path, function.name)
-                sema_name_add_declaration(&facts, module_index, name, path, "extern", function.name_span, MirNameVisibility.Public)
+                sema_name_add_declaration(&facts, module_index, name, path, "extern", function.name_span, MIRNameVisibility.Public)
             }
         }
         .CodeModule(definition) -> {
@@ -1629,13 +1762,13 @@ fn sema_name_add_item(facts: &[MirNameFacts], module_index: Int, module_path: St
     }
 }
 
-fn sema_name_tir_visibility(value: TVisibility) -> MirNameVisibility Never! {
-    if value == TVisibility.Public -> return MirNameVisibility.Public
-    if value == TVisibility.Package -> return MirNameVisibility.Package
-    MirNameVisibility.Private
+fn sema_name_tir_visibility(value: TVisibility) -> MIRNameVisibility Never! {
+    if value == TVisibility.Public -> return MIRNameVisibility.Public
+    if value == TVisibility.Package -> return MIRNameVisibility.Package
+    MIRNameVisibility.Private
 }
 
-fn sema_name_add_tir_declarations(facts: &[MirNameFacts], module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
+fn sema_name_add_tir_declarations(facts: &MIRNameFacts, module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
     loop definition in declarations.type_defs {
         name := definition.name
         path := sema_name_scoped_path(module_path, name)
@@ -1660,16 +1793,15 @@ fn sema_name_add_tir_declarations(facts: &[MirNameFacts], module_index: Int, mod
     }
 }
 
-fn sema_name_add_alias(facts: &[MirNameFacts], module_index: Int, name: String, target: String, target_module: Int?, span: Span, visibility: Int) Never! {
-    loop existing in facts.aliases {
-        if existing.module_index == module_index && existing.name == name -> return
-    }
-    &facts.aliases.push(MirNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
+fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, target: String, target_module: Int?, span: Span, visibility: Int) Never! {
+    &facts.aliases.push(MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
 }
 
-fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MirNameFacts Never! {
-    facts := MirNameFacts{modules: [MirNameModule]{}, declarations: [MirNameDeclaration]{}, aliases: [MirNameAlias]{}, references: [MirNameReference]{}, structure_facts: [MirStructureFact]{}}
-    loop graph_module in graph.modules -> &facts.modules.push(MirNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity})
+pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
+    facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
+    loop graph_module in graph.modules -> &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity})
+    owner_names :: sema_name_owner_index(graph)
+    symbol_index :: sema_name_symbol_index(graph)
     module_index := 0
     loop module_index < graph.modules.len() {
         source := graph.modules[module_index]
@@ -1694,14 +1826,11 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
                 else -> {}
             }
         }
-        loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, reference.span, reference.symbol, reference.kind)
+        loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, reference.span, reference.symbol, reference.kind)
         loop call in checked.call_facts {
             callee :: call.callee ?? next
-            resolved := sema_name_symbol_from_graph(graph, callee)
-            if resolved != None {
-                declaration :: resolved ?? return facts
-                sema_name_add_reference(&facts, graph, call.span, declaration.symbol, declaration.kind)
-            }
+            resolved :: symbol_index.get(callee.key)
+            if resolved == .Val(declaration) -> sema_name_add_reference(&facts, graph, owner_names, call.span, declaration.symbol, declaration.kind)
         }
         module_index += 1
     }
@@ -1710,8 +1839,8 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         target_index :: sema_name_module_index(graph, edge.target_module_identity) ?? next
         source := graph.modules[source_index]
         target := graph.modules[target_index]
-        &facts.structure_facts.push(MirStructureFact{
-            kind: MirStructureFactKind.ImportEdge,
+        &facts.structure_facts.push(MIRStructureFact{
+            kind: MIRStructureFactKind.ImportEdge,
             subject: "{source.module_name} -> {target.module_name}",
             source: source.module_path,
             span: edge.declaration.span,
@@ -1720,7 +1849,13 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
             gate: None,
         })
     }
-    facts
+    MIRNameFacts{
+        modules: facts.modules,
+        declarations: sema_name_first_declarations(facts.declarations),
+        aliases: sema_name_first_aliases(facts.aliases),
+        references: sema_name_first_references(facts.references),
+        structure_facts: facts.structure_facts,
+    }
 }
 
 fn sema_comptime_value_for_symbol(values: [SemaComptimeItemValue], module_identity: String, key: String) -> SemaComptimeItemValue? {
@@ -1739,7 +1874,7 @@ fn sema_comptime_symbol_with_values(symbol: ^Symbol, module_identity: String, va
     updated
 }
 
-fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaRegistrationGraph Never! {
+pub fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaRegistrationGraph Never! {
     resolved := graph
     module_index := 0
     loop module_index < resolved.modules.len() {
@@ -1867,7 +2002,7 @@ fn sema_comptime_waiting_dependencies(graph: SemaRegistrationGraph, dependencies
 }
 
 fn sema_comptime_find_function_source_by_key(graph: SemaRegistrationGraph, function_key: String) -> SemaComptimeFunctionSource? {
-    found := None
+    found := SemaComptimeFunctionSource?{None}
     loop graph_module in graph.modules {
         source := sema_comptime_find_function_source(graph, graph_module.module_identity, function_key)
         if source != None {
@@ -1885,12 +2020,15 @@ fn sema_comptime_find_function_source_by_key(graph: SemaRegistrationGraph, funct
     found
 }
 
+// Every registered function a compile-time body calls runs while building,
+// wherever it is declared: the callee's own file resolves its names, and the
+// evaluator's effect gate (E3401) rejects an effectful call. A function need
+// not be marked `prep fn` or `pure` to be reached.
 fn sema_comptime_reachable_function_keys(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     keys := [String]{}
     loop fact in call_facts {
         callee :: fact.callee ?? next
-        source :: sema_comptime_find_function_source_by_key(graph, callee.key) ?? next
-        if !source.declaration.is_comptime && !source.declaration.is_pure -> next
+        if sema_comptime_find_function_source_by_key(graph, callee.key) == None -> next
         already := false
         loop key in keys {
             if key == callee.key -> already = true
@@ -1899,7 +2037,7 @@ fn sema_comptime_reachable_function_keys(graph: SemaRegistrationGraph, call_fact
     }
     keys
 }
-fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> SemaComptimeItemSource Never! {
+pub fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> SemaComptimeItemSource Never! {
     SemaComptimeItemSource{
         module_identity: evaluation.module_identity,
         key: evaluation.key,
@@ -1923,6 +2061,7 @@ fn sema_comptime_add_source(sources: &[SemaComptimeItemSource], graph: SemaRegis
     source_module := graph.modules[module_index]
     source := SemaComptimeItemSource{
         module_identity: module_identity,
+        key: key,
         destination_key: destination_key,
         name: name,
         source_file: source_module.source_file,
@@ -1963,8 +2102,7 @@ fn sema_comptime_add_meta_sources(sources: &[SemaComptimeItemSource], graph: Sem
                 sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, "maturity", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
             }
             .Unknown(name, expression, span) -> {
-                if expression != None {
-                    source_expression :: expression ?? Expr.Unit{span: span}
+                if expression == .Val(source_expression) {
                     destination_key := "{owner_key}::meta::{name}::{span.start}"
                     sema_comptime_add_source(&sources, graph, module_identity, "{module_identity}::{destination_key}", destination_key, name, SemaComptimeItemKind.MarkerArgument, source_expression, None)
                 }
@@ -1997,7 +2135,7 @@ fn sema_comptime_add_module_item_sources(sources: &[SemaComptimeItemSource], gra
             loop marker in definition.serde_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, nominal.symbol.id.key, marker, None)
             loop marker in definition.type_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, nominal.symbol.id.key, marker, None)
             loop field in definition.fields {
-                field_symbol := None
+                field_symbol := Symbol?{None}
                 loop registered in nominal.fields {
                     if registered.symbol.name == field.name -> field_symbol = Val(registered.symbol)
                 }
@@ -2023,7 +2161,7 @@ fn sema_comptime_add_module_item_sources(sources: &[SemaComptimeItemSource], gra
             loop marker in definition.type_markers -> sema_comptime_add_marker_source(&sources, graph, source_module.module_identity, nominal.symbol.id.key, marker, None)
             loop variant in definition.variants {
                 if variant.discriminant_expr != None && variant.discriminant == None {
-                    registered_symbol := None
+                    registered_symbol := Symbol?{None}
                     loop registered in nominal.variants {
                         if registered.symbol.name == variant.name -> registered_symbol = Val(registered.symbol)
                     }
@@ -2224,15 +2362,15 @@ fn sema_comptime_policy_for_package(policies: [SemaRegistrationPackagePolicy], p
     None
 }
 
-fn sema_comptime_layer_exceeds(actual: MirRuntimeLayer, ceiling: MirRuntimeLayer) -> Bool Never! {
-    if ceiling == MirRuntimeLayer.Core -> return actual != MirRuntimeLayer.Core
-    if ceiling == MirRuntimeLayer.Alloc -> return actual == MirRuntimeLayer.Std
+fn sema_comptime_layer_exceeds(actual: MIRRuntimeLayer, ceiling: MIRRuntimeLayer) -> Bool Never! {
+    if ceiling == MIRRuntimeLayer.Core -> return actual != MIRRuntimeLayer.Core
+    if ceiling == MIRRuntimeLayer.Alloc -> return actual == MIRRuntimeLayer.Std
     false
 }
 
-fn sema_comptime_layer_name(layer: MirRuntimeLayer) -> String Never! {
-    if layer == MirRuntimeLayer.Core -> return "Core"
-    if layer == MirRuntimeLayer.Alloc -> return "Alloc"
+fn sema_comptime_layer_name(layer: MIRRuntimeLayer) -> String Never! {
+    if layer == MIRRuntimeLayer.Core -> return "Core"
+    if layer == MIRRuntimeLayer.Alloc -> return "Alloc"
     "Std"
 }
 
@@ -2241,7 +2379,7 @@ fn sema_comptime_policy_deny_diagnostic(package_identity: String, denied: [Strin
     sema_error("E0712", span, "package `{package_identity}` reaches effects denied by `authority.holds.deny`: `{denied_names}`", "denied effects remain prohibited across every reachable call edge", "remove the denied effect or update the package authority policy")
 }
 
-fn sema_comptime_runtime_ceiling_diagnostic(package_identity: String, actual: MirRuntimeLayer, ceiling: MirRuntimeLayer, span: Span?) -> Diagnostic {
+fn sema_comptime_runtime_ceiling_diagnostic(package_identity: String, actual: MIRRuntimeLayer, ceiling: MIRRuntimeLayer, span: Span?) -> Diagnostic {
     actual_name := sema_comptime_layer_name(actual)
     ceiling_name := sema_comptime_layer_name(ceiling)
     sema_error_optional("E1006", span, "package `{package_identity}` reaches runtime layer `{actual_name}` above its `{ceiling_name}` ceiling", "the package's reachable Core closure exceeds `runtime_ceiling`", "raise the package runtime ceiling or remove the higher-layer dependency")
@@ -2297,8 +2435,8 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
     loop effect_module in effects.modules {
-        module_index :: sema_name_module_index(resolved_graph, effect_module.module_identity) ?? next
-        modules[module_index].functions = effect_module.functions
+        effect_index :: sema_name_module_index(resolved_graph, effect_module.module_identity) ?? next
+        modules[effect_index].functions = effect_module.functions
     }
     resolved_compute_facts := [SemaComputeFunctionFacts]{}
     effect_solved_functions := [TFunc]{}
@@ -2310,7 +2448,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     loop diagnostic in compute_diagnostics {
         if diagnostic.span == {
             .Val(span) -> {
-                owner_index := None
+                owner_index := Int?{None}
                 ambiguous := false
                 index := 0
                 loop index < modules.len() {
@@ -2321,16 +2459,16 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
                     index += 1
                 }
                 if {
-                    owner_index == .Val(module_index) && !ambiguous -> {
-                        registration_index :: sema_name_module_index(resolved_graph, modules[module_index].module_identity)
-                        if {
-                            registration_index != None -> {
-                                registration :: resolved_graph.modules[registration_index]
+                    owner_index == .Val(owner_module_index) && !ambiguous -> {
+                        registration_index :: sema_name_module_index(resolved_graph, modules[owner_module_index].module_identity)
+                        if registration_index == {
+                            .Val(found_index) -> {
+                                registration :: resolved_graph.modules[found_index]
                                 located := [Diagnostic]{diagnostic}
                                 sema_attach_diagnostic_source_locations(&located, 0, registration.source_segments)
                                 &diagnostics.push(located[0])
                             }
-                            else -> {
+                            .None -> {
                                 &diagnostics.push(diagnostic)
                             }
                         }
@@ -2380,13 +2518,13 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     }
     core_usage := sema_collect_used_core(core_inputs)
     loop module_usage in core_usage.modules {
-        module_index :: sema_name_module_index(resolved_graph, module_usage.module_identity) ?? next
-        source_module := resolved_graph.modules[module_index]
+        usage_index :: sema_name_module_index(resolved_graph, module_usage.module_identity) ?? next
+        source_module := resolved_graph.modules[usage_index]
         policy :: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
         if policy.runtime_ceiling != None {
             ceiling :: policy.runtime_ceiling ?? next
             if sema_comptime_layer_exceeds(module_usage.inferred_layer, ceiling) {
-                span := None
+                span := Span?{None}
                 if module_usage.usage_spans.len() > 0 -> span = Val(module_usage.usage_spans[0].span)
                 diagnostic_start := diagnostics.len()
                 &diagnostics.push(sema_comptime_runtime_ceiling_diagnostic(source_module.package_identity, module_usage.inferred_layer, ceiling, span))

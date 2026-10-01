@@ -3,6 +3,23 @@
 // The root method dispatcher owns evaluation of the receiver; this helper is
 // called with its checked value and only claims methods backed by exact core
 // registration facts or intrinsic List receiver types.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    ParamZone,
+    Span,
+    TClosureOp,
+    TDeclarationOwnership,
+    TExpr,
+    TExprKind,
+    THandleOp,
+    Type,
+    TypeTupleField,
+    type_identity_equal,
+    type_tuple_struct_name,
+]
 
 fn sema_call_concurrency_label(argument: CallArg) -> String? {
     if argument.label == {.Val(label) -> Val(label.name) else -> None}
@@ -39,7 +56,8 @@ fn sema_call_concurrency_sender_element(ty: Type) -> Type? {
 
 fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if sema_call_concurrency_sender_element(ty) == None -> return false
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     if sema_type_resolve_nominal(graph, ty, environment.module_identity) != None -> return false
     owner :: sema_registration_core_builtin_owner(graph, sema_registration_core_builtin_sender_name()) ?? return false
     owner.ownership == TDeclarationOwnership.Owned

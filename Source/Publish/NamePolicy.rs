@@ -70,10 +70,6 @@ impl NamePolicyDecision {
         matches!(self, Self::Block(_))
     }
 
-    pub fn is_warning(&self) -> bool {
-        matches!(self, Self::Warn(_))
-    }
-
     pub fn finding(&self) -> Option<&NamePolicyFinding> {
         match self {
             Self::Allow => None,

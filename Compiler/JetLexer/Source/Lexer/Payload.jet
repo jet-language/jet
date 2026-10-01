@@ -1,6 +1,16 @@
 // Source-backed payload construction and lexical diagnostics. `Scan.jet` owns
 // token boundaries; this layer keeps exact spelling and turns literal bytes
 // into parser-ready values without consulting the Rust lexer.
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticLabel,
+    Span,
+    TextEdit,
+    diagnostic_from_registry,
+    diagnostic_with_edit,
+]
+use core.text as unicode
+
 MAX_INTERPOLATION_DEPTH :: 256
 
 fn empty_payload(text: String) -> TokenPayload Never! {

@@ -642,10 +642,6 @@ impl MetadataRootOverload {
             Self::TypedMethodHandle => MetadataRootInputType::MethodHandle,
         }
     }
-
-    pub const fn replaces_trailing_argument(self) -> bool {
-        matches!(self, Self::TypedMethodHandle)
-    }
 }
 
 

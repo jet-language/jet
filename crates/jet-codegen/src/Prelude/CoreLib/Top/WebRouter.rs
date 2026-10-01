@@ -874,36 +874,6 @@ impl JetWebRouter {
         )
     }
 
-    /// Register one route with compiler-derived pending/error boundary facts.
-    /// The exact IDs and island identity are retained for the shared
-    /// WebPending registry; callbacks remain renderer projections.
-    pub fn route_with_facts<F, P, E>(
-        &self,
-        pattern: String,
-        params: Vec<JetWebRouterField>,
-        search: Vec<JetWebRouterField>,
-        loader: F,
-        pending: Option<P>,
-        error: Option<E>,
-        boundaries: JetWebRouteBoundaries,
-    ) -> Result<Self, String>
-    where
-        F: Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync + 'static,
-        P: Fn(&JetWebNavigation) -> String + Send + Sync + 'static,
-        E: Fn(&JetWebNavigation, &str) -> String + Send + Sync + 'static,
-    {
-        self.route_with_facts_codec(
-            pattern,
-            params,
-            search,
-            JetWebRouterSearchCodec::Query,
-            loader,
-            pending,
-            error,
-            boundaries,
-        )
-    }
-
     pub fn route_with_facts_codec<F, P, E>(
         &self,
         pattern: String,

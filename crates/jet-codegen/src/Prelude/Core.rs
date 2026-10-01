@@ -2313,21 +2313,6 @@ fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) ->
     r
 }
 
-fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
-    r: Result<T, E>,
-    file: &str,
-    line: u32,
-    fn_name: &str,
-    note: F,
-) -> Result<T, E> {
-    if r.is_err() {
-        jet_journey_frame(file, line, 0, fn_name, note);
-    } else {
-        jet_journey_reset();
-    }
-    r
-}
-
 // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 #[inline(always)]
@@ -2561,30 +2546,6 @@ fn jet_views_mut_from_windows<'a, T>(
     pieces.into_iter().map(|(_, selected)| selected).collect()
 }
 
-fn jet_views_mut_range_new<'a, T>(
-    xs: &'a mut [T],
-    ranges: &[(JetRange, u32)],
-    file: &str,
-) -> Vec<&'a mut [T]> {
-    let len = xs.len() as i64;
-    let windows = ranges
-        .iter()
-        .enumerate()
-        .map(|(index, (range, line))| {
-            let (start, end) = jet_checked_view_window(
-                range.start,
-                range.end,
-                range.exclusive,
-                len,
-                file,
-                *line,
-            );
-            (start as usize, end as usize, index)
-        })
-        .collect::<Vec<_>>();
-    jet_views_mut_from_windows(xs, windows, file)
-}
-
 // D-MEMDISJOINT1=A: runtime disjointness is proved once, before any mutable
 // view exists. These helpers return the same Error family for bounds and
 // overlap failures; engines only marshal their arguments and results.
@@ -2663,9 +2624,6 @@ fn jet_view_mut_range_new<'a, T>(
     &mut xs[start as usize..end as usize]
 }
 
-fn jet_check_view_bounds(len: i64, a: i64, b: i64, file: &str, line: u32) {
-    let _ = jet_checked_view_window(a, b, false, len, file, line);
-}
 // D-DYNARRAY1: View<T> read-only closure surface. `xs` is already a borrow
 // (never `.clone()`d to an owned `Vec` first, unlike the `jet_list_*` family
 // above) — folding/mapping a view touches no allocation beyond the result.
@@ -2890,27 +2848,6 @@ where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
     m.entry(k).or_insert(v).clone()
-}
-
-/// Update one map entry through the map's storage seam. The closure receives
-/// the existing value without cloning it, so a read/compute/insert update can
-/// perform one tree lookup and one key evaluation while retaining the same
-/// ordered-map and copy-on-write semantics as `jet_map_insert`.
-#[inline(always)]
-fn jet_map_update<M, K: Ord, V, F>(m: &mut M, k: K, f: F)
-where
-    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
-    F: FnOnce(Option<&V>) -> V,
-{
-    match m.entry(k) {
-        std::collections::btree_map::Entry::Occupied(mut entry) => {
-            let value = f(Some(entry.get()));
-            entry.insert(value);
-        }
-        std::collections::btree_map::Entry::Vacant(entry) => {
-            entry.insert(f(None));
-        }
-    }
 }
 
 /// Update a text-keyed map without allocating a replacement key for an
@@ -3273,32 +3210,6 @@ fn jet_map_values<K: Ord + Clone + 'static, V: Clone + 'static>(m: &JetMap<K, V>
     }))
 }
 
-fn jet_list_remove_value_with_location<T: Clone + PartialEq>(
-    xs: &mut Vec<T>,
-    value: T,
-    _file: &str,
-    _line: u32,
-) -> JetOutcome<T, JetAbsent> {
-    jet_outcome_of(jet_list_remove_value_kernel(xs, value))
-}
-
-fn jet_list_remove_slot_with_location<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> JetOutcome<T, JetAbsent> {
-    match jet_list_remove_slot_kernel(xs, i) {
-        Ok(value) => Ok(value),
-        Err(message) => jet_arithmetic_stop(file, line, &message),
-    }
-}
-
-fn jet_list_insert_with_location<T>(xs: &mut Vec<T>, index: i64, value: T, file: &str, line: u32) {
-    match jet_list_insert_kernel(xs, index, value) {
-        Ok(()) => {}
-        Err(error) => {
-            let message = error.message();
-            jet_runtime_stop(error.code(), file, line, &message);
-        }
-    }
-}
-
 #[inline(always)]
 fn jet_list_remove_value<T: Clone + PartialEq>(
     xs: &mut Vec<T>,
@@ -3340,18 +3251,6 @@ fn jet_priority_queue_remove_value<T: Ord>(
     value: T,
 ) -> JetOutcome<T, JetAbsent> {
     jet_priority_queue_remove_value_kernel(pq, value)
-}
-
-fn jet_priority_queue_remove_slot<T: Ord>(
-    pq: &mut std::collections::BinaryHeap<T>,
-    i: i64,
-    file: &str,
-    line: u32,
-) -> JetOutcome<T, JetAbsent> {
-    match jet_priority_queue_remove_slot_kernel(pq, i, file, line) {
-        Ok(outcome) => outcome,
-        Err(message) => jet_panic(file, line, &message),
-    }
 }
 
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
@@ -3507,18 +3406,8 @@ where
 {
     xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
-// Float has no Rust `Ord` implementation because NaN makes `partial_cmp`
-// return `None`. The shared FloatOrdering Prelude part supplies Jet's total
-// sort comparator; this wrapper only converts it to the generated enum.
-fn jet_float_ordering(left: f64, right: f64) -> __jet_Ordering {
-    match jet_float_sort_cmp(left, right) {
-        std::cmp::Ordering::Less => __jet_Ordering::__jet_Less,
-        std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal,
-        std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater,
-    }
-}
 
-fn jet_list_sort_by_compare<T, F>(xs: &mut Vec<T>, mut f: F)
+fn jet_list_sort_by_compare<T, F>(xs: &mut [T], mut f: F)
 where
     F: FnMut(&T, &T) -> __jet_Ordering,
 {
@@ -3537,8 +3426,6 @@ where
     }
 }
 
-// #1477 Map ledger surface
-fn jet_map_copy<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> { jet_map_copy_kernel(m) }
 fn jet_map_equal<K: Ord + PartialEq, V: PartialEq>(a: &JetMap<K, V>, b: &JetMap<K, V>) -> bool { jet_map_equal_kernel(a, b) }
 fn jet_map_first_key<K: Ord + Clone, V>(m: &JetMap<K, V>) -> JetOutcome<K, JetAbsent> { jet_map_first_key_kernel(m) }
 fn jet_map_to_list<K: Ord + Clone, V: Clone, R>(m: &JetMap<K, V>, build: impl Fn(K, V) -> R) -> Vec<R> {
@@ -3577,16 +3464,8 @@ where F: FnMut(&K, &V) -> JetMap<K, V> {
     }
     out
 }
-fn jet_map_max_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_map_max_value_kernel(m) }
-fn jet_map_min_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_map_min_value_kernel(m) }
 fn jet_map_intersection<K: Ord + Clone, V: Clone>(left: &JetMap<K, V>, right: &JetMap<K, V>) -> JetMap<K, V> {
     jet_map_intersection_kernel(left, right)
-}
-fn jet_map_slice_keys<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>, keys: Vec<K>) -> JetMap<K, V> {
-    jet_map_slice_keys_kernel(m, keys)
-}
-fn jet_map_from_keys<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) -> JetMap<K, V> {
-    jet_map_from_keys_kernel(keys, default)
 }
 fn jet_map_from_keys_int<V: Clone>(
     keys: Vec<jet_foundation::Numeric::JetInt>,

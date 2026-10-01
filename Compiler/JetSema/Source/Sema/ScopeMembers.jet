@@ -1,3 +1,18 @@
+use jet_foundation.[
+    AppliedRuleApplication,
+    Diagnostic,
+    Expr,
+    Item,
+    MarkerDecl,
+    MarkerDeclParam,
+    Program,
+    Span,
+    TAppliedRule,
+    TAppliedRuleArgumentMenu,
+    TAppliedRuleCatalog,
+    Type,
+]
+
 pub struct SemaScopeMembersMarkerRule {
     pub name: String
     pub sites: [String]
@@ -22,7 +37,7 @@ pub struct SemaScopeMembersDeclaredTypeArgument {
     pub span: Span
 }
 
-pub struct SemaScopeMembersDslHeaderResult {
+pub struct SemaScopeMembersDSLHeaderResult {
     pub known: Bool
     pub block_allowed: Bool
     pub args_valid: Bool
@@ -250,8 +265,8 @@ fn sema_scope_members_dsl_argument_shape_diagnostic(name: String, args_span: Spa
     sema_error("E0617", at, "`#{name}` has an invalid DSL header", "a checked text block keeps its Jet boundary; only its declared header shape is legal", "write {expected}")
 }
 
-pub fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry, program: Program, name: String, name_span: Span, args: [Expr], args_span: Span?, span: Span) -> SemaScopeMembersDslHeaderResult {
-    result := SemaScopeMembersDslHeaderResult{
+pub fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry, program: Program, name: String, name_span: Span, args: [Expr], args_span: Span?, span: Span) -> SemaScopeMembersDSLHeaderResult {
+    result := SemaScopeMembersDSLHeaderResult{
         known: sema_scope_members_has_name(registry.known_marker_names, name),
         block_allowed: sema_scope_members_has_name(registry.block_allowed_markers, name),
         args_valid: false,

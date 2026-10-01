@@ -471,9 +471,6 @@ pub struct TirPackageFacts {
     pub web_app: Option<jet_foundation::App::AppGraph>,
     /// D-PLUGIN-AUTHORITY1: package-declared guest capability needs.
     pub authority_needs: Vec<String>,
-    /// D-MODEL-SIGNATURE1: one loader-projected model payload reaches every
-    /// execution tier; no tier reparses package manifests.
-    pub model_outputs: Vec<jet_foundation::AST::ModelOutputFact>,
     /// D-FOUND-BOARD1: sema-owned hardware operations and immutable profile.
     pub hardware_use: jet_foundation::TargetMachine::TargetHardwareUse,
     pub hardware_profile: Option<jet_foundation::TargetMachine::TargetHardwareFacts>,
@@ -650,6 +647,12 @@ fn collect_item_erasures(
 pub struct TirProgram {
     /// Stable package identity supplied by the checked bundle.
     pub package_identity: String,
+    /// D-MOD-CYCLE1=A: the entry's module identity and the call prefix its
+    /// package siblings use for it (`__jet_run::`). A sibling reaches an entry
+    /// function through the ordinary imported-call spelling, while the entry
+    /// lowers its own functions unprefixed; MIR resolves the first to the
+    /// second. `None` when the entry has no package siblings.
+    pub entry_sibling_calls: Option<(String, String)>,
     pub facts: TirPackageFacts,
     /// Display path of the entry module retained for temporary diagnostics.
     pub source_file: String,
@@ -781,44 +784,6 @@ pub fn canonical_payload(program: &TirProgram) -> String {
     )
 }
 
-pub fn canonical_function_payload(function: &TFunc) -> String {
-    let params = function
-        .params
-        .iter()
-        .map(|(name, ty, convention)| {
-            format!(
-                "{{\"name\":\"{}\",\"type\":\"{}\",\"convention\":\"{:?}\"}}",
-                jet_foundation::JSON::json_escape(name),
-                jet_foundation::JSON::json_escape(&ty.name()),
-                convention
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "{{\"representation\":\"tir\",\"name\":\"{}\",\"module\":\"{}\",\"key\":\"{}\",\"source_file\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"params\":[{}],\"body_nodes\":{},\"synthetic\":{}}}",
-        jet_foundation::JSON::json_escape(&function.name),
-        jet_foundation::JSON::json_escape(&function.module),
-        jet_foundation::JSON::json_escape(&function.key),
-        jet_foundation::JSON::json_escape(&function.source_file),
-        function.source_span.start,
-        function.source_span.end,
-        params,
-        function.body.len(),
-        function.synthetic,
-    )
-}
-
-pub fn canonical_function_identity(function: &TFunc) -> String {
-    format!(
-        "{{\"representation\":\"tir\",\"key\":\"{}\",\"source_file\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}}}}",
-        jet_foundation::JSON::json_escape(&function.key),
-        jet_foundation::JSON::json_escape(&function.source_file),
-        function.source_span.start,
-        function.source_span.end
-    )
-}
-
 pub fn canonical_expression_payload(expression: &TExpr) -> String {
     let kind = format!("{:?}", std::mem::discriminant(&expression.kind));
     format!(
@@ -854,56 +819,6 @@ pub fn canonical_statements_identity(statements: &[TStmt]) -> String {
     format!(
         "{{\"representation\":\"tir\",\"statement_count\":{}}}",
         statements.len(),
-    )
-}
-
-pub fn canonical_lambda_payload(lambda: &TLambda) -> String {
-    let params = lambda
-        .param_types
-        .iter()
-        .map(|ty| format!("\"{}\"", jet_foundation::JSON::json_escape(&ty.name())))
-        .collect::<Vec<_>>()
-        .join(",");
-    let captures = lambda
-        .captures
-        .iter()
-        .map(|(name, place, ty)| {
-            format!(
-                "{{\"name\":\"{}\",\"place\":\"{}\",\"type\":\"{}\"}}",
-                jet_foundation::JSON::json_escape(name),
-                jet_foundation::JSON::json_escape(place),
-                jet_foundation::JSON::json_escape(&ty.name()),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let body_kind = format!("{:?}", std::mem::discriminant(&lambda.executable));
-    format!(
-        "{{\"representation\":\"tir\",\"source_span\":{{\"start\":{},\"end\":{}}},\"params\":[{}],\"captures\":[{}],\"ret\":{},\"body_kind\":\"{}\",\"is_move\":{},\"boxed\":{},\"rc\":{},\"arc\":{}}}",
-        lambda.source_span.start,
-        lambda.source_span.end,
-        params,
-        captures,
-        lambda
-            .ret
-            .as_ref()
-            .map(|ty| format!("\"{}\"", jet_foundation::JSON::json_escape(&ty.name())))
-            .unwrap_or_else(|| "null".to_string()),
-        jet_foundation::JSON::json_escape(&body_kind),
-        lambda.is_move,
-        lambda.boxed,
-        lambda.rc,
-        lambda.arc,
-    )
-}
-
-pub fn canonical_lambda_identity(lambda: &TLambda) -> String {
-    format!(
-        "{{\"representation\":\"tir\",\"source_span\":{{\"start\":{},\"end\":{}}},\"param_count\":{},\"capture_count\":{}}}",
-        lambda.source_span.start,
-        lambda.source_span.end,
-        lambda.param_types.len(),
-        lambda.captures.len(),
     )
 }
 
@@ -954,45 +869,6 @@ fn add_published_schema_field_type(s: &crate::AST::StructDef, types: &mut Vec<Ty
 /// `index` is zero-based.
 pub fn migration_shape_name(index: usize) -> String {
     format!("v{}", index + 1)
-}
-
-pub fn migration_step_name(index: usize) -> String {
-    format!(
-        "{}->{}",
-        migration_shape_name(index),
-        migration_shape_name(index + 1)
-    )
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstanceProvenance {
-    pub canonical_module: String,
-    pub fingerprint: String,
-    pub full_key_hex: String,
-}
-
-pub fn instance_provenance(bundle: &ProgramBundle) -> Vec<InstanceProvenance> {
-    bundle
-        .modules
-        .iter()
-        .flat_map(|module| {
-            module.items.iter().filter_map(|item| {
-                let Item::CodeModule(instance) = item else {
-                    return None;
-                };
-                let identity = instance.instance_identity.as_ref()?;
-                Some(InstanceProvenance {
-                    canonical_module: instance.name.clone(),
-                    fingerprint: identity.fingerprint.clone(),
-                    full_key_hex: identity
-                        .full_key
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect(),
-                })
-            })
-        })
-        .collect()
 }
 
 fn payload_types_for_variant(payload: &VariantPayload) -> Vec<Type> {
@@ -1302,11 +1178,6 @@ impl TLocal {
         self
     }
 
-    pub fn with_integer_bounds(mut self, bounds: TIntegerBounds) -> TLocal {
-        self.integer_bounds = Some(bounds);
-        self
-    }
-
     pub fn as_uninit_scalar(mut self) -> TLocal {
         self.uninit_scalar = true;
         self
@@ -1533,16 +1404,6 @@ pub enum TPlace {
     /// A structured place expression — a field-read chain, a swizzle lane, a
     /// `Pool` slot. Its own node carries the facts; nothing is pre-rendered.
     Expr(Box<TExpr>),
-}
-
-impl TPlace {
-    /// The local slot this place is rooted in, when it is a plain local.
-    pub fn as_local(&self) -> Option<&TLocal> {
-        match self {
-            TPlace::Local(local) => Some(local),
-            TPlace::Expr(_) => None,
-        }
-    }
 }
 
 fn demand_serde_codec(
@@ -1990,12 +1851,32 @@ pub(crate) fn bind_generic_type(
                         // Generic source signatures still bind against the
                         // source-level return, so unwrap that carrier only when
                         // the template is not already a Result.
-                        let actual = match (template.as_ref(), actual.as_ref()) {
-                            (Type::Result { .. }, actual) => actual,
-                            (_, Type::Result { ok, .. }) => ok.as_ref(),
-                            (_, actual) => actual,
-                        };
-                        bind_generic_type(template, actual, params, subst)
+                        match (template.as_ref(), actual.as_ref()) {
+                            // A callable that cannot fail (a written or inferred
+                            // `Never!`) fits every failure slot; the MIR fn-value
+                            // adapter supplies the slot's carrier. Its success
+                            // binds as usual, and a generic failure slot binds
+                            // to `Never`.
+                            (
+                                Type::Result {
+                                    ok: template_ok,
+                                    err: template_err,
+                                },
+                                Type::Result {
+                                    ok: actual_ok,
+                                    err: actual_err,
+                                },
+                            ) if actual_err.is_never() => {
+                                bind_generic_type(template_ok, actual_ok, params, subst)
+                                    && (!matches!(template_err.as_ref(), Type::Named(name) if params.contains(name))
+                                        || bind_generic_type(template_err, actual_err, params, subst))
+                            }
+                            (Type::Result { .. }, actual) => {
+                                bind_generic_type(template, actual, params, subst)
+                            }
+                            (_, Type::Result { ok, .. }) => bind_generic_type(template, ok, params, subst),
+                            (_, actual) => bind_generic_type(template, actual, params, subst),
+                        }
                     }
                     (None, None) => true,
                     _ => false,
@@ -2216,7 +2097,16 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
                 } else {
                     generic_free_function_instance_key(&called_name, &type_args)
                 };
-                if funcs.iter().any(|func| func.name == emitted_name) {
+                // Several Core-source generic instances (`sort<String, PriceError>`,
+                // `sort<String, Never>`) each lower their helpers in a fresh
+                // imported context, so the same helper instance
+                // (`copy_values<String>`) is demanded more than once. The
+                // semantic key is the identity; a prefixed JIT name is not.
+                let emitted_key = function_semantic_key(&cx.module_identity, &emitted_name);
+                if funcs
+                    .iter()
+                    .any(|func| func.name == emitted_name || func.key == emitted_key)
+                {
                     continue;
                 }
                 let mut specialized =
@@ -2735,9 +2625,24 @@ fn collect_fragment_callable(
             recv_type,
             ..
         } => {
+            // An unchecked helper body has no `recv_type`; a receiver that is
+            // `self` or a typed parameter still names its owner exactly.
             let key = recv_type
                 .as_deref()
                 .and_then(|owner| fragment_method_key(owner, method, context))
+                .or_else(|| {
+                    let crate::AST::Expr::Ident(name, _) = receiver.as_ref() else {
+                        return None;
+                    };
+                    let owner = if name == crate::Syntax::KW_SELF {
+                        current_owner.map(str::to_string)
+                    } else {
+                        locals
+                            .and_then(|locals| locals.get(name))
+                            .and_then(fragment_type_owner)
+                    }?;
+                    fragment_method_key(&owner, method, context)
+                })
                 .or_else(|| fragment_static_method_key(receiver, method, locals, context));
             if let Some((owner, name)) = key {
                 out.insert(FragmentCallable::Method { owner, name });
@@ -2804,6 +2709,102 @@ fn collect_fragment_core_callable(
     }
 }
 
+/// Record a user file module body the fragment reaches: `alias.f(...)`
+/// through one of the calling module's `use` aliases, or `f(...)` through a
+/// member import (`use b.[f]`). Same-module calls inside a loaded user body
+/// take the ordinary loaded-module route of `collect_fragment_core_callable`.
+fn collect_fragment_module_callable(
+    expr: &crate::AST::Expr,
+    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    module_imports: &std::collections::HashMap<String, String>,
+    imported_functions: &std::collections::HashMap<String, (String, String)>,
+    locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
+    out: &mut std::collections::BTreeSet<FragmentCallable>,
+) {
+    let is_local = |name: &str| locals.is_some_and(|locals| locals.contains_key(name));
+    let (module, name) = match expr {
+        crate::AST::Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else {
+                return;
+            };
+            if is_local(alias.as_str()) {
+                return;
+            }
+            let Some(module) = module_imports.get(alias) else {
+                return;
+            };
+            (module.as_str(), method.as_str())
+        }
+        crate::AST::Expr::Call(call) if !is_local(call.name.as_str()) => {
+            let Some((module, name)) = imported_functions.get(&call.name) else {
+                return;
+            };
+            (module.as_str(), name.as_str())
+        }
+        _ => return,
+    };
+    if facts
+        .core_source_bodies
+        .get(module)
+        .is_some_and(|source| source.functions.contains_key(name))
+    {
+        out.insert(FragmentCallable::CoreSource {
+            module: module.to_string(),
+            name: name.to_string(),
+        });
+    }
+}
+
+/// Give the cross-module calls of an unchecked fragment body the return type
+/// sema records on a checked call: the callee's declared return, or the
+/// default carrier when it declares none. Module-level `prep` evaluation runs
+/// before function bodies are checked, so reached bodies carry no call facts.
+fn annotate_fragment_module_calls(
+    function: &mut crate::AST::Func,
+    signatures: &std::collections::HashMap<
+        (String, String),
+        crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+    >,
+    imported_functions: &std::collections::HashMap<String, (String, String)>,
+) {
+    if signatures.is_empty() {
+        return;
+    }
+    let checked_return = |signature: &crate::Comptime::MirBridge::MirFragmentCoreSourceSignature| {
+        signature.return_type.clone().unwrap_or_else(|| {
+            jet_foundation::AST::FailureContract::from_return_type(None).effective_type()
+        })
+    };
+    for statement in &mut function.body {
+        statement.for_each_expr_mut(|expr| match expr {
+            crate::AST::Expr::MethodCall {
+                receiver,
+                method,
+                resolved_ret,
+                ..
+            } if resolved_ret.is_none() => {
+                let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else {
+                    return;
+                };
+                if let Some(signature) = signatures.get(&(alias.clone(), method.clone())) {
+                    *resolved_ret = Some(checked_return(signature));
+                }
+            }
+            crate::AST::Expr::Call(call) if call.resolved_ret.is_none() => {
+                let Some((_, name)) = imported_functions.get(&call.name) else {
+                    return;
+                };
+                if let Some(signature) = signatures.get(&(call.name.clone(), name.clone())) {
+                    call.resolved_ret = Some(checked_return(signature));
+                }
+            }
+            _ => {}
+        });
+    }
+}
+
 fn collect_fragment_function_dependencies(
     function: &crate::AST::Func,
     current_owner: Option<&str>,
@@ -2817,15 +2818,27 @@ fn collect_fragment_function_dependencies(
         .map(|param| (param.name.clone(), param.ty.clone()))
         .collect::<std::collections::HashMap<_, _>>();
     let mut collect = |candidate: &crate::AST::Expr| match core_scope {
-        // A Core body resolves names in its own module, never the caller's.
-        Some((module, source)) => collect_fragment_core_callable(
-            candidate,
-            context,
-            &source.core_imports,
-            Some(module),
-            Some(&locals),
-            out,
-        ),
+        // A loaded body resolves names in its own module, never the caller's.
+        Some((module, source)) => {
+            collect_fragment_core_callable(
+                candidate,
+                context,
+                &source.core_imports,
+                Some(module),
+                Some(&locals),
+                out,
+            );
+            if let Some(facts) = context.checked_nominals {
+                collect_fragment_module_callable(
+                    candidate,
+                    facts,
+                    &source.module_imports,
+                    &source.imported_functions,
+                    Some(&locals),
+                    out,
+                );
+            }
+        }
         None => {
             collect_fragment_callable(candidate, context, current_owner, Some(&locals), out);
             collect_fragment_core_callable(
@@ -2836,6 +2849,16 @@ fn collect_fragment_function_dependencies(
                 Some(&locals),
                 out,
             );
+            if let Some(facts) = context.checked_nominals {
+                collect_fragment_module_callable(
+                    candidate,
+                    facts,
+                    &facts.import_modules,
+                    &facts.imported_functions,
+                    Some(&locals),
+                    out,
+                );
+            }
         }
     };
     for statement in &function.body {
@@ -2874,6 +2897,16 @@ fn fragment_callable_closure(
             Some(context.binding_types),
             &mut reachable,
         );
+        if let Some(facts) = context.checked_nominals {
+            collect_fragment_module_callable(
+                candidate,
+                facts,
+                &facts.import_modules,
+                &facts.imported_functions,
+                Some(context.binding_types),
+                &mut reachable,
+            );
+        }
     };
     expr.for_each_expr(&mut collect);
     for statement in stmts {
@@ -3066,11 +3099,16 @@ fn lift_func_receiver_marks(function: &crate::AST::Func) -> crate::AST::Func {
     function
 }
 
-fn lift_item_receiver_marks(item: &mut crate::AST::Item) {
+/// Visit the body of every function an item carries: a free function, or the
+/// inherent and trait-impl methods of an impl, struct or enum.
+fn for_each_item_body(
+    item: &mut crate::AST::Item,
+    mut visit: impl FnMut(&mut [crate::AST::Stmt]),
+) {
     use crate::AST::Item;
     let (methods, trait_impls) = match item {
         Item::Func(function) => {
-            lift_body_receiver_marks(&mut function.body);
+            visit(function.body.as_mut_slice());
             return;
         }
         Item::Impl(implementation) => (&mut implementation.methods, None),
@@ -3083,7 +3121,118 @@ fn lift_item_receiver_marks(item: &mut crate::AST::Item) {
         .flatten()
         .flat_map(|block| block.methods.iter_mut());
     for method in methods.iter_mut().chain(trait_methods) {
-        lift_body_receiver_marks(&mut method.body);
+        visit(method.body.as_mut_slice());
+    }
+}
+
+/// Every variant name a fragment enum declares. A dotted `.Val(x)` / `.None`
+/// pattern names that variant when one exists (sema resolves it against the
+/// subject's enum), so the fragment normalization below leaves it alone.
+fn fragment_declared_variants(items: &[crate::AST::Item]) -> std::collections::HashSet<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            crate::AST::Item::Enum(definition) => Some(&definition.variants),
+            _ => None,
+        })
+        .flatten()
+        .map(|variant| variant.name.clone())
+        .collect()
+}
+
+/// Sema rewrites a contextual `Val(x)` / `None` pattern to the optional
+/// carrier's `Present` / `Absent` test (`normalize_contextual_pattern`). A
+/// module `prep` constant lowers helper bodies before they are checked, so the
+/// fragment applies the same rewrite: the undotted spelling always names the
+/// optional state, and the dotted spelling does unless a fragment enum declares
+/// a variant of that name. Without it `.Val(c)` reached MIR as a variant of
+/// whichever enum owns a `Val` case (the unit `RemoveBy.Val`).
+fn normalize_fragment_optional_pattern(
+    pattern: &mut crate::AST::Pattern,
+    declared: &std::collections::HashSet<String>,
+) {
+    use crate::AST::{PatSlot, Pattern};
+    fn normalize_slot(slot: &mut PatSlot, declared: &std::collections::HashSet<String>) {
+        match slot {
+            PatSlot::Nested(inner) => normalize_fragment_optional_pattern(inner, declared),
+            PatSlot::Named { slot, .. } => normalize_slot(slot, declared),
+            _ => {}
+        }
+    }
+    let replacement = match pattern {
+        Pattern::Or(alternatives, _) => {
+            for alternative in alternatives {
+                normalize_fragment_optional_pattern(alternative, declared);
+            }
+            return;
+        }
+        Pattern::Present {
+            inner: Some(inner), ..
+        }
+        | Pattern::Ok {
+            inner: Some(inner), ..
+        }
+        | Pattern::Err {
+            inner: Some(inner), ..
+        } => {
+            normalize_fragment_optional_pattern(inner, declared);
+            return;
+        }
+        Pattern::Variant {
+            variant,
+            bindings,
+            leading_dot,
+            span,
+        } => {
+            for slot in bindings.iter_mut() {
+                normalize_slot(slot, declared);
+            }
+            if *leading_dot && declared.contains(variant.as_str()) {
+                return;
+            }
+            match bindings.as_mut_slice() {
+                [] if variant.as_str() == crate::Syntax::LIT_NULL => Pattern::Absent(*span),
+                [slot] if variant.as_str() == crate::Syntax::LIT_VALUE => {
+                    let (binding, binding_span, inner) =
+                        match std::mem::replace(slot, PatSlot::Wildcard) {
+                            PatSlot::Nested(inner) => (
+                                crate::Syntax::PAT_WILDCARD_SLOT.to_string(),
+                                inner.span(),
+                                Some(inner),
+                            ),
+                            slot => (
+                                slot.as_bind()
+                                    .unwrap_or(crate::Syntax::PAT_WILDCARD_SLOT)
+                                    .to_string(),
+                                slot.binding_span().unwrap_or(*span),
+                                None,
+                            ),
+                        };
+                    Pattern::Present {
+                        binding,
+                        binding_span,
+                        inner,
+                        span: *span,
+                    }
+                }
+                _ => return,
+            }
+        }
+        _ => return,
+    };
+    *pattern = replacement;
+}
+
+fn normalize_fragment_body_patterns(
+    body: &mut [crate::AST::Stmt],
+    declared: &std::collections::HashSet<String>,
+) {
+    for stmt in body {
+        stmt.for_each_expr_mut(|expr| {
+            if let crate::AST::Expr::PatternTest { pattern, .. } = expr {
+                normalize_fragment_optional_pattern(pattern, declared);
+            }
+        });
     }
 }
 
@@ -3214,6 +3363,10 @@ fn lower_mir_fragment(
                 })
                 || crate::AST::numeric_type_from_name(name).is_some()
                 || crate::Codegen::is_json_type_name(name)
+                // Compiler-owned rows (`Ordering`, Core exports) are always
+                // declared; a seeded unit shadow would claim the fragment's
+                // bare spelling with only the variants this block names.
+                || tir_to_mir_types::is_compiler_owned_type(name)
         };
         let mut collect = |candidate: &crate::AST::Expr| match candidate {
             crate::AST::Expr::Field(receiver, member, _) => {
@@ -3513,7 +3666,13 @@ fn lower_mir_fragment(
             os_target: None,
         }));
     }
-    items.iter_mut().for_each(lift_item_receiver_marks);
+    let declared_variants = fragment_declared_variants(&items);
+    for item in &mut items {
+        for_each_item_body(item, |body| {
+            lift_body_receiver_marks(body);
+            normalize_fragment_body_patterns(body, &declared_variants);
+        });
+    }
     let mut cx = build_cx_items(
         &items,
         "",
@@ -3555,6 +3714,13 @@ fn lower_mir_fragment(
             .extend(facts.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
         cx.type_names.extend(facts.enums.keys().cloned());
+        install_fragment_module_imports(
+            &mut cx,
+            facts,
+            &facts.import_modules,
+            &facts.imported_functions,
+            &facts.import_signatures,
+        );
     }
     cx.module_identity = module.clone();
     cx.core_imports = context.core_imports.clone();
@@ -3607,7 +3773,16 @@ fn lower_mir_fragment(
         {
             continue;
         }
-        extra_funcs.push(lower::lower_func(&lift_func_receiver_marks(function), &cx));
+        let mut function = lift_func_receiver_marks(function);
+        normalize_fragment_body_patterns(&mut function.body, &declared_variants);
+        if let Some(facts) = context.checked_nominals {
+            annotate_fragment_module_calls(
+                &mut function,
+                &facts.import_signatures,
+                &facts.imported_functions,
+            );
+        }
+        extra_funcs.push(lower::lower_func(&function, &cx));
     }
     if let Some(facts) = context.checked_nominals {
         lower_fragment_core_source_bodies(facts, &reachable, &cx, &mut extra_funcs)?;
@@ -3623,7 +3798,8 @@ fn lower_mir_fragment(
         if matches!(method_name.as_str(), "encode" | "decode") || !method.type_params.is_empty() {
             continue;
         }
-        let method = lift_func_receiver_marks(method);
+        let mut method = lift_func_receiver_marks(method);
+        normalize_fragment_body_patterns(&mut method.body, &declared_variants);
         let trait_name = fragment_trait_name(owner, method_name, &method);
         let mut lowered = if let Some(trait_name) = trait_name.as_deref() {
             trait_method_traits
@@ -3776,21 +3952,39 @@ fn lower_mir_fragment(
     )
 }
 
-/// Build the lowering context of one loaded Core source module for a comptime
-/// fragment, the way runtime lowering builds it for an imported Core module:
-/// the module's own functions and Core imports, its loader alias as the local
-/// call prefix and its checked identity as the owner of every lowered body.
+/// Build the lowering context of one loaded source module for a comptime
+/// fragment, the way runtime lowering builds it for an imported module: the
+/// module's own functions and imports, its loader alias as the local call
+/// prefix and its checked identity as the owner of every lowered body. A user
+/// file module also sees every checked nominal row by its canonical identity
+/// and spells its own and imported types through its identity table.
 fn fragment_core_source_cx(
     facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
     source: &crate::Comptime::MirBridge::MirFragmentCoreSourceModule,
     fragment_cx: &Cx,
 ) -> (Vec<Item>, Cx) {
+    let user_module =
+        jet_foundation::CoreModuleExports::core_source_module_by_alias(&source.alias).is_none();
     let mut functions = source.functions.values().collect::<Vec<_>>();
     functions.sort_by(|left, right| left.name.cmp(&right.name));
-    let items = functions
+    let mut items = functions
         .into_iter()
-        .map(|function| Item::Func(lift_func_receiver_marks(function)))
+        .map(|function| {
+            let mut function = lift_func_receiver_marks(function);
+            annotate_fragment_module_calls(
+                &mut function,
+                &source.import_signatures,
+                &source.imported_functions,
+            );
+            Item::Func(function)
+        })
+        .chain(source.constants.iter().cloned().map(Item::Const))
         .collect::<Vec<_>>();
+    let function_count = items.len();
+    if user_module {
+        items.extend(facts.structs.values().cloned().map(Item::Struct));
+        items.extend(facts.enums.values().cloned().map(Item::Enum));
+    }
     let mut cx = build_cx_items(
         &items,
         "",
@@ -3799,6 +3993,17 @@ fn fragment_core_source_cx(
         &std::collections::HashMap::new(),
         "2026",
     );
+    // A same-module constant read lowers to the `Global` key its declaration
+    // row carries in the fragment program (`fragment_core_source_constants`),
+    // exactly as `populate_cx_from_bundle` keys it for runtime lowering.
+    for constant in &source.constants {
+        let Some(ty) = cx.const_types.get(&constant.name).cloned() else {
+            continue;
+        };
+        let row = tir_to_mir_types::lower_constant(constant, &source.module_identity);
+        cx.const_ref_keys.insert(constant.name.clone(), row.key);
+        cx.const_ref_types.insert(constant.name.clone(), ty);
+    }
     cx.module_alias = source.alias.clone();
     cx.module_identity = source.module_identity.clone();
     cx.jit_local_call_prefix = Some(format!("{}::", mangle(&source.alias)));
@@ -3814,7 +4019,56 @@ fn fragment_core_source_cx(
             cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
         }
     }
+    if user_module {
+        install_fragment_module_imports(
+            &mut cx,
+            facts,
+            &source.module_imports,
+            &source.imported_functions,
+            &source.import_signatures,
+        );
+        cx.foreign_types = fragment_cx.foreign_types.clone();
+        cx.local_type_identities
+            .extend(source.nominal_identities.clone());
+        cx.type_names.extend(facts.structs.keys().cloned());
+        cx.type_names.extend(facts.enums.keys().cloned());
+        // The nominal rows shape this context only; the fragment program
+        // declares them once from its own item set.
+        items.truncate(function_count);
+    }
     (items, cx)
+}
+
+/// Install a module's user-module call surface on its fragment lowering
+/// context as `populate_cx_from_bundle` does for runtime lowering: import
+/// aliases and member imports name the loaded module rows, and each callee's
+/// declared signature supplies the call's conventions and return.
+fn install_fragment_module_imports(
+    cx: &mut Cx,
+    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    module_imports: &std::collections::HashMap<String, String>,
+    imported_functions: &std::collections::HashMap<String, (String, String)>,
+    signatures: &std::collections::HashMap<
+        (String, String),
+        crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+    >,
+) {
+    for (alias, module) in module_imports {
+        if let Some(loaded) = facts.core_source_bodies.get(module) {
+            cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
+        }
+    }
+    for (local, (module, name)) in imported_functions {
+        if let Some(loaded) = facts.core_source_bodies.get(module) {
+            cx.unqualified_file
+                .insert(local.clone(), (mangle(&loaded.alias), name.clone()));
+        }
+    }
+    for (key, signature) in signatures {
+        cx.import_sigs.insert(key.clone(), signature.params.clone());
+        cx.import_rets
+            .insert(key.clone(), signature.return_type.clone());
+    }
 }
 
 /// Lower the source-owned Core bodies a fragment reaches under the key and
@@ -3989,6 +4243,19 @@ fn lower_mir_fragment_program(
         .filter(|function| function.module != module)
         .map(|function| (function.module.clone(), function.source_file.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
+    // Their same-module constants are declaration rows too, so a body's
+    // `Global` read of a Core table (`C_SHA256_K[t]`) finds its value.
+    let mut declarations = declarations.clone();
+    if let Some(facts) = context.checked_nominals {
+        for source in facts.core_source_bodies.values() {
+            if !core_source_modules.contains_key(&source.module_identity) {
+                continue;
+            }
+            declarations.constants.extend(source.constants.iter().map(|constant| {
+                tir_to_mir_types::lower_constant(constant, &source.module_identity)
+            }));
+        }
+    }
     let artifact_facts = artifact_plan::TirArtifactFacts {
         package_identity: "comptime-fragment".to_string(),
         package_version: "0.0.0".to_string(),
@@ -4099,6 +4366,7 @@ fn lower_mir_fragment_program(
     };
     let mut tir = TirProgram {
         package_identity: "comptime-fragment".to_string(),
+        entry_sibling_calls: None,
         facts: TirPackageFacts::default(),
         source_file: file.clone(),
         source_text: String::new(),
@@ -4109,7 +4377,7 @@ fn lower_mir_fragment_program(
         funcs: std::iter::once(function)
             .chain(extra_funcs.iter().cloned())
             .collect(),
-        declarations: declarations.clone(),
+        declarations,
         artifact_facts,
         core_calls: crate::Syntax::CORE_CALLS
             .iter()
@@ -4988,7 +5256,8 @@ fn lower_checked_tir_program_on_stack(
                     }
                 }
                 Item::Impl(imp) => {
-                    let owner_params = module
+                    let owner_module = impl_owner_module(bundle, bundle.entry, &imp.type_name);
+                    let owner_params = bundle.modules[owner_module]
                         .items
                         .iter()
                         .find_map(|item| match item {
@@ -5446,7 +5715,10 @@ fn lower_checked_tir_program_on_stack(
                         }
                     }
                     Item::Impl(implementation) if implementation.trait_name.is_none() => {
-                        let owner_is_generic = imported.items.iter().any(|item| match item {
+                        let owner_module =
+                            impl_owner_module(bundle, module_idx, &implementation.type_name);
+                        let owner_items = &bundle.modules[owner_module].items;
+                        let owner_is_generic = owner_items.iter().any(|item| match item {
                             Item::Struct(definition) => {
                                 definition.name == implementation.type_name
                                     && !definition.type_params.is_empty()
@@ -5462,7 +5734,7 @@ fn lower_checked_tir_program_on_stack(
                         }
                         imported_cx.jit_local_call_prefix =
                             Some(format!("{}::", mangle(&imported.alias)));
-                        for owner in imported_type_owners(bundle, module_idx) {
+                        for owner in imported_type_owners(bundle, owner_module) {
                             let qualified = imported_type_name(&owner, &implementation.type_name);
                             for method in &implementation.methods {
                                 if !should_lower_imported_core_body(
@@ -5551,7 +5823,9 @@ fn lower_checked_tir_program_on_stack(
                         if implementation.is_generated_serde {
                             continue;
                         }
-                        let owner_params = imported
+                        let owner_module =
+                            impl_owner_module(bundle, module_idx, &implementation.type_name);
+                        let owner_params = bundle.modules[owner_module]
                             .items
                             .iter()
                             .find_map(|item| match item {
@@ -5573,7 +5847,7 @@ fn lower_checked_tir_program_on_stack(
                         }
                         imported_cx.jit_local_call_prefix =
                             Some(format!("{}::", mangle(&imported.alias)));
-                        for owner in imported_type_owners(bundle, module_idx) {
+                        for owner in imported_type_owners(bundle, owner_module) {
                             let qualified = imported_type_name(&owner, &implementation.type_name);
                             for method in &implementation.methods {
                                 if !should_lower_imported_core_body(
@@ -6055,6 +6329,13 @@ fn lower_checked_tir_program_on_stack(
         }
         let mut program = TirProgram {
             package_identity: bundle.build_facts.package_name.clone(),
+            entry_sibling_calls: (!bundle.name_ledger.namespace_siblings(bundle.entry).is_empty())
+                .then(|| {
+                    (
+                        entry_module_identity.clone(),
+                        format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
+                    )
+                }),
             facts: TirPackageFacts {
                 project_root: bundle.project_root.display().to_string(),
                 used_core,
@@ -6064,7 +6345,6 @@ fn lower_checked_tir_program_on_stack(
                 allocator: format!("{:?}", bundle.program_allocator),
                 web_app: crate::Sema::extract_app_graph(bundle).0,
                 authority_needs: bundle.package_guarantees.authority_needs.clone(),
-                model_outputs: bundle.model_outputs().to_vec(),
                 hardware_use,
                 hardware_profile,
                 hardware_profile_id,
@@ -9426,6 +9706,11 @@ struct TCostCallable {
     declaration_span: crate::Diagnostics::Span,
     source_span: Option<crate::Diagnostics::Span>,
     body_span: Option<crate::Diagnostics::Span>,
+    /// A compiler-generated body (a built-in derive expanded from
+    /// `Prelude/Derives.jet`). Its spans are provider-template offsets that
+    /// overlap the host file's authored code, so span containment cannot tell
+    /// its references from those of the authored callable at the same offsets.
+    generated_body: bool,
     source_name: Option<String>,
     declaration_name: String,
     method: bool,
@@ -9436,84 +9721,243 @@ struct TCostCallable {
     root: bool,
 }
 
-fn find_cost_method(
-    methods: &[crate::AST::Func],
-    span: crate::Diagnostics::Span,
-) -> Option<&crate::AST::Func> {
-    methods.iter().find(|method| method.name_span == span)
+/// The checked source function of every callable declaration, keyed by its
+/// module and declaration span, with whether its owner type is generic. The
+/// cost passes ask once per callable, so the items are walked once per pass
+/// instead of once per question (which made `jet check` quadratic).
+struct CostFunctionIndex<'a> {
+    functions: std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
 }
 
-fn find_cost_function(
-    items: &[Item],
-    span: crate::Diagnostics::Span,
-) -> Option<(&crate::AST::Func, bool)> {
+impl<'a> CostFunctionIndex<'a> {
+    fn new(bundle: &'a ProgramBundle) -> Self {
+        let mut functions = std::collections::HashMap::new();
+        for (module, data) in bundle.modules.iter().enumerate() {
+            index_cost_functions(&data.items, module, &mut functions);
+        }
+        Self { functions }
+    }
+
+    fn get(&self, module: usize, span: crate::Diagnostics::Span) -> Option<(&'a Func, bool)> {
+        self.functions.get(&(module, span)).copied()
+    }
+}
+
+fn index_cost_functions<'a>(
+    items: &'a [Item],
+    module: usize,
+    functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+) {
+    // The first declaration at a span wins, as in a front-to-back search.
+    fn add<'a>(
+        functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+        module: usize,
+        methods: impl IntoIterator<Item = &'a Func>,
+        owner_is_generic: bool,
+    ) {
+        for function in methods {
+            functions
+                .entry((module, function.name_span))
+                .or_insert((function, owner_is_generic));
+        }
+    }
+    // An `impl` extends a generic owner when this item list declares that
+    // owner with type parameters.
+    let generic_owners = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(definition) if !definition.type_params.is_empty() => {
+                Some(definition.name.as_str())
+            }
+            Item::Enum(definition) if !definition.type_params.is_empty() => {
+                Some(definition.name.as_str())
+            }
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
     for item in items {
         match item {
-            Item::Func(function) if function.name_span == span => return Some((function, false)),
-            Item::Struct(definition) => {
-                if let Some(function) = find_cost_method(&definition.methods, span) {
-                    return Some((function, !definition.type_params.is_empty()));
-                }
-                for implementation in &definition.trait_impls {
-                    if let Some(function) = find_cost_method(&implementation.methods, span) {
-                        return Some((function, !definition.type_params.is_empty()));
-                    }
-                }
-            }
-            Item::Enum(definition) => {
-                if let Some(function) = find_cost_method(&definition.methods, span) {
-                    return Some((function, !definition.type_params.is_empty()));
-                }
-                for implementation in &definition.trait_impls {
-                    if let Some(function) = find_cost_method(&implementation.methods, span) {
-                        return Some((function, !definition.type_params.is_empty()));
-                    }
-                }
-            }
-            Item::Impl(implementation) => {
-                let owner_is_generic = items.iter().any(|candidate| match candidate {
-                    Item::Struct(definition) => {
-                        definition.name == implementation.type_name
-                            && !definition.type_params.is_empty()
-                    }
-                    Item::Enum(definition) => {
-                        definition.name == implementation.type_name
-                            && !definition.type_params.is_empty()
-                    }
-                    _ => false,
-                });
-                if let Some(function) = find_cost_method(&implementation.methods, span) {
-                    return Some((function, owner_is_generic));
-                }
-            }
-            Item::CodeModule(module) => {
-                if let Some(body) = &module.body {
-                    if let Some(function) = find_cost_function(body, span) {
-                        return Some(function);
-                    }
+            Item::Func(function) => add(functions, module, [function], false),
+            Item::Struct(definition) => add(
+                functions,
+                module,
+                definition.methods.iter().chain(
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter()),
+                ),
+                !definition.type_params.is_empty(),
+            ),
+            Item::Enum(definition) => add(
+                functions,
+                module,
+                definition.methods.iter().chain(
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter()),
+                ),
+                !definition.type_params.is_empty(),
+            ),
+            Item::Impl(implementation) => add(
+                functions,
+                module,
+                &implementation.methods,
+                generic_owners.contains(implementation.type_name.as_str()),
+            ),
+            Item::CodeModule(code_module) => {
+                if let Some(body) = &code_module.body {
+                    index_cost_functions(body, module, functions);
                 }
             }
             _ => {}
         }
     }
-    None
 }
 
-fn selected_cost_output(
+/// Every `(module, definition)` a selected build output names.
+fn collect_selected_cost_outputs(
     items: &[Item],
-    target_module: usize,
-    target_span: crate::Diagnostics::Span,
-) -> bool {
-    items.iter().any(|item| match item {
-        Item::Const(value) => value.resolved_output.as_ref().is_some_and(|output| {
-            output.selected && output.module == target_module && output.definition == target_span
-        }),
-        Item::CodeModule(module) => module
-            .body
-            .as_deref()
-            .is_some_and(|body| selected_cost_output(body, target_module, target_span)),
-        _ => false,
-    })
+    selected: &mut std::collections::HashSet<(usize, crate::Diagnostics::Span)>,
+) {
+    for item in items {
+        match item {
+            Item::Const(value) => {
+                if let Some(output) = value.resolved_output.as_ref().filter(|output| output.selected) {
+                    selected.insert((output.module, output.definition));
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = module.body.as_deref() {
+                    collect_selected_cost_outputs(body, selected);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Lookup tables over one pass's cost callables. Reachability asks them once
+/// per checked name reference, so no question may rescan every callable.
+struct CostCallableIndex {
+    /// Module of each callable, by callable index.
+    modules: Vec<usize>,
+    /// Callables by declaration span, in callable order.
+    by_span: std::collections::HashMap<crate::Diagnostics::Span, Vec<usize>>,
+    /// Callables by semantic identity (`module::name`), in callable order.
+    by_identity: std::collections::HashMap<String, Vec<usize>>,
+    /// Callables with a body, under every module path spelling that
+    /// [`cost_module_path_matches`] accepts for their module.
+    bodies: std::collections::HashMap<String, CostBodySpans>,
+}
+
+#[derive(Default)]
+struct CostBodySpans {
+    authored: CostSpanList,
+    generated: CostSpanList,
+}
+
+/// Body spans sorted by start, with the running maximum end, so a containment
+/// query stops as soon as no earlier span can reach past the reference.
+#[derive(Default)]
+struct CostSpanList {
+    /// `(start, end, callable index)`.
+    spans: Vec<(usize, usize, usize)>,
+    max_end: Vec<usize>,
+}
+
+impl CostSpanList {
+    fn finish(&mut self) {
+        self.spans.sort_unstable();
+        let mut max_end = 0;
+        self.max_end = self
+            .spans
+            .iter()
+            .map(|&(_, end, _)| {
+                max_end = max_end.max(end);
+                max_end
+            })
+            .collect();
+    }
+
+    /// Push `(callable index, body width)` for every body containing
+    /// `start..end`.
+    fn containing(&self, start: usize, end: usize, out: &mut Vec<(usize, usize)>) {
+        let mut position = self.spans.partition_point(|&(span_start, _, _)| span_start <= start);
+        while position > 0 {
+            position -= 1;
+            if self.max_end[position] < end {
+                break;
+            }
+            let (span_start, span_end, index) = self.spans[position];
+            if end <= span_end {
+                out.push((index, span_end.saturating_sub(span_start)));
+            }
+        }
+    }
+}
+
+impl CostCallableIndex {
+    fn new(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Self {
+        let mut by_span = std::collections::HashMap::<_, Vec<usize>>::new();
+        let mut by_identity = std::collections::HashMap::<_, Vec<usize>>::new();
+        let mut bodies = std::collections::HashMap::<String, CostBodySpans>::new();
+        for (index, callable) in callables.iter().enumerate() {
+            by_span.entry(callable.declaration_span).or_default().push(index);
+            if let Some(identity) = callable_semantic_identity(bundle, callable) {
+                by_identity.entry(identity).or_default().push(index);
+            }
+            let Some(span) = callable.body_span else {
+                continue;
+            };
+            let mut paths = Vec::new();
+            if let Some(path) = bundle.name_ledger.module_path(callable.module) {
+                paths.push(path.to_string());
+            }
+            if let Some(module) = bundle.modules.get(callable.module) {
+                if !paths.iter().any(|path| path == module.display.as_str()) {
+                    paths.push(module.display.as_str().to_string());
+                }
+            }
+            for path in paths {
+                let spans = bodies.entry(path).or_default();
+                let list = if callable.generated_body {
+                    &mut spans.generated
+                } else {
+                    &mut spans.authored
+                };
+                list.spans.push((span.start, span.end, index));
+            }
+        }
+        for spans in bodies.values_mut() {
+            spans.authored.finish();
+            spans.generated.finish();
+        }
+        Self {
+            modules: callables.iter().map(|callable| callable.module).collect(),
+            by_span,
+            by_identity,
+            bodies,
+        }
+    }
+
+    /// The first callable declared at `span` in `module`.
+    fn declared(&self, module: usize, span: crate::Diagnostics::Span) -> Option<usize> {
+        self.by_span
+            .get(&span)?
+            .iter()
+            .copied()
+            .find(|&index| self.modules[index] == module)
+    }
+
+    fn declared_at(&self, span: crate::Diagnostics::Span) -> &[usize] {
+        self.by_span.get(&span).map_or(&[][..], Vec::as_slice)
+    }
+
+    fn with_identity(&self, identity: &str) -> &[usize] {
+        self.by_identity.get(identity).map_or(&[][..], Vec::as_slice)
+    }
 }
 
 fn cost_callable_is_root(
@@ -9521,6 +9965,7 @@ fn cost_callable_is_root(
     declaration: &jet_foundation::Names::NameDeclaration,
     function: Option<&crate::AST::Func>,
     app_graph: Option<&jet_foundation::App::AppGraph>,
+    selected_outputs: &std::collections::HashSet<(usize, crate::Diagnostics::Span)>,
 ) -> bool {
     let Some(function) = function else {
         return false;
@@ -9531,10 +9976,7 @@ fn cost_callable_is_root(
             Some(jet_foundation::WebPartition::WebPartitionMarker::WasmExport)
         )
         || (declaration.module == bundle.entry && function.name == "run")
-        || bundle
-            .modules
-            .iter()
-            .any(|module| selected_cost_output(&module.items, declaration.module, declaration.span))
+        || selected_outputs.contains(&(declaration.module, declaration.span))
     {
         return true;
     }
@@ -9560,6 +10002,11 @@ fn cost_callables(
     bundle: &ProgramBundle,
     app_graph: Option<&jet_foundation::App::AppGraph>,
 ) -> Vec<TCostCallable> {
+    let functions = CostFunctionIndex::new(bundle);
+    let mut selected_outputs = std::collections::HashSet::new();
+    for module in &bundle.modules {
+        collect_selected_cost_outputs(&module.items, &mut selected_outputs);
+    }
     let mut callables = Vec::new();
     for declaration in bundle.name_ledger.declarations() {
         if !matches!(declaration.kind.as_str(), "function" | "method" | "extern") {
@@ -9568,10 +10015,7 @@ fn cost_callables(
         let function = if declaration.kind == "extern" {
             None
         } else {
-            bundle
-                .modules
-                .get(declaration.module)
-                .and_then(|module| find_cost_function(&module.items, declaration.span))
+            functions.get(declaration.module, declaration.span)
         };
         if declaration.kind != "extern" && function.is_none() {
             continue;
@@ -9593,11 +10037,15 @@ fn cost_callables(
             .is_some_and(|(function, owner_is_generic)| {
                 *owner_is_generic || !function.type_params.is_empty()
             });
+        let generated_body = function
+            .as_ref()
+            .is_some_and(|(function, _)| function.compiler_generated);
         let root = cost_callable_is_root(
             bundle,
             declaration,
             function.map(|(function, _)| function),
             app_graph,
+            &selected_outputs,
         );
         let module_label = bundle
             .modules
@@ -9609,6 +10057,7 @@ fn cost_callables(
             declaration_span: declaration.span,
             source_span,
             body_span,
+            generated_body,
             source_name,
             declaration_name: declaration.name.clone(),
             method: declaration.kind == "method",
@@ -9633,44 +10082,53 @@ fn cost_module_path_matches(bundle: &ProgramBundle, module: usize, path: &str) -
             .is_some_and(|candidate| candidate.display.as_str() == path)
 }
 
-fn reachable_cost_callables(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Vec<bool> {
+/// Callees of every callable, from checked function references and loaded
+/// Core source calls. The graph does not depend on which callables are roots.
+fn cost_call_graph(
+    bundle: &ProgramBundle,
+    callables: &[TCostCallable],
+    index: &CostCallableIndex,
+) -> Vec<Vec<usize>> {
+    let mut callees = vec![Vec::new(); callables.len()];
+    for ((source, start, end), reference) in bundle.name_ledger.references() {
+        if !is_checked_function_reference(reference) {
+            continue;
+        }
+        let Some(target) = callable_for_reference(bundle, callables, index, reference) else {
+            continue;
+        };
+        for caller in callables_containing_reference(index, source, *start, *end) {
+            callees[caller].push(target);
+        }
+    }
+    for (caller, target) in checked_core_source_call_edges(bundle, callables, index) {
+        callees[caller].push(target);
+    }
+    callees
+}
+
+fn reachable_from_roots(callees: &[Vec<usize>], callables: &[TCostCallable]) -> Vec<bool> {
     let mut reachable = callables
         .iter()
         .map(|callable| callable.root)
         .collect::<Vec<_>>();
-    let core_source_call_edges = checked_core_source_call_edges(bundle, callables);
-    loop {
-        let mut changed = false;
-        for ((source, start, end), reference) in bundle.name_ledger.references() {
-            if !is_checked_function_reference(reference) {
-                continue;
-            }
-            let Some(caller) =
-                callable_containing_reference(bundle, callables, source, *start, *end)
-            else {
-                continue;
-            };
-            if !reachable[caller] {
-                continue;
-            }
-            let Some(target) = callable_for_reference(bundle, callables, reference) else {
-                continue;
-            };
+    let mut pending = (0..callables.len())
+        .filter(|index| reachable[*index])
+        .collect::<Vec<_>>();
+    while let Some(caller) = pending.pop() {
+        for &target in &callees[caller] {
             if !reachable[target] {
                 reachable[target] = true;
-                changed = true;
+                pending.push(target);
             }
-        }
-        for (caller, target) in &core_source_call_edges {
-            if reachable[*caller] && !reachable[*target] {
-                reachable[*target] = true;
-                changed = true;
-            }
-        }
-        if !changed {
-            return reachable;
         }
     }
+    reachable
+}
+
+fn reachable_cost_callables(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Vec<bool> {
+    let index = CostCallableIndex::new(bundle, callables);
+    reachable_from_roots(&cost_call_graph(bundle, callables, &index), callables)
 }
 
 fn core_source_module_indices(bundle: &ProgramBundle) -> std::collections::HashSet<usize> {
@@ -9702,28 +10160,36 @@ fn callable_semantic_identity(bundle: &ProgramBundle, callable: &TCostCallable) 
         .map(|module| format!("{module}::{}", callable.declaration_name))
 }
 
-fn callable_containing_reference(
-    bundle: &ProgramBundle,
-    callables: &[TCostCallable],
+/// The callables a reference at `start..end` of `source` belongs to: the
+/// innermost authored callable whose body contains it, plus every generated
+/// callable whose body span contains it. A generated body carries template
+/// offsets, so it must never outrank the authored callable really written at
+/// those offsets (that pruned `inflate`'s callees once the derive template got
+/// shorter than `inflate`). Crediting the reference to both only keeps extra
+/// targets reachable; it never drops a live one.
+fn callables_containing_reference(
+    index: &CostCallableIndex,
     source: &str,
     start: usize,
     end: usize,
-) -> Option<usize> {
-    callables
-        .iter()
-        .enumerate()
-        .filter(|(_, callable)| {
-            cost_module_path_matches(bundle, callable.module, source)
-                && callable
-                    .body_span
-                    .is_some_and(|span| start >= span.start && end <= span.end)
-        })
-        .min_by_key(|(_, callable)| {
-            callable
-                .body_span
-                .map_or(usize::MAX, |span| span.end.saturating_sub(span.start))
-        })
-        .map(|(index, _)| index)
+) -> Vec<usize> {
+    let Some(bodies) = index.bodies.get(source) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    bodies.generated.containing(start, end, &mut found);
+    let mut containing = found.iter().map(|&(callable, _)| callable).collect::<Vec<_>>();
+    containing.sort_unstable();
+    found.clear();
+    bodies.authored.containing(start, end, &mut found);
+    // The narrowest body wins; the earliest callable breaks a width tie.
+    containing.extend(
+        found
+            .into_iter()
+            .min_by_key(|&(callable, width)| (width, callable))
+            .map(|(callable, _)| callable),
+    );
+    containing
 }
 
 fn checked_function_reference_identity(
@@ -9744,30 +10210,30 @@ fn is_checked_function_reference(reference: &jet_foundation::Names::NameReferenc
 fn callable_for_reference(
     bundle: &ProgramBundle,
     callables: &[TCostCallable],
+    index: &CostCallableIndex,
     reference: &jet_foundation::Names::NameReference,
 ) -> Option<usize> {
     if reference.kind == "semantic" {
         let identity = checked_function_reference_identity(reference)?;
-        return callables.iter().position(|callable| {
-            callable_semantic_identity(bundle, callable).as_deref() == Some(identity)
-        });
+        return index.with_identity(identity).first().copied();
     }
     if reference.kind != "function" {
         return None;
     }
+    let declared = index.declared_at(reference.def_span);
+    let path_matches = |callable: usize| {
+        cost_module_path_matches(bundle, callables[callable].module, &reference.module_path)
+    };
     if let Some(identity) = checked_function_reference_identity(reference) {
-        if let Some((index, _)) = callables.iter().enumerate().find(|(_, callable)| {
-            callable.declaration_span == reference.def_span
-                && cost_module_path_matches(bundle, callable.module, &reference.module_path)
-                && callable_semantic_identity(bundle, callable).as_deref() == Some(identity)
+        if let Some(&callable) = declared.iter().find(|&&callable| {
+            path_matches(callable)
+                && callable_semantic_identity(bundle, &callables[callable]).as_deref()
+                    == Some(identity)
         }) {
-            return Some(index);
+            return Some(callable);
         }
     }
-    callables.iter().position(|callable| {
-        callable.declaration_span == reference.def_span
-            && cost_module_path_matches(bundle, callable.module, &reference.module_path)
-    })
+    declared.iter().copied().find(|&callable| path_matches(callable))
 }
 
 fn checked_core_module_path_from_receiver(
@@ -9831,7 +10297,7 @@ fn checked_local_function_declaration_span(
 
 fn checked_local_function_call_target(
     bundle: &ProgramBundle,
-    callables: &[TCostCallable],
+    index: &CostCallableIndex,
     module: usize,
     call: &crate::AST::Call,
 ) -> Option<usize> {
@@ -9841,9 +10307,7 @@ fn checked_local_function_call_target(
         call.resolved_ret.as_ref(),
         bundle.name_ledger.declaration(module, &call.name),
     )?;
-    callables.iter().position(|callable| {
-        callable.module == module && callable.declaration_span == declaration_span
-    })
+    index.declared(module, declaration_span)
 }
 
 // Direct Core-module syntax is sema-checked as a Core call and may not leave a
@@ -9852,20 +10316,18 @@ fn checked_local_function_call_target(
 fn checked_core_source_call_edges(
     bundle: &ProgramBundle,
     callables: &[TCostCallable],
+    index: &CostCallableIndex,
 ) -> Vec<(usize, usize)> {
     let signatures = crate::Codegen::core_source_sig_map(bundle);
     let core_imports = (0..bundle.modules.len())
         .map(|module| crate::Codegen::core_import_map(bundle, module))
         .collect::<Vec<_>>();
     let core_modules = core_source_module_indices(bundle);
+    let functions = CostFunctionIndex::new(bundle);
     let mut edges = Vec::new();
 
     for (caller_index, callable) in callables.iter().enumerate() {
-        let Some(module) = bundle.modules.get(callable.module) else {
-            continue;
-        };
-        let Some((function, _)) = find_cost_function(&module.items, callable.declaration_span)
-        else {
+        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
             continue;
         };
         let Some(imports) = core_imports.get(callable.module) else {
@@ -9879,7 +10341,7 @@ fn checked_core_source_call_edges(
                 Expr::Call(call) if core_modules.contains(&callable.module) => {
                     if let Some(target) = checked_local_function_call_target(
                         bundle,
-                        callables,
+                        index,
                         callable.module,
                         call,
                     ) {
@@ -9918,12 +10380,10 @@ fn checked_core_source_call_edges(
                         return;
                     }
                     let target_identity = format!("{module_identity}::{method}");
-                    if let Some((target_index, _)) =
-                        callables.iter().enumerate().find(|(_, target)| {
-                            core_modules.contains(&target.module)
-                                && callable_semantic_identity(bundle, target).as_deref()
-                                    == Some(target_identity.as_str())
-                        })
+                    if let Some(&target_index) = index
+                        .with_identity(&target_identity)
+                        .iter()
+                        .find(|&&target| core_modules.contains(&callables[target].module))
                     {
                         edges.push((caller_index, target_index));
                     }
@@ -10137,22 +10597,18 @@ fn test_reference_enabled(
 fn collect_trait_impl_callable_groups(
     items: &[Item],
     module: usize,
-    callables: &[TCostCallable],
+    index: &CostCallableIndex,
     groups: &mut Vec<Vec<usize>>,
 ) {
     fn push_group(
         methods: &[crate::AST::Func],
         module: usize,
-        callables: &[TCostCallable],
+        index: &CostCallableIndex,
         groups: &mut Vec<Vec<usize>>,
     ) {
         let indices = methods
             .iter()
-            .filter_map(|method| {
-                callables.iter().position(|callable| {
-                    callable.module == module && callable.declaration_span == method.name_span
-                })
-            })
+            .filter_map(|method| index.declared(module, method.name_span))
             .collect::<Vec<_>>();
         if !indices.is_empty() {
             groups.push(indices);
@@ -10163,20 +10619,20 @@ fn collect_trait_impl_callable_groups(
         match item {
             Item::Struct(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_group(&implementation.methods, module, callables, groups);
+                    push_group(&implementation.methods, module, index, groups);
                 }
             }
             Item::Enum(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_group(&implementation.methods, module, callables, groups);
+                    push_group(&implementation.methods, module, index, groups);
                 }
             }
             Item::Impl(implementation) if implementation.trait_name.is_some() => {
-                push_group(&implementation.methods, module, callables, groups);
+                push_group(&implementation.methods, module, index, groups);
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
-                    collect_trait_impl_callable_groups(body, module, callables, groups);
+                    collect_trait_impl_callable_groups(body, module, index, groups);
                 }
             }
             _ => {}
@@ -10191,46 +10647,46 @@ fn collect_trait_impl_callable_groups(
 fn collect_core_close_callables(
     items: &[Item],
     module: usize,
-    callables: &[TCostCallable],
+    index: &CostCallableIndex,
     out: &mut Vec<usize>,
 ) {
     fn push_close(
         trait_name: &str,
         methods: &[crate::AST::Func],
         module: usize,
-        callables: &[TCostCallable],
+        index: &CostCallableIndex,
         out: &mut Vec<usize>,
     ) {
         if trait_name.rsplit('.').next() != Some(crate::Syntax::TRAIT_CLOSE) {
             return;
         }
-        out.extend(methods.iter().filter_map(|method| {
-            callables.iter().position(|callable| {
-                callable.module == module && callable.declaration_span == method.name_span
-            })
-        }));
+        out.extend(
+            methods
+                .iter()
+                .filter_map(|method| index.declared(module, method.name_span)),
+        );
     }
 
     for item in items {
         match item {
             Item::Struct(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &implementation.methods, module, callables, out);
+                    push_close(&implementation.trait_name, &implementation.methods, module, index, out);
                 }
             }
             Item::Enum(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &implementation.methods, module, callables, out);
+                    push_close(&implementation.trait_name, &implementation.methods, module, index, out);
                 }
             }
             Item::Impl(implementation) => {
                 if let Some(trait_name) = &implementation.trait_name {
-                    push_close(trait_name, &implementation.methods, module, callables, out);
+                    push_close(trait_name, &implementation.methods, module, index, out);
                 }
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
-                    collect_core_close_callables(body, module, callables, out);
+                    collect_core_close_callables(body, module, index, out);
                 }
             }
             _ => {}
@@ -10253,6 +10709,8 @@ fn reachable_core_source_callables(
     for (module, data) in bundle.modules.iter().enumerate() {
         collect_test_spans(&data.items, module, include_tests, &mut tests);
     }
+    let lookup = CostCallableIndex::new(bundle, callables);
+    let functions = CostFunctionIndex::new(bundle);
     let mut rooted = callables.to_vec();
     for callable in &mut rooted {
         let is_core = core_modules.contains(&callable.module);
@@ -10272,10 +10730,8 @@ fn reachable_core_source_callables(
         });
         let ffi_callback = callable_semantic_identity(bundle, callable)
             .is_some_and(|identity| bundle.ffi_callback_fns.contains(&identity));
-        let sampled_contract = bundle
-            .modules
-            .get(callable.module)
-            .and_then(|module| find_cost_function(&module.items, callable.declaration_span))
+        let sampled_contract = functions
+            .get(callable.module, callable.declaration_span)
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
@@ -10307,10 +10763,10 @@ fn reachable_core_source_callables(
         if test_reference_enabled(bundle, &tests, source, *start, *end) == Some(false) {
             continue;
         }
-        if callable_containing_reference(bundle, &rooted, source, *start, *end).is_some() {
+        if !callables_containing_reference(&lookup, source, *start, *end).is_empty() {
             continue;
         }
-        if let Some(target) = callable_for_reference(bundle, &rooted, reference) {
+        if let Some(target) = callable_for_reference(bundle, &rooted, &lookup, reference) {
             // Selected outputs and enabled test bodies have no enclosing
             // callable row, but still contribute direct checked references.
             rooted[target].root = true;
@@ -10327,16 +10783,17 @@ fn reachable_core_source_callables(
             collect_trait_impl_callable_groups(
                 &data.items,
                 module,
-                &rooted,
+                &lookup,
                 &mut trait_impl_groups,
             );
-            collect_core_close_callables(&data.items, module, &rooted, &mut close_callables);
+            collect_core_close_callables(&data.items, module, &lookup, &mut close_callables);
         }
     }
     for index in close_callables {
         rooted[index].root = true;
     }
-    let mut reachable = reachable_cost_callables(bundle, &rooted);
+    let callees = cost_call_graph(bundle, &rooted, &lookup);
+    let mut reachable = reachable_from_roots(&callees, &rooted);
     loop {
         let mut added_impl_method = false;
         for group in &trait_impl_groups {
@@ -10352,7 +10809,7 @@ fn reachable_core_source_callables(
         if !added_impl_method {
             return reachable;
         }
-        reachable = reachable_cost_callables(bundle, &rooted);
+        reachable = reachable_from_roots(&callees, &rooted);
     }
 }
 
@@ -10409,7 +10866,16 @@ fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) 
         });
     }
     if callable.method {
-        let owner = bundle.name_ledger.module_identity(callable.module)?;
+        // D-MOD-CYCLE1=A: an impl in a package sibling lowers under the
+        // identity of the file that declares its owner type.
+        let owner_type = callable
+            .declaration_name
+            .split('.')
+            .next()
+            .unwrap_or(&callable.declaration_name);
+        let owner = bundle
+            .name_ledger
+            .module_identity(impl_owner_module(bundle, callable.module, owner_type))?;
         return Some(format!(
             "{owner}::{}",
             callable.declaration_name.replace('.', "::")
@@ -10432,18 +10898,18 @@ fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) 
 fn cost_callable_is_covered(
     bundle: &ProgramBundle,
     callable: &TCostCallable,
-    program: &TirProgram,
+    lowered: &std::collections::HashMap<crate::Diagnostics::Span, Vec<&TFunc>>,
 ) -> bool {
     let Some(source_span) = callable.source_span else {
+        return false;
+    };
+    let Some(functions) = lowered.get(&source_span) else {
         return false;
     };
     let Some(expected) = cost_callable_lowered_name(bundle, callable) else {
         return false;
     };
-    program.funcs.iter().any(|function| {
-        if function.source_span != source_span {
-            return false;
-        }
+    functions.iter().any(|function| {
         if !callable.method {
             return lowered_cost_function_matches(&function.name, &expected);
         }
@@ -10517,16 +10983,13 @@ fn cost_error_conversion_gaps(
     callables: &[TCostCallable],
     reachable: &[bool],
 ) -> Vec<String> {
+    let functions = CostFunctionIndex::new(bundle);
     let mut required = std::collections::BTreeSet::new();
     for (callable, is_reachable) in callables.iter().zip(reachable.iter().copied()) {
         if !is_reachable || callable.foreign {
             continue;
         }
-        let Some(module) = bundle.modules.get(callable.module) else {
-            continue;
-        };
-        let Some((function, _)) = find_cost_function(&module.items, callable.declaration_span)
-        else {
+        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
             continue;
         };
         collect_cost_typed_conversions(&function.body, &mut required);
@@ -10590,11 +11053,15 @@ fn cost_coverage_gaps(bundle: &ProgramBundle, program: &TirProgram) -> Vec<Strin
     let app_graph = crate::Sema::extract_app_graph(bundle).0;
     let callables = cost_callables(bundle, app_graph.as_ref());
     let reachable = reachable_cost_callables(bundle, &callables);
+    let mut lowered = std::collections::HashMap::<_, Vec<&TFunc>>::new();
+    for function in &program.funcs {
+        lowered.entry(function.source_span).or_default().push(function);
+    }
     let mut gaps = callables
         .iter()
         .zip(reachable.iter().copied())
         .filter_map(|(callable, reachable)| {
-            (reachable && !callable.foreign && !cost_callable_is_covered(bundle, callable, program))
+            (reachable && !callable.foreign && !cost_callable_is_covered(bundle, callable, &lowered))
                 .then(|| {
                     let reason = if callable.type_parameterized {
                         "type-parameterized callable has no complete TIR specialization"
@@ -13349,8 +13816,6 @@ pub enum THandleOp {
     StderrWriteBytes,
     StderrFlush,
     StderrIsTty,
-    /// Stopwatch: `elapsed_millis()` → `{root}jet_stopwatch_elapsed_millis(&(recv))`.
-    StopwatchElapsedMillis,
     /// D-CMD-OVERRIDE1=C: `TestSuite.run()` calls the installed command runner.
     TestSuiteRun,
     /// D-DET1 Clock: `now()` → `{root}jet_clock_now(&(recv))` (current ms, no advance).

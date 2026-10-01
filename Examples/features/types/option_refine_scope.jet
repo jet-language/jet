@@ -1,0 +1,59 @@
+// D-FLOWTYPE1=A: a proven test refines an Optional name only inside the
+// branch or block it proves. After that branch or block ends, the name is
+// the whole Optional again.
+fn after_branch(head: Int?) -> String {
+    if head != None {
+        print("inside {head + 1}")
+    }
+    "after {head == None}"
+}
+
+fn after_value_table(head: Int?) -> String {
+    big :: if head == {
+        None -> false
+        Val(n) -> n > 3
+    }
+    if head == None -> return "none {big}"
+    "some {head} {big}"
+}
+
+fn after_inner_guard(head: Int?, flag: Bool) -> String {
+    if flag {
+        if head == None -> return "flag none"
+        print("flag {head * 2}")
+    }
+    "after {head == None}"
+}
+
+enum Shape {
+    Named(String)
+    Other
+}
+
+// A non-Copy subject that is read again after the table.
+fn owned_table(head: Shape?) -> String {
+    record :: if head == {
+        None -> true
+        Val(shape) -> if shape == {
+            .Named(name) -> name != "Layout"
+            else -> false
+        }
+    }
+    if head == None -> return "none {record}"
+    "some {record}"
+}
+
+fn run() {
+    print(after_branch(Val(5)))
+    print(after_branch(None))
+    print(after_value_table(Val(5)))
+    print(after_value_table(Val(1)))
+    print(after_value_table(None))
+    print(after_inner_guard(Val(4), true))
+    print(after_inner_guard(Val(4), false))
+    print(after_inner_guard(None, false))
+    print(owned_table(None))
+    print(owned_table(Val(Shape.Named("Point"))))
+    print(owned_table(Val(Shape.Named("Layout"))))
+    print(owned_table(Val(Shape.Other)))
+}

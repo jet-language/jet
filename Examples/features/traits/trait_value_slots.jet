@@ -1,0 +1,84 @@
+// S48: a trait name in a field, an optional, or a declared result is a trait
+// value. A concrete value that implements the trait fills each of those slots
+// and is boxed invisibly, exactly as it is for a trait-typed parameter.
+trait Adapter {
+    fn go(self) -> Int
+}
+
+trait Cloner {
+    fn go2(self) -> Int
+    fn again(self) -> Cloner
+}
+
+struct Real {
+    n: Int
+}
+
+impl Real.Adapter {
+    fn go(self) -> Int { self.n }
+}
+
+impl Real.Cloner {
+    fn go2(self) -> Int { self.n }
+    // A declared trait result takes the concrete value.
+    fn again(self) -> Cloner { Real{n: self.n + 1} }
+}
+
+struct Plain {
+    adapter: Adapter
+}
+
+struct Config {
+    adapter: Adapter?
+    cloner: Cloner?
+}
+
+fn direct(plain: Plain) -> Int {
+    plain.adapter.go()
+}
+
+fn via_match(config: Config) -> Int {
+    if config.adapter == {
+        None -> 0
+        Val(adapter) -> adapter.go()
+    }
+}
+
+fn via_view(config: Config) -> Int {
+    configured :: config.cloner
+    cloner :: configured ?? return 0
+    cloner.again().go2()
+}
+
+fn optional_param(adapter: Adapter?) -> Int {
+    found :: adapter ?? return -1
+    found.go()
+}
+
+fn make(n: Int) -> Adapter {
+    Real{n: n}
+}
+
+fn maybe(n: Int) -> Adapter? {
+    if n < 0 -> return None
+    Val(Real{n: n})
+}
+
+fn maybe_go(n: Int) -> Int {
+    if maybe(n) == {
+        None -> 0
+        Val(adapter) -> adapter.go()
+    }
+}
+
+fn run() {
+    print(direct(Plain{adapter: Real{n: 2}}))
+    config := Config{adapter: Val(Real{n: 1}), cloner: Val(Real{n: 5})}
+    print(via_match(config))
+    print(via_view(config))
+    print(optional_param(Val(Real{n: 7})))
+    print(optional_param(None))
+    print(make(3).go())
+    print(maybe_go(4))
+    print(maybe_go(-1))
+}

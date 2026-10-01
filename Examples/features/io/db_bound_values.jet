@@ -2,6 +2,11 @@
 // as data with the table intact, a hole cannot stand in for a table name,
 // `owner == user` scopes see only their own rows, a failed policy-scoped
 // transaction rolls back, and a closed scope refuses further queries.
+package {
+    name: "db_bound_values"
+    authority: { holds: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] } }
+}
+
 use core.db as db
 
 fn count(scope: DBScope) -[DB]> Int {

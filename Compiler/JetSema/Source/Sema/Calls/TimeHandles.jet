@@ -1,4 +1,27 @@
 // Checked deterministic time/random handles and civil-time methods.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    InternalTag,
+    ParamZone,
+    Span,
+    StrPart,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    THandleOp,
+    THelperKind,
+    THostArg,
+    THostCall,
+    TagMarker,
+    Type,
+    core_call,
+    type_name,
+]
 
 fn sema_time_named(name: String) -> Type Never! {
     Type.Named{name: name}
@@ -132,7 +155,7 @@ fn sema_time_rng_fixed_signature(method: String, argc: Int) -> Type? {
         method == "normal" && argc == 2 -> Val(Type.Float)
         method == "exponential" && argc == 1 -> Val(Type.Float)
         method == "bytes" && argc == 1 -> Val(Type.List{element: Type.IntN{signed: false, bits: 8}})
-        method == "split" && argc == 0 -> Val(sema_time_named("Rng"))
+        method == "split" && argc == 0 -> Val(sema_time_named("RNG"))
         else -> None
     }
 }
@@ -150,15 +173,15 @@ fn sema_time_rng_fixed_args(method: String, argc: Int) -> [Type] Never! {
 
 fn sema_time_rng_op(method: String, argc: Int) -> THandleOp? {
     return if {
-        method == "int" -> Val(THandleOp.RngInt)
-        method == "float" -> Val(THandleOp.RngFloat)
-        method == "float_range" -> Val(THandleOp.RngFloatRange)
-        method == "bool" && argc == 1 -> Val(THandleOp.RngBoolP)
-        method == "bool" -> Val(THandleOp.RngBool)
-        method == "normal" -> Val(THandleOp.RngNormal)
-        method == "exponential" -> Val(THandleOp.RngExponential)
-        method == "bytes" -> Val(THandleOp.RngBytes)
-        method == "split" -> Val(THandleOp.RngSplit)
+        method == "int" -> Val(THandleOp.RNGInt)
+        method == "float" -> Val(THandleOp.RNGFloat)
+        method == "float_range" -> Val(THandleOp.RNGFloatRange)
+        method == "bool" && argc == 1 -> Val(THandleOp.RNGBoolP)
+        method == "bool" -> Val(THandleOp.RNGBool)
+        method == "normal" -> Val(THandleOp.RNGNormal)
+        method == "exponential" -> Val(THandleOp.RNGExponential)
+        method == "bytes" -> Val(THandleOp.RNGBytes)
+        method == "split" -> Val(THandleOp.RNGSplit)
         else -> None
     }
 }
@@ -170,7 +193,7 @@ fn sema_time_rng_method(receiver: Expr, receiver_value: TExpr, method: String, a
     values :: sema_time_check_values(args, required, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_time_check_method_ownership(receiver, method, args, required, AccessConvention.Write, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     operation :: sema_time_rng_op(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    sema_time_finish_handle(receiver_value, operation, values, result, "Rand", "Rng.{method}", span, expected, environment, &scopes, &context, &diagnostics)
+    sema_time_finish_handle(receiver_value, operation, values, result, "Rand", "RNG.{method}", span, expected, environment, &scopes, &context, &diagnostics)
 }
 
 fn sema_time_rng_generic_arity(method: String) -> Int Never! {
@@ -190,7 +213,7 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     required_arity :: sema_time_rng_generic_arity(method)
     if updated_args.len() != required_arity {
-        &diagnostics.push(sema_error("E0104", span, "`.{method}()` takes {required_arity} argument(s), got {updated_args.len()}", "this `Rng` draw operates on a list and optional draw parameter", if {
+        &diagnostics.push(sema_error("E0104", span, "`.{method}()` takes {required_arity} argument(s), got {updated_args.len()}", "this `RNG` draw operates on a list and optional draw parameter", if {
             method == "weighted_pick" -> "call `rng.weighted_pick(items, weights)`"
             method == "sample" -> "call `rng.sample(items, k)`"
             else -> "call `rng.{method}(items)"
@@ -237,16 +260,16 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
     }
     if method == "weighted_pick" -> &ownership_params.push(SemaCallParam{label: "weights", name: "weights", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.List{element: Type.Float}), variadic: false})
     if method == "sample" -> &ownership_params.push(SemaCallParam{label: "count", name: "count", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})
-    ownership := sema_ownership_check_call_arguments(&state, "Rng.{method}", ownership_params, &updated_args, scopes, &diagnostics)
+    ownership := sema_ownership_check_call_arguments(&state, "RNG.{method}", ownership_params, &updated_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     result :: sema_time_rng_generic_result(method, element)
     operation :: if method == {
-        "pick" -> THandleOp.RngPick
-        "weighted_pick" -> THandleOp.RngWeightedPick
-        "sample" -> THandleOp.RngSample
-        else -> THandleOp.RngShuffle
+        "pick" -> THandleOp.RNGPick
+        "weighted_pick" -> THandleOp.RNGWeightedPick
+        "sample" -> THandleOp.RNGSample
+        else -> THandleOp.RNGShuffle
     }
-    if !sema_time_record_intrinsic(result, "Rand", "Rng.{method}", span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_time_record_intrinsic(result, "Rand", "RNG.{method}", span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
     checked := sema_expr_expected(value, expected, environment, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
@@ -568,7 +591,7 @@ pub fn sema_call_try_time_static_method(owner: String, method: String, args: [Ca
 pub fn sema_call_try_time_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_name :: sema_time_handle_receiver_name(receiver_value.ty)
     if receiver_name == "Clock" -> return sema_time_clock_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if receiver_name == "Rng" -> return sema_time_rng_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if receiver_name == "RNG" -> return sema_time_rng_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_name == "Date" || receiver_name == "LocalDate" || receiver_name == "LocalTime" || receiver_name == "DateTime" || receiver_name == "Instant" || receiver_name == "Period" || receiver_name == "Duration" || receiver_name == "Zone" || receiver_name == "ZonedDateTime" {
         return sema_time_civil_method(receiver, receiver_value, receiver_name, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }

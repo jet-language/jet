@@ -114,16 +114,3 @@ pub(crate) fn jet_arithmetic_message(kind: &str) -> &'static str {
         _ => "This operation overflows the value's type (the result is outside its range)",
     }
 }
-
-pub(crate) fn jet_arithmetic_shift_message(
-    direction: &str,
-    count: i128,
-    bits: u8,
-) -> Option<String> {
-    if (0..i128::from(bits)).contains(&count) {
-        return None;
-    }
-    Some(format!(
-        "Shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
-    ))
-}

@@ -76,14 +76,6 @@ impl PolicyFactGraph {
     pub fn has_domain(&self, domain: PolicyDomain) -> bool {
         self.facts.iter().any(|fact| fact.domain == domain)
     }
-
-    pub fn subjects_in(&self, domain: PolicyDomain) -> Vec<&str> {
-        self.facts
-            .iter()
-            .filter(|fact| fact.domain == domain)
-            .map(|fact| fact.subject.as_str())
-            .collect()
-    }
 }
 
 /// Parse source and collect the shared static-guarantee fact graph.

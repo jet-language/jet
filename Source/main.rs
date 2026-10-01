@@ -68,6 +68,7 @@ mod CmdStructure;
 mod CmdSupply;
 mod CmdTest;
 mod CmdTry;
+mod DevAot;
 mod EngineDispatch;
 mod NativeLinker;
 mod OutputAdapter;
@@ -392,9 +393,10 @@ pub(crate) struct ProfileConfig {
     pub debug_info: bool,
     pub codegen_units: Option<u16>,
     pub small: bool,
-    /// Size-oriented AOT-only backend settings.  Kept separate from `small`,
-    /// whose panic-abort contract is intentionally stronger.
-    pub size_opt: bool,
+    /// ThinLTO across the program crate and its cached runtime rlib. Off for
+    /// the default dev build, so its final link only compiles the program
+    /// crate; release profiles keep full cross-crate optimization.
+    pub cross_crate_lto: bool,
     pub panic_abort: bool,
     pub inspect: jet::Package::Blocks::ReleaseInspect,
     pub settings: BTreeMap<String, String>,
@@ -407,18 +409,11 @@ impl ProfileConfig {
             debug_info: false,
             codegen_units: None,
             small: false,
-            size_opt: false,
+            cross_crate_lto: true,
             panic_abort: false,
             settings: BTreeMap::new(),
             inspect: Default::default(),
         }
-    }
-    /// Release's canonical AOT linker/codegen settings.  Hardened keeps the
-    /// ordinary release contract so its sentry profile remains untouched.
-    pub(crate) fn release_aot() -> Self {
-        let mut profile = Self::release();
-        profile.size_opt = true;
-        profile
     }
 
     pub(crate) fn debug() -> Self {
@@ -428,7 +423,7 @@ impl ProfileConfig {
             codegen_units: Some(256),
             small: false,
             panic_abort: false,
-            size_opt: false,
+            cross_crate_lto: false,
             settings: BTreeMap::new(),
             inspect: Default::default(),
         }
@@ -440,7 +435,7 @@ impl ProfileConfig {
             debug_info: true,
             codegen_units: None,
             small: false,
-            size_opt: false,
+            cross_crate_lto: true,
             panic_abort: false,
             settings: BTreeMap::new(),
             inspect: Default::default(),
@@ -454,7 +449,7 @@ impl ProfileConfig {
             debug_info: def.debug_info,
             codegen_units: None,
             small: def.small,
-            size_opt: false,
+            cross_crate_lto: true,
             panic_abort: matches!(def.panic, Some(BuildPanic::Abort)),
             settings: def.settings.clone(),
             inspect: def.inspect,
@@ -472,8 +467,8 @@ impl ProfileConfig {
         if self.small {
             parts.push("small".into());
         }
-        if self.size_opt {
-            parts.push("size-opt".into());
+        if !self.cross_crate_lto {
+            parts.push("lto=off".into());
         }
         if self.panic_abort {
             parts.push("panic=abort".into());
@@ -525,13 +520,6 @@ impl ProfileConfig {
             }
             return args;
         }
-        if self.size_opt && !ffi {
-            args.extend(
-                ["-C", "codegen-units=1", "-C", "lto=fat"]
-                    .into_iter()
-                    .map(str::to_string),
-            );
-        }
         if let Some(units) = self.codegen_units {
             args.extend(["-C".to_string(), format!("codegen-units={units}")]);
         }
@@ -559,8 +547,9 @@ impl ProfileConfig {
         if self.panic_abort {
             args.extend(["-C".to_string(), "panic=abort".to_string()]);
         }
-        if !ffi && !matches!(self.optimize, OptimizeLevel::None) && !self.size_opt {
-            args.extend(["-C".to_string(), "lto=thin".to_string()]);
+        if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
+            let lto = if self.cross_crate_lto { "lto=thin" } else { "lto=off" };
+            args.extend(["-C".to_string(), lto.to_string()]);
         }
         if native {
             args.extend(["-C".to_string(), "target-cpu=native".to_string()]);
@@ -571,12 +560,13 @@ impl ProfileConfig {
 
 #[derive(Clone)]
 pub(crate) enum BuildProfile {
-    /// Default `jet build` profile: optimized (opt-level=2, fat LTO, one codegen unit).
+    /// Default `jet build` profile: opt-level=2 without cross-crate LTO, so the
+    /// final link compiles only the program crate against the cached runtime.
     Default,
     /// D-BUILD-DEFAULT1: fast `jet run`/`jet dev` profile.
     Fast,
     /// D-BUILDPROFILE1: `--release` / `--profile=release`. Full optimization
-    /// with the canonical size-oriented linker/codegen settings.
+    /// with ThinLTO across the program and its runtime rlib.
     Release,
     /// D-MEM-SENTRY1: release optimization with runtime sentries enabled at
     /// every audited memory boundary.
@@ -610,6 +600,12 @@ impl BuildProfile {
         }
     }
 
+    /// #3953 owner ruling: dev profiles build native code through Cranelift;
+    /// release-class, CI, size, no-OS and named profiles keep rustc/LLVM.
+    pub(crate) fn cranelift_backend(&self) -> bool {
+        matches!(self, BuildProfile::Default | BuildProfile::Fast | BuildProfile::Debug)
+    }
+
     pub(crate) fn release_inspect(&self) -> Option<jet::Package::Blocks::ReleaseInspect> {
         self.is_release().then(|| self.config().inspect)
     }
@@ -633,9 +629,9 @@ impl BuildProfile {
 
     pub(crate) fn cache_tag(&self) -> String {
         match self {
-            BuildProfile::Default => "default;size-opt".to_string(),
+            BuildProfile::Default => "default".to_string(),
             BuildProfile::Fast => "fast".to_string(),
-            BuildProfile::Release => "release;size-opt".to_string(),
+            BuildProfile::Release => "release".to_string(),
             BuildProfile::Hardened => "hardened".to_string(),
             BuildProfile::Debug => "debug".to_string(),
             BuildProfile::Ci => "ci".to_string(),
@@ -654,7 +650,7 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: None,
                 small: false,
-                size_opt: true,
+                cross_crate_lto: false,
                 panic_abort: false,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
@@ -664,13 +660,12 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: Some(256),
                 small: false,
-                size_opt: false,
+                cross_crate_lto: false,
                 panic_abort: false,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
             },
-            BuildProfile::Release => ProfileConfig::release_aot(),
-            BuildProfile::Hardened => ProfileConfig::release(),
+            BuildProfile::Release | BuildProfile::Hardened => ProfileConfig::release(),
             BuildProfile::Debug => ProfileConfig::debug(),
             BuildProfile::Ci => ProfileConfig::ci(),
             BuildProfile::Named { config, .. } => config.clone(),
@@ -679,7 +674,7 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: None,
                 small: true,
-                size_opt: false,
+                cross_crate_lto: false,
                 panic_abort: true,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
@@ -689,7 +684,7 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: None,
                 small: true,
-                size_opt: false,
+                cross_crate_lto: false,
                 panic_abort: true,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
@@ -904,38 +899,6 @@ fn unknown_subcommand(cmd: &str) -> ! {
         false,
     );
     exit(ExitCodes::USAGE);
-}
-
-/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: grouped spelling is canonical.
-/// Normalize only after rejecting the retired top-level spelling, so grouped commands
-/// reach the existing real handlers without keeping compatibility aliases.
-fn first_cli_positional(raw: &[String]) -> Option<&str> {
-    let end = raw.iter().position(|arg| arg == "--").unwrap_or(raw.len());
-    let mut skip_next = false;
-    for arg in &raw[..end] {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if matches!(
-            arg.as_str(),
-            "-p" | "--output" | "--gate" | "--scope" | "--kind" | "--target"
-        ) {
-            skip_next = true;
-            continue;
-        }
-        if arg.starts_with("--output=")
-            || arg.starts_with("--scope=")
-            || arg.starts_with("--kind=")
-            || arg.starts_with("--target=")
-        {
-            continue;
-        }
-        if arg == "-" || !arg.starts_with('-') {
-            return Some(arg);
-        }
-    }
-    None
 }
 
 fn normalize_compiler_alias(raw: &mut Vec<String>, argv0: &str) {
@@ -3317,6 +3280,9 @@ fn main() {
             exit(ExitCodes::USAGE);
         });
         if let Some(artifact_id) = verify_artifact.as_deref() {
+            // A verify rebuild re-proves MIR legality at every pass and
+            // boundary, like a compiler test build.
+            jet_foundation::MIROptimization::enable_mir_verification();
             CmdCompile::run_build_verify(artifact_id, mode);
         }
     }
@@ -6349,6 +6315,19 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
     find_project_entry_with_callable(root).path
 }
 
+/// Resolve a command-line path against the current directory (`.` when the
+/// current directory is unavailable).
+pub(crate) fn absolutize(path: &str) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
 fn find_project_entry_with_callable(root: &Path) -> ResolvedEntry {
     let resolver = match jet::Authority::AuthorityResolver::open(root) {
         Ok(resolver) => resolver,
@@ -6429,6 +6408,23 @@ fn find_project_entry_with_callable(root: &Path) -> ResolvedEntry {
         if let Ok(relative) = named.strip_prefix(resolver.root()) {
             if let Some(entry) = checked_project_entry(&resolver, relative) {
                 return ResolvedEntry::file(entry);
+            }
+        }
+        // D-MOD-CYCLE1=A: a package is one namespace, so any member file
+        // loads all of it. Without `run.jet`, the member that declares the
+        // package's one `fn run` is the entry; a library package has none,
+        // and its first source file stands for the package.
+        if !resolver.root().join(jet::Syntax::DEFAULT_ENTRY_FILE).is_file() {
+            if let Some(entry) = jet::Loader::package_run_member(resolver.root()) {
+                return ResolvedEntry::file(entry);
+            }
+            if let Ok(files) = resolver.discover_source_files() {
+                if let Some(first) = files.into_iter().find(|file| {
+                    file.relative.file_name().and_then(|name| name.to_str())
+                        != Some(jet::Syntax::PACKAGE_FILE)
+                }) {
+                    return ResolvedEntry::file(first.path);
+                }
             }
         }
     }

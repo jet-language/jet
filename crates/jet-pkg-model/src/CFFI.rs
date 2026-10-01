@@ -84,13 +84,6 @@ fn c_module_imports_after_preflight(imp: &ImportDecl) -> Vec<(String, String)> {
     })
 }
 
-/// `Module("c.<lib>")` → `Some("<lib>")` (the logical-module C `use` form).
-/// For a member list this returns the first library; callers that need every
-/// library must use `c_module_imports`.
-pub fn c_module_lib(imp: &ImportDecl) -> Result<Option<String>, ForeignImportError> {
-    c_module_imports(imp).map(|imports| imports.into_iter().next().map(|(lib, _)| lib))
-}
-
 /// `File("<…>.h")` → `Some((header, lib))` (the header-path C `use` form). The
 /// link key is the header basename without directory or extension (D-CFFI2-SYN
 /// header→lib rule; alias maps are out of M14 v1).

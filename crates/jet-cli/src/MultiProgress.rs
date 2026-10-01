@@ -415,11 +415,6 @@ impl ProgressFrameDiff {
     pub const fn is_empty(&self) -> bool {
         !self.changed
     }
-
-    /// Number of changed/new rows.
-    pub fn changed_line_count(&self) -> usize {
-        self.changed_lines.len()
-    }
 }
 
 /// Compare two optional frames without terminal I/O.
@@ -493,11 +488,6 @@ impl<'profile> MultiProgress<'profile> {
     /// Return true when this profile permits human progress frames.
     pub fn progress_enabled(&self) -> bool {
         self.profile.progress_enabled()
-    }
-
-    /// Return true when frames are suppressed by the borrowed profile.
-    pub fn is_suppressed(&self) -> bool {
-        !self.progress_enabled()
     }
 
     /// Return the number of retained tasks.
@@ -594,11 +584,6 @@ impl<'profile> MultiProgress<'profile> {
         ProgressSnapshot {
             facts: self.facts(),
         }
-    }
-
-    /// Return machine facts only when this profile selected machine mode.
-    pub fn machine_facts(&self) -> Option<ProgressSnapshot> {
-        self.profile.machine_enabled().then(|| self.snapshot())
     }
 
     /// Apply one typed update through the one state-transition path.
@@ -935,11 +920,6 @@ impl<'profile> MultiProgress<'profile> {
             frame: Some(frame),
             diff,
         })
-    }
-
-    /// Forget the previous frame used by [`Self::observe`].
-    pub fn reset_diff(&mut self) {
-        self.previous_frame = None;
     }
 
     fn task_mut(&mut self, id: TaskId) -> Result<&mut TaskState, ProgressError> {

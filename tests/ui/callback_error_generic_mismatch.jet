@@ -1,0 +1,35 @@
+// D-CALLBACK-ERR1=A: a callback's failure type flows through a generic
+// `E!` parameter to the caller. `sort_by` fails with whatever its key
+// function fails with, so a `PriceError` key reaching a `KeyError!` caller is
+// E2404 at the call.
+#Error
+enum PriceError {
+    Missing
+}
+
+#Error
+enum KeyError {
+    Blank
+}
+
+fn sort_by<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E! {
+    out := [T]{ }
+    loop row in rows {
+        _ := key_fn(row)
+        &out.push(row)
+    }
+    out
+}
+
+fn parse_price(name: String) -> String PriceError! {
+    if name == "" -> return Err(PriceError.Missing)
+    Ok(~name)
+}
+
+fn sorted(names: [String]) -> [String] KeyError! {
+    sort_by(names, parse_price)
+}
+
+fn run() {
+
+}

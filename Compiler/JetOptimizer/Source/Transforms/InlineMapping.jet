@@ -1,52 +1,132 @@
 // Identity maps and payload rewriting for checked, target-neutral inline CFG expansion.
-struct MirInlineIdMap { pub source: Int, pub target: Int }
+use jet_foundation.[
+    AccessConvention,
+    CallContractRow,
+    CallablePolicy,
+    CallablePolicyChain,
+    Dimension,
+    DimensionAxis,
+    FunctionCallMetadata,
+    FunctionDefaultRef,
+    InternalTag,
+    MIRBasicBlock,
+    MIRBlockID,
+    MIRCallArg,
+    MIRCallContractRow,
+    MIRCallFallibility,
+    MIRCallMetadata,
+    MIRCallee,
+    MIRCaptureOperand,
+    MIRConstant,
+    MIRConversion,
+    MIRDataPlan,
+    MIRDataPlanCallable,
+    MIRDataPlanColumn,
+    MIRDataPlanNode,
+    MIRDimension,
+    MIRDropAction,
+    MIRDropEdge,
+    MIREnumArg,
+    MIRFailureCarrier,
+    MIRFieldValue,
+    MIRFnCoercion,
+    MIRFunction,
+    MIRFunctionSignature,
+    MIRHardwareOp,
+    MIRInstruction,
+    MIRLocal,
+    MIRLocalID,
+    MIRMapEntry,
+    MIRMeasure,
+    MIROpID,
+    MIROperation,
+    MIRPanicContext,
+    MIRPanicLocal,
+    MIRPhiIncoming,
+    MIRPlace,
+    MIRPlaceBase,
+    MIRPlaceID,
+    MIRPreludeTypeArg,
+    MIRProjection,
+    MIRReflectField,
+    MIRScope,
+    MIRScopeID,
+    MIRSemanticOp,
+    MIRStringPart,
+    MIRStringPartKind,
+    MIRSwitchArm,
+    MIRTagMarker,
+    MIRTerminator,
+    MIRTestScopeMember,
+    MIRTupleField,
+    MIRType,
+    MIRTypeKind,
+    MIRValueFact,
+    MIRValueID,
+    Measure,
+    MeasureRule,
+    TagMarker,
+    Type,
+    TypeTupleField,
+    mir_call_metadata_is_variadic,
+    mir_copy_ownership,
+    mir_type_from_kind,
+    mir_type_id,
+    mir_type_is_unit,
+    mir_type_same_checked_type,
+    mir_type_with_identity,
+    stable_id,
+    type_identity_key,
+]
 
-struct MirInlineValueMap { pub source: MirValueId, pub target: MirValueId, pub parameter: Bool }
+struct MIRInlineIDMap { pub source: Int, pub target: Int }
 
-struct MirInlinePlaceMap { pub source: MirPlaceId, pub target: MirPlaceId, pub materialize: Bool }
+struct MIRInlineValueMap { pub source: MIRValueID, pub target: MIRValueID, pub parameter: Bool }
 
-struct MirInlineTypeSubstitution { pub name: String, pub ty: MirType }
+struct MIRInlinePlaceMap { pub source: MIRPlaceID, pub target: MIRPlaceID, pub materialize: Bool }
 
-struct MirInlineMaps {
-    pub values: [MirInlineValueMap]
-    pub blocks: [MirInlineIdMap]
-    pub places: [MirInlinePlaceMap]
-    pub locals: [MirInlineIdMap]
-    pub scopes: [MirInlineIdMap]
-    pub operations: [MirInlineIdMap]
+struct MIRInlineTypeSubstitution { pub name: String, pub ty: MIRType }
+
+struct MIRInlineMaps {
+    pub values: [MIRInlineValueMap]
+    pub blocks: [MIRInlineIDMap]
+    pub places: [MIRInlinePlaceMap]
+    pub locals: [MIRInlineIDMap]
+    pub scopes: [MIRInlineIDMap]
+    pub operations: [MIRInlineIDMap]
 }
 
-struct MirInlinePlan {
-    pub entry: MirBlockId
-    pub continuation: MirBlockId
-    pub blocks: [MirBasicBlock]
-    pub adapter_instructions: [MirInstruction]
-    pub values: [MirValueFact]
-    pub locals: [MirLocal]
-    pub places: [MirPlace]
-    pub scopes: [MirScope]
-    pub drops: [MirDropAction]
-    pub return_incoming: [MirPhiIncoming]
+struct MIRInlinePlan {
+    pub entry: MIRBlockID
+    pub continuation: MIRBlockID
+    pub blocks: [MIRBasicBlock]
+    pub adapter_instructions: [MIRInstruction]
+    pub values: [MIRValueFact]
+    pub locals: [MIRLocal]
+    pub places: [MIRPlace]
+    pub scopes: [MIRScope]
+    pub drops: [MIRDropAction]
+    pub return_incoming: [MIRPhiIncoming]
     pub returns: Bool
 }
 
-struct MirInlinePlanResult { pub plan: MirInlinePlan?, pub error: MirOptimizationError? }
+struct MIRInlinePlanResult { pub plan: MIRInlinePlan?, pub error: MIROptimizationError? }
 
 fn mir_pass_inline_plan(
-    caller: MirFunction,
-    callee: MirFunction,
-    call_instruction: MirInstruction,
-    args: [MirCallArg],
-    type_args: [MirType],
-) -> MirInlinePlanResult Never! {
-    if args.len() != callee.params.len() || callee.generic_params.len() != type_args.len() -> return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) call arguments do not match the checked function signature"))}
-    if mir_pass_inline_has_return_drop(callee) -> return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) cannot relocate callee-scoped Return cleanup into the caller"))}
-    substitutions := [MirInlineTypeSubstitution]{}
+    caller: MIRFunction,
+    callee: MIRFunction,
+    call_instruction: MIRInstruction,
+    args: [MIRCallArg],
+    type_args: [MIRType],
+) -> MIRInlinePlanResult Never! {
+    if args.len() != callee.params.len() || callee.generic_params.len() != type_args.len() -> return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) call arguments do not match the checked function signature"))}
+    if mir_pass_inline_has_return_drop(callee) -> return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) cannot relocate callee-scoped Return cleanup into the caller"))}
+    substitutions := [MIRInlineTypeSubstitution]{}
     loop (index, parameter) in callee.generic_params {
-        &substitutions.push(MirInlineTypeSubstitution{name: parameter.name, ty: type_args[index]})
+        &substitutions.push(MIRInlineTypeSubstitution{name: parameter.name, ty: type_args[index]})
     }
     identity :: "caller={caller.id.value}:call={call_instruction.id.value}:callee={callee.id.value}"
-    maps := MirInlineMaps{values: [MirInlineValueMap]{}, blocks: [MirInlineIdMap]{}, places: [MirInlinePlaceMap]{}, locals: [MirInlineIdMap]{}, scopes: [MirInlineIdMap]{}, operations: [MirInlineIdMap]{}}
+    maps := MIRInlineMaps{values: [MIRInlineValueMap]{}, blocks: [MIRInlineIDMap]{}, places: [MIRInlinePlaceMap]{}, locals: [MIRInlineIDMap]{}, scopes: [MIRInlineIDMap]{}, operations: [MIRInlineIDMap]{}}
     used_values := [Int]{}
     used_blocks := [Int]{}
     used_places := [Int]{}
@@ -65,77 +145,77 @@ fn mir_pass_inline_plan(
     loop local in caller.locals -> &used_locals.push(local.id.value)
     loop scope in caller.scopes -> &used_scopes.push(scope.id.value)
 
-    parameter_values := [MirValueId]{}
-    loop _ in callee.params -> &parameter_values.push(MirValueId{value: 0})
+    parameter_values := [MIRValueID]{}
+    loop _ in callee.params -> &parameter_values.push(MIRValueID{value: 0})
     loop block in callee.blocks {
         loop instruction in block.instructions {
             if instruction.operation == {
                 .Parameter(parameter_index, _) -> {
-                    if instruction.result == None || parameter_index < 0 || parameter_index >= parameter_values.len() || parameter_values[parameter_index].value != 0 -> return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), instruction.span, "#Inline(Always) parameter definitions are not canonical"))}
-                    parameter_values[parameter_index] = instruction.result ?? MirValueId{value: 0}
+                    if instruction.result == None || parameter_index < 0 || parameter_index >= parameter_values.len() || parameter_values[parameter_index].value != 0 -> return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), instruction.span, "#Inline(Always) parameter definitions are not canonical"))}
+                    parameter_values[parameter_index] = instruction.result ?? MIRValueID{value: 0}
                 }
-                .Capture(_) -> return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), instruction.span, "captured values cannot be remapped in an inline body"))}
+                .Capture(_) -> return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), instruction.span, "captured values cannot be remapped in an inline body"))}
                 else -> {}
             }
         }
     }
-    adapters := [MirInstruction]{}
-    adapter_values := [MirValueFact]{}
+    adapters := [MIRInstruction]{}
+    adapter_values := [MIRValueFact]{}
     loop (index, argument) in args {
-        if parameter_values[index].value == 0 -> return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) parameter definition is missing"))}
-        argument_fact :: mir_pass_find_value(caller.values, argument.value) ?? return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), argument.span, "#Inline(Always) argument value metadata is missing"))}
+        if parameter_values[index].value == 0 -> return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) parameter definition is missing"))}
+        argument_fact :: mir_pass_find_value(caller.values, argument.value) ?? return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), argument.span, "#Inline(Always) argument value metadata is missing"))}
         adapted :: if {
             argument.implicit_clone || argument.shared_auto_clone -> {
-                cloned :: MirValueId{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:clone:{argument.value.value}:{index}")}
-                operation_id :: MirOpId{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:clone-op:{argument.value.value}:{index}")}
+                cloned :: MIRValueID{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:clone:{argument.value.value}:{index}")}
+                operation_id :: MIROpID{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:clone-op:{argument.value.value}:{index}")}
                 ownership := argument_fact.ownership
                 ownership.moved = false
                 ownership.last_use = false
-                &adapter_values.push(MirValueFact{id: cloned, ty: argument_fact.ty, span: argument_fact.span, ownership: ownership})
-                &adapters.push(MirInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(cloned), ty: Val(argument_fact.ty), operation: MirOperation.Copy{value: argument.value, materialize_view: false}})
+                &adapter_values.push(MIRValueFact{id: cloned, ty: argument_fact.ty, span: argument_fact.span, ownership: ownership})
+                &adapters.push(MIRInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(cloned), ty: Val(argument_fact.ty), operation: MIROperation.Copy{value: argument.value, materialize_view: false}})
                 cloned
             }
             mir_pass_inline_call_arg_consumes(argument) -> {
-                moved :: MirValueId{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:move:{argument.value.value}:{index}")}
-                operation_id :: MirOpId{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:move-op:{argument.value.value}:{index}")}
+                moved :: MIRValueID{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:move:{argument.value.value}:{index}")}
+                operation_id :: MIROpID{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:move-op:{argument.value.value}:{index}")}
                 ownership := argument_fact.ownership
                 ownership.moved = false
                 ownership.last_use = false
-                &adapter_values.push(MirValueFact{id: moved, ty: argument_fact.ty, span: argument_fact.span, ownership: ownership})
-                &adapters.push(MirInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(moved), ty: Val(argument_fact.ty), operation: MirOperation.Move{value: argument.value}})
+                &adapter_values.push(MIRValueFact{id: moved, ty: argument_fact.ty, span: argument_fact.span, ownership: ownership})
+                &adapters.push(MIRInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(moved), ty: Val(argument_fact.ty), operation: MIROperation.Move{value: argument.value}})
                 moved
             }
             else -> argument.value
         }
-        &maps.values.push(MirInlineValueMap{source: parameter_values[index], target: adapted, parameter: true})
+        &maps.values.push(MIRInlineValueMap{source: parameter_values[index], target: adapted, parameter: true})
     }
 
     loop value in callee.values {
         if mir_pass_inline_value_map_exists(maps.values, value.id) -> next
-        mapped :: MirValueId{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:value:{value.id.value}")}
-        &maps.values.push(MirInlineValueMap{source: value.id, target: mapped, parameter: false})
+        mapped :: MIRValueID{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:value:{value.id.value}")}
+        &maps.values.push(MIRInlineValueMap{source: value.id, target: mapped, parameter: false})
     }
     loop block in callee.blocks {
-        mapped :: MirBlockId{value: mir_pass_inline_fresh_id(&used_blocks, "mir-inline-block", "{identity}:block:{block.id.value}")}
-        &maps.blocks.push(MirInlineIdMap{source: block.id.value, target: mapped.value})
+        mapped :: MIRBlockID{value: mir_pass_inline_fresh_id(&used_blocks, "mir-inline-block", "{identity}:block:{block.id.value}")}
+        &maps.blocks.push(MIRInlineIDMap{source: block.id.value, target: mapped.value})
     }
     loop local in callee.locals {
-        mapped :: MirLocalId{value: mir_pass_inline_fresh_id(&used_locals, "mir-inline-local", "{identity}:local:{local.id.value}")}
-        &maps.locals.push(MirInlineIdMap{source: local.id.value, target: mapped.value})
+        mapped :: MIRLocalID{value: mir_pass_inline_fresh_id(&used_locals, "mir-inline-local", "{identity}:local:{local.id.value}")}
+        &maps.locals.push(MIRInlineIDMap{source: local.id.value, target: mapped.value})
     }
     loop scope in callee.scopes {
-        mapped :: MirScopeId{value: mir_pass_inline_fresh_id(&used_scopes, "mir-inline-scope", "{identity}:scope:{scope.id.value}")}
-        &maps.scopes.push(MirInlineIdMap{source: scope.id.value, target: mapped.value})
+        mapped :: MIRScopeID{value: mir_pass_inline_fresh_id(&used_scopes, "mir-inline-scope", "{identity}:scope:{scope.id.value}")}
+        &maps.scopes.push(MIRInlineIDMap{source: scope.id.value, target: mapped.value})
     }
     loop place in callee.places {
         argument_place := mir_pass_inline_parameter_place(place, parameter_values, args)
         if {
             argument_place != None && place.projections.len() == 0 -> {
-                &maps.places.push(MirInlinePlaceMap{source: place.id, target: (argument_place ?? MirPlaceId{value: 0}), materialize: false})
+                &maps.places.push(MIRInlinePlaceMap{source: place.id, target: (argument_place ?? MIRPlaceID{value: 0}), materialize: false})
             }
             else -> {
-                mapped :: MirPlaceId{value: mir_pass_inline_fresh_id(&used_places, "mir-inline-place", "{identity}:place:{place.id.value}")}
-                &maps.places.push(MirInlinePlaceMap{source: place.id, target: mapped, materialize: true})
+                mapped :: MIRPlaceID{value: mir_pass_inline_fresh_id(&used_places, "mir-inline-place", "{identity}:place:{place.id.value}")}
+                &maps.places.push(MIRInlinePlaceMap{source: place.id, target: mapped, materialize: true})
             }
         }
 
@@ -144,40 +224,40 @@ fn mir_pass_inline_plan(
         loop instruction in block.instructions {
             is_parameter :: if instruction.operation == { .Parameter(_, _) -> true else -> false }
             if is_parameter -> next
-            operation_id :: MirOpId{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:op:{instruction.id.value}")}
-            &maps.operations.push(MirInlineIdMap{source: instruction.id.value, target: operation_id.value})
+            operation_id :: MIROpID{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:op:{instruction.id.value}")}
+            &maps.operations.push(MIRInlineIDMap{source: instruction.id.value, target: operation_id.value})
         }
     }
-    continuation :: MirBlockId{value: mir_pass_inline_fresh_id(&used_blocks, "mir-inline-block", "{identity}:continuation")}
-    plan := MirInlinePlan{
+    continuation :: MIRBlockID{value: mir_pass_inline_fresh_id(&used_blocks, "mir-inline-block", "{identity}:continuation")}
+    plan := MIRInlinePlan{
         entry: mir_pass_inline_block(maps, callee.entry),
         continuation: continuation,
-        blocks: [MirBasicBlock]{},
+        blocks: [MIRBasicBlock]{},
         adapter_instructions: adapters,
         values: adapter_values,
-        locals: [MirLocal]{},
-        places: [MirPlace]{},
-        scopes: [MirScope]{},
-        drops: [MirDropAction]{},
-        return_incoming: [MirPhiIncoming]{},
+        locals: [MIRLocal]{},
+        places: [MIRPlace]{},
+        scopes: [MIRScope]{},
+        drops: [MIRDropAction]{},
+        return_incoming: [MIRPhiIncoming]{},
         returns: false,
     }
     loop place in callee.places {
-        map :: mir_pass_inline_place_map(maps, place.id) ?? MirInlinePlaceMap{source: place.id, target: place.id, materialize: false}
+        map :: mir_pass_inline_place_map(maps, place.id) ?? MIRInlinePlaceMap{source: place.id, target: place.id, materialize: false}
         if !map.materialize -> next
         parameter_source :: mir_pass_inline_parameter_place_source(place, parameter_values, args)
         base := mir_pass_inline_place_base(place.base, maps)
-        projections := [MirProjection]{}
+        projections := [MIRProjection]{}
         if parameter_source == .Val(source_id) {
             source_place :: mir_pass_find_place(caller.places, source_id) ?? next
             base = source_place.base
             loop projection in source_place.projections -> &projections.push(projection)
         }
         loop projection in place.projections -> &projections.push(mir_pass_inline_projection(projection, maps))
-        &plan.places.push(MirPlace{id: map.target, span: place.span, ty: mir_pass_inline_type(place.ty, substitutions), base: base, projections: projections, access: place.access, persist_key: place.persist_key})
+        &plan.places.push(MIRPlace{id: map.target, span: place.span, ty: mir_pass_inline_type(place.ty, substitutions), base: base, projections: projections, access: place.access, persist_key: place.persist_key})
     }
     loop local in callee.locals {
-        &plan.locals.push(MirLocal{
+        &plan.locals.push(MIRLocal{
             id: mir_pass_inline_local(maps, local.id),
             name: local.name,
             span: local.span,
@@ -193,25 +273,25 @@ fn mir_pass_inline_plan(
         })
     }
     loop value in callee.values {
-        map :: mir_pass_inline_value_map(maps.values, value.id) ?? MirInlineValueMap{source: value.id, target: value.id, parameter: true}
-        if !map.parameter -> &plan.values.push(MirValueFact{id: map.target, ty: mir_pass_inline_type(value.ty, substitutions), span: value.span, ownership: value.ownership})
+        map :: mir_pass_inline_value_map(maps.values, value.id) ?? MIRInlineValueMap{source: value.id, target: value.id, parameter: true}
+        if !map.parameter -> &plan.values.push(MIRValueFact{id: map.target, ty: mir_pass_inline_type(value.ty, substitutions), span: value.span, ownership: value.ownership})
     }
     loop scope in callee.scopes {
-        &plan.scopes.push(MirScope{id: mir_pass_inline_scope(maps, scope.id), kind: scope.kind, span: scope.span, name: scope.name, deadline: mir_pass_inline_optional_value(maps, scope.deadline), facts: scope.facts})
+        &plan.scopes.push(MIRScope{id: mir_pass_inline_scope(maps, scope.id), kind: scope.kind, span: scope.span, name: scope.name, deadline: mir_pass_inline_optional_value(maps, scope.deadline), facts: scope.facts})
     }
     loop drop in callee.drops {
         edge :: mir_pass_inline_drop_edge(drop.edge, maps)
-        &plan.drops.push(MirDropAction{place: mir_pass_inline_place(maps, drop.place), edge: edge, span: drop.span})
+        &plan.drops.push(MIRDropAction{place: mir_pass_inline_place(maps, drop.place), edge: edge, span: drop.span})
     }
     loop block in callee.blocks {
-        instructions := [MirInstruction]{}
+        instructions := [MIRInstruction]{}
         loop instruction in block.instructions {
             is_parameter :: if instruction.operation == { .Parameter(_, _) -> true else -> false }
             if is_parameter -> next
-            mapped_operation :: mir_pass_inline_operation(instruction.operation, maps, substitutions) ?? return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), instruction.span, "#Inline(Always) operation payload contains an unremappable identity"))}
+            mapped_operation :: mir_pass_inline_operation(instruction.operation, maps, substitutions) ?? return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), instruction.span, "#Inline(Always) operation payload contains an unremappable identity"))}
             mapped_result :: mir_pass_inline_optional_value(maps, instruction.result)
-            operation_id :: MirOpId{value: mir_pass_inline_id_target(maps.operations, instruction.id.value)}
-            &instructions.push(MirInstruction{id: operation_id, span: instruction.span, source_line: instruction.source_line, result: mapped_result, ty: mir_pass_inline_optional_type(instruction.ty, substitutions), operation: mapped_operation})
+            operation_id :: MIROpID{value: mir_pass_inline_id_target(maps.operations, instruction.id.value)}
+            &instructions.push(MIRInstruction{id: operation_id, span: instruction.span, source_line: instruction.source_line, result: mapped_result, ty: mir_pass_inline_optional_type(instruction.ty, substitutions), operation: mapped_operation})
         }
         terminator :: if block.terminator == {
             .Return(value) -> {
@@ -220,35 +300,35 @@ fn mir_pass_inline_plan(
                 mapped_value := mir_pass_inline_optional_value(maps, value)
                 if mapped_value == None && call_instruction.result != None {
                     return_type :: mir_pass_inline_type(callee.return_type, substitutions)
-                    if !mir_type_is_unit(return_type) -> return MirInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), block.span, "#Inline(Always) non-Unit return has no SSA value"))}
-                    unit_value :: MirValueId{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:unit-return:{block.id.value}")}
-                    unit_operation :: MirOpId{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:unit-return-op:{block.id.value}")}
-                    &plan.values.push(MirValueFact{id: unit_value, ty: return_type, span: block.span, ownership: mir_copy_ownership()})
-                    &instructions.push(MirInstruction{id: unit_operation, span: block.span, source_line: None, result: Val(unit_value), ty: Val(return_type), operation: MirOperation.Constant{value: MirConstant.Unit}})
+                    if !mir_type_is_unit(return_type) -> return MIRInlinePlanResult{plan: None, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), block.span, "#Inline(Always) non-Unit return has no SSA value"))}
+                    unit_value :: MIRValueID{value: mir_pass_inline_fresh_id(&used_values, "mir-inline-value", "{identity}:unit-return:{block.id.value}")}
+                    unit_operation :: MIROpID{value: mir_pass_inline_fresh_id(&used_operations, "mir-inline-op", "{identity}:unit-return-op:{block.id.value}")}
+                    &plan.values.push(MIRValueFact{id: unit_value, ty: return_type, span: block.span, ownership: mir_copy_ownership()})
+                    &instructions.push(MIRInstruction{id: unit_operation, span: block.span, source_line: None, result: Val(unit_value), ty: Val(return_type), operation: MIROperation.Constant{value: MIRConstant.Unit}})
                     mapped_value = Val(unit_value)
                 }
-                if mapped_value == .Val(returned) -> &plan.return_incoming.push(MirPhiIncoming{block: mir_pass_inline_block(maps, block.id), value: returned})
-                MirTerminator.Jump{target: continuation}
+                if mapped_value == .Val(returned) -> &plan.return_incoming.push(MIRPhiIncoming{block: mir_pass_inline_block(maps, block.id), value: returned})
+                MIRTerminator.Jump{target: continuation}
             }
             else -> mir_pass_inline_terminator(block.terminator, maps)
         }
-        &plan.blocks.push(MirBasicBlock{id: mir_pass_inline_block(maps, block.id), span: block.span, instructions: instructions, terminator: terminator})
+        &plan.blocks.push(MIRBasicBlock{id: mir_pass_inline_block(maps, block.id), span: block.span, instructions: instructions, terminator: terminator})
     }
-    MirInlinePlanResult{plan: Val(plan), error: None}
+    MIRInlinePlanResult{plan: Val(plan), error: None}
 }
 
 fn mir_pass_inline_call_site_can_expand(
-    caller: MirFunction,
-    callee: MirFunction,
-    call_instruction: MirInstruction,
-    args: [MirCallArg],
-    type_args: [MirType],
+    caller: MIRFunction,
+    callee: MIRFunction,
+    call_instruction: MIRInstruction,
+    args: [MIRCallArg],
+    type_args: [MIRType],
 ) -> Bool Never! {
     if mir_pass_inline_has_return_drop(callee) -> return false
     if args.len() != callee.params.len() || callee.generic_params.len() != type_args.len() -> return false
-    substitutions := [MirInlineTypeSubstitution]{}
+    substitutions := [MIRInlineTypeSubstitution]{}
     loop (index, parameter) in callee.generic_params {
-        &substitutions.push(MirInlineTypeSubstitution{name: parameter.name, ty: type_args[index]})
+        &substitutions.push(MIRInlineTypeSubstitution{name: parameter.name, ty: type_args[index]})
     }
     if call_instruction.result != None && call_instruction.ty == None -> return false
     return_type :: mir_pass_inline_type(callee.return_type, substitutions)
@@ -277,7 +357,7 @@ fn mir_pass_inline_call_site_can_expand(
     true
 }
 
-fn mir_pass_inline_has_return_drop(callee: MirFunction) -> Bool Never! {
+fn mir_pass_inline_has_return_drop(callee: MIRFunction) -> Bool Never! {
     loop drop in callee.drops {
         has_return_drop :: if drop.edge == { .Return -> true else -> false }
         if has_return_drop -> return true
@@ -285,7 +365,7 @@ fn mir_pass_inline_has_return_drop(callee: MirFunction) -> Bool Never! {
     false
 }
 
-fn mir_pass_inline_call_arg_consumes(argument: MirCallArg) -> Bool Never! {
+fn mir_pass_inline_call_arg_consumes(argument: MIRCallArg) -> Bool Never! {
     if argument.implicit_clone || argument.shared_auto_clone || argument.widen_fixed_to_list -> false else -> argument.access == .Move || argument.owned_last_use
 }
 
@@ -307,57 +387,57 @@ fn mir_pass_inline_int_seen(rows: [Int], value: Int) -> Bool Never! {
     false
 }
 
-fn mir_pass_inline_value_map(rows: [MirInlineValueMap], value: MirValueId) -> MirInlineValueMap? {
+fn mir_pass_inline_value_map(rows: [MIRInlineValueMap], value: MIRValueID) -> MIRInlineValueMap? {
     loop row in rows { if row.source == value -> return Val(row) }
     None
 }
 
-fn mir_pass_inline_value_map_exists(rows: [MirInlineValueMap], value: MirValueId) -> Bool Never! {
+fn mir_pass_inline_value_map_exists(rows: [MIRInlineValueMap], value: MIRValueID) -> Bool Never! {
     mir_pass_inline_value_map(rows, value) != None
 }
 
-fn mir_pass_inline_value(maps: MirInlineMaps, value: MirValueId) -> MirValueId Never! {
+fn mir_pass_inline_value(maps: MIRInlineMaps, value: MIRValueID) -> MIRValueID Never! {
     row :: mir_pass_inline_value_map(maps.values, value) ?? return value
     row.target
 }
 
-fn mir_pass_inline_optional_value(maps: MirInlineMaps, value: MirValueId?) -> MirValueId? {
+fn mir_pass_inline_optional_value(maps: MIRInlineMaps, value: MIRValueID?) -> MIRValueID? {
     present :: value ?? return None
     Val(mir_pass_inline_value(maps, present))
 }
 
-fn mir_pass_inline_id_target(rows: [MirInlineIdMap], source: Int) -> Int Never! {
+fn mir_pass_inline_id_target(rows: [MIRInlineIDMap], source: Int) -> Int Never! {
     loop row in rows { if row.source == source -> return row.target }
     source
 }
 
-fn mir_pass_inline_block(maps: MirInlineMaps, block: MirBlockId) -> MirBlockId Never! {
-    MirBlockId{value: mir_pass_inline_id_target(maps.blocks, block.value)}
+fn mir_pass_inline_block(maps: MIRInlineMaps, block: MIRBlockID) -> MIRBlockID Never! {
+    MIRBlockID{value: mir_pass_inline_id_target(maps.blocks, block.value)}
 }
 
-fn mir_pass_inline_local(maps: MirInlineMaps, local: MirLocalId) -> MirLocalId Never! {
-    MirLocalId{value: mir_pass_inline_id_target(maps.locals, local.value)}
+fn mir_pass_inline_local(maps: MIRInlineMaps, local: MIRLocalID) -> MIRLocalID Never! {
+    MIRLocalID{value: mir_pass_inline_id_target(maps.locals, local.value)}
 }
 
-fn mir_pass_inline_scope(maps: MirInlineMaps, scope: MirScopeId) -> MirScopeId Never! {
-    MirScopeId{value: mir_pass_inline_id_target(maps.scopes, scope.value)}
+fn mir_pass_inline_scope(maps: MIRInlineMaps, scope: MIRScopeID) -> MIRScopeID Never! {
+    MIRScopeID{value: mir_pass_inline_id_target(maps.scopes, scope.value)}
 }
 
-fn mir_pass_inline_place_map(maps: MirInlineMaps, place: MirPlaceId) -> MirInlinePlaceMap? {
+fn mir_pass_inline_place_map(maps: MIRInlineMaps, place: MIRPlaceID) -> MIRInlinePlaceMap? {
     loop row in maps.places { if row.source == place -> return Val(row) }
     None
 }
 
-fn mir_pass_inline_place(maps: MirInlineMaps, place: MirPlaceId) -> MirPlaceId Never! {
+fn mir_pass_inline_place(maps: MIRInlineMaps, place: MIRPlaceID) -> MIRPlaceID Never! {
     row :: mir_pass_inline_place_map(maps, place) ?? return place
     row.target
 }
 
-fn mir_pass_inline_operation_target(rows: [MirInlineIdMap], operation: MirOpId) -> MirOpId Never! {
-    MirOpId{value: mir_pass_inline_id_target(rows, operation.value)}
+fn mir_pass_inline_operation_target(rows: [MIRInlineIDMap], operation: MIROpID) -> MIROpID Never! {
+    MIROpID{value: mir_pass_inline_id_target(rows, operation.value)}
 }
 
-fn mir_pass_inline_parameter_place(place: MirPlace, parameters: [MirValueId], args: [MirCallArg]) -> MirPlaceId? {
+fn mir_pass_inline_parameter_place(place: MIRPlace, parameters: [MIRValueID], args: [MIRCallArg]) -> MIRPlaceID? {
     if place.base == {
         .Parameter(value) -> {
             loop (index, parameter) in parameters {
@@ -369,69 +449,71 @@ fn mir_pass_inline_parameter_place(place: MirPlace, parameters: [MirValueId], ar
     None
 }
 
-fn mir_pass_inline_parameter_place_source(place: MirPlace, parameters: [MirValueId], args: [MirCallArg]) -> MirPlaceId? {
+fn mir_pass_inline_parameter_place_source(place: MIRPlace, parameters: [MIRValueID], args: [MIRCallArg]) -> MIRPlaceID? {
     mir_pass_inline_parameter_place(place, parameters, args)
 }
 
-fn mir_pass_inline_place_base(base: MirPlaceBase, maps: MirInlineMaps) -> MirPlaceBase Never! {
+fn mir_pass_inline_place_base(base: MIRPlaceBase, maps: MIRInlineMaps) -> MIRPlaceBase Never! {
     if base == {
-        .Local(local) -> MirPlaceBase.Local{local: mir_pass_inline_local(maps, local)}
-        .Parameter(value) -> MirPlaceBase.Parameter{value: mir_pass_inline_value(maps, value)}
-        .Capture(value) -> MirPlaceBase.Capture{value: mir_pass_inline_value(maps, value)}
-        .Temporary(value) -> MirPlaceBase.Temporary{value: mir_pass_inline_value(maps, value)}
-        .Static(name) -> MirPlaceBase.Static{name: name}
+        .Local(local) -> MIRPlaceBase.Local{local: mir_pass_inline_local(maps, local)}
+        .Parameter(value) -> MIRPlaceBase.Parameter{value: mir_pass_inline_value(maps, value)}
+        .Capture(value) -> MIRPlaceBase.Capture{value: mir_pass_inline_value(maps, value)}
+        .Temporary(value) -> MIRPlaceBase.Temporary{value: mir_pass_inline_value(maps, value)}
+        .Static(name) -> MIRPlaceBase.Static{name: name}
     }
 }
 
-fn mir_pass_inline_projection(projection: MirProjection, maps: MirInlineMaps) -> MirProjection Never! {
+fn mir_pass_inline_projection(projection: MIRProjection, maps: MIRInlineMaps) -> MIRProjection Never! {
     if projection == {
-        .Field(field, span) -> MirProjection.Field{field: field, span: span}
-        .Index(kind, index, call, write_call, location, context, span) -> MirProjection.Index{kind: kind, index: mir_pass_inline_value(maps, index), call: call, write_call: write_call, location: location, context: context.map(value -> mir_pass_inline_panic_context(value, maps)), span: span}
-        .Deref(span) -> MirProjection.Deref{span: span}
+        .Field(field, span) -> MIRProjection.Field{field: field, span: span}
+        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: mir_pass_inline_value(maps, index), call: call, write_call: write_call, location: location, context: context.map(value -> mir_pass_inline_panic_context(value, maps)), span: span}
+        .Deref(span) -> MIRProjection.Deref{span: span}
+        .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
+        .Range(range, location, span) -> MIRProjection.Range{range: mir_pass_inline_value(maps, range), location: location, span: span}
     }
 }
 
-fn mir_pass_inline_drop_edge(edge: MirDropEdge, maps: MirInlineMaps) -> MirDropEdge Never! {
+fn mir_pass_inline_drop_edge(edge: MIRDropEdge, maps: MIRInlineMaps) -> MIRDropEdge Never! {
     if edge == {
-        .Normal -> MirDropEdge.Normal
-        .Return -> MirDropEdge.Return
-        .Failure(target) -> MirDropEdge.Failure{target: mir_pass_inline_block(maps, target)}
-        .Unwind(target) -> MirDropEdge.Unwind{target: mir_pass_inline_block(maps, target)}
+        .Normal -> MIRDropEdge.Normal
+        .Return -> MIRDropEdge.Return
+        .Failure(target) -> MIRDropEdge.Failure{target: mir_pass_inline_block(maps, target)}
+        .Unwind(target) -> MIRDropEdge.Unwind{target: mir_pass_inline_block(maps, target)}
     }
 }
 
-fn mir_pass_inline_terminator(terminator: MirTerminator, maps: MirInlineMaps) -> MirTerminator Never! {
+fn mir_pass_inline_terminator(terminator: MIRTerminator, maps: MIRInlineMaps) -> MIRTerminator Never! {
     if terminator == {
-        .Jump(target) -> MirTerminator.Jump{target: mir_pass_inline_block(maps, target)}
-        .Branch(condition, then_target, else_target) -> MirTerminator.Branch{condition: mir_pass_inline_value(maps, condition), then_target: mir_pass_inline_block(maps, then_target), else_target: mir_pass_inline_block(maps, else_target)}
+        .Jump(target) -> MIRTerminator.Jump{target: mir_pass_inline_block(maps, target)}
+        .Branch(condition, then_target, else_target) -> MIRTerminator.Branch{condition: mir_pass_inline_value(maps, condition), then_target: mir_pass_inline_block(maps, then_target), else_target: mir_pass_inline_block(maps, else_target)}
         .Switch(subject, arms, otherwise) -> {
-            mapped_arms :: loop arm in arms -> MirSwitchArm{condition: mir_pass_inline_value(maps, arm.condition), target: mir_pass_inline_block(maps, arm.target), span: arm.span}
-            MirTerminator.Switch{subject: mir_pass_inline_value(maps, subject), arms: mapped_arms, otherwise: mir_pass_inline_block(maps, otherwise)}
+            mapped_arms :: loop arm in arms -> MIRSwitchArm{condition: mir_pass_inline_value(maps, arm.condition), target: mir_pass_inline_block(maps, arm.target), span: arm.span}
+            MIRTerminator.Switch{subject: mir_pass_inline_value(maps, subject), arms: mapped_arms, otherwise: mir_pass_inline_block(maps, otherwise)}
         }
-        .Return(value) -> MirTerminator.Return{value: mir_pass_inline_optional_value(maps, value)}
-        .Yield(value, resume) -> MirTerminator.Yield{value: mir_pass_inline_value(maps, value), resume: mir_pass_inline_block(maps, resume)}
-        .Break(target, value) -> MirTerminator.Break{target: mir_pass_inline_block(maps, target), value: mir_pass_inline_optional_value(maps, value)}
-        .Continue(target) -> MirTerminator.Continue{target: mir_pass_inline_block(maps, target)}
-        .Unreachable(reason) -> MirTerminator.Unreachable{reason: reason}
+        .Return(value) -> MIRTerminator.Return{value: mir_pass_inline_optional_value(maps, value)}
+        .Yield(value, resume) -> MIRTerminator.Yield{value: mir_pass_inline_value(maps, value), resume: mir_pass_inline_block(maps, resume)}
+        .Break(target, value) -> MIRTerminator.Break{target: mir_pass_inline_block(maps, target), value: mir_pass_inline_optional_value(maps, value)}
+        .Continue(target) -> MIRTerminator.Continue{target: mir_pass_inline_block(maps, target)}
+        .Unreachable(reason) -> MIRTerminator.Unreachable{reason: reason}
     }
 }
 
-fn mir_pass_inline_optional_type(ty: MirType?, substitutions: [MirInlineTypeSubstitution]) -> MirType? {
+fn mir_pass_inline_optional_type(ty: MIRType?, substitutions: [MIRInlineTypeSubstitution]) -> MIRType? {
     present :: ty ?? return None
     Val(mir_pass_inline_type(present, substitutions))
 }
 
-fn mir_pass_inline_type(ty: MirType, substitutions: [MirInlineTypeSubstitution]) -> MirType Never! {
+fn mir_pass_inline_type(ty: MIRType, substitutions: [MIRInlineTypeSubstitution]) -> MIRType Never! {
     kind :: if ty.kind == {
-        .List(inner) -> MirTypeKind.List{inner: mir_pass_inline_type(inner, substitutions)}
-        .Map(key, value) -> MirTypeKind.Map{key: mir_pass_inline_type(key, substitutions), value: mir_pass_inline_type(value, substitutions)}
-        .Shared(inner) -> MirTypeKind.Shared{inner: mir_pass_inline_type(inner, substitutions)}
-        .Option(inner) -> MirTypeKind.Option{inner: mir_pass_inline_type(inner, substitutions)}
-        .Result(ok, error) -> MirTypeKind.Result{ok: mir_pass_inline_type(ok, substitutions), err: mir_pass_inline_type(error, substitutions)}
-        .Fn(signature) -> MirTypeKind.Fn{signature: mir_pass_inline_signature(signature, substitutions)}
+        .List(inner) -> MIRTypeKind.List{inner: mir_pass_inline_type(inner, substitutions)}
+        .Map(key, value) -> MIRTypeKind.Map{key: mir_pass_inline_type(key, substitutions), value: mir_pass_inline_type(value, substitutions)}
+        .Shared(inner) -> MIRTypeKind.Shared{inner: mir_pass_inline_type(inner, substitutions)}
+        .Option(inner) -> MIRTypeKind.Option{inner: mir_pass_inline_type(inner, substitutions)}
+        .Result(ok, error) -> MIRTypeKind.Result{ok: mir_pass_inline_type(ok, substitutions), err: mir_pass_inline_type(error, substitutions)}
+        .Fn(signature) -> MIRTypeKind.Fn{signature: mir_pass_inline_signature(signature, substitutions)}
         .SendFn(params, result, conventions) -> {
             mapped :: loop parameter in params -> mir_pass_inline_type(parameter, substitutions)
-            MirTypeKind.SendFn{params: mapped, ret: mir_pass_inline_optional_type(result, substitutions), conventions: conventions}
+            MIRTypeKind.SendFn{params: mapped, ret: mir_pass_inline_optional_type(result, substitutions), conventions: conventions}
         }
         .Apply(name, args) -> {
             if args.len() == 0 {
@@ -440,31 +522,31 @@ fn mir_pass_inline_type(ty: MirType, substitutions: [MirInlineTypeSubstitution])
                 }
             }
             mapped :: loop argument in args -> mir_pass_inline_type(argument, substitutions)
-            MirTypeKind.Apply{name: name, args: mapped}
+            MIRTypeKind.Apply{name: name, args: mapped}
         }
         .Tuple(fields) -> {
-            mapped :: loop field in fields -> MirTupleField{name: field.name, ty: mir_pass_inline_type(field.ty, substitutions)}
-            MirTypeKind.Tuple{fields: mapped}
+            mapped :: loop field in fields -> MIRTupleField{name: field.name, ty: mir_pass_inline_type(field.ty, substitutions)}
+            MIRTypeKind.Tuple{fields: mapped}
         }
-        .FixedList(element, length) -> MirTypeKind.FixedList{elem: mir_pass_inline_type(element, substitutions), len: length}
-        .InlineRange(base, low, high) -> MirTypeKind.InlineRange{base: mir_pass_inline_type(base, substitutions), lo: low, hi: high}
-        .Tagged(marker, inner) -> MirTypeKind.Tagged{marker: marker, inner: mir_pass_inline_type(inner, substitutions)}
+        .FixedList(element, length) -> MIRTypeKind.FixedList{elem: mir_pass_inline_type(element, substitutions), len: length}
+        .InlineRange(base, low, high) -> MIRTypeKind.InlineRange{base: mir_pass_inline_type(base, substitutions), lo: low, hi: high}
+        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: marker, inner: mir_pass_inline_type(inner, substitutions)}
         .Union(members) -> {
             mapped :: loop member in members -> mir_pass_inline_type(member, substitutions)
-            MirTypeKind.Union{members: mapped}
+            MIRTypeKind.Union{members: mapped}
         }
-        .Quantity(base, dimension) -> MirTypeKind.Quantity{base: mir_pass_inline_type(base, substitutions), dimension: dimension}
+        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: mir_pass_inline_type(base, substitutions), dimension: dimension}
         else -> ty.kind
     }
     mapped :: mir_type_from_kind(kind)
-    if kind == ty.kind -> return MirType{kind: kind, identity: ty.identity, layout: mapped.layout}
+    if kind == ty.kind -> return MIRType{kind: kind, identity: ty.identity, layout: mapped.layout}
     source_type :: mir_pass_inline_source_type(mapped)
     mir_type_with_identity(mapped, mir_type_id(type_identity_key(source_type)))
 }
 
 // Rebuild Source's checked type identity domain; MIR canonical keys are display
 // spellings and differ for containers and knowledge-bearing types.
-fn mir_pass_inline_source_type(ty: MirType) -> Type Never! {
+fn mir_pass_inline_source_type(ty: MIRType) -> Type Never! {
     if ty.kind == {
         .Int -> Type.Int
         .Float -> Type.Float
@@ -508,26 +590,26 @@ fn mir_pass_inline_source_type(ty: MirType) -> Type Never! {
     }
 }
 
-fn mir_pass_inline_source_function(signature: MirFunctionSignature) -> Type Never! {
+fn mir_pass_inline_source_function(signature: MIRFunctionSignature) -> Type Never! {
     params :: loop parameter in signature.params -> mir_pass_inline_source_type(parameter)
     contracts :: mir_pass_inline_source_contracts(signature.param_contract)
     call_metadata :: mir_pass_inline_source_call_metadata(signature.call_metadata)
     Type.Fn{params: params, ret: signature.ret.map(value -> mir_pass_inline_source_type(value)), effect_bound: None, param_contract: contracts, call_metadata: call_metadata, return_view_provenance: None}
 }
 
-fn mir_pass_inline_source_contracts(contract: [MirCallContractRow]?) -> [CallContractRow]? {
+fn mir_pass_inline_source_contracts(contract: [MIRCallContractRow]?) -> [CallContractRow]? {
     contract_rows :: contract ?? return None
     rows :: loop row in contract_rows -> CallContractRow{label: row.label, zone: row.zone}
     Val(rows)
 }
 
-fn mir_pass_inline_source_call_metadata(call_metadata: MirCallMetadata?) -> FunctionCallMetadata? {
+fn mir_pass_inline_source_call_metadata(call_metadata: MIRCallMetadata?) -> FunctionCallMetadata? {
     metadata :: call_metadata ?? return None
     if !mir_call_metadata_is_variadic(metadata) -> return None
     Val(FunctionCallMetadata{names: [String]{}, defaults: [FunctionDefaultRef?]{}, variadic: metadata.variadic, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{}}})
 }
 
-fn mir_pass_inline_source_measure(value: MirMeasure) -> Measure Never! {
+fn mir_pass_inline_source_measure(value: MIRMeasure) -> Measure Never! {
     if value == {
         .Literal(kind, amount) -> Measure.Literal{kind: kind, value: amount}
         .SignedLiteral(kind, amount) -> Measure.SignedLiteral{kind: kind, value: amount}
@@ -543,12 +625,12 @@ fn mir_pass_inline_source_measure(value: MirMeasure) -> Measure Never! {
     }
 }
 
-fn mir_pass_inline_source_dimension(value: MirDimension) -> Dimension Never! {
+fn mir_pass_inline_source_dimension(value: MIRDimension) -> Dimension Never! {
     axes :: loop axis in value.axes -> DimensionAxis{name: axis.name, exponent: mir_pass_inline_source_measure(axis.exponent)}
     Dimension{axes: axes}
 }
 
-fn mir_pass_inline_source_tag(marker: MirTagMarker) -> TagMarker Never! {
+fn mir_pass_inline_source_tag(marker: MIRTagMarker) -> TagMarker Never! {
     if marker == {
         .User(name) -> TagMarker.User{name: name}
         .Internal(internal_tag) -> TagMarker.Internal{internal_tag: if internal_tag == {
@@ -559,15 +641,15 @@ fn mir_pass_inline_source_tag(marker: MirTagMarker) -> TagMarker Never! {
             .SharedGuardRead -> InternalTag.SharedGuardRead
             .SharedGuardEdit -> InternalTag.SharedGuardEdit
             .TerminalFactSet -> InternalTag.TerminalFactSet
-            .CppCallbackAbi -> InternalTag.CppCallbackAbi
+            .CppCallbackABI -> InternalTag.CppCallbackABI
             .AllocatorView -> InternalTag.AllocatorView
         }}
     }
 }
 
-fn mir_pass_inline_signature(signature: MirFunctionSignature, substitutions: [MirInlineTypeSubstitution]) -> MirFunctionSignature Never! {
+fn mir_pass_inline_signature(signature: MIRFunctionSignature, substitutions: [MIRInlineTypeSubstitution]) -> MIRFunctionSignature Never! {
     params :: loop parameter in signature.params -> mir_pass_inline_type(parameter, substitutions)
-    MirFunctionSignature{
+    MIRFunctionSignature{
         params: params,
         ret: mir_pass_inline_optional_type(signature.ret, substitutions),
         effect_bound: signature.effect_bound,
@@ -577,46 +659,46 @@ fn mir_pass_inline_signature(signature: MirFunctionSignature, substitutions: [Mi
     }
 }
 
-fn mir_pass_inline_failure_carrier(carrier: MirFailureCarrier, substitutions: [MirInlineTypeSubstitution]) -> MirFailureCarrier Never! {
+fn mir_pass_inline_failure_carrier(carrier: MIRFailureCarrier, substitutions: [MIRInlineTypeSubstitution]) -> MIRFailureCarrier Never! {
     if carrier == {
-        .Infallible -> MirFailureCarrier.Infallible
-        .Result(success, error) -> MirFailureCarrier.Result{success: mir_pass_inline_type(success, substitutions), error: mir_pass_inline_type(error, substitutions)}
-        .Optional(value) -> MirFailureCarrier.Optional{value: mir_pass_inline_type(value, substitutions)}
-        .Diverges(value) -> MirFailureCarrier.Diverges{value: mir_pass_inline_type(value, substitutions)}
+        .Infallible -> MIRFailureCarrier.Infallible
+        .Result(success, error) -> MIRFailureCarrier.Result{success: mir_pass_inline_type(success, substitutions), error: mir_pass_inline_type(error, substitutions)}
+        .Optional(value) -> MIRFailureCarrier.Optional{value: mir_pass_inline_type(value, substitutions)}
+        .Diverges(value) -> MIRFailureCarrier.Diverges{value: mir_pass_inline_type(value, substitutions)}
     }
 }
 
-fn mir_pass_inline_fallibility(fallibility: MirCallFallibility, substitutions: [MirInlineTypeSubstitution]) -> MirCallFallibility Never! {
+fn mir_pass_inline_fallibility(fallibility: MIRCallFallibility, substitutions: [MIRInlineTypeSubstitution]) -> MIRCallFallibility Never! {
     if fallibility == {
-        .Infallible -> MirCallFallibility.Infallible
-        .Failure(failure) -> MirCallFallibility.Failure{failure: mir_pass_inline_failure_carrier(failure, substitutions)}
+        .Infallible -> MIRCallFallibility.Infallible
+        .Failure(failure) -> MIRCallFallibility.Failure{failure: mir_pass_inline_failure_carrier(failure, substitutions)}
     }
 }
 
-fn mir_pass_inline_conversion(conversion: MirConversion, substitutions: [MirInlineTypeSubstitution]) -> MirConversion Never! {
+fn mir_pass_inline_conversion(conversion: MIRConversion, substitutions: [MIRInlineTypeSubstitution]) -> MIRConversion Never! {
     if conversion == {
-        .Transparent -> MirConversion.Transparent
-        .NumericCast -> MirConversion.NumericCast
-        .SendFn -> MirConversion.SendFn
-        .Prelude(call, location, fallibility) -> MirConversion.Prelude{call: call, location: location, fallibility: mir_pass_inline_fallibility(fallibility, substitutions)}
+        .Transparent -> MIRConversion.Transparent
+        .NumericCast -> MIRConversion.NumericCast
+        .SendFn -> MIRConversion.SendFn
+        .Prelude(call, location, fallibility) -> MIRConversion.Prelude{call: call, location: location, fallibility: mir_pass_inline_fallibility(fallibility, substitutions)}
     }
 }
 
-fn mir_pass_inline_callee(callee: MirCallee, maps: MirInlineMaps, substitutions: [MirInlineTypeSubstitution]) -> MirCallee Never! {
+fn mir_pass_inline_callee(callee: MIRCallee, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIRCallee Never! {
     if callee == {
-        .User(function) -> MirCallee.User{function: function}
-        .Associated(function, owner) -> MirCallee.Associated{function: function, owner: mir_pass_inline_type(owner, substitutions)}
-        .TraitMethod(method, trait_ref, receiver) -> MirCallee.TraitMethod{method: method, trait_ref: trait_ref, receiver: mir_pass_inline_type(receiver, substitutions)}
-        .Method(function, owner) -> MirCallee.Method{function: function, owner: mir_pass_inline_type(owner, substitutions)}
-        .Core(call) -> MirCallee.Core{call: call}
-        .Prelude(call) -> MirCallee.Prelude{call: call}
-        .Foreign(id) -> MirCallee.Foreign{id: id}
-        .Indirect(value) -> MirCallee.Indirect{value: mir_pass_inline_value(maps, value)}
+        .User(function) -> MIRCallee.User{function: function}
+        .Associated(function, owner) -> MIRCallee.Associated{function: function, owner: mir_pass_inline_type(owner, substitutions)}
+        .TraitMethod(method, trait_ref, receiver) -> MIRCallee.TraitMethod{method: method, trait_ref: trait_ref, receiver: mir_pass_inline_type(receiver, substitutions)}
+        .Method(function, owner) -> MIRCallee.Method{function: function, owner: mir_pass_inline_type(owner, substitutions)}
+        .Core(call) -> MIRCallee.Core{call: call}
+        .Prelude(call) -> MIRCallee.Prelude{call: call}
+        .Foreign(id) -> MIRCallee.Foreign{id: id}
+        .Indirect(value) -> MIRCallee.Indirect{value: mir_pass_inline_value(maps, value)}
     }
 }
 
-fn mir_pass_inline_call_arg(argument: MirCallArg, maps: MirInlineMaps, substitutions: [MirInlineTypeSubstitution]) -> MirCallArg Never! {
-    MirCallArg{
+fn mir_pass_inline_call_arg(argument: MIRCallArg, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIRCallArg Never! {
+    MIRCallArg{
         value: mir_pass_inline_value(maps, argument.value),
         place: argument.place.map(value -> mir_pass_inline_place(maps, value)),
         access: argument.access,
@@ -629,237 +711,237 @@ fn mir_pass_inline_call_arg(argument: MirCallArg, maps: MirInlineMaps, substitut
         shared_auto_clone: argument.shared_auto_clone,
         owned_last_use: argument.owned_last_use,
         authority_boundary: argument.authority_boundary,
-        fn_coercion: argument.fn_coercion.map(value -> MirFnCoercion{ty: mir_pass_inline_type(value.ty, substitutions), already_boxed: value.already_boxed}),
+        fn_coercion: argument.fn_coercion.map(value -> MIRFnCoercion{ty: mir_pass_inline_type(value.ty, substitutions), already_boxed: value.already_boxed}),
         widen_fixed_to_list: argument.widen_fixed_to_list,
         widen_to_union: argument.widen_to_union,
         box_as_trait: argument.box_as_trait,
     }
 }
 
-fn mir_pass_inline_prelude_type_arg(argument: MirPreludeTypeArg, substitutions: [MirInlineTypeSubstitution]) -> MirPreludeTypeArg Never! {
+fn mir_pass_inline_prelude_type_arg(argument: MIRPreludeTypeArg, substitutions: [MIRInlineTypeSubstitution]) -> MIRPreludeTypeArg Never! {
     if argument == {
-        .Type(ty) -> MirPreludeTypeArg.Type{ty: mir_pass_inline_type(ty, substitutions)}
-        .HostUsize -> MirPreludeTypeArg.HostUsize
+        .Type(ty) -> MIRPreludeTypeArg.Type{ty: mir_pass_inline_type(ty, substitutions)}
+        .HostUsize -> MIRPreludeTypeArg.HostUsize
     }
 }
 
-fn mir_pass_inline_panic_context(context: MirPanicContext, maps: MirInlineMaps) -> MirPanicContext Never! {
-    locals :: loop local in context.locals -> MirPanicLocal{name: local.name, local: mir_pass_inline_local(maps, local.local)}
-    MirPanicContext{function: context.function, source_line: context.source_line, caret: context.caret, locals: locals}
+fn mir_pass_inline_panic_context(context: MIRPanicContext, maps: MIRInlineMaps) -> MIRPanicContext Never! {
+    locals :: loop local in context.locals -> MIRPanicLocal{name: local.name, local: mir_pass_inline_local(maps, local.local)}
+    MIRPanicContext{function: context.function, source_line: context.source_line, caret: context.caret, locals: locals}
 }
 
-fn mir_pass_inline_data_plan(plan: MirDataPlan?, substitutions: [MirInlineTypeSubstitution]) -> MirDataPlan? {
+fn mir_pass_inline_data_plan(plan: MIRDataPlan?, substitutions: [MIRInlineTypeSubstitution]) -> MIRDataPlan? {
     source :: plan ?? return None
     logical :: loop node in source.logical -> {
-        columns :: loop column in node.columns -> MirDataPlanColumn{name: column.name, ty: mir_pass_inline_type(column.ty, substitutions), nullable: column.nullable}
-        callable :: node.callable.map(value -> MirDataPlanCallable{label: value.label, parameter: mir_pass_inline_type(value.parameter, substitutions), result: mir_pass_inline_type(value.result, substitutions), span: value.span})
-        MirDataPlanNode{id: node.id, operation: node.operation, inputs: node.inputs, source: node.source, row_type: mir_pass_inline_type(node.row_type, substitutions), columns: columns, callable: callable, stream: node.stream, span: node.span}
+        columns :: loop column in node.columns -> MIRDataPlanColumn{name: column.name, ty: mir_pass_inline_type(column.ty, substitutions), nullable: column.nullable}
+        callable :: node.callable.map(value -> MIRDataPlanCallable{label: value.label, parameter: mir_pass_inline_type(value.parameter, substitutions), result: mir_pass_inline_type(value.result, substitutions), span: value.span})
+        MIRDataPlanNode{id: node.id, operation: node.operation, inputs: node.inputs, source: node.source, row_type: mir_pass_inline_type(node.row_type, substitutions), columns: columns, callable: callable, stream: node.stream, span: node.span}
     }
     physical :: loop node in source.physical -> node
-    Val(MirDataPlan{schema_version: source.schema_version, source: source.source, logical: logical, physical: physical, output: source.output, source_span: source.source_span})
+    Val(MIRDataPlan{schema_version: source.schema_version, source: source.source, logical: logical, physical: physical, output: source.output, source_span: source.source_span})
 }
 
-fn mir_pass_inline_operation(operation: MirOperation, maps: MirInlineMaps, substitutions: [MirInlineTypeSubstitution]) -> MirOperation? {
+fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIROperation? {
     return if operation == {
         .Parameter(_, _) | .Capture(_) -> None
-        .Global(name) -> Val(MirOperation.Global{name: name})
+        .Global(name) -> Val(MIROperation.Global{name: name})
         .Phi(incoming) -> {
-            rows :: loop row in incoming -> MirPhiIncoming{block: mir_pass_inline_block(maps, row.block), value: mir_pass_inline_value(maps, row.value)}
-            Val(MirOperation.Phi{incoming: rows})
+            rows :: loop row in incoming -> MIRPhiIncoming{block: mir_pass_inline_block(maps, row.block), value: mir_pass_inline_value(maps, row.value)}
+            Val(MIROperation.Phi{incoming: rows})
         }
-        .ReadPlace(place) -> Val(MirOperation.ReadPlace{place: mir_pass_inline_place(maps, place)})
-        .MovePlace(place) -> Val(MirOperation.MovePlace{place: mir_pass_inline_place(maps, place)})
-        .WritePlace(place, value) -> Val(MirOperation.WritePlace{place: mir_pass_inline_place(maps, place), value: mir_pass_inline_value(maps, value)})
-        .ReplacePlace(place, value) -> Val(MirOperation.ReplacePlace{place: mir_pass_inline_place(maps, place), value: mir_pass_inline_value(maps, value)})
-        .InitializeUninit(place) -> Val(MirOperation.InitializeUninit{place: mir_pass_inline_place(maps, place)})
-        .Copy(value, materialize_view) -> Val(MirOperation.Copy{value: mir_pass_inline_value(maps, value), materialize_view: materialize_view})
-        .Move(value) -> Val(MirOperation.Move{value: mir_pass_inline_value(maps, value)})
-        .Constant(value) -> Val(MirOperation.Constant{value: value})
-        .Unary(op, value) -> Val(MirOperation.Unary{op: op, value: mir_pass_inline_value(maps, value)})
-        .Binary(op, dispatch, overflow, left, right) -> Val(MirOperation.Binary{op: op, dispatch: dispatch, overflow: overflow, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)})
+        .ReadPlace(place) -> Val(MIROperation.ReadPlace{place: mir_pass_inline_place(maps, place)})
+        .MovePlace(place) -> Val(MIROperation.MovePlace{place: mir_pass_inline_place(maps, place)})
+        .WritePlace(place, value) -> Val(MIROperation.WritePlace{place: mir_pass_inline_place(maps, place), value: mir_pass_inline_value(maps, value)})
+        .ReplacePlace(place, value) -> Val(MIROperation.ReplacePlace{place: mir_pass_inline_place(maps, place), value: mir_pass_inline_value(maps, value)})
+        .InitializeUninit(place) -> Val(MIROperation.InitializeUninit{place: mir_pass_inline_place(maps, place)})
+        .Copy(value, materialize_view) -> Val(MIROperation.Copy{value: mir_pass_inline_value(maps, value), materialize_view: materialize_view})
+        .Move(value) -> Val(MIROperation.Move{value: mir_pass_inline_value(maps, value)})
+        .Constant(value) -> Val(MIROperation.Constant{value: value})
+        .Unary(op, value) -> Val(MIROperation.Unary{op: op, value: mir_pass_inline_value(maps, value)})
+        .Binary(op, dispatch, overflow, left, right) -> Val(MIROperation.Binary{op: op, dispatch: dispatch, overflow: overflow, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)})
         .BuildString(parts) -> {
-            mapped :: loop part in parts -> MirStringPart{kind: mir_pass_inline_string_part(part.kind, maps)}
-            Val(MirOperation.BuildString{parts: mapped})
+            mapped :: loop part in parts -> MIRStringPart{kind: mir_pass_inline_string_part(part.kind, maps)}
+            Val(MIROperation.BuildString{parts: mapped})
         }
         .BuildList(values, coercion) -> {
             mapped :: loop value in values -> mir_pass_inline_value(maps, value)
-            Val(MirOperation.BuildList{values: mapped, trait_coercion: coercion})
+            Val(MIROperation.BuildList{values: mapped, trait_coercion: coercion})
         }
         .BuildMap(entries) -> {
-            mapped :: loop entry in entries -> MirMapEntry{key: mir_pass_inline_value(maps, entry.key), value: mir_pass_inline_value(maps, entry.value)}
-            Val(MirOperation.BuildMap{entries: mapped})
+            mapped :: loop entry in entries -> MIRMapEntry{key: mir_pass_inline_value(maps, entry.key), value: mir_pass_inline_value(maps, entry.value)}
+            Val(MIROperation.BuildMap{entries: mapped})
         }
-        .EnumIs(subject, owner, variant) -> Val(MirOperation.EnumIs{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant})
-        .EnumPayload(subject, owner, variant, index) -> Val(MirOperation.EnumPayload{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant, index: index})
-        .OptionIsSome(subject) -> Val(MirOperation.OptionIsSome{subject: mir_pass_inline_value(maps, subject)})
-        .OptionValue(subject) -> Val(MirOperation.OptionValue{subject: mir_pass_inline_value(maps, subject)})
-        .ResultIsOk(subject) -> Val(MirOperation.ResultIsOk{subject: mir_pass_inline_value(maps, subject)})
-        .ResultValue(subject, ok) -> Val(MirOperation.ResultValue{subject: mir_pass_inline_value(maps, subject), ok: ok})
-        .PatternCapture(matched, index) -> Val(MirOperation.PatternCapture{matched: mir_pass_inline_value(maps, matched), index: index})
-        .PatternMatched(matched) -> Val(MirOperation.PatternMatched{matched: mir_pass_inline_value(maps, matched)})
-        .ProjectMembers(base, members) -> Val(MirOperation.ProjectMembers{base: mir_pass_inline_value(maps, base), members: members})
-        .Index(call, base, index, kind, access, location, context) -> Val(MirOperation.Index{call: call, base: mir_pass_inline_value(maps, base), index: mir_pass_inline_value(maps, index), kind: kind, access: access, location: location, context: mir_pass_inline_panic_context(context, maps)})
-        .Slice(call, base, start, end, range, location) -> Val(MirOperation.Slice{call: call, base: mir_pass_inline_value(maps, base), start: mir_pass_inline_value(maps, start), end: mir_pass_inline_value(maps, end), range: mir_pass_inline_optional_value(maps, range), location: location})
-        .Range(start, end, exclusive) -> Val(MirOperation.Range{start: mir_pass_inline_value(maps, start), end: mir_pass_inline_value(maps, end), exclusive: exclusive})
-        .Field(base, field) -> Val(MirOperation.Field{base: mir_pass_inline_value(maps, base), field: field})
-        .Struct(type_id, fields) -> Val(MirOperation.Struct{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps)})
+        .EnumIs(subject, owner, variant) -> Val(MIROperation.EnumIs{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant})
+        .EnumPayload(subject, owner, variant, index) -> Val(MIROperation.EnumPayload{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant, index: index})
+        .OptionIsSome(subject) -> Val(MIROperation.OptionIsSome{subject: mir_pass_inline_value(maps, subject)})
+        .OptionValue(subject) -> Val(MIROperation.OptionValue{subject: mir_pass_inline_value(maps, subject)})
+        .ResultIsOk(subject) -> Val(MIROperation.ResultIsOk{subject: mir_pass_inline_value(maps, subject)})
+        .ResultValue(subject, ok) -> Val(MIROperation.ResultValue{subject: mir_pass_inline_value(maps, subject), ok: ok})
+        .PatternCapture(matched, index) -> Val(MIROperation.PatternCapture{matched: mir_pass_inline_value(maps, matched), index: index})
+        .PatternMatched(matched) -> Val(MIROperation.PatternMatched{matched: mir_pass_inline_value(maps, matched)})
+        .ProjectMembers(base, members) -> Val(MIROperation.ProjectMembers{base: mir_pass_inline_value(maps, base), members: members})
+        .Index(call, base, index, kind, access, location, context) -> Val(MIROperation.Index{call: call, base: mir_pass_inline_value(maps, base), index: mir_pass_inline_value(maps, index), kind: kind, access: access, location: location, context: mir_pass_inline_panic_context(context, maps)})
+        .Slice(call, base, start, end, range, location) -> Val(MIROperation.Slice{call: call, base: mir_pass_inline_value(maps, base), start: mir_pass_inline_value(maps, start), end: mir_pass_inline_value(maps, end), range: mir_pass_inline_optional_value(maps, range), location: location})
+        .Range(start, end, exclusive) -> Val(MIROperation.Range{start: mir_pass_inline_value(maps, start), end: mir_pass_inline_value(maps, end), exclusive: exclusive})
+        .Field(base, field) -> Val(MIROperation.Field{base: mir_pass_inline_value(maps, base), field: field})
+        .Struct(type_id, fields) -> Val(MIROperation.Struct{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps)})
         .Enum(type_id, variant, args) -> {
-            mapped :: loop argument in args -> MirEnumArg{field: argument.field, value: mir_pass_inline_value(maps, argument.value), boxed: argument.boxed}
-            Val(MirOperation.Enum{type_id: type_id, variant: variant, args: mapped})
+            mapped :: loop argument in args -> MIREnumArg{field: argument.field, value: mir_pass_inline_value(maps, argument.value), boxed: argument.boxed}
+            Val(MIROperation.Enum{type_id: type_id, variant: variant, args: mapped})
         }
-        .Tuple(type_id, fields) -> Val(MirOperation.Tuple{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps)})
-        .Present(value) -> Val(MirOperation.Present{value: mir_pass_inline_value(maps, value)})
+        .Tuple(type_id, fields) -> Val(MIROperation.Tuple{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps)})
+        .Present(value) -> Val(MIROperation.Present{value: mir_pass_inline_value(maps, value)})
         .Convert(value, parameters, target, conversion) -> {
             mapped :: loop parameter in parameters -> mir_pass_inline_value(maps, parameter)
-            Val(MirOperation.Convert{value: mir_pass_inline_value(maps, value), parameters: mapped, target: mir_pass_inline_type(target, substitutions), conversion: mir_pass_inline_conversion(conversion, substitutions)})
+            Val(MIROperation.Convert{value: mir_pass_inline_value(maps, value), parameters: mapped, target: mir_pass_inline_type(target, substitutions), conversion: mir_pass_inline_conversion(conversion, substitutions)})
         }
-        .TraitBox(value, target) -> Val(MirOperation.TraitBox{value: mir_pass_inline_value(maps, value), target: target})
-        .Absent -> Val(MirOperation.Absent)
-        .ResultOk(value) -> Val(MirOperation.ResultOk{value: mir_pass_inline_value(maps, value)})
-        .ResultErr(value) -> Val(MirOperation.ResultErr{value: mir_pass_inline_value(maps, value)})
+        .TraitBox(value, target) -> Val(MIROperation.TraitBox{value: mir_pass_inline_value(maps, value), target: target})
+        .Absent -> Val(MIROperation.Absent)
+        .ResultOk(value) -> Val(MIROperation.ResultOk{value: mir_pass_inline_value(maps, value)})
+        .ResultErr(value) -> Val(MIROperation.ResultErr{value: mir_pass_inline_value(maps, value)})
         .Call(callee, args, type_args) -> {
             mapped_args :: loop argument in args -> mir_pass_inline_call_arg(argument, maps, substitutions)
             mapped_types :: loop ty in type_args -> mir_pass_inline_type(ty, substitutions)
-            Val(MirOperation.Call{callee: mir_pass_inline_callee(callee, maps, substitutions), args: mapped_args, type_args: mapped_types})
+            Val(MIROperation.Call{callee: mir_pass_inline_callee(callee, maps, substitutions), args: mapped_args, type_args: mapped_types})
         }
         .IndirectCall(callee, args, type_args) -> {
             mapped_args :: loop argument in args -> mir_pass_inline_call_arg(argument, maps, substitutions)
             mapped_types :: loop ty in type_args -> mir_pass_inline_type(ty, substitutions)
-            Val(MirOperation.IndirectCall{callee: mir_pass_inline_value(maps, callee), args: mapped_args, type_args: mapped_types})
+            Val(MIROperation.IndirectCall{callee: mir_pass_inline_value(maps, callee), args: mapped_args, type_args: mapped_types})
         }
         .Closure(function, captures, facts) -> {
             mapped :: loop capture in captures -> mir_pass_inline_capture(capture, maps)
-            Val(MirOperation.Closure{function: function, captures: mapped, facts: facts})
+            Val(MIROperation.Closure{function: function, captures: mapped, facts: facts})
         }
-        .PtrFromAddr(address, element) -> Val(MirOperation.PtrFromAddr{address: mir_pass_inline_value(maps, address), element: mir_pass_inline_type(element, substitutions)})
-        .Deref(value) -> Val(MirOperation.Deref{value: mir_pass_inline_value(maps, value)})
-        .AddressOf(place, access) -> Val(MirOperation.AddressOf{place: mir_pass_inline_place(maps, place), access: access})
-        .RawAddressOf(place) -> Val(MirOperation.RawAddressOf{place: mir_pass_inline_place(maps, place)})
+        .PtrFromAddr(address, element) -> Val(MIROperation.PtrFromAddr{address: mir_pass_inline_value(maps, address), element: mir_pass_inline_type(element, substitutions)})
+        .Deref(value) -> Val(MIROperation.Deref{value: mir_pass_inline_value(maps, value)})
+        .AddressOf(place, access) -> Val(MIROperation.AddressOf{place: mir_pass_inline_place(maps, place), access: access})
+        .RawAddressOf(place) -> Val(MIROperation.RawAddressOf{place: mir_pass_inline_place(maps, place)})
         .CoreCall(call, route, args, type_args, fallibility, plan) -> {
             mapped_args :: loop argument in args -> mir_pass_inline_call_arg(argument, maps, substitutions)
             mapped_types :: loop ty in type_args -> mir_pass_inline_type(ty, substitutions)
-            Val(MirOperation.CoreCall{call: call, route: route, args: mapped_args, type_args: mapped_types, fallibility: mir_pass_inline_fallibility(fallibility, substitutions), data_plan: mir_pass_inline_data_plan(plan, substitutions)})
+            Val(MIROperation.CoreCall{call: call, route: route, args: mapped_args, type_args: mapped_types, fallibility: mir_pass_inline_fallibility(fallibility, substitutions), data_plan: mir_pass_inline_data_plan(plan, substitutions)})
         }
-        .AttachTag(value, tag_name) -> Val(MirOperation.AttachTag{value: mir_pass_inline_value(maps, value), tag: tag_name})
-        .Todo(call, location, expected_type) -> Val(MirOperation.Todo{call: call, location: location, expected_type: mir_pass_inline_optional_type(expected_type, substitutions)})
-        .Never(reason) -> Val(MirOperation.Never{reason: reason})
-        .Semantic(semantic) -> Val(MirOperation.Semantic{operation: mir_pass_inline_semantic(semantic, maps, substitutions)})
-        .LoopRangeInit(call, start, end, step, exclusive) -> Val(MirOperation.LoopRangeInit{call: call, start: mir_pass_inline_value(maps, start), end: mir_pass_inline_value(maps, end), step: mir_pass_inline_optional_value(maps, step), exclusive: exclusive})
-        .LoopRangeHasNext(call, cursor) -> Val(MirOperation.LoopRangeHasNext{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .LoopRangeValue(call, cursor) -> Val(MirOperation.LoopRangeValue{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .LoopRangeAdvance(call, cursor) -> Val(MirOperation.LoopRangeAdvance{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .LoopIterInit(call, collection, step, by_value, source_kind) -> Val(MirOperation.LoopIterInit{call: call, collection: mir_pass_inline_value(maps, collection), step: mir_pass_inline_optional_value(maps, step), by_value: by_value, source_kind: source_kind})
-        .LoopIterHasNext(call, cursor) -> Val(MirOperation.LoopIterHasNext{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .LoopIterValue(call, cursor) -> Val(MirOperation.LoopIterValue{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .LoopIterAdvance(call, cursor) -> Val(MirOperation.LoopIterAdvance{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .ScopeEnter(scope, member) -> Val(MirOperation.ScopeEnter{scope: mir_pass_inline_scope(maps, scope), test_member: member.map(value -> mir_pass_inline_test_scope_member(value, maps))})
-        .ScopeExit(scope) -> Val(MirOperation.ScopeExit{scope: mir_pass_inline_scope(maps, scope)})
-        .Drop(value, kind) -> Val(MirOperation.Drop{value: mir_pass_inline_value(maps, value), kind: kind})
+        .AttachTag(value, tag_name) -> Val(MIROperation.AttachTag{value: mir_pass_inline_value(maps, value), tag: tag_name})
+        .Todo(call, location, expected_type) -> Val(MIROperation.Todo{call: call, location: location, expected_type: mir_pass_inline_optional_type(expected_type, substitutions)})
+        .Never(reason) -> Val(MIROperation.Never{reason: reason})
+        .Semantic(semantic) -> Val(MIROperation.Semantic{operation: mir_pass_inline_semantic(semantic, maps, substitutions)})
+        .LoopRangeInit(call, start, end, step, exclusive) -> Val(MIROperation.LoopRangeInit{call: call, start: mir_pass_inline_value(maps, start), end: mir_pass_inline_value(maps, end), step: mir_pass_inline_optional_value(maps, step), exclusive: exclusive})
+        .LoopRangeHasNext(call, cursor) -> Val(MIROperation.LoopRangeHasNext{call: call, cursor: mir_pass_inline_value(maps, cursor)})
+        .LoopRangeValue(call, cursor) -> Val(MIROperation.LoopRangeValue{call: call, cursor: mir_pass_inline_value(maps, cursor)})
+        .LoopRangeAdvance(call, cursor) -> Val(MIROperation.LoopRangeAdvance{call: call, cursor: mir_pass_inline_value(maps, cursor)})
+        .LoopIterInit(call, collection, step, by_value, source_kind) -> Val(MIROperation.LoopIterInit{call: call, collection: mir_pass_inline_value(maps, collection), step: mir_pass_inline_optional_value(maps, step), by_value: by_value, source_kind: source_kind})
+        .LoopIterHasNext(call, cursor) -> Val(MIROperation.LoopIterHasNext{call: call, cursor: mir_pass_inline_value(maps, cursor)})
+        .LoopIterValue(call, cursor) -> Val(MIROperation.LoopIterValue{call: call, cursor: mir_pass_inline_value(maps, cursor)})
+        .LoopIterAdvance(call, cursor) -> Val(MIROperation.LoopIterAdvance{call: call, cursor: mir_pass_inline_value(maps, cursor)})
+        .ScopeEnter(scope, member) -> Val(MIROperation.ScopeEnter{scope: mir_pass_inline_scope(maps, scope), test_member: member.map(value -> mir_pass_inline_test_scope_member(value, maps))})
+        .ScopeExit(scope) -> Val(MIROperation.ScopeExit{scope: mir_pass_inline_scope(maps, scope)})
+        .Drop(value, kind) -> Val(MIROperation.Drop{value: mir_pass_inline_value(maps, value), kind: kind})
     }
 }
 
-fn mir_pass_inline_string_part(part: MirStringPartKind, maps: MirInlineMaps) -> MirStringPartKind Never! {
+fn mir_pass_inline_string_part(part: MIRStringPartKind, maps: MIRInlineMaps) -> MIRStringPartKind Never! {
     if part == {
-        .Literal(text) -> MirStringPartKind.Literal{text: text}
-        .Interpolation(value, format) -> MirStringPartKind.Interpolation{value: mir_pass_inline_value(maps, value), format: format}
+        .Literal(text) -> MIRStringPartKind.Literal{text: text}
+        .Interpolation(value, format) -> MIRStringPartKind.Interpolation{value: mir_pass_inline_value(maps, value), format: format}
     }
 }
 
-fn mir_pass_inline_field_values(fields: [MirFieldValue], maps: MirInlineMaps) -> [MirFieldValue] Never! {
-    output :: loop field in fields -> MirFieldValue{field: field.field, value: mir_pass_inline_value(maps, field.value)}
+fn mir_pass_inline_field_values(fields: [MIRFieldValue], maps: MIRInlineMaps) -> [MIRFieldValue] Never! {
+    output :: loop field in fields -> MIRFieldValue{field: field.field, value: mir_pass_inline_value(maps, field.value)}
     output
 }
 
-fn mir_pass_inline_capture(capture: MirCaptureOperand, maps: MirInlineMaps) -> MirCaptureOperand Never! {
+fn mir_pass_inline_capture(capture: MIRCaptureOperand, maps: MIRInlineMaps) -> MIRCaptureOperand Never! {
     if capture == {
-        .Value(value) -> MirCaptureOperand.Value{value: mir_pass_inline_value(maps, value)}
-        .Place(place) -> MirCaptureOperand.Place{place: mir_pass_inline_place(maps, place)}
+        .Value(value) -> MIRCaptureOperand.Value{value: mir_pass_inline_value(maps, value)}
+        .Place(place) -> MIRCaptureOperand.Place{place: mir_pass_inline_place(maps, place)}
     }
 }
 
-fn mir_pass_inline_test_scope_member(member: MirTestScopeMember, maps: MirInlineMaps) -> MirTestScopeMember Never! {
+fn mir_pass_inline_test_scope_member(member: MIRTestScopeMember, maps: MIRInlineMaps) -> MIRTestScopeMember Never! {
     if member == {
-        .ExpectFail(code) -> MirTestScopeMember.ExpectFail{expected_code: code}
-        .Timeout(duration) -> MirTestScopeMember.Timeout{duration: mir_pass_inline_value(maps, duration)}
-        .Skip(whole_test) -> MirTestScopeMember.Skip{whole_test: whole_test}
-        .Measure -> MirTestScopeMember.Measure
+        .ExpectFail(code) -> MIRTestScopeMember.ExpectFail{expected_code: code}
+        .Timeout(duration) -> MIRTestScopeMember.Timeout{duration: mir_pass_inline_value(maps, duration)}
+        .Skip(whole_test) -> MIRTestScopeMember.Skip{whole_test: whole_test}
+        .Measure -> MIRTestScopeMember.Measure
     }
 }
 
-fn mir_pass_inline_semantic(operation: MirSemanticOp, maps: MirInlineMaps, substitutions: [MirInlineTypeSubstitution]) -> MirSemanticOp Never! {
+fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIRSemanticOp Never! {
     if operation == {
-        .DataEntriesToMap(call, local) -> MirSemanticOp.DataEntriesToMap{call: call, local: mir_pass_inline_local(maps, local)}
-        .MathBuiltin(type_id, call, args) -> MirSemanticOp.MathBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
-        .PreciseBuiltin(type_id, call, args) -> MirSemanticOp.PreciseBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
-        .Print(call, value) -> MirSemanticOp.Print{call: call, value: mir_pass_inline_value(maps, value)}
-        .AmbientInput(call, prompt) -> MirSemanticOp.AmbientInput{call: call, prompt: mir_pass_inline_optional_value(maps, prompt)}
-        .RequireStop(call, kind, condition, location, context, values, always_stops) -> MirSemanticOp.RequireStop{call: call, kind: kind, condition: mir_pass_inline_optional_value(maps, condition), location: location, context: mir_pass_inline_panic_context(context, maps), values: mir_pass_inline_values(values, maps), always_stops: always_stops}
-        .LayoutCompare(call, op, left, right) -> MirSemanticOp.LayoutCompare{call: call, op: op, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)}
+        .DataEntriesToMap(call, local) -> MIRSemanticOp.DataEntriesToMap{call: call, local: mir_pass_inline_local(maps, local)}
+        .MathBuiltin(type_id, call, args) -> MIRSemanticOp.MathBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
+        .PreciseBuiltin(type_id, call, args) -> MIRSemanticOp.PreciseBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
+        .Print(call, value) -> MIRSemanticOp.Print{call: call, value: mir_pass_inline_value(maps, value)}
+        .AmbientInput(call, prompt) -> MIRSemanticOp.AmbientInput{call: call, prompt: mir_pass_inline_optional_value(maps, prompt)}
+        .RequireStop(call, kind, condition, location, context, values, always_stops) -> MIRSemanticOp.RequireStop{call: call, kind: kind, condition: mir_pass_inline_optional_value(maps, condition), location: location, context: mir_pass_inline_panic_context(context, maps), values: mir_pass_inline_values(values, maps), always_stops: always_stops}
+        .LayoutCompare(call, op, left, right) -> MIRSemanticOp.LayoutCompare{call: call, op: op, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)}
         .ReflectOf(type_name, path, display, fields) -> {
-            mapped :: loop field in fields -> MirReflectField{name: field.name, type_name: field.type_name, path: field.path, value: mir_pass_inline_value(maps, field.value)}
-            MirSemanticOp.ReflectOf{type_name: type_name, path: path, display: mir_pass_inline_value(maps, display), fields: mapped}
+            mapped :: loop field in fields -> MIRReflectField{name: field.name, type_name: field.type_name, path: field.path, value: mir_pass_inline_value(maps, field.value)}
+            MIRSemanticOp.ReflectOf{type_name: type_name, path: path, display: mir_pass_inline_value(maps, display), fields: mapped}
         }
-        .LayoutLiteral(inner) -> MirSemanticOp.LayoutLiteral{inner: mir_pass_inline_value(maps, inner)}
-        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> MirSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra, trait_coercion: trait_coercion, boxed_fields: boxed_fields}
-        .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> MirSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: mir_pass_inline_value(maps, guard), paths: paths, editable: editable, edit_paths_disjoint: disjoint}
-        .SharedGuardMap(call, guard, path, editable) -> MirSemanticOp.SharedGuardMap{call: call, guard: mir_pass_inline_value(maps, guard), path: path, editable: editable}
-        .SharedGuardSplit(call, map_call, guard, first, second, editable) -> MirSemanticOp.SharedGuardSplit{call: call, map_call: map_call, guard: mir_pass_inline_value(maps, guard), first: first, second: second, editable: editable}
-        .SharedGuardWait(call, guard, condition, predicate) -> MirSemanticOp.SharedGuardWait{call: call, guard: mir_pass_inline_value(maps, guard), condition: mir_pass_inline_value(maps, condition), predicate: mir_pass_inline_value(maps, predicate)}
-        .ConditionNotify(call, condition, all) -> MirSemanticOp.ConditionNotify{call: call, condition: mir_pass_inline_value(maps, condition), all: all}
-        .AllocNew(call, kind, inline_size, args) -> MirSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size, args: mir_pass_inline_call_args(args, maps, substitutions)}
-        .ColumnarRead(base, index, column, column_index, accessor) -> MirSemanticOp.ColumnarRead{base: mir_pass_inline_value(maps, base), index: mir_pass_inline_value(maps, index), column: column, column_index: column_index, accessor: accessor}
+        .LayoutLiteral(inner) -> MIRSemanticOp.LayoutLiteral{inner: mir_pass_inline_value(maps, inner)}
+        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra, trait_coercion: trait_coercion, boxed_fields: boxed_fields}
+        .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: mir_pass_inline_value(maps, guard), paths: paths, editable: editable, edit_paths_disjoint: disjoint}
+        .SharedGuardMap(call, guard, path, editable) -> MIRSemanticOp.SharedGuardMap{call: call, guard: mir_pass_inline_value(maps, guard), path: path, editable: editable}
+        .SharedGuardSplit(call, map_call, guard, first, second, editable) -> MIRSemanticOp.SharedGuardSplit{call: call, map_call: map_call, guard: mir_pass_inline_value(maps, guard), first: first, second: second, editable: editable}
+        .SharedGuardWait(call, guard, condition, predicate) -> MIRSemanticOp.SharedGuardWait{call: call, guard: mir_pass_inline_value(maps, guard), condition: mir_pass_inline_value(maps, condition), predicate: mir_pass_inline_value(maps, predicate)}
+        .ConditionNotify(call, condition, all) -> MIRSemanticOp.ConditionNotify{call: call, condition: mir_pass_inline_value(maps, condition), all: all}
+        .AllocNew(call, kind, inline_size, args) -> MIRSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size, args: mir_pass_inline_call_args(args, maps, substitutions)}
+        .ColumnarRead(base, index, column, column_index, accessor) -> MIRSemanticOp.ColumnarRead{base: mir_pass_inline_value(maps, base), index: mir_pass_inline_value(maps, index), column: column, column_index: column_index, accessor: accessor}
         .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
             owner_args :: loop argument in owner_type_args -> mir_pass_inline_prelude_type_arg(argument, substitutions)
             mapped_types :: loop ty in type_args -> mir_pass_inline_type(ty, substitutions)
-            MirSemanticOp.StaticPreludeCall{call: call, args: mir_pass_inline_call_args(args, maps, substitutions), owner_type_args: owner_args, type_args: mapped_types}
+            MIRSemanticOp.StaticPreludeCall{call: call, args: mir_pass_inline_call_args(args, maps, substitutions), owner_type_args: owner_args, type_args: mapped_types}
         }
-        .DecodeUnder(call, segment, inner) -> MirSemanticOp.DecodeUnder{call: call, segment: mir_pass_inline_value(maps, segment), inner: mir_pass_inline_value(maps, inner)}
-        .HardwareCall(call, op, receiver, args) -> MirSemanticOp.HardwareCall{call: call, op: mir_pass_inline_hardware_op(op, substitutions), receiver: mir_pass_inline_optional_value(maps, receiver), args: mir_pass_inline_call_args(args, maps, substitutions)}
-        .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> MirSemanticOp.BuiltinMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), receiver_place: receiver_place.map(value -> mir_pass_inline_place(maps, value)), args: mir_pass_inline_values(args, maps), aggregate_fields: aggregate_fields}
-        .OptionLift2(call, function, left, right) -> MirSemanticOp.OptionLift2{call: call, function: mir_pass_inline_value(maps, function), left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)}
-        .ClosureMethod(receiver, args, call) -> MirSemanticOp.ClosureMethod{receiver: mir_pass_inline_value(maps, receiver), args: mir_pass_inline_call_args(args, maps, substitutions), call: call}
+        .DecodeUnder(call, segment, inner) -> MIRSemanticOp.DecodeUnder{call: call, segment: mir_pass_inline_value(maps, segment), inner: mir_pass_inline_value(maps, inner)}
+        .HardwareCall(call, op, receiver, args) -> MIRSemanticOp.HardwareCall{call: call, op: mir_pass_inline_hardware_op(op, substitutions), receiver: mir_pass_inline_optional_value(maps, receiver), args: mir_pass_inline_call_args(args, maps, substitutions)}
+        .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> MIRSemanticOp.BuiltinMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), receiver_place: receiver_place.map(value -> mir_pass_inline_place(maps, value)), args: mir_pass_inline_values(args, maps), aggregate_fields: aggregate_fields}
+        .OptionLift2(call, function, left, right) -> MIRSemanticOp.OptionLift2{call: call, function: mir_pass_inline_value(maps, function), left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)}
+        .ClosureMethod(receiver, args, call) -> MIRSemanticOp.ClosureMethod{receiver: mir_pass_inline_value(maps, receiver), args: mir_pass_inline_call_args(args, maps, substitutions), call: call}
         .HostBorrowCallback(callable, params) -> {
             mapped :: loop ty in params -> mir_pass_inline_type(ty, substitutions)
-            MirSemanticOp.HostBorrowCallback{callable: mir_pass_inline_value(maps, callable), params: mapped}
+            MIRSemanticOp.HostBorrowCallback{callable: mir_pass_inline_value(maps, callable), params: mapped}
         }
-        .TextPatternMatch(call, subject, parts) -> MirSemanticOp.TextPatternMatch{call: call, subject: mir_pass_inline_value(maps, subject), parts: parts}
-        .BinaryPatternMatch(call, subject, parts) -> MirSemanticOp.BinaryPatternMatch{call: call, subject: mir_pass_inline_value(maps, subject), parts: parts}
-        .CursorTakePattern(receiver, place, parts) -> MirSemanticOp.CursorTakePattern{receiver: mir_pass_inline_value(maps, receiver), receiver_place: mir_pass_inline_place(maps, place), parts: parts}
-        .ReaderTakePattern(receiver, place, parts) -> MirSemanticOp.ReaderTakePattern{receiver: mir_pass_inline_value(maps, receiver), receiver_place: mir_pass_inline_place(maps, place), parts: parts}
-        .NumericMethod(call, receiver) -> MirSemanticOp.NumericMethod{call: call, receiver: mir_pass_inline_value(maps, receiver)}
-        .NumericBinaryMethod(call, receiver, argument) -> MirSemanticOp.NumericBinaryMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), argument: mir_pass_inline_value(maps, argument)}
-        .OverflowOption(call, left, right, location) -> MirSemanticOp.OverflowOption{call: call, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right), location: location}
-        .HandleMethod(call, receiver, args, schedule, derivation) -> MirSemanticOp.HandleMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), args: mir_pass_inline_values(args, maps), frame_schedule: schedule, frame_schedule_derivation: derivation}
-        .PluginInvoke(call, handle, export_name, signature, args) -> MirSemanticOp.PluginInvoke{call: call, handle: mir_pass_inline_value(maps, handle), export_name: export_name, signature: signature, args: mir_pass_inline_values(args, maps)}
-        .HttpRouterRegister(call, receiver, path, handler, method, names, contract, location) -> MirSemanticOp.HttpRouterRegister{call: call, receiver: mir_pass_inline_value(maps, receiver), path: mir_pass_inline_value(maps, path), handler: mir_pass_inline_value(maps, handler), method: method, handler_param_names: names, contract_json: contract, location: location}
-        .CoreClosureCall(call, kind, values, closure, site, label) -> MirSemanticOp.CoreClosureCall{call: call, kind: kind, values: mir_pass_inline_values(values, maps), closure: mir_pass_inline_optional_value(maps, closure), site: site, label: label}
-        .TaskGroup(call, kind, tasks) -> MirSemanticOp.TaskGroup{call: call, kind: kind, tasks: mir_pass_inline_values(tasks, maps)}
-        .Select(call, kind, values) -> MirSemanticOp.Select{call: call, kind: kind, values: mir_pass_inline_values(values, maps)}
-        .PolicyFunction(policy, values) -> MirSemanticOp.PolicyFunction{policy: mir_pass_inline_value(maps, policy), values: mir_pass_inline_values(values, maps)}
-        .InterruptFunction(interrupt, values) -> MirSemanticOp.InterruptFunction{interrupt: mir_pass_inline_value(maps, interrupt), values: mir_pass_inline_values(values, maps)}
-        .CarrierFact(call, receiver, field, notes) -> MirSemanticOp.CarrierFact{call: call, receiver: mir_pass_inline_value(maps, receiver), field: field, notes: notes}
-        .GcEdit(call, root, edges, edit, index, kind, site) -> MirSemanticOp.GcEdit{call: call, root: mir_pass_inline_value(maps, root), edges: mir_pass_inline_values(edges, maps), edit: mir_pass_inline_value(maps, edit), index: mir_pass_inline_optional_value(maps, index), kind: kind, site: site}
-        .TypedTextInterp(call, kind, literals, holes, trusted_html) -> MirSemanticOp.TypedTextInterp{call: call, kind: kind, literals: literals, holes: mir_pass_inline_values(holes, maps), trusted_html: trusted_html}
-        .CCallback(call, callback, lambda) -> MirSemanticOp.CCallback{call: call, callback: callback, lambda: mir_pass_inline_value(maps, lambda)}
-        .HostCall(call, args) -> MirSemanticOp.HostCall{call: call, args: mir_pass_inline_call_args(args, maps, substitutions)}
+        .TextPatternMatch(call, subject, parts) -> MIRSemanticOp.TextPatternMatch{call: call, subject: mir_pass_inline_value(maps, subject), parts: parts}
+        .BinaryPatternMatch(call, subject, parts) -> MIRSemanticOp.BinaryPatternMatch{call: call, subject: mir_pass_inline_value(maps, subject), parts: parts}
+        .CursorTakePattern(receiver, place, parts) -> MIRSemanticOp.CursorTakePattern{receiver: mir_pass_inline_value(maps, receiver), receiver_place: mir_pass_inline_place(maps, place), parts: parts}
+        .ReaderTakePattern(receiver, place, parts) -> MIRSemanticOp.ReaderTakePattern{receiver: mir_pass_inline_value(maps, receiver), receiver_place: mir_pass_inline_place(maps, place), parts: parts}
+        .NumericMethod(call, receiver) -> MIRSemanticOp.NumericMethod{call: call, receiver: mir_pass_inline_value(maps, receiver)}
+        .NumericBinaryMethod(call, receiver, argument) -> MIRSemanticOp.NumericBinaryMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), argument: mir_pass_inline_value(maps, argument)}
+        .OverflowOption(call, left, right, location) -> MIRSemanticOp.OverflowOption{call: call, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right), location: location}
+        .HandleMethod(call, receiver, args, schedule, derivation) -> MIRSemanticOp.HandleMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), args: mir_pass_inline_values(args, maps), frame_schedule: schedule, frame_schedule_derivation: derivation}
+        .PluginInvoke(call, handle, export_name, signature, args) -> MIRSemanticOp.PluginInvoke{call: call, handle: mir_pass_inline_value(maps, handle), export_name: export_name, signature: signature, args: mir_pass_inline_values(args, maps)}
+        .HTTPRouterRegister(call, receiver, path, handler, method, names, contract, location) -> MIRSemanticOp.HTTPRouterRegister{call: call, receiver: mir_pass_inline_value(maps, receiver), path: mir_pass_inline_value(maps, path), handler: mir_pass_inline_value(maps, handler), method: method, handler_param_names: names, contract_json: contract, location: location}
+        .CoreClosureCall(call, kind, values, closure, site, label) -> MIRSemanticOp.CoreClosureCall{call: call, kind: kind, values: mir_pass_inline_values(values, maps), closure: mir_pass_inline_optional_value(maps, closure), site: site, label: label}
+        .TaskGroup(call, kind, tasks) -> MIRSemanticOp.TaskGroup{call: call, kind: kind, tasks: mir_pass_inline_values(tasks, maps)}
+        .Select(call, kind, values) -> MIRSemanticOp.Select{call: call, kind: kind, values: mir_pass_inline_values(values, maps)}
+        .PolicyFunction(policy, values) -> MIRSemanticOp.PolicyFunction{policy: mir_pass_inline_value(maps, policy), values: mir_pass_inline_values(values, maps)}
+        .InterruptFunction(interrupt, values) -> MIRSemanticOp.InterruptFunction{interrupt: mir_pass_inline_value(maps, interrupt), values: mir_pass_inline_values(values, maps)}
+        .CarrierFact(call, receiver, field, notes) -> MIRSemanticOp.CarrierFact{call: call, receiver: mir_pass_inline_value(maps, receiver), field: field, notes: notes}
+        .GCEdit(call, root, edges, edit, index, kind, site) -> MIRSemanticOp.GCEdit{call: call, root: mir_pass_inline_value(maps, root), edges: mir_pass_inline_values(edges, maps), edit: mir_pass_inline_value(maps, edit), index: mir_pass_inline_optional_value(maps, index), kind: kind, site: site}
+        .TypedTextInterp(call, kind, literals, holes, trusted_html) -> MIRSemanticOp.TypedTextInterp{call: call, kind: kind, literals: literals, holes: mir_pass_inline_values(holes, maps), trusted_html: trusted_html}
+        .CCallback(call, callback, lambda) -> MIRSemanticOp.CCallback{call: call, callback: callback, lambda: mir_pass_inline_value(maps, lambda)}
+        .HostCall(call, args) -> MIRSemanticOp.HostCall{call: call, args: mir_pass_inline_call_args(args, maps, substitutions)}
     }
 }
 
-fn mir_pass_inline_values(values: [MirValueId], maps: MirInlineMaps) -> [MirValueId] Never! {
+fn mir_pass_inline_values(values: [MIRValueID], maps: MIRInlineMaps) -> [MIRValueID] Never! {
     output :: loop value in values -> mir_pass_inline_value(maps, value)
     output
 }
 
-fn mir_pass_inline_call_args(args: [MirCallArg], maps: MirInlineMaps, substitutions: [MirInlineTypeSubstitution]) -> [MirCallArg] Never! {
+fn mir_pass_inline_call_args(args: [MIRCallArg], maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> [MIRCallArg] Never! {
     output :: loop argument in args -> mir_pass_inline_call_arg(argument, maps, substitutions)
     output
 }
 
-fn mir_pass_inline_hardware_op(operation: MirHardwareOp, substitutions: [MirInlineTypeSubstitution]) -> MirHardwareOp Never! {
+fn mir_pass_inline_hardware_op(operation: MIRHardwareOp, substitutions: [MIRInlineTypeSubstitution]) -> MIRHardwareOp Never! {
     if operation == {
-        .RegisterRead(profile, block, register, width) -> MirHardwareOp.RegisterRead{profile_id: profile, block: block, register: register, width: width}
-        .RegisterWrite(profile, block, register, width) -> MirHardwareOp.RegisterWrite{profile_id: profile, block: block, register: register, width: width}
-        .DmaStart(profile, channel, buffer_ty) -> MirHardwareOp.DmaStart{profile_id: profile, channel: channel, buffer_ty: mir_pass_inline_type(buffer_ty, substitutions)}
-        .DmaWait(profile, channel, buffer_ty) -> MirHardwareOp.DmaWait{profile_id: profile, channel: channel, buffer_ty: mir_pass_inline_type(buffer_ty, substitutions)}
+        .RegisterRead(profile, block, register, width) -> MIRHardwareOp.RegisterRead{profile_id: profile, block: block, register: register, width: width}
+        .RegisterWrite(profile, block, register, width) -> MIRHardwareOp.RegisterWrite{profile_id: profile, block: block, register: register, width: width}
+        .DMAStart(profile, channel, buffer_ty) -> MIRHardwareOp.DMAStart{profile_id: profile, channel: channel, buffer_ty: mir_pass_inline_type(buffer_ty, substitutions)}
+        .DMAWait(profile, channel, buffer_ty) -> MIRHardwareOp.DMAWait{profile_id: profile, channel: channel, buffer_ty: mir_pass_inline_type(buffer_ty, substitutions)}
     }
 }

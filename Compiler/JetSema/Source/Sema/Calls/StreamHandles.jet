@@ -1,6 +1,27 @@
 // Source semantic producers for filesystem, terminal, encoding, binary-reader,
 // cursor, and Path handle operations. The backend owns the fixed ABI routes;
 // this module checks their public types, ownership, and effects.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    Symbol,
+    SymbolKind,
+    TCallArg,
+    TExpr,
+    TExprKind,
+    TFieldRef,
+    TForInMethod,
+    THandleOp,
+    TMethodRef,
+    Type,
+    symbol_id,
+]
 
 struct SemaStreamHandleSpec {
     operation: THandleOp
@@ -27,7 +48,9 @@ fn sema_stream_handle_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) | .Apply(name, _) -> {
             loop owner in ([String]{"MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
-                if name == owner || name.ends_with("::{owner}") -> return Val(owner)
+                // The built-in `Path` has no declaring module: a canonical
+                // `<module>::Path` is a different record (`core.files.path`).
+                if name == owner || (owner != "Path" && name.ends_with("::{owner}")) -> return Val(owner)
             }
         }
         else -> {}
@@ -44,20 +67,20 @@ fn sema_stream_handle_owner_module(owner: String) -> String Never! {
     if owner == "XMLReader" || owner == "XMLWriter" -> return "core.encoding.xml"
     if owner == "CBORReader" || owner == "CBORWriter" -> return "core.encoding.cbor"
     if owner == "Cursor" -> return "core.text"
-    if owner == "Path" -> return "core.files.path"
     ""
 }
 
 fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaScopeEnvironment) -> Bool Never! {
     actual :: sema_stream_handle_owner(ty) ?? return false
     if actual != owner -> return false
-    graph_option := environment.registration_graph
-    if graph_option == None -> return true
+    graph_option :: environment.registration_graph
     graph :: graph_option ?? return true
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
     if resolved == .Val(row) {
         owner_module := sema_stream_handle_owner_module(owner)
-        return row.symbol.kind == SymbolKind.Type && (owner_module == "" || row.symbol.module_name == owner_module)
+        // A declared or imported type named like a module-less built-in
+        // (`Path`) shadows it; the two never share an identity.
+        return row.symbol.kind == SymbolKind.Type && owner_module != "" && row.symbol.module_name == owner_module
     }
     true
 }
@@ -104,7 +127,7 @@ fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpe
         if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteLine else -> THandleOp.StderrWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
         if method == "write_bytes" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteBytes else -> THandleOp.StderrWriteBytes, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
         if method == "flush" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutFlush else -> THandleOp.StderrFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "is_tty" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutIsTty else -> THandleOp.StderrIsTty, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "IO"})
+        if method == "is_tty" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutIsTTY else -> THandleOp.StderrIsTTY, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "IO"})
     }
     if owner == "JSONReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
     if owner == "JSONWriter" {
@@ -276,7 +299,7 @@ fn sema_stream_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr
 
 fn sema_stream_handle_method_ref(owner: String, method: String) -> TMethodRef Never! {
     owner_module := sema_stream_handle_owner_module(owner)
-    TMethodRef{symbol: symbol_id(SymbolKind.Method, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
+    TMethodRef{symbol: symbol_id(SymbolKind.Function, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
 }
 
 fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
@@ -350,7 +373,7 @@ fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScop
     symbol :: scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Type -> return false
     owner_module := sema_stream_handle_owner_module(owner)
-    owner_module == "" || symbol.module_name == owner_module
+    owner_module != "" && symbol.module_name == owner_module
 }
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.
@@ -416,8 +439,7 @@ pub fn sema_call_try_stream_handle_static(owner: String, method: String, args: [
 }
 
 fn sema_stream_handle_registered_owner(owner: String, environment: SemaScopeEnvironment) -> Symbol? {
-    graph_option := environment.registration_graph
-    if graph_option == None -> return None
+    graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner)
     if resolved == .Val(row) && row.symbol.kind == SymbolKind.Type -> return Val(row.symbol)

@@ -156,14 +156,14 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Ui, "resize_event") => ui_resize_event(args, span),
         (CoreCallPureRoute::Ui, "ascii") => tui_ascii(args, span),
         (CoreCallPureRoute::Ui, "capabilities") => Ok(tui_capabilities()),
-        (CoreCallPureRoute::Ui, "color_ansi16") => tui_color(args, span, "Ansi16", 1),
-        (CoreCallPureRoute::Ui, "color_ansi256") => tui_color(args, span, "Ansi256", 1),
-        (CoreCallPureRoute::Ui, "color_rgb") => tui_color(args, span, "Rgb", 3),
+        (CoreCallPureRoute::Ui, "color_ansi16") => tui_color(args, span, "ANSI16", 1),
+        (CoreCallPureRoute::Ui, "color_ansi256") => tui_color(args, span, "ANSI256", 1),
+        (CoreCallPureRoute::Ui, "color_rgb") => tui_color(args, span, "RGB", 3),
         (CoreCallPureRoute::Ui, "display_width") => tui_display_width(args, span),
         (CoreCallPureRoute::Ui, "focus_event") => bool_value(args, 0, span)
             .and_then(|value| tui_event("Focus", vec![(Some("focused".to_string()), value)])),
         (CoreCallPureRoute::Ui, "close_event") => tui_event("Close", Vec::new()),
-        (CoreCallPureRoute::Ui, "horizontal") => tui_enum("TuiDirection", "Horizontal"),
+        (CoreCallPureRoute::Ui, "horizontal") => tui_enum("TUIDirection", "Horizontal"),
         (CoreCallPureRoute::Ui, "interrupt_event") => tui_event("Interrupt", Vec::new()),
         (CoreCallPureRoute::Ui, "io_event") => tui_io_event(args, span),
         (CoreCallPureRoute::Ui, "key_event_modifiers") => tui_key_event_modifiers(args, span),
@@ -178,7 +178,7 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Ui, "list_state_select") => tui_list_state_update(args, span, true),
         (CoreCallPureRoute::Ui, "list_state_selected") =>
             one(args, 0, "core.tui", "list_state_selected", span)
-                .and_then(|state| int_field(state, "TuiListState", "selected", span))
+                .and_then(|state| int_field(state, "TUIListState", "selected", span))
                 .map(CtValue::Int),
         (CoreCallPureRoute::Ui, "max") => tui_constraint(args, span, "Max"),
         (CoreCallPureRoute::Ui, "min") => tui_constraint(args, span, "Min"),
@@ -192,7 +192,7 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Ui, "style_underline") => tui_style_flag(args, span, "underline"),
         (CoreCallPureRoute::Ui, "table") => tui_table(args, span),
         (CoreCallPureRoute::Ui, "timer_event") => tui_timer_event(args, span),
-        (CoreCallPureRoute::Ui, "vertical") => tui_enum("TuiDirection", "Vertical"),
+        (CoreCallPureRoute::Ui, "vertical") => tui_enum("TUIDirection", "Vertical"),
         (CoreCallPureRoute::Io, "style_force") => io_style_force(args, span),
         (CoreCallPureRoute::Net, "ip_addr") => net_ip_addr(args, span),
         (CoreCallPureRoute::Net, "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
@@ -227,14 +227,14 @@ pub(super) fn evaluate(
             net_value_field(args, "NetError", "os_code", span)
         }
         (CoreCallPureRoute::Net, "dns_srv_target") => {
-            net_string_field(args, "DNSSrv", "target", span)
+            net_string_field(args, "DNSSRV", "target", span)
         }
-        (CoreCallPureRoute::Net, "dns_srv_port") => net_value_field(args, "DNSSrv", "port", span),
+        (CoreCallPureRoute::Net, "dns_srv_port") => net_value_field(args, "DNSSRV", "port", span),
         (CoreCallPureRoute::Net, "dns_srv_priority") => {
-            net_value_field(args, "DNSSrv", "priority", span)
+            net_value_field(args, "DNSSRV", "priority", span)
         }
         (CoreCallPureRoute::Net, "dns_srv_weight") => {
-            net_value_field(args, "DNSSrv", "weight", span)
+            net_value_field(args, "DNSSRV", "weight", span)
         }
         (CoreCallPureRoute::Net, "udp_packet_data") => net_udp_packet_data(args, span),
         (CoreCallPureRoute::Net, "udp_packet_bytes") => {
@@ -338,50 +338,50 @@ pub(super) fn evaluate_method(
         ("Mime", "to_string", 0) => mime_string(recv, span).map(CtValue::Str),
         ("Mime", "param", 1) => mime_param(recv, args, span),
         ("Mime", "params", 0) => value_field(recv, "Mime", "params", span),
-        ("Url", "scheme", 0) => {
+        ("URL", "scheme", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.scheme()))
         }
-        ("Url", "username", 0) => {
+        ("URL", "username", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.username()))
         }
-        ("Url", "password", 0) => {
+        ("URL", "password", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.password()))
         }
-        ("Url", "userinfo", 0) => {
+        ("URL", "userinfo", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.userinfo()))
         }
-        ("Url", "authority", 0) => {
+        ("URL", "authority", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.authority()))
         }
-        ("Url", "path", 0) => {
+        ("URL", "path", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.path()))
         }
-        ("Url", "query", 0) => {
+        ("URL", "query", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.query()))
         }
-        ("Url", "host", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.host() {
+        ("URL", "host", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.host() {
             Ok(host) => CtValue::Present(Box::new(CtValue::Str(host))),
             Err(_) => CtValue::absent(Type::String),
         }),
-        ("Url", "port", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.port() {
+        ("URL", "port", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.port() {
             Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
             Err(_) => CtValue::absent(Type::Int),
         }),
-        ("Url", "default_port", 0) => {
+        ("URL", "default_port", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| match url.default_port() {
                 Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
                 Err(_) => CtValue::absent(Type::Int),
             })
         }
-        ("Url", "fragment", 0) => {
+        ("URL", "fragment", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| match url.fragment() {
                 Ok(fragment) => CtValue::Present(Box::new(CtValue::Str(fragment))),
                 Err(_) => CtValue::absent(Type::String),
             })
         }
-        ("Url", "path_segments", 0) => super::url_parts_from_ct(recv, span)
+        ("URL", "path_segments", 0) => super::url_parts_from_ct(recv, span)
             .map(|url| CtValue::List(url.path_segments().into_iter().map(CtValue::Str).collect())),
-        ("Url", "query_pairs", 0) => super::url_parts_from_ct(recv, span).map(|url| {
+        ("URL", "query_pairs", 0) => super::url_parts_from_ct(recv, span).map(|url| {
             CtValue::List(
                 url.query_pairs()
                     .into_iter()
@@ -389,17 +389,17 @@ pub(super) fn evaluate_method(
                     .collect(),
             )
         }),
-        ("Url", "normalize", 0) => {
+        ("URL", "normalize", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| super::url_parts_to_ct(&url.normalize()))
         }
-        ("Url", "join", 1) => super::url_parts_from_ct(recv, span).and_then(|url| {
+        ("URL", "join", 1) => super::url_parts_from_ct(recv, span).and_then(|url| {
             let relative = string_arg(args, 0, span)?.to_string();
             Ok(match url.join(&relative) {
                 Ok(url) => CtValue::Present(Box::new(super::url_parts_to_ct(&url))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }),
-        ("Url", "set_query" | "add_query", 2) => {
+        ("URL", "set_query" | "add_query", 2) => {
             super::url_parts_from_ct(recv, span).and_then(|url| {
                 let key = string_arg(args, 0, span)?.to_string();
                 let value = string_arg(args, 1, span)?.to_string();
@@ -411,7 +411,7 @@ pub(super) fn evaluate_method(
                 Ok(super::url_parts_to_ct(&updated))
             })
         }
-        ("Url", "to_string", 0) => {
+        ("URL", "to_string", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.to_string_value()))
         }
         ("Date" | "LocalDate", "year" | "month" | "day", 0) => {
@@ -1547,7 +1547,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             if type_name
                 .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                 .unwrap_or(type_name.as_str())
-                == "Url" =>
+                == "URL" =>
         {
             super::url_parts_from_ct(value, Span::new(0, 0))
                 .ok()
@@ -2056,7 +2056,7 @@ fn structure(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
 
 fn ui_role(variant: &str) -> CtValue {
     CtValue::Enum {
-        type_name: "UiAriaRole".to_string(),
+        type_name: "UIAriaRole".to_string(),
         variant: variant.to_string(),
         args: Vec::new(),
     }
@@ -2064,7 +2064,7 @@ fn ui_role(variant: &str) -> CtValue {
 
 fn ui_kind(variant: &str) -> CtValue {
     CtValue::Enum {
-        type_name: "UiNodeKind".to_string(),
+        type_name: "UINodeKind".to_string(),
         variant: variant.to_string(),
         args: Vec::new(),
     }
@@ -2150,7 +2150,7 @@ fn ui_node_value_with_metadata(
     shortcut: Option<CtValue>,
 ) -> CtValue {
     structure(
-        "UiNode",
+        "UINode",
         vec![
             ("label", CtValue::Str(label)),
             ("width", CtValue::Float(CtFloat::f64(width))),
@@ -2158,20 +2158,20 @@ fn ui_node_value_with_metadata(
             (
                 "role",
                 role.map_or(
-                    CtValue::absent(Type::Named("UiAriaRole".to_string())),
+                    CtValue::absent(Type::Named("UIAriaRole".to_string())),
                     |role| CtValue::Present(Box::new(role)),
                 ),
             ),
             (
                 "accessibility",
                 accessibility.map_or(
-                    CtValue::absent(Type::Named("UiAccessibility".to_string())),
+                    CtValue::absent(Type::Named("UIAccessibility".to_string())),
                     |metadata| CtValue::Present(Box::new(metadata)),
                 ),
             ),
             (
                 "ime",
-                CtValue::absent(Type::Named("UiImeMode".to_string())),
+                CtValue::absent(Type::Named("UIIMEMode".to_string())),
             ),
             (
                 "color",
@@ -2184,7 +2184,7 @@ fn ui_node_value_with_metadata(
             (
                 "shortcut",
                 shortcut.map_or(
-                    CtValue::absent(Type::Named("UiShortcut".to_string())),
+                    CtValue::absent(Type::Named("UIShortcut".to_string())),
                     |shortcut| CtValue::Present(Box::new(shortcut)),
                 ),
             ),
@@ -2278,7 +2278,7 @@ fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
     };
     let accessibility = accessible_label.map(|name| {
         structure(
-            "UiAccessibility",
+            "UIAccessibility",
             vec![
                 (
                     "name",
@@ -2308,19 +2308,19 @@ fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
 fn ui_box(args: &[CtValue], span: Span) -> EvalResult {
     let children = match args.first() {
         Some(CtValue::List(children)) => children.clone(),
-        _ => return Err(unsupported("core.ui.box() needs [UiNode]", span)),
+        _ => return Err(unsupported("core.ui.box() needs [UINode]", span)),
     };
     let mut width = 0.0_f64;
     let mut height = 0.0_f64;
     for child in &children {
         width = width.max(as_float(
-            field(child, "UiNode", "width")
-                .ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?,
+            field(child, "UINode", "width")
+                .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
             span,
         )?);
         height += as_float(
-            field(child, "UiNode", "height")
-                .ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?,
+            field(child, "UINode", "height")
+                .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
             span,
         )?;
     }
@@ -2356,7 +2356,7 @@ fn ui_resize_event(args: &[CtValue], span: Span) -> EvalResult {
 
 fn tui_event(variant: &str, args: Vec<(Option<String>, CtValue)>) -> EvalResult {
     Ok(CtValue::Enum {
-        type_name: "TuiEvent".to_string(),
+        type_name: "TUIEvent".to_string(),
         variant: variant.to_string(),
         args,
     })
@@ -2402,7 +2402,7 @@ fn tui_io_event(args: &[CtValue], span: Span) -> EvalResult {
         _ => return Err(unsupported("core.tui.io_event() needs [Byte]", span)),
     };
     tui_event(
-        "Io",
+        "IO",
         vec![
             (Some("channel".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string())),
             (Some("payload".to_string()), payload),
@@ -2425,10 +2425,10 @@ fn tui_color(args: &[CtValue], span: Span, variant: &str, arity: usize) -> EvalR
         .map(|index| int_arg(args, index, span))
         .collect::<Result<Vec<_>, Diagnostic>>()?;
     let color = match (variant, values.as_slice()) {
-        ("Ansi16", [index]) => tui_kernel::color_ansi16(*index),
-        ("Ansi256", [index]) => tui_kernel::color_ansi256(*index),
-        ("Rgb", [red, green, blue]) => tui_kernel::color_rgb(*red, *green, *blue),
-        _ => return Err(unsupported("malformed TuiColor value", span)),
+        ("ANSI16", [index]) => tui_kernel::color_ansi16(*index),
+        ("ANSI256", [index]) => tui_kernel::color_ansi256(*index),
+        ("RGB", [red, green, blue]) => tui_kernel::color_rgb(*red, *green, *blue),
+        _ => return Err(unsupported("malformed TUIColor value", span)),
     };
     Ok(tui_kernel_color_value(color))
 }
@@ -2458,44 +2458,44 @@ fn tui_enum_parts<'a>(
 }
 
 fn tui_kernel_profile(value: &CtValue, span: Span) -> Result<tui_kernel::ColorProfile, Diagnostic> {
-    let (variant, args) = tui_enum_parts(value, "TuiColorProfile", span)?;
+    let (variant, args) = tui_enum_parts(value, "TUIColorProfile", span)?;
     if !args.is_empty() {
         return Err(unsupported("core.tui color profile takes no arguments", span));
     }
     match variant {
-        "Ansi16" => Ok(tui_kernel::ColorProfile::Ansi16),
-        "Ansi256" => Ok(tui_kernel::ColorProfile::Ansi256),
+        "ANSI16" => Ok(tui_kernel::ColorProfile::Ansi16),
+        "ANSI256" => Ok(tui_kernel::ColorProfile::Ansi256),
         "TrueColor" => Ok(tui_kernel::ColorProfile::TrueColor),
-        "Ascii" => Ok(tui_kernel::ColorProfile::Ascii),
-        _ => Err(unsupported("unknown TuiColorProfile variant", span)),
+        "ASCII" => Ok(tui_kernel::ColorProfile::Ascii),
+        _ => Err(unsupported("unknown TUIColorProfile variant", span)),
     }
 }
 
 fn tui_kernel_color(value: &CtValue, span: Span) -> Result<tui_kernel::Color, Diagnostic> {
-    let (variant, args) = tui_enum_parts(value, "TuiColor", span)?;
+    let (variant, args) = tui_enum_parts(value, "TUIColor", span)?;
     let values = args
         .iter()
         .map(|(_, value)| as_int(value, span))
         .collect::<Result<Vec<_>, _>>()?;
     match (variant, values.as_slice()) {
-        ("Ansi16", [index]) => Ok(tui_kernel::color_ansi16(*index)),
-        ("Ansi256", [index]) => Ok(tui_kernel::color_ansi256(*index)),
-        ("Rgb", [red, green, blue]) => Ok(tui_kernel::color_rgb(*red, *green, *blue)),
-        _ => Err(unsupported("malformed TuiColor value", span)),
+        ("ANSI16", [index]) => Ok(tui_kernel::color_ansi16(*index)),
+        ("ANSI256", [index]) => Ok(tui_kernel::color_ansi256(*index)),
+        ("RGB", [red, green, blue]) => Ok(tui_kernel::color_rgb(*red, *green, *blue)),
+        _ => Err(unsupported("malformed TUIColor value", span)),
     }
 }
 
 fn tui_kernel_color_value(color: tui_kernel::Color) -> CtValue {
     let (variant, values) = match color {
-        tui_kernel::Color::Ansi16(index) => ("Ansi16", vec![i64::from(index)]),
-        tui_kernel::Color::Ansi256(index) => ("Ansi256", vec![i64::from(index)]),
+        tui_kernel::Color::Ansi16(index) => ("ANSI16", vec![i64::from(index)]),
+        tui_kernel::Color::Ansi256(index) => ("ANSI256", vec![i64::from(index)]),
         tui_kernel::Color::Rgb(red, green, blue) => (
-            "Rgb",
+            "RGB",
             vec![i64::from(red), i64::from(green), i64::from(blue)],
         ),
     };
     CtValue::Enum {
-        type_name: "TuiColor".to_string(),
+        type_name: "TUIColor".to_string(),
         variant: variant.to_string(),
         args: values
             .into_iter()
@@ -2504,7 +2504,7 @@ fn tui_kernel_color_value(color: tui_kernel::Color) -> CtValue {
     }
 }
 fn tui_kernel_bool_field(value: &CtValue, name: &str, span: Span) -> Result<bool, Diagnostic> {
-    match field(value, "TuiCapabilities", name).or_else(|| field(value, "TuiStyle", name)) {
+    match field(value, "TUICapabilities", name).or_else(|| field(value, "TUIStyle", name)) {
         Some(CtValue::Bool(value)) => Ok(*value),
         _ => Err(unsupported(
             &format!("malformed core.tui boolean field `{name}`"),
@@ -2523,8 +2523,8 @@ fn tui_kernel_int_field(value: &CtValue, type_name: &str, name: &str, span: Span
 
 fn tui_kernel_capabilities(value: &CtValue, span: Span) -> Result<tui_kernel::Capabilities, Diagnostic> {
     let profile = tui_kernel_profile(
-        field(value, "TuiCapabilities", "profile")
-            .ok_or_else(|| unsupported("malformed TuiCapabilities.profile value", span))?,
+        field(value, "TUICapabilities", "profile")
+            .ok_or_else(|| unsupported("malformed TUICapabilities.profile value", span))?,
         span,
     )?;
     Ok(tui_kernel::Capabilities {
@@ -2534,22 +2534,22 @@ fn tui_kernel_capabilities(value: &CtValue, span: Span) -> Result<tui_kernel::Ca
         mouse: tui_kernel_bool_field(value, "mouse", span)?,
         resize: tui_kernel_bool_field(value, "resize", span)?,
         clipboard: tui_kernel_bool_field(value, "clipboard", span)?,
-        width: tui_kernel_int_field(value, "TuiCapabilities", "width", span)?
+        width: tui_kernel_int_field(value, "TUICapabilities", "width", span)?
             .max(1) as usize,
-        height: tui_kernel_int_field(value, "TuiCapabilities", "height", span)?
+        height: tui_kernel_int_field(value, "TUICapabilities", "height", span)?
             .max(1) as usize,
     })
 }
 
 fn tui_kernel_capabilities_value(capabilities: tui_kernel::Capabilities) -> CtValue {
     let profile = match capabilities.profile {
-        tui_kernel::ColorProfile::Ansi16 => tui_profile("Ansi16"),
-        tui_kernel::ColorProfile::Ansi256 => tui_profile("Ansi256"),
+        tui_kernel::ColorProfile::Ansi16 => tui_profile("ANSI16"),
+        tui_kernel::ColorProfile::Ansi256 => tui_profile("ANSI256"),
         tui_kernel::ColorProfile::TrueColor => tui_profile("TrueColor"),
-        tui_kernel::ColorProfile::Ascii => tui_profile("Ascii"),
+        tui_kernel::ColorProfile::Ascii => tui_profile("ASCII"),
     };
     structure(
-        "TuiCapabilities",
+        "TUICapabilities",
         vec![
             ("profile", profile),
             ("color", CtValue::Bool(capabilities.color)),
@@ -2568,11 +2568,11 @@ fn tui_kernel_optional_color(
     name: &str,
     span: Span,
 ) -> Result<Option<tui_kernel::Color>, Diagnostic> {
-    match field(value, "TuiStyle", name) {
+    match field(value, "TUIStyle", name) {
         Some(CtValue::Present(inner)) => tui_kernel_color(inner, span).map(Some),
         Some(CtValue::Failed(CtReport::Clean(_))) => Ok(None),
         _ => Err(unsupported(
-            &format!("malformed TuiStyle.{name} value"),
+            &format!("malformed TUIStyle.{name} value"),
             span,
         )),
     }
@@ -2592,7 +2592,7 @@ fn tui_kernel_constraint(
     value: &CtValue,
     span: Span,
 ) -> Result<tui_kernel::Constraint, Diagnostic> {
-    let (variant, args) = tui_enum_parts(value, "TuiConstraint", span)?;
+    let (variant, args) = tui_enum_parts(value, "TUIConstraint", span)?;
     let amount = args
         .first()
         .map(|(_, value)| as_float(value, span))
@@ -2604,7 +2604,7 @@ fn tui_kernel_constraint(
         "Max" => Ok(tui_kernel::max(amount)),
         "Percent" => Ok(tui_kernel::percent(amount)),
         "Fill" => Ok(tui_kernel::fill(amount)),
-        _ => Err(unsupported("unknown TuiConstraint variant", span)),
+        _ => Err(unsupported("unknown TUIConstraint variant", span)),
     }
 }
 
@@ -2635,7 +2635,7 @@ fn tui_kernel_rect(value: &CtValue, span: Span) -> Result<tui_kernel::Rect, Diag
 
 fn tui_profile(variant: &str) -> CtValue {
     CtValue::Enum {
-        type_name: "TuiColorProfile".to_string(),
+        type_name: "TUIColorProfile".to_string(),
         variant: variant.to_string(),
         args: Vec::new(),
     }
@@ -2657,7 +2657,7 @@ fn tui_constraint(args: &[CtValue], span: Span, variant: &str) -> EvalResult {
         "Max" => tui_kernel::max(amount),
         "Percent" => tui_kernel::percent(amount),
         "Fill" => tui_kernel::fill(amount),
-        _ => return Err(unsupported("unknown TuiConstraint variant", span)),
+        _ => return Err(unsupported("unknown TUIConstraint variant", span)),
     };
     let amount = match constraint {
         tui_kernel::Constraint::Length(value)
@@ -2667,7 +2667,7 @@ fn tui_constraint(args: &[CtValue], span: Span, variant: &str) -> EvalResult {
         tui_kernel::Constraint::Fill(weight) => f64::from(weight),
     };
     tui_event_for_type(
-        "TuiConstraint",
+        "TUIConstraint",
         variant,
         vec![(None, CtValue::Float(CtFloat::f64(amount)))],
     )
@@ -2675,15 +2675,15 @@ fn tui_constraint(args: &[CtValue], span: Span, variant: &str) -> EvalResult {
 
 fn tui_style_default() -> CtValue {
     structure(
-        "TuiStyle",
+        "TUIStyle",
         vec![
             (
                 "foreground",
-                CtValue::absent(Type::Named("TuiColor".to_string())),
+                CtValue::absent(Type::Named("TUIColor".to_string())),
             ),
             (
                 "background",
-                CtValue::absent(Type::Named("TuiColor".to_string())),
+                CtValue::absent(Type::Named("TUIColor".to_string())),
             ),
             ("bold", CtValue::Bool(false)),
             ("dim", CtValue::Bool(false)),
@@ -2693,7 +2693,7 @@ fn tui_style_default() -> CtValue {
 }
 
 fn tui_style_color(args: &[CtValue], span: Span, background: bool) -> EvalResult {
-    let mut style = structure_fields(args, 0, "TuiStyle", span)?;
+    let mut style = structure_fields(args, 0, "TUIStyle", span)?;
     let color = tui_kernel_color(one(args, 1, "core.tui", "style_color", span)?, span)?;
     let field_name = if background {
         "background"
@@ -2710,7 +2710,7 @@ fn tui_style_color(args: &[CtValue], span: Span, background: bool) -> EvalResult
 }
 
 fn tui_style_flag(args: &[CtValue], span: Span, field_name: &str) -> EvalResult {
-    let mut style = structure_fields(args, 0, "TuiStyle", span)?;
+    let mut style = structure_fields(args, 0, "TUIStyle", span)?;
     let value = bool_value(args, 1, span)?;
     set_structure_field(&mut style, field_name, value, span)?;
     Ok(style)
@@ -2796,12 +2796,12 @@ fn tui_layout(args: &[CtValue], span: Span) -> EvalResult {
     let direction = one(args, 1, "core.tui", "layout", span)?;
     let constraints = match one(args, 2, "core.tui", "layout", span)? {
         CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.layout() needs [TuiConstraint]", span)),
+        _ => return Err(unsupported("core.tui.layout() needs [TUIConstraint]", span)),
     };
-    let direction = match tui_enum_parts(direction, "TuiDirection", span)?.0 {
+    let direction = match tui_enum_parts(direction, "TUIDirection", span)?.0 {
         "Horizontal" => tui_kernel::Direction::Horizontal,
         "Vertical" => tui_kernel::Direction::Vertical,
-        _ => return Err(unsupported("unknown TuiDirection variant", span)),
+        _ => return Err(unsupported("unknown TUIDirection variant", span)),
     };
     let constraints = constraints
         .iter()
@@ -2818,7 +2818,7 @@ fn tui_layout(args: &[CtValue], span: Span) -> EvalResult {
 
 fn tui_list_state(selected: i64, offset: i64) -> CtValue {
     structure(
-        "TuiListState",
+        "TUIListState",
         vec![
             ("selected", CtValue::Int(selected.max(0))),
             ("offset", CtValue::Int(offset.max(0))),
@@ -2827,7 +2827,7 @@ fn tui_list_state(selected: i64, offset: i64) -> CtValue {
 }
 
 fn tui_list_state_update(args: &[CtValue], span: Span, selected: bool) -> EvalResult {
-    let state = structure_fields(args, 0, "TuiListState", span)?;
+    let state = structure_fields(args, 0, "TUIListState", span)?;
     let value = int_arg(args, 1, span)?.max(0);
     let field_name = if selected { "selected" } else { "offset" };
     let mut updated = state;
@@ -2881,18 +2881,6 @@ fn tui_table(args: &[CtValue], span: Span) -> EvalResult {
         lines.push(join(values)?);
     }
     tui_list(&[CtValue::List(lines)], span)
-}
-
-fn raylib_color(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "RaylibColor",
-        vec![
-            ("r", CtValue::Int(int_arg(args, 0, span)?)),
-            ("g", CtValue::Int(int_arg(args, 1, span)?)),
-            ("b", CtValue::Int(int_arg(args, 2, span)?)),
-            ("a", CtValue::Int(int_arg(args, 3, span)?)),
-        ],
-    ))
 }
 
 fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
@@ -3661,13 +3649,6 @@ impl DateTime {
             .clamp(i64::MIN as i128, i64::MAX as i128) as i64
     }
 
-    fn from_total_ns(total: i64) -> Self {
-        Self::from_timestamp_ns(
-            total.div_euclid(1_000_000_000),
-            total.rem_euclid(1_000_000_000) as u32,
-        )
-    }
-
     fn plus_ns(&self, ns: i64) -> Self {
         Self::from_inner(self.inner.plus_duration_ns(ns))
     }
@@ -3999,12 +3980,6 @@ fn period_from_value(
         int_field(value, "Period", "years", span)?,
         int_field(value, "Period", "months", span)?,
         int_field(value, "Period", "days", span)?,
-    ))
-}
-
-fn date_add_period(date: Date, period: &CtValue, span: Span) -> Result<Date, Diagnostic> {
-    Ok(Date::from_inner(
-        date.inner.add_period(&period_from_value(period, span)?),
     ))
 }
 

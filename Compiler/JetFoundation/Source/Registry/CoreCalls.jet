@@ -1,4 +1,4 @@
-CORE_CALL_COVERAGE_SEMA :: prep { 1 }
+pub CORE_CALL_COVERAGE_SEMA :: prep { 1 }
 CORE_CALL_COVERAGE_TIR_SUBSET :: prep { 2 }
 CORE_CALL_COVERAGE_TIR_EVAL :: prep { 4 }
 CORE_CALL_COVERAGE_AOT :: prep { 8 }
@@ -25,8 +25,8 @@ pub enum CoreCallCompletionKind { Synchronous Pending Event }
 pub enum CoreCapabilityKind { Pure NativeRequired PortableFallback ExplicitSimulation }
 
 pub enum CoreCallPureRoute {
-    NoPureRoute Mime Email EncodingXml Time Math Measurement Date DateTime SketchHll SketchTDigest
-    SketchCms SketchReservoir Ui Raylib Io Net Crypto
+    NoPureRoute MIME Email EncodingXML Time Math Measurement Date DateTime SketchHLL SketchTDigest
+    SketchCMS SketchReservoir UI Raylib IO Net Crypto
 }
 
 pub enum CoreCallInterpreterRoute { NoRoute Pure(route: CoreCallPureRoute) Ambient TypedIntrinsic }
@@ -87,7 +87,7 @@ pub struct CoreCallRecord {
     pub jit_symbol: String?
     pub ui_capabilities: [String]
     pub marker: CoreMarkerApplication?
-    pub authority: MirAuthorityDecision?
+    pub authority: MIRAuthorityDecision?
 }
 
 pub enum CoreCallProjectionError {
@@ -143,6 +143,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.web.browser" -> if {
             core_call_one_of(member, [String]{"profile", "timeout"}) -> None
             member == "locked" -> Val(Effect.FS)
+            member == "config_from_env" -> Val(Effect.Env)
             else -> Val(Effect.Net)
         }
         // Encoding readers and writers.
@@ -426,7 +427,7 @@ pub fn core_call_with_marker(row: ^CoreCallRecord, marker: CoreMarkerApplication
     updated
 }
 
-pub fn core_call_with_authority(row: ^CoreCallRecord, decision: MirAuthorityDecision) -> CoreCallRecord Never! {
+pub fn core_call_with_authority(row: ^CoreCallRecord, decision: MIRAuthorityDecision) -> CoreCallRecord Never! {
     updated := row
     updated.authority = Val(decision)
     updated

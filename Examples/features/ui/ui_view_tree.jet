@@ -8,7 +8,7 @@ package {
 use core.ui as ui
 use core.reactive as reactive
 
-fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
+fn repaint(old: [UINode], updated: [UINode]) -> Int {
     backend := ui.null_backend()
     n := 0
     i := 0
@@ -29,7 +29,7 @@ fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
 }
 
 fn run() {
-    initial :: [UiNode]{ui.text("a"), ui.text("b")}
+    initial :: [UINode]{ui.text("a"), ui.text("b")}
     leaves := reactive.signal(initial)
     backend := ui.tui_backend()
     render_backend := ~backend
@@ -41,11 +41,11 @@ fn run() {
         render_backend.paint(tree)
     },
     )
-    empty :: [UiNode]{}
+    empty :: [UINode]{}
     before :: leaves.get()
     print("initial repaints: {repaint(empty, before)}")
     print("renders: {backend.render_count()}")
-    &leaves.set([ui.text("a"), ui.text("zz")])
+    leaves.set([ui.text("a"), ui.text("zz")])
     after :: leaves.get()
     print("update repaints: {repaint(before, after)}")
     print("renders: {backend.render_count()}")

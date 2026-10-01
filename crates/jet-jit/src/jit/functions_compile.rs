@@ -28,17 +28,12 @@ use super::types_meta::{clif_ty_from_mir, mir_fn_name, prelude_enum_variant_inde
 use crate::Cell::{CellGuardLayout, CellProjection, CellSchema};
 
 fn runtime_descriptor_id(ty: &MirType) -> Option<u64> {
-    // The disk format does not restore the checked type registry consumed by
-    // these hosts. Refuse capture even if this call's branch is not taken.
-    super::tier_cache::abort_capture();
+    // The id resolves against the checked type registry. A warm run artifact
+    // does not restore that registry; a dev-build image does. Record the read
+    // even if this call's branch is not taken.
+    super::tier_cache::note_type_registry_read();
     super::runtime_host::runtime_type_id(ty)
 }
-
-/// Define a lowered function, keeping the backend's own explanation when it
-/// rejects the IR.  `ModuleError`'s `Display` collapses a verifier failure to
-/// the bare summary `Compilation error: Verifier errors`; the verifier's
-/// per-instruction messages and the annotated function text are the whole
-/// diagnosis of an invalid-IR bug, so they must reach the ICE.
 
 fn cfg_block_order(function: &MirFunction) -> Vec<&MirBasicBlock> {
     let mut by_id = HashMap::with_capacity(function.blocks.len());
@@ -68,32 +63,20 @@ fn cfg_block_order(function: &MirFunction) -> Vec<&MirBasicBlock> {
     order
 }
 
+/// Define a lowered function, keeping the backend's own explanation when it
+/// rejects the IR (`define_batch::define_error_detail`). While a batch is open
+/// for `module`, the function is queued and compiled with the batch instead.
 fn define_function_checked<M: Module + ?Sized>(
     module: &mut M,
     id: FuncId,
     context: &mut cranelift_codegen::Context,
 ) -> Result<(), String> {
+    if super::define_batch::queue(module, id, context)? {
+        return Ok(());
+    }
     module
         .define_function(id, context)
-        .map_err(|error| match error {
-            cranelift_module::ModuleError::Compilation(
-                cranelift_codegen::CodegenError::Verifier(errors),
-            ) => {
-                let mut detail = format!("Cranelift verifier rejected `{}`:\n", context.func.name);
-                for error in &errors.0 {
-                    detail.push_str("  - ");
-                    detail.push_str(&error.to_string());
-                    detail.push('\n');
-                }
-                detail.push_str(&cranelift_codegen::print_errors::pretty_verifier_error(
-                    &context.func,
-                    None,
-                    errors,
-                ));
-                detail
-            }
-            other => other.to_string(),
-        })?;
+        .map_err(|error| super::define_batch::define_error_detail(&context.func, error))?;
     if let Some(name) = module.declarations().get_function_decl(id).name.as_deref() {
         super::tier_cache::note_defined(name, id, context);
     }
@@ -195,23 +178,44 @@ fn is_core_files_type(program: &MirProgram, ty: &MirType, name: &str) -> bool {
 /// Core's own helpers alias a stream (`working := stream`), so an owner drop
 /// must not release it — `close()` does.
 pub(crate) fn is_core_net_handle_type_id(program: &MirProgram, id: MirTypeId) -> bool {
+    is_core_host_handle_type_id(
+        program,
+        id,
+        "core.net",
+        &[
+            "SocketAddr",
+            "SRVRecord",
+            "TCPListener",
+            "TCPStream",
+            "UDPPacket",
+            "UDPSocket",
+            "UnixListener",
+            "UnixStream",
+        ],
+    )
+}
+
+/// `core.ui` types whose resident carrier is a host table index (the JIT
+/// `rt.ui.roles` table for `UIAriaRole`, `rt.ui.events` for `InputEvent`),
+/// never an enum or field record, so drop, copy and display treat it as an
+/// opaque handle.
+pub(crate) fn is_core_ui_handle_type_id(program: &MirProgram, id: MirTypeId) -> bool {
+    is_core_host_handle_type_id(program, id, "core.ui", &["UIAriaRole", "InputEvent"])
+}
+
+fn is_core_host_handle_type_id(
+    program: &MirProgram,
+    id: MirTypeId,
+    core_module: &str,
+    names: &[&str],
+) -> bool {
     let Some(definition) = program.types.iter().find(|definition| definition.id == id) else {
         return false;
     };
-    if !matches!(
-        definition.name.as_str(),
-        "SocketAddr"
-            | "SrvRecord"
-            | "TCPListener"
-            | "TCPStream"
-            | "UDPPacket"
-            | "UDPSocket"
-            | "UnixListener"
-            | "UnixStream"
-    ) {
+    if !names.contains(&definition.name.as_str()) {
         return false;
     }
-    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.net") else {
+    let Some(source) = jet_foundation::CoreModuleExports::core_source_module(core_module) else {
         return false;
     };
     program.modules.iter().any(|module| {
@@ -237,7 +241,7 @@ fn core_files_resource_kind(program: &MirProgram, ty: &MirType) -> Option<i64> {
     }
 }
 
-/// Core enums whose host producers (encoding, net, services) write the
+/// Core enums whose host producers (encoding, net, services, event hooks) write the
 /// discriminant straight into the owning record slot, so every compiled
 /// construction, projection and descriptor-driven runtime path must agree on
 /// the packed word.
@@ -259,7 +263,9 @@ fn is_packed_service_enum_name(name: &str) -> bool {
         | "WatchKind"
         | "EncodingFormat"
         | "EncodingErrorKind"
-        | "CBORErrorKind" => true,
+        | "CBORErrorKind"
+        | "HookDecision"
+        | "HookOutcome" => true,
         _ => false,
     }
 }
@@ -488,9 +494,14 @@ fn copy_needs_typed_clone(ty: &MirType) -> bool {
         // Built-in math values are resident MathVal handles, not heap records.
         // Treating a copied Vec/Mat/SIMD value as a typed record clone traps
         // before the math host can consume it (notably swizzle constructors).
+        // Constraint-layout values (D-LAYOUT1) are `rt.layout_slots` indices;
+        // `Layout` must not resolve to the unrelated `#Layout` Core enum.
         MirTypeKind::Apply { name, .. } => {
-            !matches!(name.name.as_str(), "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4")
-                && !jet_foundation::Syntax::is_simd_lane_type(&name.name)
+            !matches!(
+                name.name.as_str(),
+                "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+                    | "HVar" | "VVar" | "LengthVar" | "Constraint" | "Layout"
+            ) && !jet_foundation::Syntax::is_simd_lane_type(&name.name)
         }
         MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => true,
         MirTypeKind::List(inner)
@@ -537,11 +548,6 @@ fn shared_owner_value_kind(ty: &MirType) -> Option<(SharedOwnerValueKind, &MirTy
         _ => None,
     }
 }
-
-fn is_shared_owner_value(ty: &MirType) -> bool {
-    shared_owner_value_kind(ty).is_some()
-}
-
 
 fn comparison_map_parts(ty: &MirType) -> Option<(&MirType, &MirType)> {
     match ty.kind() {
@@ -2060,21 +2066,10 @@ fn hardware_handler_function_ids(
     Ok(())
 }
 
-/// Compile the checked MIR functions and linkage selected by one Cranelift
-/// artifact row. The artifact id is mandatory so no target or entry is inferred.
-pub(crate) fn compile_program(
-    module: &mut JITModule,
-    host: &HostFns,
-    program: &MirProgram,
-    artifact: MirArtifactId,
-    runtime: &mut JitRuntime,
-) -> Result<CompiledMirProgram, String> {
-    compile_program_with_roots(module, host, program, artifact, runtime, &[], None)
-}
-
 /// Compile an artifact together with checked private helper roots. The roots
 /// are invocation authorities supplied by the compiler image; they never
-/// mutate the artifact's public entry or export rows.
+/// mutate the artifact's public entry or export rows. Functions compile in
+/// parallel once lowered (`define_batch`).
 pub(crate) fn compile_program_with_roots(
     module: &mut JITModule,
     host: &HostFns,
@@ -2084,6 +2079,7 @@ pub(crate) fn compile_program_with_roots(
     helper_roots: &[MirFunctionId],
     source_helper_closure: Option<&SourceHelperCompileClosure>,
 ) -> Result<CompiledMirProgram, String> {
+    let batch = super::define_batch::open(module.declarations());
     let compiled = compile_program_inner(
         module,
         host,
@@ -2093,6 +2089,7 @@ pub(crate) fn compile_program_with_roots(
         helper_roots,
         source_helper_closure,
     )?;
+    batch.finish(module)?;
     module
         .finalize_definitions()
         .map_err(|error| error.to_string())?;
@@ -2127,9 +2124,11 @@ pub(crate) fn redefine_mir_functions(
     selected_ids: &BTreeSet<MirFunctionId>,
     runtime: &mut JitRuntime,
 ) -> Result<HashMap<MirFunctionId, FuncId>, String> {
-    program
-        .validate()
-        .map_err(|error| format!("invalid MIR: {error}"))?;
+    if jet_foundation::MIROptimization::mir_verification_enabled() {
+        program
+            .validate()
+            .map_err(|error| format!("invalid MIR: {error}"))?;
+    }
     jet_foundation::MIROptimization::require_canonical_mir_optimization(program)
         .map_err(|error| format!("MIR is not canonically optimized: {error}"))?;
     let selected_functions = selected_function_rows(program, selected_ids)?;
@@ -2156,9 +2155,11 @@ pub(crate) fn compile_register_jit_closure_target(
     closure: &SourceHelperCompileClosure,
     runtime: &mut JitRuntime,
 ) -> Result<i64, String> {
-    program
-        .validate()
-        .map_err(|error| format!("invalid MIR: {error}"))?;
+    if jet_foundation::MIROptimization::mir_verification_enabled() {
+        program
+            .validate()
+            .map_err(|error| format!("invalid MIR: {error}"))?;
+    }
     jet_foundation::MIROptimization::require_canonical_mir_optimization(program)
         .map_err(|error| format!("MIR is not canonically optimized: {error}"))?;
     if !closure.functions.contains(&target) {
@@ -2329,10 +2330,6 @@ fn compile_selected_functions_inner(
 ) -> Result<(HashMap<MirFunctionId, FuncId>, Vec<CompiledIterableHook>), String> {
     if reset_runtime_state {
         runtime.clear_iterable_hooks();
-        runtime.model_sessions.clear();
-    }
-    if !reuse_existing {
-        runtime.model_outputs = program.facts.model_outputs.clone();
     }
     let selected_functions = selected_function_rows(program, selected_ids)?;
     super::runtime_host::install_program_type_descriptors(runtime, program, &selected_functions);
@@ -2449,9 +2446,11 @@ pub(crate) fn compile_mir_function(
     function_id: MirFunctionId,
     runtime: &mut JitRuntime,
 ) -> Result<FuncId, String> {
-    program
-        .validate()
-        .map_err(|error| format!("invalid MIR: {error}"))?;
+    if jet_foundation::MIROptimization::mir_verification_enabled() {
+        program
+            .validate()
+            .map_err(|error| format!("invalid MIR: {error}"))?;
+    }
     jet_foundation::MIROptimization::require_canonical_mir_optimization(program)
         .map_err(|error| format!("MIR is not canonically optimized: {error}"))?;
     let root = program
@@ -2572,13 +2571,13 @@ fn compile_program_inner(
     helper_roots: &[MirFunctionId],
     source_helper_closure: Option<&SourceHelperCompileClosure>,
 ) -> Result<CompiledMirProgram, String> {
-    program
-        .validate()
-        .map_err(|error| format!("invalid MIR: {error}"))?;
+    if jet_foundation::MIROptimization::mir_verification_enabled() {
+        program
+            .validate()
+            .map_err(|error| format!("invalid MIR: {error}"))?;
+    }
     jet_foundation::MIROptimization::require_canonical_mir_optimization(program)
         .map_err(|error| format!("MIR is not canonically optimized: {error}"))?;
-    runtime.model_outputs = program.facts.model_outputs.clone();
-    runtime.model_sessions.clear();
     let artifact = if helper_roots.is_empty() {
         cranelift_artifact(program, artifact_id)?
     } else {
@@ -3565,7 +3564,7 @@ fn install_app_callback_thunks(
     let specs = app_callback_thunk_specs(program, selected_functions)?;
     let mut thunks = HashMap::new();
     for ((function, callback), callback_ty, mode) in specs {
-        super::tier_cache::abort_capture();
+        super::tier_cache::refuse_capture("the compiled code holds App callback type keys");
         let (params, ret) = callable_signature(&callback_ty)
             .ok_or_else(|| "MIR App callback thunk has no callable signature".to_string())?;
         let type_handles = params
@@ -5479,7 +5478,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 exclusive,
             } => Some(self.range(builder, *start, *end, *exclusive, expected)?),
             MirOperation::Struct { type_id, fields } | MirOperation::Tuple { type_id, fields } => {
-                Some(self.aggregate(builder, *type_id, fields)?)
+                Some(self.aggregate(builder, *type_id, fields, instruction.ty.as_ref())?)
             }
             MirOperation::Enum {
                 type_id,
@@ -6011,7 +6010,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirOperation::Drop { value, kind } => {
                 let value_ty = self.mir_value_type(*value)?;
                 let owner_value = self.value(*value)?;
-                let _ = self.drop_mir_value(builder, &value_ty, owner_value, *kind)?;
+                match value_ty.kind() {
+                    // A packed `payload + 1` Optional word is not a result-arena
+                    // handle; drop only the present payload.
+                    MirTypeKind::Option(inner) if self.packed_optional_subject(*value) => {
+                        let inner = MirType::clone(inner);
+                        self.drop_packed_optional(builder, &inner, owner_value, *kind)?;
+                    }
+                    _ => {
+                        let _ = self.drop_mir_value(builder, &value_ty, owner_value, *kind)?;
+                    }
+                }
                 instruction
                     .result
                     .map(|_| builder.ins().iconst(types::I64, 0))
@@ -6574,33 +6583,52 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         true
                     }
                     MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
-                        let mut saw_write = false;
-                        for instruction in self
-                            .function
-                            .blocks
-                            .iter()
-                            .flat_map(|block| block.instructions.iter())
-                        {
-                            let MirOperation::WritePlace {
-                                place: write_place,
-                                value,
-                            } = &instruction.operation
-                            else {
-                                continue;
-                            };
-                            if write_place != place {
-                                continue;
-                            }
-                            saw_write = true;
-                            if !self.packed_optional_subject(*value) {
-                                return false;
-                            }
-                        }
-                        saw_write
+                        self.packed_optional_place(*place)
                     }
                     MirOperation::Copy { value, .. } => self.packed_optional_subject(*value),
                     _ => false,
                 }
+            })
+    }
+
+    /// Whether every value written to `place` is a packed `payload + 1`
+    /// Optional word (and at least one is).
+    fn packed_optional_place(&self, place: jet_foundation::MIR::MirPlaceId) -> bool {
+        let mut saw_write = false;
+        for instruction in self
+            .function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+        {
+            let MirOperation::WritePlace {
+                place: write_place,
+                value,
+            } = &instruction.operation
+            else {
+                continue;
+            };
+            if *write_place != place {
+                continue;
+            }
+            saw_write = true;
+            if !self.packed_optional_subject(*value) {
+                return false;
+            }
+        }
+        saw_write
+    }
+
+    /// D-OPT-WRITE1 (#3974): whether the Optional carrier that projection
+    /// `projection` of `place` enters is a packed word. Only a carrier held
+    /// directly in a local can be; record fields and parameters hold
+    /// result-arena handles.
+    fn packed_optional_carrier(&self, place: &MirPlace, projection: usize) -> bool {
+        projection == 0
+            && self.function.places.iter().any(|root| {
+                root.base == place.base
+                    && root.projections.is_empty()
+                    && self.packed_optional_place(root.id)
             })
     }
 
@@ -6696,6 +6724,79 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
     }
 
+    /// D-OPT-WRITE1 (#3974): the checked type of the `MirProjection::Payload`
+    /// slot `kind` names inside `carrier`.
+    fn payload_slot_type(
+        &self,
+        carrier: &MirType,
+        kind: &jet_foundation::MIR::MirPayloadKind,
+    ) -> Result<MirType, String> {
+        use jet_foundation::MIR::{MirPayloadKind, MirVariantPayload};
+        match kind {
+            MirPayloadKind::Option => carrier
+                .option_inner()
+                .cloned()
+                .ok_or_else(|| "MIR optional payload place has a non-optional carrier".to_string()),
+            MirPayloadKind::Result { ok } => carrier
+                .result_parts()
+                .map(|(success, error)| if *ok { success.clone() } else { error.clone() })
+                .ok_or_else(|| "MIR result payload place has a non-result carrier".to_string()),
+            MirPayloadKind::Enum {
+                owner,
+                variant,
+                index,
+            } => {
+                let (_, payload) = self.enum_variant(*owner, variant)?;
+                let slot = match payload {
+                    MirVariantPayload::Unit => None,
+                    MirVariantPayload::Single(ty) => (*index == 0).then_some(ty),
+                    MirVariantPayload::Named(fields) => {
+                        fields.into_iter().nth(*index).map(|field| field.ty)
+                    }
+                };
+                slot.ok_or_else(|| format!("MIR enum variant `{variant}` has no payload {index}"))
+            }
+        }
+    }
+
+    /// Read the payload slot `kind` of the checked variant `carrier` holds.
+    /// The variant test has already run, so the slot is present.
+    fn payload_read(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        carrier: Value,
+        kind: &jet_foundation::MIR::MirPayloadKind,
+        slot_type: &MirType,
+        packed_option: bool,
+        target: types::Type,
+    ) -> Result<Value, String> {
+        use jet_foundation::MIR::MirPayloadKind;
+        let carrier = self.cast(builder, carrier, types::I64)?;
+        match kind {
+            MirPayloadKind::Option if packed_option => {
+                let payload = builder.ins().iadd_imm(carrier, -1);
+                self.cast(builder, payload, target)
+            }
+            MirPayloadKind::Option | MirPayloadKind::Result { .. } => {
+                self.result_value_get_raw(builder, carrier, Some(target))
+            }
+            MirPayloadKind::Enum { owner, index, .. } => {
+                if self.is_packed_enum(*owner) {
+                    let payload = builder.ins().sshr_imm(carrier, 8);
+                    return self.cast(builder, payload, target);
+                }
+                let field_index = builder.ins().iconst(types::I64, (*index + 1) as i64);
+                let getter = self.field_getter(slot_type)?;
+                let value = self
+                    .call_host(builder, getter, &[carrier, field_index])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR enum payload place getter returned no value".to_string())?;
+                self.cast(builder, value, target)
+            }
+        }
+    }
+
     fn pattern_capture_type(&self, matched: MirValueId, index: usize) -> Result<MirType, String> {
         let producer = self
             .function
@@ -6776,6 +6877,28 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 Self::pattern_capture_kind(inner)
             }
         }
+    }
+
+    /// MIR type identity of the `Ok` capture tuple a `take_pattern` builds, as
+    /// an i64 constant for the host (`-1` when no hole makes it a Unit).
+    fn take_pattern_tuple_type(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        instruction: &MirInstruction,
+    ) -> Result<Value, String> {
+        let ok = instruction
+            .ty
+            .as_ref()
+            .and_then(result_ok_type)
+            .ok_or_else(|| "MIR take_pattern result is not a checked Result".to_string())?;
+        let type_id = match ok.tuple_fields() {
+            Some(_) => ok
+                .identity
+                .map(|id| id.0 as i64)
+                .ok_or_else(|| "MIR take_pattern capture tuple has no identity".to_string())?,
+            None => -1,
+        };
+        Ok(builder.ins().iconst(types::I64, type_id))
     }
 
     fn pattern_capture(
@@ -9519,6 +9642,30 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         self.drop_typed_owner_value(builder, ty, value)
     }
 
+    /// Drop a packed `payload + 1` Optional word: zero is absent, any other
+    /// word carries the payload one below it.
+    fn drop_packed_optional(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        inner: &MirType,
+        value: Value,
+        kind: MirDropKind,
+    ) -> Result<(), String> {
+        let raw = self.cast(builder, value, types::I64)?;
+        let present = builder.ins().icmp_imm(IntCC::NotEqual, raw, 0);
+        let present_block = builder.create_block();
+        let merge_block = builder.create_block();
+        builder
+            .ins()
+            .brif(present, present_block, &[], merge_block, &[]);
+        builder.switch_to_block(present_block);
+        let payload = builder.ins().iadd_imm(raw, -1);
+        let _ = self.drop_mir_value(builder, inner, payload, kind)?;
+        builder.ins().jump(merge_block, &[]);
+        builder.switch_to_block(merge_block);
+        Ok(())
+    }
+
     fn flush_pending_argument_drops(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -9575,9 +9722,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
     }
 
     /// Address for a write call argument. A place whose last projection is an
-    /// index has no stable element address, so the element is spilled to a
-    /// stack slot the callee writes through; the caller queues the slot for
-    /// writeback once the call returns (`&items[i].append(x)`).
+    /// index or a variant payload has no stable slot address, so the value is
+    /// spilled to a stack slot the callee writes through; the caller queues
+    /// the slot for writeback once the call returns (`&items[i].append(x)`,
+    /// `.Val(count) -> bump(&count)` under a `&place` match).
     fn write_argument_address(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -9591,9 +9739,25 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .iter()
             .find(|place| place.id == id)
             .ok_or_else(|| format!("MIR place {:?} is missing", id))?;
+        // D-SHAPE-PLACE1=A: a range window is a view handle over the owner's
+        // storage, so the callee edits the list in place; nothing is written
+        // back after the call.
+        if matches!(
+            place.projections.last(),
+            Some(jet_foundation::MIR::MirProjection::Range { .. })
+        ) {
+            let view = self.read_place(builder, id)?;
+            let slot = builder
+                .create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 0));
+            builder.ins().stack_store(view, slot, 0);
+            return Ok(builder.ins().stack_addr(types::I64, slot, 0));
+        }
         if !matches!(
             place.projections.last(),
-            Some(jet_foundation::MIR::MirProjection::Index { .. })
+            Some(
+                jet_foundation::MIR::MirProjection::Index { .. }
+                    | jet_foundation::MIR::MirProjection::Payload { .. }
+            )
         ) {
             return self.address_of(builder, id);
         }
@@ -9605,6 +9769,23 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         builder.ins().stack_store(element, slot, 0);
         pending.push((id, value_id, slot, ty));
         Ok(builder.ins().stack_addr(types::I64, slot, 0))
+    }
+
+    /// D-SHAPE-PLACE1=A: the checked view handle (`JitViewSlot::Sequence`) of
+    /// a range window over a list handle. Bounds follow the shared view rule.
+    fn range_window_view(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        list: Value,
+        range: MirValueId,
+    ) -> Result<Value, String> {
+        let list = self.cast(builder, list, types::I64)?;
+        let range = self.value(range)?;
+        let range = self.cast(builder, range, types::I64)?;
+        self.call_host(builder, self.host.coll.view_new_range, &[list, range])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR range window view returned no value".to_string())
     }
 
     fn read_place(
@@ -9664,6 +9845,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     )?;
                     current_type = element_type;
                     value
+                }
+                jet_foundation::MIR::MirProjection::Payload { kind, .. } => {
+                    let slot_type = self.payload_slot_type(&current_type, kind)?;
+                    let packed = self.packed_optional_carrier(&place, index);
+                    let target = if final_projection { result_ty } else { types::I64 };
+                    let value =
+                        self.payload_read(builder, current, kind, &slot_type, packed, target)?;
+                    current_type = slot_type;
+                    value
+                }
+                jet_foundation::MIR::MirProjection::Range { range, .. } => {
+                    self.range_window_view(builder, current, *range)?
                 }
                 jet_foundation::MIR::MirProjection::Deref { .. } => {
                     let address = self.cast(builder, current, types::I64)?;
@@ -9735,6 +9928,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .find(|place| place.id == id)
             .cloned()
             .ok_or_else(|| format!("MIR place {:?} is missing", id))?;
+        self.write_mir_place(builder, place, value_id, value, consuming_move)
+    }
+
+    fn write_mir_place(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        place: MirPlace,
+        value_id: MirValueId,
+        value: Value,
+        consuming_move: bool,
+    ) -> Result<(), String> {
+        let id = place.id;
         self.ensure_capture_place_writable(&place, consuming_move)?;
         if place.projections.is_empty() {
             let base_type = self.place_base_type(&place)?;
@@ -9796,6 +10001,67 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             value,
                             writeback,
                         )?;
+                    }
+                    jet_foundation::MIR::MirProjection::Payload { kind, .. } => {
+                        use jet_foundation::MIR::MirPayloadKind;
+                        let slot_type = self.payload_slot_type(&current_type, kind)?;
+                        let value = self.cast(builder, value, result_ty)?;
+                        match kind {
+                            MirPayloadKind::Enum { owner, index: slot, .. }
+                                if !self.is_packed_enum(*owner) =>
+                            {
+                                // A boxed variant keeps its payload in record
+                                // field `slot + 1`, edited in place like a
+                                // struct field.
+                                let record = self.cast(builder, current, types::I64)?;
+                                self.queue_capture_place_writeback(&place)?;
+                                self.set_field(builder, record, slot + 1, &slot_type, value)?;
+                            }
+                            _ => {
+                                // A packed word or result-arena handle is a
+                                // value: rebuild the carrier around the new
+                                // payload and store it into the parent place.
+                                let carrier = match kind {
+                                    MirPayloadKind::Enum { .. } => {
+                                        let raw = self.cast(builder, current, types::I64)?;
+                                        let tag = builder.ins().band_imm(raw, 0xff);
+                                        let payload = self.cast(builder, value, types::I64)?;
+                                        let payload = builder.ins().ishl_imm(payload, 8);
+                                        builder.ins().bor(payload, tag)
+                                    }
+                                    MirPayloadKind::Option
+                                        if self.packed_optional_carrier(&place, index) =>
+                                    {
+                                        let payload = self.cast(builder, value, types::I64)?;
+                                        builder.ins().iadd_imm(payload, 1)
+                                    }
+                                    MirPayloadKind::Option => {
+                                        self.result_value(builder, true, value, Some(types::I64))?
+                                    }
+                                    MirPayloadKind::Result { ok } => {
+                                        self.result_value(builder, *ok, value, Some(types::I64))?
+                                    }
+                                };
+                                let parent = MirPlace {
+                                    ty: current_type.clone(),
+                                    projections: place.projections[..index].to_vec(),
+                                    ..place.clone()
+                                };
+                                return self.write_mir_place(
+                                    builder,
+                                    parent,
+                                    value_id,
+                                    carrier,
+                                    consuming_move,
+                                );
+                            }
+                        }
+                    }
+                    jet_foundation::MIR::MirProjection::Range { .. } => {
+                        return Err(format!(
+                            "MIR range window place {:?} is written element by element, never whole",
+                            id
+                        ));
                     }
                     jet_foundation::MIR::MirProjection::Deref { .. } => {
                         let address = self.cast(builder, current, types::I64)?;
@@ -9868,6 +10134,23 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     )?;
                     current_type = element_type;
                     value
+                }
+                jet_foundation::MIR::MirProjection::Payload { kind, .. } => {
+                    let slot_type = self.payload_slot_type(&current_type, kind)?;
+                    let packed = self.packed_optional_carrier(&place, index);
+                    let value = self.payload_read(
+                        builder,
+                        current,
+                        kind,
+                        &slot_type,
+                        packed,
+                        types::I64,
+                    )?;
+                    current_type = slot_type;
+                    value
+                }
+                jet_foundation::MIR::MirProjection::Range { range, .. } => {
+                    self.range_window_view(builder, current, *range)?
                 }
                 jet_foundation::MIR::MirProjection::Deref { .. } => {
                     let address = self.cast(builder, current, types::I64)?;
@@ -9953,7 +10236,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         builder: &mut FunctionBuilder<'_>,
         place: &MirPlace,
     ) -> Result<Value, String> {
-        super::tier_cache::abort_capture();
+        super::tier_cache::refuse_capture("the compiled code holds persistent-place type keys");
         Ok(builder.ins().iconst(
             types::I64,
             self.runtime.heap.alloc_string(place.ty.identity_key()),
@@ -10495,6 +10778,44 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     )?;
                     current_type = element_type;
                     value
+                }
+                jet_foundation::MIR::MirProjection::Payload { kind, .. } => {
+                    if final_projection {
+                        // A payload slot has no stable address in the JIT's
+                        // carriers; write arguments spill it instead
+                        // (`write_argument_address`).
+                        return Err(format!(
+                            "MIR payload place {:?} has no stable address carrier",
+                            id
+                        ));
+                    }
+                    let slot_type = self.payload_slot_type(&current_type, kind)?;
+                    let packed = self.packed_optional_carrier(&place, index);
+                    let value = self.payload_read(
+                        builder,
+                        current,
+                        kind,
+                        &slot_type,
+                        packed,
+                        types::I64,
+                    )?;
+                    current_type = slot_type;
+                    value
+                }
+                jet_foundation::MIR::MirProjection::Range { range, .. } => {
+                    let view = self.range_window_view(builder, current, *range)?;
+                    if final_projection {
+                        // A view handle has no owner slot; the address of a
+                        // spilled handle reaches the same storage.
+                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            8,
+                            0,
+                        ));
+                        builder.ins().stack_store(view, slot, 0);
+                        return Ok(builder.ins().stack_addr(types::I64, slot, 0));
+                    }
+                    view
                 }
                 jet_foundation::MIR::MirProjection::Deref { .. } => {
                     let address = self.cast(builder, current, types::I64)?;
@@ -12452,6 +12773,44 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         .ok_or_else(|| "JIT typed moved-marker host returned no value".to_string())
     }
 
+    /// A Prelude or host call whose first argument is a `Shared` owner goes
+    /// through the owner route, which appends the checked owner type the JIT
+    /// host needs. Other calls return `None`.
+    fn shared_owner_prelude_call(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        call: jet_foundation::MIR::MirPreludeCallId,
+        args: &[MirCallArg],
+        expected: Option<types::Type>,
+    ) -> Result<Option<Value>, String> {
+        let Some((receiver_arg, rest)) = args.split_first() else {
+            return Ok(None);
+        };
+        let receiver_is_shared = self
+            .mir_value_type(receiver_arg.value)
+            .ok()
+            .is_some_and(|ty| shared_owner_value_kind(&ty).is_some());
+        if !receiver_is_shared {
+            return Ok(None);
+        }
+        let row = self
+            .program
+            .prelude_calls
+            .iter()
+            .find(|row| row.id == call)
+            .cloned()
+            .ok_or_else(|| format!("MIR Prelude call {:?} is missing", call))?;
+        let rest = rest.iter().map(|arg| arg.value).collect::<Vec<_>>();
+        self.shared_owner_handle_method(
+            builder,
+            &row.member,
+            &row.signature.borrow_mask,
+            receiver_arg.value,
+            &rest,
+            expected,
+        )
+    }
+
     fn shared_owner_handle_method(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -12475,6 +12834,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             (SharedOwnerValueKind::Strong, "strong_count", 0) => {
                 Some("jet_jit_shared_strong_count")
+            }
+            (SharedOwnerValueKind::Strong, "same", 1) => {
+                Some("jet_jit_shared_same")
             }
             (SharedOwnerValueKind::Strong, "capture", 0) => {
                 Some("jet_shared_capture")
@@ -12509,7 +12871,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             let callback = self.handle_method_value(builder, args[0], borrow_mask[1])?;
             values.push(self.cast(builder, callback, types::I64)?);
         }
-        else if symbol == "jet_shared_try_replace" {
+        else if symbol == "jet_shared_try_replace" || symbol == "jet_jit_shared_same" {
             for (index, argument) in args.iter().enumerate() {
                 let value =
                     self.handle_method_value(builder, *argument, borrow_mask[index + 1])?;
@@ -13119,6 +13481,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         builder: &mut FunctionBuilder<'_>,
         type_id: jet_foundation::MIR::MirTypeId,
         fields: &[(MirFieldId, MirValueId)],
+        result_ty: Option<&MirType>,
     ) -> Result<Value, String> {
         let arity = self.aggregate_arity(type_id, fields.len())?;
         let arity_value = builder.ins().iconst(types::I64, arity as i64);
@@ -13127,11 +13490,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR aggregate host returned no record".to_string())?;
-        let base_ty = self
-            .program
-            .type_instances
-            .iter()
-            .find(|instance| instance.identity == Some(type_id));
+        // A generic nominal has one type instance per argument list, all with
+        // the same identity; the instruction's own checked type selects the
+        // instance, so a `Box<String>` field is stored as String, not as the
+        // first `Box<Int>` instance's Int.
+        let program = self.program;
+        let base_ty = result_ty
+            .filter(|ty| ty.identity == Some(type_id))
+            .or_else(|| {
+                program
+                    .type_instances
+                    .iter()
+                    .find(|instance| instance.identity == Some(type_id))
+            });
         for (field, value) in fields {
             let (index, ty) = base_ty.map_or_else(
                 || self.field_info(*field),
@@ -15265,62 +15636,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .ok_or_else(|| "MIR foreign bridge returned no value".to_string())?;
         expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
     }
-    fn is_model_embed_method(&self, function: MirFunctionId, owner: &MirType) -> bool {
-        let Some(method) = self
-            .program
-            .functions
-            .iter()
-            .find(|candidate| candidate.id == function)
-        else {
-            return false;
-        };
-        if method.name != "embed" {
-            return false;
-        }
-        let owner_name = owner.display_name();
-        let owner = owner_name
-            .rsplit("::")
-            .next()
-            .unwrap_or(owner_name.as_str())
-            .rsplit('.')
-            .next()
-            .unwrap_or(owner_name.as_str());
-        self.program
-            .facts
-            .model_outputs
-            .iter()
-            .any(|fact| fact.signature_name.as_deref() == Some(owner))
-    }
-
-    fn call_model_embed(
-        &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        args: &[MirCallArg],
-        expected: Option<types::Type>,
-    ) -> Result<Value, String> {
-        if args.len() != 2 {
-            return Err(format!(
-                "model embed expects receiver and document list, got {}",
-                args.len()
-            ));
-        }
-        let host = self.host.model_embed;
-        let signature = self
-            .module
-            .declarations()
-            .get_function_decl(host)
-            .signature
-            .clone();
-        let values = self.lower_call_args(builder, args, &signature)?;
-        self.call_declared_values(builder, host, &signature, values)
-            .and_then(|results| {
-                let value = results
-                    .first()
-                    .copied()
-                    .ok_or_else(|| "model embed host returned no value".to_string())?;
-                expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
-            })
-    }
     fn call_native_interface_method(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -15727,11 +16042,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirCallee::User(id) => self.call_user(builder, *id, args, result_type, expected),
             MirCallee::Associated { function, owner } | MirCallee::Method { function, owner } => {
                 self.validate_associated_owner(owner)?;
-                if self.is_model_embed_method(*function, owner) {
-                    self.call_model_embed(builder, args, expected)
-                } else {
-                    self.call_user(builder, *function, args, result_type, expected)
-                }
+                self.call_user(builder, *function, args, result_type, expected)
             }
             MirCallee::TraitMethod {
                 method,
@@ -15909,7 +16220,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 args[index].value
             )
         })?;
-        super::tier_cache::abort_capture();
+        super::tier_cache::refuse_capture("the compiled code holds a Core callback return type key");
         let key = ret.map_or_else(|| "Unit".to_string(), MirType::identity_key);
         let key = self.runtime.heap.alloc_string(key);
         let mut source_signature = signature.clone();
@@ -16014,7 +16325,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .iter()
             .find(|row| row.id == id)
             .ok_or_else(|| format!("MIR Core call {:?} is missing", id))?;
-        let model_open = row.module == "core.models" && row.member == "open";
         let async_event_error_type =
             if row.module == "core.event" && row.member == "async_result" {
                 result_type.and_then(result_ok_type).and_then(|ok| match ok.kind() {
@@ -16188,8 +16498,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             Some("jet_jit_async_event_new_typed")
         } else if measurement_sqrt {
             Some("jet_std::JetMeasurement::sqrt")
-        } else if model_open {
-            Some("jet_jit_model_open")
         } else if !type_args.is_empty()
             || data_stream_row_type.is_some()
             || data_reader_row_type.is_some()
@@ -16197,6 +16505,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             match (row.module.as_str(), row.member.as_str()) {
                 ("core.args", "decode") => Some("jet_jit_args_decode"),
                 ("core.args", "merge") => Some("jet_jit_args_merge"),
+                ("core.sys", "decode") => Some("jet_jit_env_decode"),
                 ("core.encoding.json", "decode") => Some("jet_jit_json_decode_typed"),
                 ("core.encoding.toml", "decode") => Some("jet_jit_toml_decode_typed"),
                 ("core.encoding.yaml", "decode") => Some("jet_jit_yaml_decode_typed"),
@@ -16269,22 +16578,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 )?;
                 let error_type = async_event_error_type
                     .expect("typed async event call has checked error metadata");
-                super::tier_cache::abort_capture();
+                super::tier_cache::refuse_capture("the compiled code holds an async event error type key");
                 let type_key = self.runtime.heap.alloc_string(error_type.identity_key());
-                values.push(builder.ins().iconst(types::I64, type_key));
-                values
-            } else if model_open {
-                if type_args.len() != 1 || signature.params.len() != args.len() + 1 {
-                    return Err(
-                        "model.open JIT ABI requires one trait key and one output argument"
-                            .to_string(),
-                    );
-                }
-                let mut source_signature = signature.clone();
-                source_signature.params.pop();
-                let mut values = self.lower_call_args(builder, args, &source_signature)?;
-                super::tier_cache::abort_capture();
-                let type_key = self.runtime.heap.alloc_string(type_args[0].identity_key());
                 values.push(builder.ins().iconst(types::I64, type_key));
                 values
             } else if csv_typed {
@@ -16317,7 +16612,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 source_signature.params.truncate(args.len());
                 let mut values = self.lower_call_args(builder, args, &source_signature)?;
                 values.push(self.json_decode_callback(builder, &spec)?);
-                super::tier_cache::abort_capture();
+                super::tier_cache::note_type_registry_read();
                 let type_key = self
                     .runtime
                     .heap
@@ -16331,6 +16626,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     (row.module.as_str(), row.member.as_str()),
                     ("core.args", "decode")
                         | ("core.args", "merge")
+                        | ("core.sys", "decode")
                         | ("core.encoding.json", "decode")
                         | ("core.encoding.toml", "decode")
                         | ("core.encoding.yaml", "decode")
@@ -16377,7 +16673,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 source_signature.params.pop();
                 let mut values =
                     self.lower_core_call_args(builder, &row.module, &row.member, args, &source_signature)?;
-                super::tier_cache::abort_capture();
+                super::tier_cache::refuse_capture("the compiled code holds a row type key");
                 let type_key = self.runtime.heap.alloc_string(row_type.identity_key());
                 values.push(builder.ins().iconst(types::I64, type_key));
                 values
@@ -16901,21 +17197,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
 
     fn ui_backend_host(&self, member: &str) -> Option<FuncId> {
         Some(match member {
-            "NullBackend.measure" | "TuiBackend.measure" | "GtkBackend.measure" => {
+            "NullBackend.measure" | "TUIBackend.measure" | "GtkBackend.measure" => {
                 self.host.ui.measure
             }
-            "NullBackend.layout" | "TuiBackend.layout" | "GtkBackend.layout" => self.host.ui.layout,
-            "NullBackend.paint" | "TuiBackend.paint" | "GtkBackend.paint" => self.host.ui.paint,
-            "NullBackend.on_event" | "TuiBackend.on_event" | "GtkBackend.on_event" => {
+            "NullBackend.layout" | "TUIBackend.layout" | "GtkBackend.layout" => self.host.ui.layout,
+            "NullBackend.paint" | "TUIBackend.paint" | "GtkBackend.paint" => self.host.ui.paint,
+            "NullBackend.on_event" | "TUIBackend.on_event" | "GtkBackend.on_event" => {
                 self.host.ui.on_event
             }
             "NullBackend.mount_default"
-            | "TuiBackend.mount_default"
+            | "TUIBackend.mount_default"
             | "GtkBackend.mount_default" => self.host.ui.mount_default,
-            "NullBackend.mount" | "TuiBackend.mount" | "GtkBackend.mount" => self.host.ui.mount,
+            "NullBackend.mount" | "TUIBackend.mount" | "GtkBackend.mount" => self.host.ui.mount,
             "NullBackend.commands" => self.host.ui.commands,
-            "TuiBackend.frame_lines" => self.host.ui.frame_lines,
-            "TuiBackend.render_count" => self.host.ui.render_count,
+            "TUIBackend.frame_lines" => self.host.ui.frame_lines,
+            "TUIBackend.render_count" => self.host.ui.render_count,
             _ => return None,
         })
     }
@@ -19866,12 +20162,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirSemanticOp::CursorTakePattern { receiver, parts, .. } => {
                 let descriptor = self.runtime.register_text_pattern(parts);
                 let descriptor = builder.ins().iconst(types::I64, descriptor);
+                let tuple_type = self.take_pattern_tuple_type(builder, instruction)?;
                 let receiver = self.handle_method_value(builder, *receiver, true)?;
                 let value = self
                     .call_host(
                         builder,
                         self.host.parse.cursor_take_pattern,
-                        &[receiver, descriptor],
+                        &[receiver, descriptor, tuple_type],
                     )?
                     .first()
                     .copied()
@@ -19883,12 +20180,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirSemanticOp::ReaderTakePattern { receiver, parts, .. } => {
                 let descriptor = self.runtime.register_binary_pattern(parts);
                 let descriptor = builder.ins().iconst(types::I64, descriptor);
+                let tuple_type = self.take_pattern_tuple_type(builder, instruction)?;
                 let receiver = self.handle_method_value(builder, *receiver, true)?;
                 let value = self
                     .call_host(
                         builder,
                         self.host.parse.reader_take_pattern,
-                        &[receiver, descriptor],
+                        &[receiver, descriptor, tuple_type],
                     )?
                     .first()
                     .copied()
@@ -20003,7 +20301,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             MirSemanticOp::StructLiteral {
                 type_id, fields, ..
-            } => Ok(Some(self.aggregate(builder, *type_id, fields)?)),
+            } => Ok(Some(self.aggregate(builder, *type_id, fields, instruction.ty.as_ref())?)),
             MirSemanticOp::ReflectOf {
                 type_name,
                 path,
@@ -20203,7 +20501,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     let value = self.value(args[1].value)?;
                     let value =
                         thunk_encode_raw(builder, value, builder.func.dfg.value_type(value))?;
-                    super::tier_cache::abort_capture();
+                    super::tier_cache::note_type_registry_read();
                     let type_key = self.runtime.heap.alloc_string(type_args[0].identity_key());
                     let type_key = builder.ins().iconst(types::I64, type_key);
                     let result = self
@@ -20261,7 +20559,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     let mut source_signature = signature.clone();
                     source_signature.params.pop();
                     let mut values = self.lower_call_args(builder, args, &source_signature)?;
-                    super::tier_cache::abort_capture();
+                    super::tier_cache::note_type_registry_read();
                     let type_key = self.runtime.heap.alloc_string(type_args[0].identity_key());
                     values.push(builder.ins().iconst(types::I64, type_key));
                     let result = self
@@ -20414,6 +20712,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .map_or(Ok(result), |ty| self.cast(builder, result, ty))
                         .map(Some);
                 }
+                // A Shared owner method lowered as a plain Prelude call (for
+                // example `state.capture()` or `a.strong_count()`) carries its
+                // receiver as the first argument; the owner host also needs the
+                // checked owner type.
+                if let Some(value) = self.shared_owner_prelude_call(builder, *call, args, expected)? {
+                    return Ok(Some(value));
+                }
 
                 // D-TAG1: `Tally<T>.new()` is the checked `HashMap<T, usize>`
                 // constructor (AOT keeps that carrier). The resident runtime
@@ -20549,9 +20854,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 self.call_prelude(builder, *call, vec![value, kind], expected)
                     .map(Some)
             }
-            MirSemanticOp::HostCall { call, args } => self
-                .call_prelude_args(builder, *call, args, expected)
-                .map(Some),
+            MirSemanticOp::HostCall { call, args } => {
+                // Checked Shared host routes (`a.same(b)`, `a.strong_count()`)
+                // take the owner route, which appends the checked owner type.
+                if let Some(value) = self.shared_owner_prelude_call(builder, *call, args, expected)? {
+                    return Ok(Some(value));
+                }
+                self.call_prelude_args(builder, *call, args, expected)
+                    .map(Some)
+            }
             MirSemanticOp::HardwareCall {
                 call,
                 op,

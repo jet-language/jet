@@ -305,14 +305,14 @@ pub fn apply_history_rng_method(
         return None;
     };
     let Some(rng) = (unsafe { pointer.as_mut() }) else {
-        return Some(Err(unsupported("invalid HistoryRng callback carrier", span)));
+        return Some(Err(unsupported("invalid HistoryRNG callback carrier", span)));
     };
     match method {
         "next_u64" if args.is_empty() => Some(Ok(exact_int_value(
             jet_foundation::Numeric::CtBigInt::from_u64(rng.next_u64()),
         ))),
         "next_u64" => Some(Err(unsupported(
-            "HistoryRng.next_u64() expects no arguments",
+            "HistoryRNG.next_u64() expects no arguments",
             span,
         ))),
         "below" if args.len() == 1 => {
@@ -325,12 +325,12 @@ pub fn apply_history_rng_method(
             )))
         }
         "below" => Some(Err(unsupported(
-            "HistoryRng.below() expects one argument",
+            "HistoryRNG.below() expects one argument",
             span,
         ))),
         "coin" if args.is_empty() => Some(Ok(CtValue::Bool(rng.coin()))),
         "coin" => Some(Err(unsupported(
-            "HistoryRng.coin() expects no arguments",
+            "HistoryRNG.coin() expects no arguments",
             span,
         ))),
         _ => None,
@@ -469,20 +469,20 @@ pub(super) fn history_handle_from_ct(value: &CtValue) -> Result<HandleId, String
     Ok(HandleId {
         value: history_u32_from_ct(
             history_field(value, "value")?,
-            "HandleId.value",
+            "HandleID.value",
         )?,
     })
 }
 
 pub(super) fn history_task_from_ct(value: &CtValue) -> Result<TaskId, String> {
     Ok(TaskId {
-        value: history_u32_from_ct(history_field(value, "value")?, "TaskId.value")?,
+        value: history_u32_from_ct(history_field(value, "value")?, "TaskID.value")?,
     })
 }
 
 pub(super) fn history_event_from_ct(value: &CtValue) -> Result<EventId, String> {
     Ok(EventId {
-        value: history_u32_from_ct(history_field(value, "value")?, "EventId.value")?,
+        value: history_u32_from_ct(history_field(value, "value")?, "EventID.value")?,
     })
 }
 
@@ -674,7 +674,7 @@ pub(super) fn history_value_to_ct(value: &HistoryValue) -> CtValue {
         HistoryValue::Integer(value) => ("Integer", CtValue::Int(*value)),
         HistoryValue::Boolean(value) => ("Boolean", CtValue::Bool(*value)),
         HistoryValue::Text(value) => ("Text", CtValue::Str(value.clone())),
-        HistoryValue::Handle(value) => ("Handle", history_id_to_ct("HandleId", value.value)),
+        HistoryValue::Handle(value) => ("Handle", history_id_to_ct("HandleID", value.value)),
         HistoryValue::Redacted(value) => ("Redacted", CtValue::Str(value.clone())),
     };
     CtValue::Enum {
@@ -694,7 +694,7 @@ pub(super) fn history_precondition_to_ct(value: &HistoryPrecondition) -> CtValue
         HistoryPrecondition::HandleLive(handle) => CtValue::Enum {
             type_name: "HistoryPrecondition".to_string(),
             variant: "HandleLive".to_string(),
-            args: vec![(None, history_id_to_ct("HandleId", handle.value))],
+            args: vec![(None, history_id_to_ct("HandleID", handle.value))],
         },
         HistoryPrecondition::HandleState { handle, state } => CtValue::Enum {
             type_name: "HistoryPrecondition".to_string(),
@@ -702,7 +702,7 @@ pub(super) fn history_precondition_to_ct(value: &HistoryPrecondition) -> CtValue
             args: vec![
                 (
                     Some("handle".to_string()),
-                    history_id_to_ct("HandleId", handle.value),
+                    history_id_to_ct("HandleID", handle.value),
                 ),
                 (Some("state".to_string()), CtValue::Str(state.clone())),
             ],
@@ -710,12 +710,12 @@ pub(super) fn history_precondition_to_ct(value: &HistoryPrecondition) -> CtValue
         HistoryPrecondition::TaskCompleted(task) => CtValue::Enum {
             type_name: "HistoryPrecondition".to_string(),
             variant: "TaskCompleted".to_string(),
-            args: vec![(None, history_id_to_ct("TaskId", task.value))],
+            args: vec![(None, history_id_to_ct("TaskID", task.value))],
         },
         HistoryPrecondition::EventAvailable(event) => CtValue::Enum {
             type_name: "HistoryPrecondition".to_string(),
             variant: "EventAvailable".to_string(),
-            args: vec![(None, history_id_to_ct("EventId", event.value))],
+            args: vec![(None, history_id_to_ct("EventID", event.value))],
         },
     }
 }
@@ -736,7 +736,7 @@ pub(super) fn history_operation_to_ct(value: &HistoryOperation) -> CtValue {
                     value
                         .creates
                         .iter()
-                        .map(|handle| history_id_to_ct("HandleId", handle.value))
+                        .map(|handle| history_id_to_ct("HandleID", handle.value))
                         .collect(),
                 ),
             ),
@@ -746,7 +746,7 @@ pub(super) fn history_operation_to_ct(value: &HistoryOperation) -> CtValue {
                     value
                         .consumes
                         .iter()
-                        .map(|handle| history_id_to_ct("HandleId", handle.value))
+                        .map(|handle| history_id_to_ct("HandleID", handle.value))
                         .collect(),
                 ),
             ),
@@ -775,8 +775,8 @@ pub(super) fn history_operation_to_ct(value: &HistoryOperation) -> CtValue {
                 history_optional_to_ct(
                     value
                         .task
-                        .map(|task| history_id_to_ct("TaskId", task.value)),
-                    "TaskId",
+                        .map(|task| history_id_to_ct("TaskID", task.value)),
+                    "TaskID",
                 ),
             ),
             (
@@ -784,8 +784,8 @@ pub(super) fn history_operation_to_ct(value: &HistoryOperation) -> CtValue {
                 history_optional_to_ct(
                     value
                         .event
-                        .map(|event| history_id_to_ct("EventId", event.value)),
-                    "EventId",
+                        .map(|event| history_id_to_ct("EventID", event.value)),
+                    "EventID",
                 ),
             ),
         ],
@@ -805,8 +805,8 @@ pub(super) fn history_schedule_to_ct(value: &HistoryScheduleChoice) -> CtValue {
                 history_optional_to_ct(
                     value
                         .task
-                        .map(|task| history_id_to_ct("TaskId", task.value)),
-                    "TaskId",
+                        .map(|task| history_id_to_ct("TaskID", task.value)),
+                    "TaskID",
                 ),
             ),
             (
@@ -814,8 +814,8 @@ pub(super) fn history_schedule_to_ct(value: &HistoryScheduleChoice) -> CtValue {
                 history_optional_to_ct(
                     value
                         .event
-                        .map(|event| history_id_to_ct("EventId", event.value)),
-                    "EventId",
+                        .map(|event| history_id_to_ct("EventID", event.value)),
+                    "EventID",
                 ),
             ),
             ("choice".to_string(), CtValue::Str(value.choice.clone())),

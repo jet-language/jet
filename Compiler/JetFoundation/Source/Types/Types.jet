@@ -59,7 +59,7 @@ pub enum InternalTag {
     SharedGuardRead
     SharedGuardEdit
     TerminalFactSet
-    CppCallbackAbi
+    CppCallbackABI
     AllocatorView
 }
 
@@ -323,12 +323,12 @@ pub enum SymbolKind {
 
 // The canonical key, rather than allocation order, is declaration identity.
 // Numeric MIR IDs are derived separately at the backend-neutral lowering edge.
-pub struct SymbolId {
+pub struct SymbolID {
     pub key: String
 }
 
 pub struct Symbol {
-    pub id: SymbolId
+    pub id: SymbolID
     pub kind: SymbolKind
     pub name: String
     pub module_name: String
@@ -338,8 +338,8 @@ pub struct Symbol {
     pub visibility: Int
 }
 
-pub fn symbol_id(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolId Never! {
-    SymbolId{key: "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"}
+pub fn symbol_id(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
+    SymbolID{key: "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"}
 }
 
 pub fn symbol_kind_name(kind: SymbolKind) -> String Never! {
@@ -726,7 +726,7 @@ pub fn type_with_effective_fn_returns(ty: Type) -> Type Never! {
         }
         .FixedList(element, length) -> Type.FixedList{elem: type_with_effective_fn_returns(element), len: length}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: type_with_effective_fn_returns(base), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackAbi}) -> Type.Tagged{marker: marker, inner: inner} else -> Type.Tagged{marker: marker, inner: type_with_effective_fn_returns(inner)}
+        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker, inner: inner} else -> Type.Tagged{marker: marker, inner: type_with_effective_fn_returns(inner)}
         .Union(members) -> {
             normalized_members := [Type]{}
             loop member in members -> &normalized_members.push(type_with_effective_fn_returns(member))

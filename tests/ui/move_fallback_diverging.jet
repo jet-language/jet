@@ -1,0 +1,64 @@
+// E0121: a move on a `??` fallback route that always leaves (`return`, or a
+// block that always returns) never reaches the statements after the `??`, so
+// later uses of the moved place stay valid. A fallback block that reaches its
+// end still hands its move to the join, and the reuse after it is E0121. A
+// new loop variable is a new value, even when an earlier loop moved a
+// variable with the same name.
+struct Machine {
+    steps: Int
+    soft_stop: Bool
+}
+
+fn finish(machine: ^Machine, ok: Bool) -> Bool {
+    ok && machine.steps > 0
+}
+
+fn step(machine: &Machine) -> Int? {
+    machine.steps += 1
+    if machine.steps > 3 -> return None
+    Val(machine.steps)
+}
+
+fn fallback_block(limit: Int) -> Bool {
+    machine := Machine{steps: limit, soft_stop: false}
+    first :: step(&machine) ?? {
+        if machine.soft_stop -> return finish(^machine, true)
+        return finish(^machine, false)
+    }
+    _ := step(&machine)
+    finish(^machine, first > 0)
+}
+
+fn fallback_return(limit: Int) -> Bool {
+    machine := Machine{steps: limit, soft_stop: false}
+    first :: step(&machine) ?? return finish(^machine, false)
+    _ := step(&machine)
+    finish(^machine, first > 0)
+}
+
+fn fallback_reaches_join(limit: Int) -> Bool {
+    machine := Machine{steps: limit, soft_stop: false}
+    first :: step(&machine) ?? {
+        _ := finish(^machine, false)
+        0
+    }
+    finish(^machine, first > 0)
+}
+
+fn loop_rebinds(machines: [Machine]) -> Bool {
+    done := false
+    loop machine in machines {
+        done = finish(^machine, true)
+    }
+    loop machine in machines {
+        if machine.soft_stop -> done = false
+    }
+    done
+}
+
+fn run() {
+    print(fallback_block(0))
+    print(fallback_return(0))
+    print(fallback_reaches_join(0))
+    print(loop_rebinds([Machine]{Machine{steps: 1, soft_stop: false}}))
+}

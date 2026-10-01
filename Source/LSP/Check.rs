@@ -2,6 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, TextEdit};
 use crate::AST::ProgramBundle;
+use jet_foundation::Names::normalize_path;
 use std::path::{Path, PathBuf};
 
 // ── Document check (used by LSP and tests) ────────────────────────────────────
@@ -233,20 +234,6 @@ pub(crate) fn canonical_path(path: &str) -> PathBuf {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         normalize_path(&cwd.join(p))
     }
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 // ── Doctor ────────────────────────────────────────────────────────────────────

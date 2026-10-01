@@ -28,6 +28,8 @@ use jet_foundation::Facts::{
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_foundation::JSON::parse_json;
 
+use crate::ProveReplay::json_str as json;
+
 #[derive(Clone)]
 struct Member {
     path: String,
@@ -1203,7 +1205,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         if json {
             let result = format!(
                 "{{\"artifactId\":{},\"status\":\"removed\"}}",
-                json_string(id)
+                crate::ProveReplay::json_str(id)
             );
             print!("{}", prove_status_result("unsave", &result));
         } else {
@@ -1219,8 +1221,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         if json {
             let result = format!(
                 "{{\"artifactId\":{},\"path\":{},\"size\":{size},\"status\":\"saved\"}}",
-                json_string(&artifact_id),
-                json_string(&path.to_string_lossy())
+                crate::ProveReplay::json_str(&artifact_id),
+                crate::ProveReplay::json_str(&path.to_string_lossy())
             );
             print!("{}", prove_status_result("save", &result));
         } else {
@@ -4751,26 +4753,6 @@ fn candidate_identity_json(target: &Target) -> String {
         target.mir.canonical_json(),
         json(&host_target_triple()),
     )
-}
-
-fn json(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c < ' ' => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-fn json_string(value: &str) -> String {
-    json(value)
 }
 
 fn record_links_json(links: &[RecordLink]) -> String {

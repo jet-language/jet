@@ -1,8 +1,43 @@
 // HTTP-specific method and nominal constructor checking. Canonical module-level
 // core.http calls stay in Calls/Core.jet; this file owns only checked HTTP
 // receiver/static routes that lower to dedicated TIR operations.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    CallContractRow,
+    CoreCallRecord,
+    CoreTypedCallSignature,
+    Diagnostic,
+    EffectRowEntry,
+    EnumLitArg,
+    Expr,
+    ExprField,
+    Field,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    StrPart,
+    SymbolID,
+    SymbolKind,
+    TCallArg,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    THandleOp,
+    TMethodRef,
+    TOrFallback,
+    TPreludeArg,
+    TStaticOwner,
+    TStrPart,
+    Type,
+    ast_empty_call_arg_flags,
+    core_call_typed_signature,
+    symbol_id,
+    type_identity_equal,
+    type_name,
+]
 
-struct SemaHttpStaticTarget {
+struct SemaHTTPStaticTarget {
     pub namespace: String
     pub type_name: String
 }
@@ -10,7 +45,7 @@ struct SemaHttpStaticTarget {
 fn sema_call_http_nominal_leaf(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> {
-            parts := name.split(".")
+            parts := name.split(".").to_list()
             return parts[parts.len() - 1]
         }
         .Tagged(_, inner) -> { return sema_call_http_nominal_leaf(inner) }
@@ -18,7 +53,7 @@ fn sema_call_http_nominal_leaf(ty: Type) -> String Never! {
     }
 }
 
-fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironment) -> SemaHttpStaticTarget? {
+fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironment) -> SemaHTTPStaticTarget? {
     if receiver == {
         .Paren(inner, _) -> { return sema_call_http_static_target(inner, environment) }
         .Field(base, leaf, _) -> {
@@ -54,7 +89,7 @@ fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironmen
                     if type_name == "" {
                         return None
                     }
-                    return Val(SemaHttpStaticTarget{namespace: namespace, type_name: type_name})
+                    return Val(SemaHTTPStaticTarget{namespace: namespace, type_name: type_name})
                 }
                 else -> { return None }
             }
@@ -83,7 +118,7 @@ fn sema_call_http_static_rust_type(type_name: String) -> String Never! {
 fn sema_call_http_static_tir_arg(value: TExpr, argument: CallArg) -> TCallArg Never! {
     TCallArg{
         value: value,
-        template_items: [SymbolId]{},
+        template_items: [SymbolID]{},
         borrow: argument.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
         mut_borrow: argument.convention == AccessConvention.Write,
         clone: argument.flags.implicit_clone || argument.flags.shared_auto_clone,
@@ -251,16 +286,17 @@ pub fn sema_call_try_http_static(
 
     arg_types :: sema_call_http_static_arg_types(target.type_name, method, args.len())
     moving := if target.type_name == "Body" && method == "reader" -> [Int]{0} else -> [Int]{}
-    loop index in 0..<args.len() {
-        loop move_index in moving { if move_index == index -> args[index].convention = AccessConvention.Move }
+    call_args := ~args
+    loop index in 0..<call_args.len() {
+        loop move_index in moving { if move_index == index -> call_args[index].convention = AccessConvention.Move }
     }
     values := [TExpr]{}
     if {
         target.type_name == "Body" && method == "json" -> {
             if args.len() == 1 {
                 value :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                params := sema_call_http_ownership_params(args, [Type]{value.ty}, moving)
-                ownership := sema_ownership_check_call_arguments(&state, "Body.json", params, &args, scopes, &span, &diagnostics)
+                params := sema_call_http_ownership_params(call_args, [Type]{value.ty}, moving)
+                ownership := sema_ownership_check_call_arguments(&state, "Body.json", params, &call_args, scopes, &diagnostics)
                 if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
                 &values.push(value)
             }
@@ -274,7 +310,7 @@ pub fn sema_call_try_http_static(
                 value :: sema_call_http_check_value(args[index], arg_types[index], environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 &values.push(value)
             }
-            if !sema_call_http_static_ownership(args, arg_types, moving, "{target.type_name}.{method}", &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+            if !sema_call_http_static_ownership(call_args, arg_types, moving, "{target.type_name}.{method}", &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     result_type := Type.Named{name: target.type_name}
@@ -497,8 +533,8 @@ fn sema_call_http_check_middleware_callback(value: TExpr, source: Expr, environm
                 loop name in updated_lambda.capture_facts.mutable { if name == capture.source -> mutable = true }
                 if mutable -> next
                 closure_taken :: sema_ownership_crossing_capture_taken(updated_lambda, capture, environment, context.generic_params)
-                problem :: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.HttpHandler, closure_taken, environment, scopes, state, context) ?? next
-                &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.HttpHandler, updated_lambda.source_span))
+                problem :: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.HTTPHandler, closure_taken, environment, scopes, state, context) ?? next
+                &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.HTTPHandler, updated_lambda.source_span))
                 valid = false
             }
             updated_lambda.is_move = true
@@ -513,9 +549,9 @@ fn sema_call_http_check_middleware_callback(value: TExpr, source: Expr, environm
     if source_is_unbound {
         return true
     }
-    problem := sema_ownership_crossing_problem_for_expr(source, value.ty, SemaSendCrossing.HttpHandler, true, environment, scopes, state, context) ?? return true
+    problem := sema_ownership_crossing_problem_for_expr(source, value.ty, SemaSendCrossing.HTTPHandler, true, environment, scopes, state, context) ?? return true
     value_name := if source == {.Ident(name, _) -> name else -> "this value"}
-    &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, value.ty, problem, SemaSendCrossing.HttpHandler, value.span))
+    &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, value.ty, problem, SemaSendCrossing.HTTPHandler, value.span))
     false
 }
 
@@ -572,7 +608,8 @@ pub fn sema_call_try_http_method(
             value :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             sema_call_http_check_serde(SemaSerdeDirection.Encode, value.ty, args[0].span, environment, &diagnostics)
             params := sema_call_http_ownership_params(args, [Type]{value.ty}, [Int]{})
-            ownership := sema_ownership_check_method_call(&state, "HTTPRequest.json", receiver, AccessConvention.Read, params, &args, scopes, span, &diagnostics)
+            call_args := ~args
+            ownership := sema_ownership_check_method_call(&state, "HTTPRequest.json", receiver, AccessConvention.Read, params, &call_args, scopes, span, &diagnostics)
             if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
             tir := sema_call_http_emit_method(receiver_value, name, method, [TExpr]{value}, Type.Named{name: "HTTPRequest"}, span)
             if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, &scopes, &context, &diagnostics)
@@ -646,7 +683,8 @@ pub fn sema_call_try_http_method(
             values = checked
         }
         else -> {
-            ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{}, &args, scopes, span, &diagnostics)
+            call_args := ~args
+            ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{}, &call_args, scopes, span, &diagnostics)
             if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
@@ -677,24 +715,30 @@ fn sema_call_http_core_unwrap_result(value: TExpr, payload: Type, message: Strin
     sema_tir_expr(payload, TExprKind.OrFallback{value: value, fallback: TOrFallback.Panic{message: text, location: sema_expression_panic_location(environment, span)}, ambient_err: None}, span)
 }
 
-fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, control_variant: String) -> Expr {
-    field_span := field.name_span
-    text :: (value: String) -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: field_span}
-    enum_lit :: (type_name: String, variant: String) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: Val(field_span), args: [EnumLitArg]{}, leading_dot: false, span: field_span}
+fn sema_call_http_form_text(value: String, span: Span) -> Expr Never! {
+    Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span}
+}
+
+fn sema_call_http_form_enum(type_name: String, variant: String, span: Span) -> Expr Never! {
+    Expr.EnumLit{type_name: type_name, variant: variant, variant_span: Val(span), args: [EnumLitArg]{}, leading_dot: false, span: span}
+}
+
+fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, control_variant: String) -> Expr Never! {
+    field_span :: field.name_span
     Expr.StructLit{
         type_name: "WebFormFieldSpec",
         type_args: [Type]{},
         import_ns: None,
         as_trait: None,
         fields: [ExprField]{
-            ExprField{name: "name", name_span: field_span, value: text(field.name)},
-            ExprField{name: "value_type", name_span: field_span, value: enum_lit("WebFormValueType", value_variant)},
+            ExprField{name: "name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
+            ExprField{name: "value_type", name_span: field_span, value: sema_call_http_form_enum("WebFormValueType", value_variant, field_span)},
             ExprField{name: "required", name_span: field_span, value: Expr.Bool{value: true, span: field_span}},
             ExprField{name: "default", name_span: field_span, value: Expr.Absent{span: field_span}},
-            ExprField{name: "label", name_span: field_span, value: text(field.name)},
-            ExprField{name: "control", name_span: field_span, value: enum_lit("WebFormControl", control_variant)},
+            ExprField{name: "label", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
+            ExprField{name: "control", name_span: field_span, value: sema_call_http_form_enum("WebFormControl", control_variant, field_span)},
             ExprField{name: "group", name_span: field_span, value: Expr.Absent{span: field_span}},
-            ExprField{name: "wire_name", name_span: field_span, value: text(field.name)},
+            ExprField{name: "wire_name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
         },
         inferred: false,
         span: field_span,
@@ -723,7 +767,7 @@ fn sema_call_http_expand_type_alias(graph: SemaRegistrationGraph, ty: Type, modu
     sema_call_http_expand_type_alias(graph, target, alias_nominal.symbol.module_name, next_active)
 }
 
-fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if !sema_call_core_check_type_args(record.module_name, record.member, 0, false, type_args, span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     if args.len() != 2 {
         &diagnostics.push(sema_call_arity_diagnostic("form", 2, args.len(), false, span))
@@ -743,7 +787,8 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
         &diagnostics.push(sema_error("E2474", args[model_index].span, "web.form model `{model_name}` is not a declared struct", "the form field set must come from the model's declared fields", "declare `struct {model_name} {{ ... }}` before constructing the form"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    graph :: environment.registration_graph ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return SemaDirectSpecialCheck{handled: true, value: None}
     model_nominal :: sema_type_resolve_nominal(graph, Type.Named{name: model_name}, environment.module_identity) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     model_module_identity := model_nominal.symbol.module_name
     action_name :: if args[action_index].expr == {.Ident(name, _) -> name else -> {
@@ -767,7 +812,7 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     if action_function.declaration.params.len() == 1 {
         action_parameter_type := sema_type_resolve_declared(graph, action_function.declaration.params[0].ty, action_function.symbol.module_name)
         action_nominal :: sema_type_resolve_nominal(graph, action_parameter_type, action_function.symbol.module_name)
-        if model_nominal == .Val(model_type) && action_nominal == .Val(action_type) -> action_accepts_model = model_type.symbol.id.key == action_type.symbol.id.key
+        if action_nominal == .Val(action_type) -> action_accepts_model = model_nominal.symbol.id.key == action_type.symbol.id.key
     }
     if !action_accepts_model {
         &diagnostics.push(sema_error("E2474", args[action_index].span, "form action `{action_name}` does not accept `{model_name}`", "the form derives its fields from the model and the one server-function action must receive that exact input type", "change `{action_name}` to accept `{model_name}` as its only parameter"))
@@ -875,7 +920,7 @@ fn sema_call_http_sync(record: CoreCallRecord, args: [CallArg], type_args: [Type
     SemaDirectSpecialCheck{handled: true, value: Val(value)}
 }
 
-pub fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+pub fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if (record.module_name == "app" || record.module_name == "core.web") && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}

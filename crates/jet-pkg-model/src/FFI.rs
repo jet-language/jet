@@ -501,8 +501,7 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 /// matching hidden provider. The compiler crate (`Source/`) stays
 /// zero-dependency (I6).
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
-    let target = host_target();
-    prepare_for_target(bundle, &target)
+    prepare_resolving_target(bundle, host_target)
 }
 
 fn needs_parquet_provider(usage: &str) -> bool {
@@ -561,26 +560,19 @@ pub fn prepare_for_target(
     bundle: &ProgramBundle,
     target: &str,
 ) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
+    prepare_resolving_target(bundle, || target.to_string())
+}
+
+/// `prepare_for_target` with the target resolved only when the bundle has a
+/// foreign declaration, a C link, or a bridge-backed Core surface: resolving
+/// the host target runs `rustc -vV`, which a program without any of them (and
+/// every Cranelift dev build of one, #3953) must not pay for.
+fn prepare_resolving_target(
+    bundle: &ProgramBundle,
+    target: impl FnOnce() -> String,
+) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
     let record_defs = collect_c_record_definitions(bundle);
     let entries = collect_externs(bundle);
-    // Reject stale or cross-target assembly contracts before any target-specific
-    // link discovery or bridge generation. Web has no native provider either:
-    // a wasm build must report the same checked-target diagnostic, not silently
-    // discard a reachable native body.
-    if let Some(diagnostic) = inline_asm_target_diagnostic(&entries, target) {
-        return Err(vec![diagnostic]);
-    }
-    // Native inline bodies have no Web lowering. Keep their declarations out
-    // of the wasm bridge rather than handing an inapplicable row to a native
-    // emitter that cannot produce a Web artifact.
-    let entries = if target.split('-').next() == Some("wasm32") {
-        entries
-            .into_iter()
-            .filter(|entry| entry.inline.is_none())
-            .collect::<Vec<_>>()
-    } else {
-        entries
-    };
     // The regex runtime is std-only in the generated prelude, so
     // this bridge never asks for a hidden regex dependency.
     let needs_regex = false;
@@ -649,6 +641,40 @@ pub fn prepare_for_target(
         .used_core
         .iter()
         .any(|u| u == "core.crypto.vault" || u.starts_with("core.crypto.vault::"));
+    let needs_bridge = needs_regex
+        || needs_archive
+        || needs_db
+        || needs_parquet
+        || needs_http_client
+        || needs_http_server_tls
+        || needs_net_tls
+        || needs_crypto
+        || needs_compress
+        || needs_plugin
+        || needs_secrets;
+    if entries.is_empty() && !bundle.cffi.links_c() && !needs_bridge {
+        return Ok(None);
+    }
+    let target_triple = target();
+    let target = target_triple.as_str();
+    // Reject stale or cross-target assembly contracts before any target-specific
+    // link discovery or bridge generation. Web has no native provider either:
+    // a wasm build must report the same checked-target diagnostic, not silently
+    // discard a reachable native body.
+    if let Some(diagnostic) = inline_asm_target_diagnostic(&entries, target) {
+        return Err(vec![diagnostic]);
+    }
+    // Native inline bodies have no Web lowering. Keep their declarations out
+    // of the wasm bridge rather than handing an inapplicable row to a native
+    // emitter that cannot produce a Web artifact.
+    let entries = if target.split('-').next() == Some("wasm32") {
+        entries
+            .into_iter()
+            .filter(|entry| entry.inline.is_none())
+            .collect::<Vec<_>>()
+    } else {
+        entries
+    };
     // Link discovery is independent of hidden-bridge eligibility. A C surface
     // made only from local Jet types must still resolve its declared provider
     // and report E3201 when the provider is absent.
@@ -666,20 +692,7 @@ pub fn prepare_for_target(
         Vec::new()
     };
 
-    if entries.is_empty()
-        && !needs_regex
-        && !needs_archive
-        && !needs_db
-        && !needs_parquet
-
-        && !needs_http_client
-        && !needs_http_server_tls
-        && !needs_net_tls
-        && !needs_crypto
-        && !needs_compress
-        && !needs_plugin
-        && !needs_secrets
-    {
+    if entries.is_empty() && !needs_bridge {
         return Ok(None);
     }
 
@@ -1866,7 +1879,7 @@ mod net_tls_close_tests {
             host: "localhost".to_string(),
             port: port as i64,
             security: if starttls {
-                email::SMTPSecurity::StartTls
+                email::SMTPSecurity::StartTLS
             } else {
                 email::SMTPSecurity::TLS
             },

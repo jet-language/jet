@@ -1,6 +1,33 @@
 // Lexical resolution stores the foundation Symbol unchanged and associates it
 // with one active scope. SymbolId remains the stable declaration identity;
 // vector positions are only local lookup accelerators.
+use jet_foundation.[
+    AccessConvention,
+    Diagnostic,
+    ElseArmSpan,
+    Expr,
+    Item,
+    MIRTargetHardwareUse,
+    PolicyDeclaration,
+    PolicyKey,
+    PolicyScope,
+    Span,
+    Stmt,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TComptimeValue,
+    TExpr,
+    TFailureCarrier,
+    TGenericParam,
+    TIntegerBounds,
+    TTypeDef,
+    Type,
+    ViewProvenanceMap,
+    ViewSourcePath,
+    type_identity_equal,
+    type_name,
+]
 
 pub enum SemaKnowledgePlane {
     Range
@@ -32,17 +59,28 @@ pub struct SemaScopeBinding {
     pub integer_bounds: TIntegerBounds?
     pub string_view: Bool
     pub compiler_builtin: Bool
+    // D-PREP-SURFACE2=A: a `name :: prep { … }` local reads as this value.
+    pub prepared: TComptimeValue?{None}
+    // D-TRACK-ORIGIN1=A: the `#Track` origin row for this binding; `None`
+    // is the untracked row.
+    pub origin: SemaOriginFact?{None}
+}
+
+pub struct SemaOriginFact {
+    pub source: String
+    pub line: Int?
+    pub column: Int?
 }
 
 pub struct SemaScopeDeclaration {
-    pub symbol_id: SymbolId
+    pub symbol_id: SymbolID
     pub item: Item
 }
 
 pub struct SemaCallSiteFact {
     pub span: Span
     pub caller_key: String
-    pub callee: SymbolId?
+    pub callee: SymbolID?
     pub facts: SemaCallFacts
     // The statement drops this call's result. The solved effect phase reports
     // it when the callee's row is empty (E0433).
@@ -121,7 +159,7 @@ pub fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) Ne
     context.pending_loop_value = None
     kind := SemaLoopValueKind.Effect
     resolved_label := label
-    result_type := None
+    result_type := Type?{None}
     if pending == .Val(value) {
         kind = value.kind
         if value.label != None -> resolved_label = value.label
@@ -140,9 +178,9 @@ pub fn sema_loop_value_pop_frame(context: &SemaCheckContext) Never! {
 
 pub fn sema_loop_value_resolve_frame(context: SemaCheckContext, label: String?) -> Int? {
     index := context.loop_value_frames.len() - 1
-    if label == .Val(name) {
+    if label != None {
         loop index >= 0 {
-            if context.loop_value_frames[index].label == .Val(name) -> return Val(index)
+            if context.loop_value_frames[index].label == label -> return Val(index)
             index -= 1
         }
         return None
@@ -244,7 +282,7 @@ pub struct SemaCheckedTextEvaluation {
     pub source_file: String
     pub source_expression: Expr
     pub expression: TExpr
-    pub hardware_use: MirTargetHardwareUse
+    pub hardware_use: MIRTargetHardwareUse
     pub reachable_function_keys: [String]
     pub dependencies: [String]
     pub span: Span
@@ -293,6 +331,9 @@ pub struct SemaScopeEnvironment {
     pub comptime_body_values: [SemaComptimeBodyValue]
     // L0303 (#3716): the module's dispatch-table `else` arms, from the parser.
     pub else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
+    // D-SHAPE-PLACE1=A: the module's proven length-preserving list write
+    // parameters, copied into each function's ownership state.
+    pub fixed_length_write_params: [String]{[String]{}}
 }
  
 pub struct SemaCheckContext {
@@ -305,7 +346,7 @@ pub struct SemaCheckContext {
     pub lambda_escapes: Bool?
     pub lambda_statement_tails: [SemaStatementTailFrame]
     pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MirTargetHardwareUse
+    pub hardware_use: MIRTargetHardwareUse
     pub call_return_views: [SemaCallReturnView]
     pub local_view_provenance: [SemaLocalViewProvenance]
     pub return_view_receiver_key: String
@@ -363,9 +404,9 @@ pub struct SemaScopeTable {
     pub frames: [SemaScopeFrame]
     pub bindings: [SemaScopeBinding]
     pub loop_labels: [SemaScopeLoopLabel]
-    pub hardware_transfers: [SemaHardwareDmaTransferFact]
-    pub hardware_definite_transfers: [SemaHardwareDmaTransferFact]
-    pub hardware_pending_transfers: [SemaHardwareDmaTransferFact]
+    pub hardware_transfers: [SemaHardwareDMATransferFact]
+    pub hardware_definite_transfers: [SemaHardwareDMATransferFact]
+    pub hardware_pending_transfers: [SemaHardwareDMATransferFact]
     pub current: Int
     pub return_type: Type?
     pub failure_carrier: TFailureCarrier?
@@ -394,8 +435,9 @@ pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identit
     }
 }
 
-pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolId, edge: String) -> Bool Never! {
-    graph :: environment.registration_graph ?? return false
+pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolID, edge: String) -> Bool Never! {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     loop module_row in graph.modules {
         loop nominal in module_row.nominals {
             if nominal.symbol.id.key == owner.key {
@@ -483,6 +525,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         allow_string_view_read: source.allow_string_view_read,
         allow_fixed_constructor: source.allow_fixed_constructor,
         generic_params: ~source.generic_params,
+        lambda_escapes: source.lambda_escapes,
         lambda_statement_tails: ~source.lambda_statement_tails,
         call_facts: ~source.call_facts,
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
@@ -524,8 +567,8 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
     }
 }
 
-fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] Never! {
-    result := [SemaHardwareDmaTransferFact]{}
+fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
+    result := [SemaHardwareDMATransferFact]{}
     loop fact in source -> &result.push(fact)
     result
 }
@@ -556,9 +599,9 @@ pub fn sema_scope_init(module_name: String) -> SemaScopeTable Never! {
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
         bindings: [SemaScopeBinding]{},
         loop_labels: [SemaScopeLoopLabel]{},
-        hardware_transfers: [SemaHardwareDmaTransferFact]{},
-        hardware_definite_transfers: [SemaHardwareDmaTransferFact]{},
-        hardware_pending_transfers: [SemaHardwareDmaTransferFact]{},
+        hardware_transfers: [SemaHardwareDMATransferFact]{},
+        hardware_definite_transfers: [SemaHardwareDMATransferFact]{},
+        hardware_pending_transfers: [SemaHardwareDMATransferFact]{},
         current: 0,
         return_type: None,
         failure_carrier: None,
@@ -604,15 +647,15 @@ pub fn sema_scope_enter(table: &SemaScopeTable, state: &SemaOwnershipState, owne
 pub fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
     if table.current <= 0 -> return
     leaving := table.current
-    remaining_transfers := [SemaHardwareDmaTransferFact]{}
+    remaining_transfers := [SemaHardwareDMATransferFact]{}
     loop fact in table.hardware_transfers {
         if fact.buffer_frame != leaving -> &remaining_transfers.push(fact)
     }
-    remaining_definite := [SemaHardwareDmaTransferFact]{}
+    remaining_definite := [SemaHardwareDMATransferFact]{}
     loop fact in table.hardware_definite_transfers {
         if fact.scope_frame != leaving && fact.buffer_frame != leaving -> &remaining_definite.push(fact)
     }
-    remaining_pending := [SemaHardwareDmaTransferFact]{}
+    remaining_pending := [SemaHardwareDMATransferFact]{}
     loop fact in table.hardware_pending_transfers {
         if fact.buffer_frame != leaving -> &remaining_pending.push(fact)
     }
@@ -622,11 +665,11 @@ pub fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) Neve
     sema_ownership_leave_scope(&state)
     table.current = table.frames[leaving].parent
 }
-fn sema_scope_hardware_fact_equal(left: SemaHardwareDmaTransferFact, right: SemaHardwareDmaTransferFact) -> Bool Never! {
+fn sema_scope_hardware_fact_equal(left: SemaHardwareDMATransferFact, right: SemaHardwareDMATransferFact) -> Bool Never! {
     left.transfer_key == right.transfer_key && left.buffer_key == right.buffer_key && left.profile_id == right.profile_id && left.channel == right.channel && left.buffer_name == right.buffer_name && type_identity_equal(left.buffer_type, right.buffer_type)
 }
-fn sema_scope_hardware_intersection(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] Never! {
-    result := [SemaHardwareDmaTransferFact]{}
+fn sema_scope_hardware_intersection(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
+    result := [SemaHardwareDMATransferFact]{}
     loop candidate in left {
         loop other in right {
             if sema_scope_hardware_fact_equal(candidate, other) {
@@ -637,7 +680,7 @@ fn sema_scope_hardware_intersection(left: [SemaHardwareDmaTransferFact], right: 
     }
     result
 }
-fn sema_scope_hardware_union(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] Never! {
+fn sema_scope_hardware_union(left: [SemaHardwareDMATransferFact], right: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := sema_scope_hardware_transfers_snapshot(left)
     loop candidate in right {
         found := false
@@ -741,7 +784,7 @@ fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate
 }
 
 pub fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaKnowledgeGate? {
-    previous :: table.knowledge_gate
+    previous :: ~table.knowledge_gate
     table.knowledge_gate = Val(gate)
     previous
 }
@@ -783,7 +826,7 @@ pub fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: 
     module_index :: sema_registration_module_index(graph, module_identity) ?? return
     declaration_module :: graph.modules[module_index]
     loop declaration in declaration_module.program.policy_declarations {
-        if declaration.key == PolicyKey.ExplicitUnits && declaration.scope == PolicyScope.Function && declaration.target == Val(function_span) -> table.unit_explicit_units = true
+        if declaration.key == PolicyKey.ExplicitUnits && declaration.scope == PolicyScope.Function && declaration.target == .Val(target) && target.start == function_span.start && target.end == function_span.end -> table.unit_explicit_units = true
     }
 }
 
@@ -885,14 +928,21 @@ pub fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable:
     true
 }
 
-pub fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolId) -> Symbol? {
+// D-FLOWTYPE1=A: a proven payload refines a stable Optional name for the rest
+// of its scope. The refinement shadows the carrier binding on purpose, so it
+// skips the duplicate-name rule that ordinary declarations obey.
+pub fn sema_scope_refine_local(table: &SemaScopeTable, symbol: Symbol) Never! {
+    &table.bindings.push(SemaScopeBinding{frame: table.current, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+}
+
+pub fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolID) -> Symbol? {
     loop binding in table.bindings {
         if binding.symbol.id.key == id.key -> return Val(binding.symbol)
     }
     None
 }
 
-pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolId) -> Item? {
+pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolID) -> Item? {
     if environment.registration_graph == .Val(graph) {
         loop module_row in graph.modules {
             loop function in module_row.functions {

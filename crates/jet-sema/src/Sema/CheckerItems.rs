@@ -191,7 +191,7 @@ impl<'a> Checker<'a> {
                     eligible
                 }
                 Type::Apply { name, args } => {
-                    if name == "Id" {
+                    if name == "ID" {
                         return checker.is_equatable_type(ty);
                     }
                     if matches!(
@@ -400,6 +400,66 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// The type parameters `owner_name` declares in `owner_mod`, which stay
+    /// unqualified when a declared type is read from another module.
+    fn owner_generic_names(&self, owner_mod: usize, owner_name: &str) -> HashSet<String> {
+        let trait_reg = if owner_mod == self.module_idx {
+            Some(self.trait_reg)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner_mod))
+                .map(|module| &module.trait_reg)
+        };
+        trait_reg
+            .and_then(|trait_reg| {
+                trait_reg
+                    .struct_params
+                    .get(owner_name)
+                    .or_else(|| trait_reg.enum_params.get(owner_name))
+            })
+            .map(|params| params.iter().map(|param| param.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// A field or payload type as `owner_mod` declared it, spelled the way
+    /// checked values spell it: the owner's own nominals by canonical
+    /// identity, and names the owner reaches through an import or its
+    /// package namespace by their declaring module's identity. The registry
+    /// keeps the declared spelling (`ty: Type` for a package sibling's
+    /// `Type`), while a parameter or literal of that type resolves to the
+    /// canonical identity; reading the field must give the same type.
+    /// Method signatures cross the module boundary the same way
+    /// (`qualify_method_signature`).
+    pub(crate) fn owner_type_for_reader(&self, owner_mod: usize, owner_name: &str, ty: Type) -> Type {
+        let generic_names = self.owner_generic_names(owner_mod, owner_name);
+        self.qualify_method_type(owner_mod, &ty, &generic_names)
+    }
+
+    /// `owner_mod`'s variant table for `enum_name` with every payload type
+    /// spelled for this module (`owner_type_for_reader`).
+    fn owner_variants_for_reader(
+        &self,
+        owner_mod: usize,
+        enum_name: &str,
+        mut variants: HashMap<String, (Span, VariantPayload)>,
+    ) -> HashMap<String, (Span, VariantPayload)> {
+        let generic_names = self.owner_generic_names(owner_mod, enum_name);
+        for (_, payload) in variants.values_mut() {
+            match payload {
+                VariantPayload::Unit => {}
+                VariantPayload::Single(ty, _) => {
+                    *ty = self.qualify_method_type(owner_mod, ty, &generic_names);
+                }
+                VariantPayload::Named(fields) => {
+                    for field in fields {
+                        field.ty = self.qualify_method_type(owner_mod, &field.ty, &generic_names);
+                    }
+                }
+            }
+        }
+        variants
+    }
+
     pub(crate) fn resolve_method_sig(
         &self,
         type_name: &str,
@@ -503,7 +563,7 @@ impl<'a> Checker<'a> {
         }
         if !self.copies_explicit()
             && ty.is_some_and(|ty| owned_type_for_read_view(ty).is_none())
-            && ty.is_some_and(|ty| is_cloneable(ty, self.registry))
+            && ty.is_some_and(|ty| self.is_cloneable_type(ty))
         {
             let ty = ty.expect("cloneable borrowed subplace has a type");
             self.insert_implicit_copy(expr, ty, ty);
@@ -520,8 +580,9 @@ impl<'a> Checker<'a> {
             ),
             Some(expr.span()),
         );
+        let anchor = crate::Sema::CheckerOwnership::copy_edit_anchor(expr);
         self.diags
-            .push(self.with_ownership_copy_edit(diagnostic, expr.span(), ty));
+            .push(self.with_ownership_copy_edit(diagnostic, anchor, ty));
         true
     }
 
@@ -1872,6 +1933,82 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// The modules whose public names this file reaches through its imports:
+    /// each import target, then (D-MOD-CYCLE1=A) the other member files of
+    /// every imported dependency package, since a dependency is one namespace
+    /// that the loader binds through a single member file. Members of this
+    /// file's own package are already imported directly.
+    pub(crate) fn import_scope_modules(&self) -> Vec<usize> {
+        let mut scope: Vec<usize> = self.imports.values().copied().collect();
+        let own_root = self.name_ledger.module_namespace(self.module_idx);
+        let mut dependency_roots: Vec<&str> = Vec::new();
+        for idx in scope.clone() {
+            let Some(root) = self.name_ledger.module_namespace(idx) else {
+                continue;
+            };
+            if Some(root) == own_root || dependency_roots.contains(&root) {
+                continue;
+            }
+            dependency_roots.push(root);
+            for sibling in self.name_ledger.namespace_siblings(idx) {
+                if !scope.contains(&sibling) {
+                    scope.push(sibling);
+                }
+            }
+        }
+        scope
+    }
+
+    /// Whether `owner` declares a record named like a built-in boundary type
+    /// (`Path`, `URL`, `DateTime`) that is not that built-in's own carrier.
+    /// `core.net.url`'s `URL` is the built-in; `core.files.path`'s `Path` is a
+    /// different type that only shares the leaf.
+    pub(crate) fn record_distinct_from_builtin(&self, owner: usize, leaf: &str) -> bool {
+        let Some(kind) = crate::Syntax::typed_head_kind(leaf) else {
+            return false;
+        };
+        let carrier_alias = kind
+            .carrier_record_module()
+            .and_then(jet_foundation::CoreModuleExports::core_source_module)
+            .map(|source| source.alias);
+        self.modules
+            .and_then(|modules| modules.get(owner))
+            .is_some_and(|state| {
+                state.registry.contains(leaf) && Some(state.module_alias.as_str()) != carrier_alias
+            })
+    }
+
+    /// A Core record whose leaf is also a built-in type name but which is not
+    /// that built-in (the `core.files.path` record `Path`) is identified by its
+    /// canonical path. Its bare leaf names the built-in, so the two never unify
+    /// by spelling.
+    pub(crate) fn core_nominal_shadowing_builtin(&self, module: &str, leaf: &str) -> Option<String> {
+        let owner = self.core_source_owner_module(module, leaf)?;
+        self.record_distinct_from_builtin(owner, leaf)
+            .then(|| self.canonical_nominal_name(owner, leaf))
+    }
+
+    /// A function signature read across a module boundary names the owner's
+    /// records that only share a built-in type's leaf (`Path`) by canonical
+    /// path, so the caller never reads that leaf as the built-in.
+    pub(crate) fn qualify_builtin_shadowing_sig(&self, owner: usize, sig: &mut crate::AST::FuncSig) {
+        if owner == self.module_idx {
+            return;
+        }
+        let qualify = |ty: &Type| {
+            ty.map_named_types(&|name| {
+                self.record_distinct_from_builtin(owner, name)
+                    .then(|| self.canonical_nominal_name(owner, name))
+            })
+        };
+        for (_, ty) in &mut sig.params {
+            *ty = qualify(ty);
+        }
+        if let Some(ret) = &mut sig.return_type {
+            *ret = qualify(ret);
+        }
+    }
+
     pub(crate) fn struct_owner_module(
         &self,
         type_name: &str,
@@ -1945,6 +2082,12 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // A bare built-in type name (`Path`, `URL`, `DateTime`) that this
+        // module neither declares nor imports by name is the built-in. A
+        // loaded module's same-named record keeps its canonical identity.
+        if crate::Syntax::typed_head_kind(type_name).is_some() {
+            return None;
+        }
         // The fallback is the only branch that scans every module. Cache its
         // exact source spelling for this body checker, including misses and
         // ambiguities, so repeated expression nodes do not repeat the scan.
@@ -2085,33 +2228,130 @@ impl<'a> Checker<'a> {
             }
         }
     }
-    /// Resolve cloneability through the same owner registry as ordinary
-    /// imported struct lookup. Generated codec temporaries often wrap an
-    /// imported field in `Result`/`Option`, so peel structural containers
-    /// before selecting the nominal's canonical bundle owner.
+    /// Whether a value of `ty` can be duplicated, with every nominal resolved
+    /// through the module that declares it. A field or payload may name a
+    /// type from an import or a package sibling (D-MOD-CYCLE1=A), which the
+    /// reading module's registry does not hold, and generated codec
+    /// temporaries wrap imported fields in `Result`/`Option`. A type whose
+    /// nominals all live in this module takes the registry walk directly.
     pub(crate) fn is_cloneable_type(&self, ty: &Type) -> bool {
+        if crate::Sema::Diagnostics::is_cloneable(ty, self.registry) {
+            return true;
+        }
+        let mut entered = HashSet::new();
+        self.cloneable_in_context(ty, self.module_idx, &mut entered)
+    }
+
+    /// The declaring module and leaf of the nominal `name` as `context_mod`
+    /// spells it: a canonical identity names its module, the context's own
+    /// declarations stay there, and any other spelling resolves the way this
+    /// module's nominal lookup does.
+    fn nominal_owner_in_context<'n>(
+        &self,
+        name: &'n str,
+        context_mod: usize,
+    ) -> Option<(usize, &'n str)> {
+        let registry_of = |module: usize| {
+            if module == self.module_idx {
+                Some(self.registry)
+            } else {
+                self.modules
+                    .and_then(|modules| modules.get(module))
+                    .map(|state| &state.registry)
+            }
+        };
+        let (owner, leaf) = if let Some((_, leaf)) = name.rsplit_once("::") {
+            (self.name_ledger.nominal_module(name)?, leaf)
+        } else if registry_of(context_mod).is_some_and(|registry| registry.contains(name)) {
+            (context_mod, name)
+        } else {
+            let (namespace, leaf) = Self::split_type_name(name);
+            (self.struct_owner_module(leaf, namespace)?, leaf)
+        };
+        registry_of(owner)
+            .is_some_and(|registry| registry.contains(leaf))
+            .then_some((owner, leaf))
+    }
+
+    /// `is_cloneable_type`'s walk. Each nominal is entered once per query: a
+    /// revisit is either a cycle (vacuously cloneable, as in the registry
+    /// walk) or a type already found cloneable, since the first field that
+    /// is not ends the query.
+    fn cloneable_in_context(
+        &self,
+        ty: &Type,
+        context_mod: usize,
+        entered: &mut HashSet<(usize, String)>,
+    ) -> bool {
         match ty {
             Type::List(inner) | Type::Option(inner) => {
-                self.is_cloneable_type(inner)
+                self.cloneable_in_context(inner, context_mod, entered)
             }
             Type::Map { key, value, .. } => {
-                self.is_cloneable_type(key) && self.is_cloneable_type(value)
+                self.cloneable_in_context(key, context_mod, entered)
+                    && self.cloneable_in_context(value, context_mod, entered)
             }
-            Type::Result { ok, err } => self.is_cloneable_type(ok) && self.is_cloneable_type(err),
+            Type::Result { ok, err } => {
+                self.cloneable_in_context(ok, context_mod, entered)
+                    && self.cloneable_in_context(err, context_mod, entered)
+            }
             Type::Tuple(fields) => fields
                 .iter()
-                .all(|(_, field)| self.is_cloneable_type(field)),
+                .all(|(_, field)| self.cloneable_in_context(field, context_mod, entered)),
             Type::FixedList { elem, .. }
             | Type::Tagged { inner: elem, .. }
             | Type::InlineRange { base: elem, .. }
-            | Type::Quantity { base: elem, .. } => self.is_cloneable_type(elem),
-            Type::Union(members) => members.iter().all(|member| self.is_cloneable_type(member)),
-            Type::Apply { args, .. } if !args.iter().all(|arg| self.is_cloneable_type(arg)) => {
-                false
+            | Type::Quantity { base: elem, .. } => {
+                self.cloneable_in_context(elem, context_mod, entered)
             }
-            Type::Named(_) | Type::Apply { .. } => {
-                let (normalized, registry, _) = self.capability_type_context(ty);
-                crate::Sema::Diagnostics::is_cloneable(&normalized, registry)
+            Type::Union(members) => members
+                .iter()
+                .all(|member| self.cloneable_in_context(member, context_mod, entered)),
+            Type::Named(name) | Type::Apply { name, .. } => {
+                let Some((owner, leaf)) = self.nominal_owner_in_context(name, context_mod) else {
+                    // Built-in carriers, Core types and type variables.
+                    return crate::Sema::Diagnostics::is_cloneable(ty, self.registry);
+                };
+                if let Type::Apply { args, .. } = ty {
+                    if !args
+                        .iter()
+                        .all(|arg| self.cloneable_in_context(arg, context_mod, entered))
+                    {
+                        return false;
+                    }
+                }
+                if !entered.insert((owner, leaf.to_string())) {
+                    return true;
+                }
+                let registry = if owner == self.module_idx {
+                    self.registry
+                } else if let Some(state) = self.modules.and_then(|modules| modules.get(owner)) {
+                    &state.registry
+                } else {
+                    return false;
+                };
+                match registry.types.get(leaf) {
+                    Some(TypeDef::Struct { fields, .. }) => fields
+                        .iter()
+                        .all(|(_, _, field)| self.cloneable_in_context(field, owner, entered)),
+                    Some(TypeDef::Enum { variants, .. }) => {
+                        variants.values().all(|(_, payload)| match payload {
+                            VariantPayload::Unit => true,
+                            VariantPayload::Single(payload, _) => {
+                                self.cloneable_in_context(payload, owner, entered)
+                            }
+                            VariantPayload::Named(fields) => fields
+                                .iter()
+                                .all(|field| self.cloneable_in_context(&field.ty, owner, entered)),
+                        })
+                    }
+                    // D-DIST1: distinct types wrap a scalar.
+                    Some(TypeDef::Distinct { .. }) => true,
+                    Some(TypeDef::Alias { target, .. }) => {
+                        self.cloneable_in_context(target, owner, entered)
+                    }
+                    None => false,
+                }
             }
             _ => crate::Sema::Diagnostics::is_cloneable(ty, self.registry),
         }
@@ -2307,7 +2547,7 @@ impl<'a> Checker<'a> {
             return true;
         }
         if let Some(mods) = self.modules {
-            for &idx in self.imports.values() {
+            for idx in self.import_scope_modules() {
                 if self.type_is_pub_in(idx, enum_name)
                     && mods[idx].registry.enum_variants(enum_name).is_some()
                 {
@@ -2403,20 +2643,24 @@ impl<'a> Checker<'a> {
             return Some(v);
         }
         if let Some(v) = self.registry.enum_variants(enum_name) {
-            return Some(v.clone());
+            return Some(self.owner_variants_for_reader(self.module_idx, enum_name, v.clone()));
         }
         // A canonical nominal (`<owner>::Leaf`) names its declaring module
         // directly; imported Core enums reach patterns in this spelling.
         if let Some(variants) = self.canonical_enum_registry(enum_name, |registry, leaf| {
             registry.enum_variants(leaf).cloned()
         }) {
-            return Some(variants);
+            let (namespace, leaf) = Self::split_type_name(enum_name);
+            return Some(match self.struct_owner_module(leaf, namespace) {
+                Some(owner) => self.owner_variants_for_reader(owner, leaf, variants),
+                None => variants,
+            });
         }
         if let Some(mods) = self.modules {
-            for &idx in self.imports.values() {
+            for idx in self.import_scope_modules() {
                 if self.type_is_pub_in(idx, enum_name) {
                     if let Some(v) = mods[idx].registry.enum_variants(enum_name) {
-                        return Some(v.clone());
+                        return Some(self.owner_variants_for_reader(idx, enum_name, v.clone()));
                     }
                 }
             }
@@ -2589,7 +2833,7 @@ impl<'a> Checker<'a> {
             return Some(groups);
         }
         if let Some(mods) = self.modules {
-            for &idx in self.imports.values() {
+            for idx in self.import_scope_modules() {
                 if self.type_is_pub_in(idx, enum_name) {
                     if let Some(g) = mods[idx].registry.enum_groups(enum_name) {
                         return Some(g.clone());
@@ -3254,7 +3498,7 @@ impl<'a> Checker<'a> {
                 };
             if borrowed
                 && !self.copies_explicit()
-                && payload_ty.is_some_and(|ty| is_cloneable(ty, self.registry))
+                && payload_ty.is_some_and(|ty| self.is_cloneable_type(ty))
             {
                 let ty = payload_ty.expect("cloneable borrowed same-name field has a type");
                 self.insert_implicit_copy(payload, ty, ty);
@@ -3354,6 +3598,9 @@ impl<'a> Checker<'a> {
         variant_span: Option<Span>,
     ) -> Type {
         self.warn_deprecated_type_name(type_name, span);
+        // An enum literal reads its enum's name, so it uses the import
+        // that binds it (`use dep.[Kind]` then `Kind.Beta(3)`).
+        self.record_type_import_name_use(type_name);
         let contextual_ty = self
             .expected_type
             .clone()
@@ -3912,43 +4159,15 @@ impl<'a> Checker<'a> {
         if bindings.values().all(type_is_copy) {
             return;
         }
-        if let Expr::Ident(name, name_span) = subject {
-            if self.is_borrowed_binding(name)
-                && self
-                    .lookup(name)
-                    .is_some_and(|info| !is_cloneable(&info.ty, self.registry))
-            {
-                if self
-                    .diags
-                    .iter()
-                    .any(|diag| diag.code == "E0120" && diag.span == Some(*name_span))
-                {
-                    return;
-                }
-                let source_ty = self.lookup(name).map(|info| info.ty.clone());
-                let ty = source_ty
-                    .as_ref()
-                    .map(|ty| ty.show().trim_matches('`').to_string())
-                    .unwrap_or_else(|| "value".to_string());
-                let diagnostic = Diagnostic::error(
-                    "E0120",
-                    format!("`{name}` was not moved here, so its contents cannot be taken apart"),
-                    format!(
-                        "`{name}` grants read-only access to `{ty}`, so its non-copyable parts cannot be taken apart with the move marker `^`"
-                    ),
-                    format!(
-                        "change the parameter to `{name}: {}{ty}` with the move marker `^`, or inspect it without binding its contents",
-                        Syntax::SIGIL_MOVE
-                    ),
-                    Some(*name_span),
-                );
-                self.diags.push(self.with_ownership_copy_edit(
-                    diagnostic,
-                    *name_span,
-                    source_ty.as_ref(),
-                ));
-                return;
-            }
+        // D-OPT-WRITE1 (#3974): a `&place` subject binds write windows into
+        // its payload; the owner keeps its value.
+        if crate::Sema::CheckerCore::is_write_window_subject(subject) {
+            return;
+        }
+        if let Expr::Ident(name, _) = subject {
+            // A borrowed parameter's payload binds as a read view of that
+            // parameter, exactly like a projected subject `param.field`; the
+            // subject stays usable and nothing is copied.
             if self.is_borrowed_binding(name) {
                 return;
             }

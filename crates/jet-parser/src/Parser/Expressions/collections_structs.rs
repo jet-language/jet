@@ -759,8 +759,11 @@ impl<'a> Parser<'a> {
             }
             // D-ENUMDOT1: bare unit `Variant | …` starts an or-pattern (lone
             // `Variant` stays value equality so typos don't get a fake E0367).
+            // An ALL_CAPS name is a constant (D-PREP-SURFACE2), so
+            // `ARCH_X64 | ARCH_ARM64` stays a list of value alternates.
             TokKind::Ident(variant)
                 if variant.chars().next().is_some_and(|c| c.is_uppercase())
+                    && !Syntax::is_constant_name(variant)
                     && !matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::LParen)
@@ -1010,6 +1013,7 @@ impl<'a> Parser<'a> {
 
     /// D-ENUMDOT1 / D-PATO: one alternative after `|` in an or-pattern.
     /// Accepts a normal pattern RHS, or a bare unit PascalCase Ident (E0367).
+    /// An ALL_CAPS constant is a value, never a bare variant.
     fn try_or_pattern_alt(&mut self, allow_named_fields: bool) -> Result<Option<Pattern>, Diagnostic> {
         if let Some(alt) = self.try_pattern_rhs(allow_named_fields)? {
             return Ok(Some(alt));
@@ -1017,7 +1021,7 @@ impl<'a> Parser<'a> {
         let TokKind::Ident(name) = &self.peek().kind else {
             return Ok(None);
         };
-        if !name.chars().next().is_some_and(|c| c.is_uppercase()) {
+        if !name.chars().next().is_some_and(|c| c.is_uppercase()) || Syntax::is_constant_name(name) {
             return Ok(None);
         }
         if matches!(

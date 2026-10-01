@@ -34,7 +34,7 @@ pub fn parse(text: String) -> [DataTree] EncodingError! {
 }
 
 /// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
-pub fn to_string(rows: [DataTree]) -> String {
+pub fn to_string(rows: [DataTree]) -> String Never! {
     out := ""
     loop row in rows -> out = "{out}{json.to_string(row)}\n"
     out
@@ -64,16 +64,16 @@ pub struct JSONLReader {
 pub struct JSONLWriter {
     pub parts: [String]
 
-    pub fn write(&self, value: DataTree) { &self.parts.push(json.to_string(value)) }
+    pub fn write(&self, value: DataTree) Never! { &self.parts.push(json.to_string(value)) }
 
-    pub fn to_string(self) -> String {
+    pub fn to_string(self) -> String Never! {
         out := ""
         loop row in self.parts -> out = "{out}{row}\n"
         out
     }
 }
 
-pub fn reader(text: String) -> JSONLReader {
+pub fn reader(text: String) -> JSONLReader Never! {
     rows := [String]{}
     lines := [Int]{}
     offsets := [Int]{}
@@ -85,13 +85,13 @@ pub fn reader(text: String) -> JSONLReader {
     {rows: rows, lines: lines, offsets: offsets, index: 0, records_read: 0}
 }
 
-pub fn writer() -> JSONLWriter { {parts: [String]{}} }
+pub fn writer() -> JSONLWriter Never! { {parts: [String]{}} }
 
 pub fn loads(text: String) -> [DataTree] EncodingError! { parse(text) }
 
-pub fn dumps(rows: [DataTree]) -> String { to_string(rows) }
+pub fn dumps(rows: [DataTree]) -> String Never! { to_string(rows) }
 
-pub fn count_rows(text: String) -> Int {
+pub fn count_rows(text: String) -> Int Never! {
     n := 0
     loop record in records_of(text) {
         if !is_blank(record.text) -> n += 1
@@ -99,7 +99,7 @@ pub fn count_rows(text: String) -> Int {
     n
 }
 
-pub fn append_line(text: String, value: DataTree) -> String {
+pub fn append_line(text: String, value: DataTree) -> String Never! {
     if text.bytes().len() == 0 -> return "{json.to_string(value)}\n"
     last :: text.bytes()[text.bytes().len() - 1]
     if last == (U8{10}) -> return "{text}{json.to_string(value)}\n"

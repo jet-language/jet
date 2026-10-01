@@ -223,6 +223,19 @@ and #816 is the Jet-built compiler full-suite closeout. The policy-family
 homes #808–#813 and the boundary inventory #218 cannot substitute for those
 bootstrap and fixed-point proofs.
 
+Behavioral parity between any two compiler binaries (#670) is a separate,
+reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
+runs the golden, UI and differential corpora through a pinned `--reference`
+and a `--candidate` compiler under deterministic roots and a scrubbed
+environment. It compares panics, exit status, diagnostics, stdout, stderr and
+side-effect files phase by phase (`check`, `run`, `run --interpret`, `build`)
+and reports the first divergence with its case, phase, expected and candidate
+values and a repro directory. A missing binary or tool exits 2 and is never a
+match. `--canary` runs the checked cases in `tests/compiler-diff/` through a
+wrapper that plants known divergences, proving detection without editing
+source. The comparator claims behavior only; artifact identity stays with
+#815.
+
 
 ### Machine-wide artifact store
 
@@ -876,20 +889,35 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   depend on either responsibility. Another backend replaces the codegen and
   binary-build edges without changing the front end.
 - **R8 — Small, self-contained binaries.** The root binary build path in
-  `Source/CmdCompile.rs` calls `rustc` directly with explicit profile flags,
-  `strip=symbols`, and thin LTO for optimized AOT. Its shared native-linker
+  `Source/CmdCompile.rs` calls `rustc` directly with explicit profile flags and
+  `strip=symbols` for optimized AOT: the default `jet build` profile is
+  opt-level 2 with `lto=off`, and release profiles add ThinLTO across the
+  program and its runtime rlib. Its shared native-linker
   selector honors explicit `RUSTC_LINKER`/`CC`, then chooses mold or lld through
   the C driver before falling back to the system linker. The selected
   driver/backend identity is part of native cache and timing evidence.
-  It links content-addressed `jet_runtime` and reachable `jet_runtime_core`
-  rlibs, so rustc does not compile the fixed embedded runtime or an unused Core
-  closure for each program. The object keys include the exact emitted/exported
-  source, the runtime dependency key, rustc identity, target and profile flags,
-  and explicit profile environment. The final native key carries the same
-  relevant runtime/Core digests; it does not read or hash the compiler binary.
-  A verified warm object is reused; a malformed, corrupt, or rejected object
-  falls back to the complete inline program, and the shared cache remains
-  bounded.
+  It links one content-addressed `jet_runtime` rlib built from the fixed
+  runtime block plus the runtime-part-selected Core block (the two blocks
+  reference each other, so they are one crate), so rustc does not re-check or
+  re-codegen the embedded runtime for each program; generic runtime items stay
+  in the rlib and are monomorphized in the program crate. The rlib key covers
+  the exact emitted/exported source (which carries the edition, OS, test
+  harness, runtime parts and devtools policy, never user source), rustc
+  identity (plus the host CPU's `--print cfg` features when the flags select
+  `target-cpu=native`), target and profile flags, and explicit profile
+  environment, so all programs with the same build facts share one rlib.
+  Packaging (`Tools/packaging/prebuild-runtime.sh`, run by the flake) ships the
+  default and release rlibs for the default build facts as
+  `jet-runtime/<key>/libjet_runtime.rlib` beside the `jet` executable; a key
+  found there is linked directly, so a fresh machine with an empty store
+  compiles only the user crate. Other keys build on demand into the store.
+  The final native key
+  carries the same relevant runtime/Core digests; it does not read or hash the
+  compiler binary. A verified warm object is reused; a malformed, corrupt, or
+  rejected object falls back to the complete inline program, and the shared
+  cache remains bounded. LTO profiles (release ThinLTO, `--small` fat LTO)
+  still optimize the reachable runtime bitcode at the final link; the rlib
+  removes the per-program front-end and runtime codegen cost.
   The linker keeps only what the program uses ("only link what's needed"). The
   output is one self-contained native binary. Rust's std links a baseline
   (low-hundreds-of-KB), accepted as the cost of a beginner-friendly std-backed
@@ -1029,8 +1057,8 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.time` | Mixed | `Prelude/Core/Time.rs` owns civil, duration, and zone rules; clock reads remain host effects and every engine marshals the same Prelude symbols. |
   | `core.net.tls` | Host | Native TLS boundary; comptime rejects unavailable calls. |
   | `core.ui` | Intrinsic | `CtValue` constructors and field projection only. |
-  | `core.ui.box() needs UiNode children` | Intrinsic | UI node-shape validation stays with the intrinsic constructor path. |
-  | `core.ui.box() needs [UiNode]` | Intrinsic | UI list validation stays with the intrinsic constructor path. |
+  | `core.ui.box() needs UINode children` | Intrinsic | UI node-shape validation stays with the intrinsic constructor path. |
+  | `core.ui.box() needs [UINode]` | Intrinsic | UI list validation stays with the intrinsic constructor path. |
   | `core.ui.node_role(): missing role` | Intrinsic | UI role validation stays with the intrinsic constructor path. |
   | `core.net.url.data: first argument must be a Mime` | Kernel | URL data validation stays with the shared URL/MIME kernel. |
   | `core.net.url.data: mime.sub` | Kernel | URL MIME field validation stays with the shared kernel. |

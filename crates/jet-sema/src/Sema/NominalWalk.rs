@@ -18,9 +18,11 @@
 //! before. When a whole query ends neutral, no problem is reachable from any
 //! instantiation it entered, so those instantiations are neutral outright;
 //! while body checking runs, the registry is final and its memo keeps them
-//! for every later query.
+//! for every later query. Parallel body checkers share one memo: a row only
+//! records a proven answer, so the order in which checkers add rows cannot
+//! change any answer.
 
-use std::cell::RefCell;
+use std::sync::{PoisonError, RwLock};
 use std::collections::{HashMap, HashSet};
 
 use super::TypeRegistry;
@@ -55,7 +57,7 @@ struct NominalMemo {
 /// still change the registered types, so no answer can go stale. A copy of a
 /// registry may be changed afterwards, so it starts closed too.
 #[derive(Default)]
-pub(crate) struct NominalMemoCell(RefCell<Option<NominalMemo>>);
+pub(crate) struct NominalMemoCell(RwLock<Option<NominalMemo>>);
 
 impl Clone for NominalMemoCell {
     fn clone(&self) -> Self {
@@ -148,7 +150,11 @@ impl TypeRegistry {
     /// the registry shared for the whole scope, so no type can change
     /// underneath a remembered answer.
     pub(crate) fn open_nominal_memo(&self) -> NominalMemoScope<'_> {
-        let mut memo = self.nominal_memo.0.borrow_mut();
+        let mut memo = self
+            .nominal_memo
+            .0
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
         let opened = memo.is_none();
         if opened {
             *memo = Some(NominalMemo::default());
@@ -163,7 +169,8 @@ impl TypeRegistry {
     pub(crate) fn nominal_memo_holds(&self, query: NominalQuery, key: &str) -> bool {
         self.nominal_memo
             .0
-            .borrow()
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .and_then(|memo| memo.neutral.get(&query))
             .is_some_and(|neutral| neutral.contains(key))
@@ -176,7 +183,13 @@ impl TypeRegistry {
         query: NominalQuery,
         keys: impl IntoIterator<Item = String>,
     ) {
-        if let Some(memo) = self.nominal_memo.0.borrow_mut().as_mut() {
+        if let Some(memo) = self
+            .nominal_memo
+            .0
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
             memo.neutral.entry(query).or_default().extend(keys);
         }
     }
@@ -185,7 +198,12 @@ impl TypeRegistry {
 impl Drop for NominalMemoScope<'_> {
     fn drop(&mut self) {
         if self.opened {
-            *self.registry.nominal_memo.0.borrow_mut() = None;
+            *self
+                .registry
+                .nominal_memo
+                .0
+                .write()
+                .unwrap_or_else(PoisonError::into_inner) = None;
         }
     }
 }

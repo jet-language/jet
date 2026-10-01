@@ -4,6 +4,89 @@
 // is intentionally the only producer of TDeclarationFacts: TIR consumers get
 // resolved types, callable keys, storage/layout markers, and recursive edges
 // without looking back through raw AST declarations or guessing defaults.
+use jet_foundation.[
+    AccessConvention,
+    ConstDef,
+    CtKey,
+    CtValue,
+    Diagnostic,
+    EffectRowEntry,
+    EnumDef,
+    Expr,
+    ExprField,
+    ExprPair,
+    Field,
+    Func,
+    ImplDef,
+    Item,
+    LayoutFacts,
+    Marker,
+    NamedSpan,
+    OperatorMarker,
+    Param,
+    ParamZone,
+    Span,
+    StructDef,
+    StructLayout,
+    SymbolID,
+    SymbolKind,
+    TAssociatedTypeDecl,
+    TAssociatedTypeValue,
+    TCEnumTag,
+    TCLIBinding,
+    TComptimeEnumArg,
+    TComptimeField,
+    TComptimeKey,
+    TComptimeKeyField,
+    TComptimeMapEntry,
+    TComptimeReport,
+    TComptimeValue,
+    TConstantDef,
+    TCoreBuiltinOwner,
+    TDeclarationFacts,
+    TDeclarationOwnership,
+    TDeclarationParam,
+    TEffectSpan,
+    TFailureCarrier,
+    TField,
+    TGenericParam,
+    TImplDef,
+    TIntegerRange,
+    TOperatorMarker,
+    TSerdeAttribute,
+    TSerdeAttributeKind,
+    TSerdeCodec,
+    TShapeFieldNames,
+    TStructLayout,
+    TTargetOS,
+    TTraitDef,
+    TTraitMethod,
+    TTypeDef,
+    TTypeDefKind,
+    TVariant,
+    TVariantPayload,
+    TVisibility,
+    TargetLayoutEngine,
+    TargetLayoutNameResolution,
+    TargetLayoutQualifiedItem,
+    TraitDef,
+    TraitImplBlock,
+    TraitMethodSig,
+    Type,
+    TypeParam,
+    UnOp,
+    UnitFamilyDef,
+    Variant,
+    VariantField,
+    VariantPayload,
+    expr_span,
+    jet_target_layout_engine_with_registry,
+    jet_target_layout_enum_c_tag,
+    jet_target_layout_enum_facts_in_module,
+    jet_target_layout_from_machine,
+    type_identity_equal,
+    type_name,
+]
 
 fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String Never! {
     if module_row.module_identity == "" -> name else -> "{module_row.module_identity}::{name}"
@@ -96,15 +179,15 @@ fn sema_checked_shape_names(name: String) -> TShapeFieldNames Never! {
         toml: None,
         yaml: None,
         xml: None,
-        args: &name.replace("_", "-"),
-        env: sema_checked_ascii_upper(&name.replace("-", "_")),
+        args: name.replace("_", "-"),
+        env: sema_checked_ascii_upper(name.replace("-", "_")),
         db: None,
         layout: None,
     }
 }
 
 fn sema_checked_field_shape_names(definition: StructDef, field: Field) -> TShapeFieldNames Never! {
-    style := None
+    style := String?{None}
     rename_all :: sema_checked_marker(definition.serde_markers, "RenameAll")
     if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
     rename :: sema_checked_marker(field.serde_markers, "Rename")
@@ -343,7 +426,7 @@ fn sema_checked_foreign_boundary(input: SemaForeignBoundaryInput, library: Strin
         &diagnostics.push(sema_checked_foreign_provider_error(span, "foreign boundary carrier names the wrong library", "a boundary record must belong to the C library whose declarations it checks", "retain the provider library identity without rewriting it"))
         valid = false
     }
-    if !sema_checked_foreign_list_has(input.effects.split(";"), input.effect_root) {
+    if !sema_checked_foreign_list_has(input.effects.split(";").to_list(), input.effect_root) {
         &diagnostics.push(sema_checked_foreign_provider_error(span, "foreign boundary carrier narrowed its effect root", "the provider effect set must retain its descriptor-owned root", "preserve the descriptor-owned effect root in the boundary record"))
         valid = false
     }
@@ -464,7 +547,7 @@ fn sema_checked_foreign_provider(input: SemaForeignProviderInput, diagnostics: &
         }
         &overrides.push(SemaCheckedForeignOverlayOverride{generated_symbol: override.generated_symbol, overlay_symbol: override.overlay_symbol})
     }
-    boundary := None
+    boundary := SemaCheckedForeignBoundary?{None}
     if input.boundary == .Val(value) {
         boundary = sema_checked_foreign_boundary(value, input.library, input.source_span, &diagnostics)
         if boundary == {
@@ -519,7 +602,7 @@ pub struct SemaCheckedForeignParam {
 // rows. They retain ABI/lifecycle provenance without exposing raw ExternFn
 // payloads to downstream lowering.
 pub struct SemaCheckedForeignFunction {
-    pub symbol_id: SymbolId
+    pub symbol_id: SymbolID
     pub key: String
     pub module_identity: String
     pub module_name: String
@@ -549,8 +632,8 @@ pub struct SemaCheckedForeignFunction {
 }
 
 fn sema_checked_foreign_key(module_identity: String, name: String) -> String Never! {
-    if module_identity == "" -> return name
-    if name == "" -> return module_identity
+    if module_identity == "" -> return ~name
+    if name == "" -> return ~module_identity
     "{module_identity}::{name}"
 }
 
@@ -587,7 +670,7 @@ fn sema_checked_foreign_owner(owner: SemaRegistrationForeignOwner) -> SemaChecke
     if owner == SemaRegistrationForeignOwner.CModule -> SemaCheckedForeignOwner.CModule else -> SemaCheckedForeignOwner.ExternRust
 }
 
-fn sema_checked_foreign_abi_name(abi: SemaRegistrationCallableAbi) -> String Never! {
+fn sema_checked_foreign_abi_name(abi: SemaRegistrationCallableABI) -> String Never! {
     abi.c_abi_name ?? "C"
 }
 
@@ -640,7 +723,7 @@ fn sema_checked_foreign_nominal_type(graph: SemaRegistrationGraph, nominal: Sema
     &next_seen.push(key)
     if nominal.source == {
         .ForeignHandle(facts) -> c_abi && sema_checked_foreign_handle_source_matches(handles, facts)
-        .SourceAst(item) -> if item == {
+        .SourceAST(item) -> if item == {
             .Struct(definition) -> {
                 if c_abi && !sema_checked_foreign_struct_c_layout(definition.layout) -> return false
                 loop field in definition.fields {
@@ -745,7 +828,7 @@ fn sema_checked_foreign_bridge_handle_type(graph: SemaRegistrationGraph, module_
     if nominal.kind != SemaRegistrationNominalKind.ForeignHandle -> return false
     if nominal.source == {
         .ForeignHandle(facts) -> sema_checked_foreign_handle_source_matches(handles, facts)
-        .SourceAst(_) -> false
+        .SourceAST(_) -> false
     }
 }
 
@@ -963,7 +1046,7 @@ fn sema_checked_foreign_close(graph: SemaRegistrationGraph, module_row: SemaRegi
         &diagnostics.push(sema_error("E0702", close.span, "`#Close({close.name})` is attached to `{registered.declaration.name}`", "a close function belongs to a returned foreign handle", "remove `#Close`, or give the foreign function a handle return type"))
         return false
     }
-    function_candidate := None
+    function_candidate := SemaRegistrationFunction?{None}
     loop function in module_row.functions {
         if function.declaration.name == close.name {
             function_candidate = Val(function)
@@ -976,7 +1059,7 @@ fn sema_checked_foreign_close(graph: SemaRegistrationGraph, module_row: SemaRegi
         &diagnostics.push(sema_error("E0702", candidate_value.declaration.name_span, "foreign close function `{close.name}` has the wrong signature", "`#Close` runs the named function exactly once by consuming the returned handle", "declare one `^` parameter with the returned handle type and no return value"))
         return false
     }
-    candidate := None
+    candidate := SemaRegistrationForeignFunction?{None}
     loop function in module_row.foreign_functions {
         if function.declaration.name == close.name {
             candidate = Val(function)
@@ -1011,7 +1094,7 @@ fn sema_checked_foreign_close(graph: SemaRegistrationGraph, module_row: SemaRegi
 fn sema_checked_foreign_undo(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationForeignFunction, diagnostics: &[Diagnostic]) -> Bool {
     inverse :: registered.declaration.undo ?? return true
     inverse_params := [SemaRegistrationParameter]{}
-    inverse_return := None
+    inverse_return := Type?{None}
     found := false
     loop function in module_row.functions {
         if function.declaration.name == inverse.name {
@@ -1133,7 +1216,7 @@ fn sema_checked_inline_validation(module_row: SemaRegistrationModule, registered
 fn sema_checked_inline_undo(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction, diagnostics: &[Diagnostic]) -> Bool {
     inverse :: registered.declaration.undo ?? return true
     inverse_params := [SemaRegistrationParameter]{}
-    inverse_return := None
+    inverse_return := Type?{None}
     found := false
     loop function in module_row.functions {
         if function.declaration.name == inverse.name {
@@ -1185,7 +1268,7 @@ fn sema_checked_foreign_handle_key_for_type(graph: SemaRegistrationGraph, module
     nominal :: sema_type_resolve_nominal(graph, qualified, module_identity) ?? return None
     if nominal.source == {
         .ForeignHandle(facts) -> if sema_checked_foreign_handle_source_matches(provider.handles, facts) -> Val("c::{provider.module_library}::{facts.jet_name}") else -> None
-        .SourceAst(_) -> None
+        .SourceAST(_) -> None
     }
 }
 
@@ -1235,7 +1318,7 @@ fn sema_checked_foreign_boundary_effect(registered: SemaRegistrationForeignFunct
         if provider.module_identity != registered.symbol.module_name -> next
         if provider.boundary == .Val(boundary) {
             if registered.abi.foreign_effect_root == .Val(root) {
-                if root != boundary.effect_root || !sema_checked_foreign_list_has(boundary.effects.split(";"), root) {
+                if root != boundary.effect_root || !sema_checked_foreign_list_has(boundary.effects.split(";").to_list(), root) {
                     &diagnostics.push(sema_checked_foreign_provider_error(registered.declaration.span, "foreign function effect root disagrees with its provider boundary", "generated C functions must retain the descriptor-owned effect root", "preserve the provider boundary effect root on the foreign declaration"))
                     return false
                 }
@@ -1399,7 +1482,7 @@ fn sema_checked_trait_method_key(module_row: SemaRegistrationModule, trait_name:
 
 fn sema_checked_trait_method(graph: SemaRegistrationGraph, method: SemaRegistrationTraitMethod, module_row: SemaRegistrationModule, trait_name: String) -> TTraitMethod Never! {
     declaration :: method.declaration
-    self_access := None
+    self_access := AccessConvention?{None}
     parameter_start := 0
     if declaration.params.len() > 0 && declaration.params[0].name == "self" {
         self_access = Val(declaration.params[0].convention)
@@ -1568,7 +1651,7 @@ fn sema_checked_restore_wire_word(word: String) -> String Never! {
         "mime" -> "MIME"
         else -> {
             bytes := word.bytes()
-            if bytes.len() == 0 -> return word
+            if bytes.len() == 0 -> return ~word
             code :: Int.from_u8(bytes[0])
             if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
             rest :: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
@@ -1580,12 +1663,12 @@ fn sema_checked_restore_wire_word(word: String) -> String Never! {
 fn sema_checked_wire_case(style: String?, name: String) -> String Never! {
     style_value :: style ?? return name
     words :: sema_checked_wire_words(name)
-    if words.len() == 0 -> return name
+    if words.len() == 0 -> return ~name
     if style_value == {
         "kebab" | "snake" | "screaming" -> {
             rendered := [String]{}
             loop word in words {
-                &rendered.push(if style_value == "screaming" -> sema_checked_ascii_upper(word) else -> sema_checked_ascii_lower(word))
+                if style_value == "screaming" -> &rendered.push(sema_checked_ascii_upper(word)) else -> &rendered.push(sema_checked_ascii_lower(word))
             }
             rendered.join(if style_value == "kebab" -> "-" else -> "_")
         }
@@ -1606,7 +1689,10 @@ fn sema_checked_wire_case(style: String?, name: String) -> String Never! {
 fn sema_checked_variant_wire_name(variant: Variant, style: String?) -> String Never! {
     rename :: sema_checked_marker(variant.serde_markers, "Rename")
     if rename == {
-        .Val(marker) -> sema_checked_marker_text_label(marker, "json") ?? sema_checked_marker_text(marker) ?? variant.name
+        .Val(marker) -> {
+            if sema_checked_marker_text_label(marker, "json") == .Val(label) -> return label
+            sema_checked_marker_text(marker) ?? variant.name
+        }
         else -> sema_checked_wire_case(style, variant.name)
     }
 }
@@ -1728,7 +1814,7 @@ fn sema_checked_variant_payload(graph: SemaRegistrationGraph, payload: VariantPa
 
 fn sema_checked_variants(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: EnumDef, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> [TVariant] {
     variants := [TVariant]{}
-    style := None
+    style := String?{None}
     rename_all :: sema_checked_marker(definition.serde_markers, "RenameAll")
     if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
     if !sema_checked_wire_style_valid(style) && rename_all == .Val(marker) {
@@ -1781,8 +1867,8 @@ fn sema_checked_box_named(graph: SemaRegistrationGraph, owner: String, edge: Str
     next_stack := stack
     &next_stack.push(nominal.symbol.id.key)
     next_caller :: nominal.symbol.module_name
-    definition :: sema_registration_nominal_source_item(nominal.source) ?? return
-    if definition == {
+    item :: sema_registration_nominal_source_item(nominal.source) ?? return
+    if item == {
         .Struct(definition) -> {
             loop field in definition.fields {
                 sema_checked_box_walk(graph, nominal.symbol.name, field.name, field.ty, next_stack, next_caller, &boxed)
@@ -1823,7 +1909,7 @@ pub fn sema_checked_type_has_boxed_edge(definition: TTypeDef, edge: String) -> B
 fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, params: [SemaRegistrationGenericParam], diagnostics: &[Diagnostic]) -> [TGenericParam] {
     result := [TGenericParam]{}
     loop parameter in params {
-        bounds := [SymbolId]{}
+        bounds := [SymbolID]{}
         loop bound in parameter.bounds {
             symbol :: sema_type_graph_lookup_symbol(graph, module_row.module_identity, bound) ?? {
                 if graph.complete -> &diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not registered", "checked generic declarations need a trait identity", "import or declare the trait before using it as a bound"))
@@ -1883,19 +1969,20 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     if nominal.kind == SemaRegistrationNominalKind.Trait -> return None
     name :: nominal.symbol.name
     generic_params :: sema_checked_generic_params(graph, module_row, nominal.generic_params, &diagnostics)
-    layout := None
-    c_layout_tag := None
-    enum_layout := None
+    layout := TStructLayout?{None}
+    c_layout_tag := TCEnumTag?{None}
+    enum_layout := LayoutFacts?{None}
     serde := [TSerdeAttribute]{}
     cli_bindings := [TCLIBinding]{}
     boxed_edges := sema_checked_boxed_edges(graph, module_row, definition)
     if nominal.compiler_owned -> boxed_edges = [String]{}
+    derives := [String]{}
     auto_derive_default := false
     published_schema := false
     single_use := false
     must_use := false
     ownership := TDeclarationOwnership.Owned
-    kind := None
+    kind := TTypeDefKind?{None}
     if definition == {
         .Struct(value) -> {
             derives = sema_checked_derive_names(value.derives)
@@ -1963,6 +2050,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, module_row: SemaRegistrat
         cli: None,
         ownership: ownership,
         compiler_builtin: sema_registration_compiler_builtin_marker(nominal),
+        boxed_edges: boxed_edges,
         kind: type_kind,
     }
 }
@@ -2007,6 +2095,7 @@ fn sema_checked_unit_member_defs(module_row: SemaRegistrationModule, definition:
                 public: definition.is_pub,
                 package_public: definition.is_package_pub,
                 generic_params: [TGenericParam]{},
+                boxed_edges: [String]{},
                 derives: derives,
                 auto_derive_default: false,
                 auto_printable: false,
@@ -2049,12 +2138,12 @@ fn sema_checked_nested_impl_key(module_row: SemaRegistrationModule, type_name: S
     "{module_row.module_identity}::{type_name}::{block.trait_name}"
 }
 
-fn sema_checked_target_os(target: String?) -> TTargetOs? {
+fn sema_checked_target_os(target: String?) -> TTargetOS? {
     value :: target ?? return None
     if value == {
-        "linux" -> Val(TTargetOs.Linux)
-        "macos" | "mac_os" -> Val(TTargetOs.MacOS)
-        "windows" -> Val(TTargetOs.Windows)
+        "linux" -> Val(TTargetOS.Linux)
+        "macos" | "mac_os" -> Val(TTargetOS.MacOS)
+        "windows" -> Val(TTargetOS.Windows)
         else -> None
     }
 }
@@ -2122,7 +2211,7 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
     }
     trait_row :: sema_checked_trait_nominal(graph, module_row.module_identity, trait_name) ?? return
     loop expected in trait_row.trait_methods {
-        found := None
+        found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {
             if actual.declaration.name == expected.declaration.name {
                 found = Val(actual)
@@ -2179,7 +2268,7 @@ fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRe
     }
 }
 
-fn sema_checked_const_char(text: String) -> Int? {
+pub fn sema_checked_const_char(text: String) -> Int? {
     bytes :: text.bytes()
     if bytes.len() == 0 -> return None
     first :: Int.from_u8(bytes[0])
@@ -2225,18 +2314,18 @@ fn sema_checked_comptime_key(key: CtKey) -> TComptimeKey? {
     }
 }
 
-fn sema_checked_comptime(value: CtValue) -> TComptimeValue? {
-    if value == {
+fn sema_checked_comptime(source: CtValue) -> TComptimeValue? {
+    if source == {
         .Int(number) -> Val(TComptimeValue.Int{value: number})
-        .Float(number) -> if number == {
-            .F32(number) -> Val(TComptimeValue.Float{value: number, bits: 32})
-            .F64(number) -> Val(TComptimeValue.Float{value: number, bits: 64})
+        .Float(float_value) -> if float_value == {
+            .F32(bits32) -> Val(TComptimeValue.Float{value: bits32, bits: 32})
+            .F64(bits64) -> Val(TComptimeValue.Float{value: bits64, bits: 64})
         }
-        .Bool(value) -> Val(TComptimeValue.Bool{value: value})
-        .Char(value) -> sema_checked_const_char("{value}").map((code) -> TComptimeValue.Char{value: code})
-        .Str(value) -> Val(TComptimeValue.String{value: value})
-        .BigInt(value) -> Val(TComptimeValue.BigInt{decimal: value})
-        .Bytes(value) -> Val(TComptimeValue.Bytes{value: value})
+        .Bool(flag) -> Val(TComptimeValue.Bool{value: flag})
+        .Char(character) -> sema_checked_const_char("{character}").map((code) -> TComptimeValue.Char{value: code})
+        .Str(text) -> Val(TComptimeValue.String{value: text})
+        .BigInt(decimal) -> Val(TComptimeValue.BigInt{decimal: decimal})
+        .Bytes(bytes) -> Val(TComptimeValue.Bytes{value: bytes})
         .List(values) -> {
             result := [TComptimeValue]{}
             loop item in values {
@@ -2324,7 +2413,7 @@ fn sema_checked_runtime_tvalue_supported(definition: ConstDef, value: TComptimeV
     if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
     if !definition.mutable && !definition.is_persist -> return true
     if value == {
-        .Int(_) | .Float(_) | .Bool(_) -> true
+        .Int(_) | .Float(_, _) | .Bool(_) -> true
         .Char(_) | .String(_) -> !definition.mutable
         .List(values) -> {
             if definition.mutable -> return false
@@ -2345,7 +2434,7 @@ fn sema_checked_constant_from_value(graph: SemaRegistrationGraph, module_row: Se
         &diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
-    ty :: constant.declaration.ty ?? value.ty
+    ty := constant.declaration.ty ?? value.ty
     if ty == (Type.Named{name: ""}) {
         ty = sema_checked_constant_type(constant.declaration) ?? {
             &diagnostics.push(sema_error("E0109", constant.declaration.span, "this constant has no checked type", "constant declarations need a stable value type", "provide a supported constant literal"))
@@ -2381,7 +2470,7 @@ fn sema_checked_module_value_error(definition: ConstDef) -> Diagnostic {
     if definition.mutable || definition.is_persist {
         return sema_error("E0622", expr_span(definition.value), "a module binding's value must be a literal", "a mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `fn run`", "use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant")
     }
-    sema_error("E0622", expr_span(definition.value), "a module binding's value must be a literal", "a module constant is folded once while building, so its value must be literal data: numbers, text, typed literals, and enum cases", "write the value as literal data, such as `Rgb{{r: U8{{0}}, g: U8{{0}}, b: U8{{0}}}}`, prepare it while building with `NAME :: prep {{ value }}`, or compute it inside a function")
+    sema_error("E0622", expr_span(definition.value), "a module binding's value must be a literal", "a module constant is folded once while building, so its value must be literal data: numbers, text, typed literals, and enum cases", "write the value as literal data, such as `RGB{{r: U8{{0}}, g: U8{{0}}, b: U8{{0}}}}`, prepare it while building with `NAME :: prep {{ value }}`, or compute it inside a function")
 }
 
 // Literal data only: no calls, operators, or name reads. An uppercase
@@ -2595,7 +2684,7 @@ pub fn sema_registration_check_declarations(graph: SemaRegistrationGraph, module
 fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue]) -> TDeclarationFacts {
     if module_index < 0 || module_index >= graph.modules.len() -> return TDeclarationFacts{type_defs: [TTypeDef]{}, traits: [TTraitDef]{}, impls: [TImplDef]{}, constants: [TConstantDef]{}, core_builtin_owners: [TCoreBuiltinOwner]{}}
     module_row :: graph.modules[module_index]
-    layout_engine := None
+    layout_engine := TargetLayoutEngine?{None}
     type_defs := [TTypeDef]{}
     traits := [TTraitDef]{}
     impls := [TImplDef]{}

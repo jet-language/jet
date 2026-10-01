@@ -2572,14 +2572,16 @@ impl Type {
     }
 
     /// Numeric expression join. One operand must itself be the wider target;
-    /// Jet does not search for a third numeric type that could hold both.
+    /// Jet does not search for a third numeric type that could hold both. A
+    /// lossless direction wins over a checked one in either operand order, so
+    /// `cp & 63` with `63: U8` joins at `Int` instead of narrowing `cp`.
     pub fn numeric_join(&self, other: &Type) -> Option<Type> {
-        if self.numeric_widening_to(other).is_some() {
-            Some(other.clone())
-        } else if other.numeric_widening_to(self).is_some() {
-            Some(self.clone())
-        } else {
-            None
+        match (self.numeric_widening_to(other), other.numeric_widening_to(self)) {
+            (Some(false), _) => Some(other.clone()),
+            (_, Some(false)) => Some(self.clone()),
+            (Some(true), _) => Some(other.clone()),
+            (_, Some(true)) => Some(self.clone()),
+            (None, None) => None,
         }
     }
 

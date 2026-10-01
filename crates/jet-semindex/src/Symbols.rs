@@ -11,8 +11,8 @@ use jet_foundation::{Collections, AST};
 
 use crate::Build::{function_parameter_parts, SymKind, SymbolDB};
 use crate::Types::{
-    CallableFactAvailability, CompilerFact, MemberFact, MemberOrigin, SourceSpan, SymbolDef,
-    TraitContractFact,
+    CallableFactAvailability, CompilerFact, MemberFact, MemberOrigin, SourceSpan,
+    StructuralNode, SymbolDef, TraitContractFact,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,6 +449,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         .iter()
         .map(|module| (module.display.as_str(), module.source.as_str()))
         .collect();
+    let lexical_scopes = LexicalScopeIndex::new(db);
 
     for def in &db.defs {
         // Import bindings have richer source/import provenance below. Their
@@ -533,8 +534,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
             }
         }
         let lexical_scope = if matches!(def.kind, SymKind::Local { .. } | SymKind::Param { .. }) {
-            lexical_scope_for_def(
-                db,
+            lexical_scopes.scope(
                 &def.module_path,
                 def.def_span.into(),
                 matches!(def.kind, SymKind::Param { .. }),
@@ -1003,69 +1003,159 @@ fn type_leaf(name: &str) -> &str {
     name.rsplit_once('.').map_or(name, |(_, leaf)| leaf)
 }
 
-fn lexical_scope_for_def(
-    db: &SymbolDB,
-    module_path: &str,
-    def_span: SourceSpan,
-    is_param: bool,
-) -> Option<SemanticLexicalScope> {
-    let nodes = db
-        .nodes
-        .iter()
-        .filter(|node| node.module_path == module_path)
-        .collect::<Vec<_>>();
-    let mut current = nodes
-        .iter()
-        .filter(|node| node.span.start <= def_span.start && def_span.end <= node.span.end)
-        .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
-        .map(|node| node.id)?;
-    let initial = current;
-    let mut innermost = nodes
-        .iter()
-        .find(|node| node.parent == Some(initial) && is_lexical_slot(&node.slot))
-        .map(|node| (initial, node.slot.clone()));
-    let mut depth = usize::from(innermost.is_some());
-    loop {
-        let node = db.nodes.get(current)?;
-        if is_lexical_slot(&node.slot) {
-            depth += 1;
-            if innermost.is_none() {
-                innermost = Some((node.parent?, node.slot.clone()));
+/// Structural lookups behind the lexical scope of each local and parameter,
+/// built once per symbol index. A scan of every structural node per
+/// definition made the index quadratic in program size; here each definition
+/// costs the number of nodes that overlap its start.
+struct LexicalScopeIndex<'a> {
+    db: &'a SymbolDB,
+    /// (module, def start, def end) to the smallest enclosing node and the
+    /// smallest enclosing item node. Ties go to the earlier node.
+    enclosing: HashMap<(&'a str, usize, usize), (Option<usize>, Option<usize>)>,
+    /// (module, parent) to the parent's first child in a lexical slot.
+    first_lexical_child: HashMap<(&'a str, usize), &'a StructuralNode>,
+    /// (module, parent, slot) to the first matching slot boundary.
+    boundaries: HashMap<(&'a str, usize, &'a str), SourceSpan>,
+}
+
+impl<'a> LexicalScopeIndex<'a> {
+    fn new(db: &'a SymbolDB) -> Self {
+        let mut queries: HashMap<&'a str, Vec<(usize, usize)>> = HashMap::new();
+        for def in &db.defs {
+            if matches!(def.kind, SymKind::Local { .. } | SymKind::Param { .. }) {
+                let span: SourceSpan = def.def_span.into();
+                queries
+                    .entry(def.module_path.as_str())
+                    .or_default()
+                    .push((span.start, span.end));
             }
         }
-        let Some(parent) = node.parent else {
-            break;
-        };
-        current = parent;
+        let mut module_nodes: HashMap<&'a str, Vec<&'a StructuralNode>> = HashMap::new();
+        let mut first_lexical_child = HashMap::new();
+        for node in &db.nodes {
+            let module = node.module_path.as_str();
+            if !queries.contains_key(module) {
+                continue;
+            }
+            module_nodes.entry(module).or_default().push(node);
+            if let Some(parent) = node.parent {
+                if is_lexical_slot(&node.slot) {
+                    first_lexical_child.entry((module, parent)).or_insert(node);
+                }
+            }
+        }
+        let mut boundaries = HashMap::new();
+        for boundary in &db.slot_boundaries {
+            boundaries
+                .entry((
+                    boundary.module_path.as_str(),
+                    boundary.parent,
+                    boundary.slot.as_str(),
+                ))
+                .or_insert(boundary.span);
+        }
+        let mut enclosing = HashMap::new();
+        for (module, mut spans) in queries {
+            spans.sort_unstable();
+            spans.dedup();
+            let mut nodes = module_nodes.remove(module).unwrap_or_default();
+            // Stable sort: equal starts keep structural order.
+            nodes.sort_by_key(|node| node.span.start);
+            let mut next = 0;
+            // Nodes that start at or before the current definition and have
+            // not ended before it; definitions arrive in start order, so a
+            // node that ends before one can never enclose a later one.
+            let mut active: Vec<&StructuralNode> = Vec::new();
+            for (start, end) in spans {
+                while next < nodes.len() && nodes[next].span.start <= start {
+                    active.push(nodes[next]);
+                    next += 1;
+                }
+                active.retain(|node| node.span.end >= start);
+                let found = if end < start {
+                    // A reversed span can sit inside a node that ended
+                    // before its start; answer it from every module node.
+                    (
+                        smallest_enclosing(nodes.iter().copied(), start, end, false),
+                        smallest_enclosing(nodes.iter().copied(), start, end, true),
+                    )
+                } else {
+                    (
+                        smallest_enclosing(active.iter().copied(), start, end, false),
+                        smallest_enclosing(active.iter().copied(), start, end, true),
+                    )
+                };
+                enclosing.insert((module, start, end), found);
+            }
+        }
+        LexicalScopeIndex {
+            db,
+            enclosing,
+            first_lexical_child,
+            boundaries,
+        }
     }
-    let (parent, slot) = innermost.or_else(|| {
-        nodes
-            .iter()
-            .filter(|node| {
-                node.class == "item"
-                    && node.span.start <= def_span.start
-                    && def_span.end <= node.span.end
-            })
-            .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
-            .map(|node| (node.id, "body".to_string()))
-    })?;
-    let span = db
-        .slot_boundaries
-        .iter()
-        .find(|boundary| {
-            boundary.module_path == module_path
-                && boundary.parent == parent
-                && boundary.slot == slot
-        })?
-        .span;
-    Some(SemanticLexicalScope {
-        identity: format!("scope:{module_path}:{parent}:{slot}"),
-        structural_parent: parent,
-        structural_slot: slot,
-        span,
-        depth: depth.max(1),
-        declaration_offset: if is_param { 0 } else { def_span.start },
-    })
+
+    fn scope(
+        &self,
+        module_path: &str,
+        def_span: SourceSpan,
+        is_param: bool,
+    ) -> Option<SemanticLexicalScope> {
+        let (initial, item) = *self
+            .enclosing
+            .get(&(module_path, def_span.start, def_span.end))?;
+        let initial = initial?;
+        let mut current = initial;
+        let mut innermost = self
+            .first_lexical_child
+            .get(&(module_path, initial))
+            .map(|node| (initial, node.slot.clone()));
+        let mut depth = usize::from(innermost.is_some());
+        loop {
+            let node = self.db.nodes.get(current)?;
+            if is_lexical_slot(&node.slot) {
+                depth += 1;
+                if innermost.is_none() {
+                    innermost = Some((node.parent?, node.slot.clone()));
+                }
+            }
+            let Some(parent) = node.parent else {
+                break;
+            };
+            current = parent;
+        }
+        let (parent, slot) = innermost.or_else(|| item.map(|id| (id, "body".to_string())))?;
+        let span = *self
+            .boundaries
+            .get(&(module_path, parent, slot.as_str()))?;
+        Some(SemanticLexicalScope {
+            identity: format!("scope:{module_path}:{parent}:{slot}"),
+            structural_parent: parent,
+            structural_slot: slot,
+            span,
+            depth: depth.max(1),
+            declaration_offset: if is_param { 0 } else { def_span.start },
+        })
+    }
+}
+
+/// The smallest node (optionally only item nodes) whose span encloses
+/// `start..end`; among equal sizes, the earliest structural node.
+fn smallest_enclosing<'n>(
+    nodes: impl Iterator<Item = &'n StructuralNode>,
+    start: usize,
+    end: usize,
+    items_only: bool,
+) -> Option<usize> {
+    nodes
+        .filter(|node| {
+            (!items_only || node.class == "item")
+                && node.span.start <= start
+                && end <= node.span.end
+        })
+        .min_by_key(|node| (node.span.end.saturating_sub(node.span.start), node.id))
+        .map(|node| node.id)
 }
 
 fn is_lexical_slot(slot: &str) -> bool {

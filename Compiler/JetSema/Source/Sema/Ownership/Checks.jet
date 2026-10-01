@@ -10,6 +10,35 @@
 // Jet's `&` is AccessConvention.Write.  It grants a capability to change the
 // named place; it is not a Rust read borrow and is never silently downgraded
 // to Read.
+use jet_foundation.[
+    AccessConvention,
+    Binding,
+    CallArg,
+    Diagnostic,
+    Expr,
+    InternalTag,
+    LValue,
+    Lambda,
+    PlaceAccess,
+    Span,
+    Stmt,
+    Symbol,
+    SymbolKind,
+    TagMarker,
+    TextEdit,
+    Type,
+    TypeTupleField,
+    UnOp,
+    ViewProvenance,
+    ViewProvenanceEntry,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    diagnostic_with_edit,
+    diagnostic_with_label,
+    expr_span,
+]
 
 pub enum SemaOwnershipReferenceKind {
     Read
@@ -120,6 +149,9 @@ pub struct SemaOwnershipState {
     // found that a later use reached.
     pub share_known: [Span]
     pub share_found: [SemaOwnershipShareSite]
+    // D-SHAPE-PLACE1=A: `function#parameter` keys of list write parameters
+    // proven length-preserving (sema_fixed_length_write_params).
+    pub fixed_length_write_params: [String]
 }
 
 // D-CAP-RECEIVER1=D: a written `&`/`^` mark on a method receiver place.
@@ -164,6 +196,7 @@ pub fn sema_ownership_state_init() -> SemaOwnershipState Never! {
         receiver_frames: [SemaReceiverMarkFrame]{},
         share_known: [Span]{},
         share_found: [SemaOwnershipShareSite]{},
+        fixed_length_write_params: [String]{},
     }
 }
 
@@ -225,6 +258,7 @@ pub fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershi
     loop reference in source.references -> &snapshot.references.push(reference)
     loop site in source.share_known -> &snapshot.share_known.push(site)
     loop site in source.share_found -> &snapshot.share_found.push(site)
+    snapshot.fixed_length_write_params = source.fixed_length_write_params
     snapshot
 }
 
@@ -538,23 +572,23 @@ fn sema_ownership_typed_projection_facts(expr: Expr) -> [SemaOwnershipProjection
         .Ident(_, _) -> Val([SemaOwnershipProjection]{})
         .Paren(value, _) | .Place(value, _, _) | .Tainted(value, _, _) -> sema_ownership_typed_projection_facts(value)
         .Field(base, member, span) | .OptField(base, member, _, _, span) -> {
-            facts :: sema_ownership_typed_projection_facts(base) ?? return None
+            facts := sema_ownership_typed_projection_facts(base) ?? return None
             &facts.push(SemaOwnershipProjection.Field{name: member, span: span})
             Val(facts)
         }
         .Index(base, index, span, _) -> {
-            facts :: sema_ownership_typed_projection_facts(base) ?? return None
+            facts := sema_ownership_typed_projection_facts(base) ?? return None
             &facts.push(SemaOwnershipProjection.Index{value: sema_ownership_const_index(index), span: span})
             Val(facts)
         }
         .Slice(base, start, end, range, span) -> {
-            facts :: sema_ownership_typed_projection_facts(base) ?? return None
+            facts := sema_ownership_typed_projection_facts(base) ?? return None
             bounds :: sema_ownership_range_bounds(start, end, range)
             &facts.push(SemaOwnershipProjection.Range{start: bounds.start, end: bounds.end, span: span})
             Val(facts)
         }
         .Deref(value, span) | .RawOf(value, span) -> {
-            facts :: sema_ownership_typed_projection_facts(value) ?? return None
+            facts := sema_ownership_typed_projection_facts(value) ?? return None
             &facts.push(SemaOwnershipProjection.Deref{span: span})
             Val(facts)
         }
@@ -663,13 +697,13 @@ fn sema_ownership_typed_projection_overlap(left: SemaOwnershipProjection, right:
         }
         .Index(value, _) -> if right == {
             .Index(other, _) -> {
-                if value != None && other != None -> return (value) == (other)
+                if value != None && other != None -> return value == other
                 true
             }
             .Range(start, end, _) -> {
                 if value != None && start != None && end != None {
                     number := value
-                    if number < (start) || number > (end) -> return false
+                    if number < start || number > end -> return false
                 }
                 true
             }
@@ -679,13 +713,13 @@ fn sema_ownership_typed_projection_overlap(left: SemaOwnershipProjection, right:
             .Index(value, _) -> {
                 if value != None && start != None && end != None {
                     number := value
-                    if number < (start) || number > (end) -> return false
+                    if number < start || number > end -> return false
                 }
                 true
             }
             .Range(other_start, other_end, _) -> {
                 if start != None && end != None && other_start != None && other_end != None {
-                    if (end) < (other_start) || (other_end) < (start) -> return false
+                    if end < other_start || other_end < start -> return false
                 }
                 true
             }
@@ -932,7 +966,7 @@ fn sema_ownership_view_source_projection(projection: SemaOwnershipProjection) ->
 fn sema_ownership_view_source_for_place(place: SemaOwnershipPlace, receiver_key: String, parameter_keys: [String], scopes: SemaScopeTable) -> ViewSourcePath? {
     loop binding in scopes.bindings {
         if binding.symbol.id.key == place.root_key {
-            source := None
+            source := ViewSource?{None}
             if {
                 receiver_key != "" && receiver_key == place.root_key -> source = Val(ViewSource.Receiver)
                 else -> {
@@ -1103,7 +1137,7 @@ pub fn sema_ownership_open_reference(state: &SemaOwnershipState, place: SemaOwne
     loan_seq := sema_ownership_next_sequence(&state)
     &state.loans.push(SemaOwnershipLoan{place: place, access: access, span: span, scope_depth: state.scope_depth, seq: loan_seq, carrier_fact_seq: -1, carrier_key: ""})
     kind :: if access == AccessConvention.Write -> SemaOwnershipReferenceKind.Write else -> SemaOwnershipReferenceKind.Read
-    sema_ownership_note_reference(&state, state.loans[state.loans.len() - 1].place.root, span, scopes, kind)
+    sema_ownership_note_reference(&state, place.root, span, scopes, kind)
     true
 }
 
@@ -1572,6 +1606,14 @@ pub fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr,
 // ────────────────────────────────────────────────────────────────────────────
 // Call access integration
 
+// One place a call argument (or receiver) holds for the duration of the call;
+// later arguments that overlap it with a write on either side conflict.
+struct SemaOwnershipCallAccess {
+    place: SemaOwnershipPlace
+    access: AccessConvention
+    span: Span
+}
+
 fn sema_ownership_call_access_conflict(accesses: [SemaOwnershipCallAccess], place: SemaOwnershipPlace, access: AccessConvention) -> Bool Never! {
     loop active in accesses {
         if sema_ownership_places_overlap(active.place, place) && (active.access == AccessConvention.Write || access == AccessConvention.Write) -> return true
@@ -1589,8 +1631,16 @@ fn sema_ownership_call_diag_write_required(callee: String, name: String, span: S
     sema_error("E0202", span, "parameter `{name}` requires the write-access marker `&` at the call site", "`{callee}` needs to edit this value with the write-access marker `&`; passing it without that marker grants only read access", "write the write-access marker `&` (`&{name}`) when calling `{callee}`")
 }
 
-fn sema_ownership_call_diag_plain_name(span: Span) -> Diagnostic {
-    sema_error("E0202", span, "the write-access marker `&` needs a plain named binding after it", "write access from the write-access marker `&` can only be granted to a named binding, not an expression", "bind the value first, then pass the binding with `&`")
+// D-SHAPE-PLACE1=A: `&` grants write access to a place — a name followed by
+// field, index, or range projections. Only a temporary lacks one.
+fn sema_ownership_call_diag_write_place(span: Span) -> Diagnostic {
+    sema_error("E0202", span, "the write-access marker `&` needs a place after it", "write access reaches only a place: a name, optionally followed by field, index, or range projections such as `buf.items[0]`; a temporary expression has no storage for the edit to land in", "bind the value first: `x := ...` then pass `&x` with the write-access marker `&`")
+}
+
+// D-SHAPE-PLACE1=A: a range window has a fixed length, while this callee may
+// grow or shrink the list it receives.
+fn sema_ownership_call_diag_write_range_window(span: Span) -> Diagnostic {
+    sema_error("E0202", span, "a range write window can't fill a list parameter that may resize", "a range window has a fixed length, but this function may grow or shrink the list it receives through the write-access marker `&`", "pass the whole list with the write-access marker `&`: `fill(&values)`")
 }
 
 fn sema_ownership_call_diag_move_rejected(span: Span) -> Diagnostic {
@@ -1601,7 +1651,10 @@ fn sema_ownership_call_diag_clone(callee: String, name: String, span: Span) -> D
     sema_error("E0209", span, "implicit clone of `{name}`", "`{callee}` expects to take ownership of this value", "write the move marker `^` (`^{name}`) if this is the last use, or copy first with `~{name}`")
 }
 
-fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], accesses: [SemaOwnershipCallAccess], accepted: Bool, complete: Bool) -> SemaOwnershipCheckResult {
+fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], initial_accesses: ^[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool) -> SemaOwnershipCheckResult {
+    accesses := initial_accesses
+    accepted := initial_accepted
+    complete := initial_complete
     loop index in 0..<args.len() {
         arg :: args[index]
         param :: sema_ownership_param_for_arg(params, arg, index) ?? {
@@ -1621,18 +1674,24 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             else -> {}
         }
 
-        plain_name :: if arg.expr == {
-            .Ident(_, _) -> true
-            else -> false
-        }
-        write_name_ok := true
-        if arg.convention == AccessConvention.Write && !plain_name {
+        write_place_ok := true
+        if arg.convention == AccessConvention.Write && sema_receiver_mark_place_root(arg.expr) == None {
             accepted = false
-            write_name_ok = false
-            &diagnostics.push(sema_ownership_call_diag_plain_name(arg.span))
+            write_place_ok = false
+            &diagnostics.push(sema_ownership_call_diag_write_place(arg.span))
+        }
+        if arg.convention == AccessConvention.Write && write_place_ok {
+            if arg.expr == {
+                .Slice(_, _, _, _, _) -> if !sema_window_contains(state.fixed_length_write_params, sema_window_callee_key(callee, param.name)) {
+                    accepted = false
+                    write_place_ok = false
+                    &diagnostics.push(sema_ownership_call_diag_write_range_window(arg.span))
+                }
+                else -> {}
+            }
         }
         places := sema_ownership_places_from_expr_in_state(arg.expr, scopes, &state)
-        if places.len() > 0 && write_name_ok {
+        if places.len() > 0 && write_place_ok {
             loop actual in places {
                 if sema_ownership_call_access_conflict(accesses, actual, arg.convention) {
                     accepted = false
@@ -1645,12 +1704,12 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 loop place in places -> &accesses.push(SemaOwnershipCallAccess{place: place, access: arg.convention, span: arg.span})
             }
         }
-
+        mark_implicit_clone := false
         if decision == SemaCallConventionDecision.NeedsImplicitClone {
             if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) -> next
             if {
                 sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? false -> {
-                    args[index].flags.implicit_clone = true
+                    mark_implicit_clone = true
                     &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
                 }
                 else -> {
@@ -1661,6 +1720,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
         if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move {
             if !sema_ownership_mark_move(&state, arg.expr, scopes, "`{callee}`", &diagnostics) -> accepted = false
         }
+        if mark_implicit_clone -> args[index].flags.implicit_clone = true
     }
     SemaOwnershipCheckResult{accepted: accepted, complete: complete}
 }
@@ -1721,7 +1781,7 @@ fn sema_receiver_mark_rank(convention: AccessConvention) -> Int Never! {
 
 pub fn sema_receiver_mark_begin(state: &SemaOwnershipState, receiver: Expr) -> Expr {
     unmarked := receiver
-    mark := None
+    mark := SemaReceiverMark?{None}
     if receiver == .Place(value, access, span) {
         window :: if value == {
             .Slice(_, _, _, _, _) -> access == PlaceAccess.Write
@@ -1818,7 +1878,7 @@ pub fn sema_ownership_check_method_call(state: &SemaOwnershipState, callee: Stri
     accepted :: sema_ownership_check_call_receiver(&state, receiver, receiver_convention, scopes, span, &diagnostics)
     receiver_places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     accesses :: loop receiver_place in receiver_places -> SemaOwnershipCallAccess{place: receiver_place, access: receiver_convention, span: span}
-    sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, accesses, accepted, true)
+    sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, ^accesses, accepted, true)
 }
 
 pub fn sema_ownership_check_lambda_captures(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
@@ -1946,7 +2006,8 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
         }
         .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
             valid := true
-            if sema_ownership_places_from_expr_in_state(receiver, scopes, &state).len() == 0 {
+            receiver_places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
+            if receiver_places.len() == 0 {
                 valid = sema_ownership_check_expression(&state, receiver, scopes, &diagnostics)
             }
             loop arg in args {
@@ -1983,17 +2044,26 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
             valid
         }
         .TypedLit(_, body, _) -> {
-            valid := true
-            if body.value != None && !sema_ownership_check_expression(&state, body.value ?? Expr.Unit{span: expr_span(expr)}, scopes, &diagnostics) -> valid = false
-            if !sema_ownership_check_expr_list(&state, body.elements, scopes, &diagnostics) -> valid = false
-            loop field in body.fields {
-                if !sema_ownership_check_expression(&state, field.value, scopes, &diagnostics) -> valid = false
+            if body == {
+                .Fields(fields) -> {
+                    valid := true
+                    loop field in fields {
+                        if !sema_ownership_check_expression(&state, field.value, scopes, &diagnostics) -> valid = false
+                    }
+                    valid
+                }
+                .Elements(elements) -> sema_ownership_check_expr_list(&state, elements, scopes, &diagnostics)
+                .Entries(entries) -> {
+                    valid := true
+                    loop entry in entries {
+                        if !sema_ownership_check_expression(&state, entry.key, scopes, &diagnostics) -> valid = false
+                        if !sema_ownership_check_expression(&state, entry.value, scopes, &diagnostics) -> valid = false
+                    }
+                    valid
+                }
+                .Value(value) -> sema_ownership_check_expression(&state, value, scopes, &diagnostics)
+                else -> true
             }
-            loop entry in body.entries {
-                if !sema_ownership_check_expression(&state, entry.key, scopes, &diagnostics) -> valid = false
-                if !sema_ownership_check_expression(&state, entry.value, scopes, &diagnostics) -> valid = false
-            }
-            valid
         }
         .EnumLit(_, _, _, args, _, _) -> {
             valid := true
@@ -2025,13 +2095,20 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
             valid := sema_ownership_check_expression(&state, value, scopes, &diagnostics)
             before :: sema_ownership_state_snapshot(state)
             fallback_state := sema_ownership_state_snapshot(before)
+            // A fallback route that leaves (`return`, `panic`, `break`,
+            // `next`, or a block that always does) never reaches the join, so
+            // its moves must not poison later uses.
+            fallback_reaches_merge := false
             if fallback == {
                 .Value(other) -> {
                     if !sema_ownership_check_expression(&fallback_state, other, scopes, &diagnostics) -> valid = false
+                    fallback_reaches_merge = true
                 }
                 .Block(body, result, _) -> {
                     sema_ownership_enter_scope(&fallback_state)
-                    if !sema_ownership_check_statements(&fallback_state, body, scopes, &diagnostics).complete -> valid = false
+                    nested :: sema_ownership_check_statements(&fallback_state, body, scopes, &diagnostics)
+                    if !nested.complete -> valid = false
+                    fallback_reaches_merge = nested.falls_through
                     if result == .Val(result_expr) {
                         if !sema_ownership_check_expression(&fallback_state, result_expr, scopes, &diagnostics) -> valid = false
                     }
@@ -2044,7 +2121,7 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
                 }
                 else -> {}
             }
-            sema_ownership_join_paths(&state, before, before, fallback_state, true)
+            if fallback_reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
             valid
         }
         .PatternTest(subject, _, _) -> sema_ownership_check_expression(&state, subject, scopes, &diagnostics)
@@ -2408,7 +2485,7 @@ pub fn sema_ownership_check_statement(state: &SemaOwnershipState, statement: Stm
             if !nested.complete -> valid = false
             SemaOwnershipFlowResult{complete: valid, falls_through: true}
         }
-        .CountedLoop(init, condition, step, body, _, _, _, _) -> {
+        .CountedLoop(init, condition, step, body, _, _, _) -> {
             valid := sema_ownership_check_binding(&state, init, scopes, &diagnostics)
             if !sema_ownership_check_expression(&state, condition, scopes, &diagnostics) -> valid = false
             if step == .Val(step_statement) {
@@ -2434,7 +2511,8 @@ pub fn sema_ownership_check_statement(state: &SemaOwnershipState, statement: Stm
                 else_state := sema_ownership_state_snapshot(before)
                 nested :: sema_ownership_check_statements(&else_state, else_statements, scopes, &diagnostics)
                 if !nested.complete -> valid = false
-                sema_ownership_join_paths(&joined, before, joined, else_state, true)
+                arms_state := sema_ownership_state_snapshot(joined)
+                sema_ownership_join_paths(&joined, before, arms_state, else_state, true)
             }
             state.moved = joined.moved
             state.loans = joined.loans

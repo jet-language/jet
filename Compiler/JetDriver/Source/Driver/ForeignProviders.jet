@@ -2,6 +2,49 @@
 // metadata, and provenance bytes; this stage never opens a path or calls the
 // native assembler.  It parses the exact Jet cache and source overlays, merges
 // one surface per requested language/library, and publishes provider facts.
+use jet_foundation.[
+    AccessConvention,
+    AppliedRuleApplication,
+    CModule,
+    CModuleKind,
+    Diagnostic,
+    ExternFn,
+    FencedStatement,
+    Func,
+    ImportDecl,
+    ImportKind,
+    Item,
+    MIRSourceFile,
+    NamedSpan,
+    PolicyDeclaration,
+    Program,
+    Span,
+    Stmt,
+    TextEdit,
+    Type,
+    UserPolicyDecl,
+    diagnostic_with_source_path,
+    mir_source_file_id,
+]
+use jet_lexer.[
+    Token,
+    lex_generated,
+]
+use jet_parser.[
+    parse_lexed,
+]
+use jet_sema.[
+    SemaForeignBoundaryInput,
+    SemaForeignBoundaryObligationInput,
+    SemaForeignCloseAdapterInput,
+    SemaForeignHandleInput,
+    SemaForeignImportBinding,
+    SemaForeignOverlayOverrideInput,
+    SemaForeignProviderInput,
+    SemaRegistrationImportEdge,
+    SemaSourceOrigin,
+    SemaSourceSegment,
+]
 
 struct JetDriverForeignRequest {
     library: String
@@ -48,7 +91,7 @@ struct JetDriverForeignCanonicalAssembly {
     overlay_functions: [ExternFn]
     adapter_functions: [Func]
     source_segments: [SemaSourceSegment]
-    generated_source_files: [MirSourceFile]
+    generated_source_files: [MIRSourceFile]
 }
 
 struct JetDriverForeignProvenance {
@@ -77,7 +120,7 @@ fn jet_driver_foreign_span_zero() -> Span Never! {
 }
 
 fn jet_driver_foreign_path(path: String) -> String Never! {
-    &path.replace("\\", "/")
+    path.replace("\\", "/")
 }
 
 fn jet_driver_foreign_cache_relative(language: String, library: String) -> String Never! {
@@ -96,7 +139,7 @@ fn jet_driver_foreign_valid_library(library: String) -> Bool Never! {
 fn jet_driver_foreign_library_from_c_path(path: String) -> String? {
     if !path.starts_with("c.") -> return None
     remainder :: path.slice(2, path.len())
-    parts :: remainder.split(".")
+    parts :: remainder.split(".").to_list()
     if parts.len() == 0 -> return None
     first :: parts[0]
     if !jet_driver_foreign_valid_library(first) -> return None
@@ -106,7 +149,7 @@ fn jet_driver_foreign_library_from_c_path(path: String) -> String? {
 fn jet_driver_foreign_library_from_cpp_path(path: String) -> String? {
     if !path.starts_with("cpp.") -> return None
     remainder :: path.slice(4, path.len())
-    parts :: remainder.split(".")
+    parts :: remainder.split(".").to_list()
     if parts.len() == 0 -> return None
     first :: parts[0]
     if !jet_driver_foreign_valid_library(first) -> return None
@@ -116,7 +159,7 @@ fn jet_driver_foreign_library_from_cpp_path(path: String) -> String? {
 fn jet_driver_foreign_library_from_header(path: String) -> String? {
     normalized :: jet_driver_foreign_path(path)
     if !normalized.ends_with(".h") -> return None
-    parts :: normalized.split("/")
+    parts :: normalized.split("/").to_list()
     file :: parts[parts.len() - 1]
     suffix :: ".h"
     library :: file.slice(0, file.len() - suffix.len())
@@ -127,7 +170,7 @@ fn jet_driver_foreign_library_from_header(path: String) -> String? {
 fn jet_driver_foreign_library_from_cpp_header(path: String) -> String? {
     normalized :: jet_driver_foreign_path(path)
     if !normalized.ends_with(".hpp") && !normalized.ends_with(".hxx") -> return None
-    parts :: normalized.split("/")
+    parts :: normalized.split("/").to_list()
     file :: parts[parts.len() - 1]
     suffix :: if file.ends_with(".hpp") -> ".hpp" else -> ".hxx"
     library :: file.slice(0, file.len() - suffix.len())
@@ -163,6 +206,7 @@ fn jet_driver_foreign_import_libraries(declaration: ImportDecl) -> (libraries: [
         }
     }
     if imported.library == .Val(library) -> &libraries.push(library)
+    (libraries: libraries, form: imported.form)
 }
 
 fn jet_driver_foreign_import_header(declaration: ImportDecl) -> String Never! {
@@ -182,7 +226,7 @@ fn jet_driver_foreign_binding_diagnostic(path: String, library: String, reason: 
 
 fn jet_driver_foreign_artifact_library(path: String) -> String Never! {
     normalized :: jet_driver_foreign_path(path)
-    parts :: normalized.split("/")
+    parts :: normalized.split("/").to_list()
     file :: parts[parts.len() - 1]
     suffix :: if {
         file.ends_with(".metadata") -> ".metadata"
@@ -192,7 +236,7 @@ fn jet_driver_foreign_artifact_library(path: String) -> String Never! {
     }
     if suffix != "" -> return file.slice(0, file.len() - suffix.len())
     if file.starts_with("foreign:") {
-        foreign_parts :: file.split(".")
+        foreign_parts :: file.split(".").to_list()
         if foreign_parts.len() > 1 -> return foreign_parts[foreign_parts.len() - 1]
     }
     ""
@@ -251,12 +295,11 @@ fn jet_driver_foreign_collect_imports(imports: [ImportDecl], root_index: Int, mo
                     loop (item_index, item) in items {
                         maybe_library :: if language == "c" -> jet_driver_foreign_library_from_c_path("{module_alias}.{item.original}") else -> jet_driver_foreign_library_from_cpp_path("{module_alias}.{item.original}")
                         library :: maybe_library ?? next
-                        alias :: item.original
+                        alias :: item.alias ?? item.original
                         alias_span := declaration.span
                         binding_span :: if item_index < declaration.item_spans.len() -> declaration.item_spans[item_index] else -> declaration.span
                         if {
                             item.alias != None -> {
-                                alias :: item.alias ?? item.original
                                 if item_index < declaration.local_spans.len() -> alias_span = declaration.local_spans[item_index]
                             }
                             item_index < declaration.item_spans.len() -> alias_span = declaration.item_spans[item_index]
@@ -272,7 +315,7 @@ fn jet_driver_foreign_collect_imports(imports: [ImportDecl], root_index: Int, mo
         if !handled_members {
             imported :: jet_driver_foreign_import_libraries(declaration)
             language := "c"
-            maybe_library := None
+            maybe_library := String?{None}
             if declaration.kind == {
                 .Module(name, _) -> {
                     if name.starts_with("cpp.") {
@@ -400,12 +443,12 @@ fn jet_driver_foreign_cache_error(path: String, reason: String, diagnostics: &[D
 
 fn jet_driver_foreign_surface(snapshot: JetDriverAuthorizedSourceSnapshot, request: JetDriverForeignRequest, overlays: [JetDriverForeignSurface], diagnostics: &[Diagnostic]) -> JetDriverForeignSurface {
     found :: jet_driver_foreign_find_cache(snapshot, request.root_index, request.language, request.library)
-    cache_program := None
+    cache_program := Program?{None}
     cache_span := jet_driver_foreign_span_zero()
     module_library := request.library
     valid := true
-    metadata_file := None
-    provenance_file := None
+    metadata_file := JetDriverAuthorizedSourceFile?{None}
+    provenance_file := JetDriverAuthorizedSourceFile?{None}
     if found.cache == .Val(cache) {
         cache_program = jet_driver_foreign_parse_cache(cache, &diagnostics)
         metadata_file = found.metadata
@@ -428,12 +471,12 @@ fn jet_driver_foreign_surface(snapshot: JetDriverAuthorizedSourceSnapshot, reque
             else -> valid = false
         }
     }
-    parsed_metadata := None
+    parsed_metadata := JetDriverForeignMetadata?{None}
     if metadata_file == .Val(metadata) && request.language == "c" {
         parsed_metadata = jet_driver_foreign_parse_metadata(metadata, request.library, &diagnostics)
         if parsed_metadata == None -> valid = false
     }
-    parsed_provenance := None
+    parsed_provenance := JetDriverForeignProvenance?{None}
     if provenance_file == .Val(provenance) {
         parsed_provenance = jet_driver_foreign_parse_provenance(provenance, request.library, &diagnostics)
         if parsed_provenance == None -> valid = false
@@ -480,7 +523,8 @@ fn jet_driver_foreign_unescape(value: String) -> String? {
         &output.push(U8{high * 16 + low})
         index += 3
     }
-    String.from_bytes(output)
+    decoded :: String.from_bytes(output) ?? return None
+    Val(decoded)
 }
 
 fn jet_driver_foreign_line_parts(line: String) -> (name: String, value: String, valid: Bool) Never! {
@@ -561,7 +605,7 @@ fn jet_driver_foreign_parse_metadata(file: JetDriverAuthorizedSourceFile, librar
                 &transitive.push(decoded)
             }
             "handle" -> {
-                fields :: value.split("|")
+                fields :: value.split("|").to_list()
                 if fields.len() != 6 {
                     jet_driver_foreign_metadata_error(file.path, "contains a handle row with the wrong field count", &diagnostics)
                     valid = false
@@ -648,9 +692,9 @@ fn jet_driver_foreign_parse_provenance(file: JetDriverAuthorizedSourceFile, libr
     artifact_coverage_digest := ""
     direct_links := [String]{library}
     loaded_artifact := ""
-    transitive_dependencies := None
-    reachable_callbacks := None
-    compiler_flags := None
+    transitive_dependencies := [String]?{None}
+    reachable_callbacks := [String]?{None}
+    compiler_flags := [String]?{None}
     target := ""
     generator := ""
     obligations := [SemaForeignBoundaryObligationInput]{ }
@@ -663,6 +707,8 @@ fn jet_driver_foreign_parse_provenance(file: JetDriverAuthorizedSourceFile, libr
             valid = false
             next
         }
+        name :: parts.name
+        value :: parts.value
         if name == {
             "schema" -> schema = value
             "language" -> if language == "" -> language = value
@@ -683,7 +729,7 @@ fn jet_driver_foreign_parse_provenance(file: JetDriverAuthorizedSourceFile, libr
             "boundary-coverage-target" -> target = value
             "boundary-coverage-generator" -> generator = value
             "boundary-obligation" -> {
-                fields :: value.split("\t")
+                fields :: value.split("\t").to_list()
                 if fields.len() != 5 {
                     jet_driver_foreign_provenance_error(file.path, "contains a boundary obligation with the wrong field count", &diagnostics)
                     valid = false
@@ -772,16 +818,18 @@ fn jet_driver_foreign_make_adapter_function(handle: String, raw_function: String
     loop item in parsed.program.items {
         if item == {
             .Func(function) -> {
-                function.is_pub = false
-                function.is_unsafe = true
-                function.unsafe_reason = Val("compiler-generated foreign close adapter")
-                function.unsafe_span = Val(jet_driver_foreign_span_zero())
-                function.compiler_generated = true
-                return Val(function)
+                adapter := function
+                adapter.is_pub = false
+                adapter.is_unsafe = true
+                adapter.unsafe_reason = Val("compiler-generated foreign close adapter")
+                adapter.unsafe_span = Val(jet_driver_foreign_span_zero())
+                adapter.compiler_generated = true
+                return Val(adapter)
             }
             else -> {}
         }
     }
+    None
 }
 
 fn jet_driver_foreign_prepare_functions(functions: [ExternFn], handles: [SemaForeignHandleInput], surface: JetDriverForeignSurface, diagnostics: &[Diagnostic]) -> (functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func]) Never! {
@@ -823,8 +871,9 @@ fn jet_driver_foreign_package_for_root(load: JetDriverLoadResult, root_index: In
 }
 
 fn jet_driver_foreign_find_synthetic_module(load: JetDriverLoadResult, module_library: String, root_index: Int) -> Int? {
+    synthetic_name :: "__c_{module_library}"
     loop (index, loaded_module) in load.modules {
-        if loaded_module.module_name == "__c_{module_library}" && loaded_module.source_unit_index >= 0 && loaded_module.source_unit_index < load.source_units.len() && load.source_units[loaded_module.source_unit_index].root_index == root_index -> return Val(index)
+        if loaded_module.module_name == synthetic_name && loaded_module.source_unit_index >= 0 && loaded_module.source_unit_index < load.source_units.len() && load.source_units[loaded_module.source_unit_index].root_index == root_index -> return Val(index)
     }
     None
 }
@@ -835,7 +884,7 @@ fn jet_driver_foreign_import_edge_declaration(request: JetDriverForeignRequest) 
 
 fn jet_driver_foreign_add_import_edge(load: &JetDriverLoadResult, request: JetDriverForeignRequest, target: JetDriverLoadedModule) Never! {
     declaration :: jet_driver_foreign_import_edge_declaration(request)
-    scope := None
+    scope := String?{None}
     if request.scope != "" -> scope = Val(request.scope)
     binding_value :: SemaForeignImportBinding{scope: scope, alias: request.alias}
     binding :: Val(binding_value)
@@ -927,10 +976,7 @@ fn jet_driver_foreign_shift_diagnostic(diagnostic: Diagnostic, offset: Int) -> D
         .None -> None
     }
     shifted.edit = if shifted.edit == {
-        .Val(edit) -> {
-            edit.span = Span{start: edit.span.start + offset, end: edit.span.end + offset}
-            Val(edit)
-        }
+        .Val(edit) -> Val(TextEdit{span: Span{start: edit.span.start + offset, end: edit.span.end + offset}, new_text: edit.new_text})
         .None -> None
     }
     shifted
@@ -1037,12 +1083,12 @@ fn jet_driver_foreign_canonical_assembly(load: JetDriverLoadResult, surface: Jet
         &source_segments.push(SemaSourceSegment{generated: Span{start: adapter_bases[adapter_index], end: adapter_bases[adapter_index] + adapter_sources[adapter_index].len()}, source_file: adapter_path, source_start: 0, origin: SemaSourceOrigin.CompilerGenerated, line_starts: jet_driver_foreign_fragment_line_starts(adapter_sources[adapter_index])})
     }
     aggregate_path :: jet_driver_foreign_aggregate_path(surface)
-    generated_source_files := [MirSourceFile]{
-        MirSourceFile{id: mir_source_file_id(aggregate_path), path: aggregate_path, source: canonical},
+    generated_source_files := [MIRSourceFile]{
+        MIRSourceFile{id: mir_source_file_id(aggregate_path), path: aggregate_path, source: canonical},
     }
     loop adapter_index in 0..<adapter_sources.len() {
         adapter_path :: jet_driver_foreign_adapter_path(surface, adapter_index)
-        &generated_source_files.push(MirSourceFile{id: mir_source_file_id(adapter_path), path: adapter_path, source: adapter_sources[adapter_index]})
+        &generated_source_files.push(MIRSourceFile{id: mir_source_file_id(adapter_path), path: adapter_path, source: adapter_sources[adapter_index]})
     }
     Val(JetDriverForeignCanonicalAssembly{source: canonical, overlay_functions: canonical_overlays, adapter_functions: canonical_adapters, source_segments: source_segments, generated_source_files: generated_source_files})
 }
@@ -1216,7 +1262,7 @@ pub fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSource
         }
         prepared :: jet_driver_foreign_prepare_functions(merged, handles, surface, &diagnostics)
         merged = prepared.functions
-        boundary := None
+        boundary := SemaForeignBoundaryInput?{None}
         if surface.parsed_provenance == .Val(provenance) -> boundary = Val(jet_driver_foreign_boundary(provenance))
         if boundary == .Val(boundary_value) {
             loop index in 0..<merged.len() {

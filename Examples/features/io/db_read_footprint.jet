@@ -4,6 +4,11 @@
 // `close` keep the plain `DB` root). So a read-only query function can PROVE
 // `-[DB.Read]>` — the read-footprint qualification a live query (D-LIVEQUERY1)
 // rides on. A write hiding inside such a function would be rejected by E0740.
+package {
+    name: "db_read_footprint"
+    authority: { holds: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] } }
+}
+
 use core.db as db
 
 // A checked read-only query: its only DB effect is `DB.Read`, so the

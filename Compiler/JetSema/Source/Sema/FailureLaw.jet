@@ -3,6 +3,36 @@
 // `TraitRegistry::register_error_conv` (jet-foundation Traits.rs),
 // `Sema::Prelude::inject_exercised_error_conversions` and the D-FAIL-CONV2
 // arm of `CheckerInfer/fallible.rs`.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    ErrorConvDef,
+    Expr,
+    Func,
+    Item,
+    Marker,
+    Param,
+    ParamZone,
+    Span,
+    Stmt,
+    StrPart,
+    SymbolKind,
+    TExpr,
+    TFunc,
+    TFuncKind,
+    TStmt,
+    Type,
+    ast_func,
+    expr_span,
+    symbol_id,
+    tir_expr_children,
+    tir_stmt_children,
+    type_name,
+]
+use jet_parser.[
+    parse_source,
+]
 
 // D-FAIL-CONV2=A: the standard library's own error family, exactly the
 // `impl <member> -> Err` declarations of the embedded Prelude/Errors.jet (the
@@ -10,8 +40,9 @@
 // payload-free `CryptoError` and `FileCryptoError`. `TaskFailure`,
 // `[FieldError]` and component types stay outside on purpose.
 JET_CORE_ERROR_FAMILY :: prep { [String]{
-    "BuildError", "BrowserError", "CBORError", "CryptoError", "DBError", "DataError", "EncodingError", "EmailError", "EnvError",
-    "FileCryptoError", "HTTPError", "IOError", "NetError", "RangeError", "TextError", "UTF8Error", "UUIDError", "WsError", "XMLError",
+    "AppError", "ArchiveError", "BuildError", "BrowserError", "CBORError", "ComputeError", "CryptoError", "DBError", "DataError",
+    "EncodingError", "EmailError", "EnvError", "FileCryptoError", "HTTPError", "IOError", "MIMEError", "ModError", "NetError", "PerfError",
+    "RangeError", "TextError", "TimeError", "URLError", "UTF8Error", "UUIDError", "WsError", "XMLError",
 } }
 
 // D-FAILURE-FOUNDATION1=A: every Core type that may be named as the error side
@@ -19,15 +50,15 @@ JET_CORE_ERROR_FAMILY :: prep { [String]{
 JET_CORE_ERROR_TYPES :: prep { [String]{
     "AllocError", "AuthError", "BuildError", "BrowserError", "CBORError", "Closed", "CompilerError", "ComputeError",
     "CryptoError", "DBError", "DataError", "EmailError", "EncodingError", "EnvError", "EventConfigError", "Expired",
-    "FileCryptoError", "HTTPError", "IOError", "UiHostError", "KeyWrapError", "NetError", "RangeError", "ServiceError",
+    "FileCryptoError", "HTTPError", "IOError", "UIHostError", "KeyWrapError", "NetError", "RangeError", "ServiceError",
     "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
 } }
 
 // A canonical owner identity (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`)
 // reduces to its `::` leaf; a qualified spelling to its `.` leaf.
 fn sema_error_conversion_leaf(name: String) -> String Never! {
-    owned :: name.split("::")
-    parts :: owned[owned.len() - 1].split(".")
+    owned :: name.split("::").to_list()
+    parts :: owned[owned.len() - 1].split(".").to_list()
     parts[parts.len() - 1]
 }
 
@@ -57,8 +88,7 @@ fn sema_error_conversion_path_exists(edges: [SemaErrorConversionEdge], from_ty: 
     pending := [String]{from_ty}
     seen := [String]{}
     loop pending.len() > 0 {
-        current :: pending[pending.len() - 1]
-        &pending.pop()
+        current :: &pending.pop() ?? break
         already := false
         loop visited in seen {
             if visited == current -> already = true
@@ -159,12 +189,11 @@ pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) ->
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
     loop item in items {
-        definition :: if item == {
-            .ErrorConv(value) -> value
-            else -> {
-                &output.push(item)
-                next
-            }
+        conversion := ErrorConvDef?{None}
+        if item == .ErrorConv(value) -> conversion = Val(value)
+        definition :: conversion ?? {
+            &output.push(item)
+            next
         }
         from_ty :: definition.from_ty
         to_ty :: definition.to_ty
@@ -198,7 +227,7 @@ pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) ->
         &edges.push(SemaErrorConversionEdge{source: from_ty, target: to_ty})
         ambiguous :: sema_error_conversion_ambiguous_pair(edges)
         if ambiguous == .Val(pair) {
-            &edges.pop()
+            _ := &edges.pop()
             &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{pair.source}` already reaches `{pair.target}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
             next
         }
@@ -212,7 +241,7 @@ pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) ->
 // routine is anchored at the propagation site that demanded it.
 fn sema_prelude_error_conversion(source: Type, site: Span) -> Func? {
     name :: type_name(source)
-    parsed :: parse_source("impl {name} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes())
+    parsed :: parse_source("impl {name} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes()) ?? return None
     if parsed.diagnostics.len() != 0 || parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == {
         .ErrorConv(definition) -> Val(sema_error_conversion_function(definition.from_ty, site, definition.to_ty, site, source, definition.body, site))
@@ -221,7 +250,8 @@ fn sema_prelude_error_conversion(source: Type, site: Span) -> Func? {
 }
 
 pub fn sema_module_no_prelude(environment: SemaScopeEnvironment) -> Bool Never! {
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     loop module_row in graph.modules {
         if module_row.module_identity == environment.module_identity -> return module_row.program.no_prelude
     }
@@ -325,7 +355,8 @@ fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [Strin
 
 // The declaring module wins; other graph modules supply imported nominals.
 fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment) -> Bool? {
-    graph :: environment.registration_graph ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
     loop module_row in graph.modules {
         if module_row.module_identity != environment.module_identity -> next
         local :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment)
@@ -507,8 +538,13 @@ fn sema_never_expr_diverges(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
         .Call(call) -> {
             if call.name == "panic" -> return true
             symbol :: sema_scope_resolve(scopes, call.name) ?? return false
+            // `Never Never!` has no failure route, so its call diverges like
+            // `Never`; a fallible `Never E!` call can still return its `Err`.
             if symbol.ty == .Val(symbol_type) {
-                if symbol_type == .Fn(_, ret, _, _, _, _) -> return ret == (Val(Type.Named{name: "Never"}))
+                if symbol_type == .Fn(_, ret, _, _, _, _) {
+                    if ret == (Val(Type.Named{name: "Never"})) -> return true
+                    return ret == (Val(Type.Result{ok: Type.Named{name: "Never"}, err: Type.Named{name: "Never"}}))
+                }
             }
             return false
         }

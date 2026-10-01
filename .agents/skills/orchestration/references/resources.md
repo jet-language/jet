@@ -19,6 +19,9 @@ fallback. Prompts do not select a model.
 ## Disk and memory
 
 Use the one shared bounded checkout `target/`, with `CARGO_INCREMENTAL=0`.
+The orchestrator's lock-serialized build targets (one writer each) opt in
+to incremental compilation with `JET_CARGO_INCREMENTAL=1` and are pruned
+between builds.
 Keep scratch at `~/.cache/jet-test-scratch` and logs/briefs at
 `~/.cache/jet-luna`; `/tmp` is RAM-backed and must not hold Cargo targets,
 large logs, or test scratch. Monitor available RAM, swap, disk, and target size.

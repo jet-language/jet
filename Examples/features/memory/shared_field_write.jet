@@ -1,0 +1,37 @@
+package {
+    name: "memory_shared_field_write"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }
+}
+// D-CONC-SHARE1=A: a field write on a `Shared<T>` handle is one locked edit
+// of the cell. The edit returns nothing, so it is kept for what it does to
+// the cell: every write below must be visible to the next read, whether it
+// assigns, compounds, runs through another handle to the same cell, repeats
+// in a loop, or reads a second shared cell on its right-hand side.
+struct Counter {
+    hits: Int
+    label: String
+}
+
+fn bump(counter: Shared<Counter>, by: Int) {
+    counter.hits += by
+}
+
+fn run() {
+    counter :: shared Counter{hits: 0, label: "start"}
+    counter.hits = 5
+    print("assign: {counter.hits}")
+    counter.hits += 2
+    print("compound: {counter.hits}")
+    counter.label = "renamed"
+    print("text: {counter.label}")
+    bump(counter, 10)
+    print("through a handle: {counter.hits}")
+    loop i in 0..<4 {
+        counter.hits += i
+    }
+    print("loop: {counter.hits}")
+    step :: shared Counter{hits: 100, label: "step"}
+    counter.hits += step.hits
+    print("reads another cell: {counter.hits}")
+}

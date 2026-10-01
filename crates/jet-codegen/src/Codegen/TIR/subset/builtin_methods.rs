@@ -310,7 +310,7 @@ pub(crate) fn is_ui_backend_method_name(backend: Option<&str>, method: &str, nar
         // D-UI-MOUNT1=A: measure→layout→paint; 1-arg uses the backend default viewport.
         (_, "mount", 1 | 2) => true,
         (Some("NullBackend"), "commands", 0) => true,
-        (Some("TuiBackend"), "frame_lines" | "render_count", 0) => true,
+        (Some("TUIBackend"), "frame_lines" | "render_count", 0) => true,
         // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
         (_, "set_focus_group", 1) | (_, "focused_label", 0) => true,
         // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 retained-widget surface.
@@ -378,7 +378,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "HTTPMux"
                 | "HTTPHandler"
                 | "HTTPServer"
-                | "HTTPServerTls"
+                | "HTTPServerTLS"
                 | "WsConn"
                 | "WsMessage"
                 | "Browser"

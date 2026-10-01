@@ -59,6 +59,37 @@ pub struct JetModGrant {
     pub read: Vec<String>,
 }
 
+/// D-MOD-ERR1=A: every load refusal is one of four cases. The provider
+/// reports it as `<Case>: <reason>`, and Core/mod/mod.jet turns the case word
+/// into the matching `ModError` case, so every tier shares one mapping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JetModFailure {
+    Denied,
+    NotFound,
+    Invalid,
+    Unsupported,
+}
+
+impl JetModFailure {
+    fn tag(self, reason: impl std::fmt::Display) -> String {
+        let case = match self {
+            Self::Denied => "Denied",
+            Self::NotFound => "NotFound",
+            Self::Invalid => "Invalid",
+            Self::Unsupported => "Unsupported",
+        };
+        format!("{case}: {reason}")
+    }
+
+    fn from_io(error: &std::io::Error) -> Self {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Self::NotFound
+        } else {
+            Self::Invalid
+        }
+    }
+}
+
 pub struct JetMod {
     handle: usize,
     exports: Vec<JetModExport>,
@@ -289,30 +320,34 @@ fn c_symbol(name: &str) -> String {
     out
 }
 
+/// Refusals come back tagged (D-MOD-ERR1=A): another compiler, ABI or target
+/// is `Unsupported`, an effect outside the grant is `Denied`, and malformed
+/// metadata is `Invalid`.
 fn check_before_map(header: &JetLibHeader<'_>) -> Result<(), String> {
+    use JetModFailure::{Denied, Invalid, Unsupported};
     // Compiler identity is deliberately first. A foreign artifact must fail
     // E1338 before any effect or ABI claim is trusted.
     if header.compiler_version != __JET_COMPILER_VERSION {
-        return Err(format!(
+        return Err(Unsupported.tag(format!(
             "E1338: library `{}` was built by Jet `{}`, but the loader uses Jet `{}`",
             header.library_name, header.compiler_version, __JET_COMPILER_VERSION
-        ));
+        )));
     }
     if header.abi_version != JETLIB_ABI_VERSION {
-        return Err(format!(
+        return Err(Unsupported.tag(format!(
             "E1341: library `{}` uses unsupported .jetlib ABI version {}; this loader accepts ABI version {}",
             header.library_name, header.abi_version, JETLIB_ABI_VERSION
-        ));
+        )));
     }
     if header.library_name.is_empty() || header.library_name.contains('\0') {
-        return Err("E1341: .jetlib metadata has no valid Library name".to_string());
+        return Err(Invalid.tag("E1341: .jetlib metadata has no valid Library name"));
     }
     if header
         .entry
         .as_deref()
         .is_some_and(|entry| entry.is_empty() || entry.contains('\0'))
     {
-        return Err("E1341: .jetlib metadata has an invalid output entry".to_string());
+        return Err(Invalid.tag("E1341: .jetlib metadata has an invalid output entry"));
     }
     for (label, value) in [
         ("compiler build", &header.compiler_build),
@@ -320,78 +355,78 @@ fn check_before_map(header: &JetLibHeader<'_>) -> Result<(), String> {
         ("linker identity", &header.linker_identity),
     ] {
         if value.is_empty() || value.contains('\0') {
-            return Err(format!("E1341: .jetlib metadata has no valid {label}"));
+            return Err(Invalid.tag(format!("E1341: .jetlib metadata has no valid {label}")));
         }
     }
     if header.abi_identity != JETLIB_ABI_IDENTITY {
-        return Err(format!(
+        return Err(Unsupported.tag(format!(
             "E1341: library `{}` uses unsupported native ABI identity `{}`",
             header.library_name, header.abi_identity
-        ));
+        )));
     }
     if !valid_payload_digest(&header.payload_digest) {
-        return Err(format!(
+        return Err(Invalid.tag(format!(
             "E1341: library `{}` has no valid native payload digest",
             header.library_name
-        ));
+        )));
     }
     let target = current_target();
     if header.target != target {
-        return Err(format!(
+        return Err(Unsupported.tag(format!(
             "E1341: library `{}` targets `{}`, but this loader targets `{target}`",
             header.library_name, header.target
-        ));
+        )));
     }
     if header.exports.is_empty() {
-        return Err(format!(
+        return Err(Invalid.tag(format!(
             "E1341: library `{}` has no exported functions",
             header.library_name
-        ));
+        )));
     }
     let mut names = std::collections::BTreeSet::new();
     let mut symbols = std::collections::BTreeSet::new();
     for export in &header.exports {
         if export.name.is_empty() || export.name.contains('\0') {
-            return Err("E1341: .jetlib metadata has an invalid export name".to_string());
+            return Err(Invalid.tag("E1341: .jetlib metadata has an invalid export name"));
         }
         if export.symbol.is_empty()
             || export.symbol.contains('\0')
             || export.symbol != c_symbol(&export.name)
         {
-            return Err(format!(
+            return Err(Invalid.tag(format!(
                 "E1341: .jetlib export `{}` has an invalid native symbol `{}`",
                 export.name, export.symbol
-            ));
+            )));
         }
         if !names.insert(export.name.clone()) {
-            return Err(format!(
+            return Err(Invalid.tag(format!(
                 "E1341: .jetlib metadata repeats export `{}`",
                 export.name
-            ));
+            )));
         }
         if !symbols.insert(export.symbol.clone()) {
-            return Err(format!(
+            return Err(Invalid.tag(format!(
                 "E1341: .jetlib metadata repeats native symbol `{}`",
                 export.symbol
-            ));
+            )));
         }
         if export.conventions.len() != export.params as usize
             || export.conventions.len() > JETLIB_MAX_EXPORT_PARAMS
         {
-            return Err(format!(
+            return Err(Invalid.tag(format!(
                 "E1341: .jetlib export `{}` has invalid access-convention metadata",
                 export.name
-            ));
+            )));
         }
     }
     for effect in &header.effects {
         // D-LIB-CALLGRANT1=A exposes filesystem roots as the load-site grant;
         // no other ambient effect has a load-site spelling on this surface.
         if effect != "FS" && !effect.starts_with("FS.") {
-            return Err(format!(
+            return Err(Denied.tag(format!(
                 "E1339: library `{}` declares `{effect}`, which this load site does not grant",
                 header.library_name
-            ));
+            )));
         }
     }
     Ok(())
@@ -472,8 +507,8 @@ pub fn jet_mod_on_tick(mod_: &JetMod, dt: i64) -> Result<i64, String> {
 #[cfg(unix)]
 mod native {
     use super::{
-        check_before_map, granted_path, jetlib_header, payload_digest, JetMod, JetModGrant,
-        JetModScalar,
+        check_before_map, granted_path, jetlib_header, payload_digest, JetMod, JetModFailure,
+        JetModGrant, JetModScalar,
     };
     use std::ffi::{c_char, c_void, CString};
     use std::io::Write;
@@ -583,26 +618,32 @@ mod native {
         Ok(staged)
     }
 
+    /// Every refusal is tagged (D-MOD-ERR1=A): the grant and metadata checks
+    /// tag their own; a file that cannot be read, parsed, staged or mapped is
+    /// `Invalid`.
     pub(super) fn load(path: &str, grant: &JetModGrant) -> Result<JetMod, String> {
+        let invalid = |reason: String| JetModFailure::Invalid.tag(reason);
         let source = granted_path(Path::new(path), grant)?;
-        let bytes = std::fs::read(&source)
-            .map_err(|error| format!("cannot read library `{}`: {error}", source.display()))?;
-        let header = jetlib_header(&bytes)?;
+        let bytes = std::fs::read(&source).map_err(|error| {
+            JetModFailure::from_io(&error)
+                .tag(format!("cannot read library `{}`: {error}", source.display()))
+        })?;
+        let header = jetlib_header(&bytes).map_err(invalid)?;
         check_before_map(&header)?;
         if payload_digest(header.payload) != header.payload_digest {
-            return Err(format!(
+            return Err(invalid(format!(
                 "cannot map library payload: `{}` has a content digest that does not match its metadata",
                 header.library_name
-            ));
+            )));
         }
-        let staged = stage(header.payload)?;
+        let staged = stage(header.payload).map_err(invalid)?;
         let path_c = CString::new(staged.path.as_ref().unwrap().as_os_str().as_bytes())
-            .map_err(|_| "library path contains NUL".to_string())?;
+            .map_err(|_| invalid("library path contains NUL".to_string()))?;
         // SAFETY: the staged path is NUL-terminated and remains until the
         // returned JetMod drops; RTLD_NOW resolves every dependency now.
         let handle = unsafe { dlopen(path_c.as_ptr(), RTLD_NOW) };
         if handle.is_null() {
-            return Err(format!("cannot map library payload: {}", last_error()));
+            return Err(invalid(format!("cannot map library payload: {}", last_error())));
         }
 
         let mut exports = header.exports.clone();
@@ -611,10 +652,10 @@ mod native {
                 Ok(pointer) => pointer,
                 Err(error) => {
                     unload(handle as usize);
-                    return Err(format!(
+                    return Err(invalid(format!(
                         "E1341: library `{}` metadata names `{}`, but the payload has no `{}` export: {error}",
                         header.library_name, export.name, export.symbol
-                    ));
+                    )));
                 }
             };
             export.pointer = pointer;
@@ -626,10 +667,10 @@ mod native {
         {
             if let Err(error) = lookup(handle, "jet_text_free") {
                 unload(handle as usize);
-                return Err(format!(
+                return Err(invalid(format!(
                     "E1341: library `{}` has Text exports but no `jet_text_free` allocator release export: {error}",
                     header.library_name
-                ));
+                )));
             }
         }
         Ok(JetMod {
@@ -653,8 +694,8 @@ mod native {
 #[cfg(windows)]
 mod native {
     use super::{
-        check_before_map, granted_path, jetlib_header, payload_digest, JetMod, JetModGrant,
-        JetModScalar,
+        check_before_map, granted_path, jetlib_header, payload_digest, JetMod, JetModFailure,
+        JetModGrant, JetModScalar,
     };
     use std::ffi::{c_char, c_void, CString};
     use std::io::Write;
@@ -735,19 +776,23 @@ mod native {
         Ok(staged)
     }
 
+    /// Every refusal is tagged (D-MOD-ERR1=A), as on unix.
     pub(super) fn load(path: &str, grant: &JetModGrant) -> Result<JetMod, String> {
+        let invalid = |reason: String| JetModFailure::Invalid.tag(reason);
         let source = granted_path(Path::new(path), grant)?;
-        let bytes = std::fs::read(&source)
-            .map_err(|error| format!("cannot read library `{}`: {error}", source.display()))?;
-        let header = jetlib_header(&bytes)?;
+        let bytes = std::fs::read(&source).map_err(|error| {
+            JetModFailure::from_io(&error)
+                .tag(format!("cannot read library `{}`: {error}", source.display()))
+        })?;
+        let header = jetlib_header(&bytes).map_err(invalid)?;
         check_before_map(&header)?;
         if payload_digest(header.payload) != header.payload_digest {
-            return Err(format!(
+            return Err(invalid(format!(
                 "cannot map library payload: `{}` has a content digest that does not match its metadata",
                 header.library_name
-            ));
+            )));
         }
-        let staged = stage(header.payload)?;
+        let staged = stage(header.payload).map_err(invalid)?;
         let mut wide: Vec<u16> = staged
             .path
             .as_ref()
@@ -760,7 +805,7 @@ mod native {
         // staged file remains until the JetMod drops.
         let handle = unsafe { LoadLibraryW(wide.as_ptr()) };
         if handle.is_null() {
-            return Err(format!("cannot map library payload: {}", last_error()));
+            return Err(invalid(format!("cannot map library payload: {}", last_error())));
         }
 
         let mut exports = header.exports.clone();
@@ -769,10 +814,10 @@ mod native {
                 Ok(pointer) => pointer,
                 Err(error) => {
                     unload(handle as usize);
-                    return Err(format!(
+                    return Err(invalid(format!(
                         "E1341: library `{}` metadata names `{}`, but the payload has no `{}` export: {error}",
                         header.library_name, export.name, export.symbol
-                    ));
+                    )));
                 }
             };
             export.pointer = pointer;
@@ -784,10 +829,10 @@ mod native {
         {
             if let Err(error) = lookup(handle, "jet_text_free") {
                 unload(handle as usize);
-                return Err(format!(
+                return Err(invalid(format!(
                     "E1341: library `{}` has Text exports but no `jet_text_free` allocator release export: {error}",
                     header.library_name
-                ));
+                )));
             }
         }
         Ok(JetMod {
@@ -811,13 +856,13 @@ mod native {
 
 #[cfg(not(any(unix, windows)))]
 mod native {
-    use super::{JetMod, JetModGrant};
+    use super::{JetMod, JetModFailure, JetModGrant};
 
     pub(super) fn load(_path: &str, _grant: &JetModGrant) -> Result<JetMod, String> {
-        Err(format!(
+        Err(JetModFailure::Unsupported.tag(format!(
             "Mod.load is not supported on target `{}`",
             std::env::consts::OS
-        ))
+        )))
     }
 
     pub(super) fn unload(_handle: usize) {}
@@ -840,12 +885,14 @@ fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
     }
 }
 
+/// Tagged (D-MOD-ERR1=A): a symlink or reparse point anywhere on the path is
+/// a grant refusal (`Denied`); failing to inspect the path is `Invalid`.
 fn reject_reparse_components(path: &std::path::Path, label: &str) -> Result<(), String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
-            .map_err(|error| format!("cannot resolve {label}: {error}"))?
+            .map_err(|error| JetModFailure::Invalid.tag(format!("cannot resolve {label}: {error}")))?
             .join(path)
     };
     let mut current = std::path::PathBuf::new();
@@ -854,44 +901,51 @@ fn reject_reparse_components(path: &std::path::Path, label: &str) -> Result<(), 
         let metadata = match std::fs::symlink_metadata(&current) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(format!("cannot inspect {label}: {error}")),
+            Err(error) => {
+                return Err(JetModFailure::Invalid.tag(format!("cannot inspect {label}: {error}")))
+            }
         };
         if is_reparse_point(&metadata) {
-            return Err(format!("{label} contains a symlink or reparse point"));
+            return Err(JetModFailure::Denied.tag(format!("{label} contains a symlink or reparse point")));
         }
     }
     Ok(())
 }
 
+/// Tagged (D-MOD-ERR1=A): nothing at the path is `NotFound`.
 fn canonical_revalidated(
     path: &std::path::Path,
     label: &str,
 ) -> Result<std::path::PathBuf, String> {
+    let resolve = |error: std::io::Error| {
+        JetModFailure::from_io(&error)
+            .tag(format!("cannot resolve {label} `{}`: {error}", path.display()))
+    };
     reject_reparse_components(path, label)?;
-    let first = std::fs::canonicalize(path)
-        .map_err(|error| format!("cannot resolve {label}: {error}"))?;
+    let first = std::fs::canonicalize(path).map_err(resolve)?;
     reject_reparse_components(path, label)?;
-    let second = std::fs::canonicalize(path)
-        .map_err(|error| format!("cannot resolve {label}: {error}"))?;
+    let second = std::fs::canonicalize(path).map_err(resolve)?;
     if first != second {
-        return Err(format!("{label} changed while it was being resolved"));
+        return Err(JetModFailure::Invalid.tag(format!("{label} changed while it was being resolved")));
     }
     Ok(second)
 }
 
+/// Tagged (D-MOD-ERR1=A): an empty grant or a path outside every read root
+/// is `Denied`.
 fn granted_path(path: &std::path::Path, grant: &JetModGrant) -> Result<std::path::PathBuf, String> {
     if grant.read.is_empty() {
-        return Err("Mod.load requires a non-empty `read` grant".to_string());
+        return Err(JetModFailure::Denied.tag("Mod.load requires a non-empty `read` grant"));
     }
     let canonical = canonical_revalidated(path, "library path")?;
     if !std::fs::metadata(&canonical)
         .map(|metadata| metadata.is_file())
         .unwrap_or(false)
     {
-        return Err(format!(
+        return Err(JetModFailure::Invalid.tag(format!(
             "library path `{}` is not a regular file",
             path.display()
-        ));
+        )));
     }
     for root in &grant.read {
         let root = canonical_revalidated(std::path::Path::new(root), "read grant root")?;
@@ -904,13 +958,18 @@ fn granted_path(path: &std::path::Path, grant: &JetModGrant) -> Result<std::path
         let root_again = canonical_revalidated(&root, "read grant root")?;
         let canonical_again = canonical_revalidated(path, "library path")?;
         if root != root_again || canonical != canonical_again {
-            return Err("library path or read grant root changed while it was being checked".to_string());
+            return Err(JetModFailure::Invalid.tag(
+                "library path or read grant root changed while it was being checked",
+            ));
         }
         if canonical == root || canonical.strip_prefix(&root).is_ok() {
             return Ok(canonical);
         }
     }
-    Err(format!("library path `{}` is outside the granted read roots", path.display()))
+    Err(JetModFailure::Denied.tag(format!(
+        "library path `{}` is outside the granted read roots",
+        path.display()
+    )))
 }
 
 pub fn jet_mod_load(path: &String, grant: &JetModGrant) -> Result<JetMod, String> {

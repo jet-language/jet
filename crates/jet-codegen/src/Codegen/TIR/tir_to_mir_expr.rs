@@ -148,12 +148,12 @@ fn zip_context_arg(
 fn zip_context_args(ctx: &mut LowerCtx) -> Result<Vec<MirCallArg>, LowerError> {
     let span = ctx.span();
     let (source_line, line, col) = {
-        let source = ctx
-            .source_texts
-            .get(&ctx.function.source_file)
-            .map(String::as_str)
-            .unwrap_or_default();
-        let (source_line, line, col) = crate::Codegen::TIR::tir_src_line_at(source, span.start);
+        let (source_line, line, col) = match ctx.function_source() {
+            Some(source) => {
+                crate::Codegen::TIR::tir_src_line_at(source.text, &source.lines, span.start)
+            }
+            None => ("", 1, 1),
+        };
         (source_line.trim_end().to_string(), line, col)
     };
     let file = ctx.function.source_file.clone();
@@ -1014,6 +1014,47 @@ pub(super) fn lower_receiver_place(
                 None => Some(base),
             }
         }
+        // D-SHAPE-PLACE1=A: `&list[a..b]` written through is a range window
+        // place over the owner list, so a write argument or a mutating
+        // receiver edits the owner's storage instead of a view copy.
+        TExprKind::BuiltinMethod {
+            recv,
+            op: TBuiltinOp::ViewMutNew { line },
+            args,
+        } if access == MirAccess::Write
+            && matches!(recv.ty.without_user_tags(), Type::List(_)) =>
+        {
+            let Some(base) = lower_receiver_place(ctx, recv, access)? else {
+                return Ok(None);
+            };
+            let range = match args.as_slice() {
+                [range] => ctx.lower_child(range)?,
+                [start, end] => {
+                    let range = TExpr {
+                        ty: Type::Named("Range".to_string()),
+                        kind: TExprKind::StructLit {
+                            fields: vec![
+                                ("start".to_string(), start.clone(), false),
+                                ("end".to_string(), end.clone(), false),
+                                (
+                                    "exclusive".to_string(),
+                                    TExpr {
+                                        ty: Type::Bool,
+                                        kind: TExprKind::BoolLit(false),
+                                    },
+                                    false,
+                                ),
+                            ],
+                            extra: None,
+                            as_trait: None,
+                        },
+                    };
+                    ctx.lower_child(&range)?
+                }
+                _ => return Err(ctx.error(ctx.span(), "checked range window has no bounds")),
+            };
+            Some(ctx.project_range_place(base, range, *line, ctx.span())?)
+        }
         _ => None,
     };
     Ok(place)
@@ -1787,7 +1828,15 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::Move(inner) => {
-            if let Some(place) = lower_receiver_place(ctx, inner, MirAccess::Move)? {
+            // Copy values cannot be consumed: moving an Int literal or local
+            // into a `^T` slot is a copy, the rule `lower_call_arg` applies.
+            let copy = matches!(
+                ctx.ownership_for(&inner.ty).mode,
+                jet_foundation::MIR::MirOwnershipMode::Copy
+            );
+            if copy {
+                ctx.lower_child(inner)
+            } else if let Some(place) = lower_receiver_place(ctx, inner, MirAccess::Move)? {
                 ctx.emit(
                     "explicit-move-place",
                     Some(expr.ty.clone()),
@@ -1940,6 +1989,9 @@ pub(super) fn lower_expr(
                     } else {
                         (value.ty.clone(), ctx.lower_child(value)?)
                     };
+                    // A raw-payload function value (a lambda) entering a
+                    // stored callable slot is lifted into the slot's carrier.
+                    let lowered = ctx.adapt_fn_value_carrier(lowered, &source, &expected)?;
                     let lowered = ctx.trait_box_value(lowered, &source, &expected)?;
                     Ok((ctx.field_id_for(owner, name)?, lowered))
                 })
@@ -2006,7 +2058,7 @@ pub(super) fn lower_expr(
             }
             let computed_grads = field == "grads"
                 && matches!(recv.ty.without_user_tags(), Type::Apply { name, args }
-                    if name == "VjpRun" && args.len() == 1);
+                    if name == "VJPRun" && args.len() == 1);
             let stored_ty = if computed_grads {
                 ctx.checked_field_type(&recv.ty, field)?
             } else {
@@ -3688,9 +3740,13 @@ pub(super) fn lower_expr(
         } => lower_optional_field(ctx, expr, base, member, *flatten),
         TExprKind::Lambda(lambda) => ctx.lower_lambda(lambda),
         TExprKind::PatternMatches { subj, pattern } => {
-            let subject = ctx.lower_child(subj)?;
+            let subject = ctx.lower_pattern_subject(subj)?;
             let pattern = lower_pattern(ctx, pattern)?;
-            ctx.lower_pattern_condition(subject, &pattern)
+            // A Bool-valued test keeps none of its bindings past itself.
+            let shadow_mark = ctx.shadow_mark();
+            let matched = ctx.lower_pattern_condition(subject, &pattern);
+            ctx.restore_shadowed_locals(shadow_mark);
+            matched
         }
         TExprKind::OptionLift2 { f, a, b } => lower_option_lift2(ctx, expr, f, a, b),
         TExprKind::TaskGroupAll { tasks } => {
@@ -4387,12 +4443,12 @@ pub(super) fn lower_expr(
                 .call_return_type_for(function, type_args)
                 .ok()
                 .flatten()
-                .filter(|returned| {
-                    super::mir::is_plain_return(returned)
-                        && target_return.as_ref().map_or_else(
-                            || super::mir::is_result_carrier(&expr.ty),
-                            |target| !super::mir::is_plain_return(target),
-                        )
+                .filter(|returned| match target_return {
+                    Some(target) if super::mir::is_plain_return(returned) => {
+                        !super::mir::is_plain_return(target)
+                    }
+                    Some(target) => super::mir::is_plain_call_return(returned, target),
+                    None => super::mir::is_plain_call_return(returned, &expr.ty),
                 });
             let type_args = lower_mir_types(ctx, type_args)?;
             let value = ctx.emit(
@@ -5484,6 +5540,8 @@ fn lower_if_expr(
     let else_block = ctx.new_block(ctx.span(), "if-else")?;
     let join = ctx.new_block(ctx.span(), "if-join")?;
 
+    // Condition bindings (`x == .Val(x)`) hold only on the then path.
+    let shadow_mark = ctx.shadow_mark();
     lower_if_cond(ctx, cond, then_block, else_block)?;
 
     let mut incoming = Vec::with_capacity(2);
@@ -5500,6 +5558,7 @@ fn lower_if_expr(
         }
     }
 
+    ctx.restore_shadowed_locals(shadow_mark);
     ctx.switch_to(else_block);
     ctx.lower_nested_stmts(else_body)?;
     if !ctx.is_terminated() {
@@ -5512,6 +5571,7 @@ fn lower_if_expr(
         }
     }
 
+    ctx.restore_shadowed_locals(shadow_mark);
     if incoming.is_empty() {
         ctx.block_mut(join)?.terminator = MirTerminator::Unreachable {
             reason: "every conditional arm diverges".to_string(),
@@ -5637,15 +5697,14 @@ fn plain_try_call_root(inner: &TExpr) -> Option<usize> {
 /// #3740: a plain-return function hands back its success value. Its checked
 /// body still returns the `T Never!` carrier — the implicit `Ok(v)` or a
 /// carrier-typed value — so the executable return unwraps it here, once.
-/// `None` when the function keeps a carrier-shaped return.
+/// A `T? Never!` function hands back its `T?` the same way. `None` when the
+/// function keeps a carrier-shaped return.
 pub(super) fn lower_plain_return_value(
     ctx: &mut LowerCtx,
     expr: &TExpr,
     expected: &Type,
 ) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
-    if !super::mir::is_plain_return(expected)
-        || !super::mir::is_result_carrier(&expr.ty)
-    {
+    if !super::mir::is_plain_call_return(expected, &expr.ty) {
         return Ok(None);
     }
     if let TExprKind::Ok(inner) = &expr.kind {
@@ -5703,7 +5762,7 @@ fn lower_if_cond(
             lower_if_cond(ctx, right, then_target, else_target)?;
         }
         super::TIfCond::IfLet { pattern, subj } => {
-            let subject = ctx.lower_child(subj)?;
+            let subject = ctx.lower_pattern_subject(subj)?;
             let pattern = lower_pattern(ctx, pattern)?;
             let condition = ctx.lower_pattern_condition(subject, &pattern)?;
             ctx.terminate(MirTerminator::Branch {
@@ -5729,7 +5788,7 @@ fn lower_if_cond(
             });
         }
         super::TIfCond::Matches { pattern, subj } => {
-            let subject = ctx.lower_child(subj)?;
+            let subject = ctx.lower_pattern_subject(subj)?;
             let pattern = lower_pattern(ctx, pattern)?;
             let condition = ctx.lower_pattern_condition(subject, &pattern)?;
             ctx.terminate(MirTerminator::Branch {
@@ -5850,27 +5909,35 @@ fn lower_try_value(
             .cloned()
             .ok_or_else(|| ctx.error(ctx.span(), "checked try option has no success type"))?
     };
-    let success = if is_result {
-        ctx.emit(
-            "try-result-value",
-            Some(success_ty.clone()),
-            MirOperation::ResultValue {
-                subject: input,
-                ok: true,
-            },
-        )?
+    if success_ty.is_never() {
+        // A `Never` success (`Never E!`, `Never Never!`) has no value to
+        // hand on; only the failure edge can leave this `Try`.
+        ctx.terminate(MirTerminator::Unreachable {
+            reason: "checked try success is uninhabited".to_string(),
+        });
     } else {
-        ctx.emit(
-            "try-option-value",
-            Some(success_ty.clone()),
-            MirOperation::OptionValue { subject: input },
-        )?
-    };
-    let success = ctx.trait_box_value(success, &success_ty, result)?;
-    let success_source = ctx.current_block();
-    if !ctx.is_terminated() {
-        ctx.terminate(MirTerminator::Jump { target: join });
-        incoming.push((success_source, success));
+        let success = if is_result {
+            ctx.emit(
+                "try-result-value",
+                Some(success_ty.clone()),
+                MirOperation::ResultValue {
+                    subject: input,
+                    ok: true,
+                },
+            )?
+        } else {
+            ctx.emit(
+                "try-option-value",
+                Some(success_ty.clone()),
+                MirOperation::OptionValue { subject: input },
+            )?
+        };
+        let success = ctx.trait_box_value(success, &success_ty, result)?;
+        let success_source = ctx.current_block();
+        if !ctx.is_terminated() {
+            ctx.terminate(MirTerminator::Jump { target: join });
+            incoming.push((success_source, success));
+        }
     }
 
     ctx.switch_to(failure_block);
@@ -5994,7 +6061,18 @@ fn lower_try_value(
     }
 
     if incoming.is_empty() {
-        return unsupported_expr(ctx, "TExprKind::Try (no reachable success)");
+        // Every edge left the `Try` (a `Never` success whose failure
+        // propagated or is itself uninhabited). The join has no predecessor
+        // and the placeholder below sits after a terminator, as for an `if`
+        // whose every arm diverges.
+        ctx.block_mut(join)?.terminator = MirTerminator::Unreachable {
+            reason: "every try edge diverges".to_string(),
+        };
+        return ctx.emit(
+            "diverging-try",
+            Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+            MirOperation::Constant(MirConstant::Unit),
+        );
     }
     ctx.switch_to(join);
     ctx.emit(

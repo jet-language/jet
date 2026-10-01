@@ -1,5 +1,16 @@
 // Pure Prelude dispatch. The row and symbol are checked before any route body is
 // selected; route names are only used after the canonical MIR row is found.
+use jet_foundation.[
+    MIRCallFallibility,
+    MIRPreludeABI,
+    MIRPreludeCallID,
+    MIRPreludeFamily,
+    MIRType,
+    Span,
+    TComptimeEnumArg,
+    TComptimeValue,
+    mir_symbol_name,
+]
 
 fn jet_eval_route_is_exact_integer_member(member: String) -> Bool Never! {
     if member == {
@@ -66,6 +77,7 @@ fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &J
                     else -> Val(0)
                 }
             }
+            else -> {}
         }
         .String(left_text) -> if right == {
             .String(right_text) -> return if {
@@ -73,6 +85,7 @@ fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &J
                 left_text > right_text -> Val(1)
                 else -> Val(0)
             }
+            else -> {}
         }
         .Char(left_char) -> if right == {
             .Char(right_char) -> return if {
@@ -80,6 +93,7 @@ fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &J
                 left_char > right_char -> Val(1)
                 else -> Val(0)
             }
+            else -> {}
         }
         .Bool(left_flag) -> if right == {
             .Bool(right_flag) -> return if {
@@ -87,7 +101,9 @@ fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &J
                 !left_flag -> Val(-1)
                 else -> Val(1)
             }
+            else -> {}
         }
+        else -> {}
     }
     jet_eval_compiler_fail(&machine, span, "comparison route received incompatible values")
     None
@@ -162,7 +178,7 @@ fn jet_eval_route_parse_integer_failure(text: String, radix: Int) -> String Neve
     "invalid base-{radix} integer `{trimmed}`"
 }
 
-fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: MirCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: MIRCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if member == {
         "string_ascii_lower" | "string_ascii_upper" -> {
             if args.len() != 1 {
@@ -292,16 +308,15 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
             }
         }
         "compare" | "eq" | "ne" | "lt" | "gt" | "le" | "ge" -> jet_eval_route_compare(member, args, &machine, span)
-        "bit_count" | "int_bit_count" -> jet_eval_route_bit_count(args, &machine, span)
         "string_split" | "iter_to_list" | "iter_collect" -> jet_eval_route_not_supported(&machine, span, "stream-producing builtin route")
         else -> jet_eval_route_not_supported(&machine, span, "Prelude builtin {member}")
     }
 }
 
-fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args: [JetEvalRuntimeValue], type_args: [MIRType], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
     if !jet_eval_route_signature_prelude(row, args.len(), &machine, span) -> return None
-    if row.abi == MirPreludeAbi.Control || row.abi == MirPreludeAbi.Effect -> return jet_eval_route_not_supported(&machine, span, "effectful or control Prelude route")
+    if row.abi == MIRPreludeABI.Control || row.abi == MIRPreludeABI.Effect -> return jet_eval_route_not_supported(&machine, span, "effectful or control Prelude route")
     if row.module_name == "core.prelude" && row.member == "keep" {
         symbol :: mir_symbol_name(row.symbol)
         if symbol != "jet_keep" || args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "invalid core.prelude.keep ABI")
@@ -309,22 +324,23 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MirPreludeCallId, args
     }
     symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
     data :: jet_eval_route_args(args, &machine, span) ?? return None
-    if row.family == MirPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" {
+    if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" {
         parts :: jet_eval_compiler_value_method_owner(row.member) ?? return jet_eval_route_not_supported(&machine, span, "invalid compiler host method member")
         if jet_eval_reflection_metadata_supported(parts[0], parts[1]) -> return jet_eval_route_reflection_host(row, data, &machine, span)
         if jet_eval_compiler_value_method_supported(parts[0], parts[1], data.len() - 1) -> return jet_eval_route_compiler_value_host(row, data, &machine, span)
     }
-    if row.family == MirPreludeFamily.Overflow && row.module_name == "core.numeric" && jet_eval_route_is_exact_integer_member(row.member) && jet_eval_route_exact_integer_symbol(row.member, symbol) -> return jet_eval_route_exact_integer_host(row, args, &machine, result_ty, span)
-    if row.family == MirPreludeFamily.Overflow {
+    if row.family == MIRPreludeFamily.Overflow && row.module_name == "core.numeric" && jet_eval_route_is_exact_integer_member(row.member) && jet_eval_route_exact_integer_symbol(row.member, symbol) -> return jet_eval_route_exact_integer_host(row, args, &machine, result_ty, span)
+    if row.family == MIRPreludeFamily.Overflow {
         fixed :: jet_eval_route_fixed_member(row.member)
-        if fixed != None && jet_eval_route_fixed_symbol(fixed ?? [String]{}, symbol) -> return jet_eval_route_fixed_host(row, args, &machine, result_ty, span)
+        if fixed != None && jet_eval_route_fixed_symbol(fixed, symbol) -> return jet_eval_route_fixed_host(row, args, &machine, result_ty, span)
     }
-    if row.family == MirPreludeFamily.BuiltinMethod && row.module_name == "core.compare" && symbol == "jet_int_compare" -> return jet_eval_route_exact_compare_member_host(row.member, args, &machine, result_ty, span)
-    if row.family == MirPreludeFamily.BuiltinMethod || row.family == MirPreludeFamily.MathBuiltin -> return jet_eval_route_builtin(row.member, data, row.fallibility, &machine, span)
-    if row.family == MirPreludeFamily.PreciseBuiltin {
+    if row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.compare" && symbol == "jet_int_compare" -> return jet_eval_route_exact_compare_member_host(row.member, args, &machine, result_ty, span)
+    if row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.numeric" && (row.member == "bit_count" || row.member == "int_bit_count") -> return jet_eval_route_numeric_conversion(row, args, &machine, result_ty, span)
+    if row.family == MIRPreludeFamily.BuiltinMethod || row.family == MIRPreludeFamily.MathBuiltin -> return jet_eval_route_builtin(row.member, data, row.fallibility, &machine, span)
+    if row.family == MIRPreludeFamily.PreciseBuiltin {
         if jet_eval_route_precise_operator(row.module_name, row.member) && jet_eval_route_precise_symbol(row.module_name, row.member, symbol) -> return jet_eval_host_row(&machine, row, args, result_ty, span)
         return jet_eval_route_not_supported(&machine, span, "PreciseBuiltin route has no canonical numeric adapter")
     }
-    if row.family == MirPreludeFamily.StaticPrelude && symbol.starts_with("jet_") -> return jet_eval_route_numeric_conversion(row, args, &machine, result_ty, span)
+    if row.family == MIRPreludeFamily.StaticPrelude && symbol.starts_with("jet_") -> return jet_eval_route_numeric_conversion(row, args, &machine, result_ty, span)
     jet_eval_route_not_supported(&machine, span, "Prelude route {row.module_name}.{row.member}")
 }

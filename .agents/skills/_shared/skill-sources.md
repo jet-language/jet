@@ -33,6 +33,7 @@ Source keys:
 | A+F | H | `codex-result-handling` | keep | After Codex helper output | Preserve verdict, evidence, and finding boundaries; do not imply a fix. |
 | A+F | R | `diagnosing-bugs` | keep | “diagnose”, “debug”, broken, throwing, failing, or slow | Reproduce, isolate the root cause, and keep a feedback loop. |
 | A+F | R | `domain-modeling` | keep | Domain terms, ubiquitous language, glossary, or ADR work | Challenge terms and record the model when it crystallizes. |
+| F | R | `elegance-audit` | keep | Elegance, beauty, “make it click”, grouping or numbering laws, or cross-layer consistency | Census five user-facing layers for area and rhymes, let the owner pick the dive, and keep area and click as separate verdicts; report-only. |
 | A+F | R + M | `eli5` | keep | ELI5, “explain simply”, plain English, or beginner explanation | Build an accurate beginner mental model. Select the canonical `R` source, not the managed duplicate. |
 | A+F | R + M | `eli5-caveman` | keep | ELI5 plus brief or caveman compression | Explain accurately, then compress without dropping mechanisms or material caveats. Select `R`, not the managed duplicate. |
 | A+F | G | `find-skills` | narrow | Find a skill, ask how to do something, or discover capability | Discover host capabilities only; `jet-router` still routes Jet work. |

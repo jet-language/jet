@@ -16,6 +16,8 @@ use crate::Syntax;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+
+use jet_foundation::Names::normalize_path;
 use std::process::Command;
 
 #[cfg(any(
@@ -2682,20 +2684,6 @@ fn git_clone(
             }
         };
     }
-}
-
-fn normalize_path(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in p.components() {
-        match comp {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 fn path_dependency_escape_diagnostic(dep_name: &str, path: &str, parent_dir: &Path) -> Diagnostic {

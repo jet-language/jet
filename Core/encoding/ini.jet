@@ -22,7 +22,7 @@ pub struct INIError {
 }
 
 impl INIError {
-    pub fn new(line: Int, reason: String) -> INIError {
+    pub fn new(line: Int, reason: String) -> INIError Never! {
         INIError{line: line, reason: reason}
     }
 }
@@ -81,7 +81,7 @@ pub fn parse(text: String) -> Ini INIError! {
     Ok(doc)
 }
 
-pub fn to_string(doc: Ini) -> String {
+pub fn to_string(doc: Ini) -> String Never! {
     out := ""
     loop section in doc.sections {
         out = "{out}[{section.name}]\n"
@@ -91,7 +91,7 @@ pub fn to_string(doc: Ini) -> String {
     out
 }
 
-pub fn sections(doc: Ini) -> [String] {
+pub fn sections(doc: Ini) -> [String] Never! {
     names := [String]{}
     loop s in doc.sections -> &names.push(s.name)
     names
@@ -104,9 +104,9 @@ pub fn has_section(doc: Ini, name: String) -> Bool Never! {
     false
 }
 
-pub fn has_option(doc: Ini, section: String, key: String) -> Bool { get(doc, section, key) != None }
+pub fn has_option(doc: Ini, section: String, key: String) -> Bool Never! { get(doc, section, key) != None }
 
-pub fn get(doc: Ini, section: String, key: String) -> String? {
+pub fn get(doc: Ini, section: String, key: String) -> String? Never! {
     loop s in doc.sections {
         if s.name == section {
             loop p in s.pairs {
@@ -117,14 +117,14 @@ pub fn get(doc: Ini, section: String, key: String) -> String? {
     None
 }
 
-pub fn get_or(doc: Ini, section: String, key: String, fallback: String) -> String { get(doc, section, key) ?? fallback }
+pub fn get_or(doc: Ini, section: String, key: String, fallback: String) -> String Never! { get(doc, section, key) ?? fallback }
 
-pub fn get_int(doc: Ini, section: String, key: String) -> Int? {
+pub fn get_int(doc: Ini, section: String, key: String) -> Int? Never! {
     text :: get(doc, section, key) ?? return None
     parse_int(text)
 }
 
-pub fn get_bool(doc: Ini, section: String, key: String) -> Bool? {
+pub fn get_bool(doc: Ini, section: String, key: String) -> Bool? Never! {
     text :: get(doc, section, key) ?? return None
     t :: ascii_lower(trim(text))
     if t == {
@@ -134,19 +134,19 @@ pub fn get_bool(doc: Ini, section: String, key: String) -> Bool? {
     }
 }
 
-pub fn get_float(doc: Ini, section: String, key: String) -> Float? {
+pub fn get_float(doc: Ini, section: String, key: String) -> Float? Never! {
     text :: get(doc, section, key) ?? return None
     parse_float(text)
 }
 
-pub fn items(doc: Ini, section: String) -> [Pair] {
+pub fn items(doc: Ini, section: String) -> [Pair] Never! {
     loop s in doc.sections {
         if s.name == section -> return s.pairs
     }
     [Pair]{}
 }
 
-pub fn options(doc: Ini, section: String) -> [String] {
+pub fn options(doc: Ini, section: String) -> [String] Never! {
     keys := [String]{}
     loop p in items(doc, section) -> &keys.push(p.key)
     keys
@@ -180,7 +180,7 @@ pub fn set(doc: Ini, section: String, key: String, value: String) -> Ini Never! 
     Ini{sections: sections}
 }
 
-pub fn remove_option(doc: Ini, section: String, key: String) -> Ini {
+pub fn remove_option(doc: Ini, section: String, key: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
         if s.name == section {
@@ -196,7 +196,7 @@ pub fn remove_option(doc: Ini, section: String, key: String) -> Ini {
     Ini{sections: sections}
 }
 
-pub fn remove_section(doc: Ini, section: String) -> Ini {
+pub fn remove_section(doc: Ini, section: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
         if s.name != section -> &sections.push(s)
@@ -204,7 +204,7 @@ pub fn remove_section(doc: Ini, section: String) -> Ini {
     Ini{sections: sections}
 }
 
-pub fn defaults(doc: Ini) -> [Pair] { items(doc, "DEFAULT") }
+pub fn defaults(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
 
 fn ensure_section(doc: Ini, name: String) -> Ini Never! {
     if has_section(doc, name) -> return ~doc

@@ -590,6 +590,14 @@ impl<'a> Interp<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         self.burn(e.span())?;
+        // Template conditions (`left.$index == right.$index`) and literal
+        // folds read values already in scope. Answer them on the layered
+        // view (scope shadows globals) before building the merged snapshot
+        // the MIR fragment needs: cloning every scope value per condition
+        // made derive expansion over an enum with V variants O(V^3).
+        if let Some(value) = super::MirBridge::static_ct_value(e, self.globals, Some(&*scope)) {
+            return Ok(value);
+        }
         let mut globals = self.globals.clone();
         for (k, v) in scope.iter() {
             globals.insert(k.clone(), v.clone());

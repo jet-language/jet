@@ -40,11 +40,11 @@ pub struct Session {
     pub proxy: String
 }
 pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
-    http.get(url)
+    core.http.client.get(url)
 }
 
 pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
-    http.post(url, body)
+    core.http.client.post(url, body)
 }
 
 pub fn request(method: String, url: String) -> HTTPRequest Never! {
@@ -55,7 +55,7 @@ pub fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     req.send()
 }
 
-pub fn header(client: Client, line: String) -> Client {
+pub fn header(client: Client, line: String) -> Client Never! {
     _ :: header_name(line) ?? return ~client
     _ :: header_value(line) ?? return ~client
     Client{
@@ -67,7 +67,7 @@ pub fn header(client: Client, line: String) -> Client {
     }
 }
 
-pub fn set_header(client: Client, name: String, value: String) -> Client {
+pub fn set_header(client: Client, name: String, value: String) -> Client Never! {
     Client{
         method: ~client.method,
         url: ~client.url,
@@ -76,19 +76,19 @@ pub fn set_header(client: Client, name: String, value: String) -> Client {
         proxy: ~client.proxy,
     }
 }
-pub fn with_proxy(client: Client, proxy: Proxy) -> Client {
+pub fn with_proxy(client: Client, proxy: Proxy) -> Client Never! {
     Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: client.redirects, proxy: ~proxy.url}
 }
 
 
-pub fn timeout_redirects(client: Client, n: Int) -> Client {
+pub fn timeout_redirects(client: Client, n: Int) -> Client Never! {
     limit := n
     if limit < 0 -> limit = 0
     if limit > C_MAX_REDIRECTS -> limit = C_MAX_REDIRECTS
     Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: limit, proxy: ~client.proxy}
 }
 
-pub fn session() -> Session {
+pub fn session() -> Session Never! {
     Session{
         headers: [String]{},
         cookies: [String]{},
@@ -114,35 +114,35 @@ pub fn session_header(s: Session, name: String, value: String) -> Session Never!
     }
 }
 
-pub fn session_timeout(s: Session, ms: Int) -> Session {
+pub fn session_timeout(s: Session, ms: Int) -> Session Never! {
     t := ms
     if t < 0 -> t = 0
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: t, retries: s.retries, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
-pub fn session_retries(s: Session, n: Int) -> Session {
+pub fn session_retries(s: Session, n: Int) -> Session Never! {
     r := n
     if r < 0 -> r = 0
     if r > C_MAX_RETRIES -> r = C_MAX_RETRIES
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
-pub fn session_redirects(s: Session, n: Int) -> Session {
+pub fn session_redirects(s: Session, n: Int) -> Session Never! {
     r := n
     if r < 0 -> r = 0
     if r > C_MAX_REDIRECTS -> r = C_MAX_REDIRECTS
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
-pub fn session_auth(s: Session, user: String, password: String) -> Session {
+pub fn session_auth(s: Session, user: String, password: String) -> Session Never! {
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: ~s.proxy}
 }
 
-pub fn session_proxy(s: Session, url: String) -> Session {
+pub fn session_proxy(s: Session, url: String) -> Session Never! {
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: url}
 }
 
-pub fn session_cookie(s: Session, cookie: String) -> Session {
+pub fn session_cookie(s: Session, cookie: String) -> Session Never! {
     if !valid_cookie_pair(cookie) -> return ~s
     cookies := [String]{}
     name :: cookie_name(cookie) ?? return ~s
@@ -177,7 +177,7 @@ pub fn cookie_header(cookies: [String]) -> String Never! {
 
 pub fn session_request(s: Session, method: String, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_method(method) -> return Err(.InvalidMethod)
-    if !valid_url(url) -> return Err(.InvalidUrl)
+    if !valid_url(url) -> return Err(.InvalidURL)
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     if s.proxy.bytes().len() > 0 && !valid_url(s.proxy) -> return Err(.Proxy{stage: "invalid proxy"})
     h := session_headers(s)
@@ -198,7 +198,7 @@ fn session_follow(s: Session, method: String, url: String, body: String, h: [Str
         if code != 301 && code != 302 && code != 303 && code != 307 && code != 308 -> return Ok(~resp)
         if hops >= s.redirects -> return Ok(~resp)
         loc :: &resp.header("Location") ?? return Ok(~resp)
-        next :: resolve_location(current_url, loc) ?? return Err(.InvalidUrl)
+        next :: resolve_location(current_url, loc) ?? return Err(.InvalidURL)
         if is_https_downgrade(current_url, next) -> return Err(.Redirect{reason: "https downgrade"})
         on_same_origin := same_origin(current_url, next)
         preserve := code == 307 || code == 308
@@ -241,7 +241,7 @@ fn retryable_error(error: HTTPError) -> Bool Never! {
     }
 }
 
-pub fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int {
+pub fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int Never! {
     if policy == {
         RedirectPolicy.Disabled -> return 0
         RedirectPolicy.All -> return C_MAX_REDIRECTS
@@ -284,10 +284,10 @@ fn request_once(s: Session, method: String, url: String, body: String, headers: 
     req.send()
 }
 
-pub fn user_agent(client: Client, name: String) -> Client { set_header(client, "User-Agent", name) }
-pub fn bearer(client: Client, token: String) -> Client { set_header(client, "Authorization", http.bearer_auth(token)) }
-pub fn accept(client: Client, mime: String) -> Client { set_header(client, "Accept", mime) }
-pub fn content_type(client: Client, mime: String) -> Client { set_header(client, "Content-Type", mime) }
+pub fn user_agent(client: Client, name: String) -> Client Never! { set_header(client, "User-Agent", name) }
+pub fn bearer(client: Client, token: String) -> Client Never! { set_header(client, "Authorization", http.bearer_auth(token)) }
+pub fn accept(client: Client, mime: String) -> Client Never! { set_header(client, "Accept", mime) }
+pub fn content_type(client: Client, mime: String) -> Client Never! { set_header(client, "Content-Type", mime) }
 
 
 fn session_headers(s: Session) -> [String] Never! {
@@ -494,7 +494,7 @@ fn valid_url(url: String) -> Bool Never! {
     if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
     parsed :: http_url.parse(url) ?? return false
     if parsed.scheme != "http" && parsed.scheme != "https" -> return false
-    if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 -> return false
+    if parsed.host.bytes().len() == 0 || parsed.userinfo().bytes().len() > 0 -> return false
     colon := index_byte(raw, 58)
     if colon <= 0 || colon + 2 >= raw.len() -> return false
     if raw[colon + 1] != (U8{47}) || raw[colon + 2] != (U8{47}) -> return false

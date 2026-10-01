@@ -55,9 +55,6 @@ pub fn note_lower() {
 pub fn note_codegen() {
     CODEGEN.fetch_add(1, Ordering::Relaxed);
 }
-pub fn note_link() {
-    LINK.fetch_add(1, Ordering::Relaxed);
-}
 
 pub fn phases() -> RunPhases {
     RunPhases {

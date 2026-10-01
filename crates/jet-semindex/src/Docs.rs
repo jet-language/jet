@@ -8,6 +8,7 @@ use crate::Types::{SemIndex, TraitContractFact};
 use jet_foundation::AST::{Item, ProgramBundle};
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+use jet_foundation::JSON::quote as json_string;
 use jet_pkg_model::EffectBudget::{render_effect_projection_line, render_effect_projection_object, EffectProjection};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -1565,10 +1566,6 @@ fn line_offset(source: &str, line: usize) -> usize {
         .sum()
 }
 
-fn json_string(value: &str) -> String {
-    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
-}
-
 fn optional_json_string(value: Option<&str>) -> String {
     value.map_or_else(|| "null".to_string(), json_string)
 }
@@ -1584,7 +1581,8 @@ fn json_array(values: &[String]) -> String {
     )
 }
 
-fn html_escape(value: &str) -> String {
+/// Escape text for HTML element and attribute content (`&<>"'`).
+pub fn html_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")

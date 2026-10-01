@@ -1,60 +1,46 @@
 // Reservoir sample (Algorithm R).
 //
-// `add` is intentionally pure and takes one caller-supplied deterministic
-// draw.  The draw is interpreted as an unsigned 63-bit word, so replaying a
-// stream with the same draws produces the same sample on every tier.  Native
-// receiver samplers may keep an equivalent seeded generator behind the
-// opaque carrier; they must follow the same replacement rule.
+// `add` updates the sample in place through a write receiver. Replacement
+// draws come from a SplitMix64 stream carried in the value and seeded by
+// `new`, so replaying a stream produces the same sample on every tier.
 C_DEFAULT_K :: 32
-C_MASK63 :: 9223372036854775807
 C_INT_MAX :: 9223372036854775807
 
 pub struct Reservoir {
     pub k: Int
     pub seen: Int
     pub items: [String]
+    state: U64
 }
 
-pub fn new() -> Reservoir { Reservoir{k: C_DEFAULT_K, seen: 0, items: [String]{}} }
-
-pub fn new_k(k: Int) -> Reservoir {
+pub fn new(k: Int{C_DEFAULT_K}) -> Reservoir Never! {
     capacity := k
     if capacity < 1 -> capacity = 1
-    Reservoir{k: capacity, seen: 0, items: [String]{}}
+    Reservoir{k: capacity, seen: 0, items: [String]{}, state: U64{0}}
 }
 
-pub fn add(res: Reservoir, item: String, rand: Int) -> Reservoir {
-    capacity := res.k
-    if capacity < 1 -> capacity = 1
-    limit := res.items.len()
-    if limit > capacity -> limit = capacity
-    items := [String]{}
-    loop i in 0..<limit -> &items.push(res.items[i])
-
-    seen := res.seen
-    if seen < limit -> seen = limit
-    if seen < 0 -> seen = 0
-    if seen < C_INT_MAX -> seen = seen + 1
-
-    if items.len() < capacity {
-        &items.push(item)
-        return Reservoir{k: capacity, seen: seen, items: items}
+impl Reservoir {
+    /// Offer one item; every item seen so far is kept with equal probability.
+    pub fn add(&self, item: String) Never! {
+        if self.k < 1 -> self.k = 1
+        if self.seen < self.items.len() -> self.seen = self.items.len()
+        if self.seen < C_INT_MAX -> self.seen = self.seen + 1
+        if self.items.len() < self.k {
+            &self.items.push(item)
+            return
+        }
+        self.state = self.state.wrapping_add(U64{11400714819323198485})
+        z := (self.state ~| (self.state >> 30)).wrapping_mul(U64{13787848793156543929})
+        z = (z ~| (z >> 27)).wrapping_mul(U64{10723151780598845931})
+        z = z ~| (z >> 31)
+        index :: Int.from_u64(z >> 1) %% self.seen
+        if index < self.k -> self.items[index] = item
     }
 
-    span := seen
-    if span < 1 -> span = 1
-    draw :: rand & C_MASK63
-    index :: draw %% span
-    if index < capacity -> items[index] = item
-    Reservoir{k: capacity, seen: seen, items: items}
-}
-
-pub fn sample(res: Reservoir) -> [String] {
-    capacity := res.k
-    if capacity < 1 -> capacity = 1
-    limit := res.items.len()
-    if limit > capacity -> limit = capacity
-    out := [String]{}
-    loop i in 0..<limit -> &out.push(res.items[i])
-    out
+    /// The current sample, in slot order.
+    pub fn sample(self) -> [String] Never! {
+        out := [String]{}
+        loop item in self.items -> &out.push(item)
+        out
+    }
 }

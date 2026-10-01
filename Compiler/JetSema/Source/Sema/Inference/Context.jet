@@ -3,6 +3,13 @@
 // Inference is deliberately the only owner of substitutions for callable and
 // nominal generic checking. Callers retain the resulting evidence rather than
 // guessing whether a bound was checked.
+use jet_foundation.[
+    Span,
+    TGenericParam,
+    Type,
+    TypeParam,
+    type_identity_equal,
+]
 
 pub struct SemaInferenceTypeParam {
     pub name: String
@@ -69,7 +76,7 @@ pub fn sema_inference_bindings_for_type_args(parameters: [SemaInferenceTypeParam
 }
 
 pub fn sema_inference_context(graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
-    SemaInferenceContext{graph: graph, caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
+    SemaInferenceContext{graph: ~graph, caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
 }
 
 pub fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> SemaInferenceBinding? {

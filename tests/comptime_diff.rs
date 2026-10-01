@@ -870,7 +870,7 @@ fn empty() -> [Float] {{
     return []
 }}
 
-EXPECTED_EMPTY :: prep { show(data.{method}(empty())) }
+EXPECTED_EMPTY :: prep {{ show(data.{method}(empty())) }}
 
 fn run() {{
     actual_empty :: show(data.{method}(empty()))

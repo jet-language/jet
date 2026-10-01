@@ -1,3 +1,14 @@
+use jet_foundation.[
+    Diagnostic,
+    Item,
+    SymbolID,
+    TFunc,
+    TFuncKind,
+    TestDef,
+    ast_func,
+    tir_test_artifact_key,
+]
+
 pub struct SemaTestFunctionCheckResult {
     pub function: TFunc?
     pub call_facts: [SemaCallSiteFact]
@@ -11,7 +22,7 @@ pub struct SemaTestFunctionCheckResult {
 
 pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, module_scopes: SemaScopeTable) -> SemaTestFunctionCheckResult {
     key := tir_test_artifact_key(environment.module_identity, test)
-    owner_id := SymbolId{key: key}
+    owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
     temporary_name := "__jet_test_{test.span.start}_{test.span.end}"
     synthetic := ast_func(temporary_name, test.name_span, test.span)
@@ -21,7 +32,7 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
     registered := false
     loop !registered {
         synthetic.name = temporary_name
-        symbol :: sema_item_symbol(Item.Func{value: synthetic}, environment.module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
+        symbol := sema_item_symbol(Item.Func{value: synthetic}, environment.module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
             return SemaTestFunctionCheckResult{
                 function: None,
                 call_facts: [SemaCallSiteFact]{},
@@ -43,7 +54,7 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
     name_references := [SemaNameReferenceFact]{}
     diagnostics := [Diagnostic]{}
     checked := sema_function_check(synthetic, owner_id, TFuncKind.TopLevel, ~environment, scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
-    function := None
+    function := TFunc?{None}
     if checked.value == .Val(value) {
         updated_value := value
         updated_value.name = key

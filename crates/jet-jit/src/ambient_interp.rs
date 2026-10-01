@@ -974,11 +974,6 @@ impl InterpreterAmbientContext {
         self.state().handles.push(callback);
     }
 
-    /// Register a typed foreign-call adapter.
-    pub fn register_extern(&mut self, callback: AmbientExternCall) {
-        self.state().extern_calls.push(callback);
-    }
-
     /// Register a typed canonical MIR foreign adapter.
     pub fn register_mir_extern(&mut self, callback: AmbientMirExternCall) {
         self.state().mir_extern_calls.push(callback);

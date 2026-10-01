@@ -47,7 +47,7 @@ pub enum Key {
     Right
     Unknown
 }
-pub fn print(text: String) -[IO, Time.Wait]> {
+pub fn print(text: String) Never! -[IO, Time.Wait]> {
     out :: core.term.stdout()
     &out.write_line(text).drop("stdout write")
 }
@@ -79,28 +79,28 @@ pub fn binwrite(path: String, bytes: [U8]) IOError! -[IO, Time.Wait]> {
     core.term.binwrite(path, bytes)
 }
 
-pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool { core.term.confirm(prompt) }
+pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool Never! { core.term.confirm(prompt) }
 
 pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     if options.len() == 0 -> return Err(term_input_error("choose", prompt, "choose needs at least one item"))
     core.term.choose(prompt, options)
 }
 
-pub fn stdin() -> StdinHandle { core.term.stdin() }
+pub fn stdin() -> StdinHandle Never! { core.term.stdin() }
 
-pub fn stdout() -> Stdout { core.term.stdout() }
+pub fn stdout() -> Stdout Never! { core.term.stdout() }
 
-pub fn stderr() -> Stderr { core.term.stderr() }
+pub fn stderr() -> Stderr Never! { core.term.stderr() }
 
-pub fn buffered() -> StdinHandle { core.term.buffered() }
+pub fn buffered() -> StdinHandle Never! { core.term.buffered() }
 
-pub fn terminal_width() -[IO]> Int { core.term.terminal_width() }
+pub fn terminal_width() -[IO]> Int Never! { core.term.terminal_width() }
 
-pub fn terminal_height() -[IO]> Int { core.term.terminal_height() }
+pub fn terminal_height() -[IO]> Int Never! { core.term.terminal_height() }
 
-pub fn style(style: String, text: String) -[IO]> String { core.term.style(style, text) }
+pub fn style(style: String, text: String) -[IO]> String Never! { core.term.style(style, text) }
 
-pub fn style_force(style: String, text: String) -> String {
+pub fn style_force(style: String, text: String) -> String Never! {
     codes :: sgr(style)
     if codes.len() == 0 -> return ~text
     esc :: String.from_bytes([U8]{27}) ?? ""
@@ -108,7 +108,7 @@ pub fn style_force(style: String, text: String) -> String {
 }
 
 
-pub fn read_key() -[IO, Time.Wait]> Key { core.term.read_key() }
+pub fn read_key() -[IO, Time.Wait]> Key Never! { core.term.read_key() }
 
 pub struct WinSize {
     pub w: Int

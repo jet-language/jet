@@ -199,9 +199,6 @@ impl JetDate {
     pub(crate) fn iso_week_year(&self) -> i64 {
         self.add_days(4 - self.iso_weekday()).year
     }
-    pub(crate) fn iso_week_date(&self) -> (i64, i64, i64) {
-        (self.iso_week_year(), self.iso_week(), self.iso_weekday())
-    }
     pub(crate) fn from_iso_week(year: i64, week: i64, weekday: i64) -> Option<Self> {
         if !(1..=53).contains(&week) || !(1..=7).contains(&weekday) {
             return None;

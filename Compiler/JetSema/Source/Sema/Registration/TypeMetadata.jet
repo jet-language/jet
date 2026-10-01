@@ -1,5 +1,15 @@
 // Structural type capabilities selected from the declaration's signed markers.
 // The caller must pass items from this declaration's module only.
+use jet_foundation.[
+    EnumDef,
+    Item,
+    Marker,
+    StructDef,
+    TraitImplBlock,
+    Type,
+    VariantPayload,
+]
+
 pub struct SemaTypeMetadataAutoDerives {
     pub printable: Bool
     pub debug: Bool
@@ -69,9 +79,11 @@ fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, pac
     package_default
 }
 
+// Only an authored block suppresses a structural selection; a
+// compiler-generated block is that selection's own expansion.
 fn sema_type_metadata_has_trait_block(blocks: [TraitImplBlock], trait_name: String) -> Bool Never! {
     loop block in blocks {
-        if block.trait_name == trait_name -> return true
+        if block.trait_name == trait_name && !block.compiler_generated -> return true
     }
     false
 }
@@ -80,7 +92,7 @@ fn sema_type_metadata_has_explicit_impl(module_items: [Item], type_name: String,
     loop item in module_items {
         if item == {
             .Impl(definition) -> {
-                if definition.type_name == type_name && definition.trait_name == Val(trait_name) -> return true
+                if definition.type_name == type_name && definition.trait_name == (Val(trait_name)) -> return true
             }
             else -> {}
         }

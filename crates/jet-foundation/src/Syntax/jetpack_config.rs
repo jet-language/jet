@@ -270,8 +270,6 @@ pub const OUTPUT_KINDS: &[&str] = &[
     "Bundle",
     "System",
     "Fleet",
-    // D-MODEL-PACKAGE1=A: models are ordinary typed package outputs.
-    "Model",
 ];
 pub const OUTPUT_FIELD_NAME: &str = "name";
 pub const OUTPUT_FIELD_ENTRY: &str = "entry";

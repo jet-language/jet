@@ -1982,7 +1982,7 @@ function jetUiDropItems(event) {
   const values = [];
   const uriText = transfer.getData?.("text/uri-list") ?? "";
   for (const uri of String(uriText).split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
-    if (!uri.startsWith("#")) values.push({ tag: "Uri", values: [uri] });
+    if (!uri.startsWith("#")) values.push({ tag: "URI", values: [uri] });
   }
   const text = transfer.getData?.("text/plain") ?? "";
   if (text) values.push({ tag: "Text", values: [String(text)] });

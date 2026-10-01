@@ -1,4 +1,62 @@
 // Statement blocks, bindings, assignments, and control flow.
+use jet_foundation.[
+    BinOp,
+    CallArg,
+    CallLabel,
+    Expr,
+    ForKind,
+    LValue,
+    Marker,
+    MarkerCallArg,
+    NamedSpan,
+    Span,
+    Stmt,
+    SwitchArm,
+    TextEdit,
+    ast_binding,
+    diagnostic_from_registry,
+    diagnostic_with_edit,
+    expr_span,
+]
+use jet_lexer.[
+    TOKEN_AMP_EQ,
+    TOKEN_AT,
+    TOKEN_BANG,
+    TOKEN_BREAK,
+    TOKEN_CARET_EQ,
+    TOKEN_COLON,
+    TOKEN_COLON_COLON,
+    TOKEN_COLON_EQ,
+    TOKEN_COMMA,
+    TOKEN_EOF,
+    TOKEN_EQ,
+    TOKEN_HASH,
+    TOKEN_IDENT,
+    TOKEN_KW_ELSE,
+    TOKEN_KW_FN,
+    TOKEN_KW_IF,
+    TOKEN_KW_LOOP,
+    TOKEN_KW_YIELD,
+    TOKEN_LBRACE,
+    TOKEN_LPAREN,
+    TOKEN_MINUS_EQ,
+    TOKEN_PERCENT_EQ,
+    TOKEN_PERCENT_PERCENT_EQ,
+    TOKEN_PIPE_EQ,
+    TOKEN_PLUS_EQ,
+    TOKEN_RBRACE,
+    TOKEN_RETURN,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+    TOKEN_SHL_EQ,
+    TOKEN_SHR_EQ,
+    TOKEN_SLASH_EQ,
+    TOKEN_SLASH_PERCENT_EQ,
+    TOKEN_STAR_EQ,
+    TOKEN_TILDE_PIPE_EQ,
+    TOKEN_UNIFIED_ARROW,
+    Token,
+]
 
 fn parser_statement_is_keyword(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
@@ -130,12 +188,20 @@ fn parser_loop_body_can_break_inner(statements: [Stmt], nested_labels: [String],
 }
 
 fn parser_parse_block(state: &JetParserState) -> ParsedBlock {
+    parser_parse_body_block(&state, false)
+}
+
+// D-TAIL-RETURN1=A: `value_tail` marks the body of a callable with a declared
+// result. Its final line is in value position, where a finite source loop
+// with `->` keeps its collecting meaning (D-LOOP-STMT-ARROW1=C).
+fn parser_parse_body_block(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
     open :: parser_expect(&state, TOKEN_LBRACE, "`{{` to begin the block")
     statements := [Stmt]{}
     parser_skip_semicolons(&state)
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         before := state.position
-        &statements.push(parser_parse_statement(&state))
+        statement :: if value_tail && parser_current_kind(&state) == TOKEN_KW_LOOP -> parser_parse_tail_loop(&state) else -> parser_parse_statement(&state)
+        &statements.push(statement)
         parser_skip_semicolons(&state)
         if state.position == before {
             token :: parser_current(&state)
@@ -156,7 +222,38 @@ fn parser_parse_block(state: &JetParserState) -> ParsedBlock {
     ParsedBlock{span: parser_cover(open.span, close.span), statements: statements, tail: None}
 }
 
-fn parser_parse_value_block(state: &JetParserState, depth: Int) -> ParsedBlock {
+// The final line of a value body: a collecting loop that ends the block is
+// the block's value. Any other loop form, or a loop with lines after it, is
+// parsed again as a statement.
+fn parser_parse_tail_loop(state: &JetParserState) -> Stmt {
+    saved_position :: state.position
+    saved_diagnostics :: state.diagnostics.len()
+    saved_blocks :: state.block_spans.len()
+    saved_else_arms :: state.else_arms.len()
+    parsed :: parser_parse_expression(&state, 1, 0)
+    at_tail :: parser_current_kind(&state) == TOKEN_RBRACE || (parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
+    if at_tail && parser_expression_is_collecting_loop(parsed.expr) -> return Stmt.Expr{expr: parsed.expr}
+    state.position = saved_position
+    loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
+    loop state.block_spans.len() > saved_blocks -> _ := &state.block_spans.pop()
+    loop state.else_arms.len() > saved_else_arms -> _ := &state.else_arms.pop()
+    parser_parse_statement(&state)
+}
+
+fn parser_expression_is_collecting_loop(expr: Expr) -> Bool Never! {
+    if expr == .CallValue(callee, _, _) {
+        if callee == .Lambda(lambda) -> return lambda.meta.collecting_loop
+    }
+    false
+}
+
+// `prepared_value` marks the block of `name :: prep { value }`. A binding
+// `other :: prep { … }` directly inside it means that block was never closed
+// (a prepared value holds one expression, never a binding): report the
+// unclosed `{` and stop before the binding, so it parses on as the next
+// statement or declaration instead of nesting every later prepared binding
+// inside the first one without bound.
+fn parser_parse_value_block(state: &JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
     open :: parser_expect(&state, TOKEN_LBRACE, "`{{` to begin the value block")
     statements := [Stmt]{}
     tail := Expr?{None}
@@ -165,6 +262,13 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int) -> ParsedBlock {
     parser_skip_synthetic_semicolons(&state)
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         before := state.position
+        if prepared_value && parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_prep_verb_ahead(&state, 2, TOKEN_LBRACE) {
+            binding :: parser_current(&state)
+            parser_report_unclosed(&state, open, "the binding `{binding.payload.decoded}`", "prepared value")
+            // Leave the line terminator before the binding to end this one.
+            if state.position > 0 && state.tokens[state.position - 1].kind == TOKEN_SEMI -> state.position = state.position - 1
+            return ParsedBlock{span: Span{start: open.span.start, end: binding.span.start}, statements: [Stmt]{}, tail: Val(Expr.Unit{span: open.span})}
+        }
         if {
             parser_statement_is_keyword(&state) -> &statements.push(parser_parse_statement(&state))
             else -> {
@@ -519,7 +623,7 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     // compile-time binding path; any other block keeps E0391.
     if !mutable && parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
         head :: parser_bump(&state)
-        block :: parser_parse_value_block(&state, 0)
+        block :: parser_parse_value_block(&state, 0, true)
         span :: parser_cover(head.span, block.span)
         if block.statements.len() == 0 && block.tail == .Val(tail) {
             prepared := ast_binding(parser_retire_const_mark(&state, name), name.span, false, tail, Val(sigil.span))
@@ -545,7 +649,7 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
 // with a behavior-preserving edit to `name :: Type{value}`, then parses on as
 // the untyped binding so one mistake reports once. Returns None with the
 // cursor restored when the tokens after `:` are not a type and a sigil.
-fn parser_parse_retired_typed_binding(state: &JetParserState, name: Token) -> Stmt? Err! {
+fn parser_parse_retired_typed_binding(state: &JetParserState, name: Token) -> Stmt? {
     saved_position := state.position
     saved_diagnostics := state.diagnostics.len()
     saved_gt := state.pending_type_gt
@@ -573,7 +677,9 @@ fn parser_parse_retired_typed_binding(state: &JetParserState, name: Token) -> St
     sigil_text :: if mutable -> ":=" else -> "::"
     replacement :: "{binding_name} {sigil_text} {type_text}{{{value_text}}}"
     diagnostic :: diagnostic_from_registry("E0393", Val(parser_cover(colon.span, parsed.span)), "`{binding_name}: {type_text}` puts a type after the binding name, which Jet does not accept.", "A binding carries no type of its own (D-BIND-BARE1); `Type{{ … }}` on the value states the type, checking the value or converting it the way a parameter of that type would.", "Write `{replacement}`.")
-    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: parser_cover(name.span, value.span), new_text: replacement}))
+    // The edit ends at the value's last token; `value.span` is only the head
+    // of some forms (a method call's span is its method name).
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: name.span.start, end: parser_previous_end(state)}, new_text: replacement}))
     binding :: ast_binding(binding_name, name.span, mutable, value.expr, Val(sigil.span))
     parser_finish_statement(&state)
     Val(Stmt.Val{binding: binding})

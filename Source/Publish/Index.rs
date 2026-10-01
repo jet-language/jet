@@ -17,7 +17,7 @@
 
 use crate::Diagnostics::Diagnostic;
 use jet_foundation::DataTree::DataTree;
-use jet_foundation::JSON::{json_escape, parse_json};
+use jet_foundation::JSON::{parse_json, quote as json_str};
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -462,11 +462,6 @@ pub fn non_yanked_entries(repo: &Path, name: &str) -> io::Result<Vec<IndexEntry>
 // ──────────────────────────────────────────────
 // Minimal JSON (I6: no serde)
 // ──────────────────────────────────────────────
-
-/// Quote + escape a string as a JSON string literal.
-fn json_str(s: &str) -> String {
-    format!("\"{}\"", json_escape(s))
-}
 
 fn field<'a>(fields: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
     fields

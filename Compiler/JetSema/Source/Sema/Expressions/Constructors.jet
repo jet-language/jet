@@ -1,4 +1,43 @@
 // Checked struct and enum construction expressions.
+use jet_foundation.[
+    AccessConvention,
+    ByteTextPart,
+    Call,
+    CallArg,
+    Diagnostic,
+    EnumLitArg,
+    Expr,
+    ExprField,
+    ExprPair,
+    Item,
+    MIRTargetHardwareUse,
+    MIRTypedHeadKind,
+    Span,
+    StrFormat,
+    StrPart,
+    Symbol,
+    SymbolKind,
+    TCoercionTarget,
+    TComptimeValue,
+    TEnumArg,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    THostCall,
+    TStrPart,
+    TStructFieldValue,
+    Type,
+    TypedLitBody,
+    Variant,
+    ast_empty_call_arg_flags,
+    core_call,
+    expr_span,
+    regex_syntax_validate,
+    symbol_id,
+    type_identity_key,
+    type_name,
+]
+
 fn sema_expression_type_symbol(scopes: &SemaScopeTable, name: String) -> Symbol? {
     index :: sema_scope_resolve_index(scopes, name) ?? return None
     symbol :: scopes.bindings[index].symbol
@@ -12,7 +51,8 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, name: String) -> Symbol?
 fn sema_expression_enum_owner(scopes: &SemaScopeTable, environment: SemaScopeEnvironment, name: String) -> Symbol? {
     local :: sema_expression_type_symbol(&scopes, name)
     if local != None -> return local
-    graph :: environment.registration_graph ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
     if resolved.symbol.kind == SymbolKind.Type -> Val(resolved.symbol) else -> None
 }
@@ -114,7 +154,7 @@ fn sema_expression_struct_literal(type_name: String, type_args: [Type], fields: 
     values := [TStructFieldValue]{}
     loop field in struct_def.fields {
         field_ty :: sema_inference_substitute_type(field.ty, names, args)
-        value_expr := None
+        value_expr := Expr?{None}
         field_reference_span := field.name_span
         loop source in fields {
             if source.name == field.name {
@@ -141,7 +181,7 @@ fn sema_expression_struct_literal(type_name: String, type_args: [Type], fields: 
         reference.boxed = sema_scope_environment_boxed_edge(environment, owner.id, field.name)
         &values.push(TStructFieldValue{field: reference, value: checked, boxed: reference.boxed})
     }
-    coercion := None
+    coercion := TCoercionTarget?{None}
     if as_trait == .Val(trait_name) {
         trait_symbol_index :: sema_scope_resolve_index(scopes, trait_name)
         if trait_symbol_index == None || scopes.bindings[trait_symbol_index ?? 0].symbol.kind != SymbolKind.Trait {
@@ -202,9 +242,13 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             return None
         }
     }
+    // D-FACT-ENUM-TIR: `ExactnessKind.Approximate` / `.Approximate` builds a
+    // compiler-owned fact enum value, which has no registered declaration.
+    fact_enum :: sema_fact_enum_literal(resolved_name, variant, args, span, variant_span, expected, environment, &diagnostics)
+    if fact_enum.handled -> return fact_enum.value
     if type_name == "" {
         inferred_owner :: sema_expression_enum_owner(&scopes, environment, resolved_name)
-        inferred_declaration := None
+        inferred_declaration := Item?{None}
         if inferred_owner == .Val(owner_symbol) {
             inferred_declaration = sema_scope_resolve_declaration(environment, owner_symbol.id)
         }
@@ -236,7 +280,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             return None
         }
     }
-    selected := None
+    selected := Variant?{None}
     loop candidate in enum_def.variants {
         if candidate.name == variant {
             selected = Val(candidate)
@@ -353,15 +397,15 @@ struct SemaExpressionTypedTextParts {
     pub trusted_html: [Bool]
 }
 
-fn sema_expression_typed_literal_head_kind(head: Type) -> MirTypedHeadKind? {
+fn sema_expression_typed_literal_head_kind(head: Type) -> MIRTypedHeadKind? {
     if head == {
         .Named(name) -> {
-            if name == "SQL" -> return Val(MirTypedHeadKind.SQL)
-            if name == "HTML" -> return Val(MirTypedHeadKind.HTML)
-            if name == "Sh" -> return Val(MirTypedHeadKind.Sh)
-            if name == "URL" -> return Val(MirTypedHeadKind.URL)
-            if name == "Path" -> return Val(MirTypedHeadKind.Path)
-            if name == "DateTime" -> return Val(MirTypedHeadKind.DateTime)
+            if name == "SQL" -> return Val(MIRTypedHeadKind.SQL)
+            if name == "HTML" -> return Val(MIRTypedHeadKind.HTML)
+            if name == "Sh" -> return Val(MIRTypedHeadKind.Sh)
+            if name == "URL" -> return Val(MIRTypedHeadKind.URL)
+            if name == "Path" -> return Val(MIRTypedHeadKind.Path)
+            if name == "DateTime" -> return Val(MIRTypedHeadKind.DateTime)
         }
         else -> {}
     }
@@ -369,7 +413,8 @@ fn sema_expression_typed_literal_head_kind(head: Type) -> MirTypedHeadKind? {
 }
 
 fn sema_expression_typed_literal_printable_bound(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     sema_type_bound_satisfied_with_generics(graph, ty, "Printable", environment.module_identity, environment.generic_params) ?? false
 }
 
@@ -430,8 +475,9 @@ fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnviron
     name :: if head == {.Named(value) -> value else -> { return None }}
     owner :: sema_expression_type_symbol(&scopes, name) ?? return None
     if owner.kind != SymbolKind.Type -> return None
-    graph :: environment.registration_graph ?? return None
-    nominal := None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
+    nominal := SemaRegistrationNominal?{None}
     loop graph_module in graph.modules {
         loop candidate in graph_module.nominals {
             if candidate.symbol.id.key == owner.id.key {
@@ -443,7 +489,7 @@ fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnviron
     }
     registered :: nominal ?? return None
     if registered.kind != SemaRegistrationNominalKind.Distinct -> return None
-    definition :: sema_registration_nominal_source_item(registered) ?? return None
+    definition :: sema_registration_nominal_source_item(registered.source) ?? return None
     if definition == {
         .Distinct(value) -> {
             if value.base != Type.String -> return None
@@ -454,8 +500,8 @@ fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnviron
         loop implementation in graph_module.impls {
             if !sema_type_graph_is_checked_text_impl(graph, implementation) -> next
             if implementation.target_identity_key != registered.identity_key && (implementation.target_module_identity != Val(registered.symbol.module_name) || implementation.target_type_name != registered.symbol.name) -> next
-            check := None
-            encode_hole := None
+            check := SemaRegistrationFunction?{None}
+            encode_hole := SemaRegistrationFunction?{None}
             loop method in implementation.methods {
                 if method.symbol.name == "check" -> check = Val(method)
                 if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
@@ -485,7 +531,8 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         &diagnostics.push(sema_error("E0907", method_span, "`{type_name}.{method_name}` must be pure", "CheckedText methods are evaluated through the canonical pure Source evaluator", "declare this CheckedText method pure"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    graph :: environment.registration_graph ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return SemaMethodSpecialCheck{handled: true, value: None}
     direct :: sema_call_direct_target_from_registration(function, graph, environment.module_identity, environment.package_identity, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call := Call{
         name: "{type_name}.{method_name}",
@@ -588,7 +635,8 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
-    graph :: environment.registration_graph ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
     functions := sema_comptime_reachable_function_keys(graph, context.call_facts)
     reachable := [String]{}
     loop key in functions {
@@ -620,7 +668,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
         source_file: source_file,
         source_expression: Expr.TypedLit{head: source_head, body: body, span: span},
         expression: checked,
-        hardware_use: MirTargetHardwareUse{
+        hardware_use: MIRTargetHardwareUse{
             register_accesses: loop index in register_access_start..<context.hardware_use.register_accesses.len() -> context.hardware_use.register_accesses[index],
             interrupt_handlers: loop index in interrupt_handler_start..<context.hardware_use.interrupt_handlers.len() -> context.hardware_use.interrupt_handlers[index],
             dma_operations: loop index in dma_operation_start..<context.hardware_use.dma_operations.len() -> context.hardware_use.dma_operations[index],
@@ -667,7 +715,7 @@ fn sema_expression_typed_literal_byte_text(parts: [ByteTextPart], head: Type, sp
     Val(values)
 }
 
-fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MirTypedHeadKind, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionTypedTextParts? {
+fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MIRTypedHeadKind, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionTypedTextParts? {
     literals := [String]{""}
     holes := [TExpr]{}
     trusted_html := [Bool]{}
@@ -682,7 +730,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MirTypedHead
                 literals[last] = "{literals[last]}{sema_expr_byte_text(value)}"
             }
             .Interp(value, _) -> {
-                if kind == MirTypedHeadKind.DateTime {
+                if kind == MIRTypedHeadKind.DateTime {
                     &diagnostics.push(sema_error("E0155", expr_span(value), "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
                     return None
                 }
@@ -694,7 +742,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MirTypedHead
                 context.borrow_ctx = old_borrow
                 context.allow_string_view_read = old_string_view
                 hole :: checked ?? return None
-                trusted := kind == MirTypedHeadKind.HTML && hole.ty == Type.Named{name: "HTML"}
+                trusted := kind == MIRTypedHeadKind.HTML && hole.ty == Type.Named{name: "HTML"}
                 if !trusted && !sema_expression_typed_literal_printable(hole.ty, environment) {
                     &diagnostics.push(sema_error("E0112", expr_span(value), "`{type_name(hole.ty)}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole"))
                     return None
@@ -708,7 +756,7 @@ fn sema_expression_typed_literal_text_parts(parts: [StrPart], kind: MirTypedHead
     Val(SemaExpressionTypedTextParts{literals: literals, holes: holes, trusted_html: trusted_html})
 }
 
-fn sema_expression_validate_boundary_literal(kind: MirTypedHeadKind, parts: [StrPart], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_expression_validate_boundary_literal(kind: MIRTypedHeadKind, parts: [StrPart], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
     name := if kind == {
         .URL -> "URL"
         .Path -> "Path"
@@ -727,7 +775,7 @@ fn sema_expression_validate_boundary_literal(kind: MirTypedHeadKind, parts: [Str
                 literals[last] = "{literals[last]}{sema_expr_byte_text(byte)}"
             }
             .Interp(_, _) -> {
-                if kind == MirTypedHeadKind.DateTime {
+                if kind == MIRTypedHeadKind.DateTime {
                     &diagnostics.push(sema_error("E0155", span, "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
                     return false
                 }
@@ -735,8 +783,9 @@ fn sema_expression_validate_boundary_literal(kind: MirTypedHeadKind, parts: [Str
             }
         }
     }
-    graph :: environment.registration_graph ?? panic("boundary literal checking has no canonical registration graph")
-    validate :: graph.typed_boundary_literal_validate ?? panic("canonical Prelude boundary literal validator is not installed")
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? panic("boundary literal checking has no canonical registration graph")
+    validate :: graph.host_hooks.typed_boundary_literal_validate ?? panic("canonical Prelude boundary literal validator is not installed")
     if validate(kind, literals) == .Val(reason) {
         &diagnostics.push(sema_error("E0155", span, "this `{name}` literal is invalid", reason, "fix the literal, or parse a runtime String with the ordinary `{name}` constructor"))
         return false
@@ -744,7 +793,7 @@ fn sema_expression_validate_boundary_literal(kind: MirTypedHeadKind, parts: [Str
     true
 }
 
-fn sema_expression_typed_literal_text(kind: MirTypedHeadKind, head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     parts := if value == {
         .Str(rows, _) -> rows
         else -> {
@@ -754,9 +803,9 @@ fn sema_expression_typed_literal_text(kind: MirTypedHeadKind, head: Type, value:
     }
     if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), environment, &diagnostics) -> return None
     checked :: sema_expression_typed_literal_text_parts(parts, kind, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    result_head := if kind == MirTypedHeadKind.URL -> Type.Named{name: "URL"} else -> head
+    result_head := if kind == MIRTypedHeadKind.URL -> Type.Named{name: "URL"} else -> head
     result := sema_tir_expr(result_head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
-    if kind == MirTypedHeadKind.HTML && checked.holes.len() == 0 {
+    if kind == MIRTypedHeadKind.HTML && checked.holes.len() == 0 {
         result = sema_tir_expr(head, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: checked.literals[0]}}}, span)
     }
     sema_expr_expected(result, expected, environment, &diagnostics)
@@ -887,10 +936,10 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             }
         }
     }
-    written_head :: head
+    written_head :: head ?? (expected ?? {
         &diagnostics.push(sema_error("E0119", span, "this inferred typed literal needs a known type", "an inferred typed literal needs an expected type from the surrounding context", "add a type head, or annotate the binding with the intended type"))
         return None
-    }
+    })
     source_kind := sema_expression_typed_literal_head_kind(written_head)
     result_head := sema_expr_expected_type(sema_expr_unwrap_tag(written_head), environment)
     kind := source_kind
@@ -973,7 +1022,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
     if body == {
         .Value(value) -> {
             if kind == .Val(head_kind) {
-                if head_kind == MirTypedHeadKind.SQL || head_kind == MirTypedHeadKind.HTML || head_kind == MirTypedHeadKind.Sh || head_kind == MirTypedHeadKind.URL || head_kind == MirTypedHeadKind.Path || head_kind == MirTypedHeadKind.DateTime {
+                if head_kind == MIRTypedHeadKind.SQL || head_kind == MIRTypedHeadKind.HTML || head_kind == MIRTypedHeadKind.Sh || head_kind == MIRTypedHeadKind.URL || head_kind == MIRTypedHeadKind.Path || head_kind == MIRTypedHeadKind.DateTime {
                     return sema_expression_typed_literal_text(head_kind, result_head, value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                 }
             }

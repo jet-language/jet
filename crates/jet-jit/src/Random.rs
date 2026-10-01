@@ -52,76 +52,9 @@ mod ambient_random_kernel {
     pub(crate) fn getrandbits(bits: i64) -> i64 {
         jet_std_random_getrandbits(bits)
     }
-
-    pub(crate) fn randrange(start: i64, stop: i64) -> i64 {
-        jet_std_random_randrange(start, stop)
-    }
-
-
     pub(crate) fn bool_p(p: f64) -> bool {
         jet_std_random_bool(p)
     }
-
-    pub(crate) fn float_range(low: f64, high: f64) -> f64 {
-        jet_std_random_float_range(low, high)
-    }
-
-    pub(crate) fn normal(mean: f64, stddev: f64) -> f64 {
-        jet_std_random_normal(mean, stddev)
-    }
-
-    pub(crate) fn exponential(lambda: f64) -> f64 {
-        jet_std_random_exponential(lambda)
-    }
-
-    pub(crate) fn bytes(count: i64) -> Vec<u8> {
-        jet_std_random_bytes(count)
-    }
-
-    pub(crate) fn weighted_pick<T: Clone>(items: &Vec<T>, weights: &Vec<f64>) -> Option<T> {
-        jet_std_random_weighted_pick(items, weights)
-    }
-
-    pub(crate) fn sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
-        jet_std_random_sample(items, count)
-    }
-    pub(crate) fn choices<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
-        jet_std_random_choices(items, count)
-    }
-
-    pub(crate) fn triangular(low: f64, high: f64, mode: f64) -> f64 {
-        jet_std_random_triangular(low, high, mode)
-    }
-
-    pub(crate) fn gamma(alpha: f64, beta: f64) -> f64 {
-        jet_std_random_gamma(alpha, beta)
-    }
-
-    pub(crate) fn beta(alpha: f64, beta: f64) -> f64 {
-        jet_std_random_beta(alpha, beta)
-    }
-
-    pub(crate) fn lognormal(mean: f64, sigma: f64) -> f64 {
-        jet_std_random_lognormal(mean, sigma)
-    }
-
-    pub(crate) fn pareto(alpha: f64) -> f64 {
-        jet_std_random_pareto(alpha)
-    }
-
-    pub(crate) fn weibull(alpha: f64, beta: f64) -> f64 {
-        jet_std_random_weibull(alpha, beta)
-    }
-
-    pub(crate) fn vonmises(mu: f64, kappa: f64) -> f64 {
-        jet_std_random_vonmises(mu, kappa)
-    }
-
-    pub(crate) fn binomial(n: i64, p: f64) -> i64 {
-        jet_std_random_binomial(n, p)
-    }
-
-
     pub(crate) fn int(low: i64, high: i64) -> i64 {
         jet_std_random_int(low, high)
     }
@@ -129,22 +62,9 @@ mod ambient_random_kernel {
     pub(crate) fn float() -> f64 {
         jet_std_random_float()
     }
-
-    pub(crate) fn pick<T: Clone>(items: &Vec<T>) -> Option<T> {
-        jet_std_random_pick(items)
-    }
-
-    pub(crate) fn shuffle<T>(items: &mut Vec<T>) {
-        jet_std_random_shuffle(items);
-    }
-
     pub(crate) fn split(seed: i64) -> jet_std::Rng {
         jet_std_random_split(seed)
     }
-}
-
-pub(crate) fn ambient_seed(seed: i64) {
-    ambient_random_kernel::seed(seed);
 }
 
 pub(crate) fn ambient_int(low: i64, high: i64) -> i64 {
@@ -155,44 +75,8 @@ pub(crate) fn ambient_float() -> f64 {
     ambient_random_kernel::float()
 }
 
-pub(crate) fn ambient_float_range(low: f64, high: f64) -> f64 {
-    ambient_random_kernel::float_range(low, high)
-}
-
 pub(crate) fn ambient_bool(p: f64) -> bool {
     ambient_random_kernel::bool_p(p)
-}
-
-pub(crate) fn ambient_normal(mean: f64, stddev: f64) -> f64 {
-    ambient_random_kernel::normal(mean, stddev)
-}
-
-pub(crate) fn ambient_exponential(lambda: f64) -> f64 {
-    ambient_random_kernel::exponential(lambda)
-}
-
-pub(crate) fn ambient_bytes(count: i64) -> Vec<u8> {
-    ambient_random_kernel::bytes(count)
-}
-
-pub(crate) fn ambient_pick<T: Clone>(items: &Vec<T>) -> Option<T> {
-    ambient_random_kernel::pick(items)
-}
-
-pub(crate) fn ambient_weighted_pick<T: Clone>(items: &Vec<T>, weights: &Vec<f64>) -> Option<T> {
-    ambient_random_kernel::weighted_pick(items, weights)
-}
-
-pub(crate) fn ambient_sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
-    ambient_random_kernel::sample(items, count)
-}
-
-pub(crate) fn ambient_shuffle<T>(items: &mut Vec<T>) {
-    ambient_random_kernel::shuffle(items);
-}
-
-pub(crate) fn ambient_split(seed: i64) -> i64 {
-    ambient_random_kernel::split(seed).state as i64
 }
 
 fn read_list<T>(list: i64, read: impl Fn(&jet_rt::JetArena, i64) -> Option<T>) -> Option<Vec<T>> {
@@ -233,46 +117,6 @@ fn list_is_float(list: i64) -> bool {
             && rt.heap.list_get_float(list, 0).is_some()
     })
 }
-fn jet_jit_random_choices(items: i64, count: i64) -> i64 {
-    let values =
-        read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
-    let choices = ambient_random_kernel::choices(&values, count);
-    alloc_list(choices, |heap, list, value| heap.list_push_int(list, value))
-}
-
-fn jet_jit_random_triangular(low: f64, high: f64, mode: f64) -> f64 {
-    ambient_random_kernel::triangular(low, high, mode)
-}
-
-fn jet_jit_random_gamma(alpha: f64, beta: f64) -> f64 {
-    ambient_random_kernel::gamma(alpha, beta)
-}
-
-fn jet_jit_random_beta(alpha: f64, beta: f64) -> f64 {
-    ambient_random_kernel::beta(alpha, beta)
-}
-
-fn jet_jit_random_lognormal(mean: f64, sigma: f64) -> f64 {
-    ambient_random_kernel::lognormal(mean, sigma)
-}
-
-fn jet_jit_random_pareto(alpha: f64) -> f64 {
-    ambient_random_kernel::pareto(alpha)
-}
-
-fn jet_jit_random_weibull(alpha: f64, beta: f64) -> f64 {
-    ambient_random_kernel::weibull(alpha, beta)
-}
-
-fn jet_jit_random_vonmises(mu: f64, kappa: f64) -> f64 {
-    ambient_random_kernel::vonmises(mu, kappa)
-}
-
-fn jet_jit_random_binomial(n: i64, p: f64) -> i64 {
-    ambient_random_kernel::binomial(n, p)
-}
-
-
 /// Read one checked JIT `Int` word as the host kernel's `i64`. A value outside
 /// the host range stops with the same report AOT raises for a native argument.
 fn int_arg(raw: i64) -> i64 {
@@ -296,63 +140,8 @@ fn jet_jit_random_getrandbits(k: i64) -> i64 {
     int_result(ambient_random_kernel::getrandbits(int_arg(k)))
 }
 
-fn jet_jit_random_randrange(start: i64, stop: i64) -> i64 {
-    ambient_random_kernel::randrange(start, stop)
-}
-
-
-fn jet_jit_random_int(low: i64, high: i64) -> i64 {
-    ambient_random_kernel::int(low, high)
-}
-
 fn jet_jit_random_float() -> f64 {
     ambient_random_kernel::float()
-}
-
-fn jet_jit_random_bool(p: f64) -> i8 {
-    i8::from(ambient_random_kernel::bool_p(p))
-}
-
-fn jet_jit_random_float_range(low: f64, high: f64) -> f64 {
-    ambient_random_kernel::float_range(low, high)
-}
-
-fn jet_jit_random_normal(mean: f64, stddev: f64) -> f64 {
-    ambient_random_kernel::normal(mean, stddev)
-}
-
-fn jet_jit_random_exponential(lambda: f64) -> f64 {
-    ambient_random_kernel::exponential(lambda)
-}
-
-fn jet_jit_random_pick(items: i64) -> i64 {
-    if list_is_float(items) {
-        let values =
-            read_list(items, |heap, index| heap.list_get_float(items, index)).unwrap_or_default();
-        pack_option_float(ambient_random_kernel::pick(&values))
-    } else {
-        let values =
-            read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
-        pack_option_i64(ambient_random_kernel::pick(&values))
-    }
-}
-
-fn jet_jit_random_shuffle(items: i64) {
-    if list_is_float(items) {
-        let mut values =
-            read_list(items, |heap, index| heap.list_get_float(items, index)).unwrap_or_default();
-        ambient_random_kernel::shuffle(&mut values);
-        write_list(items, values, |heap, index, value| {
-            heap.list_set_float(items, index, value)
-        });
-    } else {
-        let mut values =
-            read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
-        ambient_random_kernel::shuffle(&mut values);
-        write_list(items, values, |heap, index, value| {
-            heap.list_set_int(items, index, value)
-        });
-    }
 }
 
 fn jet_jit_random_split(seed: i64) -> i64 {
@@ -360,17 +149,6 @@ fn jet_jit_random_split(seed: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.rngs.push(RngState { state });
         rt.rngs.len() as i64
-    })
-}
-
-fn jet_jit_random_bytes(n: i64) -> i64 {
-    let bytes = ambient_random_kernel::bytes(n);
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for byte in bytes {
-            let _ = rt.heap.list_push_int(list, byte as i64);
-        }
-        list
     })
 }
 
@@ -385,39 +163,6 @@ fn pack_option_float(opt: Option<f64>) -> i64 {
     match opt {
         Some(value) => (value.to_bits() as i64).wrapping_add(1),
         None => 0,
-    }
-}
-
-fn jet_jit_random_weighted_pick(items: i64, weights: i64) -> i64 {
-    let Some(ws) = read_list(weights, |heap, index| heap.list_get_float(weights, index)) else {
-        return pack_option_i64(None);
-    };
-    if list_is_float(items) {
-        let Some(values) = read_list(items, |heap, index| heap.list_get_float(items, index)) else {
-            return pack_option_float(None);
-        };
-        pack_option_float(ambient_random_kernel::weighted_pick(&values, &ws))
-    } else {
-        let Some(values) = read_list(items, |heap, index| heap.list_get_int(items, index)) else {
-            return pack_option_i64(None);
-        };
-        pack_option_i64(ambient_random_kernel::weighted_pick(&values, &ws))
-    }
-}
-
-fn jet_jit_random_sample(items: i64, k: i64) -> i64 {
-    if list_is_float(items) {
-        let values =
-            read_list(items, |heap, index| heap.list_get_float(items, index)).unwrap_or_default();
-        let sample = ambient_random_kernel::sample(&values, k);
-        alloc_list(sample, |heap, list, value| {
-            heap.list_push_float(list, value)
-        })
-    } else {
-        let values =
-            read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
-        let sample = ambient_random_kernel::sample(&values, k);
-        alloc_list(sample, |heap, list, value| heap.list_push_int(list, value))
     }
 }
 
@@ -687,21 +432,6 @@ host_fns! {
         let mut sig_void_i64_i64 = Signature::new(cc);
         sig_void_i64_i64.params.push(AbiParam::new(types::I64));
         sig_void_i64_i64.params.push(AbiParam::new(types::I64));
-        let mut sig_f64_i8 = Signature::new(cc);
-        sig_f64_i8.params.push(AbiParam::new(types::F64));
-        sig_f64_i8.returns.push(AbiParam::new(types::I8));
-        let mut sig_f64_f64_f64 = Signature::new(cc);
-        sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
-        sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
-        sig_f64_f64_f64.returns.push(AbiParam::new(types::F64));
-        let mut sig_f64_f64_f64_f64 = Signature::new(cc);
-        sig_f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
-        sig_f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
-        sig_f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
-        sig_f64_f64_f64_f64.returns.push(AbiParam::new(types::F64));
-        let mut sig_f64 = Signature::new(cc);
-        sig_f64.params.push(AbiParam::new(types::F64));
-        sig_f64.returns.push(AbiParam::new(types::F64));
         let mut sig_noarg_f64 = Signature::new(cc);
         sig_noarg_f64.returns.push(AbiParam::new(types::F64));
         let mut sig_i64_i64 = Signature::new(cc);
@@ -711,10 +441,6 @@ host_fns! {
         sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
-        let mut sig_i64_f64_i64 = Signature::new(cc);
-        sig_i64_f64_i64.params.push(AbiParam::new(types::I64));
-        sig_i64_f64_i64.params.push(AbiParam::new(types::F64));
-        sig_i64_f64_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_i64_i64_i64_i64 = Signature::new(cc);
         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));

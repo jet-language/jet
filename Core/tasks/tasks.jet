@@ -32,13 +32,13 @@ pub struct TaskState {
     pub generation: Int
 }
 
-pub fn channel(capacity: Int) -> TaskState {
+pub fn channel(capacity: Int) -> TaskState Never! {
     cap := capacity
     if cap < 0 -> cap = 0
     TaskState{values: [Int]{}, capacity: cap, closed: false, locked: false, generation: 0}
 }
 
-pub fn put(state: TaskState, value: Int) -> TaskState {
+pub fn put(state: TaskState, value: Int) -> TaskState Never! {
     if state.closed -> return ~state
     if state.capacity > 0 && state.values.len() >= state.capacity -> return ~state
     values := ~state.values
@@ -52,51 +52,51 @@ pub fn put(state: TaskState, value: Int) -> TaskState {
     }
 }
 
-pub fn clear(state: TaskState) -> TaskState {
+pub fn clear(state: TaskState) -> TaskState Never! {
     if state.values.len() == 0 -> return ~state
     TaskState{values: [Int]{}, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn shutdown(state: TaskState) -> TaskState {
+pub fn shutdown(state: TaskState) -> TaskState Never! {
     if state.closed -> return ~state
     TaskState{values: ~state.values, capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn stop(state: TaskState) -> TaskState { shutdown(state) }
+pub fn stop(state: TaskState) -> TaskState Never! { shutdown(state) }
 
-pub fn reset(state: TaskState) -> TaskState {
+pub fn reset(state: TaskState) -> TaskState Never! {
     TaskState{values: [Int]{}, capacity: state.capacity, closed: false, locked: false, generation: state.generation + 1}
 }
 
-pub fn lock() -> TaskState { channel(1) }
+pub fn lock() -> TaskState Never! { channel(1) }
 
-pub fn acquire(state: TaskState) -> TaskState {
+pub fn acquire(state: TaskState) -> TaskState Never! {
     if state.closed || state.locked -> return ~state
     TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation + 1}
 }
 
-pub fn release(state: TaskState) -> TaskState {
+pub fn release(state: TaskState) -> TaskState Never! {
     if !state.locked -> return ~state
     TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation + 1}
 }
 
-pub fn notify(state: TaskState) -> TaskState {
+pub fn notify(state: TaskState) -> TaskState Never! {
     TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn start(rx: Receiver<Int>) -> Receiver<Int> { ~rx }
+pub fn start(rx: Receiver<Int>) -> Receiver<Int> Never! { ~rx }
 
-pub fn run() -[Time]> {
+pub fn run() Never! -[Time]> {
     yield_now()
 }
 
-pub fn waitall(receivers: [Receiver<Int>]) -[Time]> [Int] {
+pub fn waitall(receivers: [Receiver<Int>]) -[Time]> [Int] Never! {
     out := [Int]{}
     loop rx in receivers -> &out.push(wait(rx))
     out
 }
 
-pub fn waitany(receivers: [Receiver<Int>]) -[Time]> Int {
+pub fn waitany(receivers: [Receiver<Int>]) -[Time]> Int Never! {
     if receivers.len() == 0 -> return -1
     // Receiver readiness is owned by the scheduler's opaque handle. This
     // convenience rail keeps the deterministic first-arm selection; callers
@@ -104,31 +104,31 @@ pub fn waitany(receivers: [Receiver<Int>]) -[Time]> Int {
     wait(receivers[0])
 }
 
-pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> {
+pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! {
     core.tasks.after(delay, value)
 }
 
-pub fn interval(period: time.Duration) -[Time]> Receiver<Int> {
+pub fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
     core.tasks.interval(period)
 }
 
-pub fn yield_now() -[Time]> host_yield()
+pub fn yield_now() Never! -[Time]> { host_yield() }
 
-pub fn current_task() -> String { host_task_id() }
+pub fn current_task() -> String Never! { host_task_id() }
 
 /// Receive from the host scheduler channel. A closed channel maps to the
 /// existing integer sentinel because this convenience rail is non-fallible.
-pub fn recv(rx: Receiver<Int>) -[Time]> Int {
+pub fn recv(rx: Receiver<Int>) -[Time]> Int Never! {
     value :: rx.receive() ?? return -1
     value
 }
 
 /// Blocking receive spellings used by queue/future adapters.
-pub fn get(rx: Receiver<Int>) -[Time]> Int { recv(rx) }
+pub fn get(rx: Receiver<Int>) -[Time]> Int Never! { recv(rx) }
 
-pub fn result(rx: Receiver<Int>) -[Time]> Int { recv(rx) }
+pub fn result(rx: Receiver<Int>) -[Time]> Int Never! { recv(rx) }
 
-pub fn wait(rx: Receiver<Int>) -[Time]> Int { recv(rx) }
+pub fn wait(rx: Receiver<Int>) -[Time]> Int Never! { recv(rx) }
 
 
 fn host_sleep_ms(ms: Int) -[Time]> {
@@ -141,42 +141,42 @@ fn host_yield() -[Time]> { core.tasks.yield_now() }
 fn host_task_id() -> String { core.tasks.current_task() }
 
 /// Receiver metadata is owned by the scheduler's typed handle.
-pub fn is_timer(rx: Receiver<Int>) -> Bool { rx.is_timer() }
+pub fn is_timer(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
 
-pub fn is_interval(rx: Receiver<Int>) -> Bool { rx.is_interval() }
+pub fn is_interval(rx: Receiver<Int>) -> Bool Never! { rx.is_interval() }
 
-pub fn is_cancelled(rx: Receiver<Int>) -> Bool { rx.is_cancelled() }
+pub fn is_cancelled(rx: Receiver<Int>) -> Bool Never! { rx.is_cancelled() }
 
-pub fn is_ready(rx: Receiver<Int>) -> Bool { rx.is_ready() }
+pub fn is_ready(rx: Receiver<Int>) -> Bool Never! { rx.is_ready() }
 
-pub fn delay_ms(rx: Receiver<Int>) -> Int { rx.delay_ms() }
+pub fn delay_ms(rx: Receiver<Int>) -> Int Never! { rx.delay_ms() }
 
-pub fn timeout(delay: time.Duration) -[Time]> {
+pub fn timeout(delay: time.Duration) Never! -[Time]> {
     _ :: recv(core.tasks.after(delay, 0))
 }
 
-pub fn sleep(ms: Int) -[Time]> {
+pub fn sleep(ms: Int) Never! -[Time]> {
     delay := ms
     if delay < 0 -> delay = 0
     host_sleep_ms(delay)
 }
 
-pub fn try_recv(rx: Receiver<Int>) -> Int? { rx.try_receive() }
+pub fn try_recv(rx: Receiver<Int>) -> Int? Never! { rx.try_receive() }
 
 /// Closing the receiver wakes blocked consumers and is the host cancellation
 /// operation. The returned handle remains usable for identity/ownership.
-pub fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> {
+pub fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
     rx.close()
     ~rx
 }
 
-pub fn is_closed(state: TaskState) -> Bool { state.closed }
-pub fn is_locked(state: TaskState) -> Bool { state.locked }
-pub fn size(state: TaskState) -> Int { state.values.len() }
-pub fn capacity(state: TaskState) -> Int { state.capacity }
-pub fn generation(state: TaskState) -> Int { state.generation }
+pub fn is_closed(state: TaskState) -> Bool Never! { state.closed }
+pub fn is_locked(state: TaskState) -> Bool Never! { state.locked }
+pub fn size(state: TaskState) -> Int Never! { state.values.len() }
+pub fn capacity(state: TaskState) -> Int Never! { state.capacity }
+pub fn generation(state: TaskState) -> Int Never! { state.generation }
 
-pub fn spawn_name(name: String) -> String {
+pub fn spawn_name(name: String) -> String Never! {
     ~name
 }
 

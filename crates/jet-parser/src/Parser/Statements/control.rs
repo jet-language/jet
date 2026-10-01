@@ -2295,6 +2295,9 @@ impl<'a> Parser<'a> {
                 }
                 _ => match self.stmt() {
                     Ok(s) => body.push(s),
+                    // An unclosed prepared value block ends here; its binding
+                    // reports it (`binding_value`).
+                    Err(_) if self.prep_value_escape.is_some() => break self.peek().span.start,
                     Err(d) => {
                         self.diags.push(d);
                         self.sync_stmt();
@@ -2647,6 +2650,35 @@ impl<'a> Parser<'a> {
                 let word = name.clone();
                 let span = self.bump().span;
                 Err(self.foreign_keyword_diagnostic(&word, span))
+            }
+            TokKind::KwLoop
+                if self.callable_tail_expects_value
+                    && self.callable_tail_block_depth == Some(self.block_depth)
+                    && self.lambda_tail_block_depth != Some(self.block_depth) =>
+            {
+                // D-TAIL-RETURN1=A: the final line of a callable with a
+                // declared result is in value position, where a finite source
+                // loop with `->` keeps its collecting meaning
+                // (D-LOOP-STMT-ARROW1=C). Every other loop form, any loop
+                // before the final line, and a block lambda's final loop (its
+                // result may be unit) keep statement parsing.
+                let save = self.pos;
+                let saved_diags = self.diags.len();
+                let saved_blocks = self.block_spans.len();
+                if let Ok(expr) = self.expr() {
+                    let collecting = matches!(&expr, Expr::CallValue { callee, .. }
+                        if matches!(callee.as_ref(), Expr::Lambda(lambda) if lambda.meta.collecting_loop));
+                    let at_tail = matches!(self.peek().kind, TokKind::RBrace)
+                        || matches!(self.peek().kind, TokKind::Semi)
+                            && matches!(self.peek2().kind, TokKind::RBrace);
+                    if collecting && at_tail {
+                        return Ok(Stmt::Expr(expr));
+                    }
+                }
+                self.pos = save;
+                self.diags.truncate(saved_diags);
+                self.block_spans.truncate(saved_blocks);
+                self.loop_stmt(None)
             }
             TokKind::KwLoop => self.loop_stmt(None),
             // D-LOOPLABEL3=A: `name :: loop { }` declares a compile-time loop name.

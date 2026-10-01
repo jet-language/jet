@@ -46,7 +46,7 @@ pub fn parse_ipv4(text: String) -> IPv4 IOError! {
     ipv4(a, b, c, d)
 }
 
-pub fn ipv4_to_string(addr: IPv4) -> String { "{addr.a}.{addr.b}.{addr.c}.{addr.d}" }
+pub fn ipv4_to_string(addr: IPv4) -> String Never! { "{addr.a}.{addr.b}.{addr.c}.{addr.d}" }
 
 pub fn ipv4_int(addr: IPv4) -> Int Never! { ((addr.a * 256 + addr.b) * 256 + addr.c) * 256 + addr.d }
 
@@ -59,26 +59,26 @@ pub fn ipv4_from_int(n: Int) -> IPv4 IOError! {
     ipv4(a, b, c, d)
 }
 
-pub fn is_private(addr: IPv4) -> Bool {
+pub fn is_private(addr: IPv4) -> Bool Never! {
     if addr.a == 10 -> return true
     if addr.a == 192 && addr.b == 168 -> return true
     if addr.a == 172 && addr.b >= 16 && addr.b <= 31 -> return true
     false
 }
 
-pub fn is_loopback(addr: IPv4) -> Bool { addr.a == 127 }
+pub fn is_loopback(addr: IPv4) -> Bool Never! { addr.a == 127 }
 
-pub fn is_link_local(addr: IPv4) -> Bool { addr.a == 169 && addr.b == 254 }
+pub fn is_link_local(addr: IPv4) -> Bool Never! { addr.a == 169 && addr.b == 254 }
 
-pub fn is_multicast(addr: IPv4) -> Bool { addr.a >= 224 && addr.a <= 239 }
+pub fn is_multicast(addr: IPv4) -> Bool Never! { addr.a >= 224 && addr.a <= 239 }
 
-pub fn is_reserved(addr: IPv4) -> Bool { addr.a == 240 || addr.a == 0 }
+pub fn is_reserved(addr: IPv4) -> Bool Never! { addr.a == 240 || addr.a == 0 }
 
-pub fn is_unspecified(addr: IPv4) -> Bool {
+pub fn is_unspecified(addr: IPv4) -> Bool Never! {
     addr.a == 0 && addr.b == 0 && addr.c == 0 && addr.d == 0
 }
 
-pub fn is_global(addr: IPv4) -> Bool {
+pub fn is_global(addr: IPv4) -> Bool Never! {
     !is_private(addr) && !is_loopback(addr) && !is_link_local(addr) && !is_multicast(addr) && !is_reserved(addr) && !is_unspecified(addr)
 }
 
@@ -100,20 +100,20 @@ pub fn network(cidr: String) -> Network IOError! {
     Ok(Network{addr: masked, prefix: pref})
 }
 
-pub fn network_contains(net: Network, addr: IPv4) -> Bool {
+pub fn network_contains(net: Network, addr: IPv4) -> Bool Never! {
     if net.prefix < 0 || net.prefix > 32 -> return false
     mask :: prefix_mask(net.prefix)
     (ipv4_int(addr) & mask) == (ipv4_int(net.addr) & mask)
 }
 
-pub fn network_broadcast(net: Network) -> IPv4 {
+pub fn network_broadcast(net: Network) -> IPv4 Never! {
     if net.prefix < 0 || net.prefix > 32 -> return net.addr
     mask :: prefix_mask(net.prefix)
     bcast :: (ipv4_int(net.addr) & mask) | (4294967295 - mask)
     ipv4_from_int(bcast) ?? net.addr
 }
 
-pub fn network_hosts(net: Network) -> Int {
+pub fn network_hosts(net: Network) -> Int Never! {
     if net.prefix < 0 || net.prefix > 32 || net.prefix >= 31 -> return 0
     int_pow2(32 - net.prefix) - 2
 }
@@ -160,7 +160,7 @@ pub fn parse_ipv6(text: String) -> IPv6 IOError! {
     Ok(IPv6{words: words})
 }
 
-pub fn ipv6_to_string(addr: IPv6) -> String {
+pub fn ipv6_to_string(addr: IPv6) -> String Never! {
     s := ""
     i := 0
     loop i < addr.words.len() {
@@ -170,7 +170,7 @@ pub fn ipv6_to_string(addr: IPv6) -> String {
     }
     s
 }
-pub fn ipv6_is_loopback(addr: IPv6) -> Bool {
+pub fn ipv6_is_loopback(addr: IPv6) -> Bool Never! {
     if addr.words.len() != 8 -> return false
     i := 0
     loop i < 7 {
@@ -180,7 +180,7 @@ pub fn ipv6_is_loopback(addr: IPv6) -> Bool {
     addr.words[7] == 1
 }
 
-pub fn ipv6_is_unspecified(addr: IPv6) -> Bool {
+pub fn ipv6_is_unspecified(addr: IPv6) -> Bool Never! {
     if addr.words.len() != 8 -> return false
     loop w in addr.words {
         if w != 0 -> return false
@@ -188,7 +188,7 @@ pub fn ipv6_is_unspecified(addr: IPv6) -> Bool {
     true
 }
 
-pub fn ipv6_is_link_local(addr: IPv6) -> Bool {
+pub fn ipv6_is_link_local(addr: IPv6) -> Bool Never! {
     addr.words.len() == 8 && addr.words[0] & 65472 == 65152
 }
 
@@ -330,7 +330,7 @@ pub struct IPv4Interface {
     pub network: Network
 }
 
-pub fn packed_ipv4(addr: IPv4) -> [U8] {
+pub fn packed_ipv4(addr: IPv4) -> [U8] Never! {
     [U8]{(U8{addr.a}), (U8{addr.b}), (U8{addr.c}), (U8{addr.d})}
 }
 
@@ -339,47 +339,47 @@ pub fn from_packed_ipv4(bytes: [U8]) -> IPv4 IOError! {
     ipv4(Int.from_u8(bytes[0]), Int.from_u8(bytes[1]), Int.from_u8(bytes[2]), Int.from_u8(bytes[3]))
 }
 
-pub fn reverse_pointer(addr: IPv4) -> String { "{addr.d}.{addr.c}.{addr.b}.{addr.a}.in-addr.arpa" }
+pub fn reverse_pointer(addr: IPv4) -> String Never! { "{addr.d}.{addr.c}.{addr.b}.{addr.a}.in-addr.arpa" }
 
-pub fn with_prefixlen(net: Network) -> String { return "{ipv4_to_string(net.addr)}/{net.prefix}" }
+pub fn with_prefixlen(net: Network) -> String Never! { return "{ipv4_to_string(net.addr)}/{net.prefix}" }
 
-pub fn with_netmask(net: Network) -> String {
+pub fn with_netmask(net: Network) -> String Never! {
     mask :: ipv4_from_int(prefix_mask(net.prefix)) ?? net.addr
     return "{ipv4_to_string(net.addr)}/{ipv4_to_string(mask)}"
 }
 
-pub fn with_hostmask(net: Network) -> String {
+pub fn with_hostmask(net: Network) -> String Never! {
     host :: ipv4_from_int(4294967295 - prefix_mask(net.prefix)) ?? net.addr
     return "{ipv4_to_string(net.addr)}/{ipv4_to_string(host)}"
 }
 
-pub fn num_addresses(net: Network) -> Int {
+pub fn num_addresses(net: Network) -> Int Never! {
     if net.prefix < 0 || net.prefix > 32 -> return 0
     int_pow2(32 - net.prefix)
 }
-pub fn network_first(net: Network) -> IPv4 { net.addr }
+pub fn network_first(net: Network) -> IPv4 Never! { net.addr }
 
-pub fn network_last(net: Network) -> IPv4 { network_broadcast(net) }
+pub fn network_last(net: Network) -> IPv4 Never! { network_broadcast(net) }
 
-pub fn network_overlaps(a: Network, b: Network) -> Bool {
+pub fn network_overlaps(a: Network, b: Network) -> Bool Never! {
     network_contains(a, b.addr) || network_contains(b, a.addr)
 }
 
-pub fn subnet_of(inner: Network, outer: Network) -> Bool {
+pub fn subnet_of(inner: Network, outer: Network) -> Bool Never! {
     if inner.prefix < outer.prefix -> return false
     network_contains(outer, inner.addr)
 }
 
-pub fn supernet_of(outer: Network, inner: Network) -> Bool { subnet_of(inner, outer) }
+pub fn supernet_of(outer: Network, inner: Network) -> Bool Never! { subnet_of(inner, outer) }
 
-pub fn supernet(net: Network) -> Network {
+pub fn supernet(net: Network) -> Network Never! {
     p := net.prefix - 1
     if p < 0 -> p = 0
     masked :: ipv4_from_int(ipv4_int(net.addr) & prefix_mask(p)) ?? net.addr
     {addr: masked, prefix: p}
 }
 
-pub fn subnets(net: Network, new_prefix: Int) -> [Network] {
+pub fn subnets(net: Network, new_prefix: Int) -> [Network] Never! {
     out := [Network]{}
     if net.prefix < 0 || net.prefix > 32 || new_prefix <= net.prefix || new_prefix > 32 -> return out
     step :: int_pow2(32 - new_prefix)
@@ -394,7 +394,7 @@ pub fn subnets(net: Network, new_prefix: Int) -> [Network] {
     out
 }
 
-pub fn hosts(net: Network) -> [IPv4] {
+pub fn hosts(net: Network) -> [IPv4] Never! {
     out := [IPv4]{}
     if net.prefix < 0 || net.prefix > 32 -> return out
     if net.prefix >= 31 {
@@ -428,33 +428,33 @@ pub fn interface(text: String) -> IPv4Interface IOError! {
     Ok(IPv4Interface{addr: addr, network: network_value})
 }
 
-pub fn is_carrier_grade_nat(addr: IPv4) -> Bool { addr.a == 100 && addr.b >= 64 && addr.b <= 127 }
+pub fn is_carrier_grade_nat(addr: IPv4) -> Bool Never! { addr.a == 100 && addr.b >= 64 && addr.b <= 127 }
 
-pub fn is_benchmarking(addr: IPv4) -> Bool { addr.a == 198 && (addr.b == 18 || addr.b == 19) }
+pub fn is_benchmarking(addr: IPv4) -> Bool Never! { addr.a == 198 && (addr.b == 18 || addr.b == 19) }
 
-pub fn is_documentation(addr: IPv4) -> Bool {
+pub fn is_documentation(addr: IPv4) -> Bool Never! {
     if addr.a == 192 && addr.b == 0 && addr.c == 2 -> return true
     if addr.a == 198 && addr.b == 51 && addr.c == 100 -> return true
     if addr.a == 203 && addr.b == 0 && addr.c == 113 -> return true
     false
 }
 
-pub fn is_shared(addr: IPv4) -> Bool { is_carrier_grade_nat(addr) }
+pub fn is_shared(addr: IPv4) -> Bool Never! { is_carrier_grade_nat(addr) }
 
-pub fn ipv6_is_multicast(addr: IPv6) -> Bool {
+pub fn ipv6_is_multicast(addr: IPv6) -> Bool Never! {
     addr.words.len() == 8 && addr.words[0] & 65280 == 65280
 }
 
-pub fn ipv6_is_private(addr: IPv6) -> Bool {
+pub fn ipv6_is_private(addr: IPv6) -> Bool Never! {
     // Unique-local addresses are fc00::/7.
     addr.words.len() == 8 && addr.words[0] & 65024 == 64512
 }
 
-pub fn ipv6_is_global(addr: IPv6) -> Bool {
+pub fn ipv6_is_global(addr: IPv6) -> Bool Never! {
     !ipv6_is_loopback(addr) && !ipv6_is_unspecified(addr) && !ipv6_is_link_local(addr) && !ipv6_is_multicast(addr) && !ipv6_is_private(addr)
 }
 
-pub fn ipv6_packed(addr: IPv6) -> [U8] {
+pub fn ipv6_packed(addr: IPv6) -> [U8] Never! {
     if addr.words.len() != 8 -> return [U8]{}
     out := [U8]{}
     loop w in addr.words {
@@ -469,7 +469,7 @@ fn to_u8(n: Int) -> U8 Never! {
     (U8{v})
 }
 
-pub fn ipv6_compressed(addr: IPv6) -> String {
+pub fn ipv6_compressed(addr: IPv6) -> String Never! {
     if addr.words.len() != 8 -> return ipv6_to_string(addr)
     best_i := -1
     best_n := 0
@@ -504,7 +504,7 @@ pub fn ipv6_compressed(addr: IPv6) -> String {
     s
 }
 
-pub fn compare_ipv4(a: IPv4, b: IPv4) -> Int {
+pub fn compare_ipv4(a: IPv4, b: IPv4) -> Int Never! {
     na :: ipv4_int(a)
     nb :: ipv4_int(b)
     if na < nb -> return -1
@@ -512,7 +512,7 @@ pub fn compare_ipv4(a: IPv4, b: IPv4) -> Int {
     0
 }
 
-pub fn ipv4_equals(a: IPv4, b: IPv4) -> Bool { ipv4_int(a) == ipv4_int(b) }
+pub fn ipv4_equals(a: IPv4, b: IPv4) -> Bool Never! { ipv4_int(a) == ipv4_int(b) }
 
 fn hex_trim(n: Int) -> String {
     v := n

@@ -433,6 +433,7 @@ pub(crate) fn method_call_in_subset(
                     && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
             }
             "guard_read" | "guard_edit" | "downgrade" | "strong_count" => args.is_empty(),
+            "same" => args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals),
             _ => false,
         };
     }
@@ -851,21 +852,8 @@ pub(crate) fn method_call_in_subset(
             }
         }
     }
-    // Shape (d2) [c109 Phase 19]: `Stopwatch.elapsed_millis()`. The AST
-    // `emit_builtin_method` dispatches `elapsed_millis` on the method NAME alone (it
-    // fires before any `rty` test, Expression.rs ~L1023), and sema types it via
-    // `Collections::stopwatch_method_return` — leaving `recv_type == None` (NOT the
-    // `Some(<handle>)` of the Phase-13 handle shape). So it is a Phase-9-style builtin
-    // gap: a `MethodCall` with `recv_type == None`, a covered builtin name, an in-subset
-    // value receiver (a `Stopwatch` `let`-bound from the covered `time.start` producer).
-    // Lower to the existing `THandleOp::StopwatchElapsedMillis` (`{root}jet_stopwatch_
-    // elapsed_millis(&(recv))`). Tried after the collection builtins so a list/map/string
-    // `elapsed_millis` (impossible — no such method) can't be misclaimed.
-    if recv_type.is_none() && method == "elapsed_millis" && args.is_empty() {
-        return expr_in_subset(receiver, cx, locals);
-    }
     // Shape (d3) [c109 Phase 21 / D-TUPLE-DESTRUCT1]: a Task/Receiver/Sender
-    // concurrency method. Like Stopwatch (d2), sema types these via
+    // concurrency method. Sema types these via
     // `Collections::builtin_method_return`'s `Type::Apply` arms
     // (`task_method_return`/`receiver_method_return`/`sender_method_return`,
     // Source/Collections.rs) and leaves `recv_type == None` (a Phase-9 builtin gap).
@@ -1021,7 +1009,7 @@ pub(crate) fn method_call_in_subset(
     // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
     if matches!(
         recv_type.as_deref(),
-        Some("NullBackend" | "TuiBackend" | "GtkBackend")
+        Some("NullBackend" | "TUIBackend" | "GtkBackend")
     ) && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
@@ -1555,7 +1543,7 @@ pub(crate) fn static_method_call_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
-    if type_name == "UiShortcut" && method == "cmd" {
+    if type_name == "UIShortcut" && method == "cmd" {
         return args.len() == 1
             && args[0].label.is_none()
             && matches!(

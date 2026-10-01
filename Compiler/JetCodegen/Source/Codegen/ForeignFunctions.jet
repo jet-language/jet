@@ -1,5 +1,20 @@
 // Prepare checked inline-foreign native artifacts without manufacturing MIR.
 // Tool discovery and execution remain with the native artifact adapter.
+use jet_foundation.[
+    AccessConvention,
+    Func,
+    InlineAsmContract,
+    InlineAsmOutput,
+    InlineForeign,
+    TInlineAssembly,
+    TInlineAssemblyContract,
+    TInlineAssemblyOutput,
+    Type,
+]
+use jet_sema.[
+    SemaCheckedForeignFunction,
+    SemaCheckedForeignOwner,
+]
 
 pub struct JetCodegenForeignArtifactIdentityField {
     pub name: String
@@ -23,7 +38,7 @@ fn jet_codegen_inline_assembly_normalize_register(register: String) -> String Ne
     if bytes.len() > 0 && Int.from_u8(bytes[0]) == 37 {
         return String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
     }
-    register
+    ~register
 }
 
 fn jet_codegen_inline_foreign_rust_type(ty: Type) -> String Never! {
@@ -58,7 +73,7 @@ fn jet_codegen_inline_foreign_param_type(convention: AccessConvention, ty: Type)
 }
 
 fn jet_codegen_inline_assembly_rust_string(value: String) -> String Never! {
-    &value.replace("\\", "\\\\").replace("\"", "\\\"")
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
 fn jet_codegen_inline_assembly_identity_push_bytes(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: [U8]) Never! {
@@ -87,7 +102,7 @@ fn jet_codegen_inline_assembly_output_identity(output: InlineAsmOutput?) -> Stri
         .None -> "none"
         .Val(output_value) -> if output_value == {
             .Parameter(index) -> "parameter:{index}"
-            .Register(register) -> "register:{jet_codegen_inline_assembly_normalize_register(register).to_ascii_lowercase()}"
+            .Register(register) -> "register:{jet_codegen_inline_assembly_normalize_register(register).lower()}"
         }
     }
 }
@@ -117,7 +132,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
                     has_output_parameter = true
                 }
                 .Register(register) -> {
-                    return_register = jet_codegen_inline_assembly_normalize_register(register).to_ascii_lowercase()
+                    return_register = jet_codegen_inline_assembly_normalize_register(register).lower()
                     has_return_register = true
                 }
             }
@@ -129,7 +144,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
     loop raw_line in inline.source.split("\n") {
         line := raw_line.trim()
         if line == "" || line.starts_with("; clobbers ") -> next
-        &instructions.push(&line.replace("; -> return", "").trim())
+        &instructions.push(line.replace("; -> return", "").trim())
     }
     operands := [String]{}
     result_expression := "()"
@@ -143,7 +158,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
                         result_expression = "p{index}"
                     }
                     .Register(register) -> {
-                        normalized := jet_codegen_inline_assembly_normalize_register(register).to_ascii_lowercase()
+                        normalized := jet_codegen_inline_assembly_normalize_register(register).lower()
                         &operands.push("out(\"{normalized}\") __jet_result")
                         result_expression = "__jet_result"
                     }
@@ -157,7 +172,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
     }
     seen_clobbers := [String]{}
     loop raw_register in contract.clobbers {
-        register := jet_codegen_inline_assembly_normalize_register(raw_register).to_ascii_lowercase()
+        register := jet_codegen_inline_assembly_normalize_register(raw_register).lower()
         if (!has_return_register || return_register != register) && !seen_clobbers.contains(register) {
             &seen_clobbers.push(register)
             &operands.push("out(\"{register}\") _")
@@ -224,7 +239,7 @@ pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_ide
     loop parameter in row.params -> jet_codegen_inline_assembly_identity_push(&identity_fields, "inline_parameter", parameter.name)
     jet_codegen_inline_assembly_identity_push(&identity_fields, "asm_target", contract.target)
     jet_codegen_inline_assembly_identity_push(&identity_fields, "asm_output", jet_codegen_inline_assembly_output_identity(contract.output))
-    loop register in contract.clobbers -> jet_codegen_inline_assembly_identity_push(&identity_fields, "asm_clobber", jet_codegen_inline_assembly_normalize_register(register).to_ascii_lowercase())
+    loop register in contract.clobbers -> jet_codegen_inline_assembly_identity_push(&identity_fields, "asm_clobber", jet_codegen_inline_assembly_normalize_register(register).lower())
     loop parameter in row.params {
         jet_codegen_inline_assembly_identity_push(&identity_fields, "parameter_convention", jet_codegen_inline_assembly_access_identity(parameter.convention))
         jet_codegen_inline_assembly_identity_push(&identity_fields, "parameter_type", jet_codegen_inline_foreign_type_key(parameter.ty))
@@ -332,7 +347,7 @@ fn jet_codegen_inline_native_rust_quote(value: String) -> String Never! {
                 &out.push(U8{92})
                 &out.push(U8{120})
                 hex :: "0123456789abcdef"
-                &out.push(hex.bytes()[code / 16])
+                &out.push(hex.bytes()[code /% 16])
                 &out.push(hex.bytes()[code % 16])
             }
             else -> &out.push(byte)

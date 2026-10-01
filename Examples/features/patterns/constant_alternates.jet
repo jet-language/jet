@@ -1,0 +1,29 @@
+// An ALL_CAPS name in an arm head is a constant, never a bare enum variant,
+// so `ARCH_X64 | ARCH_ARM64` lists two value alternates and needs no leading
+// `.`; constants and literals mix in one alternate list.
+ARCH_X64 :: prep { "x86_64" }
+ARCH_ARM64 :: prep { "aarch64" }
+OS_LINUX :: prep { "linux" }
+
+fn tier_one(arch: String) -> Bool {
+    if arch == {
+        ARCH_X64 | ARCH_ARM64 -> true
+        else -> false
+    }
+}
+
+fn os_label(os: String) -> String {
+    if os == {
+        OS_LINUX | "Linux" -> "linux"
+        else -> "other"
+    }
+}
+
+fn run() {
+    print(tier_one("x86_64"))
+    print(tier_one("aarch64"))
+    print(tier_one("riscv64"))
+    print(os_label("Linux"))
+    print(os_label(OS_LINUX))
+    print(os_label("plan9"))
+}

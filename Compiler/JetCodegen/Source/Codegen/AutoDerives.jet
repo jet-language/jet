@@ -1,39 +1,56 @@
-// Structural Jet trait implementations emitted from explicit checked selection facts.
+// Structural Jet trait implementations emitted from explicit checked selection
+// facts. Equatable is not here: its body is the Prelude derive template that
+// JetSema expands into a compiler-generated impl (D-ONCE-DERIVE1=A).
+use jet_foundation.[
+    MIRField,
+    MIRNominalRef,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeID,
+    MIRTypeKind,
+    MIRVariant,
+    mir_trait_id,
+    mir_type_layout,
+    mir_type_same_checked_type,
+]
+use jet_sema.[
+    sema_core_error_family_member,
+]
+
 pub struct JetCodegenAutoDeriveFacts {
-    pub type_id: MirTypeId
+    pub type_id: MIRTypeID
     pub printable: Bool
     pub debug: Bool
-    pub equatable: Bool
 }
 
 fn jet_codegen_auto_derives_source_name(name: String) -> String Never! {
     if name.starts_with("__jet_") -> String.from_bytes(name.bytes()[6..name.bytes().len()]) ?? name else -> name
 }
 
-fn jet_codegen_auto_derives_type_args(definition: MirTypeDef) -> String Never! {
+fn jet_codegen_auto_derives_type_args(definition: MIRTypeDef) -> String Never! {
     if definition.generic_params.len() == 0 -> return ""
     names :: loop parameter in definition.generic_params -> parameter.name
     "<{names.join(", ")}>"
 }
 
-fn jet_codegen_auto_derives_impl_generics(ctx: &JetRustEmitContext, definition: MirTypeDef, rust_bound: String) -> String Never! {
+fn jet_codegen_auto_derives_impl_generics(ctx: &JetRustEmitContext, definition: MIRTypeDef, rust_bound: String) -> String Never! {
     if definition.generic_params.len() == 0 -> return ""
     params := [String]{}
     loop parameter in definition.generic_params {
         bounds := [String]{}
-        loop bound in parameter.bounds -> &bounds.push(jet_rust_emit_trait_name(ctx, bound.id))
+        loop bound in parameter.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
         if !bounds.contains(rust_bound) -> &bounds.push(rust_bound)
         &params.push("{parameter.name}: {bounds.join(" + ")}")
     }
     "<{params.join(", ")}>"
 }
 
-fn jet_codegen_auto_derives_impl_selected(ctx: &JetRustEmitContext, definition: MirTypeDef, trait_name: String) -> Bool Never! {
+fn jet_codegen_auto_derives_impl_selected(ctx: &JetRustEmitContext, definition: MIRTypeDef, trait_name: String) -> Bool Never! {
     expected_trait := mir_trait_id(trait_name)
-    type_kind := MirTypeKind.Apply{name: MirNominalRef{id: definition.id, name: definition.key}, args: [MirType]{}}
-    declared_type := MirType{kind: type_kind, identity: Val(definition.id), layout: mir_type_layout(type_kind)}
+    type_kind := MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}}
+    declared_type := MIRType{kind: type_kind, identity: Val(definition.id), layout: mir_type_layout(type_kind)}
     loop implementation in ctx.program.impls {
-        if !jet_rust_emit_impl_target_enabled(ctx, implementation) -> next
+        if !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
         reference :: implementation.trait_ref ?? next
         if reference.id != expected_trait -> next
         if reference.name != trait_name -> next
@@ -48,23 +65,23 @@ fn jet_codegen_auto_derives_impl_selected(ctx: &JetRustEmitContext, definition: 
     false
 }
 
-fn jet_codegen_auto_derives_boxed(definition: MirTypeDef, edge: String) -> Bool Never! {
+fn jet_codegen_auto_derives_boxed(definition: MIRTypeDef, edge: String) -> Bool Never! {
     loop candidate in definition.boxed_edges {
         if candidate == edge -> return true
     }
     false
 }
 
-fn jet_codegen_auto_derives_field_value(ctx: &JetRustEmitContext, definition: MirTypeDef, field: MirField, receiver: String, method: String, edge: String) -> String Never! {
-    value := "({receiver}).{jet_rust_emit_field_name(ctx, field.id)}"
+fn jet_codegen_auto_derives_field_value(ctx: &JetRustEmitContext, definition: MIRTypeDef, field: MIRField, receiver: String, method: String, edge: String) -> String Never! {
+    value := "({receiver}).{jet_rust_emit_field_name(&ctx, field.id)}"
     if jet_codegen_auto_derives_boxed(definition, edge) -> value = "({value}).as_ref()"
     "({value}).{method}()"
 }
 
-fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MirTypeDef, rust_trait: String, method: String, rust_bound: String, lines: &[String]) Never! {
-    name :: jet_rust_emit_type_name(ctx, definition.id)
+fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MIRTypeDef, rust_trait: String, method: String, rust_bound: String, lines: &[String]) Never! {
+    name :: jet_rust_emit_type_name(&ctx, definition.id)
     args :: jet_codegen_auto_derives_type_args(definition)
-    impl_generics :: jet_codegen_auto_derives_impl_generics(ctx, definition, rust_bound)
+    impl_generics :: jet_codegen_auto_derives_impl_generics(&ctx, definition, rust_bound)
     quoted_source_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(definition.name))
     &lines.push("impl{impl_generics} {rust_trait} for {name}{args} {{")
     &lines.push("    fn {method}(&self) -> String {{")
@@ -75,7 +92,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: Mi
             loop (storage_index, field) in fields {
                 if field.computed -> next
                 field_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(field.name))
-                value :: jet_codegen_auto_derives_field_value(ctx, definition, field, "self", method, field.name)
+                value :: jet_codegen_auto_derives_field_value(&ctx, definition, field, "self", method, field.name)
                 if {
                     method == "jet_debug" -> {
                         &lines.push("            JetDebugField {{ name: {field_name}.to_string(), value: {value}, storage_index: {storage_index}, redacted: {field.redact} }},")
@@ -90,7 +107,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: Mi
             &lines.push("        match self {{")
             loop variant in variants {
                 variant_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(variant.name))
-                variant_path :: "Self::{jet_rust_emit_variant_name(ctx, definition.id, variant.name)}"
+                variant_path :: "Self::{jet_rust_emit_variant_name(&ctx, definition.id, variant.name)}"
                 if variant.payload == {
                     .Unit -> &lines.push("            {variant_path} => jet_debug_variant({variant_name}, None),")
                     .Single(_) -> {
@@ -105,7 +122,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: Mi
                         loop (storage_index, field) in fields {
                             if field.computed -> next
                             local :: "__jet_show_field_{index}"
-                            &patterns.push("{jet_rust_emit_field_name(ctx, field.id)}: {local}")
+                            &patterns.push("{jet_rust_emit_field_name(&ctx, field.id)}: {local}")
                             value := "{local}.{method}()"
                             if jet_codegen_auto_derives_boxed(definition, "{variant.name}.{field.name}") -> value = "{local}.as_ref().{method}()"
                             field_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(field.name))
@@ -138,7 +155,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: Mi
 // D-DISPLAYDBG1: bare `{value}` of a plain enum (every case a unit case) renders
 // its case name on every tier, so `jet_fmt_display<T: JetDisplay>` gets that
 // render here. A selected user `Display` impl keeps its own rendering.
-fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, definition: MirTypeDef, variants: [MirVariant], lines: &[String]) Never! {
+fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, variants: [MIRVariant], lines: &[String]) Never! {
     if definition.generic_params.len() > 0 || variants.len() == 0 -> return
     loop variant in variants {
         if variant.payload == {
@@ -146,14 +163,14 @@ fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, 
             else -> return
         }
     }
-    if jet_codegen_auto_derives_impl_selected(ctx, definition, "Display") -> return
-    name :: jet_rust_emit_type_name(ctx, definition.id)
+    if jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display") -> return
+    name :: jet_rust_emit_type_name(&ctx, definition.id)
     &lines.push("impl JetDisplay for {name} {{")
     &lines.push("    fn jet_display(&self) -> String {{")
     &lines.push("        match self {{")
     loop variant in variants {
         variant_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(variant.name))
-        &lines.push("            Self::{jet_rust_emit_variant_name(ctx, definition.id, variant.name)} => {variant_name}.to_string(),")
+        &lines.push("            Self::{jet_rust_emit_variant_name(&ctx, definition.id, variant.name)} => {variant_name}.to_string(),")
     }
     &lines.push("        }}")
     &lines.push("    }}")
@@ -166,7 +183,7 @@ fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, 
 // (`UUIDError`) is emitted from MIR, so it forwards `JetDisplay` to the
 // structural `JetShow` above. A unit-only enum keeps its case-name display; a
 // selected user `Display` impl keeps its own rendering.
-fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, definition: MirTypeDef, lines: &[String]) Never! {
+fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
     if !definition.key.starts_with("<corelib>/") || !sema_core_error_family_member(definition.key) || definition.generic_params.len() > 0 -> return
     if definition.kind == {
         .Struct(_, _) -> {}
@@ -182,8 +199,8 @@ fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, 
         }
         else -> return
     }
-    if jet_codegen_auto_derives_impl_selected(ctx, definition, "Display") -> return
-    name :: jet_rust_emit_type_name(ctx, definition.id)
+    if jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display") -> return
+    name :: jet_rust_emit_type_name(&ctx, definition.id)
     &lines.push("impl JetDisplay for {name} {{")
     &lines.push("    fn jet_display(&self) -> String {{")
     &lines.push("        <Self as JetShow>::jet_show(self)")
@@ -191,89 +208,11 @@ fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, 
     &lines.push("}}")
 }
 
-fn jet_codegen_auto_derives_field_ref(ctx: &JetRustEmitContext, definition: MirTypeDef, field: MirField, receiver: String, edge: String) -> String Never! {
-    value := "&({receiver}).{jet_rust_emit_field_name(ctx, field.id)}"
-    if jet_codegen_auto_derives_boxed(definition, edge) -> value = "({value}).as_ref()"
-    value
-}
-
-
-fn jet_codegen_auto_derives_append_equatable(ctx: &JetRustEmitContext, definition: MirTypeDef, lines: &[String]) Never! {
-    name :: jet_rust_emit_type_name(ctx, definition.id)
-    args :: jet_codegen_auto_derives_type_args(definition)
-    impl_generics :: jet_codegen_auto_derives_impl_generics(ctx, definition, "Equatable", "__jet_Equatable")
-    &lines.push("impl{impl_generics} __jet_Equatable for {name}{args} {{")
-    &lines.push("    fn equal(&self, rhs: &Self) -> bool {{")
-    if definition.kind == {
-        .Struct(fields, _) -> {
-            loop field in fields {
-                if field.computed -> next
-                left :: jet_codegen_auto_derives_field_ref(ctx, definition, field, "self", field.name)
-                right :: jet_codegen_auto_derives_field_ref(ctx, definition, field, "rhs", field.name)
-                &lines.push("        if !__jet_Equatable::equal({left}, {right}) {{ return false; }}")
-            }
-            &lines.push("        true")
-        }
-        .Enum(variants, _) -> {
-            &lines.push("        match (self, rhs) {{")
-            loop variant in variants {
-                path :: "Self::{jet_rust_emit_variant_name(ctx, definition.id, variant.name)}"
-                if variant.payload == {
-                    .Unit -> &lines.push("            ({path}, {path}) => true,")
-                    .Single(_) -> {
-                        left := "__jet_left_payload"
-                        right := "__jet_right_payload"
-                        &lines.push("            ({path}({left}), {path}({right})) => {{")
-                        if {
-                            jet_codegen_auto_derives_boxed(definition, variant.name) -> {
-                                &lines.push("                __jet_Equatable::equal({left}.as_ref(), {right}.as_ref())")
-                            } else -> {
-                                &lines.push("                __jet_Equatable::equal({left}, {right})")
-                            }
-                        }
-                        &lines.push("            }},")
-                    }
-                    .Named(fields) -> {
-                        left_patterns := [String]{}
-                        right_patterns := [String]{}
-                        visible := [MirField]{}
-                        loop field in fields { if !field.computed -> &visible.push(field) }
-                        loop (index, field) in visible {
-                            &left_patterns.push("{jet_rust_emit_field_name(ctx, field.id)}: __jet_left_field_{index}")
-                            &right_patterns.push("{jet_rust_emit_field_name(ctx, field.id)}: __jet_right_field_{index}")
-                        }
-                        if visible.len() == 0 {
-                            &lines.push("            ({path} {{ .. }}, {path} {{ .. }}) => true,")
-                            next
-                        }
-                        &lines.push("            ({path} {{ {left_patterns.join(", ")}, .. }}, {path} {{ {right_patterns.join(", ")}, .. }}) => {{")
-                        loop (index, field) in visible {
-                            left := "__jet_left_field_{index}"
-                            right := "__jet_right_field_{index}"
-                            if jet_codegen_auto_derives_boxed(definition, "{variant.name}.{field.name}") {
-                                left = "__jet_left_field_{index}.as_ref()"
-                                right = "__jet_right_field_{index}.as_ref()"
-                            }
-                            &lines.push("                if !__jet_Equatable::equal({left}, {right}) {{ return false; }}")
-                        }
-                        &lines.push("                true")
-                        &lines.push("            }},")
-                    }
-                }
-            }
-            &lines.push("            (_, _) => false,")
-            &lines.push("        }}")
-        }
-        else -> &lines.push("        false")
-    }
-    &lines.push("    }}")
-    &lines.push("}}")
-}
 
 // The selection booleans are checked semantic facts keyed to one canonical MIR
 // type. They are deliberately independent of source `derives` and native Rust
 // capability derives; callers must not reconstruct them from either.
-pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MirTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
+pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
     lines := [String]{}
     if facts.type_id != definition.id {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "auto-derive facts name a different MIR type", "structural auto-derive selections are bound to the exact canonical type ID", Val(definition.span))
@@ -283,20 +222,17 @@ pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MirTy
         .Enum(variants, _) -> jet_codegen_auto_derives_append_plain_enum_display(&ctx, definition, variants, &lines)
         else -> {}
     }
-    if !facts.printable && !facts.debug && !facts.equatable -> return lines
+    if !facts.printable && !facts.debug -> return lines
     if definition.kind == {.Struct(_, _) | .Enum(_, _) -> {} else -> {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "structural auto-derive facts target a non-structural type", "Printable, Debug, and Equatable auto bodies are defined only for checked structs and enums", Val(definition.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "structural auto-derive facts target a non-structural type", "Printable and Debug auto bodies are defined only for checked structs and enums", Val(definition.span))
         return lines
     }}
-    if facts.printable && !jet_codegen_auto_derives_impl_selected(ctx, definition, "Printable") {
+    if facts.printable && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Printable") {
         jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
         jet_codegen_auto_derives_append_core_error_display(&ctx, definition, &lines)
     }
-    if facts.debug && !jet_codegen_auto_derives_impl_selected(ctx, definition, "Debug") {
+    if facts.debug && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Debug") {
         jet_codegen_auto_derives_append_show(&ctx, definition, "JetDebug", "jet_debug", "JetDebug", &lines)
-    }
-    if facts.equatable && !jet_codegen_auto_derives_impl_selected(ctx, definition, "Equatable") {
-        jet_codegen_auto_derives_append_equatable(&ctx, definition, &lines)
     }
     lines
 }

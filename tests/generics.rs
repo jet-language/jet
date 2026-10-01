@@ -109,8 +109,6 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
     let entry = root.join("fact_value_arguments.jet");
     std::fs::copy(fixture.join("fact_value_arguments.jet"), &entry)
         .expect("copy fact-value module");
-    std::fs::copy(fixture.join("package.jet"), root.join("package.jet"))
-        .expect("copy fact-value package");
     let expected =
         std::fs::read(repo.join("Examples/features/expected/modules/fact_value_arguments.out"))
             .expect("fact-value module golden");

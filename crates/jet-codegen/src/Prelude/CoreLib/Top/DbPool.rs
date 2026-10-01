@@ -237,10 +237,6 @@ impl<D: Send + 'static> JetDbLease<D> {
         self.healthy = false;
     }
 
-    pub fn is_healthy(&self) -> bool {
-        self.healthy
-    }
-
     pub fn with_driver<R, F>(&mut self, operation: F) -> Result<R, jet_std::DBError>
     where
         F: FnOnce(&mut D) -> Result<R, jet_std::DBError>,

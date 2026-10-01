@@ -1,5 +1,28 @@
 // Axis-aware layout producers and generic Measurement<T> accessors.
 // Layout statement bodies remain owned by Statements.jet.
+use jet_foundation.[
+    AccessConvention,
+    BinOp,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    TFieldRef,
+    THandleOp,
+    Type,
+    symbol_id,
+    type_identity_equal,
+    type_name,
+]
 
 pub enum SemaExpressionLayoutAxis {
     Horizontal
@@ -18,7 +41,7 @@ pub struct SemaExpressionLayoutBinaryCheck {
 }
 
 pub struct SemaExpressionCoreFieldFact {
-    pub owner: SymbolId
+    pub owner: SymbolID
     pub field: Symbol
     pub ty: Type
 }
@@ -72,7 +95,7 @@ pub fn sema_expression_layout_literal(value: TExpr) -> TExpr Never! {
     if value.ty == Type.Int || value.ty == Type.Float || value.ty == .InlineRange(_, _, _) {
         return sema_tir_expr(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
     }
-    value
+    ~value
 }
 
 fn sema_expression_layout_binary_axis_diagnostic(left: Type, right: Type, span: Span, diagnostics: &[Diagnostic]) {
@@ -203,7 +226,8 @@ pub fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method
 }
 
 fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment) -> Type? {
-    graph :: environment.registration_graph ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
     resolved :: sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
     name :: if resolved == {
         .Apply(name, args) -> {

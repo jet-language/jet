@@ -19,7 +19,6 @@ use jet_foundation::MIR::{
 };
 use jet_foundation::TestingHistory::{HistoryProvenance, HISTORY_ENGINE};
 use jet_foundation::WebPartition::{WebBucket, WebPartitionMarker};
-use jet_foundation::Names::mangle_path;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
@@ -57,11 +56,6 @@ pub struct WebArtifacts {
     pub source_names: Vec<String>,
     pub source_contents: Vec<String>,
     pub dom_runtime: String,
-    /// Browser model transport module.  It is emitted only when a checked
-    /// model output reaches this Web artifact.
-    pub onnx_runtime_js: String,
-    /// Worker module loaded by the browser model transport module.
-    pub onnx_runtime_worker_js: String,
     pub index_html: String,
     pub explicit_html_path: Option<String>,
     pub command_record: Vec<u8>,
@@ -137,7 +131,6 @@ pub fn web_rustc_incremental_identity(
          |environment={}\
          |tier={}\
          |edition={}\
-         |model-runtime={}\
          |policy={:?}",
         target.layout.triple,
         target.layout.pointer_size,
@@ -149,7 +142,6 @@ pub fn web_rustc_incremental_identity(
         program.facts.target_dossier.environment_identity,
         program.facts.target_dossier.tier_identity,
         program.facts.edition,
-        !program.facts.model_outputs.is_empty(),
         target.release_devtools_policy,
     );
     sha256_hex(context.as_bytes())
@@ -259,16 +251,6 @@ pub fn emit_web(program: &MirProgram, target: &MirWebTarget) -> Result<WebArtifa
         rustc_incremental_identity,
         js_app,
         js_source_map,
-        onnx_runtime_js: if program.facts.model_outputs.is_empty() {
-            String::new()
-        } else {
-            jet_rt::model::provider::browser::HOST_JAVASCRIPT.to_string()
-        },
-        onnx_runtime_worker_js: if program.facts.model_outputs.is_empty() {
-            String::new()
-        } else {
-            jet_rt::model::provider::browser::WORKER_JAVASCRIPT.to_string()
-        },
         source_names: target.assets.source_names.clone(),
         source_contents: target.assets.source_contents.clone(),
         dom_runtime: target.assets.dom_runtime.clone(),
@@ -767,167 +749,6 @@ fn emit_wasm_rust(
     out.push_str(&emit_mir_program(program, &config));
     Ok(out)
 }
-fn model_trait_for_type_args<'a>(
-    program: &'a MirProgram,
-    type_args: &[MirType],
-) -> Option<&'a jet_foundation::MIR::MirTraitDef> {
-    let Some(first) = type_args.first() else {
-        return None;
-    };
-    let names = match &first.kind {
-        MirTypeKind::TraitObject(rows) => rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
-        MirTypeKind::Apply { name, .. } => vec![name.name.as_str()],
-        _ => Vec::new(),
-    };
-    program.traits.iter().find(|definition| {
-        names.iter().any(|name| *name == definition.name || *name == definition.key)
-            && program.facts.model_outputs.iter().any(|fact| {
-                fact.signature_name.as_deref() == Some(definition.name.as_str())
-            })
-    })
-}
-
-fn model_trait_for_function<'a>(
-    program: &'a MirProgram,
-    id: jet_foundation::MIR::MirFunctionId,
-) -> Option<&'a jet_foundation::MIR::MirTraitDef> {
-    let function = program.functions.iter().find(|function| function.id == id)?;
-    let MirFunctionForm::TraitMethod { trait_ref, .. } = &function.form else {
-        return None;
-    };
-    let definition = program.traits.iter().find(|definition| definition.id == trait_ref.id)?;
-    (function.name == "embed"
-        && program.facts.model_outputs.iter().any(|fact| {
-            fact.signature_name.as_deref() == Some(definition.name.as_str())
-        }))
-    .then_some(definition)
-}
-
-fn model_bridge_prefix(definition: &jet_foundation::MIR::MirTraitDef) -> String {
-    mangle_path(&definition.key)
-}
-
-fn emit_model_web_bridges(
-    out: &mut String,
-    program: &MirProgram,
-) -> Result<(), MirWebError> {
-    if program.facts.model_outputs.is_empty() {
-        return Ok(());
-    }
-    out.push_str(
-        "const __jetModelUtf8 = new TextEncoder();\n\
-         const __jetModelUtf8Decode = new TextDecoder(\"utf-8\", { fatal: true });\n\
-         const __jetModelWait = () => new Promise((resolve) => setTimeout(resolve, 0));\n\
-         function __jetModelInput(prefix, value) {\n\
-           const bytes = value instanceof Uint8Array ? value : __jetModelUtf8.encode(value);\n\
-           const pointer = Number(__jetPreludeWasm[`__jet_model_web_input_alloc_${prefix}`](bytes.length));\n\
-           if (!Number.isSafeInteger(pointer) || (bytes.length !== 0 && pointer === 0)) throw new Error(\"model Web input allocation failed\");\n\
-           if (bytes.length !== 0) new Uint8Array(__jetPreludeWasm.memory.buffer, pointer, bytes.length).set(bytes);\n\
-           return [pointer, bytes.length];\n\
-         }\n\
-         function __jetModelDocuments(documents) {\n\
-           if (!Array.isArray(documents)) throw new Error(\"model Web documents must be a list\");\n\
-           const values = documents.map((document) => __jetModelUtf8.encode(String(document)));\n\
-           const size = 4 + values.reduce((total, value) => total + 4 + value.length, 0);\n\
-           const bytes = new Uint8Array(size);\n\
-           const view = new DataView(bytes.buffer);\n\
-           view.setUint32(0, values.length, true);\n\
-           let offset = 4;\n\
-           for (const value of values) { view.setUint32(offset, value.length, true); offset += 4; bytes.set(value, offset); offset += value.length; }\n\
-           return bytes;\n\
-         }\n\
-         function __jetModelBatch(bytes) {\n\
-           const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);\n\
-           let offset = 0;\n\
-           const u32 = () => { if (offset + 4 > view.byteLength) throw new Error(\"truncated model Web batch\"); const value = view.getUint32(offset, true); offset += 4; return value; };\n\
-           const u64 = () => { const low = u32(); const high = u32(); const value = high * 4294967296 + low; if (!Number.isSafeInteger(value)) throw new Error(\"model Web batch dimension is too large\"); return value; };\n\
-           const text = () => { const length = u32(); if (offset + length > view.byteLength) throw new Error(\"truncated model Web batch text\"); const value = __jetModelUtf8Decode.decode(new Uint8Array(view.buffer, view.byteOffset + offset, length)); offset += length; return value; };\n\
-           const rows = u32();\n\
-           const values = [];\n\
-           for (let row = 0; row < rows; row += 1) { const columns = u32(); const value = []; for (let column = 0; column < columns; column += 1) value.push(f32()); values.push(value); }\n\
-           const space = { model_digest: text(), dimension: u64(), metric: text(), normalization: text() };\n\
-           return { values, space };\n\
-         }\n\
-         async function __jetModelPoll(prefix, operation, handle) {\n\
-           const wasm = __jetPreludeWasm;\n\
-           const poll = wasm[`__jet_model_web_${operation}_poll_${prefix}`];\n\
-           const pointer = wasm[`__jet_model_web_${operation}_result_ptr_${prefix}`];\n\
-           const length = wasm[`__jet_model_web_${operation}_result_len_${prefix}`];\n\
-           const release = wasm[`__jet_model_web_${operation}_result_free_${prefix}`];\n\
-           if (typeof poll !== \"function\" || typeof pointer !== \"function\" || typeof length !== \"function\" || typeof release !== \"function\") throw new Error(\"model Web async bridge is unavailable\");\n\
-           for (;;) {\n\
-             const status = Number(poll(handle));\n\
-             if (status === 0) { await __jetModelWait(); continue; }\n\
-             const size = Number(length(handle));\n\
-             const address = Number(pointer(handle));\n\
-             if (!Number.isSafeInteger(address) || !Number.isSafeInteger(size) || address < 0 || size < 0 || address + size > wasm.memory.buffer.byteLength) {\n\
-               release(handle);\n\
-               throw new Error(\"model Web async bridge returned an invalid result buffer\");\n\
-             }\n\
-             const bytes = new Uint8Array(wasm.memory.buffer, address, size).slice();\n\
-             release(handle);\n\
-             if (status === 2) throw new Error(__jetModelUtf8Decode.decode(bytes) || \"model Web provider failed\");\n\
-             if (status !== 1) throw new Error(\"model Web async bridge returned an unknown status\");\n\
-             return bytes;\n\
-           }\n\
-         }\n\
-",
-    );
-    for definition in &program.traits {
-        let Some(fact) = program
-            .facts
-            .model_outputs
-            .iter()
-            .find(|fact| fact.signature_name.as_deref() == Some(definition.name.as_str()))
-        else {
-            continue;
-        };
-        let _ = fact;
-        let prefix = model_bridge_prefix(definition);
-        writeln!(
-            out,
-
-            "async function __jet_model_open_{prefix}(output) {{
-  const [pointer, length] = __jetModelInput({prefix:?}, String(output));
-  let handle;
-  try {{
-    handle = Number(__jetPreludeWasm[`__jet_model_web_open_start_{prefix}`](pointer, length));
-  }} finally {{
-    __jetPreludeWasm[`__jet_model_web_input_free_{prefix}`](pointer);
-  }}
-  if (!Number.isSafeInteger(handle) || handle === 0) throw new Error(\"model Web open failed to start\");
-  const packet = await __jetModelPoll({prefix:?}, \"open\", handle);
-  if (packet.byteLength !== 4) throw new Error(\"model Web open returned an invalid session handle\");
-  return {{ __jet_model_trait: {prefix:?}, handle: new DataView(packet.buffer, packet.byteOffset, 4).getUint32(0, true) }};
-}}
-async function __jet_model_embed_{prefix}(receiver, documents) {{
-  if (!receiver || receiver.__jet_model_trait !== {prefix:?}) throw new Error(\"model Web session belongs to a different trait\");
-  const [pointer, length] = __jetModelInput({prefix:?}, __jetModelDocuments(documents));
-  let handle;
-  try {{
-    handle = Number(__jetPreludeWasm[`__jet_model_web_embed_start_{prefix}`](receiver.handle, pointer, length));
-  }} finally {{
-    __jetPreludeWasm[`__jet_model_web_input_free_{prefix}`](pointer);
-  }}
-  if (!Number.isSafeInteger(handle) || handle === 0) throw new Error(\"model Web embed failed to start\");
-  return __jetModelBatch(await __jetModelPoll({prefix:?}, \"embed\", handle));
-}}
-"
-        )
-        .map_err(|_| MirWebError::InvalidMir {
-            message: format!("model Web bridge for `{}` could not be rendered", definition.name),
-        })?;
-    }
-    Ok(())
-}
-
-fn web_model_core_call(program: &MirProgram, id: jet_foundation::MIR::MirCoreCallId) -> bool {
-    program
-        .core_calls
-        .iter()
-        .find(|call| call.id == id)
-        .is_some_and(|call| call.module == "core.models" && call.member == "open")
-}
 fn web_font_shape_core_call(program: &MirProgram, id: jet_foundation::MIR::MirCoreCallId) -> bool {
     program
         .core_calls
@@ -1041,9 +862,8 @@ fn web_async_function_ids(program: &MirProgram) -> BTreeSet<jet_foundation::MIR:
             }
             let needs_async = function.blocks.iter().any(|block| {
                 block.instructions.iter().any(|instruction| match &instruction.operation {
-                    MirOperation::CoreCall { call, .. } => web_model_core_call(program, *call),
                     MirOperation::Call { callee, .. } => match callee {
-                        MirCallee::Core(id) => web_model_core_call(program, *id),
+                        MirCallee::Core(_) => false,
                         MirCallee::Prelude(id) => {
                             web_task_join_call(program, *id) || web_channel_async_call(program, *id)
                         }
@@ -1056,8 +876,7 @@ fn web_async_function_ids(program: &MirProgram) -> BTreeSet<jet_foundation::MIR:
                                 .iter()
                                 .find(|function| function.id == *id)
                                 .is_some_and(|function| is_wasm_export(function));
-                            model_trait_for_function(program, *id).is_some()
-                                || wasm_export
+                            wasm_export
                                 || async_functions.contains(id)
                         }
                         MirCallee::TraitMethod { method, trait_ref, .. } => {
@@ -1603,7 +1422,6 @@ fn emit_js_app(
     let has_data_runtime = artifact
         .runtime_parts
         .contains(&jet_foundation::MIR::MirRuntimePartId::Data);
-    let has_model_runtime = !program.facts.model_outputs.is_empty();
     // The Wasm prelude always exports the history ABI, including for programs
     // with no authored history call. Keep the canonical JS callback import
     // present so WebAssembly instantiation never receives a missing import.
@@ -1613,9 +1431,6 @@ fn emit_js_app(
     let needs_font_shaping = web_uses_font_shaping(program, functions);
     let mut out = String::new();
     out.push_str("import * as jetDom from \"./jet_dom_runtime.js\";\n");
-    if has_model_runtime {
-        out.push_str("import { createOnnxRuntimeWebHost } from \"./jet_onnx_runtime.js\";\n");
-    }
     let shared_prelude = shared_js_prelude(
         needs_font_shaping,
         &artifact.runtime_parts,
@@ -1634,11 +1449,6 @@ fn emit_js_app(
     } else {
         "const __jetFontImports = jet_ui_web_unreachable_harfbuzz_imports();\n"
     });
-    if has_model_runtime {
-        out.push_str(
-            "const __jetModelHost = createOnnxRuntimeWebHost(globalThis.__JET_ONNX_RUNTIME_ARCHIVE ?? null);\n",
-        );
-    }
     if has_data_runtime {
         out.push_str("const __jetDataImports = jet_data_web_imports();\n");
     }
@@ -1654,9 +1464,6 @@ fn emit_js_app(
     if include_history {
         out.push_str(", ...__jetTestingHistoryImports");
     }
-    if has_model_runtime {
-        out.push_str(", ...__jetModelHost.imports");
-    }
     out.push_str(" })).exports;\n");
     for constant in &program.constants {
         if !artifact.modules.contains(&constant.module) {
@@ -1668,16 +1475,6 @@ fn emit_js_app(
             "globalThis[{}] = {};",
             js_string(&constant.key),
             value
-        );
-    }
-    if has_model_runtime {
-        out.push_str(
-            "__jetModelHost.bind(__jetPreludeWasm);\n\
-             const __jetModelTransport = __jetModelHost.transport;\n\
-             const __jetModelTransportAwait = (session, operation, packet, signal) => {\n\
-               const job = __jetModelTransport.start(session, operation, packet, signal ? { signal } : {});\n\
-               return __jetModelTransport.resume(job);\n\
-             };\n",
         );
     }
     if has_data_runtime {
@@ -1721,7 +1518,6 @@ fn emit_js_app(
              }\n",
         );
     }
-    emit_model_web_bridges(&mut out, program)?;
     emit_wasm_export_bridges(&mut out, functions)?;
     emit_web_module_registry(&mut out, program, artifact, artifact_identity)?;
     let mut js_functions = functions
@@ -2323,6 +2119,14 @@ fn js_read_place_storage_expression(
             MirProjection::Deref { .. } => {
                 expression = format!("({expression}).value");
             }
+            MirProjection::Payload { kind, .. } => {
+                expression = format!("({expression}).values[{}]", js_payload_slot(kind));
+            }
+            MirProjection::Range { .. } => {
+                return Err(MirWebError::InvalidMir {
+                    message: "Web MIR has no range write window lowering".to_string(),
+                });
+            }
         }
     }
     if place.projections.is_empty() {
@@ -2450,6 +2254,25 @@ fn js_write_projected_place_expression(
             rest,
             expression,
         ),
+        MirProjection::Payload { kind, .. } => js_write_projected_place_expression(
+            program,
+            function,
+            format!("({target}).values[{}]", js_payload_slot(kind)),
+            rest,
+            expression,
+        ),
+        MirProjection::Range { .. } => Err(MirWebError::InvalidMir {
+            message: "Web MIR has no range write window lowering".to_string(),
+        }),
+    }
+}
+
+/// The `values` slot a `MirProjection::Payload` names in a JS variant carrier.
+fn js_payload_slot(kind: &jet_foundation::MIR::MirPayloadKind) -> usize {
+    match kind {
+        jet_foundation::MIR::MirPayloadKind::Option
+        | jet_foundation::MIR::MirPayloadKind::Result { .. } => 0,
+        jet_foundation::MIR::MirPayloadKind::Enum { index, .. } => *index,
     }
 }
 
@@ -2970,11 +2793,7 @@ fn js_operation_expression(
                 type_args,
                 history_provenance,
             )?;
-            if function.generator.is_none() && web_model_core_call(program, *call) {
-                format!("await ({expression})")
-            } else {
-                expression
-            }
+            expression
         }
         MirOperation::IndirectCall { callee, args, type_args } => {
             validate_type_args(program, type_args)?;
@@ -5543,23 +5362,6 @@ fn js_call_expression(
                     ),
                 });
             }
-            if let Some(definition) = model_trait_for_function(program, *id) {
-                if args.len() != 2 {
-                    return Err(MirWebError::InvalidMir {
-                        message: format!("model embed method {} has {} arguments; expected receiver and documents", id.0, args.len()),
-                    });
-                }
-                let prefix = model_bridge_prefix(definition);
-                let call = format!(
-                    "__jet_model_embed_{prefix}({}, {})",
-                    values[0], values[1]
-                );
-                return Ok(if caller.generator.is_none() {
-                    format!("await {call}")
-                } else {
-                    call
-                });
-            }
             let call = format!("jet_fn_{}([], [{}])", id.0, values.join(", "));
             Ok(if function.generator.is_none() && web_function_is_async(program, *id) {
                 format!("await {call}")
@@ -5631,11 +5433,7 @@ fn js_call_expression(
                 type_args,
                 history_provenance,
             )?;
-            Ok(if caller.generator.is_none() && web_model_core_call(program, *id) {
-                format!("await ({expression})")
-            } else {
-                expression
-            })
+            Ok(expression)
         }
         MirCallee::Prelude(id) => {
             let values = js_call_values(program, caller, args, false)?;
@@ -6010,7 +5808,7 @@ fn js_history_capture_schema(
                 let leaf = nominal.map(|name| name.name.rsplit("::").next().unwrap_or(&name.name))
                     .unwrap_or("");
                 match leaf {
-                    "Secret" | "ExpiringSecret" | "HistoryRng" | "Ptr" => "kind: \"opaque\"".to_string(),
+                    "Secret" | "ExpiringSecret" | "HistoryRNG" | "Ptr" => "kind: \"opaque\"".to_string(),
                     "Bytes" => "kind: \"bytes\"".to_string(),
                     "BigInt" => "kind: \"integer\"".to_string(),
                     "DataTree" => "kind: \"data\"".to_string(),
@@ -6123,24 +5921,6 @@ fn js_core_call_expression(
     };
     validate_type_args(program, type_args)?;
     let values = js_call_values(program, caller, args, false)?;
-    if core.module == "core.models" && core.member == "open" {
-        if values.len() != 1 {
-            return Err(MirWebError::InvalidMir {
-                message: format!("MIR models.open has {} runtime arguments; expected one output name", values.len()),
-            });
-        }
-        let Some(definition) = model_trait_for_type_args(program, type_args) else {
-            return Err(MirWebError::InvalidMir {
-                message: "MIR models.open has no checked model trait binding".to_string(),
-            });
-        };
-        let expression = format!(
-            "__jet_model_open_{}({})",
-            model_bridge_prefix(definition),
-            values[0]
-        );
-        return Ok(js_guard_core_expression(core, expression));
-    }
     if core.module == "core.testing" && core.member == "histories" {
         if type_args.len() != 1 {
             return Err(MirWebError::InvalidMir {
@@ -6642,6 +6422,7 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_shared_edit_txn", "jet_shared_edit_txn"),
     ("jet_stm_commit", "jet_stm_commit"),
     ("jet_shared_strong_count", "jet_shared_strong_count"),
+    ("jet_shared_same", "jet_shared_same"),
     ("jet_shared_downgrade", "jet_shared_downgrade"),
     ("jet_shared_weak_upgrade", "jet_shared_weak_upgrade"),
     ("jet_cell_new", "jet_cell_new"),

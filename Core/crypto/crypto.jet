@@ -9,7 +9,6 @@ package {
     }
 }
 use core
-use core.files.path.[Path]
 use core.crypto.expert as rawcrypto
 
 // core.crypto - safe envelopes and expert primitives (D-ONCE-LAYER1=B).
@@ -61,7 +60,7 @@ pub enum FileCryptoError {
 pub struct Digest256 {
     pub bytes: [U8]
 
-    pub fn as_bytes(self) -> [U8] { self.bytes }
+    pub fn as_bytes(self) -> [U8] Never! { self.bytes }
 
     pub fn hex(self) -> String Never! { hex_encode(self.bytes) }
 }
@@ -69,7 +68,7 @@ pub struct Digest256 {
 pub struct Digest512 {
     pub bytes: [U8]
 
-    pub fn as_bytes(self) -> [U8] { self.bytes }
+    pub fn as_bytes(self) -> [U8] Never! { self.bytes }
 
     pub fn hex(self) -> String Never! { hex_encode(self.bytes) }
 }
@@ -77,29 +76,29 @@ pub struct Digest512 {
 pub struct Hasher {
     pub data: [U8]
 
-    pub fn new() -> Hasher { {data: [U8]{}} }
+    pub fn new() -> Hasher Never! { {data: [U8]{}} }
 
-    pub fn update(&self, bytes: [U8]) {
+    pub fn update(&self, bytes: [U8]) Never! {
         loop b in bytes -> &self.data.push(b)
     }
 
-    pub fn digest(self) -> String { sha256(self.data).hex() }
+    pub fn digest(self) -> String Never! { sha256(self.data).hex() }
 }
 
 /// Hashlib-style module constructors for the default SHA-256 hasher.
-pub fn new() -> Hasher { Hasher.new() }
+pub fn new() -> Hasher Never! { Hasher.new() }
 
-pub fn update(hasher: &Hasher, bytes: [U8]) { &hasher.update(bytes) }
+pub fn update(hasher: &Hasher, bytes: [U8]) Never! { &hasher.update(bytes) }
 
-pub fn digest(hasher: ^Hasher) -> String { hasher.digest() }
+pub fn digest(hasher: ^Hasher) -> String Never! { hasher.digest() }
 
 pub struct Secret {
     pub bytes: [U8]
 
     /// The UTF-8 bytes of `text` as secret material.
-    pub fn from_text(text: String) -> Secret { Secret{bytes: text.bytes()} }
+    pub fn from_text(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
 
-    pub fn from_bytes(bytes: [U8]) -> Secret { Secret{bytes: bytes} }
+    pub fn from_bytes(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
 }
 
 // Secret-bearing values wipe their bytes when they close (D-SHAPE-RESOURCE1=A).
@@ -167,7 +166,7 @@ pub struct X25519SecretKey {
 
     /// The RFC 7748 public key. A key that isn't 32 bytes stops with a panic;
     /// `x25519_public` is the checked form.
-    pub fn public_key(self) -> X25519PublicKey { X25519PublicKey{bytes: x25519_scalarmult(self.bytes, x25519_base_point())} }
+    pub fn public_key(self) -> X25519PublicKey Never! { X25519PublicKey{bytes: x25519_scalarmult(self.bytes, x25519_base_point())} }
 }
 
 impl X25519SecretKey.Close {
@@ -251,28 +250,28 @@ pub struct KeyWrapError {
 pub fn sha256(bytes: [U8]) -> Digest256 Never! { {bytes: sha256_raw(bytes)} }
 
 /// SHA-224. SHA-256 with the SHA-224 IV, truncated to 28 bytes.
-pub fn sha224(bytes: [U8]) -> String { hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)) }
+pub fn sha224(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)) }
 
 /// SHA-1. RFC 3174. Prefer SHA-256; this exists for UUID v5 and legacy checks.
-pub fn sha1(bytes: [U8]) -> String { hex_encode(sha1_raw(bytes)) }
+pub fn sha1(bytes: [U8]) -> String Never! { hex_encode(sha1_raw(bytes)) }
 
 /// SHA-384. SHA-512 with the SHA-384 IV, truncated to 48 bytes.
-pub fn sha384(bytes: [U8]) -> String { hex_encode(slice_u8(sha512_raw(bytes, C_SHA384_IV), 0, 48)) }
+pub fn sha384(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha512_raw(bytes, C_SHA384_IV), 0, 48)) }
 
 /// SHA-512 (FIPS 180-4).
-pub fn sha512(bytes: [U8]) -> Digest512 { {bytes: sha512_raw(bytes, C_SHA512_IV)} }
+pub fn sha512(bytes: [U8]) -> Digest512 Never! { {bytes: sha512_raw(bytes, C_SHA512_IV)} }
 
 /// SHA-3 (FIPS 202). Keccak-f[1600] sponge, rate 1152/1088/832/576.
-pub fn sha3_224(bytes: [U8]) -> String { hex_encode(keccak(bytes, 144, 28, 0x06)) }
+pub fn sha3_224(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 144, 28, 0x06)) }
 
-pub fn sha3_256(bytes: [U8]) -> String { hex_encode(keccak(bytes, 136, 32, 0x06)) }
+pub fn sha3_256(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 136, 32, 0x06)) }
 
-pub fn sha3_384(bytes: [U8]) -> String { hex_encode(keccak(bytes, 104, 48, 0x06)) }
+pub fn sha3_384(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 104, 48, 0x06)) }
 
-pub fn sha3_512(bytes: [U8]) -> String { hex_encode(keccak(bytes, 72, 64, 0x06)) }
+pub fn sha3_512(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 72, 64, 0x06)) }
 
 /// BLAKE3-256. Tree hasher, 32-byte output.
-pub fn blake3(bytes: [U8]) -> Digest256 { {bytes: blake3_raw(bytes)} }
+pub fn blake3(bytes: [U8]) -> Digest256 Never! { {bytes: blake3_raw(bytes)} }
 
 /// HMAC-SHA256 (RFC 4231).
 pub fn hmac_sha256(key: [U8], data: [U8]) -> [U8] Never! { hmac_sha256_raw(key, data) }
@@ -344,7 +343,7 @@ pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool Never! {
     diff == 0
 }
 
-pub fn constant_time_equal(a: Secret, b: Secret) -> Bool {
+pub fn constant_time_equal(a: Secret, b: Secret) -> Bool Never! {
     constant_time_equal_bytes(a.bytes, b.bytes)
 }
 
@@ -523,16 +522,16 @@ pub fn open(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] CryptoErr
 }
 
 pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) -[FS, Rand]> Bool FileCryptoError! {
-    data :: host_read_file(source.raw) ?? return Err(FileCryptoError.SourceMissing)
+    data :: host_read_file(source.to_string()) ?? return Err(FileCryptoError.SourceMissing)
     sealed :: seal(recipients, data, [U8]{}) ?? return Err(FileCryptoError.PublishFailed)
-    host_write_file(destination.raw, sealed.bytes) ?? return Err(FileCryptoError.PublishFailed)
+    host_write_file(destination.to_string(), sealed.bytes) ?? return Err(FileCryptoError.PublishFailed)
     Ok(true)
 }
 
 pub fn file_open(identity: X25519SecretKey, source: Path, destination: Path) -[FS]> Bool FileCryptoError! {
-    data :: host_read_file(source.raw) ?? return Err(FileCryptoError.SourceMissing)
+    data :: host_read_file(source.to_string()) ?? return Err(FileCryptoError.SourceMissing)
     plain :: open_sealed(identity, Sealed{bytes: data}, [U8]{}) ?? return Err(FileCryptoError.OpenFailed)
-    host_write_file(destination.raw, plain) ?? return Err(FileCryptoError.PublishFailed)
+    host_write_file(destination.to_string(), plain) ?? return Err(FileCryptoError.PublishFailed)
     Ok(true)
 }
 

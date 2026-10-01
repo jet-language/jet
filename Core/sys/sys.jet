@@ -11,9 +11,9 @@ package {
 use core as core
 
 
-pub fn get(name: String) -[Env]> String? { core.sys.get(name) }
+pub fn get(name: String) -[Env]> String? Never! { core.sys.get(name) }
 
-pub fn set(name: String, value: String) -[Env]> { core.sys.set(name, value) }
+pub fn set(name: String, value: String) Never! -[Env]> { core.sys.set(name, value) }
 
 pub fn unset(name: String) -[Env]> Bool EnvError! { core.sys.unset(name) }
 
@@ -21,15 +21,15 @@ pub fn vars() -[Env]> [String] EnvError! { core.sys.vars() }
 
 pub fn current_dir() -[FS, Env]> String IOError! { core.sys.current_dir() }
 
-pub fn home_dir() -[Env]> String? {
+pub fn home_dir() -[Env]> String? Never! {
     home :: get("HOME")
     if home != None -> return Val(home)
     get("USERPROFILE")
 }
 
-pub fn name() -[Env]> String { core.sys.name() }
+pub fn name() -[Env]> String Never! { core.sys.name() }
 
-pub fn family() -[Env]> String {
+pub fn family() -[Env]> String Never! {
     platform_name :: ascii_lower(name())
     if platform_name == "windows" || platform_name.starts_with("windows") -> return "windows"
     if platform_name == "linux" || platform_name == "darwin" || platform_name == "macos" || platform_name == "osx" || platform_name == "freebsd" || platform_name == "openbsd" || platform_name == "netbsd" || platform_name == "android" {
@@ -38,9 +38,9 @@ pub fn family() -[Env]> String {
     platform_name
 }
 
-pub fn arch() -[Env]> String { core.sys.arch() }
+pub fn arch() -[Env]> String Never! { core.sys.arch() }
 
-pub fn temp_dir() -[Env]> String {
+pub fn temp_dir() -[Env]> String Never! {
     tmp :: get("TMPDIR")
     if tmp != None -> return tmp
     temp :: get("TEMP")
@@ -50,11 +50,11 @@ pub fn temp_dir() -[Env]> String {
     "/tmp"
 }
 
-pub fn executable() -[Env]> String { core.sys.executable() }
+pub fn executable() -[Env]> String Never! { core.sys.executable() }
 
-pub fn hostname() -[Env]> String { core.sys.hostname() }
+pub fn hostname() -[Env]> String Never! { core.sys.hostname() }
 
-pub fn username() -[Env]> String {
+pub fn username() -[Env]> String Never! {
     user :: get("USER")
     if user != None -> return user
     username :: get("USERNAME")
@@ -62,11 +62,11 @@ pub fn username() -[Env]> String {
     core.sys.username()
 }
 
-pub fn release() -[Env]> String { core.sys.release() }
+pub fn release() -[Env]> String Never! { core.sys.release() }
 
-pub fn version() -[Env]> String { core.sys.version() }
+pub fn version() -[Env]> String Never! { core.sys.version() }
 
-pub fn expand(value: String) -[Env]> String {
+pub fn expand(value: String) -[Env]> String Never! {
     raw :: value.bytes()
     out := [U8]{}
     i := 0
@@ -133,44 +133,44 @@ pub fn expand(value: String) -[Env]> String {
     }
 }
 
-pub fn pid() -[Env]> Int { core.sys.getpid() }
+pub fn pid() -[Env]> Int Never! { core.sys.getpid() }
 
-pub fn getpid() -[Env]> Int { core.sys.getpid() }
+pub fn getpid() -[Env]> Int Never! { core.sys.getpid() }
 
-pub fn cpu_count() -[Env]> Int {
+pub fn cpu_count() -[Env]> Int Never! {
     count :: core.sys.cpu_count()
     if count < 1 -> return 1
     count
 }
 
-pub fn getppid() -[Env]> Int { core.sys.getppid() }
+pub fn getppid() -[Env]> Int Never! { core.sys.getppid() }
 
-pub fn getuid() -[Env]> Int { core.sys.getuid() }
+pub fn getuid() -[Env]> Int Never! { core.sys.getuid() }
 
-pub fn geteuid() -[Env]> Int { core.sys.geteuid() }
+pub fn geteuid() -[Env]> Int Never! { core.sys.geteuid() }
 
-pub fn getgid() -[Env]> Int { core.sys.getgid() }
+pub fn getgid() -[Env]> Int Never! { core.sys.getgid() }
 
-pub fn getegid() -[Env]> Int { core.sys.getegid() }
+pub fn getegid() -[Env]> Int Never! { core.sys.getegid() }
 
-pub fn getpgrp() -[Env]> Int { core.sys.getpgrp() }
+pub fn getpgrp() -[Env]> Int Never! { core.sys.getpgrp() }
 
-pub fn umask(mask: Int) -[FS, Env]> Int {
+pub fn umask(mask: Int) -[FS, Env]> Int Never! {
     #Unsafe("posix umask: change the process file-creation mask") {
         return core.sys.umask(mask)
     }
 }
-pub fn exitcode(code: Int) -> Int { code }
+pub fn exitcode(code: Int) -> Int Never! { code }
 
-pub fn success(code: Int) -> Bool { code == 0 }
+pub fn success(code: Int) -> Bool Never! { code == 0 }
 
-pub fn uptime() -[Time, Env]> Float { core.sys.uptime() }
+pub fn uptime() -[Time, Env]> Float Never! { core.sys.uptime() }
 
-pub fn getgroups() -[Env]> [Int] { core.sys.getgroups() }
+pub fn getgroups() -[Env]> [Int] Never! { core.sys.getgroups() }
 
-pub fn loadavg() -[Env]> [Float] { core.sys.loadavg() }
+pub fn loadavg() -[Env]> [Float] Never! { core.sys.loadavg() }
 
-pub fn times() -[Env]> [Float] { core.sys.times() }
+pub fn times() -[Env]> [Float] Never! { core.sys.times() }
 
 pub fn getpgid(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getpgid: inspect a process group") {
@@ -202,9 +202,9 @@ pub fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
     }
 }
 
-pub fn sync() -[FS, Env]> { core.sys.sync() }
+pub fn sync() Never! -[FS, Env]> { core.sys.sync() }
 
-pub fn stop(code: Int) -[Env]> {
+pub fn stop(code: Int) Never! -[Env]> {
     #Unsafe("posix stop: terminate the process with an exit code") {
         core.sys.stop(code)
     }
@@ -219,7 +219,7 @@ pub fn pipe() -[FS, Env]> [Int] IOError! {
     }
 }
 
-pub fn close_fd(fd: Int) -[FS, Env]> {
+pub fn close_fd(fd: Int) Never! -[FS, Env]> {
     #Unsafe("posix close_fd: close a process file descriptor") {
         core.sys.close_fd(fd)
     }
@@ -292,36 +292,36 @@ pub fn initgroups(user: String, group: Int) IOError! -[Env]> {
 }
 
 
-pub fn platform() -[Env]> String { "{name()}-{arch()}" }
+pub fn platform() -[Env]> String Never! { "{name()}-{arch()}" }
 
-pub fn is_windows() -[Env]> Bool { family() == "windows" }
+pub fn is_windows() -[Env]> Bool Never! { family() == "windows" }
 
-pub fn is_unix() -[Env]> Bool { family() == "unix" }
+pub fn is_unix() -[Env]> Bool Never! { family() == "unix" }
 
-pub fn is_linux() -[Env]> Bool {
+pub fn is_linux() -[Env]> Bool Never! {
     platform_name :: ascii_lower(name())
     platform_name == "linux"
 }
 
-pub fn is_macos() -[Env]> Bool {
+pub fn is_macos() -[Env]> Bool Never! {
     platform_name :: ascii_lower(name())
     platform_name == "macos" || platform_name == "darwin" || platform_name == "osx"
 }
 
-pub fn uname() -[Env]> String { "{name()} {release()} {version()} {arch()}" }
+pub fn uname() -[Env]> String Never! { "{name()} {release()} {version()} {arch()}" }
 
-pub fn sysname() -[Env]> String { name() }
+pub fn sysname() -[Env]> String Never! { name() }
 
-pub fn machine() -[Env]> String { arch() }
+pub fn machine() -[Env]> String Never! { arch() }
 
-pub fn getenv(name: String) -[Env]> String? { get(name) }
+pub fn getenv(name: String) -[Env]> String? Never! { get(name) }
 
-pub fn pathsep() -[Env]> String {
+pub fn pathsep() -[Env]> String Never! {
     if is_windows() -> return ";"
     ":"
 }
 
-pub fn linesep() -[Env]> String {
+pub fn linesep() -[Env]> String Never! {
     if is_windows() -> return String.from_bytes([U8]{13, 10}) ?? ""
     "\n"
 }

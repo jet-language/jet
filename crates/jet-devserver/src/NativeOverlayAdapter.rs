@@ -370,10 +370,6 @@ impl NativeOverlayAdapter {
         Ok(())
     }
 
-    pub fn clear_typed_panels(&mut self) {
-        self.typed_panels.clear();
-    }
-
     /// Apply one canonical typed projection.
     pub fn apply_projection(
         &mut self,
@@ -586,15 +582,6 @@ impl NativeOverlayAdapter {
         ))
     }
 
-    /// Validate and return an action request for the caller to submit.
-    pub fn request_action(
-        &self,
-        request: NativeOverlayActionRequest,
-    ) -> Result<NativeOverlayActionRequest, NativeOverlayAdapterError> {
-        self.validate_action_request(&request)?;
-        Ok(request)
-    }
-
     pub fn validate_action_request(
         &self,
         request: &NativeOverlayActionRequest,
@@ -637,36 +624,6 @@ impl NativeOverlayAdapter {
             panel_id,
             item_key,
         ))
-    }
-
-    pub fn request_selection(
-        &self,
-        request: NativeOverlaySelectionRequest,
-    ) -> Result<NativeOverlaySelectionRequest, NativeOverlayAdapterError> {
-        self.validate_selection_request(&request)?;
-        Ok(request)
-    }
-
-    pub fn validate_selection_request(
-        &self,
-        request: &NativeOverlaySelectionRequest,
-    ) -> Result<(), NativeOverlayAdapterError> {
-        self.validate_request_identity(
-            &request.protocol,
-            &request.session_id,
-            &request.revision,
-            request.sequence,
-        )?;
-        validate_text(&request.panel_id, "selection panel id", false)?;
-        validate_text(&request.item_key, "selection item key", true)?;
-        if !self.typed_panels.contains_key(&request.panel_id)
-            && request.panel_id != NATIVE_OVERLAY_EVENT_LOG_PANEL_ID
-        {
-            return Err(NativeOverlayAdapterError::UnknownPanel(
-                request.panel_id.clone(),
-            ));
-        }
-        Ok(())
     }
 
     fn current_context(&self) -> Result<(String, u64), NativeOverlayAdapterError> {

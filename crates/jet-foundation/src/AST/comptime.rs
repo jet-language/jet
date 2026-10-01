@@ -124,14 +124,6 @@ impl FailureContract {
         matches!(self, Self::Explicit { .. })
     }
 
-    pub fn is_converted(&self) -> bool {
-        matches!(self, Self::Converted { .. })
-    }
-
-    pub fn is_declared_never(&self) -> bool {
-        matches!(self, Self::DeclaredNever)
-    }
-
     /// An empty failure set, written (`Never!`) or inferred.
     pub fn is_proven_unreachable(&self) -> bool {
         matches!(self, Self::ProvenUnreachable { .. } | Self::InferredNever { .. })
@@ -543,13 +535,6 @@ impl CtFloat {
         match self {
             Self::F32(value) => i64::from(value > 0.0) - i64::from(value < 0.0),
             Self::F64(value) => i64::from(value > 0.0) - i64::from(value < 0.0),
-        }
-    }
-
-    pub fn to_bits_i64(self) -> i64 {
-        match self {
-            Self::F32(value) => value.to_bits() as i64,
-            Self::F64(value) => value.to_bits() as i64,
         }
     }
 
@@ -1217,23 +1202,6 @@ impl CtValue {
             }
         }
         Some(error)
-    }
-
-    /// Interpreter/deopt adapter for the core crypto error shape. The native
-    /// bridge carries the same stable Display text in `JetCryptoError`; keep
-    /// the tier-0 carrier as a message-only view rather than exposing its
-    /// Rust-shaped struct rendering at an entry boundary.
-    pub fn crypto_error_message(&self) -> Option<String> {
-        let CtValue::Struct { type_name, fields } = self else {
-            return None;
-        };
-        if type_name != "CryptoError" {
-            return None;
-        }
-        match fields.iter().find(|(field, _)| field == "message") {
-            Some((_, CtValue::Str(message))) => Some(message.clone()),
-            _ => None,
-        }
     }
 
     /// Interpreter/deopt adapter from the Prelude-owned error shape. This is

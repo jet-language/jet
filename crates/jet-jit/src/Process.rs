@@ -117,52 +117,6 @@ fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
     })
 }
 
-fn alloc_process_plan(plan: &process_prelude::ProcessPlan) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        // Field order mirrors ProcessPlan in JetStd/CommonTypes.rs.
-        let record = rt.heap.alloc_record(9);
-        let executable = rt.heap.alloc_string(plan.executable_identity.clone());
-        let _ = rt.heap.record_set_string(record, 0, executable);
-        let argv_values = plan
-            .argv
-            .iter()
-            .map(|word| rt.heap.alloc_string(word.clone()))
-            .collect::<Vec<_>>();
-        let argv = rt.heap.alloc_int_list(argv_values);
-        let _ = rt.heap.record_set_int(record, 1, argv);
-        let input_digest = rt.heap.alloc_string(plan.input_digest.clone());
-        let _ = rt.heap.record_set_string(record, 2, input_digest);
-        let digest = rt.heap.alloc_string(plan.policy_digest.clone());
-        let _ = rt.heap.record_set_string(record, 3, digest);
-        let backend = rt.heap.alloc_string(plan.backend.clone());
-        let _ = rt.heap.record_set_string(record, 4, backend);
-        let authority_values = plan
-            .authority
-            .iter()
-            .map(|right| rt.heap.alloc_string(right.clone()))
-            .collect::<Vec<_>>();
-        let authority = rt.heap.alloc_int_list(authority_values);
-        let _ = rt.heap.record_set_int(record, 5, authority);
-        let descendants = rt.heap.alloc_string(plan.descendants.clone());
-        let _ = rt.heap.record_set_string(record, 6, descendants);
-        let limit_values = plan
-            .limits
-            .iter()
-            .map(|fact| rt.heap.alloc_string(fact.clone()))
-            .collect::<Vec<_>>();
-        let limits = rt.heap.alloc_int_list(limit_values);
-        let _ = rt.heap.record_set_int(record, 7, limits);
-        let output_values = plan
-            .outputs
-            .iter()
-            .map(|fact| rt.heap.alloc_string(fact.clone()))
-            .collect::<Vec<_>>();
-        let outputs = rt.heap.alloc_int_list(output_values);
-        let _ = rt.heap.record_set_int(record, 8, outputs);
-        record
-    })
-}
-
 fn outcome_to_result(out: process_prelude::ProcessReceipt) -> i64 {
     result_ok(alloc_process_result(&out) as u64)
 }
@@ -1897,16 +1851,6 @@ fn jet_jit_process_spec_under(spec: i64, authority: i64) -> i64 {
     update_spec(spec, |spec| {
         process_prelude::spec_under_wire(spec, &authority_wire)
     })
-}
-
-fn jet_jit_process_spec_plan(spec: i64) -> i64 {
-    let Some(spec) = clone_spec(spec) else {
-        return invalid_process_spec();
-    };
-    match process_prelude::spec_plan(&spec) {
-        Ok(plan) => result_ok(alloc_process_plan(&plan) as u64),
-        Err(error) => process_io_error_result(error),
-    }
 }
 
 fn jet_jit_process_spec_spawn(spec: i64) -> i64 {

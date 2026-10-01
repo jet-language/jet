@@ -31,7 +31,7 @@ pub use program_imports::{
     rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreListPath, ErrorConvDef,
     FencedNames, FencedStatement, ForeignImportError, ForeignLanguage, ForeignNamespace,
     ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl, MigrationOp,
-    ModelOutputFact, PackageGuarantees, Program, ProgramBundle, TryConvert,
+    PackageGuarantees, Program, ProgramBundle, TryConvert,
 };
 
 #[path = "AST/items.rs"]

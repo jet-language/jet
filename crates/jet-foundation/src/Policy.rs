@@ -1256,7 +1256,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
         "ABI" => &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"],
         "Effect" => crate::Authority::EFFECT_ROOTS.as_slice(),
         "ArithmeticMode" => &["Checked", "Wrapping", "Saturating"],
-        "FfiLanguage" => &["c", "cpp", "asm"],
+        "FFILanguage" => &["c", "cpp", "asm"],
         "InlineMode" => &["Hint", "Always", "Never"],
         "JobScope" => crate::Syntax::JOB_SCOPE_VARIANTS,
         "KernelMode" => &["parallel"],
@@ -2124,7 +2124,7 @@ mod tests {
             variants("ABI"),
             &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"]
         );
-        assert_eq!(variants("FfiLanguage"), &["c", "cpp", "asm"]);
+        assert_eq!(variants("FFILanguage"), &["c", "cpp", "asm"]);
         assert_eq!(variants("Layout"), &["c", "columnar"]);
         assert_eq!(
             variants("NamingCase"),

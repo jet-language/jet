@@ -13,6 +13,7 @@ jet-foundation = { path = "../jet-foundation" }
 jet-codegen = { path = "../jet-codegen" }
 jet-rt = { path = "../jet-rt" }
 jet-pkg-model = { path = "../jet-pkg-model" }
+jet-unicode = { path = "../jet-unicode" }
 
 # D-JITDEP1 / D-JIT2=A: owner-approved runtime-side dep.
 # M1: first CLIF emitter path for the resident-safe subset.
@@ -23,8 +24,10 @@ cranelift-jit = "0.112"
 cranelift-module = "0.112"
 # D-JITDEP1 / D-JIT2=A: owner-approved runtime-side dep.
 cranelift-frontend = "0.112"
-# D-JITDEP1 / D-JIT2=A: owner-approved runtime-side dep.
-cranelift-codegen = "0.112"
+# D-JITDEP1 / D-JIT2=A: owner-approved runtime-side dep. #3953: the
+# incremental cache lets dev builds reuse compiled functions across builds
+# and programs (its serde/postcard/sha2 crates are already in the tree).
+cranelift-codegen = { version = "0.112", features = ["incremental-cache"] }
 # D-JITDEP1 / D-JIT2=A: owner-approved runtime-side dep.
 cranelift-native = "0.112"
 # D-AOT-CRANELIFT1=B / #1028: debug-AOT object emission.

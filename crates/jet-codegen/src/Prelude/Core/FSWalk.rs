@@ -30,48 +30,6 @@ fn jet_fs_validate_walk_root(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn jet_fs_walk_parallel<T, E, MakeEntry, MakeError>(
-    path: &str,
-    shown: &str,
-    make_entry: MakeEntry,
-    make_error: MakeError,
-) -> Result<Vec<T>, E>
-where
-    T: Send + 'static,
-    E: Send + 'static,
-    MakeEntry: Fn(String, String, bool, i64) -> T + Send + Sync + 'static,
-    MakeError: Fn(&str, std::io::Error) -> E + Send + Sync + 'static,
-{
-    jet_fs_walk_parallel_filtered(path, shown, make_entry, make_error, |_, _| true)
-}
-
-/// The same walk policy with an entry filter. The traversal still visits every
-/// real directory when no ignore selector is supplied. With a selector, ignored
-/// directories are pruned before they can be yielded or traversed.
-pub(crate) fn jet_fs_walk_parallel_filtered<T, E, MakeEntry, MakeError, Keep>(
-    path: &str,
-    shown: &str,
-    make_entry: MakeEntry,
-    make_error: MakeError,
-    keep: Keep,
-) -> Result<Vec<T>, E>
-where
-    T: Send + 'static,
-    E: Send + 'static,
-    MakeEntry: Fn(String, String, bool, i64) -> T + Send + Sync + 'static,
-    MakeError: Fn(&str, std::io::Error) -> E + Send + Sync + 'static,
-    Keep: Fn(bool, bool) -> bool + Send + Sync + 'static,
-{
-    jet_fs_walk_parallel_filtered_with_ignore(
-        path,
-        shown,
-        None,
-        make_entry,
-        make_error,
-        move |_, is_dir, is_file| keep(is_dir, is_file),
-    )
-}
-
 /// Shared walk policy with one optional ignore-file selector. The selector is
 /// currently the typed `.gitignore` row; keeping it as a filename here lets the
 /// traversal kernel stay independent of the surface enum and its marshalling.
@@ -298,27 +256,6 @@ where
     Ok(sink
         .into_inner()
         .unwrap_or_else(|_| panic!("filesystem walk sink poisoned")))
-}
-
-pub(crate) fn jet_fs_walk_files_parallel<T, E, MakeEntry, MakeError>(
-    path: &str,
-    shown: &str,
-    make_entry: MakeEntry,
-    make_error: MakeError,
-) -> Result<Vec<T>, E>
-where
-    T: Send + 'static,
-    E: Send + 'static,
-    MakeEntry: Fn(String, String, bool, i64) -> T + Send + Sync + 'static,
-    MakeError: Fn(&str, std::io::Error) -> E + Send + Sync + 'static,
-{
-    jet_fs_walk_parallel_filtered(
-        path,
-        shown,
-        make_entry,
-        make_error,
-        |is_dir, is_file| !is_dir && is_file,
-    )
 }
 
 pub(crate) fn jet_fs_walk_files_parallel_with_ignore<T, E, MakeEntry, MakeError>(

@@ -32,6 +32,12 @@ fn run_then_stop(stop: fn() -> Never) -> Never { stop() }
 
 fn fail() -> Never StopError! { return Err(StopError.Closed) }
 
+// `Never Never!` has neither a success value nor a failure route, so a call
+// to it stops like any `Never` call, here in tail position.
+fn halt(code: Int) -> Never Never! { process.exit(code) }
+
+fn halt_usage() -> Never { halt(3) }
+
 fn unbounded() -> Never {
     loop {
 

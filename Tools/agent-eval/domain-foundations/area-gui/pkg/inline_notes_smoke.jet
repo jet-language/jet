@@ -1,3 +1,8 @@
+package {
+    name: "inline_notes_smoke"
+    authority: { holds: { allow: [Browser, IO, Mem.Alloc] } }
+}
+
 use core.ui as ui
 use core.reactive as reactive
 
@@ -13,7 +18,7 @@ fn run() {
     ui.reactive_render(() -> {
         marker :: if selected.get() == 0 -> "* " else -> "  "
         mode :: if dark.get() -> "dark" else -> "light"
-        rows := [UiNode]{
+        rows := [UINode]{
             ui.node_color("JET NOTES — {mode} mode", 72.0, 1.0, "#161616"),
             ui.node_role("{marker}{meeting_title}", 28.0, 1.0, ui.aria_role_button()),
             ui.node_role("  {ideas_title}", 28.0, 1.0, ui.aria_role_button()),

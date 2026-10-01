@@ -19,6 +19,7 @@ use jet::REPL::Sql::{SqlEval, SqlSession};
 use jet_foundation::DataTree::DataTree as Value;
 use jet_foundation::EncodingJson::parse_json;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+use jet_semindex::html_escape;
 use crate::OutputAdapter::{
     write_mode_diagnostic, write_mode_machine, write_mode_renderable, write_mode_status,
 };
@@ -34,57 +35,6 @@ const DEFAULT_MAX_INPUT_BYTES: usize = 32 * 1024 * 1024;
 const DEFAULT_MAX_ROWS: usize = 100_000;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const ROW_TYPE_NAME: &str = "DbConsoleRow";
-
-const DOSSIER_DATA_ROWS: &[(&str, &str, &str, &str, &str, &str)] = &[
-    (
-        "schema",
-        "jet db .schema",
-        "typed columns, nullability, and source row bound",
-        "source-scoped",
-        "derived from the loaded source",
-        "available only in a live local query session",
-    ),
-    (
-        "table",
-        "jet db .tables",
-        "source identity and typed row carrier",
-        "source-scoped",
-        "loaded source identity",
-        "available only in a live local query session",
-    ),
-    (
-        "timing",
-        "jet db .stats",
-        "elapsed milliseconds for the latest query",
-        "query-scoped",
-        "not measured by inspect",
-        "available after a query in a live local query session",
-    ),
-    (
-        "plan",
-        "jet db .plan",
-        "shared SQL parser plan: scan, filter, group, project, sort, limit",
-        "query-scoped",
-        "not measured by inspect",
-        "available only in a live local query session",
-    ),
-    (
-        "output",
-        "jet db --json|--jsonl|--csv",
-        "deterministic output mode and structured receipt",
-        "invocation-scoped",
-        "selected by the invocation",
-        "available when the console invocation runs",
-    ),
-    (
-        "result-size",
-        "jet db --max-output-bytes",
-        "final rendered result bytes and explicit output bound",
-        "query-scoped",
-        "not measured by inspect",
-        "available after a query in a live local query session",
-    ),
-];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DbOutput {
@@ -731,93 +681,6 @@ fn browser_page(snapshot: &str) -> String {
     let escaped = html_escape(snapshot);
     format!(
         "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Jet DB inspector</title><style>body{{font:15px system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;background:#101419;color:#e7edf4}}pre{{white-space:pre-wrap;overflow:auto;background:#18212b;border:1px solid #334454;border-radius:8px;padding:1rem}}</style><h1>Jet DB inspector</h1><p>Loopback-only projection of the same authorized SQL session.</p><pre>{escaped}</pre>"
-    )
-}
-
-fn html_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(character),
-        }
-    }
-    escaped
-}
-
-
-/// Stable metadata rows used by `jet inspect dossier data`. A dossier is a
-/// separate process from a live console, so session values are deliberately
-/// reported as scoped facts rather than invented measurements.
-pub(crate) fn dossier_data_json() -> String {
-    let rows = DOSSIER_DATA_ROWS;
-    format!(
-        "[{}]",
-        rows.iter()
-            .map(
-                |(kind, surface, meaning, scope, value, status)| format!(
-                    "{{\"kind\":{},\"surface\":{},\"meaning\":{},\"scope\":{},\"value\":{},\"status\":{},\"authority\":\"same local typed query session\"}}",
-                    json_str(kind),
-                    json_str(surface),
-                    json_str(meaning),
-                    json_str(scope),
-                    json_str(value),
-                    json_str(status),
-                )
-            )
-            .collect::<Vec<_>>()
-            .join(",")
-    )
-}
-
-pub(crate) fn dossier_data_value() -> StatusValue {
-    StatusValue::array(DOSSIER_DATA_ROWS.iter().map(
-        |(kind, surface, meaning, scope, value, status)| {
-            StatusValue::object(
-                StatusFields::new()
-                    .with("kind", *kind)
-                    .with("surface", *surface)
-                    .with("meaning", *meaning)
-                    .with("scope", *scope)
-                    .with("value", *value)
-                    .with("status", *status)
-                    .with("authority", "same local typed query session"),
-            )
-        },
-    ))
-}
-
-pub(crate) fn dossier_data_limits_value() -> StatusValue {
-    StatusValue::object(
-        StatusFields::new()
-            .with("max_input_bytes", DEFAULT_MAX_INPUT_BYTES)
-            .with("max_rows", DEFAULT_MAX_ROWS)
-            .with("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES),
-    )
-}
-
-pub(crate) fn dossier_data_text() -> String {
-    [
-        "sql console data facts (inspect is not a live query session)",
-        "  schema: typed columns, nullability, and source row bound (.schema)",
-        "  table: source identity and typed row carrier (.tables)",
-        "  timing: latest-query elapsed milliseconds (.stats; not measured here)",
-        "  plan: shared scan/filter/group/project/sort/limit plan (.plan; not measured here)",
-        "  output: deterministic human/json/jsonl/csv modes",
-        "  result-size: final rendered bytes and --max-output-bytes bound (.stats; not measured here)",
-    ]
-    .join("\n")
-        + "\n"
-}
-
-pub(crate) fn dossier_data_limits_json() -> String {
-    format!(
-        "{{\"max_input_bytes\":{},\"max_rows\":{},\"max_output_bytes\":{}}}",
-        DEFAULT_MAX_INPUT_BYTES, DEFAULT_MAX_ROWS, DEFAULT_MAX_OUTPUT_BYTES
     )
 }
 

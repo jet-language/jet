@@ -1946,7 +1946,7 @@ pub(super) fn default_arg_for_type(ty: &str) -> String {
     let ty = ty.trim().trim_end_matches('?').trim();
     match ty {
         "Bool" => "true".to_string(),
-        "String" | "Path" | "Url" => "\"canvas\"".to_string(),
+        "String" | "Path" | "URL" => "\"canvas\"".to_string(),
 
         "Float" | "F32" | "F64" | "Decimal" => "1.0".to_string(),
         _ => "1".to_string(),

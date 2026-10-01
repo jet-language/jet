@@ -1,6 +1,16 @@
 // CFG and module emission for the JavaScript Web partition.
+use jet_foundation.[
+    MIRAccess,
+    MIRBasicBlock,
+    MIRFunction,
+    MIRModule,
+    MIRParam,
+    MIRRuntimePartID,
+    MIRWebBucket,
+    mir_sha256_hex,
+]
 
-fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, block: MirBasicBlock, out: &[String]) Never! {
+fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MIRFunction, block: MIRBasicBlock, out: &[String]) Never! {
     if block.terminator == {
         .Jump(target) -> {
             &out.push("        __jet_pred = __jet_block; __jet_block = {target.value}; continue;")
@@ -24,7 +34,7 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, bl
         .Yield(value, resume) -> {
             if {
                 function.generator == None -> {
-                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Yield terminator has no generator facts", "checked generator functions must retain generator metadata", Val(function.span))
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Yield terminator has no generator facts", "checked generator functions must retain generator metadata", Val(function.span))
                 }
                 else -> {
                 &out.push("        yield __jet_values.get({value.value}); __jet_pred = __jet_block; __jet_block = {resume.value}; continue;")
@@ -40,8 +50,8 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, bl
     }
 }
 
-fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MirFunction, out: &[String]) {
-    if !jet_web_function_in_bucket(function, MirWebBucket.JS) -> return
+fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MIRFunction, out: &[String]) {
+    if !jet_web_function_in_bucket(function, MIRWebBucket.JS) -> return
     keyword :: if function.generator != None -> "async function*" else -> "async function"
     &out.push("{keyword} jet_fn_{function.id.value}(__jet_env, __jet_args) {{")
     &out.push("  const __jet_stack_frame = jet_stack_enter({jet_web_js_quote(jet_web_find_source_path(ctx.program, function.source_file) ?? "")}, {jet_web_source_line(ctx.program, function)}, {jet_web_js_quote(function.name)}, {jet_web_js_quote(jet_web_source_line(ctx.program, function))});")
@@ -65,17 +75,17 @@ fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MirFunction, out:
     loop block in function.blocks {
         &out.push("        case {block.id.value}: {{")
         loop instruction in block.instructions {
-            expression :: jet_web_js_operation(ctx, function, instruction.operation, instruction.ty)
+            expression :: jet_web_js_operation(&ctx, function, instruction.operation, instruction.ty)
             if instruction.result == {
                 .Val(result) -> {
                 &out.push("          __jet_values.set({result.value}, {expression});")
                 if instruction.operation == {
                     .Parameter(index, _) -> {
-                        parameter := None
+                        parameter := MIRParam?{None}
                         loop row in function.params { if row.index == index -> parameter = Val(row) }
                         if parameter == .Val(row) {
                             if {
-                                row.access == MirAccess.Write -> {
+                                row.access == MIRAccess.Write -> {
                                 &out.push("          __jet_cells.set({result.value}, {{ get value() {{ return __jet_args[{index}]; }}, set value(v) {{ __jet_args[{index}] = v; }} }});")
                                 }
                                 else -> {
@@ -108,15 +118,15 @@ fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MirFunction, out:
 
 fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) Never! {
     loop module_id in ctx.artifact.modules {
-        module_row := None
+        module_row := MIRModule?{None}
         loop candidate in ctx.program.modules { if candidate.id == module_id -> module_row = Val(candidate) }
         if module_row == None {
-            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact references a missing module", "module closure identities must resolve before JavaScript emission", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web artifact references a missing module", "module closure identities must resolve before JavaScript emission", None)
             next
         }
         row :: module_row ?? next
         if row.key == "" || row.path == "" {
-            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact module has no stable key or path", "module registry provenance requires both checked identity fields", None)
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web artifact module has no stable key or path", "module registry provenance requires both checked identity fields", None)
             next
         }
         nul :: String.from_bytes([U8]{0}) ?? ""
@@ -130,20 +140,24 @@ fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) Never! 
 }
 
 fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) Never! {
+    entry_is_js :: jet_web_function_in_bucket(ctx.entry, MIRWebBucket.JS)
+    if !entry_is_js && jet_web_function_in_bucket(ctx.entry, MIRWebBucket.Wasm) && ctx.entry.generator != None {
+        entry_name := ~ctx.entry.name
+        entry_span := ctx.entry.span
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web Wasm entry cannot be a generator", entry_name, Val(entry_span))
+        return
+    }
     function :: ctx.entry
     if {
-        jet_web_function_in_bucket(function, MirWebBucket.JS) -> {
+        jet_web_function_in_bucket(function, MIRWebBucket.JS) -> {
             &out.push("export async function jet_main(...args) {{")
             &out.push("  const __jet_edge_result = await jet_fn_{function.id.value}([], args);")
             &out.push("  return jet_web_edge_result(__jet_edge_result);")
             &out.push("}}")
             &out.push("")
         }
-        jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> {
-            if function.generator != None {
-                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm entry cannot be a generator", function.name, Val(function.span))
-                return
-            }
+        jet_web_function_in_bucket(function, MIRWebBucket.Wasm) -> {
+            // A Wasm generator entry was rejected above.
             &out.push("export async function jet_main(...args) {{")
             &out.push("  __jetPreludeWasm.jet_entry_{function.id.value}(...args);")
             &out.push("  const outcome = jetDom.takeWasmError(__jetPreludeWasm);")
@@ -152,124 +166,31 @@ fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) Never! {
             &out.push("}}")
             &out.push("")
         }
-        else -> jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web entry has no checked partition", "the selected entry function must be JS or Wasm-applicable", Val(function.span))
-    }
-}
-
-fn jet_web_emit_model_bridges(ctx: &JetWebEmitContext, out: &[String]) Never! {
-    if ctx.program.facts.model_outputs.len() == 0 -> return
-    &out.push("const __jetModelUtf8 = new TextEncoder();")
-    &out.push("const __jetModelUtf8Decode = new TextDecoder(\"utf-8\", {{ fatal: true }});")
-    &out.push("const __jetModelWait = () => new Promise((resolve) => setTimeout(resolve, 0));")
-    &out.push("function __jetModelInput(prefix, value) {{")
-    &out.push("  const bytes = value instanceof Uint8Array ? value : __jetModelUtf8.encode(value);")
-    &out.push("  const pointer = Number(__jetPreludeWasm[\"__jet_model_web_input_alloc_\" + prefix](bytes.length));")
-    &out.push("  if (!Number.isSafeInteger(pointer) || (bytes.length !== 0 && pointer === 0)) throw new Error(\"model Web input allocation failed\");")
-    &out.push("  if (bytes.length !== 0) new Uint8Array(__jetPreludeWasm.memory.buffer, pointer, bytes.length).set(bytes);")
-    &out.push("  return [pointer, bytes.length];")
-    &out.push("}}")
-    &out.push("function __jetModelDocuments(documents) {{")
-    &out.push("  if (!Array.isArray(documents)) throw new Error(\"model Web documents must be a list\");")
-    &out.push("  const values = documents.map((document) => __jetModelUtf8.encode(String(document)));")
-    &out.push("  const size = 4 + values.reduce((total, value) => total + 4 + value.length, 0);")
-    &out.push("  const bytes = new Uint8Array(size);")
-    &out.push("  const view = new DataView(bytes.buffer);")
-    &out.push("  view.setUint32(0, values.length, true);")
-    &out.push("  let offset = 4;")
-    &out.push("  for (const value of values) {{ view.setUint32(offset, value.length, true); offset += 4; bytes.set(value, offset); offset += value.length; }}")
-    &out.push("  return bytes;")
-    &out.push("}}")
-    &out.push("function __jetModelBatch(bytes) {{")
-    &out.push("  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);")
-    &out.push("  let offset = 0;")
-    &out.push("  const u32 = () => {{ if (offset + 4 > view.byteLength) throw new Error(\"truncated model Web batch\"); const value = view.getUint32(offset, true); offset += 4; return value; }};")
-    &out.push("  const f32 = () => {{ if (offset + 4 > view.byteLength) throw new Error(\"truncated model Web batch\"); const value = view.getFloat32(offset, true); offset += 4; return value; }};")
-    &out.push("  const u64 = () => {{ const low = u32(); const high = u32(); const value = high * 4294967296 + low; if (!Number.isSafeInteger(value)) throw new Error(\"model Web batch dimension is too large\"); return value; }};")
-    &out.push("  const text = () => {{ const length = u32(); if (offset + length > view.byteLength) throw new Error(\"truncated model Web batch text\"); const value = __jetModelUtf8Decode.decode(new Uint8Array(view.buffer, view.byteOffset + offset, length)); offset += length; return value; }};")
-    &out.push("  const rows = u32();")
-    &out.push("  const values = [];")
-    &out.push("  for (let row = 0; row < rows; row += 1) {{ const columns = u32(); const value = []; for (let column = 0; column < columns; column += 1) value.push(f32()); values.push(value); }}")
-    &out.push("  const space = {{ model_digest: text(), dimension: u64(), metric: text(), normalization: text() }};")
-    &out.push("  return {{ values, space }};")
-    &out.push("}}")
-    &out.push("async function __jetModelPoll(prefix, operation, handle) {{")
-    &out.push("  const wasm = __jetPreludeWasm;")
-    &out.push("  const poll = wasm[\"__jet_model_web_\" + operation + \"_poll_\" + prefix];")
-    &out.push("  const pointer = wasm[\"__jet_model_web_\" + operation + \"_result_ptr_\" + prefix];")
-    &out.push("  const length = wasm[\"__jet_model_web_\" + operation + \"_result_len_\" + prefix];")
-    &out.push("  const release = wasm[\"__jet_model_web_\" + operation + \"_result_free_\" + prefix];")
-    &out.push("  if (typeof poll !== \"function\" || typeof pointer !== \"function\" || typeof length !== \"function\" || typeof release !== \"function\") throw new Error(\"model Web async bridge is unavailable\");")
-    &out.push("  for (;;) {{")
-    &out.push("    const status = Number(poll(handle));")
-    &out.push("    if (status === 0) {{ await __jetModelWait(); continue; }}")
-    &out.push("    const size = Number(length(handle));")
-    &out.push("    const address = Number(pointer(handle));")
-    &out.push("    if (!Number.isSafeInteger(address) || !Number.isSafeInteger(size) || address < 0 || size < 0 || address + size > wasm.memory.buffer.byteLength) {{ release(handle); throw new Error(\"model Web async bridge returned an invalid result buffer\"); }}")
-    &out.push("    const bytes = new Uint8Array(wasm.memory.buffer, address, size).slice();")
-    &out.push("    release(handle);")
-    &out.push("    if (status === 2) throw new Error(__jetModelUtf8Decode.decode(bytes) || \"model Web provider failed\");")
-    &out.push("    if (status !== 1) throw new Error(\"model Web async bridge returned an unknown status\");")
-    &out.push("    return bytes;")
-    &out.push("  }}")
-    &out.push("}}")
-    loop definition in ctx.program.traits {
-        found := false
-        loop fact in ctx.program.facts.model_outputs { if fact.signature_name == (Val(definition.name)) -> found = true }
-        if !found -> next
-        prefix :: jet_web_js_model_prefix(definition.key)
-        &out.push("async function __jet_model_open_{prefix}(output) {{")
-        &out.push("  const input = __jetModelInput(\"{prefix}\", String(output));")
-        &out.push("  let handle;")
-        &out.push("  try {{ handle = Number(__jetPreludeWasm[\"__jet_model_web_open_start_{prefix}\"](input[0], input[1])); }} finally {{ __jetPreludeWasm[\"__jet_model_web_input_free_{prefix}\"](input[0]); }}")
-        &out.push("  if (!Number.isSafeInteger(handle) || handle === 0) throw new Error(\"model Web open failed to start\");")
-        &out.push("  const packet = await __jetModelPoll(\"{prefix}\", \"open\", handle);")
-        &out.push("  if (packet.byteLength !== 4) throw new Error(\"model Web open returned an invalid session handle\");")
-        &out.push("  return {{ __jet_model_trait: \"{prefix}\", handle: new DataView(packet.buffer, packet.byteOffset, 4).getUint32(0, true) }};")
-        &out.push("}}")
-        &out.push("async function __jet_model_embed_{prefix}(receiver, documents) {{")
-        &out.push("  if (!receiver || receiver.__jet_model_trait !== \"{prefix}\") throw new Error(\"model Web session belongs to a different trait\");")
-        &out.push("  const input = __jetModelInput(\"{prefix}\", __jetModelDocuments(documents));")
-        &out.push("  let handle;")
-        &out.push("  try {{ handle = Number(__jetPreludeWasm[\"__jet_model_web_embed_start_{prefix}\"](receiver.handle, input[0], input[1])); }} finally {{ __jetPreludeWasm[\"__jet_model_web_input_free_{prefix}\"](input[0]); }}")
-        &out.push("  if (!Number.isSafeInteger(handle) || handle === 0) throw new Error(\"model Web embed failed to start\");")
-        &out.push("  return __jetModelBatch(await __jetModelPoll(\"{prefix}\", \"embed\", handle));")
-        &out.push("}}")
+        else -> {
+            entry_span := function.span
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web entry has no checked partition", "the selected entry function must be JS or Wasm-applicable", Val(entry_span))
+        }
     }
 }
 
 fn jet_web_emit_js_app(ctx: &JetWebEmitContext) -> String {
-    needs_font :: jet_web_needs_font_shaping(ctx)
-    has_data :: jet_web_has_runtime_part(ctx, MirRuntimePartId.Data)
-    has_model :: ctx.program.facts.model_outputs.len() != 0
-    has_game :: jet_web_has_runtime_part(ctx, MirRuntimePartId.Game)
+    needs_font :: jet_web_needs_font_shaping(&ctx)
+    has_data :: jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Data)
+    has_game :: jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Game)
     font_import :: if needs_font -> "await jet_ui_web_harfbuzz_imports()" else -> "jet_ui_web_unreachable_harfbuzz_imports()"
     lines := [String]{
         "import * as jetDom from \"./jet_dom_runtime.js\";",
         jet_web_compose_prelude(&ctx),
         "const __jetFontImports = {font_import};",
     }
-    &lines.push(jet_web_js_copy_type_facts(ctx))
-    if has_model {
-        &lines.push("import {{ createOnnxRuntimeWebHost }} from \"./jet_onnx_runtime.js\";")
-        &lines.push("const __jetModelHost = createOnnxRuntimeWebHost(globalThis.__JET_ONNX_RUNTIME_ARCHIVE ?? null);")
-    }
+    &lines.push(jet_web_js_copy_type_facts(&ctx))
     if has_data -> &lines.push("const __jetDataImports = jet_data_web_imports();")
     // History is part of every checked Web Wasm import contract.
     &lines.push("const __jetTestingHistoryImports = jet_testing_history_web_imports();")
     imports := [String]{"...__jetFontImports", "...__jetTestingHistoryImports"}
     if has_data -> &imports.push("...__jetDataImports")
-    if has_model -> &imports.push("...__jetModelHost.imports")
     imports_text :: imports.join(", ")
     &lines.push("const __jetPreludeWasm = (await jetDom.instantiateWasm(new URL(\"./app.wasm\", import.meta.url).href, {{ {imports_text} }})).exports;")
-    if has_model {
-        &lines.push("__jetModelHost.bind(__jetPreludeWasm);")
-        &lines.push("const __jetModelTransport = __jetModelHost.transport;")
-        &lines.push("const __jetModelTransportAwait = (session, operation, packet, signal) => {{")
-        &lines.push("  const job = __jetModelTransport.start(session, operation, packet, signal ? {{ signal }} : {{}});")
-        &lines.push("  return __jetModelTransport.resume(job);")
-        &lines.push("}};")
-        jet_web_emit_model_bridges(&ctx, &lines)
-    }
     if has_data {
         &lines.push("jet_data_web_bind_wasm(__jetPreludeWasm);")
         &lines.push("if (typeof __jetPreludeWasm.jet_data_web_register_types === \"function\") __jetPreludeWasm.jet_data_web_register_types();")
@@ -292,8 +213,8 @@ fn jet_web_emit_js_app(ctx: &JetWebEmitContext) -> String {
         &lines.push("}}")
     }
     jet_web_emit_module_registry(&ctx, &lines)
-    jet_web_emit_wasm_export_bridges(ctx, ctx.functions, &lines)
-    loop function in ctx.functions -> jet_web_emit_js_function(ctx, function, &lines)
+    jet_web_emit_wasm_export_bridges(&ctx, &lines)
+    loop function in ctx.functions -> jet_web_emit_js_function(&ctx, function, &lines)
     jet_web_emit_js_entry(&ctx, &lines)
     lines.join("\n")
 }

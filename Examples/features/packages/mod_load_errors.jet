@@ -1,0 +1,52 @@
+package {
+    name: "mod-load-errors"
+    version: "0.1.0"
+    authority: { holds: { allow: [Exec, FS.Write, IO, Mem.Alloc] } }
+}
+// D-MOD-ERR1=A: `core.mod.load` fails with `ModError`, one case per action a
+// caller can take: fix the grant, skip, replace the file, or rebuild. This
+// example needs no built library; it drives the refusals that happen before
+// anything is mapped, inside one hermetic temporary directory.
+use core.mod as library
+use core.files as files
+
+fn outcome(path: String, roots: [String]) -> String {
+    if library.load(path, grant: {read: roots}) == {
+        .Ok(_) -> "loaded"
+        .Err(.Denied(_)) -> "Denied"
+        .Err(.NotFound(_)) -> "NotFound"
+        .Err(.Invalid(_)) -> "Invalid"
+        .Err(.Unsupported(_)) -> "Unsupported"
+    }
+}
+
+fn run() {
+    scratch :: files.temp_dir("jet-mod-load-errors") ?? panic("temp dir")
+    granted :: "{scratch.path}/plugins"
+    other :: "{scratch.path}/other"
+    files.create_dir(granted) ?? panic("mkdir plugins")
+    files.create_dir(other) ?? panic("mkdir other")
+    plain :: "{granted}/plain.jetlib"
+    stray :: "{other}/plain.jetlib"
+    missing :: "{granted}/missing.jetlib"
+    files.write(plain, "not a library") ?? panic("write plain")
+    files.write(stray, "not a library") ?? panic("write stray")
+
+    print("empty grant: {outcome(plain, [String]{})}")
+    print("outside the grant: {outcome(stray, [granted])}")
+    print("missing file: {outcome(missing, [granted])}")
+    print("not a library: {outcome(plain, [granted])}")
+
+    // Every case keeps the provider's reason.
+    if library.load(missing, grant: {read: [granted]}) == {
+        .Ok(_) -> print("loaded")
+        .Err(.NotFound(reason)) -> print("reason names the path: {reason.contains("missing.jetlib")}")
+        .Err(error) -> print("unexpected: {error}")
+    }
+    // `unload` is a typed refusal: loaded handles unload on drop.
+    if library.unload(CompiledModule{path: plain, handle: 0}) == {
+        .Ok(_) -> print("unloaded")
+        .Err(.Unsupported(_)) -> print("unload: Unsupported")
+        .Err(error) -> print("unexpected: {error}")
+    }
+}

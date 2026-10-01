@@ -7,8 +7,7 @@
 //! enum table is generated from the same Prelude declarations used by every
 //! execution tier.
 
-use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_module::Module;
+use cranelift_codegen::ir::types;
 use jet_foundation::MIR::{
     MirAbi, MirFunction, MirFunctionId, MirProgram, MirType, MirTypeDefKind,
 };
@@ -71,12 +70,6 @@ pub(crate) fn prelude_enum_variant_at(enum_name: &str, index: i64) -> Option<&'s
     variants.get(usize::try_from(index).ok()?).copied()
 }
 
-/// A stable name shared by resident compilation, callbacks, and hot reload.
-pub(crate) fn jit_fn_name(name: &str) -> String {
-    let suffix = jet_foundation::Syntax::generated_suffix(name);
-    jet_foundation::Names::mangle(&format!("jit_fn_{}", suffix.replace("::", "__")))
-}
-
 pub(crate) fn mir_fn_name(id: MirFunctionId) -> String {
     format!("__jet_mir_fn_{}", id.0)
 }
@@ -103,11 +96,6 @@ pub(crate) fn clif_ty_from_mir(ty: &MirType) -> Option<types::Type> {
         | MirAbi::Dynamic => Some(types::I64),
         MirAbi::Never => None,
     }
-}
-
-
-pub(crate) fn struct_field_redacted(_type_name: &str, _index: usize) -> Option<bool> {
-    None
 }
 
 /// MIR-backed type metadata used by Cell schema conversion and Cranelift
@@ -212,73 +200,8 @@ impl<'a> JitMeta<'a> {
     }
 }
 
-pub(crate) fn func_signature<M: Module>(
-    module: &M,
-    function: &MirFunction,
-) -> Result<Signature, String> {
-    let mut signature = Signature::new(module.target_config().default_call_conv);
-    for parameter in &function.params {
-        let ty = clif_ty_from_mir(&parameter.ty)
-            .ok_or_else(|| format!("MIR function `{}` has a non-value parameter", function.key))?;
-        signature.params.push(AbiParam::new(ty));
-    }
-    if let Some(ty) = clif_ty_from_mir(&function.return_type) {
-        signature.returns.push(AbiParam::new(ty));
-    }
-    Ok(signature)
-}
-
-pub(crate) fn fn_value_signature<M: Module>(
-    module: &M,
-    ty: &MirType,
-    _meta: &JitMeta<'_>,
-) -> Result<Signature, String> {
-    let (params, ret) = ty
-        .function_signature()
-        .map(|facts| (facts.params.as_slice(), facts.ret.as_deref()))
-        .or_else(|| ty.send_fn_signature())
-        .ok_or_else(|| {
-            format!("MIR function value has non-function type `{}`", ty.display_name())
-        })?;
-    let mut signature = Signature::new(module.target_config().default_call_conv);
-    for parameter in params {
-        signature.params.push(AbiParam::new(
-            clif_ty_from_mir(parameter)
-                .ok_or_else(|| format!("function parameter has no ABI: {}", parameter.display_name()))?,
-        ));
-    }
-    if let Some(ret) = ret {
-        if let Some(ty) = clif_ty_from_mir(ret) {
-            signature.returns.push(AbiParam::new(ty));
-        }
-    }
-    Ok(signature)
-}
-
-pub(crate) fn interrupt_callback_signature<M: Module>(module: &M) -> Signature {
-    Signature::new(module.target_config().default_call_conv)
-}
-
-pub(crate) fn core_alias_leaf(type_name: &str) -> Option<&str> {
-    let leaf = type_name.rsplit('.').next().unwrap_or(type_name);
-    PRELUDE_ENUM_VARIANTS
-        .contains_key(core_prelude_key(leaf))
-        .then_some(core_prelude_key(leaf))
-}
-
 pub(crate) fn core_struct_field_type(_type_name: &str, _field: &str) -> Option<MirType> {
     None
-}
-
-pub(crate) fn core_struct_field_uses_result_option_abi(
-    _type_name: &str,
-    _field: &str,
-) -> bool {
-    false
-}
-
-pub(crate) fn core_call_uses_result_option_abi(_module: &str, _member: &str) -> bool {
-    false
 }
 
 pub(crate) fn install_struct_redact(_program: &MirProgram) {}

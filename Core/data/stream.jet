@@ -19,7 +19,7 @@ fn stream_error(kind: DataErrorKind, reason: String, operation: String) -> DataE
 // success.  Provider-owned decoders must construct DataStream<T> before these
 // operations are called, so this module never coerces a String into T.
 
-pub fn from_items<T>(items: ^[T]) -> DataStream<T> {
+pub fn from_items<T>(items: ^[T]) -> DataStream<T> Never! {
     DataStream<T>{items: items, index: 0, cancelled: false}
 }
 
@@ -43,11 +43,11 @@ pub fn collect<T>(stream: &DataStream<T>) -> [T] DataError! {
     Ok(out)
 }
 
-pub fn cancel<T>(stream: &DataStream<T>) {
+pub fn cancel<T>(stream: &DataStream<T>) Never! {
     stream.cancelled = true
 }
 
-pub fn skip<T>(stream: &DataStream<T>, count: Int) {
+pub fn skip<T>(stream: &DataStream<T>, count: Int) Never! {
     if stream.cancelled || count <= 0 -> return
     if stream.index < 0 -> stream.index = 0
     available := stream.items.len() - stream.index
@@ -71,7 +71,7 @@ pub fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
 }
 
 
-pub fn len<T>(stream: DataStream<T>) -> Int {
+pub fn len<T>(stream: DataStream<T>) -> Int Never! {
     if stream.cancelled -> return 0
     if stream.index < 0 -> return stream.items.len()
     n := stream.items.len() - stream.index
@@ -79,4 +79,4 @@ pub fn len<T>(stream: DataStream<T>) -> Int {
     n
 }
 
-pub fn is_empty<T>(stream: DataStream<T>) -> Bool { len<T>(stream) == 0 }
+pub fn is_empty<T>(stream: DataStream<T>) -> Bool Never! { len<T>(stream) == 0 }

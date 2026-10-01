@@ -52,14 +52,6 @@ pub fn jet_interrupt_dispatcher_stopped_error() -> &'static str {
     "interrupt dispatcher stopped"
 }
 
-pub fn jet_interrupt_invalid_callback_record_error() -> &'static str {
-    "invalid interrupt callback record"
-}
-
-pub fn jet_interrupt_invalid_callback_value_error() -> &'static str {
-    "core.sys.on_interrupt callback"
-}
-
 pub fn jet_interrupt_unavailable_error() -> &'static str {
     "interrupt handling is unavailable on this target"
 }

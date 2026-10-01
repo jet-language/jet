@@ -1,19 +1,65 @@
+use jet_foundation.[
+    EverySchedule,
+    JobCachePolicy,
+    JobScope,
+    JobSkip,
+    MIRBlockID,
+    MIRCLIDefault,
+    MIRCLIInput,
+    MIRCLIInputShape,
+    MIRCLIValueKind,
+    MIRConstant,
+    MIRCoveragePoint,
+    MIRCoveragePointID,
+    MIRFunction,
+    MIRFunctionID,
+    MIRHarnessID,
+    MIRHarnessKind,
+    MIRHarnessPlan,
+    MIRJob,
+    MIRJobCachePolicy,
+    MIRJobDispatch,
+    MIRJobID,
+    MIRJobLimit,
+    MIRJobSchedule,
+    MIRJobScope,
+    MIRJobSkip,
+    MIROutputCheck,
+    MIROutputCheckID,
+    MIRParam,
+    MIRTestCase,
+    MIRTestID,
+    MIRTestKind,
+    MIRType,
+    StringMapEntry,
+    TCoveragePointFact,
+    TFunc,
+    TFunctionRef,
+    THarnessKind,
+    THarnessPlanFact,
+    TJobArgumentFact,
+    TJobFact,
+    TTestFact,
+    TTestKind,
+    stable_id,
+]
+
 pub struct JetCodegenJobTestArtifacts {
-    pub jobs: [MirJob]
-    pub tests: [MirTestCase]
-    pub harnesses: [MirHarnessPlan]
+    pub jobs: [MIRJob]
+    pub tests: [MIRTestCase]
+    pub harnesses: [MIRHarnessPlan]
 }
 
 fn jet_codegen_artifact_function(reference: TFunctionRef, functions: [TFunc]) -> TFunc? {
     jet_codegen_find_function_by_key(functions, reference.key, reference.module_identity)
 }
 
-fn jet_codegen_artifact_function_id(reference: TFunctionRef, functions: [TFunc]) -> MirFunctionId? {
+fn jet_codegen_artifact_function_id(reference: TFunctionRef, functions: [TFunc]) -> MIRFunctionID? {
     function :: jet_codegen_artifact_function(reference, functions) ?? return None
     Val(jet_codegen_function_id(function))
 }
 
-fn jet_codegen_artifact_checked_function(function_id: MirFunctionId, checked_functions: [MirFunction]) -> MirFunction? {
+fn jet_codegen_artifact_checked_function(function_id: MIRFunctionID, checked_functions: [MIRFunction]) -> MIRFunction? {
     loop function in checked_functions {
         if function.id == function_id -> return Val(function)
     }
@@ -21,23 +67,23 @@ fn jet_codegen_artifact_checked_function(function_id: MirFunctionId, checked_fun
 }
 
 /// The command-line value kind of a checked job parameter's MIR type.
-fn jet_codegen_job_value_kind(argument: TJobArgumentFact, ty: MirType) -> MirCliValueKind Never! {
-    if argument.ty == "Path" || argument.ty == "Path?" -> return MirCliValueKind.Path
+fn jet_codegen_job_value_kind(argument: TJobArgumentFact, ty: MIRType) -> MIRCLIValueKind Never! {
+    if argument.ty == "Path" || argument.ty == "Path?" -> return MIRCLIValueKind.Path
     if ty.kind == {
         .Option(inner) -> return jet_codegen_job_value_kind(argument, inner)
-        .Bool -> return MirCliValueKind.Bool
-        .Int | .IntN(_, _) -> return MirCliValueKind.Int
-        .Float | .Float32 -> return MirCliValueKind.Float
+        .Bool -> return MIRCLIValueKind.Bool
+        .Int | .IntN(_, _) -> return MIRCLIValueKind.Int
+        .Float | .Float32 -> return MIRCLIValueKind.Float
         else -> {}
     }
-    MirCliValueKind.String
+    MIRCLIValueKind.String
 }
 
 /// One scalar job parameter as a command input. The input carries the
 /// parameter's checked MIR type, and its shape follows the `#CLI` record field
 /// rules: `Bool` is a flag, `T?` is optional, a default makes a non-optional
 /// value with that default, and a required value fills positionally.
-fn jet_codegen_lower_job_argument(argument: TJobArgumentFact, index: Int, ty: MirType) -> MirCliInput Never! {
+fn jet_codegen_lower_job_argument(argument: TJobArgumentFact, index: Int, ty: MIRType) -> MIRCLIInput Never! {
     boolean :: if ty.kind == {
         .Bool -> true
         else -> false
@@ -47,11 +93,11 @@ fn jet_codegen_lower_job_argument(argument: TJobArgumentFact, index: Int, ty: Mi
         .Option(_) -> true
         else -> false
     }
-    default := None
-    if !optional && argument.default == .Val(value) -> default = Val(MirCliDefault.Value{value: MirConstant.String{value: value}})
-    metavar := None
+    default := MIRCLIDefault?{None}
+    if !optional && argument.default == .Val(value) -> default = Val(MIRCLIDefault.Value{value: MIRConstant.String{value: value}})
+    metavar := String?{None}
     if !flag -> metavar = Val(jet_codegen_tuple_shape_names(argument.name).env)
-    MirCliInput{
+    MIRCLIInput{
         parameter: index,
         name: argument.name,
         label: argument.label,
@@ -64,52 +110,52 @@ fn jet_codegen_lower_job_argument(argument: TJobArgumentFact, index: Int, ty: Mi
         // job's inputs pass the one CLI legality rule and render identically.
         help: "value for --{argument.name}",
         metavar: metavar,
-        shape: if flag -> MirCliInputShape.Flag else -> MirCliInputShape.Value{kind: jet_codegen_job_value_kind(argument, ty), optional: optional, default: default},
+        shape: if flag -> MIRCLIInputShape.Flag else -> MIRCLIInputShape.Value{kind: jet_codegen_job_value_kind(argument, ty), optional: optional, default: default},
         positional: if argument.required || argument.variadic -> Val(index) else -> None,
         variadic: argument.variadic,
     }
 }
 
-fn jet_codegen_job_scope(scope: JobScope) -> MirJobScope Never! {
+fn jet_codegen_job_scope(scope: JobScope) -> MIRJobScope Never! {
     if scope == {
-        .Dev -> MirJobScope.Dev
-        .Ship -> MirJobScope.Ship
-        .Internal -> MirJobScope.Internal
+        .Dev -> MIRJobScope.Dev
+        .Ship -> MIRJobScope.Ship
+        .Internal -> MIRJobScope.Internal
     }
 }
 
-fn jet_codegen_job_schedule(schedule: EverySchedule?) -> MirJobSchedule? {
+fn jet_codegen_job_schedule(schedule: EverySchedule?) -> MIRJobSchedule? {
     if schedule == .Val(value) {
         if value == {
-            .Duration(nanos) -> return Val(MirJobSchedule.Duration{nanos: nanos})
-            .WallClockTime(hour, minute) -> return Val(MirJobSchedule.WallClockTime{hour: hour, minute: minute})
+            .Duration(nanos) -> return Val(MIRJobSchedule.Duration{nanos: nanos})
+            .WallClockTime(hour, minute) -> return Val(MIRJobSchedule.WallClockTime{hour: hour, minute: minute})
         }
     }
     None
 }
 
-fn jet_codegen_job_skip(skip: JobSkip?) -> MirJobSkip? {
+fn jet_codegen_job_skip(skip: JobSkip?) -> MIRJobSkip? {
     if skip == .Val(value) {
         if value == {
-            .Always(reason) -> return Val(MirJobSkip.Always{reason: reason})
-            .UnlessPlatform(platform) -> return Val(MirJobSkip.UnlessPlatform{platform: platform})
+            .Always(reason) -> return Val(MIRJobSkip.Always{reason: reason})
+            .UnlessPlatform(platform) -> return Val(MIRJobSkip.UnlessPlatform{platform: platform})
         }
     }
     None
 }
 
-fn jet_codegen_job_cache(cache: JobCachePolicy) -> MirJobCachePolicy Never! {
+fn jet_codegen_job_cache(cache: JobCachePolicy) -> MIRJobCachePolicy Never! {
     if cache == {
-        .Uncached -> MirJobCachePolicy.Uncached
-        .Local -> MirJobCachePolicy.Local
-        .Shared -> MirJobCachePolicy.Shared
+        .Uncached -> MIRJobCachePolicy.Uncached
+        .Local -> MIRJobCachePolicy.Local
+        .Shared -> MIRJobCachePolicy.Shared
     }
 }
 
-fn jet_codegen_job_limits(limits: [StringMapEntry]) -> [MirJobLimit] Never! {
-    result := [MirJobLimit]{}
+fn jet_codegen_job_limits(limits: [StringMapEntry]) -> [MIRJobLimit] Never! {
+    result := [MIRJobLimit]{}
     loop limit in limits {
-        row := MirJobLimit{name: limit.key, value: limit.value}
+        row := MIRJobLimit{name: limit.key, value: limit.value}
         index := result.len()
         &result.push(row)
         loop index > 0 && result[index - 1].name > row.name {
@@ -121,13 +167,13 @@ fn jet_codegen_job_limits(limits: [StringMapEntry]) -> [MirJobLimit] Never! {
     result
 }
 
-fn jet_codegen_lower_job_fact(row: TJobFact, functions: [TFunc], checked_functions: [MirFunction]) -> MirJob? {
+fn jet_codegen_lower_job_fact(row: TJobFact, functions: [TFunc], checked_functions: [MIRFunction]) -> MIRJob? {
     reference :: row.function ?? return None
     function_id :: jet_codegen_artifact_function_id(reference, functions) ?? return None
     checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? panic("job target has no checked MIR signature")
     // Each input binds one checked job parameter and carries that
     // parameter's canonical MIR type.
-    inputs := [MirCliInput]{}
+    inputs := [MIRCLIInput]{}
     index := 0
     loop argument in row.arguments {
         parameter :: loop candidate in checked.params {
@@ -137,15 +183,15 @@ fn jet_codegen_lower_job_fact(row: TJobFact, functions: [TFunc], checked_functio
         index += 1
     }
     schedule := jet_codegen_job_schedule(row.schedule)
-    MirJob{
-        id: MirJobId{value: stable_id("mir-job", row.key)},
+    MIRJob{
+        id: MIRJobID{value: stable_id("mir-job", row.key)},
         function: function_id,
         name: row.name,
         doc: row.doc,
         scope: jet_codegen_job_scope(row.scope),
         schedule: schedule,
         inputs: inputs,
-        dispatch: if schedule != None -> MirJobDispatch.Scheduled else -> MirJobDispatch.Direct,
+        dispatch: if schedule != None -> MIRJobDispatch.Scheduled else -> MIRJobDispatch.Direct,
         after: row.after,
         parallel: row.parallel,
         packages: row.packages,
@@ -158,20 +204,20 @@ fn jet_codegen_lower_job_fact(row: TJobFact, functions: [TFunc], checked_functio
     }
 }
 
-fn jet_codegen_test_kind(kind: TTestKind) -> MirTestKind Never! {
-    if kind == {.Unit -> MirTestKind.Unit else -> MirTestKind.Property}
+fn jet_codegen_test_kind(kind: TTestKind) -> MIRTestKind Never! {
+    if kind == {.Unit -> MIRTestKind.Unit else -> MIRTestKind.Property}
 }
 
-fn jet_codegen_lower_test_fact(row: TTestFact, functions: [TFunc], checked_functions: [MirFunction]) -> MirTestCase? {
+fn jet_codegen_lower_test_fact(row: TTestFact, functions: [TFunc], checked_functions: [MIRFunction]) -> MIRTestCase? {
     function :: jet_codegen_artifact_function(row.function, functions) ?? return None
     function_id := jet_codegen_function_id(function)
     checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? panic("test target has no checked MIR signature")
-    parameters := [MirParam]{}
+    parameters := [MIRParam]{}
     loop parameter in row.parameters {
         checked_parameter :: loop candidate in checked.params {
             if candidate.index == parameter.index -> break candidate
         } ?? panic("test parameter has no checked MIR signature slot")
-        &parameters.push(MirParam{
+        &parameters.push(MIRParam{
             index: checked_parameter.index,
             name: parameter.name,
             span: parameter.span,
@@ -183,10 +229,10 @@ fn jet_codegen_lower_test_fact(row: TTestFact, functions: [TFunc], checked_funct
             default_present: checked_parameter.default_present,
         })
     }
-    eligibility := None
+    eligibility := MIRFunctionID?{None}
     if row.eligibility == .Val(reference) -> eligibility = jet_codegen_artifact_function_id(reference, functions)
-    MirTestCase{
-        id: MirTestId{value: stable_id("mir-test", row.key)},
+    MIRTestCase{
+        id: MIRTestID{value: stable_id("mir-test", row.key)},
         function: function_id,
         name: row.name,
         span: row.span,
@@ -200,10 +246,10 @@ fn jet_codegen_lower_test_fact(row: TTestFact, functions: [TFunc], checked_funct
     }
 }
 
-fn jet_codegen_test_id_for_key(key: String, rows: [TTestFact], lowered: [MirTestCase]) -> MirTestId? {
+fn jet_codegen_test_id_for_key(key: String, rows: [TTestFact], lowered: [MIRTestCase]) -> MIRTestID? {
     loop row in rows {
         if row.key != key -> next
-        id := MirTestId{value: stable_id("mir-test", row.key)}
+        id := MIRTestID{value: stable_id("mir-test", row.key)}
         loop test in lowered {
             if test.id == id -> return Val(id)
         }
@@ -211,7 +257,7 @@ fn jet_codegen_test_id_for_key(key: String, rows: [TTestFact], lowered: [MirTest
     None
 }
 
-fn jet_codegen_coverage_block(point: TCoveragePointFact, function: TFunc, checked: MirFunction) -> MirBlockId? {
+fn jet_codegen_coverage_block(point: TCoveragePointFact, function: TFunc, checked: MIRFunction) -> MIRBlockID? {
     role := point.block ?? "entry"
     if role == "entry" -> return Val(checked.entry)
     identity_limit := checked.blocks.len() + checked.values.len() + checked.places.len() + checked.locals.len() + checked.scopes.len()
@@ -219,7 +265,7 @@ fn jet_codegen_coverage_block(point: TCoveragePointFact, function: TFunc, checke
     index := 0
     loop index <= identity_limit {
         identity := "{function.key}|block|{point.span.start}:{point.span.end}|{role}||{index}"
-        candidate := MirBlockId{value: stable_id("mir-block", identity)}
+        candidate := MIRBlockID{value: stable_id("mir-block", identity)}
         loop block in checked.blocks {
             if block.id == candidate -> return Val(candidate)
         }
@@ -228,46 +274,46 @@ fn jet_codegen_coverage_block(point: TCoveragePointFact, function: TFunc, checke
     None
 }
 
-fn jet_codegen_harness_kind(kind: THarnessKind) -> MirHarnessKind Never! {
+fn jet_codegen_harness_kind(kind: THarnessKind) -> MIRHarnessKind Never! {
     if kind == {
-        .Test -> MirHarnessKind.Test
-        .Fuzz -> MirHarnessKind.Fuzz
-        .Coverage -> MirHarnessKind.Coverage
+        .Test -> MIRHarnessKind.Test
+        .Fuzz -> MIRHarnessKind.Fuzz
+        .Coverage -> MIRHarnessKind.Coverage
     }
 }
 
-fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact], lowered_tests: [MirTestCase], functions: [TFunc], checked_functions: [MirFunction]) -> MirHarnessPlan Never! {
-    tests := [MirTestId]{}
+fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact], lowered_tests: [MIRTestCase], functions: [TFunc], checked_functions: [MIRFunction]) -> MIRHarnessPlan Never! {
+    tests := [MIRTestID]{}
     loop key in row.tests {
         test_id :: jet_codegen_test_id_for_key(key, test_rows, lowered_tests) ?? next
         &tests.push(test_id)
     }
-    output_checks := [MirOutputCheck]{}
+    output_checks := [MIROutputCheck]{}
     loop check in row.output_checks {
         function_id :: jet_codegen_artifact_function_id(check.function, functions) ?? next
-        &output_checks.push(MirOutputCheck{
-            id: MirOutputCheckId{value: stable_id("mir-output-check", check.key)},
+        &output_checks.push(MIROutputCheck{
+            id: MIROutputCheckID{value: stable_id("mir-output-check", check.key)},
             name: check.name,
             function: function_id,
         })
     }
-    coverage_points := [MirCoveragePoint]{}
+    coverage_points := [MIRCoveragePoint]{}
     loop point in row.coverage_points {
         function :: jet_codegen_artifact_function(point.function, functions) ?? next
         function_id := jet_codegen_function_id(function)
         checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? next
         block :: jet_codegen_coverage_block(point, function, checked) ?? next
-        &coverage_points.push(MirCoveragePoint{
-            id: MirCoveragePointId{value: stable_id("mir-coverage", point.key)},
+        &coverage_points.push(MIRCoveragePoint{
+            id: MIRCoveragePointID{value: stable_id("mir-coverage", point.key)},
             function: function_id,
             block: block,
             span: point.span,
         })
     }
-    selected_test := None
+    selected_test := MIRTestID?{None}
     if row.selected_test == .Val(key) -> selected_test = jet_codegen_test_id_for_key(key, test_rows, lowered_tests)
-    MirHarnessPlan{
-        id: MirHarnessId{value: stable_id("mir-harness", row.key)},
+    MIRHarnessPlan{
+        id: MIRHarnessID{value: stable_id("mir-harness", row.key)},
         kind: jet_codegen_harness_kind(row.kind),
         tests: tests,
         output_checks: output_checks,
@@ -277,7 +323,7 @@ fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact],
     }
 }
 
-fn jet_codegen_insert_job(rows: &[MirJob], row: MirJob) Never! {
+fn jet_codegen_insert_job(rows: &[MIRJob], row: MIRJob) Never! {
     index := rows.len()
     &rows.push(row)
     loop index > 0 && rows[index - 1].id.value > row.id.value {
@@ -287,7 +333,7 @@ fn jet_codegen_insert_job(rows: &[MirJob], row: MirJob) Never! {
     rows[index] = row
 }
 
-fn jet_codegen_insert_test(rows: &[MirTestCase], row: MirTestCase) Never! {
+fn jet_codegen_insert_test(rows: &[MIRTestCase], row: MIRTestCase) Never! {
     index := rows.len()
     &rows.push(row)
     loop index > 0 && rows[index - 1].id.value > row.id.value {
@@ -297,7 +343,7 @@ fn jet_codegen_insert_test(rows: &[MirTestCase], row: MirTestCase) Never! {
     rows[index] = row
 }
 
-fn jet_codegen_insert_harness(rows: &[MirHarnessPlan], row: MirHarnessPlan) Never! {
+fn jet_codegen_insert_harness(rows: &[MIRHarnessPlan], row: MIRHarnessPlan) Never! {
     index := rows.len()
     &rows.push(row)
     loop index > 0 && rows[index - 1].id.value > row.id.value {
@@ -307,16 +353,16 @@ fn jet_codegen_insert_harness(rows: &[MirHarnessPlan], row: MirHarnessPlan) Neve
     rows[index] = row
 }
 
-pub fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MirFunction]) -> JetCodegenJobTestArtifacts Never! {
-    lowered_jobs := [MirJob]{}
+pub fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
+    lowered_jobs := [MIRJob]{}
     loop row in jobs {
         if jet_codegen_lower_job_fact(row, functions, checked_functions) == .Val(lowered) -> jet_codegen_insert_job(&lowered_jobs, lowered)
     }
-    lowered_tests := [MirTestCase]{}
+    lowered_tests := [MIRTestCase]{}
     loop row in tests {
         if jet_codegen_lower_test_fact(row, functions, checked_functions) == .Val(lowered) -> jet_codegen_insert_test(&lowered_tests, lowered)
     }
-    lowered_harnesses := [MirHarnessPlan]{}
+    lowered_harnesses := [MIRHarnessPlan]{}
     loop row in harnesses {
         lowered := jet_codegen_lower_harness_fact(row, tests, lowered_tests, functions, checked_functions)
         if lowered.tests.len() > 0 || lowered.output_checks.len() > 0 || lowered.coverage_points.len() > 0 -> jet_codegen_insert_harness(&lowered_harnesses, lowered)

@@ -11,7 +11,7 @@ use core.data.[
 
 /// Build a chart plan. Values shorter than labels are explicit zero-valued
 /// observations; excess values are not silently rendered without an x label.
-pub fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlotPlan {
+pub fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlotPlan Never! {
     xs := [String]{}
     loop label in labels -> &xs.push(~label)
     ys := [Float]{}
@@ -31,60 +31,60 @@ pub fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetData
     }
 }
 
-pub fn bar_text(labels: [String], values: [Int]) -> String {
+pub fn bar_text(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_bar_text(labels, align_values(labels, ys))
 }
 
-pub fn bar_svg(labels: [String], values: [Int]) -> String {
+pub fn bar_svg(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_bar_svg(labels, align_values(labels, ys))
 }
 
-pub fn line_text(labels: [String], values: [Int]) -> String {
+pub fn line_text(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_line_text(labels, align_values(labels, ys))
 }
 
-pub fn line_svg(labels: [String], values: [Int]) -> String {
+pub fn line_svg(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_line_svg(labels, align_values(labels, ys))
 }
 
-pub fn inspect(labels: [String], values: [Int]) -> String { bar_text(labels, values) }
+pub fn inspect(labels: [String], values: [Int]) -> String Never! { bar_text(labels, values) }
 
-pub fn inspect_json(plan: JetDataPlotPlan) -> String {
+pub fn inspect_json(plan: JetDataPlotPlan) -> String Never! {
     mark := "bar"
     if plan.mark == JetDataPlotMark.Line -> mark = "line"
     if plan.mark == JetDataPlotMark.Point -> mark = "point"
     "{{\"mark\":\"{mark}\",\"n\":{plan.labels.len()},\"width\":{plan.layout.width},\"height\":{plan.layout.height}}}"
 }
 
-pub fn render(plan: JetDataPlotPlan) -> JetDataPlotRender {
+pub fn render(plan: JetDataPlotPlan) -> JetDataPlotRender Never! {
     normalized :: normalize_plan(plan)
     if normalized.mark == JetDataPlotMark.Line {
-        return {format: .Svg, body: render_line_svg(normalized.labels, normalized.values)}
+        return {format: .SVG, body: render_line_svg(normalized.labels, normalized.values)}
     }
     if normalized.mark == JetDataPlotMark.Point {
-        return {format: .Svg, body: render_point_svg(normalized.labels, normalized.values)}
+        return {format: .SVG, body: render_point_svg(normalized.labels, normalized.values)}
     }
-    {format: .Svg, body: render_bar_svg(normalized.labels, normalized.values)}
+    {format: .SVG, body: render_bar_svg(normalized.labels, normalized.values)}
 }
 
-pub fn svg(plan: JetDataPlotPlan) -> String { render(plan).body }
+pub fn svg(plan: JetDataPlotPlan) -> String Never! { render(plan).body }
 
-pub fn text(plan: JetDataPlotPlan) -> String {
+pub fn text(plan: JetDataPlotPlan) -> String Never! {
     normalized :: normalize_plan(plan)
     if normalized.mark == JetDataPlotMark.Line -> return render_line_text(normalized.labels, normalized.values)
     if normalized.mark == JetDataPlotMark.Point -> return render_point_text(normalized.labels, normalized.values)
     render_bar_text(normalized.labels, normalized.values)
 }
 
-pub fn show(plan: JetDataPlotPlan) -> String { text(plan) }
+pub fn show(plan: JetDataPlotPlan) -> String Never! { text(plan) }
 
 fn normalize_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan {
     ys := [Float]{}

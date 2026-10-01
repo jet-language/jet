@@ -924,12 +924,6 @@ pub struct TerminalStyleReloadNotification {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TerminalStyleSubscriberId(u64);
 
-impl TerminalStyleSubscriberId {
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
-}
-
 /// Failure to allocate a bounded subscriber mailbox.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalStyleSubscribeError {
@@ -1078,14 +1072,6 @@ impl TerminalStyleReload {
         std::mem::take(&mut mailbox.notifications)
             .into_iter()
             .collect()
-    }
-
-    pub fn subscriber_count(&self) -> usize {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .subscribers
-            .len()
     }
 
     /// Reset the resident kernel to a fresh, unopened state.  Used when

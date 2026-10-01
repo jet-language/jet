@@ -1602,7 +1602,8 @@ fn covers_fallible_return_and_try() {
 fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
     let source = jet_foundation::CoreModuleExports::core_source_module("core.http")
         .expect("Core HTTP source module");
-    let source_for_parse = jet_pkg_model::Package::mask_inline_package_source(source.source)
+    let body = jet_sema::CoreSources::core_source_text(source.module).expect("Core HTTP body");
+    let source_for_parse = jet_pkg_model::Package::mask_inline_package_source(body)
         .expect("Core HTTP package header")
         .0;
     let (tokens, lex_diags) = crate::Lexer::lex(&source_for_parse);
@@ -1724,10 +1725,10 @@ fn compiler_owned_core_ui_registry_has_nominal_rows() {
     let shortcut = declarations
         .type_defs
         .iter()
-        .find(|row| row.key == "UiShortcut")
-        .expect("UiShortcut must have a canonical declaration row");
+        .find(|row| row.key == "UIShortcut")
+        .expect("UIShortcut must have a canonical declaration row");
     let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &shortcut.kind else {
-        panic!("UiShortcut must lower as a struct row");
+        panic!("UIShortcut must lower as a struct row");
     };
     assert_eq!(
         fields
@@ -3001,9 +3002,9 @@ fn covers_default_params() {
 fn covers_distinct_value_type_and_ctor() {
     // c109 Phase 23: a distinct param type + `.raw()` + the destination-owned conversion are
     // covered. The build_cx-only helper registers the distinct in `distinct_types`.
-    let src = "UserId :: distinct Int\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
+    let src = "UserID :: distinct Int\nfn greet(id: UserID) -> Int {\n return (id.raw())\n}\n";
     assert!(covers(src, "greet"));
-    let src2 = "UserId :: distinct Int\nfn mk() -> UserId {\n return UserId.from_int(42)\n}\n";
+    let src2 = "UserID :: distinct Int\nfn mk() -> UserID {\n return UserID.from_int(42)\n}\n";
     assert!(covers(src2, "mk"));
 }
 

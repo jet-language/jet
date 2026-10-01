@@ -36,7 +36,7 @@ use jet_foundation::MIR::{
     MirCallbackId, MirCallee, MirCaptureFacts, MirCaptureOperand, MirCaptureParam, MirCffiFacts,
     MirCliCommand, MirCliDefault, MirCliEntry, MirCliInput, MirCliInputShape, MirCliValueKind,
     MirCloseAdapter, MirConstant, MirConstantDef, MirConstantId, MirCoreCallId, MirCoreClosureKind,
-    MirCoveragePoint, MirDbQueryMetadata, MirDbTableFact, MirDropAction, MirDropEdge, MirDropKind,
+    MirCoveragePoint, MirDbQueryMetadata, MirDbTableFact, MirDropAction, MirDropKind,
     MirEffectFacts, MirEntryKind, MirEntryOutput, MirEntrySpec, MirFailureCarrier, MirFieldId,
     MirForeign, MirForeignAbi, MirForeignId, MirForeignLanguage, MirFunction, MirFunctionForm,
     MirFunctionId, MirFunctionKind, MirGeneratorFacts, MirHandleId, MirHandleLifecycle,
@@ -192,7 +192,10 @@ pub(super) struct FunctionRegistry {
 }
 
 impl FunctionRegistry {
-    fn build(functions: &[TFunc]) -> Result<Self, LowerError> {
+    fn build(
+        functions: &[TFunc],
+        entry_sibling_calls: Option<&(String, String)>,
+    ) -> Result<Self, LowerError> {
         let mut registry = Self {
             by_key: HashMap::new(),
             top_level_by_key: HashMap::new(),
@@ -309,6 +312,20 @@ impl FunctionRegistry {
                 .entry(function.name.clone())
                 .or_default()
                 .push(id);
+            // D-MOD-CYCLE1=A: a package sibling calls an entry function by the
+            // imported spelling `<entry alias>::<name>`; it names this row.
+            if let Some((entry_module, prefix)) = entry_sibling_calls {
+                if matches!(&function.kind, TFuncKind::TopLevel)
+                    && function.module == *entry_module
+                    && !function.name.contains("::")
+                {
+                    registry
+                        .by_name
+                        .entry(format!("{prefix}{}", crate::Codegen::mangle(&function.name)))
+                        .or_default()
+                        .push(id);
+                }
+            }
             registry
                 .by_module_name
                 .entry((function.module.clone(), function.name.clone()))
@@ -1075,7 +1092,8 @@ fn fold_anonymous_union_declarations(types: &mut Vec<MirTypeDef>) {
 }
 
 pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> {
-    let mut function_registry = FunctionRegistry::build(&program.funcs)?;
+    let mut function_registry =
+        FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,
@@ -1107,6 +1125,18 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             merge_type_instance(&mut type_instances, instance, definition.span)?;
         }
     }
+    // Index every source once; per-function lowering reads positions from it.
+    let indexed_sources: BTreeMap<String, IndexedSource<'_>> = program
+        .source_files
+        .iter()
+        .map(|(path, text)| {
+            let source = IndexedSource {
+                text: text.as_str(),
+                lines: jet_foundation::Diagnostics::LineIndex::new(text),
+            };
+            (path.clone(), source)
+        })
+        .collect();
     for function in &program.funcs {
         let (lowered, calls, files, instances, nested, function_callbacks) = lower_function(
             function,
@@ -1115,7 +1145,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             &program.reflect_paths,
             &program.declarations.traits,
             &function_registry,
-            &program.source_files,
+            &indexed_sources,
             &program.artifact_facts.modules,
             None,
             None,
@@ -1172,24 +1202,23 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
                 callbacks.push(callback);
             }
         }
+        // `lower_function` names files by path only; the text is attached once
+        // per file here instead of being cloned and compared per function.
         for file in files {
-            let mut file = file;
-            if file.source.is_empty() {
-                file.source = program
-                    .source_files
-                    .get(&file.path)
-                    .cloned()
-                    .unwrap_or_default();
-            }
             if let Some(existing) = source_files.iter().find(|row| row.id == file.id) {
-                if existing.path != file.path || existing.source != file.source {
+                if existing.path != file.path {
                     return Err(LowerError::new(
                         function.source_span,
                         format!("conflicting source-file row {:?}", file.id),
                     ));
                 }
             } else {
-                source_files.push(file);
+                let source = program
+                    .source_files
+                    .get(&file.path)
+                    .cloned()
+                    .unwrap_or_default();
+                source_files.push(MirSourceFile { source, ..file });
             }
         }
     }
@@ -1849,6 +1878,21 @@ pub(super) fn is_plain_return(ty: &Type) -> bool {
         ty.without_user_tags(),
         Type::Result { .. } | Type::Option(_)
     ) && !ty.is_never()
+}
+
+/// #3740: whether a user callee's executable return `returned` is the plain
+/// success value of the checked carrier `checked` its call site names. A
+/// value return pairs with any `Result` carrier (#3708: a caller checked
+/// before the failure solve names the default `Result<T, Err>`). An `Option`
+/// return is plain only as the exact success of a `T? Never!` carrier, since
+/// a callee that keeps its `T?` carrier returns that `Option` itself.
+pub(super) fn is_plain_call_return(returned: &Type, checked: &Type) -> bool {
+    if is_plain_return(returned) {
+        return is_result_carrier(checked);
+    }
+    matches!(returned.without_user_tags(), Type::Option(_))
+        && never_carrier_success(checked)
+            .is_some_and(|success| success.without_user_tags() == returned.without_user_tags())
 }
 
 /// The adaptation a raw-payload function value needs to fill a callable slot
@@ -2855,16 +2899,6 @@ fn cli_value_kind(kind: crate::CLISchema::CLIValueKind) -> MirCliValueKind {
     }
 }
 
-fn cli_value_kind_from_name(name: &str) -> MirCliValueKind {
-    match name {
-        "Bool" | "bool" => MirCliValueKind::Bool,
-        "Int" | "int" => MirCliValueKind::Int,
-        "Float" | "float" | "Float32" | "float32" => MirCliValueKind::Float,
-        "Path" | "path" => MirCliValueKind::Path,
-        _ => MirCliValueKind::String,
-    }
-}
-
 fn lower_cli_default(default: &TirCliDefault) -> Option<MirCliDefault> {
     Some(match default {
         TirCliDefault::TypeDefault => MirCliDefault::TypeDefault,
@@ -3498,7 +3532,10 @@ pub fn lower_checked_mir_program_for_with_debug(
     let target = request.target;
     let kind = request.kind;
     let tir = super::lower_checked_tir_program_for_with_debug(bundle, request, debug_linemap)?;
-    let mir = lower_tir_to_mir(&tir)?;
+    let mut mir = lower_tir_to_mir(&tir)?;
+    // Compile time is explicit in the checker, so ordinary immutable bindings
+    // over pure work are folded here, once, for every execution tier.
+    crate::Codegen::MIREval::fold_pure_calls(&mut mir);
     let mir = jet_foundation::MIR::optimize_mir_program(
         &mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
@@ -3734,7 +3771,6 @@ fn lower_package_facts(program: &TirProgram) -> MirPackageFacts {
         artifact_target: Some(program.artifact_facts.target),
         target_dossier: program.artifact_facts.build.target_dossier.clone(),
         web_app: program.facts.web_app.clone(),
-        model_outputs: program.facts.model_outputs.clone(),
         authority_needs: program.facts.authority_needs.clone(),
         hardware_use: program.facts.hardware_use.clone(),
         hardware_profile: program.facts.hardware_profile.clone(),
@@ -3968,7 +4004,7 @@ fn lower_function(
     reflect_paths: &HashMap<String, String>,
     trait_defs: &[super::tir_to_mir_types::TirTraitDef],
     function_registry: &FunctionRegistry,
-    source_texts: &BTreeMap<String, String>,
+    source_texts: &BTreeMap<String, IndexedSource<'_>>,
     modules: &[TirModuleFact],
     body: Option<&TLambdaBody>,
     lambda: Option<&TLambda>,
@@ -4323,6 +4359,19 @@ fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
 /// the handle to that record's field layout (#3779).
 const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 
+/// A bare built-in boundary spelling (`Path`, `URL`, `DateTime`) names only its
+/// carrier record (`core.net.url`'s `URL`); a loaded record that merely shares
+/// the leaf (`core.files.path`'s `Path`) is a different type and never claims
+/// the bare spelling. Every other name may match by leaf.
+fn row_claims_bare_name(row: &MirTypeDef, name: &str) -> bool {
+    let Some(kind) = crate::Syntax::typed_head_kind(name) else {
+        return true;
+    };
+    kind.carrier_record_module()
+        .and_then(jet_foundation::CoreModuleExports::core_source_module)
+        .is_some_and(|source| row.key.ends_with(&format!("{}::{name}", source.path)))
+}
+
 fn canonical_nominal_name(
     type_defs: &[MirTypeDef],
     name: &str,
@@ -4357,7 +4406,7 @@ fn canonical_nominal_name(
     }
     let matches = type_defs
         .iter()
-        .filter(|ty| ty.name == name)
+        .filter(|ty| ty.name == name && row_claims_bare_name(ty, name))
         .collect::<Vec<_>>();
     match matches.as_slice() {
         [ty] => Ok(ty.key.clone()),
@@ -4464,12 +4513,12 @@ fn canonical_type_instance(
         }
         Type::Named(name) => type_defs
             .iter()
-            .find(|row| row.key == *name || row.name == *name)
+            .find(|row| row.key == *name || (row.name == *name && row_claims_bare_name(row, name)))
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
         Type::Apply { name, args } if args.is_empty() => type_defs
             .iter()
-            .find(|row| row.key == *name || row.name == *name)
+            .find(|row| row.key == *name || (row.name == *name && row_claims_bare_name(row, name)))
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
         _ => MirTypeId(stable_id("mir-type", &key)),
@@ -4640,6 +4689,30 @@ struct DeferredClose {
 struct DeferFrame {
     owner: Option<MirScopeId>,
     actions: Vec<DeferredCleanup>,
+    /// Length of `LowerCtx::shadowed_locals` when the frame opened; leaving
+    /// the frame restores every name rebound inside it.
+    shadow_mark: usize,
+}
+
+/// The binding a name had before a later source-named binding replaced
+/// it in the name-keyed local maps. Source names are unique per function
+/// except for a same-name refinement (D-FLOWTYPE1 `x == .Val(x)`), whose
+/// payload binding ends with its branch or block. The outer binding comes
+/// back when the inner one's scope ends.
+#[derive(Debug)]
+pub(super) struct ShadowedLocal {
+    name: String,
+    place: Option<MirPlaceId>,
+    ty: Option<Type>,
+    value: Option<MirValueId>,
+}
+
+/// Put `previous` back as `name`'s entry; returns the entry it replaces.
+fn restore_entry<V>(map: &mut HashMap<String, V>, name: &str, previous: Option<V>) -> Option<V> {
+    match previous {
+        Some(value) => map.insert(name.to_string(), value),
+        None => map.remove(name),
+    }
 }
 
 fn checked_operation_place_refs(operation: &MirOperation) -> Vec<MirPlaceId> {
@@ -4683,6 +4756,13 @@ fn checked_operation_place_refs(operation: &MirOperation) -> Vec<MirPlaceId> {
     places
 }
 
+/// One checked source text with its line index, built once per program so
+/// lowering reads positions without rescanning the text from byte 0.
+pub(super) struct IndexedSource<'s> {
+    pub(super) text: &'s str,
+    pub(super) lines: jet_foundation::Diagnostics::LineIndex,
+}
+
 pub(super) struct LowerCtx<'a> {
     pub(super) function: &'a TFunc,
     pub(super) type_defs: &'a [MirTypeDef],
@@ -4691,7 +4771,7 @@ pub(super) struct LowerCtx<'a> {
     pub(super) trait_defs: &'a [super::tir_to_mir_types::TirTraitDef],
     pub(super) function_registry: &'a FunctionRegistry,
     pub(super) trait_method_traits: HashMap<(String, String), String>,
-    pub(super) source_texts: &'a BTreeMap<String, String>,
+    pub(super) source_texts: &'a BTreeMap<String, IndexedSource<'a>>,
     pub(super) modules: &'a [TirModuleFact],
     pub(super) entry: MirBlockId,
     pub(super) current: MirBlockId,
@@ -4715,6 +4795,18 @@ pub(super) struct LowerCtx<'a> {
     pub(super) local_places: HashMap<String, MirPlaceId>,
     pub(super) local_types: HashMap<String, Type>,
     pub(super) local_values: HashMap<String, MirValueId>,
+    /// Outer bindings replaced by a nested same-name binding, restored when
+    /// the nested binding's frame or branch ends (see [`ShadowedLocal`]).
+    shadowed_locals: Vec<ShadowedLocal>,
+    /// D-OPT-WRITE1 (#3974): pattern subjects lowered from a `&place` write
+    /// window, keyed by the subject value the pattern tests read. Payload
+    /// bindings under such a subject alias the place through
+    /// `MirProjection::Payload` instead of copying the payload out.
+    pattern_windows: HashMap<MirValueId, MirPlaceId>,
+    /// Generated locals bound with `name := &place` (a nested-pattern switch
+    /// evaluates its `&place` subject once into one); a pattern on such a
+    /// local is a write window like the `&place` itself.
+    pub(super) window_aliases: HashSet<String>,
     drop_live_places: HashMap<MirPlaceId, MirPlaceId>,
     send_fn_locals: HashSet<String>,
     capture_values: HashMap<String, MirValueId>,
@@ -4839,7 +4931,7 @@ impl<'a> LowerCtx<'a> {
         reflect_paths: &'a HashMap<String, String>,
         trait_defs: &'a [super::tir_to_mir_types::TirTraitDef],
         function_registry: &'a FunctionRegistry,
-        source_texts: &'a BTreeMap<String, String>,
+        source_texts: &'a BTreeMap<String, IndexedSource<'a>>,
         modules: &'a [TirModuleFact],
     ) -> Self {
         let entry_identity =
@@ -4887,6 +4979,9 @@ impl<'a> LowerCtx<'a> {
             local_places: HashMap::new(),
             local_types: HashMap::new(),
             local_values: HashMap::new(),
+            shadowed_locals: Vec::new(),
+            pattern_windows: HashMap::new(),
+            window_aliases: HashSet::new(),
             drop_live_places: HashMap::new(),
             send_fn_locals: HashSet::new(),
             capture_values: HashMap::new(),
@@ -5468,24 +5563,26 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn set_line_marker(&mut self, line: u32) {
         self.current_line = Some(line);
     }
+    /// Source text and line index of the function being lowered.
+    pub(super) fn function_source(&self) -> Option<&'a IndexedSource<'a>> {
+        self.source_texts.get(&self.function.source_file)
+    }
     pub(super) fn source_line(&self) -> u32 {
         if let Some(line) = self.current_line {
             return line;
         }
         // LineMarker is debug-only; SourceSpan is always present for jet run.
-        if let Some(src) = self.source_texts.get(&self.function.source_file) {
-            return crate::Diagnostics::span_line_col(src, self.current_span.start).0 as u32;
+        if let Some(source) = self.function_source() {
+            return source.lines.line_col(source.text, self.current_span.start).0 as u32;
         }
         self.function.line as u32
     }
     /// 1-based character column of the statement being lowered, or 0 when
     /// its source text is not retained.
     pub(super) fn source_column(&self) -> u32 {
-        self.source_texts
-            .get(&self.function.source_file)
-            .map_or(0, |src| {
-                crate::Diagnostics::span_line_col(src, self.current_span.start).1 as u32
-            })
+        self.function_source().map_or(0, |source| {
+            source.lines.line_col(source.text, self.current_span.start).1 as u32
+        })
     }
     pub(super) fn with_switch_subject<R>(
         &mut self,
@@ -5510,14 +5607,12 @@ impl<'a> LowerCtx<'a> {
         let source_line = source_line_override
             .map(str::to_owned)
             .or_else(|| {
-                self.source_texts
-                    .get(&self.function.source_file)
-                    .and_then(|source| {
-                        source
-                            .lines()
-                            .nth(line.saturating_sub(1) as usize)
-                            .map(str::to_owned)
-                    })
+                self.function_source().map(|source| {
+                    source
+                        .lines
+                        .line_text(source.text, line as usize)
+                        .to_owned()
+                })
             })
             .unwrap_or_default();
         MirPanicContext {
@@ -5568,7 +5663,21 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn type_id_for(&self, key: &str) -> Result<MirTypeId, LowerError> {
-        let canonical_key = canonical_nominal_name(self.type_defs, key, self.span())?;
+        // A bare name declared by the function's own module shadows a
+        // compiler-owned row of the same leaf (a user `Effect` over the Core
+        // export row keyed `Effect`), as `mir_type` resolves the value type.
+        let scoped = (!self.function.module.is_empty() && !key.contains("::"))
+            .then(|| format!("{}::{key}", self.function.module))
+            .filter(|scoped| {
+                self.type_defs
+                    .iter()
+                    .any(|ty| ty.key == *scoped && ty.name == key)
+            });
+        let canonical_key = canonical_nominal_name(
+            self.type_defs,
+            scoped.as_deref().unwrap_or(key),
+            self.span(),
+        )?;
         let exact = self
             .type_defs
             .iter()
@@ -5624,7 +5733,12 @@ impl<'a> LowerCtx<'a> {
                 return None;
             }
             let scoped = format!("{}::{name}", self.function.module);
-            let bare = if name == crate::Syntax::TYPE_TASKGROUP {
+            // A bare built-in type name (`Path`) outside its declaring module is
+            // the built-in; a loaded module's same-named record is reached only
+            // through its scoped or canonical spelling.
+            let bare = if name == crate::Syntax::TYPE_TASKGROUP
+                || crate::Syntax::typed_head_kind(name).is_some()
+            {
                 None
             } else {
                 self.nominal_identities.get(name)
@@ -7235,40 +7349,6 @@ impl<'a> LowerCtx<'a> {
         )
     }
 
-    pub(super) fn lower_slice_value(
-        &mut self,
-        base: &TExpr,
-        start: &TExpr,
-        end: &TExpr,
-        range: Option<&TExpr>,
-        result_ty: &Type,
-    ) -> Result<MirValueId, LowerError> {
-        let base_value = self.lower_child(base)?;
-        let start_value = self.lower_child(start)?;
-        let end_value = self.lower_child(end)?;
-        let range_value = range.map(|expr| self.lower_child(expr)).transpose()?;
-        let carrier = TFailureCarrier::from_checked_type(result_ty);
-        let call = self.intern_prelude_route(super::slice_route(
-            &base.ty,
-            range_value.is_some(),
-            result_ty,
-            &carrier,
-        )?)?;
-        let location = self.panic_location_at(self.function.line as u32);
-        self.emit(
-            "slice",
-            Some(result_ty.clone()),
-            MirOperation::Slice {
-                call,
-                base: base_value,
-                start: start_value,
-                end: end_value,
-                range: range_value,
-                location,
-            },
-        )
-    }
-
     pub(super) fn lower_index_place(
         &mut self,
         base: &TExpr,
@@ -7407,19 +7487,40 @@ impl<'a> LowerCtx<'a> {
         Ok(id)
     }
 
-    pub(super) fn lower_local(
+    /// D-SHAPE-PLACE1=A: project the fixed-length range window `range` of a
+    /// list place. The window keeps the list type, so a write argument or a
+    /// mutating receiver reaches the owner's storage on every tier.
+    pub(super) fn project_range_place(
         &mut self,
-        local: &TLocal,
-        ty: &Type,
-    ) -> Result<MirValueId, LowerError> {
-        let place = self.place_for_local(local, MirAccess::Read)?;
-        let value = self.emit(
-            "local.read",
-            Some(ty.clone()),
-            MirOperation::ReadPlace(place),
-        )?;
-        self.local_values.insert(local.name.clone(), value);
-        Ok(value)
+        base: MirPlaceId,
+        range: MirValueId,
+        line: usize,
+        span: Span,
+    ) -> Result<MirPlaceId, LowerError> {
+        let root = self
+            .places
+            .iter()
+            .find(|place| place.id == base)
+            .cloned()
+            .ok_or_else(|| self.error(span, "missing checked range window base place"))?;
+        let id = self.place_id("range", &format!("{}:{}", root.id.0, range.0))?;
+        let location = self.panic_location_at(u32::try_from(line).unwrap_or(u32::MAX));
+        let mut projections = root.projections;
+        projections.push(MirProjection::Range {
+            range,
+            location,
+            span,
+        });
+        self.places.push(MirPlace {
+            id,
+            span,
+            ty: root.ty,
+            base: root.base,
+            projections,
+            access: root.access,
+            persist_key: None,
+        });
+        Ok(id)
     }
 
     pub(super) fn bind_parameter(
@@ -7486,6 +7587,61 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
+    /// Remember the binding `name` has before a source-named binding
+    /// replaces it. A first binding has nothing to restore and is not
+    /// recorded. Generated temporaries are never recorded: a re-lowered
+    /// compiler temporary must keep its latest binding.
+    fn record_shadowed_local(&mut self, name: &str) {
+        let place = self.local_places.get(name).copied();
+        let ty = self.local_types.get(name).cloned();
+        if place.is_none() && ty.is_none() {
+            return;
+        }
+        let value = self.local_values.get(name).copied();
+        self.shadowed_locals.push(ShadowedLocal {
+            name: name.to_string(),
+            place,
+            ty,
+            value,
+        });
+    }
+
+    pub(super) fn shadow_mark(&self) -> usize {
+        self.shadowed_locals.len()
+    }
+
+    /// End every binding recorded since `mark`: each rebound name reads its
+    /// outer binding again. Returns the inner bindings, innermost last, so a
+    /// caller can lower a sibling path without them and then reinstate them
+    /// with [`Self::reinstate_shadowed_locals`].
+    pub(super) fn restore_shadowed_locals(&mut self, mark: usize) -> Vec<ShadowedLocal> {
+        let mut inner = Vec::new();
+        while self.shadowed_locals.len() > mark {
+            let Some(outer) = self.shadowed_locals.pop() else {
+                break;
+            };
+            inner.push(ShadowedLocal {
+                place: restore_entry(&mut self.local_places, &outer.name, outer.place),
+                ty: restore_entry(&mut self.local_types, &outer.name, outer.ty),
+                value: restore_entry(&mut self.local_values, &outer.name, outer.value),
+                name: outer.name,
+            });
+        }
+        inner.reverse();
+        inner
+    }
+
+    /// Bring back inner bindings that [`Self::restore_shadowed_locals`]
+    /// ended, recording the outer ones again for the enclosing scope's end.
+    pub(super) fn reinstate_shadowed_locals(&mut self, inner: Vec<ShadowedLocal>) {
+        for binding in inner {
+            self.record_shadowed_local(&binding.name);
+            restore_entry(&mut self.local_places, &binding.name, binding.place);
+            restore_entry(&mut self.local_types, &binding.name, binding.ty);
+            restore_entry(&mut self.local_values, &binding.name, binding.value);
+        }
+    }
+
     pub(super) fn bind_local(
         &mut self,
         local: &TLocal,
@@ -7494,6 +7650,9 @@ impl<'a> LowerCtx<'a> {
         comptime: bool,
         uninit: bool,
     ) -> Result<MirPlaceId, LowerError> {
+        if !local.generated {
+            self.record_shadowed_local(&local.name);
+        }
         self.local_types.insert(local.name.clone(), ty.clone());
         let access = if mutable {
             MirAccess::Write
@@ -7542,6 +7701,9 @@ impl<'a> LowerCtx<'a> {
         place: MirPlaceId,
         mutable: bool,
     ) -> Result<MirPlaceId, LowerError> {
+        if !local.generated {
+            self.record_shadowed_local(&local.name);
+        }
         self.local_types.insert(local.name.clone(), ty.clone());
         let mir_ty = self.mir_type(&ty)?;
         let local_identity = self.reserve_identity("local", self.span(), &local.name, "")?;
@@ -7563,6 +7725,95 @@ impl<'a> LowerCtx<'a> {
         });
         Ok(place)
     }
+
+    /// D-OPT-WRITE1 (#3974): lower a pattern subject. A `&place` subject, or
+    /// the generated local a nested-pattern switch binds to one, is a write
+    /// window: the variant tests read the place, and every payload binding
+    /// aliases it through `MirProjection::Payload`, so edits reach the owner's
+    /// storage instead of a copy.
+    pub(super) fn lower_pattern_subject(
+        &mut self,
+        subject: &TExpr,
+    ) -> Result<MirValueId, LowerError> {
+        let window = match &subject.kind {
+            TExprKind::Borrow {
+                place,
+                mutable: true,
+            } => Some(self.lower_place(&TPlace::Expr(place.clone()), MirAccess::Write)?),
+            TExprKind::Local(local)
+                if local.generated && self.window_aliases.contains(&local.name) =>
+            {
+                self.local_places.get(&local.name).copied()
+            }
+            _ => None,
+        };
+        let Some(window) = window else {
+            return self.lower_child(subject);
+        };
+        let value = self.emit(
+            "pattern.window",
+            Some(subject.ty.clone()),
+            MirOperation::ReadPlace(window),
+        )?;
+        self.pattern_windows.insert(value, window);
+        Ok(value)
+    }
+
+    /// `base` extended by one projection, typed `ty`.
+    fn project_window_place(
+        &mut self,
+        base: MirPlaceId,
+        projection: MirProjection,
+        ty: &Type,
+    ) -> Result<MirPlaceId, LowerError> {
+        let span = self.span();
+        let root = self
+            .places
+            .iter()
+            .find(|place| place.id == base)
+            .cloned()
+            .ok_or_else(|| self.error(span, "missing checked pattern window place"))?;
+        let id = self.place_id("pattern-window", &format!("{}:{projection:?}", root.id.0))?;
+        let mut projections = root.projections;
+        projections.push(projection);
+        let ty = self.mir_type(ty)?;
+        self.places.push(MirPlace {
+            id,
+            span,
+            ty,
+            base: root.base,
+            projections,
+            access: MirAccess::Write,
+            persist_key: None,
+        });
+        Ok(id)
+    }
+
+    fn project_payload_place(
+        &mut self,
+        base: MirPlaceId,
+        kind: jet_foundation::MIR::MirPayloadKind,
+        ty: &Type,
+    ) -> Result<MirPlaceId, LowerError> {
+        let span = self.span();
+        self.project_window_place(base, MirProjection::Payload { kind, span }, ty)
+    }
+
+    /// Bind a payload name under a write-window subject as an alias of
+    /// `place`: reads and edits go through the owner, nothing is copied.
+    fn bind_window_binding(
+        &mut self,
+        name: &str,
+        ty: Type,
+        place: MirPlaceId,
+    ) -> Result<(), LowerError> {
+        if name.is_empty() || name == "_" {
+            return Ok(());
+        }
+        self.bind_local_alias(&TLocal::user(name.to_string()), ty, place, true)?;
+        Ok(())
+    }
+
     pub(super) fn bind_data_entries_temp(
         &mut self,
         local: &TLocal,
@@ -7621,6 +7872,7 @@ impl<'a> LowerCtx<'a> {
             },
             _ => pattern.shape.clone(),
         };
+        let window = self.pattern_windows.get(&subject).copied();
         let condition = self.lower_pattern_shape_condition(
             subject,
             &subject_ty,
@@ -7628,6 +7880,7 @@ impl<'a> LowerCtx<'a> {
             &shape,
             pattern.mutable,
             false,
+            window,
         )?;
         if let MirPatternPosition::DataEntries { temp } = &pattern.position {
             if let MirPatternShape::Variant { variant, .. } = &pattern.shape {
@@ -7665,6 +7918,9 @@ impl<'a> LowerCtx<'a> {
         shape: &MirPatternShape,
         mutable: bool,
         reuse_bindings: bool,
+        // D-OPT-WRITE1 (#3974): the owner place `subject` was read from when
+        // the pattern matches through a `&place` write window.
+        window: Option<MirPlaceId>,
     ) -> Result<MirValueId, LowerError> {
         match shape {
             MirPatternShape::Variant {
@@ -7710,6 +7966,7 @@ impl<'a> LowerCtx<'a> {
                         &shape,
                         mutable,
                         reuse_bindings,
+                        window,
                     );
                 }
                 let owner = owner.ok_or_else(|| {
@@ -7737,6 +7994,19 @@ impl<'a> LowerCtx<'a> {
                             MirPatternBinding::Wildcard => {}
                             MirPatternBinding::Bind { name, .. } => {
                                 let ty = ctx.variant_payload_type(owner, variant, index)?;
+                                if let Some(window) = window {
+                                    let place = ctx.project_payload_place(
+                                        window,
+                                        jet_foundation::MIR::MirPayloadKind::Enum {
+                                            owner,
+                                            variant: variant.clone(),
+                                            index,
+                                        },
+                                        &ty,
+                                    )?;
+                                    ctx.bind_window_binding(name, ty, place)?;
+                                    continue;
+                                }
                                 let value = ctx.emit_checked(
                                     "pattern",
                                     Some(&ty),
@@ -7777,12 +8047,25 @@ impl<'a> LowerCtx<'a> {
                                         index,
                                     },
                                 )?;
+                                let nested_window = match window {
+                                    Some(window) => Some(ctx.project_payload_place(
+                                        window,
+                                        jet_foundation::MIR::MirPayloadKind::Enum {
+                                            owner,
+                                            variant: variant.clone(),
+                                            index,
+                                        },
+                                        &ty,
+                                    )?),
+                                    None => None,
+                                };
                                 tests.push(ctx.lower_nested_pattern_condition(
                                     value,
                                     &ty,
                                     inner,
                                     mutable,
                                     reuse_bindings,
+                                    nested_window,
                                 )?);
                             }
                         }
@@ -7813,18 +8096,36 @@ impl<'a> LowerCtx<'a> {
                     return Ok(test);
                 }
                 self.lower_guarded_pattern(test, |ctx| {
+                    if let (Some(window), None) = (window, nested) {
+                        let place = ctx.project_payload_place(
+                            window,
+                            jet_foundation::MIR::MirPayloadKind::Option,
+                            &inner,
+                        )?;
+                        ctx.bind_window_binding(binding, inner, place)?;
+                        return Ok(test);
+                    }
                     let value = ctx.emit_checked(
                         "pattern",
                         Some(&inner),
                         MirOperation::OptionValue { subject },
                     )?;
                     if let Some(nested) = nested {
+                        let nested_window = match window {
+                            Some(window) => Some(ctx.project_payload_place(
+                                window,
+                                jet_foundation::MIR::MirPayloadKind::Option,
+                                &inner,
+                            )?),
+                            None => None,
+                        };
                         return ctx.lower_nested_pattern_condition(
                             value,
                             &inner,
                             nested,
                             mutable,
                             reuse_bindings,
+                            nested_window,
                         );
                     }
                     ctx.bind_pattern_value(binding, inner, value, mutable, reuse_bindings)?;
@@ -7888,18 +8189,31 @@ impl<'a> LowerCtx<'a> {
                 }
                 self.lower_guarded_pattern(test, |ctx| {
                     let value_ty = if ok { success } else { error };
+                    let payload = jet_foundation::MIR::MirPayloadKind::Result { ok };
+                    if let (Some(window), None) = (window, nested) {
+                        let place = ctx.project_payload_place(window, payload, &value_ty)?;
+                        ctx.bind_window_binding(binding, value_ty, place)?;
+                        return Ok(test);
+                    }
                     let value = ctx.emit_checked(
                         "pattern",
                         Some(&value_ty),
                         MirOperation::ResultValue { subject, ok },
                     )?;
                     if let Some(nested) = nested {
+                        let nested_window = match window {
+                            Some(window) => {
+                                Some(ctx.project_payload_place(window, payload, &value_ty)?)
+                            }
+                            None => None,
+                        };
                         return ctx.lower_nested_pattern_condition(
                             value,
                             &value_ty,
                             nested,
                             mutable,
                             reuse_bindings,
+                            nested_window,
                         );
                     }
                     ctx.bind_pattern_value(binding, value_ty, value, mutable, reuse_bindings)?;
@@ -7919,6 +8233,10 @@ impl<'a> LowerCtx<'a> {
                         alternative,
                         mutable,
                         reuse_bindings || index > 0,
+                        // One name cannot alias two payload slots: or-pattern
+                        // bindings stay read-only values even under a `&place`
+                        // subject (sema declares them so).
+                        None,
                     )?);
                 }
                 self.combine_pattern_tests(tests, jet_foundation::AST::BinOp::Or)
@@ -7943,6 +8261,19 @@ impl<'a> LowerCtx<'a> {
                             field, value: _, ..
                         } => (*field, self.field_type_for_id(owner, *field)?, None),
                     };
+                    if let (Some(window), Some(name)) = (window, binding) {
+                        let span = self.span();
+                        let place = self.project_window_place(
+                            window,
+                            MirProjection::Field {
+                                field: field_id,
+                                span,
+                            },
+                            &value_ty,
+                        )?;
+                        self.bind_window_binding(name, value_ty, place)?;
+                        continue;
+                    }
                     let projected = self.emit_checked(
                         "pattern",
                         Some(&value_ty),
@@ -7991,10 +8322,19 @@ impl<'a> LowerCtx<'a> {
         shape: &MirPatternShape,
         mutable: bool,
         reuse_bindings: bool,
+        window: Option<MirPlaceId>,
     ) -> Result<MirValueId, LowerError> {
         let owner = self.field_owner_id_for_type(subject_ty).ok();
         let shape = self.expand_nested_group_heads(shape, owner);
-        self.lower_pattern_shape_condition(subject, subject_ty, owner, &shape, mutable, reuse_bindings)
+        self.lower_pattern_shape_condition(
+            subject,
+            subject_ty,
+            owner,
+            &shape,
+            mutable,
+            reuse_bindings,
+            window,
+        )
     }
 
     fn expand_nested_group_heads(
@@ -8830,13 +9170,10 @@ impl<'a> LowerCtx<'a> {
         else {
             return Ok(None);
         };
-        if !is_result_carrier(ret) {
-            return Ok(None);
-        }
         let Ok(Some(returned)) = self.function_registry.call_return_type_for(function, &[]) else {
             return Ok(None);
         };
-        if !is_plain_return(&returned) {
+        if !is_plain_call_return(&returned, ret) {
             return Ok(None);
         }
         let source_params = (0..params.len())
@@ -8911,7 +9248,7 @@ impl<'a> LowerCtx<'a> {
         value: MirValueId,
         returned: &Type,
     ) -> Result<MirValueId, LowerError> {
-        if !is_plain_return(returned) || !is_result_carrier(&expr.ty) {
+        if !is_plain_call_return(returned, &expr.ty) {
             return Ok(value);
         }
         if self.plain_try_operand == Some(expr as *const TExpr as usize) {
@@ -9313,7 +9650,16 @@ impl<'a> LowerCtx<'a> {
             } else {
                 MirOperation::ReadPlace(place)
             };
-            self.emit("call-place", Some(arg.value.ty.clone()), operation)?
+            // A range write window keeps its owner's list type as a place.
+            let place_ty = match &arg.value.kind {
+                TExprKind::BuiltinMethod {
+                    recv,
+                    op: super::TBuiltinOp::ViewMutNew { .. },
+                    ..
+                } if arg.mut_borrow => recv.ty.clone(),
+                _ => arg.value.ty.clone(),
+            };
+            self.emit("call-place", Some(place_ty), operation)?
         } else {
             self.lower_child(&arg.value)?
         };
@@ -9394,33 +9740,11 @@ impl<'a> LowerCtx<'a> {
         self.function_id_for(name)
     }
 
-    pub(super) fn resolve_core(
-        &self,
-        module: &str,
-        member: &str,
-        span: Span,
-    ) -> Result<jet_foundation::MIR::MirCoreCallId, LowerError> {
-        jet_foundation::Syntax::CORE_CALLS
-            .iter()
-            .find(|row| row.module == module && row.member == member)
-            .map(|row| jet_foundation::MIR::MirCoreCall::from_record(row).id)
-            .ok_or_else(|| {
-                self.error(
-                    span,
-                    format!("missing checked Core registry row `{module}.{member}`"),
-                )
-            })
-    }
-
     pub(super) fn lower_pattern(
         &mut self,
         pattern: &TPattern,
     ) -> Result<jet_foundation::MIR::MirPattern, LowerError> {
         super::tir_to_mir_expr::lower_pattern(self, pattern)
-    }
-
-    pub(super) fn add_drop(&mut self, place: MirPlaceId, edge: MirDropEdge, span: Span) {
-        self.drops.push(MirDropAction { place, edge, span });
     }
 
     pub(super) fn push_loop(
@@ -9510,6 +9834,7 @@ impl<'a> LowerCtx<'a> {
         self.defer_stack.push(DeferFrame {
             owner: Some(id),
             actions: Vec::new(),
+            shadow_mark: self.shadowed_locals.len(),
         });
         Ok(id)
     }
@@ -9563,7 +9888,9 @@ impl<'a> LowerCtx<'a> {
         if !self.is_terminated() {
             self.emit_deferred_cleanups(self.defer_stack.len() - 1)?;
         }
-        self.defer_stack.pop();
+        if let Some(frame) = self.defer_stack.pop() {
+            self.restore_shadowed_locals(frame.shadow_mark);
+        }
         if !self.is_terminated() {
             self.emit("scope.exit", None, MirOperation::ScopeExit { scope })?;
         }
@@ -9571,7 +9898,10 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn push_lexical_frame(&mut self) {
-        self.defer_stack.push(DeferFrame::default());
+        self.defer_stack.push(DeferFrame {
+            shadow_mark: self.shadowed_locals.len(),
+            ..DeferFrame::default()
+        });
     }
 
     pub(super) fn pop_lexical_frame(&mut self) -> Result<(), LowerError> {
@@ -9592,7 +9922,9 @@ impl<'a> LowerCtx<'a> {
         if !self.is_terminated() {
             self.emit_deferred_cleanups(self.defer_stack.len() - 1)?;
         }
-        self.defer_stack.pop();
+        if let Some(frame) = self.defer_stack.pop() {
+            self.restore_shadowed_locals(frame.shadow_mark);
+        }
         Ok(())
     }
 

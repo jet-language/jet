@@ -557,17 +557,17 @@ fn dkim_from_value(
     value: &CtValue,
     span: Span,
 ) -> Result<jet_email::DkimConfig<Vec<u8>>, Diagnostic> {
-    let domain = field(value, "DkimConfig", "domain")
-        .ok_or_else(|| unsupported("email DkimConfig.domain is missing", span))
+    let domain = field(value, "DKIMConfig", "domain")
+        .ok_or_else(|| unsupported("email DKIMConfig.domain is missing", span))
         .and_then(|value| string(value, span).map(str::to_string))?;
-    let selector = field(value, "DkimConfig", "selector")
-        .ok_or_else(|| unsupported("email DkimConfig.selector is missing", span))
+    let selector = field(value, "DKIMConfig", "selector")
+        .ok_or_else(|| unsupported("email DKIMConfig.selector is missing", span))
         .and_then(|value| string(value, span).map(str::to_string))?;
-    let private_key = field(value, "DkimConfig", "private_key")
-        .ok_or_else(|| unsupported("email DkimConfig.private_key is missing", span))
+    let private_key = field(value, "DKIMConfig", "private_key")
+        .ok_or_else(|| unsupported("email DKIMConfig.private_key is missing", span))
         .and_then(|value| secret(value, span))?;
-    let signed_headers = field(value, "DkimConfig", "signed_headers")
-        .ok_or_else(|| unsupported("email DkimConfig.signed_headers is missing", span))
+    let signed_headers = field(value, "DKIMConfig", "signed_headers")
+        .ok_or_else(|| unsupported("email DKIMConfig.signed_headers is missing", span))
         .and_then(|value| string_list(value, span))?;
     Ok(jet_email::DkimConfig {
         domain,
@@ -588,8 +588,8 @@ fn smtp_config_from_value(
         .ok_or_else(|| unsupported("email SMTPConfig.port is missing", span))
         .and_then(|value| int(value, "SMTPConfig.port", span))?;
     let security = match field(value, "SMTPConfig", "security") {
-        Some(value) if enum_args(value, "SMTPSecurity", "StartTls").is_some() => {
-            jet_email::SMTPSecurity::StartTls
+        Some(value) if enum_args(value, "SMTPSecurity", "StartTLS").is_some() => {
+            jet_email::SMTPSecurity::StartTLS
         }
         Some(value) if enum_args(value, "SMTPSecurity", "TLS").is_some() => {
             jet_email::SMTPSecurity::TLS

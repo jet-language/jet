@@ -164,7 +164,7 @@ function copyFixtureState(source, destination) {
   }
 }
 
-function copyFeatureProject(source, destination) {
+export function copyFeatureProject(source, destination) {
   mkdirSync(destination, { recursive: true });
   for (const item of readdirSync(source, { withFileTypes: true })) {
     if (item.isDirectory() && item.name === ".jet") continue;
@@ -179,7 +179,7 @@ function copyFeatureProject(source, destination) {
   }
 }
 
-function featureProjectRoot(entry) {
+export function featureProjectRoot(entry) {
   let directory = dirname(entry.path);
   while (true) {
     if (existsSync(join(directory, "package.jet")) || existsSync(join(directory, "fixture-state"))) {

@@ -1907,12 +1907,6 @@ impl PausedEvaluateHost {
         self.evaluator_result = None;
     }
 
-    /// Whether an evaluator result is currently staged for the next
-    /// evaluate call.
-    pub fn has_evaluator_result(&self) -> bool {
-        self.evaluator_result.is_some()
-    }
-
     /// Handle one `/paused/inspect` request body against the injected
     /// session.  Returns the bounded JSON response on success, or an
     /// explicit JSON error; the body is a `String` either way so a host can

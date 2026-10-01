@@ -5,6 +5,24 @@
 // argument shape: labels, zones, defaults, rest arguments, source order, and
 // the declaration access convention. A Type-derived default is represented by
 // its FunctionDefaultRef; this layer never invents an expression for it.
+use jet_foundation.[
+    AccessConvention,
+    BinderRef,
+    CallArg,
+    CallContractRow,
+    CallLabel,
+    Diagnostic,
+    Expr,
+    Func,
+    FunctionCallMetadata,
+    FunctionDefaultRef,
+    Param,
+    ParamZone,
+    Span,
+    Type,
+    ast_empty_call_arg_flags,
+    type_with_effective_fn_returns,
+]
 
 pub struct SemaCallParam {
     pub label: String
@@ -250,7 +268,7 @@ fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource])
 }
 
 fn sema_call_append_rewritten_written(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) Never! {
-    written :: taken[original_index] ?? return
+    written :: ~taken[original_index] ?? return
     taken[original_index] = None
     &rewritten.push(sema_call_mark_written(written, original_index, parameter, params[parameter], call_span))
     &sources.push(SemaCallArgSource.Written{index: original_index})
@@ -449,7 +467,7 @@ pub fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[Call
             }
             if positional_recovery {
                 sources := [SemaCallArgSource]{}
-                loop index in 0..<args.len() -> &sources.push(SemaCallArgSource.Written{index: index})
+                loop arg_index in 0..<args.len() -> &sources.push(SemaCallArgSource.Written{index: arg_index})
                 return Val(SemaCallBinding{slots: source_slots, sources: sources, default_refs: [FunctionDefaultRef]{}, source_ordered: true, rewrote: false})
             }
         }

@@ -536,6 +536,64 @@ thread_local! {
 
 pub struct JetSharedTransaction {
     state: std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+    // Declared after `state` so the gate opens only once `Drop` has run the
+    // rollback hooks or the commit has published.
+    _gate: Option<JetSharedTransactionGate>,
+}
+
+/// Outermost Shared transactions run one at a time, process-wide. A body
+/// works on transaction-local copies taken at first touch and commit publishes
+/// them, so two transactions whose bodies overlapped would each publish a copy
+/// that misses the other's write. Holding the gate from begin to commit or
+/// rollback makes every transaction's copies current; contention waits and
+/// the body still runs once. Nested transactions join their parent and never
+/// take the gate again; the per-thread depth keeps an orphaned inner begin
+/// from waiting on its own thread.
+struct JetSharedTransactionGate;
+
+static JET_SHARED_TRANSACTION_GATE_OWNER: std::sync::Mutex<Option<(std::thread::ThreadId, usize)>> =
+    std::sync::Mutex::new(None);
+static JET_SHARED_TRANSACTION_GATE_RELEASED: std::sync::Condvar = std::sync::Condvar::new();
+
+impl JetSharedTransactionGate {
+    fn enter() -> Self {
+        let me = std::thread::current().id();
+        let mut owner = JET_SHARED_TRANSACTION_GATE_OWNER
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        loop {
+            match owner.as_mut() {
+                None => {
+                    *owner = Some((me, 1));
+                    return Self;
+                }
+                Some((holder, depth)) if *holder == me => {
+                    *depth += 1;
+                    return Self;
+                }
+                Some(_) => {
+                    owner = JET_SHARED_TRANSACTION_GATE_RELEASED
+                        .wait(owner)
+                        .unwrap_or_else(|error| error.into_inner());
+                }
+            }
+        }
+    }
+}
+
+impl Drop for JetSharedTransactionGate {
+    fn drop(&mut self) {
+        let mut owner = JET_SHARED_TRANSACTION_GATE_OWNER
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some((_, depth)) = owner.as_mut() {
+            *depth -= 1;
+            if *depth == 0 {
+                *owner = None;
+                JET_SHARED_TRANSACTION_GATE_RELEASED.notify_all();
+            }
+        }
+    }
 }
 
 fn jet_shared_transaction_part_mut<'a>(
@@ -676,6 +734,9 @@ pub fn jet_shared_transaction_begin() -> JetSharedTransaction {
             .and_then(|parent| parent.upgrade())
             .map(|parent| std::rc::Rc::downgrade(&parent))
     });
+    // Only an outermost transaction takes the gate; a nested one joins the
+    // parent that already holds it.
+    let gate = parent.is_none().then(JetSharedTransactionGate::enter);
     let state = std::rc::Rc::new(std::cell::RefCell::new(JetSharedTransactionState {
         parts: Some(Vec::new()),
         rollback_hooks: Some(Vec::new()),
@@ -684,7 +745,7 @@ pub fn jet_shared_transaction_begin() -> JetSharedTransaction {
     JET_SHARED_TRANSACTION_STACK.with(|stack| {
         stack.borrow_mut().push(std::rc::Rc::downgrade(&state));
     });
-    JetSharedTransaction { state }
+    JetSharedTransaction { state, _gate: gate }
 }
 
 impl JetSharedTransaction {

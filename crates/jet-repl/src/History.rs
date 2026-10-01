@@ -3,6 +3,8 @@
 use std::io;
 use std::path::PathBuf;
 
+use jet_foundation::Hex::nibble as hex;
+
 #[path = "HistoryPlatform.rs"]
 mod platform;
 use platform::Backend;
@@ -234,15 +236,6 @@ fn decode(bytes: &[u8]) -> Option<String> {
         decoded.push((hex(pair[0])? << 4) | hex(pair[1])?);
     }
     String::from_utf8(decoded).ok()
-}
-
-fn hex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 fn state_root() -> Option<PathBuf> {

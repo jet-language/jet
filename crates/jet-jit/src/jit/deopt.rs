@@ -319,31 +319,6 @@ pub fn last_snapshot() -> Option<MirFrameSnapshot> {
     DEOPT_STATE.with(|slot| slot.borrow().last_snapshot.clone())
 }
 
-pub(crate) fn record_frame_snapshot(
-    program: &MirProgram,
-    artifact: MirArtifactId,
-    function: MirFunctionId,
-    block: MirBlockId,
-    values: Vec<MirFrameValue>,
-    places: Vec<MirFramePlace>,
-) -> Result<(), String> {
-    DEOPT_STATE.with(|slot| {
-        let mut state = slot.borrow_mut();
-        state.last_outcome = None;
-        state.last_value = None;
-        state.last_stdout.clear();
-        state.last_stderr.clear();
-        state.soft_stop = false;
-        let sequence = state.sequence;
-        state.sequence = state.sequence.wrapping_add(1);
-        let identity = program
-            .frame_identity(Some(artifact), function, Some(block), sequence)
-            .map_err(|error| format!("MIR deopt frame identity unavailable: {error}"))?;
-        state.last_snapshot = Some(MirFrameSnapshot { identity, values, places });
-        Ok(())
-    })
-}
-
 fn record_abi_frame(function: i64, argc: i64, args: &[i64; 8]) -> Option<MirFrameSnapshot> {
     let function = u64::try_from(function).ok()?;
     let argc = usize::try_from(argc).ok()?;
@@ -502,10 +477,6 @@ fn record_source_deopt_failure(message: impl Into<String>) {
     crate::Concurrency::with_runtime_mut(|runtime| {
         runtime.set_host_fault(message.into());
     });
-}
-
-pub(crate) fn source_deopt_scope_depth() -> usize {
-    SOURCE_DEOPT_CALLBACKS.with(|stack| stack.borrow().len())
 }
 
 pub(crate) fn clear_deopt_state() {

@@ -94,14 +94,14 @@ pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
 /// Python-compatible file-shaped spelling for JSON parsing.
 pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
 /// Compact JSON text. Object keys keep insertion order.
-pub fn to_string(value: DataTree) -> String { render_json(value, false) }
+pub fn to_string(value: DataTree) -> String Never! { render_json(value, false) }
 /// Python-compatible spelling for compact JSON serialization.
-pub fn dumps(value: DataTree) -> String { render_json(value, false) }
+pub fn dumps(value: DataTree) -> String Never! { render_json(value, false) }
 /// Python-compatible file-shaped spelling for JSON serialization.
-pub fn dump(value: DataTree) -> String { render_json(value, false) }
+pub fn dump(value: DataTree) -> String Never! { render_json(value, false) }
 
 /// Two-space indented JSON text.
-pub fn to_string_pretty(value: DataTree) -> String { render_json(value, true) }
+pub fn to_string_pretty(value: DataTree) -> String Never! { render_json(value, true) }
 
 /// RFC 8785 JSON Canonicalization Scheme bytes (D-JSONCANON1=A): compact,
 /// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
@@ -117,11 +117,11 @@ pub fn canonical(value: DataTree) -> String EncodingError! {
 
 /// Streaming pull parser over `text`.  The first call validates and
 /// materializes the value, then subsequent calls walk its event sequence.
-pub fn reader(text: String) -> JSONReader { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
+pub fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
 
 /// Pull reader that reports every occurrence of a repeated object name as its
 /// own `Key` event instead of rejecting the document.
-pub fn reader_allow_duplicates(text: String) -> JSONReader { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
 
 /// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
 /// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
@@ -188,9 +188,9 @@ pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -
 }
 
 /// Convert a parsed tree to the canonical streaming event sequence.
-pub fn events(value: DataTree) -> [DataEvent] { append_events(value) }
+pub fn events(value: DataTree) -> [DataEvent] Never! { append_events(value) }
 
-pub fn writer() -> JSONWriter { JSONWriter{pretty: false, parts: [U8]{}} }
+pub fn writer() -> JSONWriter Never! { JSONWriter{pretty: false, parts: [U8]{}} }
 
 pub struct JSONReader {
     pub parser: Parser
@@ -206,12 +206,12 @@ pub struct JSONWriter {
 }
 
 impl JSONWriter {
-    pub fn write(&self, value: DataTree) {
+    pub fn write(&self, value: DataTree) Never! {
         chunk :: render_json(value, self.pretty).bytes()
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn to_string(self) -> String { String.from_bytes(self.parts) ?? "" }
+    pub fn to_string(self) -> String Never! { String.from_bytes(self.parts) ?? "" }
 }
 
 struct Parser {

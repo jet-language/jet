@@ -335,18 +335,6 @@ impl NativeOverlayViewport {
         f64::from(self.scale_milli) / 1000.0
     }
 
-    pub fn logical_width(&self) -> u32 {
-        ((u64::from(self.width) * 1000) / u64::from(self.scale_milli))
-            .max(1)
-            .min(u64::from(self.width)) as u32
-    }
-
-    pub fn logical_height(&self) -> u32 {
-        ((u64::from(self.height) * 1000) / u64::from(self.scale_milli))
-            .max(1)
-            .min(u64::from(self.height)) as u32
-    }
-
     pub fn overlay_rect(&self, dock: NativeOverlayDock) -> NativeOverlayRect {
         let width = self.scaled_extent(480, self.width);
         let height = self.scaled_extent(360, self.height);
@@ -617,13 +605,6 @@ impl NativeOverlayHost {
 
     pub fn toggle_key(&self) -> &str {
         &self.toggle_key
-    }
-
-    pub fn set_toggle_key(&mut self, key: impl Into<String>) -> Result<(), String> {
-        let key = key.into();
-        validate_text(&key, "native overlay toggle key", false)?;
-        self.toggle_key = key;
-        Ok(())
     }
 
     pub fn set_viewport(&mut self, viewport: NativeOverlayViewport) -> Result<(), String> {

@@ -308,13 +308,6 @@ pub fn jet_host_program_allocator_try_reserve(requested: usize) -> bool {
     jet_active_hosted_program_allocator(|allocator| allocator.try_reserve_hosted(requested))
 }
 
-/// Roll back a hosted reservation when the system allocation itself fails.
-pub fn jet_host_program_allocator_cancel_reservation(requested: usize) {
-    jet_active_hosted_program_allocator(|allocator| {
-        allocator.cancel_hosted_reservation(requested);
-    });
-}
-
 struct JetProgramAllocationNode {
     ptr: *mut u8,
     requested_bytes: usize,

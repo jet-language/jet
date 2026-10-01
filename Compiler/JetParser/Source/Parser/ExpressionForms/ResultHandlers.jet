@@ -1,6 +1,24 @@
 // Compact Result handlers. The canonical parser lowers
 // `value ? ok -> success ! error -> failure` to nested Expr.If nodes so
 // ordinary pattern checking and value-branch sema remain the single path.
+use jet_foundation.[
+    Expr,
+    Pattern,
+    Span,
+    Stmt,
+    expr_span,
+]
+use jet_lexer.[
+    TOKEN_BANG,
+    TOKEN_EOF,
+    TOKEN_IDENT,
+    TOKEN_LBRACE,
+    TOKEN_QUESTION,
+    TOKEN_RBRACE,
+    TOKEN_RETURN,
+    TOKEN_SEMI,
+    TOKEN_UNIFIED_ARROW,
+]
 
 pub fn parser_expression_result_handler_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_QUESTION && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_UNIFIED_ARROW

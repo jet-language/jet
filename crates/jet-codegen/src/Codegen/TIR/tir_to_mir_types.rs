@@ -984,7 +984,10 @@ fn lower_mir_field_for_owner(
 ) -> MirField {
     let ty = match (identity_key, identity_name) {
         (Some(key), Some(name)) => lower_type_for_owner(&field.ty, key, name),
-        _ => lower_type(&field.ty),
+        // A struct field that stores a callable holds the effective `Result`
+        // carrier, the same slot shape as a `fn` parameter or list element;
+        // TIR field reads (`struct_field_type`) and struct literals agree.
+        _ => lower_type(&field.ty.with_effective_fn_returns()),
     };
     MirField {
         id: MirFieldId(stable_id("mir-field", &format!("{owner}::{}", field.name))),
@@ -1367,6 +1370,12 @@ pub(super) fn lower_tir_declarations(
             auto_printable,
             auto_debug,
             &|ty, binders| super::qualify_imported_type(bundle, index, &module_name, binders, ty),
+            &|type_name| {
+                crate::Codegen::Context::module_identity(
+                    bundle,
+                    super::impl_owner_module(bundle, index, type_name),
+                )
+            },
             seed_parse_error,
             None,
         );
@@ -1422,6 +1431,7 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
         auto_printable,
         auto_debug,
         &qualify_owned,
+        &|_| module.to_string(),
         !owned.contains("ParseError"),
         checked_nominals,
     );
@@ -1482,16 +1492,38 @@ fn collect_items(
     auto_printable: &HashSet<String>,
     auto_debug: &HashSet<String>,
     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+    impl_owner: &impl Fn(&str) -> String,
     seed_parse_error: bool,
     checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
 ) {
+    // A bare trait name in a declared field, payload, or trait signature is
+    // the trait value, the same canonical type every checked body and impl
+    // signature carries. Keeping it `Named` makes a `-> Cloner` trait method
+    // disagree with its impl at MIR validation and lets a struct holding an
+    // `Adapter?` claim a derived Clone its boxed trait value cannot provide.
+    let trait_names = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Trait(candidate) => Some(candidate.name.clone()),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    let nominal_names = super::module_owned_type_names(items);
+    let canonical = |ty: &Type, binders: &[String]| {
+        canonicalize_checked_trait_types(
+            &qualify_type(ty, binders),
+            &trait_names,
+            &nominal_names,
+            &binders.iter().cloned().collect(),
+        )
+    };
     for item in items {
         match item {
             Item::Struct(definition) => {
                 out.type_defs.push(lower_struct(
                     definition,
                     module,
-                    qualify_type,
+                    &canonical,
                     layout_engine,
                     boxed_edges,
                     is_auto_printable(auto_printable, module, &definition.name),
@@ -1503,7 +1535,7 @@ fn collect_items(
                 out.type_defs.push(lower_enum(
                     definition,
                     module,
-                    qualify_type,
+                    &canonical,
                     definition.c_layout_tag().map(|_| layout_engine.enum_facts(definition)),
                     boxed_edges,
                     is_auto_printable(auto_printable, module, &definition.name),
@@ -1539,10 +1571,13 @@ fn collect_items(
                 }
             }
             Item::Trait(definition) => {
-                out.traits
-                    .push(lower_trait(definition, module, qualify_type))
+                out.traits.push(lower_trait(definition, module, &canonical))
             }
-            Item::Impl(definition) => out.impls.push(lower_impl(definition, module)),
+            Item::Impl(definition) => out.impls.push(lower_impl(
+                definition,
+                module,
+                &impl_owner(&definition.type_name),
+            )),
             Item::Const(definition) => out.constants.push(lower_constant(definition, module)),
             _ => {}
         }
@@ -2044,7 +2079,14 @@ fn lower_nested_trait_impl(type_name: &str, block: &TraitImplBlock, module: &str
     }
 }
 
-fn lower_impl(definition: &ImplDef, module: &str) -> TirImplDef {
+/// `owner_module` declares the implemented type: the impl's own module, or
+/// (D-MOD-CYCLE1=A) the sibling file of its package that declares it.
+fn lower_impl(definition: &ImplDef, module: &str, owner_module: &str) -> TirImplDef {
+    let owner = if owner_module == module {
+        definition.type_name.clone()
+    } else {
+        qualified_key(owner_module, &definition.type_name)
+    };
     TirImplDef {
         module: module.to_string(),
         key: match definition.trait_name.as_deref() {
@@ -2052,7 +2094,7 @@ fn lower_impl(definition: &ImplDef, module: &str) -> TirImplDef {
             None => format!("{}::{}", module, definition.type_name),
         },
         span: definition.span,
-        self_type: Type::Named(qualified_key(module, &definition.type_name)),
+        self_type: Type::Named(qualified_key(owner_module, &definition.type_name)),
         trait_name: definition.trait_name.clone(),
         trait_ref: definition.trait_name.clone(),
         associated_types: definition
@@ -2066,7 +2108,7 @@ fn lower_impl(definition: &ImplDef, module: &str) -> TirImplDef {
             .collect(),
         methods: method_keys(
             module,
-            &definition.type_name,
+            &owner,
             definition.trait_name.as_deref(),
             definition.operator_rhs.as_ref(),
             &definition.methods,
@@ -2084,7 +2126,7 @@ fn lower_impl(definition: &ImplDef, module: &str) -> TirImplDef {
     }
 }
 
-fn lower_constant(definition: &ConstDef, module: &str) -> TirConstantDef {
+pub(super) fn lower_constant(definition: &ConstDef, module: &str) -> TirConstantDef {
     let value = super::source_constant_value(definition).unwrap_or(CtValue::Unit);
     let ty = super::source_constant_type(definition)
         .or_else(|| (!matches!(value, CtValue::Unit)).then(|| value.jet_type()))
@@ -2191,7 +2233,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     (
         "WebFormControl",
         &[
-            "Text", "Email", "Url", "Password", "Number", "Date", "Checkbox", "Hidden",
+            "Text", "Email", "URL", "Password", "Number", "Date", "Checkbox", "Hidden",
         ],
     ),
     // D-DX-LOADERS1: the native Prelude carrier still needs a checked MIR
@@ -2285,11 +2327,11 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "DeliveryUnknown",
         ],
     ),
-    ("SMTPSecurity", &["StartTls", "TLS"]),
+    ("SMTPSecurity", &["StartTLS", "TLS"]),
     ("RecipientPolicy", &["RequireAll", "DeliverAccepted"]),
     ("SMTPAuth", &["None", "Password"]),
     ("TLSTrust", &["System", "SystemPlusCa"]),
-    ("TLSVersion", &["Tls12", "Tls13"]),
+    ("TLSVersion", &["TLS12", "TLS13"]),
     ("TLSClientTrust", &["System", "SystemPlus", "CustomOnly"]),
     ("NetDnsError", &["NotFound", "Failure"]),
     (
@@ -2322,7 +2364,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     (
         "WsError",
         &[
-            "InvalidUrl",
+            "InvalidURL",
             "InvalidHandshake",
             "Protocol",
             "Timeout",
@@ -2619,7 +2661,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("Mailer", &[]),
     ("Envelope", &["from", "recipients"]),
     (
-        "DkimConfig",
+        "DKIMConfig",
         &["domain", "selector", "private_key", "signed_headers"],
     ),
     (
@@ -2638,7 +2680,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
     ("Size", &["width", "height"]),
     (
-        "UiNode",
+        "UINode",
         &[
             "label",
             "width",
@@ -2704,11 +2746,11 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     // D-FOUND-PLATFORM1=A: Core UI host records share their runtime carriers
     // with every backend; keep their checked field vocabulary in the nominal
     // declaration registry so field projections have MIR owner rows.
-    ("UiFileFilter", &["label", "extensions", "mime_types"]),
-    ("UiFsGrant", &["root", "rights"]),
-    ("UiGrantedPath", &["path", "grant_root", "access"]),
+    ("UIFileFilter", &["label", "extensions", "mime_types"]),
+    ("UIFSGrant", &["root", "rights"]),
+    ("UIGrantedPath", &["path", "grant_root", "access"]),
     (
-        "UiFileDialogRequest",
+        "UIFileDialogRequest",
         &[
             "kind",
             "title",
@@ -2718,16 +2760,16 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "allow_multiple",
         ],
     ),
-    ("UiFileDialogSelection", &["files"]),
-    ("UiClipboardText", &["text", "selection"]),
-    ("UiClipboardWrite", &["characters"]),
-    ("UiTextRange", &["start", "end"]),
-    ("UiImeComposition", &["text", "selection", "marked"]),
-    ("UiImeEvent", &["target", "phase", "composition"]),
-    ("UiDragEvent", &["target", "phase", "operation", "items"]),
-    ("UiShortcut", &["key", "modifiers"]),
-    ("UiShortcutBinding", &["shortcut", "action", "node"]),
-    ("UiAccessibility", &["name", "description"]),
+    ("UIFileDialogSelection", &["files"]),
+    ("UIClipboardText", &["text", "selection"]),
+    ("UIClipboardWrite", &["characters"]),
+    ("UITextRange", &["start", "end"]),
+    ("UIIMEComposition", &["text", "selection", "marked"]),
+    ("UIIMEEvent", &["target", "phase", "composition"]),
+    ("UIDragEvent", &["target", "phase", "operation", "items"]),
+    ("UIShortcut", &["key", "modifiers"]),
+    ("UIShortcutBinding", &["shortcut", "action", "node"]),
+    ("UIAccessibility", &["name", "description"]),
     (
         crate::Syntax::TYPE_TYPE_INFO,
         &[
@@ -2909,6 +2951,9 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "issuer",
         ],
     ),
+    // D-LIB-CALLGRANT1=A: the load-site grant is a constructable Prelude
+    // record (`{read: roots}`), so its literal needs an owner row.
+    ("ModGrant", &["read"]),
 ];
 const COMPILER_OWNED_MATH_RECORDS: &[(&str, &[&str])] = &[
     ("F32x4", &["x", "y", "z", "w"]),
@@ -2971,7 +3016,7 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
         || name == crate::Syntax::TYPE_ERR
         || matches!(
             name,
-            "VjpRun"
+            "VJPRun"
                 | "Group"
                 | "DataJoin"
                 | "DataSnapshot"
@@ -3266,8 +3311,8 @@ fn compiler_owned_vjp_run(module: &str) -> TirTypeDef {
     };
     TirTypeDef {
         module: module.to_string(),
-        key: "VjpRun".to_string(),
-        name: "VjpRun".to_string(),
+        key: "VJPRun".to_string(),
+        name: "VJPRun".to_string(),
         span,
         public: true,
         package_public: false,

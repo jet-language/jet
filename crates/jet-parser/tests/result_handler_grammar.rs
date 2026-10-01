@@ -99,3 +99,44 @@ fn run(value: Int Error!, optional: String) {
         ) && matches!(failure.as_ref(), Expr::Ident(name, _) if name == "error")
     ));
 }
+
+#[test]
+fn pointer_mark_leaves_the_failure_contract_and_union_to_the_enclosing_type() {
+    let source = r#"
+fn from_addr<T>(addr: Int) -> *T Never! { todo }
+fn either(value: *Node | Label) {}
+"#;
+    let (tokens, lexer_diagnostics) = Lexer::lex(source);
+    assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+    let program = Parser::parse(&tokens).expect("pointer types should parse");
+    let function = |name| {
+        program.items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == name => Some(function),
+            _ => None,
+        })
+    };
+    let is_pointer_to = |ty: &Type, element: &str| {
+        matches!(ty, Type::Apply { name, args } if name == "Ptr"
+            && matches!(args.as_slice(), [Type::Named(inner)] if inner == element))
+    };
+    assert!(
+        matches!(
+            function("from_addr").and_then(|function| function.return_type.as_ref()),
+            Some(Type::Result { ok, err }) if is_pointer_to(ok, "T") && err.is_never()
+        ),
+        "`*T Never!` must be a `Never!` contract over `*T`"
+    );
+    let either = function("either").expect("either");
+    assert!(
+        matches!(
+            &either.params[0].ty,
+            Type::Union(members)
+                if members.len() == 2
+                    && members.iter().any(|member| is_pointer_to(member, "Node"))
+                    && members
+                        .iter()
+                        .any(|member| matches!(member, Type::Named(name) if name == "Label"))
+        ),
+        "`*Node | Label` must be a union with a `*Node` member"
+    );
+}

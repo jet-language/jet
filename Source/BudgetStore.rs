@@ -1311,7 +1311,7 @@ fn canonical_decompose(code: u32, out: &mut Vec<u32>) {
         }
         return;
     }
-    use jet_foundation::generated::UnicodeTables::{UNICODE_DECOMP_INDEX, UNICODE_DECOMP_POOL};
+    use jet_unicode::{UNICODE_DECOMP_INDEX, UNICODE_DECOMP_POOL};
     if let Ok(index) = UNICODE_DECOMP_INDEX.binary_search_by_key(&code, |entry| entry.0) {
         let (_, offset, length, canonical) = UNICODE_DECOMP_INDEX[index];
         if canonical == 1 {
@@ -1324,7 +1324,7 @@ fn canonical_decompose(code: u32, out: &mut Vec<u32>) {
     out.push(code)
 }
 fn ccc(code: u32) -> u8 {
-    use jet_foundation::generated::UnicodeTables::UNICODE_CCC;
+    use jet_unicode::UNICODE_CCC;
     let mut low = 0usize;
     let mut high = UNICODE_CCC.len();
     while low < high {
@@ -1359,7 +1359,7 @@ fn compose(left: u32, right: u32) -> Option<u32> {
     {
         return Some(left + right - TBASE);
     }
-    use jet_foundation::generated::UnicodeTables::UNICODE_COMPOSE_PAIRS;
+    use jet_unicode::UNICODE_COMPOSE_PAIRS;
     UNICODE_COMPOSE_PAIRS
         .binary_search_by_key(&(left, right), |entry| (entry.0, entry.1))
         .ok()

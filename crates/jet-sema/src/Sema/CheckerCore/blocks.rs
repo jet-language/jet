@@ -137,6 +137,10 @@ impl<'a> Checker<'a> {
         if pushed_frame {
             self.liveness_frames.push((saved_ptr, saved_len));
         }
+        // D-FLOWTYPE1=A: exiting `x == None` guards whose payload proof
+        // continues past them. They are rewritten once the whole block is
+        // checked, so the checks of later statements still see the guards.
+        let mut exit_guards = Vec::new();
         for i in 0..stmts.len() {
             if i > 0 {
                 self.emit_unreachable_after_loop(&stmts[i - 1], &stmts[i]);
@@ -156,7 +160,13 @@ impl<'a> Checker<'a> {
                 }
             } else {
                 let diagnostics_start = self.diags.len();
+                let exit_guard = self.optional_exit_guard_subject(&stmts[i]);
                 self.check_stmt(&mut stmts[i]);
+                if let Some(name) = exit_guard {
+                    if self.flow.narrow.get_at(&name, self.scope_depth()).is_some() {
+                        exit_guards.push((i, name));
+                    }
+                }
                 if i + 2 == stmts.len() {
                     if let Some(span) = redundant_tail_span {
                         let checked = self.diags.split_off(diagnostics_start);
@@ -166,6 +176,9 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+        for (i, name) in exit_guards {
+            self.rewrite_optional_exit_guard(&mut stmts[i], &name);
         }
         if stmts.is_empty() {
             if let Some((expected, block_span)) = value_tail {
@@ -179,6 +192,30 @@ impl<'a> Checker<'a> {
         self.stmt_tail_len = saved_len;
         if new_scope {
             self.pop_scope();
+        }
+    }
+
+    /// Check a statement run inside a scope its owner already opened (loop
+    /// bodies share the loop-variable scope). Exiting `x == None` guards are
+    /// rewritten afterwards exactly as in `check_block_inner` (D-FLOWTYPE1=A).
+    pub(crate) fn check_stmts_in_scope(&mut self, stmts: &mut [Stmt]) {
+        let mut exit_guards = Vec::new();
+        let last = stmts.len().saturating_sub(1);
+        for (i, stmt) in stmts.iter_mut().enumerate() {
+            let exit_guard = if i < last {
+                self.optional_exit_guard_subject(stmt)
+            } else {
+                None
+            };
+            self.check_stmt(stmt);
+            if let Some(name) = exit_guard {
+                if self.flow.narrow.get_at(&name, self.scope_depth()).is_some() {
+                    exit_guards.push((i, name));
+                }
+            }
+        }
+        for (i, name) in exit_guards {
+            self.rewrite_optional_exit_guard(&mut stmts[i], &name);
         }
     }
     fn tail_has_authored_semicolon(&self, span: Span) -> bool {
@@ -220,7 +257,20 @@ impl<'a> Checker<'a> {
         if !self.flow.reachable {
             // Source after an earlier exit is still checked for its own
             // diagnostics, but cannot be the block's reachable value tail.
-            self.check_stmt(stmt);
+            // A dead value line keeps the promised type as context (so a
+            // bare `None` still types) without being compared against it
+            // or treated as a discarded statement value. A dead diverging
+            // line such as `panic(...)` stays statement-shaped, exactly as
+            // on the reachable path.
+            match stmt {
+                Stmt::Expr(expr)
+                    if !self.tail_has_authored_semicolon(expr.span())
+                        && !self.is_diverging_tail(expr) =>
+                {
+                    self.infer_with_expected(expr, expected);
+                }
+                _ => self.check_stmt(stmt),
+            }
             return;
         }
         match stmt {

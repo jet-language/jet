@@ -1,27 +1,57 @@
 // Lower resolved cross-module TIR calls through their canonical function identity.
-fn jet_codegen_lower_module_call(builder: &JetCodegenBuilder, expression: TExpr, target: TFunctionRef, form: TModuleCallForm, target_return: Type?, type_args: [Type], args: [TCallArg]) -> MirValueId {
+use jet_foundation.[
+    MIRCallee,
+    MIROperation,
+    MIRType,
+    MIRValueID,
+    TCallArg,
+    TExpr,
+    TFunctionRef,
+    TModuleCallForm,
+    TTryConvert,
+    Type,
+]
+
+fn jet_codegen_lower_module_call(builder: &JetCodegenBuilder, expression: TExpr, target: TFunctionRef, form: TModuleCallForm, target_return: Type?, type_args: [Type], args: [TCallArg]) -> MIRValueID {
     // The Rust projection is provenance only; resolve calls from the canonical TFunctionRef.
     function := jet_codegen_find_function_by_key(builder.functions, target.key, target.module_identity) ?? panic("checked module call target has no reachable TFunc")
     if function.name != target.name -> panic("checked module call target name disagrees with its canonical TFunc")
 
     lowered_args := jet_codegen_lower_call_args(&builder, args, function.params)
-    lowered_type_args := [MirType]{}
-    loop ty in type_args -> &lowered_type_args.push(jet_codegen_lower_type_for_function(ty, &builder))
+    lowered_type_args := [MIRType]{}
+    loop ty in type_args -> &lowered_type_args.push(jet_codegen_lower_type_for_function(ty, builder))
+    // #3740: a plain-return callee (`T Never!`) is reconciled exactly like a
+    // direct call. A `??` or `?` subject names the checked carrier on the
+    // expression itself and has no adapter return.
+    plain_return := Type?{None}
+    if function.generic_params.len() == 0 || function.generic_params.len() == type_args.len() {
+        returned := jet_codegen_executable_function_return_type(function, type_args)
+        plain := if target_return == {
+            None -> jet_codegen_is_plain_call_return(returned, expression.ty)
+            Val(target_type) -> if {
+                jet_codegen_is_plain_return(returned) -> !jet_codegen_is_plain_return(target_type)
+                else -> jet_codegen_is_plain_call_return(returned, target_type)
+            }
+        }
+        if plain -> plain_return = Val(returned)
+    }
     call_type := target_return ?? expression.ty
+    if plain_return == .Val(returned) -> call_type = returned
     value := jet_codegen_emit_value(
         &builder,
         expression.span,
         call_type,
-        MirOperation.Call{callee: MirCallee.User{function: jet_codegen_function_id(function)}, args: lowered_args, type_args: lowered_type_args},
+        MIROperation.Call{callee: MIRCallee.User{function: jet_codegen_function_id(function)}, args: lowered_args, type_args: lowered_type_args},
     )
+    if plain_return == .Val(returned) -> return jet_codegen_reconcile_plain_call_return(&builder, expression, target.key, value, returned)
 
     if target_return == {
         None -> return value
-        Val(target) -> {
-            if target != expression.ty {
-                if target == {
-                    .Result(_, _) | .Option(_) -> return jet_codegen_lower_try_value(&builder, expression, value, target, expression.span, None, TTryConvert.NoConversion, None, 0, None, false)
-                    else -> return jet_codegen_collection_trait_box_value(&builder, value, target, expression.ty, expression.span)
+        Val(target_type) -> {
+            if target_type != expression.ty {
+                if target_type == {
+                    .Result(_, _) | .Option(_) -> return jet_codegen_lower_try_value(&builder, expression, value, target_type, expression.span, None, TTryConvert.NoConversion, None, 0, None, false)
+                    else -> return jet_codegen_collection_trait_box_value(&builder, value, target_type, expression.ty, expression.span)
                 }
             }
             return value

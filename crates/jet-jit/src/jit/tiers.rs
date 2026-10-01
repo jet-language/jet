@@ -437,13 +437,6 @@ fn append_operation_targets(
     }
 }
 
-fn selected_function_ids(
-    program: &MirProgram,
-    artifact: MirArtifactId,
-) -> BTreeSet<MirFunctionId> {
-    selected_function_ids_with_roots(program, artifact, &[])
-}
-
 fn seed_roots_with_helpers(
     mut selected: BTreeSet<MirFunctionId>,
     helper_roots: &[MirFunctionId],
@@ -522,10 +515,6 @@ pub(crate) fn plan_mir_tiers_with_roots(
 /// unrelated functions never turn a resident run into a whole-program deopt.
 pub fn plan_mir_tiers(program: &MirProgram, artifact: MirArtifactId) -> MirTierPlan {
     plan_mir_tiers_with_roots(program, artifact, &[])
-}
-
-pub(crate) fn mir_function_ids(plan: &MirTierPlan) -> impl Iterator<Item = MirFunctionId> + '_ {
-    plan.native.iter().copied()
 }
 
 #[cfg(test)]

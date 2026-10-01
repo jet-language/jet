@@ -1,6 +1,23 @@
 // Reflection call contracts and the shared displayability gate used by
 // `core.reflect.of`. Runtime reflection may expose only values accepted by the
 // same semantic predicate as display interpolation.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    InternalTag,
+    ParamZone,
+    Span,
+    TExpr,
+    TExprKind,
+    THandleOp,
+    THostCall,
+    TagMarker,
+    Type,
+    type_name,
+]
 
 fn sema_call_reflection_leaf_name(name: String) -> String Never! {
     parts := name.split("::").to_list()
@@ -47,7 +64,8 @@ fn sema_call_reflection_core_shown(name: String) -> Bool Never! {
 }
 
 fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment) -> Bool Never! {
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params) ?? false
 }
 

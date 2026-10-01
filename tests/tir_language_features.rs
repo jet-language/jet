@@ -390,25 +390,25 @@ fn distinct_types() {
         return;
     }
     let src = "\
-UserId :: distinct Int
+UserID :: distinct Int
 #Numeric Meters :: distinct Float
 #UnitFamily(Currency) { usd }
 
-fn greet(id: UserId) -> String {
+fn greet(id: UserID) -> String {
     return \"user {(id.raw())}\"
 }
 fn run() {
-    uid :: UserId.from_int(42)
+    uid :: UserID.from_int(42)
     print(greet(uid))
     a :: Meters.from_float(3.0)
     b :: Meters.from_float(1.5)
     c :: a + b
     print(\"{(c.raw())} m\")
-    x :: UserId.from_int(7)
-    y :: UserId.from_int(7)
+    x :: UserID.from_int(7)
+    y :: UserID.from_int(7)
     print(\"{(x == y)}\")
-    from_byte :: UserId.from_u8(8)
-    from_float :: UserId.from_float(9.9) ?? UserId.from_int(0)
+    from_byte :: UserID.from_u8(8)
+    from_float :: UserID.from_float(9.9) ?? UserID.from_int(0)
     print(\"{(from_byte.raw())} {(from_float.raw())}\")
     meters :: Meters.from_int(3)
     dollars :: Usd.from_int(5)
@@ -446,25 +446,25 @@ fn distinct_and_unit_numeric_source_matrix() {
         return;
     }
     let src = "\
-UserId :: distinct Int
+UserID :: distinct Int
 Label :: distinct String
 #UnitFamily(Currency) { usd }
 
-fn checked_user(value: U64) -> UserId String! { return UserId.from_u64(value) }
-fn pass_user(value: UserId String!) -> UserId String! { return ~value }
+fn checked_user(value: U64) -> UserID String! { return UserID.from_u64(value) }
+fn pass_user(value: UserID String!) -> UserID String! { return ~value }
 
 fn run() {
-    fallback :: UserId.from_int(0)
-    print(UserId.from_i8(-8).raw())
-    print(UserId.from_i16(-16).raw())
-    print(UserId.from_i32(-32).raw())
-    print(UserId.from_int(-64).raw())
-    print(UserId.from_u8(8).raw())
-    print(UserId.from_u16(16).raw())
-    print(UserId.from_u32(32).raw())
+    fallback :: UserID.from_int(0)
+    print(UserID.from_i8(-8).raw())
+    print(UserID.from_i16(-16).raw())
+    print(UserID.from_i32(-32).raw())
+    print(UserID.from_int(-64).raw())
+    print(UserID.from_u8(8).raw())
+    print(UserID.from_u16(16).raw())
+    print(UserID.from_u32(32).raw())
     print((pass_user(checked_user(64)) ?? fallback).raw())
-    print((UserId.from_f32(3.75) ?? fallback).raw())
-    print((UserId.from_float(4.75) ?? fallback).raw())
+    print((UserID.from_f32(3.75) ?? fallback).raw())
+    print((UserID.from_float(4.75) ?? fallback).raw())
     print(Usd.from_i8(-8).raw())
     print(Usd.from_i16(-16).raw())
     print(Usd.from_i32(-32).raw())

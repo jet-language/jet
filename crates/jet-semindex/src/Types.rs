@@ -894,10 +894,6 @@ impl SemIndex {
         &self.definition_facts
     }
 
-    pub fn members_of(&self, owner: &str) -> Vec<&MemberFact> {
-        self.members.iter().filter(|m| m.owner == owner).collect()
-    }
-
     pub fn effect_of(&self, function: &str) -> Option<&EffectFact> {
         self.effects.iter().find(|e| e.function == function)
     }

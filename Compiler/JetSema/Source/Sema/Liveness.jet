@@ -1,0 +1,59 @@
+// D-STRUCT-LIVE1=A / D-LINT-UNUSED1: L0103 reports a private import whose
+// local name the file never reads. The parser records which import names the
+// file spells outside its import declarations (`Program.used_import_names`),
+// so every spelled read counts, including impl heads (`impl Local.types.Named`,
+// D-IMPLDOT1), `prep` bodies and interpolations. C headers stay outside
+// liveness because importing a bridge can have link-time meaning even when no
+// Jet name is read; foreign bindings stay outside for the same reason.
+use jet_foundation.[
+    Diagnostic,
+    Program,
+    Span,
+    TextEdit,
+    diagnostic_with_edit,
+]
+
+pub fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String]) -> [Diagnostic] {
+    diagnostics := [Diagnostic]{}
+    loop declaration in program.imports {
+        if declaration.is_pub || declaration.is_package_pub -> next
+        if declaration.kind == {
+            .File(path, _) -> {
+                if path.ends_with(".h") -> next
+                explicit_alias :: declaration.alias_span.start > declaration.span.start
+                span :: if explicit_alias -> declaration.alias_span else -> declaration.span
+                edit :: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: span, new_text: ""}
+                sema_liveness_note_import(program, foreign_aliases, declaration.alias, span, edit, &diagnostics)
+            }
+            .Module(_, path_span) -> {
+                // `use core.files as files` renames the alias; an unaliased
+                // path import is removed whole.
+                explicit_alias :: declaration.alias_span.start >= path_span.end
+                span :: if explicit_alias -> declaration.alias_span else -> Span{start: path_span.end - declaration.alias.len(), end: path_span.end}
+                edit :: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: declaration.span, new_text: ""}
+                sema_liveness_note_import(program, foreign_aliases, declaration.alias, span, edit, &diagnostics)
+            }
+            .Unqualified(_, module_alias_span, items, _, _) -> {
+                loop (index, item) in items {
+                    local :: sema_registration_import_local(item)
+                    span := module_alias_span
+                    if {
+                        index < declaration.local_spans.len() -> span = declaration.local_spans[index]
+                        index < declaration.item_spans.len() -> span = declaration.item_spans[index]
+                    }
+                    // A member without `as` keeps its path: `mem` becomes `mem as _mem`.
+                    replacement :: if item.alias == None -> "{local} as _{local}" else -> "_{local}"
+                    sema_liveness_note_import(program, foreign_aliases, local, span, TextEdit{span: span, new_text: replacement}, &diagnostics)
+                }
+            }
+        }
+    }
+    diagnostics
+}
+
+fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: String, span: Span, edit: TextEdit, diagnostics: &[Diagnostic]) Never! {
+    if name == "" || name.starts_with("_") || span.start >= span.end -> return
+    if program.used_import_names.contains(name) || foreign_aliases.contains(name) -> return
+    diagnostic :: sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
+    &diagnostics.push(diagnostic_with_edit(diagnostic, edit))
+}

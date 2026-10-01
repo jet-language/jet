@@ -723,6 +723,10 @@ pub struct TraitDef {
     pub is_package_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// D-TRAIT-OVERLOAD1=A: `trait Name: [A, B] { … }` — the traits this one
+    /// builds on. A bound on `Name` admits their operators and methods, and an
+    /// implementation of `Name` requires each of them.
+    pub supertraits: Vec<String>,
     /// D-LIB2: `type Name;` associated type declarations inside the trait body.
     pub assoc_types: Vec<(String, Span)>,
     pub methods: Vec<TraitMethodSig>,
@@ -1972,12 +1976,6 @@ pub struct Marker {
 impl Marker {
     pub fn expr_arg(&self, index: usize) -> Option<&Expr> {
         self.args.get(index).and_then(super::MarkerCallArg::as_expr)
-    }
-
-    pub fn expr_arg_mut(&mut self, index: usize) -> Option<&mut Expr> {
-        self.args
-            .get_mut(index)
-            .and_then(super::MarkerCallArg::as_expr_mut)
     }
 
     pub fn expr_args(&self) -> impl Iterator<Item = &Expr> {

@@ -258,6 +258,8 @@ pub(crate) struct Cx {
     /// including transitive computed-field dependencies.
     pub(crate) memo_dependencies: HashMap<String, HashMap<String, HashSet<String>>>,
     pub(crate) src: String,
+    /// Line-start index of `src`, built on first use by [`Cx::src_lines`].
+    pub(crate) src_line_index: std::sync::OnceLock<jet_foundation::Diagnostics::LineIndex>,
     pub(crate) file: String,
     /// Rust module alias for this loaded source file, when it is emitted as a
     /// file module.  TIR uses this only to keep the source package's internal
@@ -507,6 +509,31 @@ pub(crate) fn is_json_type_name(name: &str) -> bool {
     Syntax::is_data_type_name(name)
 }
 
+/// Whether a checked pattern subject is the dynamic `DataTree` value. User
+/// enums may declare the same variant names (`Int`, `Text`, `Null`, …), so a
+/// variant pattern takes the DataTree owner only from its subject type, never
+/// from the variant name alone.
+pub(crate) fn is_data_tree_subject(cx: &Cx, subject_ty: &Type) -> bool {
+    match subject_ty.without_user_tags() {
+        Type::Named(name) | Type::Apply { name, .. } => {
+            is_json_type_name(name)
+                || super::TIR::canonical_enum_owner(cx, name) == Syntax::TYPE_DATA
+        }
+        _ => false,
+    }
+}
+
+/// Whether a checked pattern subject is the terminal `Key` enum, whose variant
+/// names (`Char`, `Up`, …) user enums may also declare.
+pub(crate) fn is_key_subject(cx: &Cx, subject_ty: &Type) -> bool {
+    match subject_ty.without_user_tags() {
+        Type::Named(name) | Type::Apply { name, .. } => {
+            super::TIR::canonical_enum_owner(cx, name) == Syntax::TYPE_KEY
+        }
+        _ => false,
+    }
+}
+
 // D-DBDRIVER1: the `DBValue` dynamic tagged SQL value — same construction
 // mechanism as `Data`/`JSON`, mirrored via `jet_std::DBValue`.
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
@@ -517,21 +544,21 @@ pub(crate) fn is_db_value_type_name(name: &str) -> bool {
 /// dedicated `JetUiServiceResult<...>` projections below.
 pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
     const RESULT_ALIASES: &[&str] = &[
-        "UiServiceResult",
-        "UiFileFilterResult",
-        "UiFsGrantResult",
-        "UiShortcutResult",
+        "UIServiceResult",
+        "UIFileFilterResult",
+        "UIFSGrantResult",
+        "UIShortcutResult",
         "UiShortcutBindingResult",
-        "UiAccessibilityResult",
-        "UiFileDialogResult",
-        "UiClipboardTextResult",
-        "UiClipboardWriteResult",
-        "UiImeResult",
-        "UiDragResult",
-        "UiShortcutDispatchResult",
-        "UiAccessibilityNodeResult",
-        "UiAccessibilityAttachResult",
-        "UiAccessibilityProjectionResult",
+        "UIAccessibilityResult",
+        "UIFileDialogResult",
+        "UIClipboardTextResult",
+        "UIClipboardWriteResult",
+        "UIIMEResult",
+        "UIDragResult",
+        "UIShortcutDispatchResult",
+        "UIAccessibilityNodeResult",
+        "UIAccessibilityAttachResult",
+        "UIAccessibilityProjectionResult",
     ];
     if RESULT_ALIASES.contains(&name) {
         return None;
@@ -571,17 +598,17 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Size" => Some("JetSize"),
         "Rect" => Some("JetRect"),
         "SizeConstraint" => Some("JetSizeConstraint"),
-        "UiNode" => Some("JetUiNode"),
+        "UINode" => Some("JetUiNode"),
         "FontStyle" => Some("JetFontStyle"),
         "FontFace" => Some("JetFontFace"),
         "Glyph" => Some("JetGlyph"),
         "GlyphRun" => Some("JetGlyphRun"),
         "GlyphShaper" => Some("JetGlyphShaper"),
-        "UiAriaRole" => Some("JetUiAriaRole"),
+        "UIAriaRole" => Some("JetUiAriaRole"),
         "InputEvent" => Some("JetInputEvent"),
         "EventResult" => Some("JetEventResult"),
         "NullBackend" => Some("JetNullBackend"),
-        "TuiBackend" => Some("JetTuiBackend"),
+        "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
         // D-AUTH1=A: authentication carriers are Prelude-root values.
         "Session" => Some("JetAuthSession"),
@@ -712,10 +739,10 @@ pub(crate) fn history_rust_type_name(name: &str) -> Option<&'static str> {
         Some(_) => None,
         None => match name {
             "Count" => Some("Count"),
-            "HandleId" => Some("HandleId"),
-            "TaskId" => Some("TaskId"),
-            "EventId" => Some("EventId"),
-            "HistoryRng" => Some("HistoryRng"),
+            "HandleID" => Some("HandleID"),
+            "TaskID" => Some("TaskID"),
+            "EventID" => Some("EventID"),
+            "HistoryRNG" => Some("HistoryRNG"),
             "HistoryValue" => Some("HistoryValue"),
             "HistoryPrecondition" => Some("HistoryPrecondition"),
             "HistoryCase" => Some("HistoryCase"),
@@ -806,12 +833,11 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "DispatchState" => Some("JetDispatchState"),
         "HookPolicy" => Some("JetHookPolicy"),
         "EventConfigError" => Some("JetEventConfigError"),
-        "Stopwatch" => Some("Stopwatch"),
         "TestSuite" => Some("JetTestSuite"),
         "TestComparison" => Some("JetTestComparison"),
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
-        "Rng" => Some("Rng"),
+        "RNG" => Some("RNG"),
         "Fake" => Some("Fake"),
         // D-SOLVER-LIB1=A: explicit finite solver state.
         "Solver" => Some("Solver"),
@@ -852,7 +878,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         n if n == Syntax::TYPE_SENDER => Some("JetSender"),
         "Closed" => Some("Closed"),
         "Pool" => Some("JetPool"),
-        "Id" => Some("JetId"),
+        "ID" => Some("JetId"),
         n if n == Syntax::TYPE_TASK_FAILURE => Some("JetTaskFailure"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
@@ -1008,7 +1034,7 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Limits" => Some("Limits"),
         "SMTPAuth" => Some("SMTPAuth"),
         "TLSTrust" => Some("TLSTrust"),
-        "DkimConfig" => Some("DkimConfig"),
+        "DKIMConfig" => Some("DKIMConfig"),
         "SMTPConfig" => Some("SMTPConfig"),
         "Mailer" => Some("Mailer"),
         _ => None,
@@ -1165,7 +1191,7 @@ pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
         "ComputeError" => Some("JetComputeError"),
         "ComputeDevice" => Some("JetComputeDevice"),
         "ComputeStream" => Some("JetComputeStream"),
-        "VjpRun" => Some("JetComputeVjpRun"),
+        "VJPRun" => Some("JetComputeVjpRun"),
         "SparseTensor" => Some("JetSparseCsr"),
         _ => None,
     }
@@ -1202,7 +1228,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "SocketAddr" => Some("JetSocketAddr"),
         "UdpSocket" => Some("JetUDPSocket"),
         "UDPPacket" => Some("JetUDPPacket"),
-        "DNSSrv" => Some("JetDNSSrv"),
+        "DNSSRV" => Some("JetDNSSrv"),
         "UnixListener" => Some("JetUnixListener"),
         "UnixStream" => Some("JetUnixStream"),
         "TLSStream" => Some("JetTLSStream"),
@@ -1244,7 +1270,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HTTPHandler" => Some("JetHTTPHandler"),
         "HTTPServer" => Some("JetHTTPServer"),
         "HTTPShutdownReport" => Some("JetHTTPShutdownReport"),
-        "HTTPServerTls" => Some("JetHTTPServerTls"),
+        "HTTPServerTLS" => Some("JetHTTPServerTls"),
         // D-WS1=B: WebSocket values are Prelude-owned runtime carriers.
         "WsConn" => Some("JetWsConn"),
         "WsError" => Some("JetWsError"),
@@ -1269,6 +1295,26 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
 }
 
 impl Cx {
+    /// Line-start index of `src`. Lowering asks for positions of nearly every
+    /// expression, so the index is built once instead of scanning from byte 0
+    /// per query (quadratic on large units).
+    pub(crate) fn src_lines(&self) -> &jet_foundation::Diagnostics::LineIndex {
+        self.src_line_index
+            .get_or_init(|| jet_foundation::Diagnostics::LineIndex::new(&self.src))
+    }
+
+    /// 1-based (line, column) of `offset` in `src`; the same answer as
+    /// `Diagnostics::span_line_col(&self.src, offset)`.
+    pub(crate) fn src_line_col(&self, offset: usize) -> (usize, usize) {
+        self.src_lines().line_col(&self.src, offset)
+    }
+
+    /// Text of 1-based `line` of `src`, as `self.src.lines().nth(line - 1)`
+    /// yields it ("" past the end).
+    pub(crate) fn src_line_text(&self, line: usize) -> &str {
+        self.src_lines().line_text(&self.src, line)
+    }
+
     pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
         self.persist_types.get(name).map(|_| {
             let module = if self.module_identity.is_empty() {
@@ -1700,7 +1746,7 @@ impl Cx {
             (Some("core.email"), "SMTPAuth") => Some("SMTPAuth"),
             (Some("core.email"), "TLSTrust") => Some("TLSTrust"),
             (Some("core.email"), "SMTPConfig") => Some("SMTPConfig"),
-            (Some("core.email"), "DkimConfig") => Some("DkimConfig"),
+            (Some("core.email"), "DKIMConfig") => Some("DKIMConfig"),
             (Some("core.email"), "Mailer") => Some("Mailer"),
             (Some("core.encoding.json"), "JSONReader") => Some("JSONReader"),
             (Some("core.encoding.json"), "JSONWriter") => Some("JSONWriter"),
@@ -2700,7 +2746,7 @@ impl Cx {
                 format!("{}jet_email::SMTPAuth<{}::Secret>", self.root_prefix, ffi)
             }
             Type::Named(name)
-                if matches!(name.as_str(), "DkimConfig" | "SMTPConfig")
+                if matches!(name.as_str(), "DKIMConfig" | "SMTPConfig")
                     && !self.type_names.contains(name) =>
             {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
@@ -2755,20 +2801,20 @@ impl Cx {
                 format!("{}Jet{}", self.root_prefix, name)
             }
             Type::Named(name)
-                if name == "UiFileFilterResult" && !self.type_names.contains(name) =>
+                if name == "UIFileFilterResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<{}JetUiFileFilter>",
                     self.root_prefix, self.root_prefix
                 )
             }
-            Type::Named(name) if name == "UiFsGrantResult" && !self.type_names.contains(name) => {
+            Type::Named(name) if name == "UIFSGrantResult" && !self.type_names.contains(name) => {
                 format!(
                     "{}JetUiServiceResult<{}JetUiFsGrant>",
                     self.root_prefix, self.root_prefix
                 )
             }
-            Type::Named(name) if name == "UiShortcutResult" && !self.type_names.contains(name) => {
+            Type::Named(name) if name == "UIShortcutResult" && !self.type_names.contains(name) => {
                 format!(
                     "{}JetUiServiceResult<{}JetUiShortcut>",
                     self.root_prefix, self.root_prefix
@@ -2783,7 +2829,7 @@ impl Cx {
                 )
             }
             Type::Named(name)
-                if name == "UiAccessibilityResult" && !self.type_names.contains(name) =>
+                if name == "UIAccessibilityResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<{}JetUiAccessibility>",
@@ -2791,7 +2837,7 @@ impl Cx {
                 )
             }
             Type::Named(name)
-                if name == "UiFileDialogResult" && !self.type_names.contains(name) =>
+                if name == "UIFileDialogResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<{}JetUiFileDialogSelection>",
@@ -2799,7 +2845,7 @@ impl Cx {
                 )
             }
             Type::Named(name)
-                if name == "UiClipboardTextResult" && !self.type_names.contains(name) =>
+                if name == "UIClipboardTextResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<{}JetUiClipboardText>",
@@ -2807,27 +2853,27 @@ impl Cx {
                 )
             }
             Type::Named(name)
-                if name == "UiClipboardWriteResult" && !self.type_names.contains(name) =>
+                if name == "UIClipboardWriteResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<{}JetUiClipboardWrite>",
                     self.root_prefix, self.root_prefix
                 )
             }
-            Type::Named(name) if name == "UiImeResult" && !self.type_names.contains(name) => {
+            Type::Named(name) if name == "UIIMEResult" && !self.type_names.contains(name) => {
                 format!(
                     "{}JetUiServiceResult<Option<{}JetUiImeEvent>>",
                     self.root_prefix, self.root_prefix
                 )
             }
-            Type::Named(name) if name == "UiDragResult" && !self.type_names.contains(name) => {
+            Type::Named(name) if name == "UIDragResult" && !self.type_names.contains(name) => {
                 format!(
                     "{}JetUiServiceResult<Option<{}JetUiDragEvent>>",
                     self.root_prefix, self.root_prefix
                 )
             }
             Type::Named(name)
-                if name == "UiShortcutDispatchResult" && !self.type_names.contains(name) =>
+                if name == "UIShortcutDispatchResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<{}JetUiShortcutDispatch>",
@@ -2835,12 +2881,12 @@ impl Cx {
                 )
             }
             Type::Named(name)
-                if name == "UiAccessibilityAttachResult" && !self.type_names.contains(name) =>
+                if name == "UIAccessibilityAttachResult" && !self.type_names.contains(name) =>
             {
                 format!("{}JetUiServiceResult<()>", self.root_prefix)
             }
             Type::Named(name)
-                if name == "UiAccessibilityProjectionResult" && !self.type_names.contains(name) =>
+                if name == "UIAccessibilityProjectionResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<Option<{}JetUiAccessibilityProjection>>",
@@ -2848,7 +2894,7 @@ impl Cx {
                 )
             }
             Type::Named(name)
-                if name == "UiAccessibilityNodeResult" && !self.type_names.contains(name) =>
+                if name == "UIAccessibilityNodeResult" && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}JetUiServiceResult<{}JetUiNode>",
@@ -3019,7 +3065,7 @@ impl Cx {
             {
                 format!("{}JetTensor", self.root_prefix)
             }
-            Type::Apply { name, args } if name == "VjpRun" && args.len() == 1 => {
+            Type::Apply { name, args } if name == "VJPRun" && args.len() == 1 => {
                 format!(
                     "{}JetComputeVjpRun<{}>",
                     self.root_prefix,
@@ -3174,7 +3220,7 @@ impl Cx {
                     };
                     return format!("{}jet_email::{rust}", self.root_prefix);
                 }
-                if matches!(resolved, "SMTPAuth" | "DkimConfig" | "SMTPConfig") {
+                if matches!(resolved, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     return format!(
                         "{}jet_email::{}<{}::Secret>",
@@ -4871,8 +4917,8 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
     {
         let zero = Span::new(0, 0);
         let versions = vec![
-            ("Tls12".to_string(), VariantPayload::Unit),
-            ("Tls13".to_string(), VariantPayload::Unit),
+            ("TLS12".to_string(), VariantPayload::Unit),
+            ("TLS13".to_string(), VariantPayload::Unit),
         ];
         for (variant, _) in &versions {
             cx.variant_owner
@@ -4958,7 +5004,7 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         (
             "SMTPSecurity",
             vec![
-                ("StartTls".to_string(), VariantPayload::Unit),
+                ("StartTLS".to_string(), VariantPayload::Unit),
                 ("TLS".to_string(), VariantPayload::Unit),
             ],
         ),
@@ -5120,12 +5166,12 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
             ("limits".to_string(), Type::Named("Limits".to_string())),
             (
                 "dkim".to_string(),
-                Type::Option(Box::new(Type::Named("DkimConfig".to_string()))),
+                Type::Option(Box::new(Type::Named("DKIMConfig".to_string()))),
             ),
         ],
     );
     cx.struct_fields.insert(
-        "DkimConfig".to_string(),
+        "DKIMConfig".to_string(),
         vec![
             ("domain".to_string(), Type::String),
             ("selector".to_string(), Type::String),
@@ -5291,6 +5337,7 @@ pub(crate) fn build_cx_items(
         memo_fields: HashMap::new(),
         memo_dependencies: HashMap::new(),
         src: src.to_string(),
+        src_line_index: std::sync::OnceLock::new(),
         file: file.to_string(),
         module_alias: String::new(),
         module_identity: String::new(),
@@ -5517,7 +5564,7 @@ pub(crate) fn build_cx_items(
         ("FromEnvironment".to_string(), VariantPayload::Unit),
         ("None".to_string(), VariantPayload::Unit),
         (
-            "Url".to_string(),
+            "URL".to_string(),
             VariantPayload::Single(Type::String, zero),
         ),
     ];
@@ -5593,7 +5640,7 @@ pub(crate) fn build_cx_items(
     cx.cloneable.insert("HTTPCorsOrigins".to_string());
     let mut http_errors = [
         "InvalidMethod",
-        "InvalidUrl",
+        "InvalidURL",
         "InvalidHeader",
         "InvalidStatus",
         "BodyConsumed",
@@ -5643,7 +5690,7 @@ pub(crate) fn build_cx_items(
     cx.cloneable.insert("HTTPOperation".to_string());
     // D-WS1=B
     let mut ws_errors: Vec<(String, VariantPayload)> = [
-        "InvalidUrl",
+        "InvalidURL",
         "InvalidHandshake",
         "Protocol",
         "Timeout",
@@ -7078,7 +7125,7 @@ pub(crate) fn field_type_hashable(
         }
         // D-MEM1 S6: same `Pool`/`Id` split as the backend equality walk above.
         Type::Apply { name, .. } if name == "Pool" => false,
-        Type::Apply { name, .. } if name == "Id" => true,
+        Type::Apply { name, .. } if name == "ID" => true,
         Type::Apply { args, .. } => args
             .iter()
             .all(|a| field_type_hashable(a, types, param_names)),

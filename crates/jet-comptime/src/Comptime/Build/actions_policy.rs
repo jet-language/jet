@@ -1573,13 +1573,6 @@ impl BuildPolicy {
         }
     }
 
-    pub fn deny_wasm_plugins(reason: impl Into<String>) -> Self {
-        BuildPolicy {
-            wasm_plugins: PolicySetting::deny(reason),
-            ..Self::allow_all()
-        }
-    }
-
     pub fn with_plugin_grant(mut self, plugin: impl Into<String>, cap: BuildCapability) -> Self {
         self.plugin_grants
             .entry(plugin.into())

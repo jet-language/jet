@@ -1,5 +1,19 @@
 // Calls through a value whose type is Fn. The callee is checked first, then
 // the same binder/checker path as a named function is used.
+use jet_foundation.[
+    CallArg,
+    Diagnostic,
+    Expr,
+    Lambda,
+    Span,
+    SymbolKind,
+    TContract,
+    TExpr,
+    TExprKind,
+    TStmt,
+    Type,
+    expr_span,
+]
 
 fn sema_call_value_root_name(callee: Expr) -> String? {
     if callee == {
@@ -46,6 +60,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     checked_args := args
     binding :: sema_call_bind_value(resolved_signature, &checked_args, span, &diagnostics) ?? return None
     resolved_defaults := defaults
+    resolved_binding := binding
     if binding.default_refs.len() > 0 {
         if resolved_defaults.len() == 0 {
             if environment.registration_graph == {
@@ -76,7 +91,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     if sema_call_value_root_name(callee) == .Val(root_name) {
         if sema_scope_resolve(scopes, root_name) == .Val(target) {
             if sema_contract_function_for_symbol(environment, target.id) == .Val(contract) {
-                slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], lowered[source_index])
+                slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], checked_args[source_index])
                 checked_contract :: sema_contract_check_call(contract, &lowered, slots, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 contract_bindings = checked_contract.bindings
                 contract_nodes = checked_contract.contracts
@@ -107,13 +122,15 @@ fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, envi
     context.lambda_escapes = previous_escapes
     lambda_value :: checked_lambda ?? return None
     signature :: lambda_value.ty
-    executable :: if lambda_value.kind == .Lambda(value) -> Val(value.executable) else -> None
+    executable :: if lambda_value.kind == .Lambda(lambda_body) -> Val(lambda_body.executable) else -> None
     body := [TStmt]{}
     if executable == {
-        .Block(statements) -> body = statements
-        .SharedBlock(statements) -> body = statements
-        .Expr(value) -> &body.push(TStmt.ExprStmt{value: value, span: value.span})
-        else -> {
+        .Val(executable_body) -> if executable_body == {
+            .Block(statements) -> body = statements
+            .SharedBlock(statements) -> body = statements
+            .Expr(value) -> &body.push(TStmt.ExprStmt{value: value, span: value.span})
+        }
+        .None -> {
             &diagnostics.push(sema_error("E0803", span, "an inline loop body is not executable", "the loop expression must retain its checked block as inline control flow", "use a loop expression parsed as a block"))
             return None
         }

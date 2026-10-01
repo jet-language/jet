@@ -82,14 +82,20 @@ set_default_target_dir "$repo"
 check_target_dir "$repo"
 
 # Select sccache for a cold tree after the shell has made it available.
-# Agent commands keep incremental compilation disabled in either cache mode.
-# JET_NO_SCCACHE=1 opts out.
+# Agent commands keep incremental compilation disabled in either cache mode;
+# the orchestrator's lock-serialized build targets opt in with
+# JET_CARGO_INCREMENTAL=1 (one writer per target, pruned between builds).
+# JET_NO_SCCACHE=1 opts out of sccache.
 ensure_command_resources() {
   # Apply after direnv/nix as well: shell imports may replace the caller's
   # environment. A machine-wide Cargo/test fan-out can exhaust shared RAM.
   export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
   export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
-  export CARGO_INCREMENTAL=0
+  if [ "${JET_CARGO_INCREMENTAL:-0}" = 1 ]; then
+    export CARGO_INCREMENTAL=1
+  else
+    export CARGO_INCREMENTAL=0
+  fi
   # Recursive formatter/parser walks overflow the 2 MiB test-thread default.
   if [ -z "${RUST_MIN_STACK:-}" ]; then
     export RUST_MIN_STACK=8388608
@@ -99,7 +105,7 @@ ensure_command_resources() {
 cache_mode_env() {
   # $1 = checkout root (baked in by the caller — the nix-develop transplant
   # below has no access to this script's variables at runtime).
-  if [ -z "${JET_NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ]; then
+  if [ -z "${JET_NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && [ "${JET_CARGO_INCREMENTAL:-0}" != 1 ]; then
     tgt="${CARGO_TARGET_DIR:-$1/target}"
     if [ ! -d "$tgt/debug" ] && command -v sccache >/dev/null 2>&1; then
       export RUSTC_WRAPPER=sccache

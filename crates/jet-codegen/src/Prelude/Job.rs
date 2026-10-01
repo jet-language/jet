@@ -242,19 +242,6 @@ static JET_JOB_EVENT_SINK: std::sync::LazyLock<
     std::sync::Mutex<Option<JetJobEventSinkHandle>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
 
-/// Install the process-wide sink used by the ordinary generated dispatch path.
-/// Passing `None` restores the bounded in-process collector.
-pub fn jet_job_set_event_sink(sink: Option<JetJobEventSinkHandle>) -> Option<JetJobEventSinkHandle> {
-    let mut current = JET_JOB_EVENT_SINK
-        .lock()
-        .expect("job event sink poisoned");
-    std::mem::replace(&mut *current, sink)
-}
-
-pub fn jet_job_event_history() -> Vec<crate::JetDevtoolsEvent> {
-    JET_JOB_EVENT_COLLECTOR.snapshot()
-}
-
 fn jet_job_event_sink() -> JetJobEventSinkHandle {
     JET_JOB_EVENT_SINK
         .lock()
@@ -1310,34 +1297,6 @@ where
         scope_enter,
     );
 }
-fn jet_job_legacy_specs(jobs: &[JetJobEntry]) -> Vec<JetJobSpec> {
-    jobs.iter()
-        .copied()
-        .map(|entry| JetJobSpec {
-            entry,
-            payload_type: None,
-            queue_invoke: None,
-            dispatch: JetJobDispatch::Direct,
-            packages: &[],
-            working_directory: None,
-            input_paths: &[],
-            output_paths: &[],
-            skip: None,
-            cache: JetJobCachePolicy::Uncached,
-            limits: &[],
-            after: &[],
-            parallel: 1,
-            validate: None,
-        })
-        .collect()
-}
-
-/// Legacy callers are adapted into the typed spec path instead of invoking a
-/// second runtime implementation.
-pub fn jet_job_service_tick(clock: &mut JetJobClock, jobs: &[JetJobEntry], program: &str) {
-    let specs = jet_job_legacy_specs(jobs);
-    jet_job_service_tick_specs_with_sink(clock, &specs, program, jet_job_event_sink(), jet_job_no_scope);
-}
 
 /// Shared schedule decision used by AOT, the resident JIT adapter, the TIR
 /// evaluator, and `jet dev`.
@@ -1493,10 +1452,4 @@ pub fn jet_job_select(argv: &[String], jobs: &[(&str, JetJobScope)]) -> JetJobSe
         }
     }
     JetJobSelection::Unknown
-}
-
-/// Dispatch a legacy entry table through the canonical typed runtime.
-pub fn jet_job_dispatch(argv: &[String], jobs: &[JetJobEntry]) -> bool {
-    let specs = jet_job_legacy_specs(jobs);
-    jet_job_dispatch_specs(argv, &specs, jet_job_no_scope)
 }

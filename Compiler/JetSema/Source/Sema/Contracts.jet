@@ -4,6 +4,43 @@
 // #Pre clauses are caller obligations: this file pins each evaluated argument
 // once, checks the clauses against those pins, and leaves the callee scope's
 // pre list empty so a contract is never evaluated twice.
+use jet_foundation.[
+    AccessConvention,
+    BindPattern,
+    Binding,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Func,
+    Item,
+    LValue,
+    OrFallback,
+    Pattern,
+    Span,
+    Stmt,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TBinaryOp,
+    TCallArg,
+    TContract,
+    TContractDisposition,
+    TContractKind,
+    TContractResult,
+    TContractResultMode,
+    TExpr,
+    TExprKind,
+    TIntegerRange,
+    TLetTy,
+    TLocal,
+    TStmt,
+    Type,
+    expr_span,
+    symbol_id,
+    tir_generated_local,
+    tir_symbol_local,
+    type_name,
+]
 
 pub struct SemaContractDeclaration {
     pub complete: Bool
@@ -333,7 +370,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             if found != None -> return found
             sema_contract_result_ident_in_expr(index)
         }
-        .Slice(base, start, end, range, _, _) -> {
+        .Slice(base, start, end, range, _) -> {
             found := sema_contract_result_ident_in_expr(base)
             if found != None -> return found
             found = sema_contract_result_ident_in_expr(start)
@@ -380,13 +417,23 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             None
         }
         .TypedLit(_, body, _) -> {
-            loop field in body.fields {
-                found :: sema_contract_result_ident_in_expr(field.value)
-                if found != None -> return found
-            }
-            loop value in body.elements {
-                found :: sema_contract_result_ident_in_expr(value)
-                if found != None -> return found
+            if body == {
+                .Fields(fields) -> loop field in fields {
+                    found :: sema_contract_result_ident_in_expr(field.value)
+                    if found != None -> return found
+                }
+                .Elements(elements) -> loop value in elements {
+                    found :: sema_contract_result_ident_in_expr(value)
+                    if found != None -> return found
+                }
+                .Entries(entries) -> loop entry in entries {
+                    key_found :: sema_contract_result_ident_in_expr(entry.key)
+                    if key_found != None -> return key_found
+                    value_found :: sema_contract_result_ident_in_expr(entry.value)
+                    if value_found != None -> return value_found
+                }
+                .Value(value) -> return sema_contract_result_ident_in_expr(value)
+                else -> {}
             }
             None
         }
@@ -610,7 +657,7 @@ pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironmen
     SemaContractDeclaration{complete: complete, post: post, result: result}
 }
 
-fn sema_contract_method_function_for_item(item: Item, target: SymbolId, module_identity: String) -> Func? {
+fn sema_contract_method_function_for_item(item: Item, target: SymbolID, module_identity: String) -> Func? {
     if item == {
         .Struct(value) -> {
             loop method in value.methods {
@@ -632,7 +679,7 @@ fn sema_contract_method_function_for_item(item: Item, target: SymbolId, module_i
     None
 }
 
-pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolId) -> Func? {
+pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolID) -> Func? {
     if environment.registration_graph == .Val(graph) {
         loop module_row in graph.modules {
             loop function in module_row.functions {

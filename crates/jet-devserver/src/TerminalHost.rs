@@ -126,18 +126,6 @@ impl TerminalHostCapabilities {
         }
     }
 
-    pub const fn with_no_color(color_capable: bool, no_color: bool) -> Self {
-        Self::new(
-            color_capable,
-            color_capable,
-            no_color,
-            DEFAULT_TERMINAL_COLUMNS,
-            false,
-            false,
-            TerminalHostAccess::interactive(),
-        )
-    }
-
     pub const fn color() -> Self {
         Self::new(
             true,
@@ -160,11 +148,6 @@ impl TerminalHostCapabilities {
             false,
             TerminalHostAccess::interactive(),
         )
-    }
-
-    pub const fn with_width(mut self, width: usize) -> Self {
-        self.width = if width == 0 { 1 } else { width };
-        self
     }
 
     pub const fn color_enabled(self) -> bool {
@@ -1350,10 +1333,6 @@ impl TerminalHost {
         }
     }
 
-    pub fn render_diff(&self, previous: Option<&TerminalFrame>) -> TerminalDiff {
-        let frame = self.render();
-        previous.map_or_else(|| TerminalDiff::initial(&frame), |old| frame.diff(old))
-    }
     fn move_panel(&mut self, direction: isize) -> TerminalAction {
         let catalog = crate::Devtools::catalog::descriptors();
         if catalog.is_empty() {

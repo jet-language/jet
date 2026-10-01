@@ -107,6 +107,17 @@ impl Stamp {
     }
 }
 
+/// Text form `size:mtime_ns:ctime_ns:inode` of a regular file's stamp, for
+/// hosts that hand stamps to the self-hosted compiler. `None` when the path
+/// is missing or not a regular file, and always on non-Unix hosts.
+pub fn file_stamp(path: &Path) -> Option<String> {
+    let stamp = Stamp::of(path)?;
+    Some(format!(
+        "{}:{}:{}:{}",
+        stamp.size, stamp.modified_ns, stamp.changed_ns, stamp.inode
+    ))
+}
+
 /// The `.jet/stamps` table.
 #[derive(Debug, Default)]
 pub struct StampTable {

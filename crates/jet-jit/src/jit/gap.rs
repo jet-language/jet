@@ -1,4 +1,3 @@
-use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::MIR::MirFunctionId;
 
 /// A Cranelift failure attached to the exact canonical MIR function.
@@ -21,10 +20,4 @@ impl JitGap {
             reason: reason.into(),
         }
     }
-}
-
-/// Retained only as a diagnostic compatibility query.  The MIR adapter never
-/// manufactures this code; unsupported MIR is reported as a compile error.
-pub fn is_e2211(diags: &[Diagnostic]) -> bool {
-    diags.iter().any(|diagnostic| diagnostic.code == "E2211")
 }

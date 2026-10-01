@@ -1,6 +1,48 @@
 // Checked serial source-order schedule and derivation for frame callbacks.
 // Call/resource facts are supplied by the sema caller; this module does not
 // invent identities or completion contracts.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    CoreCallCompletion,
+    CoreCallCompletionKind,
+    CoreCallRecord,
+    CoreCallResourceAccessMode,
+    DerivationPayload,
+    DerivationRecord,
+    DerivationRef,
+    Expr,
+    FrameCompletion,
+    FrameDependency,
+    FrameOperation,
+    FrameRetention,
+    FrameReuse,
+    FrameSchedule,
+    FrameTransfer,
+    MIRDerivationMethod,
+    MIRDerivationRef,
+    MIRFrameCompletion,
+    MIRFrameDependency,
+    MIRFrameOperation,
+    MIRFrameRetention,
+    MIRFrameReuse,
+    MIRFrameSchedule,
+    MIRFrameTransfer,
+    MIRResourceAccess,
+    MIRResourceAccessMode,
+    MIRResourceIdentity,
+    MIRResourceLayout,
+    MIRResourceRegion,
+    ResourceAccess,
+    ResourceAccessMode,
+    ResourceIdentity,
+    ResourceLayout,
+    ResourceRegion,
+    derivation_identity,
+    derivation_record,
+    derivation_record_reference,
+    derivation_record_with_payload,
+]
 
 pub struct SemaFrameScheduleBuild {
     pub schedule: FrameSchedule?
@@ -12,7 +54,7 @@ pub struct SemaFrameScheduleFacts {
     pub explanation: String?
     pub derivation_record: DerivationRecord?
     pub derivation: DerivationRef?
-    pub mir_derivation: MirDerivationRef?
+    pub mir_derivation: MIRDerivationRef?
     pub error: String?
 }
 
@@ -46,7 +88,7 @@ pub fn sema_frame_core_call_operation(record: CoreCallRecord, name: String, args
         })
     }
     completion := FrameCompletion.Synchronous
-    completion_provider := None
+    completion_provider := String?{None}
     if record.frame_completion == {
         .Val(_) -> {
             metadata :: record.frame_completion ?? CoreCallCompletion{kind: CoreCallCompletionKind.Synchronous, token: None, provider: ""}
@@ -133,7 +175,7 @@ fn sema_frame_access_convention(convention: AccessConvention) -> ResourceAccessM
 }
 
 
-pub struct SemaFrameDmaBinding {
+pub struct SemaFrameDMABinding {
     pub transfer_name: String
     pub profile_id: String
     pub channel: String
@@ -143,7 +185,7 @@ pub struct SemaFrameDmaBinding {
 
 pub struct SemaFrameHardwareCall {
     pub operation: FrameOperation?
-    pub dma_start: SemaFrameDmaBinding?
+    pub dma_start: SemaFrameDMABinding?
 }
 
 // Only selected target-machine register facts can create an MMIO resource.
@@ -155,9 +197,9 @@ pub fn sema_frame_hardware_register_operation(receiver: Expr, method: String, so
     block :: sema_hardware_register_block_fact(machine, path.segments[1]) ?? return None
     register :: sema_hardware_register_fact(block, path.segments[2]) ?? return None
     mode := if method == "read" -> ResourceAccessMode.Read else -> ResourceAccessMode.Write
-    resource := "mmio::" + path.profile_id + "::" + block.name + "::" + register.name
+    resource := "mmio::{path.profile_id}::{block.name}::{register.name}"
     Val(FrameOperation{
-        name: "hardware.register." + path.profile_id + "." + block.name + "." + register.name + "." + method,
+        name: "hardware.register.{path.profile_id}.{block.name}.{register.name}.{method}",
         source_index: source_index,
         accesses: [ResourceAccess]{ResourceAccess{resource: ResourceIdentity.Named{name: resource}, mode: mode, region: ResourceRegion.Whole, layout: None, temporary: false}},
         completion: FrameCompletion.Synchronous,
@@ -167,7 +209,7 @@ pub fn sema_frame_hardware_register_operation(receiver: Expr, method: String, so
 }
 
 // Bind the exact checked start token to the source local that receives it.
-pub fn sema_frame_hardware_dma_bind_start(start: SemaFrameDmaBinding, transfer_name: String) -> SemaFrameDmaBinding Never! {
+pub fn sema_frame_hardware_dma_bind_start(start: SemaFrameDMABinding, transfer_name: String) -> SemaFrameDMABinding Never! {
     result := start
     result.transfer_name = transfer_name
     result
@@ -184,9 +226,9 @@ pub fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_ind
     machine :: sema_hardware_target_machine(environment) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     channel :: sema_hardware_dma_channel_fact(machine, path.segments[1], path.segments[2]) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
     buffer :: sema_hardware_expr_name(args[1].expr) ?? return SemaFrameHardwareCall{operation: None, dma_start: None}
-    token := "jet_dma_transfer@" + source_index.to_string()
+    token := "jet_dma_transfer@{source_index}"
     operation := FrameOperation{
-        name: "hardware.dma.start." + path.profile_id + "." + channel,
+        name: "hardware.dma.start.{path.profile_id}.{channel}",
         source_index: source_index,
         accesses: [ResourceAccess]{ResourceAccess{resource: ResourceIdentity.Named{name: buffer}, mode: ResourceAccessMode.Move, region: ResourceRegion.Whole, layout: None, temporary: false}},
         completion: FrameCompletion.Pending{token: token},
@@ -195,18 +237,17 @@ pub fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_ind
     }
     return SemaFrameHardwareCall{
         operation: Val(operation),
-        dma_start: Val(SemaFrameDmaBinding{transfer_name: "", profile_id: path.profile_id, channel: channel, buffer_name: buffer, token: token}),
+        dma_start: Val(SemaFrameDMABinding{transfer_name: "", profile_id: path.profile_id, channel: channel, buffer_name: buffer, token: token}),
     }
 }
 
-pub fn sema_frame_hardware_dma_wait(receiver: Expr, source_index: Int, bindings: [SemaFrameDmaBinding]) -> FrameOperation? {
+pub fn sema_frame_hardware_dma_wait(receiver: Expr, source_index: Int, bindings: [SemaFrameDMABinding]) -> FrameOperation? {
     transfer_name :: sema_hardware_expr_name(receiver) ?? return None
-    binding_result := (loop item in bindings {
-        if item.transfer_name == transfer_name -> break Val(item)
-    } ?? None)
-    binding :: binding_result
+    binding :: loop item in bindings {
+        if item.transfer_name == transfer_name -> break item
+    } ?? return None
     Val(FrameOperation{
-        name: "hardware.dma.wait." + binding.profile_id + "." + binding.channel,
+        name: "hardware.dma.wait.{binding.profile_id}.{binding.channel}",
         source_index: source_index,
         accesses: [ResourceAccess]{ResourceAccess{resource: ResourceIdentity.Named{name: binding.buffer_name}, mode: ResourceAccessMode.Move, region: ResourceRegion.Whole, layout: None, temporary: false}},
         completion: FrameCompletion.Event{token: binding.token},
@@ -235,12 +276,12 @@ pub fn sema_frame_schedule_build(operations: [FrameOperation]) -> SemaFrameSched
                     unknown_alias := left_access.resource == ResourceIdentity.Unknown || right_access.resource == ResourceIdentity.Unknown
                     conflict := sema_frame_mode_writes(left_access.mode) || sema_frame_mode_writes(right_access.mode)
                     if unknown_alias {
-                        &conservative.push(left.name + " and " + right.name + " keep source order because aliasing is unknown")
+                        &conservative.push("{left.name} and {right.name} keep source order because aliasing is unknown")
                         if !conflict -> sema_frame_push_dependency(&dependencies, &dependency_keys, left_index, right_index, "unknown resource", "unknown aliasing")
                     }
                     if conflict {
                         resource := if unknown_alias -> "unknown resource" else -> sema_frame_resource_label(left_access.resource)
-                        reason := left.name + " " + sema_frame_mode_name(left_access.mode) + " -> " + right.name + " " + sema_frame_mode_name(right_access.mode)
+                        reason := "{left.name} {sema_frame_mode_name(left_access.mode)} -> {right.name} {sema_frame_mode_name(right_access.mode)}"
                         sema_frame_push_dependency(&dependencies, &dependency_keys, left_index, right_index, resource, reason)
                     }
                     if left_access.resource == {
@@ -278,14 +319,15 @@ pub fn sema_frame_schedule_produce(operations: [FrameOperation], environment: Se
     if operations.len() == 0 -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: None}
     built := sema_frame_schedule_build(operations)
     if built.schedule == None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: built.error}
-    graph :: environment.registration_graph ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: Val("frame schedule derivation requires registered module identity")}
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: Val("frame schedule derivation requires registered module identity")}
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: Val("frame schedule derivation requires registered module identity")}
     module_path := graph.modules[module_index].module_path
     schedule :: built.schedule ?? FrameSchedule{operations: [FrameOperation]{}, dependencies: [FrameDependency]{}, transfers: [FrameTransfer]{}, reuse: [FrameReuse]{}, retentions: [FrameRetention]{}, conservative: [String]{}}
     premises := [String]{}
-    loop operation in schedule.operations -> &premises.push(operation.name + "@" + operation.source_index.to_string())
+    loop operation in schedule.operations -> &premises.push("{operation.name}@{operation.source_index}")
     identity := derivation_identity(module_path, "", "", source_bytes)
-    record := derivation_record(module_path + "::on_frame@" + lambda_start.to_string(), "checked frame resource schedule", "jet-sema", MirDerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
+    record := derivation_record("{module_path}::on_frame@{lambda_start}", "checked frame resource schedule", "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
     record = derivation_record_with_payload(^record, DerivationPayload.FrameSchedule{schedule: sema_frame_schedule_to_mir(schedule)})
     mir_reference := derivation_record_reference(record)
     SemaFrameScheduleFacts{
@@ -378,11 +420,11 @@ fn sema_frame_check_async_uses(operations: [FrameOperation], events: [FrameEvent
             .Pending(token) -> {
                 event_index := sema_frame_event_index(events, token)
                 if event_index < 0 -> return Val("operation `{operation.name}` has no completion event `{token}`")
-                sema_frame_push_dependency(&dependencies, &keys, index, event_index, "completion", operation.name + " completes at event " + token)
+                sema_frame_push_dependency(&dependencies, &keys, index, event_index, "completion", "{operation.name} completes at event {token}")
                 loop later_index in event_index + 1..<operations.len() {
                     later_operation := operations[later_index]
                     loop access in later_operation.accesses {
-                        if sema_frame_operation_overlaps(operation, access) -> sema_frame_push_dependency(&dependencies, &keys, event_index, later_index, "completion", "event " + token + " releases submitted owners")
+                        if sema_frame_operation_overlaps(operation, access) -> sema_frame_push_dependency(&dependencies, &keys, event_index, later_index, "completion", "event {token} releases submitted owners")
                     }
                 }
             }
@@ -430,11 +472,11 @@ fn sema_frame_reuse(operations: [FrameOperation], events: [FrameEventIndex], con
                 .Named(resource) -> {
                     use_index := sema_frame_use_index(uses, resource)
                     if {
-                        use_index < 0 -> &uses.push(FrameUse{resource: resource, first: index, last: index, temporary: access.temporary, layouts: [ResourceLayout?]{Val(access.layout)}})
+                        use_index < 0 -> &uses.push(FrameUse{resource: resource, first: index, last: index, temporary: access.temporary, layouts: [ResourceLayout?]{access.layout}})
                         else -> {
                             usage := uses[use_index]
-                            usage.first = min(usage.first, index)
-                            usage.last = max(usage.last, index)
+                            if index < usage.first -> usage.first = index
+                            if index > usage.last -> usage.last = index
                             usage.temporary = usage.temporary && access.temporary
                             &usage.layouts.push(access.layout)
                             uses[use_index] = usage
@@ -482,14 +524,14 @@ fn sema_frame_reuse(operations: [FrameOperation], events: [FrameEventIndex], con
                     .Pending(token) -> {
                         if sema_frame_event_index(events, token) >= right.first {
                             legal = false
-                            reason_text = "completion event " + token + " has not occurred"
+                            reason_text = "completion event {token} has not occurred"
                         }
                     }
                     else -> {}
                 }
             }
         }
-        if !legal -> &conservative.push(left.resource + " was not reused for " + right.resource + ": " + reason_text)
+        if !legal -> &conservative.push("{left.resource} was not reused for {right.resource}: {reason_text}")
         &reuse.push(FrameReuse{previous_resource: left.resource, next_resource: right.resource, previous_last_use: left.last, next_first_use: right.first, legal: legal, reason: reason_text})
     }
     sema_frame_sort_reuse(&reuse)
@@ -665,24 +707,25 @@ fn sema_frame_sort_uses(rows: &[FrameUse]) Never! {
 }
 
 fn sema_frame_strings_sorted_unique(values: [String]) -> [String] Never! {
-    loop i in 1..<values.len() {
-        item := values[i]
+    sorted := values
+    loop i in 1..<sorted.len() {
+        item := sorted[i]
         j := i
-        loop j > 0 && values[j - 1] > item {
-            values[j] = values[j - 1]
+        loop j > 0 && sorted[j - 1] > item {
+            sorted[j] = sorted[j - 1]
             j -= 1
         }
-        values[j] = item
+        sorted[j] = item
     }
     output := [String]{}
-    loop value in values {
+    loop value in sorted {
         if output.len() == 0 || output[output.len() - 1] != value -> &output.push(value)
     }
     output
 }
 
 fn sema_frame_explain_access(access: ResourceAccess) -> String Never! {
-    sema_frame_mode_name(access.mode) + " " + sema_frame_resource_label(access.resource)
+    "{sema_frame_mode_name(access.mode)} {sema_frame_resource_label(access.resource)}"
 }
 
 fn sema_frame_schedule_explain(schedule: FrameSchedule) -> String Never! {
@@ -691,73 +734,73 @@ fn sema_frame_schedule_explain(schedule: FrameSchedule) -> String Never! {
         accesses := [String]{}
         loop access in operation.accesses -> &accesses.push(sema_frame_explain_access(access))
         description := if accesses.len() == 0 -> "no resource access" else -> accesses.join(", ")
-        &lines.push("  " + operation.name + " " + description)
+        &lines.push("  {operation.name} {description}")
     }
     loop dependency in schedule.dependencies {
-        &lines.push("  dependency: " + schedule.operations[dependency.before].name + " -> " + schedule.operations[dependency.after].name + " (" + dependency.reason + ")")
+        &lines.push("  dependency: {schedule.operations[dependency.before].name} -> {schedule.operations[dependency.after].name} ({dependency.reason})")
     }
-    loop transfer in schedule.transfers -> &lines.push("  transfer: " + transfer.resource + " " + transfer.from_device + " -> " + transfer.to_device)
+    loop transfer in schedule.transfers -> &lines.push("  transfer: {transfer.resource} {transfer.from_device} -> {transfer.to_device}")
     loop reuse in schedule.reuse {
         verb := if reuse.legal -> "reuse" else -> "reuse refused"
-        &lines.push("  " + verb + ": " + reuse.previous_resource + " -> " + reuse.next_resource + " (" + reuse.reason + ")")
+        &lines.push("  {verb}: {reuse.previous_resource} -> {reuse.next_resource} ({reuse.reason})")
     }
     loop retention in schedule.retentions {
         state := if retention.completed -> "completed" else -> "still retained"
         token := retention.completion_token ?? "return"
-        &lines.push("  retention: " + retention.resource + " owner " + retention.owner + " until " + token + " (" + state + ")")
+        &lines.push("  retention: {retention.resource} owner {retention.owner} until {token} ({state})")
     }
-    loop reason in schedule.conservative -> &lines.push("  conservative: " + reason)
+    loop reason in schedule.conservative -> &lines.push("  conservative: {reason}")
     if schedule.dependencies.len() == 0 -> &lines.push("  no conflicting resource accesses")
     lines.join("\n")
 }
 
-fn sema_frame_schedule_to_mir(schedule: FrameSchedule) -> MirFrameSchedule Never! {
-    operations := [MirFrameOperation]{}
-    dependencies := [MirFrameDependency]{}
-    transfers := [MirFrameTransfer]{}
-    reuse := [MirFrameReuse]{}
-    retentions := [MirFrameRetention]{}
+fn sema_frame_schedule_to_mir(schedule: FrameSchedule) -> MIRFrameSchedule Never! {
+    operations := [MIRFrameOperation]{}
+    dependencies := [MIRFrameDependency]{}
+    transfers := [MIRFrameTransfer]{}
+    reuse := [MIRFrameReuse]{}
+    retentions := [MIRFrameRetention]{}
     loop operation in schedule.operations {
-        accesses := [MirResourceAccess]{}
+        accesses := [MIRResourceAccess]{}
         loop access in operation.accesses -> &accesses.push(sema_frame_access_to_mir(access))
-        &operations.push(MirFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: sema_frame_completion_to_mir(operation.completion), completion_provider: operation.completion_provider, external_effect: operation.external_effect})
+        &operations.push(MIRFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: sema_frame_completion_to_mir(operation.completion), completion_provider: operation.completion_provider, external_effect: operation.external_effect})
     }
-    loop row in schedule.dependencies -> &dependencies.push(MirFrameDependency{before: row.before, after: row.after, resource: row.resource, reason: row.reason})
-    loop row in schedule.transfers -> &transfers.push(MirFrameTransfer{before: row.before, after: row.after, resource: row.resource, from_device: row.from_device, to_device: row.to_device})
-    loop row in schedule.reuse -> &reuse.push(MirFrameReuse{previous_resource: row.previous_resource, next_resource: row.next_resource, previous_last_use: row.previous_last_use, next_first_use: row.next_first_use, legal: row.legal, reason: row.reason})
-    loop row in schedule.retentions -> &retentions.push(MirFrameRetention{resource: row.resource, operation: row.operation, owner: row.owner, completion_token: row.completion_token, completed: row.completed})
-    MirFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: schedule.conservative}
+    loop row in schedule.dependencies -> &dependencies.push(MIRFrameDependency{before: row.before, after: row.after, resource: row.resource, reason: row.reason})
+    loop row in schedule.transfers -> &transfers.push(MIRFrameTransfer{before: row.before, after: row.after, resource: row.resource, from_device: row.from_device, to_device: row.to_device})
+    loop row in schedule.reuse -> &reuse.push(MIRFrameReuse{previous_resource: row.previous_resource, next_resource: row.next_resource, previous_last_use: row.previous_last_use, next_first_use: row.next_first_use, legal: row.legal, reason: row.reason})
+    loop row in schedule.retentions -> &retentions.push(MIRFrameRetention{resource: row.resource, operation: row.operation, owner: row.owner, completion_token: row.completion_token, completed: row.completed})
+    MIRFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: schedule.conservative}
 }
 
-fn sema_frame_access_to_mir(access: ResourceAccess) -> MirResourceAccess Never! {
+fn sema_frame_access_to_mir(access: ResourceAccess) -> MIRResourceAccess Never! {
     resource := if access.resource == {
-        .Named(name) -> MirResourceIdentity.Named{name: name}
-        .Unknown -> MirResourceIdentity.Unknown
+        .Named(name) -> MIRResourceIdentity.Named{name: name}
+        .Unknown -> MIRResourceIdentity.Unknown
     }
     mode := if access.mode == {
-        .Read -> MirResourceAccessMode.Read
-        .Write -> MirResourceAccessMode.Write
-        .Move -> MirResourceAccessMode.Move
+        .Read -> MIRResourceAccessMode.Read
+        .Write -> MIRResourceAccessMode.Write
+        .Move -> MIRResourceAccessMode.Move
     }
     region := if access.region == {
-        .Whole -> MirResourceRegion.Whole
-        .Bytes(start, length) -> MirResourceRegion.Bytes{start: start, length: length}
-        .Unknown -> MirResourceRegion.Unknown
+        .Whole -> MIRResourceRegion.Whole
+        .Bytes(start, length) -> MIRResourceRegion.Bytes{start: start, length: length}
+        .Unknown -> MIRResourceRegion.Unknown
     }
     layout := if {
         access.layout == None -> None
         else -> {
             value :: access.layout ?? ResourceLayout{size: 0, align: 0, layout: "", device: ""}
-            Val(MirResourceLayout{size: value.size, align: value.align, layout: value.layout, device: value.device})
+            Val(MIRResourceLayout{size: value.size, align: value.align, layout: value.layout, device: value.device})
         }
     }
-    MirResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary}
+    MIRResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary}
 }
 
-fn sema_frame_completion_to_mir(completion: FrameCompletion) -> MirFrameCompletion Never! {
+fn sema_frame_completion_to_mir(completion: FrameCompletion) -> MIRFrameCompletion Never! {
     if completion == {
-        .Synchronous -> MirFrameCompletion.Synchronous
-        .Pending(token) -> MirFrameCompletion.Pending{token: token}
-        .Event(token) -> MirFrameCompletion.Event{token: token}
+        .Synchronous -> MIRFrameCompletion.Synchronous
+        .Pending(token) -> MIRFrameCompletion.Pending{token: token}
+        .Event(token) -> MIRFrameCompletion.Event{token: token}
     }
 }

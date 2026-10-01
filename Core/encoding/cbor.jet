@@ -74,26 +74,26 @@ pub fn parse(data: [U8]) -> DataTree EncodingError! { decode(data) }
 
 pub fn decode(data: [U8]) -> DataTree EncodingError! { decode_cbor(data) }
 
-pub fn to_bytes(value: DataTree) -> [U8] { encode_cbor(value, false) }
+pub fn to_bytes(value: DataTree) -> [U8] Never! { encode_cbor(value, false) }
 
-pub fn to_bytes_canonical(value: DataTree) -> [U8] { encode_cbor(value, true) }
+pub fn to_bytes_canonical(value: DataTree) -> [U8] Never! { encode_cbor(value, true) }
 
-pub fn reader(data: [U8]) -> CBORReader { {bytes: data, index: 0} }
+pub fn reader(data: [U8]) -> CBORReader Never! { {bytes: data, index: 0} }
 
-pub fn writer() -> CBORWriter { {parts: [U8]{}} }
+pub fn writer() -> CBORWriter Never! { {parts: [U8]{}} }
 
 impl CBORWriter {
-    pub fn write(&self, value: DataTree) {
+    pub fn write(&self, value: DataTree) Never! {
         chunk :: encode_cbor(value, false)
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn write_canonical(&self, value: DataTree) {
+    pub fn write_canonical(&self, value: DataTree) Never! {
         chunk :: encode_cbor(value, true)
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn to_bytes(self) -> [U8] { self.parts }
+    pub fn to_bytes(self) -> [U8] Never! { self.parts }
 }
 
 fn decode_cbor(data: [U8]) -> DataTree EncodingError! {
@@ -239,7 +239,7 @@ impl CBORReader {
     }
 }
 
-fn encode_cbor(value: DataTree, canonical: Bool) -> [U8] {
+fn encode_cbor(value: DataTree, canonical: Bool) -> [U8] Never! {
     out := [U8]{}
     write_cbor(&out, value, canonical)
     out
@@ -249,7 +249,7 @@ fn cbor_push(out: &[U8], value: U8) {
     &out.push(value)
 }
 
-fn write_cbor(out: &[U8], value: DataTree, canonical: Bool) {
+fn write_cbor(out: &[U8], value: DataTree, canonical: Bool) Never! {
     if value == {
         .Null -> { cbor_push(&out, U8{246}) }
         .Bool(v) -> {
@@ -314,7 +314,7 @@ fn compare_cbor_text(a: String, b: String) -> Int {
     0
 }
 
-fn write_cbor_float(out: &[U8], n: Float) {
+fn write_cbor_float(out: &[U8], n: Float) Never! {
     bits :: math.to_bits(n)
     &out.push(U8{251})
     k := 7

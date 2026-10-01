@@ -738,7 +738,7 @@ mod jet_gtk {
                     .to_string_lossy()
                     .into_owned();
                 if text.starts_with("file://") {
-                    vec![JetUiDropItem::Uri(text)]
+                    vec![JetUiDropItem::URI(text)]
                 } else {
                     vec![JetUiDropItem::Text(text)]
                 }
@@ -976,7 +976,7 @@ mod jet_gtk {
             if !self.window.is_null() && !self.vbox.is_null() {
                 self.capabilities.grant(JetUiCapability::Accessibility);
                 self.capabilities.grant(JetUiCapability::FileDialog);
-                self.capabilities.grant(JetUiCapability::Ime);
+                self.capabilities.grant(JetUiCapability::IME);
                 self.capabilities.grant(JetUiCapability::DragDrop);
                 self.capabilities.grant(JetUiCapability::Shortcuts);
                 let display = gdk_display_get_default();
@@ -1915,7 +1915,7 @@ mod jet_gtk {
         fn poll_ime_event(&mut self) -> JetUiServiceResult<Option<JetUiImeEvent>> {
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             state.ensure_init();
-            if let Err(error) = state.capabilities.require(JetUiCapability::Ime) {
+            if let Err(error) = state.capabilities.require(JetUiCapability::IME) {
                 return Err(error);
             }
             Ok(state.ime_events.pop_front())

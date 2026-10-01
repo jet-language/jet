@@ -2357,14 +2357,14 @@ impl JetDataPlotInspection {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum JetDataPlotRenderFormat {
     Text,
-    Svg,
+    SVG,
 }
 
 impl JetDataPlotRenderFormat {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
-            Self::Svg => "svg",
+            Self::SVG => "svg",
         }
     }
 }
@@ -2962,7 +2962,7 @@ impl<T: 'static> JetDataPlot<T> {
             )
         } else {
             (
-                JetDataPlotRenderFormat::Svg,
+                JetDataPlotRenderFormat::SVG,
                 jet_data_plot_render_svg(&self.plan, &rows, &capabilities, &self.selection)?,
             )
         };

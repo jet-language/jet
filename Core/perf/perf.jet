@@ -11,28 +11,37 @@ package {
 use core as core
 
 // core.perf — a process-global 0.0..=1.0 fidelity knob for adaptive work.
-// Values outside the unit interval are rejected. The cell is host; clamp
-// and defaulting are Jet.
+// Values outside the unit interval are rejected with `PerfError.OutOfRange`.
+// The cell is host; clamp and defaulting are Jet.
 pub struct Perf {
     pub fidelity: Float
 }
 
-pub fn fidelity() -[Env]> Float { host_fidelity() }
-
-pub fn default_fidelity() -> Float { 1.0 }
-
-pub fn override_fidelity(value: Float) -[Env]> {
-    if core.math.is_nan(value) || value < 0.0 || value > 1.0 -> return Err("fidelity must be finite and in 0.0..=1.0")
-    host_set_fidelity(value)
+/// D-PERF-ERR1=A: the one way to set fidelity wrongly is a number outside
+/// 0.0..=1.0 (NaN included); the case carries the rejected number.
+#Error
+pub enum PerfError {
+    OutOfRange(Float)
 }
 
-pub fn reset_fidelity() -[Env]> { host_set_fidelity(1.0) }
+pub fn fidelity() -[Env]> Float Never! { host_fidelity() }
+
+pub fn default_fidelity() -> Float Never! { 1.0 }
+
+pub fn override_fidelity(value: Float) PerfError! -[Env]> {
+    if core.math.is_nan(value) || value < 0.0 || value > 1.0 -> return Err(PerfError.OutOfRange(value))
+    // The host applies the same range check, so an in-range value never fails there.
+    if core.perf.override_fidelity(value) == {
+        .Ok(_) -> {}
+        .Err(_) -> return Err(PerfError.OutOfRange(value))
+    }
+}
+
+pub fn reset_fidelity() Never! -[Env]> { core.perf.reset_fidelity() }
 
 fn host_fidelity() -[Env]> Float { core.perf.fidelity() }
 
-fn host_set_fidelity(value: Float) -[Env]> { core.perf.override_fidelity(value) }
-
-pub fn of(fidelity: Float) -> Perf {
+pub fn of(fidelity: Float) -> Perf Never! {
     v := fidelity
     if core.math.is_nan(v) -> v = 1.0
     if v < 0.0 -> v = 0.0
@@ -40,11 +49,11 @@ pub fn of(fidelity: Float) -> Perf {
     {fidelity: v}
 }
 
-pub fn is_full(perf: Perf) -> Bool { perf.fidelity >= 1.0 }
+pub fn is_full(perf: Perf) -> Bool Never! { perf.fidelity >= 1.0 }
 
-pub fn is_low(perf: Perf) -> Bool { perf.fidelity < 0.25 }
+pub fn is_low(perf: Perf) -> Bool Never! { perf.fidelity < 0.25 }
 
-pub fn scale(perf: Perf, work: Int) -> Int {
+pub fn scale(perf: Perf, work: Int) -> Int Never! {
     n :: Int{(Float{work}) * perf.fidelity}
     if n < 0 -> return 0
     n

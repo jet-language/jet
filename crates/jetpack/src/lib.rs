@@ -27,7 +27,7 @@ pub use jet_pkg_model::ProviderFacts::{
 };
 pub use jet_pkg_model::{
     AdaBind, CBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FortranBind,
-    JavaBind, JetLib, LintPolicy, Lock, Manifest, Model, Package, PascalBind, Platform, PowerShellBind,
+    JavaBind, JetLib, LintPolicy, Lock, Manifest, Package, PascalBind, Platform, PowerShellBind,
     RefSpec, ScriptDeps, TclBind, Variant, CFFI, FFI, JSON,
 };
 pub use jet_pkg_model::MCP;

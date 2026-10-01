@@ -1,0 +1,15 @@
+// A derived `Equatable` body compares each payload; a payload type that opted
+// out of equality is reported on the enum that asks for the derive, never at
+// an offset of the provider template.
+#!Equatable
+struct Opaque { value: Int }
+
+#Equatable
+enum Shape {
+    Leaf
+    Node(item: Opaque)
+}
+
+fn run() {
+    print(Shape.Leaf == Shape.Leaf)
+}

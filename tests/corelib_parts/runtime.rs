@@ -75,9 +75,10 @@ fn run() {
     );
     assert_eq!(code, 1, "out-of-range override should fail");
     assert_eq!(stdout, "1.0\n0.25\n1.0\n");
+    // D-PERF-ERR1=A: the rejected number passes up as `PerfError.OutOfRange`.
     assert!(
-        stderr.contains("core.perf.Perf.override_fidelity needs 0.0 through 1.0"),
-        "range error should be in Jet runtime terms, got {stderr:?}"
+        stderr.contains("OutOfRange") && stderr.contains("PerfError"),
+        "range error should be the typed PerfError case, got {stderr:?}"
     );
     let _ = fs::remove_dir_all(&dir);
 }

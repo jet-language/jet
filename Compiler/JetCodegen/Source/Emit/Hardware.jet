@@ -1,0 +1,400 @@
+// Hardware profile facts, register helpers, interrupt runtime, and setup calls.
+// Ports MIRRust.rs emit_hardware_facts / emit_hardware_register_helpers /
+// emit_hardware_interrupt_runtime / emit_hardware_setups / hardware_call so the
+// Jet emitter produces the same statics and helper names for the same MIR.
+use jet_foundation.[
+    MIRAccess,
+    MIRCallArg,
+    MIRFailureCarrier,
+    MIRFunction,
+    MIRFunctionForm,
+    MIRHardwareOp,
+    MIRPreludeCallID,
+    MIRRegisterWidth,
+    MIRTargetDMAOwnership,
+    MIRTargetRegisterAccessMode,
+    MIRTargetRegisterBlockFact,
+    MIRTargetRegisterFact,
+    MIRValueID,
+    mir_type_is_unit,
+    mir_type_same_checked_type,
+]
+
+// Syntax::generated_path: `__jet_` plus the byte-escaped canonical path.
+fn jet_rust_emit_generated_path(name: String) -> String Never! {
+    hex :: "0123456789abcdef"
+    out := [U8]{}
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
+            &out.push(byte)
+            next
+        }
+        &out.push(U8{95})
+        if {
+            code == 95 -> &out.push(U8{117})
+            code == 46 -> &out.push(U8{100})
+            code == 58 -> &out.push(U8{99})
+            code == 47 -> &out.push(U8{115})
+            code == 92 -> &out.push(U8{98})
+            code == 45 -> &out.push(U8{104})
+            else -> {
+                &out.push(U8{120})
+                &out.push(hex.bytes()[code /% 16])
+                &out.push(hex.bytes()[code % 16])
+            }
+        }
+    }
+    "__jet_{String.from_bytes(out) ?? ""}"
+}
+
+fn jet_rust_emit_is_no_os(ctx: &JetRustEmitContext) -> Bool Never! {
+    machine :: ctx.program.facts.target_dossier.machine ?? return false
+    machine.no_os
+}
+
+fn jet_rust_emit_register_width_name(width: MIRRegisterWidth) -> String Never! {
+    if width == {
+        .U8 -> "U8"
+        .U16 -> "U16"
+        .U32 -> "U32"
+        .U64 -> "U64"
+    }
+}
+
+fn jet_rust_emit_register_width_rust(width: MIRRegisterWidth) -> String Never! {
+    if width == {
+        .U8 -> "u8"
+        .U16 -> "u16"
+        .U32 -> "u32"
+        .U64 -> "u64"
+    }
+}
+
+fn jet_rust_emit_register_width_bytes(width: MIRRegisterWidth) -> Int Never! {
+    if width == {
+        .U8 -> 1
+        .U16 -> 2
+        .U32 -> 4
+        .U64 -> 8
+    }
+}
+
+fn jet_rust_emit_register_access_name(access: MIRTargetRegisterAccessMode) -> String Never! {
+    if access == {
+        .ReadOnly -> "ReadOnly"
+        .WriteOnly -> "WriteOnly"
+        .ReadWrite -> "ReadWrite"
+    }
+}
+
+fn jet_rust_emit_register_can_read(access: MIRTargetRegisterAccessMode) -> Bool Never! { access != MIRTargetRegisterAccessMode.WriteOnly }
+
+fn jet_rust_emit_register_can_write(access: MIRTargetRegisterAccessMode) -> Bool Never! { access != MIRTargetRegisterAccessMode.ReadOnly }
+
+fn jet_rust_emit_dma_ownership_name(ownership: MIRTargetDMAOwnership) -> String Never! {
+    if ownership == {
+        .Borrowed -> "Borrowed"
+        .Transfer -> "Transfer"
+    }
+}
+
+fn jet_rust_emit_bool_text(value: Bool) -> String Never! { if value -> "true" else -> "false" }
+
+fn jet_rust_emit_hardware_register_helper_name(operation: String, profile_id: String, block: String, register: String) -> String Never! {
+    jet_rust_emit_generated_path("hardware_register_{operation}.{profile_id}.{block}.{register}")
+}
+
+fn jet_rust_emit_hardware_register_helper(ctx: &JetRustEmitContext, block_index: Int, block: MIRTargetRegisterBlockFact, register: MIRTargetRegisterFact, operation: String, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    profile_id :: ~ctx.program.facts.hardware_profile_id
+    name :: jet_rust_emit_hardware_register_helper_name(operation, profile_id, block.name, register.name)
+    value_type :: jet_rust_emit_register_width_rust(register.width)
+    width :: jet_rust_emit_register_width_bytes(register.width)
+    access_type :: if register.access == {
+        .ReadOnly -> "JetReadOnly"
+        .WriteOnly -> "JetWriteOnly"
+        .ReadWrite -> "JetReadWrite"
+    }
+    &lines.push("#[inline]")
+    if operation == "read" -> &lines.push("fn {name}() -> i64 {{") else -> &lines.push("fn {name}(value: i64) -> i64 {{")
+    &lines.push("    #[cfg(target_os = \"none\")]")
+    &lines.push("    {{")
+    &lines.push("        let __jet_block = {root}JetRegisterBlock::<{root}JetVolatileRegisterBackend>::new(")
+    &lines.push("            &__JET_HARDWARE_VOLATILE_BACKEND, &__JET_HARDWARE_BLOCKS[{block_index}],")
+    &lines.push("        );")
+    &lines.push("        let __jet_register = __jet_block.register::<{value_type}, {root}{access_type}, {jet_rust_emit_bool_text(register.volatile)}>({jet_rust_emit_quote(register.name)})")
+    &lines.push("            .unwrap_or_else(|_| panic!(\"hardware register {block.name}.{register.name} has inconsistent generated facts\"));")
+    if operation == "read" {
+        &lines.push("        __jet_register.read() as i64")
+    } else {
+        &lines.push("        __jet_register.write(<{value_type} as {root}JetRegisterValue>::from_bits(value as u64));")
+        &lines.push("        0")
+    }
+    &lines.push("    }}")
+    &lines.push("    #[cfg(not(target_os = \"none\"))]")
+    &lines.push("    {{")
+    if operation == "read" {
+        &lines.push("        {root}jet_hardware_register_read_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(block.name)}, {jet_rust_emit_quote(register.name)}, {width}i64)")
+    } else {
+        &lines.push("        {root}jet_hardware_register_write_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(block.name)}, {jet_rust_emit_quote(register.name)}, {width}i64, value)")
+    }
+    &lines.push("    }}")
+    &lines.push("}}")
+    &lines.push("")
+}
+
+fn jet_rust_emit_has_hardware_interrupts(ctx: &JetRustEmitContext) -> Bool Never! {
+    loop setup in ctx.program.facts.hardware_setups {
+        if setup == {
+            .InterruptBind(_, _, _, _, _) -> return true
+            else -> {}
+        }
+    }
+    false
+}
+
+fn jet_rust_emit_interrupt_handler_function(ctx: &JetRustEmitContext, handler_symbol: String) -> MIRFunction? {
+    found := MIRFunction?{None}
+    loop function in ctx.program.functions {
+        if function.key != handler_symbol -> next
+        if found != None {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR interrupt handler resolves to multiple function rows", "each checked interrupt binding names exactly one handler function", None)
+            return None
+        }
+        found = Val(function)
+    }
+    function :: found ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR interrupt handler has no function row", "checked interrupt bindings must resolve their handler symbol", None)
+        return None
+    }
+    abi_ok :: function.form == MIRFunctionForm.TopLevel && function.generic_params.len() == 0 && function.capture_params.len() == 0 && function.params.len() == 0 && mir_type_is_unit(function.return_type) && function.failure == MIRFailureCarrier.Infallible && function.generator == None && !function.is_unsafe
+    if !abi_ok {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR interrupt handler must have a capture-free zero-argument Unit ABI", "interrupt trampolines call the handler with no arguments and no failure edge", Val(function.span))
+        return None
+    }
+    Val(function)
+}
+
+fn jet_rust_emit_interrupt_registrations(ctx: &JetRustEmitContext, indent: String, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    loop (setup_index, setup) in ctx.program.facts.hardware_setups {
+        if setup == {
+            .InterruptBind(_, _, vector, _, _) -> {
+                &lines.push("{indent}if !__jet_hardware_registry.register({vector}u16, {root}JetHardwareInterruptHandler {{ fn_ptr: __jet_hardware_interrupt_trampoline_{setup_index} as usize as i64, env: 0, has_env: false }}) {{")
+                &lines.push("{indent}    panic!(\"duplicate MIR hardware interrupt vector binding\");")
+                &lines.push("{indent}}}")
+            }
+            else -> {}
+        }
+    }
+}
+
+fn jet_rust_emit_hardware_interrupt_runtime(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    if !jet_rust_emit_has_hardware_interrupts(&ctx) -> return
+    root :: ~ctx.config.root_prefix
+    loop (setup_index, setup) in ctx.program.facts.hardware_setups {
+        if setup == {
+            .InterruptBind(_, _, _, handler_symbol, _) -> {
+                function :: jet_rust_emit_interrupt_handler_function(&ctx, handler_symbol) ?? return
+                &lines.push("extern \"C\" fn __jet_hardware_interrupt_trampoline_{setup_index}() {{")
+                &lines.push("    {jet_rust_emit_function_name(&ctx, function.id)}();")
+                &lines.push("}}")
+                &lines.push("")
+            }
+            else -> {}
+        }
+    }
+    if jet_rust_emit_is_no_os(&ctx) {
+        &lines.push("static mut __JET_HARDWARE_INTERRUPT_REGISTRY: {root}JetHardwareInterruptRegistry = {root}JetHardwareInterruptRegistry::new();")
+        &lines.push("static __JET_HARDWARE_INTERRUPT_REGISTRY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);")
+        &lines.push("fn __jet_hardware_registry() -> &'static {root}JetHardwareInterruptRegistry {{")
+        &lines.push("    if !__JET_HARDWARE_INTERRUPT_REGISTRY_READY.swap(true, core::sync::atomic::Ordering::AcqRel) {{")
+        &lines.push("        unsafe {{")
+        &lines.push("            let __jet_hardware_registry = &mut *core::ptr::addr_of_mut!(__JET_HARDWARE_INTERRUPT_REGISTRY);")
+        jet_rust_emit_interrupt_registrations(&ctx, "            ", &lines)
+        &lines.push("        }}")
+        &lines.push("    }}")
+        &lines.push("    unsafe {{ &*core::ptr::addr_of!(__JET_HARDWARE_INTERRUPT_REGISTRY) }}")
+        &lines.push("}}")
+        &lines.push("")
+        &lines.push("#[inline]")
+        &lines.push("fn __jet_hardware_poll() {{")
+        &lines.push("    let __jet_hardware_registry = __jet_hardware_registry();")
+        &lines.push("    if !{root}jet_hardware_has_pending() {{ return; }}")
+        &lines.push("    let __jet_hardware_callbacks = {root}jet_hardware_dispatch_pending(__jet_hardware_registry);")
+        &lines.push("    {root}jet_hardware_invoke_pending(__jet_hardware_callbacks);")
+        &lines.push("}}")
+        return
+    }
+    &lines.push("static __JET_HARDWARE_INTERRUPT_REGISTRY: std::sync::LazyLock<{root}JetHardwareInterruptRegistry> = std::sync::LazyLock::new(|| {{")
+    &lines.push("    let mut __jet_hardware_registry = {root}JetHardwareInterruptRegistry::default();")
+    jet_rust_emit_interrupt_registrations(&ctx, "    ", &lines)
+    &lines.push("    __jet_hardware_registry")
+    &lines.push("}});")
+    &lines.push("")
+    &lines.push("#[inline]")
+    &lines.push("fn __jet_hardware_poll() {{")
+    &lines.push("    if !{root}jet_hardware_has_pending() {{ return; }}")
+    &lines.push("    let __jet_hardware_callbacks = {root}jet_hardware_dispatch_pending(&*__JET_HARDWARE_INTERRUPT_REGISTRY);")
+    &lines.push("    {root}jet_hardware_invoke_pending(__jet_hardware_callbacks);")
+    &lines.push("}}")
+}
+
+fn jet_rust_emit_hardware_facts(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    profile :: ~ctx.program.facts.hardware_profile ?? return
+    root :: ~ctx.config.root_prefix
+    loop (block_index, block) in profile.register_blocks {
+        &lines.push("static __JET_HARDWARE_REGISTERS_{block_index}: &[{root}JetRegisterSpec<'static>] = &[")
+        loop register in block.registers {
+            &lines.push("    {root}JetRegisterSpec::new({jet_rust_emit_quote(register.name)}, {register.offset}u64, {root}JetRegisterWidth::{jet_rust_emit_register_width_name(register.width)}, {root}JetRegisterAccessMode::{jet_rust_emit_register_access_name(register.access)}, {jet_rust_emit_bool_text(register.volatile)}),")
+        }
+        &lines.push("];")
+    }
+    &lines.push("static __JET_HARDWARE_BLOCKS: &[{root}JetRegisterBlockSpec<'static>] = &[")
+    loop (block_index, block) in profile.register_blocks {
+        &lines.push("    {root}JetRegisterBlockSpec::new({jet_rust_emit_quote(block.name)}, {block.base}u64, {block.size.bytes}u64, __JET_HARDWARE_REGISTERS_{block_index}),")
+    }
+    &lines.push("];")
+    loop (interrupt_index, interrupt) in profile.interrupts {
+        &lines.push("static __JET_HARDWARE_INTERRUPT_EFFECTS_{interrupt_index}: &[&'static str] = &[")
+        loop forbidden in interrupt.forbidden_effects -> &lines.push("    {jet_rust_emit_quote(forbidden)},")
+        &lines.push("];")
+    }
+    &lines.push("static __JET_HARDWARE_INTERRUPTS: &[{root}JetInterruptSpec<'static>] = &[")
+    loop (interrupt_index, interrupt) in profile.interrupts {
+        if interrupt.forbidden_effects.len() == 0 {
+            &lines.push("    {root}JetInterruptSpec::new({jet_rust_emit_quote(interrupt.name)}, {interrupt.vector}u16, {jet_rust_emit_bool_text(interrupt.bounded)}),")
+        } else {
+            &lines.push("    {root}JetInterruptSpec::with_effects({jet_rust_emit_quote(interrupt.name)}, {interrupt.vector}u16, __JET_HARDWARE_INTERRUPT_EFFECTS_{interrupt_index}, {jet_rust_emit_bool_text(interrupt.bounded)}),")
+        }
+    }
+    &lines.push("];")
+    &lines.push("static __JET_HARDWARE_DMA_CHANNELS: &[{root}JetDmaChannelSpec<'static>] = &[")
+    loop channel in profile.dma_channels {
+        limit :: if channel.max_transfer_bytes == .Val(bytes) -> "Some({bytes}u64)" else -> "None"
+        &lines.push("    {root}JetDmaChannelSpec::with_transfer({jet_rust_emit_quote(channel.name)}, {channel.channel}u16, {root}JetRegisterWidth::{jet_rust_emit_register_width_name(channel.transfer_width)}, {root}JetDmaOwnership::{jet_rust_emit_dma_ownership_name(channel.ownership)}, {limit}),")
+    }
+    &lines.push("];")
+    capabilities := [String]{}
+    loop capability in ctx.program.facts.hardware_capabilities -> &capabilities.push(jet_rust_emit_quote(capability))
+    svd_source :: if profile.svd == .Val(svd) -> "Some({jet_rust_emit_quote(svd.source)})" else -> "None"
+    svd_sha256 :: if profile.svd == .Val(svd) -> "Some({jet_rust_emit_quote(svd.sha256)})" else -> "None"
+    &lines.push("static __JET_HARDWARE_FACTS: {root}JetHardwareFacts<'static> = {root}JetHardwareFacts::with_profile({jet_rust_emit_quote(ctx.program.facts.hardware_profile_id)}, &[{capabilities.join(", ")}], {svd_source}, {svd_sha256}, __JET_HARDWARE_BLOCKS, __JET_HARDWARE_INTERRUPTS, __JET_HARDWARE_DMA_CHANNELS);")
+    &lines.push("")
+    &lines.push("#[cfg(target_os = \"none\")]")
+    &lines.push("static __JET_HARDWARE_VOLATILE_BACKEND: {root}JetVolatileRegisterBackend = {root}JetVolatileRegisterBackend;")
+    loop (block_index, block) in profile.register_blocks {
+        loop register in block.registers {
+            if jet_rust_emit_register_can_read(register.access) -> jet_rust_emit_hardware_register_helper(&ctx, block_index, block, register, "read", &lines)
+            if jet_rust_emit_register_can_write(register.access) -> jet_rust_emit_hardware_register_helper(&ctx, block_index, block, register, "write", &lines)
+        }
+    }
+    jet_rust_emit_hardware_interrupt_runtime(&ctx, &lines)
+    &lines.push("")
+}
+
+fn jet_rust_emit_hardware_setups(ctx: &JetRustEmitContext, indent: String, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    if jet_rust_emit_is_no_os(&ctx) {
+        loop setup in ctx.program.facts.hardware_setups {
+            if setup == {
+                .DMAConfigure(_, _, _, _) -> &lines.push("{indent}{root}jet_target_failure_bytes(b\"DMA setup requires a target provider\", -1);")
+                else -> {}
+            }
+        }
+        return
+    }
+    loop setup in ctx.program.facts.hardware_setups {
+        call :: if setup == {
+            .DMAConfigure(profile_id, channel, transfer_width, ownership) -> {
+                ownership_text :: if ownership == {
+                    .Borrowed -> "borrowed"
+                    .Transfer -> "transfer"
+                }
+                "{root}jet_hardware_setup_typed({jet_rust_emit_quote(profile_id)}, {root}JET_HARDWARE_SETUP_DMA_CONFIGURE_NAME, {jet_rust_emit_quote(channel)}, {jet_rust_emit_register_width_bytes(transfer_width)}i64, {jet_rust_emit_quote(ownership_text)})"
+            }
+            .InterruptBind(profile_id, interrupt, vector, handler_symbol, _) -> "{root}jet_hardware_setup_typed({jet_rust_emit_quote(profile_id)}, {root}JET_HARDWARE_SETUP_INTERRUPT_BIND_NAME, {jet_rust_emit_quote(interrupt)}, {vector}i64, {jet_rust_emit_quote(handler_symbol)})"
+        }
+        &lines.push("{indent}let _ = {call};")
+    }
+}
+
+fn jet_rust_emit_hardware_register_checked(ctx: &JetRustEmitContext, function: MIRFunction, operation: String, profile_id: String, block: String, register: String, width: MIRRegisterWidth) -> String Never! {
+    profile :: ~ctx.program.facts.hardware_profile ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR hardware register has no checked profile", "register access requires the package hardware profile facts", Val(function.span))
+        return "unreachable!(\"hardware profile missing\")"
+    }
+    if ctx.program.facts.hardware_profile_id != profile_id {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware register profile disagrees with checked profile", "register access must name the selected hardware profile", Val(function.span))
+        return "unreachable!(\"hardware profile mismatch\")"
+    }
+    loop block_fact in profile.register_blocks {
+        if block_fact.name != block -> next
+        loop register_fact in block_fact.registers {
+            if register_fact.name != register -> next
+            allowed :: if operation == "read" -> jet_rust_emit_register_can_read(register_fact.access) else -> jet_rust_emit_register_can_write(register_fact.access)
+            if register_fact.width != width || !allowed {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware register width or access disagrees with checked fact", "register operations must match the checked register width and access mode", Val(function.span))
+                return "unreachable!(\"hardware register mismatch\")"
+            }
+            return jet_rust_emit_hardware_register_helper_name(operation, profile_id, block, register)
+        }
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR hardware register has unknown block or register", "register operations must resolve to one checked register fact", Val(function.span))
+    "unreachable!(\"unknown hardware register\")"
+}
+
+fn jet_rust_emit_hardware_call(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, op: MIRHardwareOp, receiver: MIRValueID?, args: [MIRCallArg]) -> String Never! {
+    root :: ~ctx.config.root_prefix
+    loop row in ctx.program.prelude_calls {
+        if row.id != call -> next
+        if args.len() < row.signature.arity || args.len() > row.signature.max_arity || row.signature.borrow_mask.contains(true) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware route ABI disagrees with its operation", "hardware routes take owned arguments within their checked arity", Val(function.span))
+            return "unreachable!(\"hardware route ABI\")"
+        }
+    }
+    if op == {
+        .RegisterRead(profile_id, block, register, width) -> {
+            if receiver != None || args.len() != 0 {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware register read has unexpected receiver or arguments", "register reads take no operands", Val(function.span))
+                return "unreachable!(\"hardware register read operands\")"
+            }
+            return "{root}{jet_rust_emit_hardware_register_checked(&ctx, function, "read", profile_id, block, register, width)}()"
+        }
+        .RegisterWrite(profile_id, block, register, width) -> {
+            if receiver != None || args.len() != 1 || args[0].access == MIRAccess.Write {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware register write requires one owned value argument", "register writes take exactly one non-borrowed value", Val(function.span))
+                return "unreachable!(\"hardware register write operands\")"
+            }
+            value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], false)
+            return "{root}{jet_rust_emit_hardware_register_checked(&ctx, function, "write", profile_id, block, register, width)}({value})"
+        }
+        .DMAStart(profile_id, channel, buffer_ty) -> {
+            if receiver != None || args.len() != 1 || args[0].access != MIRAccess.Move || !mir_type_same_checked_type(jet_rust_emit_value_type(function, args[0].value), buffer_ty) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware DMA start requires one owned buffer of the checked buffer type", "DMA start moves exactly one buffer matching buffer_ty", Val(function.span))
+                return "unreachable!(\"hardware DMA start operands\")"
+            }
+            buffer :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], false)
+            return "{root}jet_hardware_dma_start_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(channel)}, {buffer})"
+        }
+        .DMAWait(profile_id, channel, buffer_ty) -> {
+            transfer :: receiver ?? {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware DMA wait has no transfer receiver", "DMA wait consumes the checked transfer value", Val(function.span))
+                return "unreachable!(\"hardware DMA wait receiver\")"
+            }
+            valid := args.len() == 0
+            if jet_rust_emit_value_type(function, transfer).kind == {
+                .Apply(name, type_args) -> {
+                    if name.name != "__JetDmaTransfer" || type_args.len() != 1 || !mir_type_same_checked_type(type_args[0], buffer_ty) -> valid = false
+                }
+                else -> valid = false
+            }
+            if !valid {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware DMA wait receiver disagrees with checked buffer_ty", "DMA wait receivers are __JetDmaTransfer<buffer_ty> with no value arguments", Val(function.span))
+                return "unreachable!(\"hardware DMA wait receiver type\")"
+            }
+            return "{root}jet_hardware_dma_wait_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(channel)}, {jet_rust_emit_value_move(transfer)})"
+        }
+    }
+}

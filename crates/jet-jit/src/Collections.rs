@@ -977,13 +977,6 @@ pub(crate) mod collection_semantics {
         jet_set_pop_kernel(values, value).ok()
     }
 
-    pub(super) fn set_replace_i64(
-        values: &mut std::collections::HashSet<i64>,
-        value: i64,
-    ) -> Option<i64> {
-        jet_set_replace_kernel(values, value).ok()
-    }
-
     pub(super) fn deque_pop_front<T>(values: &mut std::collections::VecDeque<T>) -> Option<T> {
         jet_deque_pop_front_kernel(values).ok()
     }
@@ -2376,8 +2369,44 @@ fn jet_jit_list_extend(list: i64, other: i64) {
     });
 }
 
+/// D-SHAPE-PLACE1=A: the owner list and element bounds behind a range window
+/// view handle, or `None` for an ordinary list handle.
+fn list_view_window(rt: &crate::runtime_host::JitRuntime, list: i64) -> Option<(i64, usize, usize)> {
+    let index = crate::runtime_host::view_index(rt, list)?;
+    match rt.view_slots.get(index)? {
+        crate::runtime_host::JitViewSlot::Sequence { source, start, end } => {
+            Some((*source, *start, *end))
+        }
+        _ => None,
+    }
+}
+
+/// D-SHAPE-PLACE1=A: reorder the word cells of a range window and store them
+/// back into the owner list, so a length-preserving kernel edits the window
+/// in place. `edit` also learns whether the cells are unsigned words.
+fn edit_window_words(
+    rt: &mut crate::runtime_host::JitRuntime,
+    (source, start, end): (i64, usize, usize),
+    edit: impl FnOnce(&mut [i64], bool),
+) {
+    let unsigned = matches!(rt.heap.int_cells(source), jet_rt::IntCells::Word { unsigned: true });
+    let Some(mut values) = rt.heap.clone_int_list(source) else {
+        jet_foundation::ice!(None, "jit range window: bad owner handle");
+    };
+    edit(&mut values[start..end], unsigned);
+    for position in start..end {
+        rt.heap
+            .list_set_int(source, position as i64, values[position])
+            .expect("jit range window: set");
+    }
+}
+
 fn jet_jit_list_reverse(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
+        if let Some(window) = list_view_window(rt, list) {
+            edit_window_words(rt, window, |values, _| values.reverse());
+            return;
+        }
         let Some(values) = rt.heap.list_values_mut(list) else {
             jet_foundation::ice!(None, "jit list reverse: bad handle");
         };
@@ -4697,10 +4726,10 @@ fn jet_jit_list_order_f64(a: i64, b: i64) -> i8 {
 fn jet_jit_list_sort_f64(list: i64) {
     let mut values = clone_list_floats(list);
     values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*left, *right));
+    // A range window view writes back into its owner at the window offset.
     Concurrency::with_runtime_mut(|rt| {
         for (index, value) in values.into_iter().enumerate() {
-            rt.heap
-                .list_set_float(list, index as i64, value)
+            crate::runtime_host::sequence_set_float(rt, list, index, value)
                 .expect("jit list sort_f64: set");
         }
     });
@@ -4711,8 +4740,7 @@ fn jet_jit_list_sort_f64_desc(list: i64) {
     values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*right, *left));
     Concurrency::with_runtime_mut(|rt| {
         for (index, value) in values.into_iter().enumerate() {
-            rt.heap
-                .list_set_float(list, index as i64, value)
+            crate::runtime_host::sequence_set_float(rt, list, index, value)
                 .expect("jit list sort_f64_desc: set");
         }
     });
@@ -4735,8 +4763,7 @@ fn jet_jit_list_sort_datetime(list: i64) {
         };
         pairs.sort_by(|left, right| left.0.cmp(&right.0));
         for (index, (_, handle)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, index as i64, handle)
+            crate::runtime_host::sequence_set_int(rt, list, index, handle)
                 .expect("jit list sort_datetime: set");
         }
     });
@@ -4760,8 +4787,7 @@ fn jet_jit_list_sort_date(list: i64) {
         };
         pairs.sort_by(|left, right| left.0.cmp(&right.0));
         for (index, (_, handle)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, index as i64, handle)
+            crate::runtime_host::sequence_set_int(rt, list, index, handle)
                 .expect("jit list sort_date: set");
         }
     });
@@ -5214,6 +5240,16 @@ fn jet_jit_index_vec_set(list: i64, idx: i64, value: i64, _file: i64, line: i64)
 
 fn jet_jit_list_sort(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
+        if let Some(window) = list_view_window(rt, list) {
+            edit_window_words(rt, window, |values, unsigned| {
+                if unsigned {
+                    values.sort_unstable_by_key(|value| *value as u64);
+                } else {
+                    values.sort_unstable();
+                }
+            });
+            return;
+        }
         rt.heap
             .list_sort_int(list)
             .expect("jit list sort: bad handle")
@@ -5222,6 +5258,16 @@ fn jet_jit_list_sort(list: i64) {
 
 fn jet_jit_list_sort_desc(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
+        if let Some(window) = list_view_window(rt, list) {
+            edit_window_words(rt, window, |values, unsigned| {
+                if unsigned {
+                    values.sort_unstable_by(|left, right| (*right as u64).cmp(&(*left as u64)));
+                } else {
+                    values.sort_unstable_by(|left, right| right.cmp(left));
+                }
+            });
+            return;
+        }
         let mut values = rt
             .heap
             .clone_int_list(list)
@@ -5242,9 +5288,7 @@ fn jet_jit_list_sort_desc(list: i64) {
 /// Lexicographic sort of a `[String]` list (handles are string arena ids).
 fn jet_jit_list_sort_fraction(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(ids) = rt.heap.clone_int_list(list) else {
-            jet_foundation::ice!(None, "jit list sort_fraction: bad handle");
-        };
+        let ids = clone_list_ints_with_runtime(rt, list);
         let mut pairs: Vec<(jet_foundation::Numeric::CtFraction, i64)> =
             Vec::with_capacity(ids.len());
         for id in ids {
@@ -5256,8 +5300,7 @@ fn jet_jit_list_sort_fraction(list: i64) {
         }
         pairs.sort_by(|left, right| left.0.cmp(&right.0));
         for (index, (_, id)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, index as i64, id)
+            crate::runtime_host::sequence_set_int(rt, list, index, id)
                 .expect("jit list sort_fraction: set");
         }
     });
@@ -5265,17 +5308,14 @@ fn jet_jit_list_sort_fraction(list: i64) {
 
 fn jet_jit_list_sort_str(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(ids) = rt.heap.clone_int_list(list) else {
-            jet_foundation::ice!(None, "jit list sort_str: bad handle");
-        };
+        let ids = clone_list_ints_with_runtime(rt, list);
         let mut pairs: Vec<(String, i64)> = ids
             .into_iter()
             .map(|id| (rt.heap.clone_string(id).unwrap_or_default(), id))
             .collect();
         collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
         for (i, (_, id)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, i as i64, id)
+            crate::runtime_host::sequence_set_int(rt, list, i, id)
                 .expect("jit list sort_str: set");
         }
     });
@@ -5283,17 +5323,14 @@ fn jet_jit_list_sort_str(list: i64) {
 
 fn jet_jit_list_sort_str_desc(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(ids) = rt.heap.clone_int_list(list) else {
-            jet_foundation::ice!(None, "jit list sort_str_desc: bad handle");
-        };
+        let ids = clone_list_ints_with_runtime(rt, list);
         let mut pairs: Vec<(String, i64)> = ids
             .into_iter()
             .map(|id| (rt.heap.clone_string(id).unwrap_or_default(), id))
             .collect();
         collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
         for (index, (_, id)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, index as i64, id)
+            crate::runtime_host::sequence_set_int(rt, list, index, id)
                 .expect("jit list sort_str_desc: set");
         }
     });
@@ -5328,8 +5365,7 @@ fn jet_jit_list_sort_by_compare(list: i64, callback: i64) {
     }
     Concurrency::with_runtime_mut(|rt| {
         for (index, value) in values.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, index as i64, value)
+            crate::runtime_host::sequence_set_int(rt, list, index, value)
                 .expect("jit list sort_by_compare: set");
         }
     });
@@ -6756,11 +6792,6 @@ fn alloc_nested_from_ints(xs: &[Vec<i64>]) -> i64 {
     })
 }
 
-fn transfer_progress(source: i64, target: i64) -> i64 {
-    crate::IO::progress_transfer_state(source, target);
-    target
-}
-
 fn transfer_progress_step(source: i64, target: i64, n: i64) -> i64 {
     crate::IO::progress_transfer_step_state(source, target, n);
     target
@@ -7891,10 +7922,7 @@ fn jet_jit_list_sort_by_i64_keys_desc(list: i64, keys: i64) {
 
 fn jet_jit_list_sort_by_i64_keys_impl(list: i64, keys: i64, descending: bool) {
     Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .heap
-            .clone_int_list(list)
-            .expect("jit sort_by: bad list handle");
+        let xs = clone_list_ints_with_runtime(rt, list);
         let keys = rt
             .heap
             .clone_int_list(keys)
@@ -7907,8 +7935,7 @@ fn jet_jit_list_sort_by_i64_keys_impl(list: i64, keys: i64, descending: bool) {
             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0);
         }
         for (dst, (_, value)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, dst as i64, value)
+            crate::runtime_host::sequence_set_int(rt, list, dst, value)
                 .expect("jit sort_by: set");
         }
     });
@@ -7925,10 +7952,7 @@ fn jet_jit_list_sort_by_str_keys_desc(list: i64, keys: i64) {
 
 fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
     Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .heap
-            .clone_int_list(list)
-            .expect("jit sort_by_str: bad list handle");
+        let xs = clone_list_ints_with_runtime(rt, list);
         let key_ids = rt
             .heap
             .clone_int_list(keys)
@@ -7945,8 +7969,7 @@ fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
         }
         for (dst, (_, value)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, dst as i64, value)
+            crate::runtime_host::sequence_set_int(rt, list, dst, value)
                 .expect("jit sort_by_str: set");
         }
     });
@@ -7986,8 +8009,7 @@ fn jet_jit_list_sort_by_datetime_keys_impl(list: i64, keys: i64, descending: boo
             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
         }
         for (index, (_, value)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, index as i64, value)
+            crate::runtime_host::sequence_set_int(rt, list, index, value)
                 .expect("jit sort_by_datetime: set");
         }
     });
@@ -8028,8 +8050,7 @@ fn jet_jit_list_sort_by_date_keys_impl(list: i64, keys: i64, descending: bool) {
             collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
         }
         for (index, (_, value)) in pairs.into_iter().enumerate() {
-            rt.heap
-                .list_set_int(list, index as i64, value)
+            crate::runtime_host::sequence_set_int(rt, list, index, value)
                 .expect("jit sort_by_date: set");
         }
     });

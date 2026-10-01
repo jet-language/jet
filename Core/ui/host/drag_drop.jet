@@ -1,8 +1,8 @@
 use core as core
-use core.ui.host.[UiGrantedPath, UiHostError, UiNodeId]
+use core.ui.host.[UIGrantedPath, UIHostError, UINodeID]
 
 // core.ui.host.drag_drop — typed file/text drop events.
-pub enum UiDragPhase {
+pub enum UIDragPhase {
     Enter
     Over
     Drop
@@ -10,25 +10,25 @@ pub enum UiDragPhase {
     Cancel
 }
 
-pub enum UiDragOperation {
+pub enum UIDragOperation {
     Copy
     Move
     Link
 }
 
-pub enum UiDropItem {
+pub enum UIDropItem {
     Text(value: String)
-    Uri(value: String)
-    File(value: UiGrantedPath)
+    URI(value: String)
+    File(value: UIGrantedPath)
 }
 
-pub struct UiDragEvent {
-    pub target: UiNodeId
-    pub phase: UiDragPhase
-    pub operation: UiDragOperation
-    pub items: [UiDropItem]
+pub struct UIDragEvent {
+    pub target: UINodeID
+    pub phase: UIDragPhase
+    pub operation: UIDragOperation
+    pub items: [UIDropItem]
 }
 
-pub fn poll() -[IO]> UiDragEvent? UiHostError! {
+pub fn poll() -[IO]> UIDragEvent? UIHostError! {
     core.ui.host.drag_drop.poll()
 }

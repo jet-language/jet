@@ -11,6 +11,35 @@
 // Detached. The primary cursor is supplied by the harness as a real
 // arena-registered handle/raw pair; its final alias exercises the
 // adapter-backed physical release path and Last-alias close.
+use jet_foundation.[
+    MIRAccess,
+    MIRCallFallibility,
+    MIRCallSignature,
+    MIRFailureCarrier,
+    MIRFunctionID,
+    MIRFunctionSignature,
+    MIRHandleID,
+    MIRNominalRef,
+    MIRPlace,
+    MIRPlaceBase,
+    MIRPlaceID,
+    MIRPreludeCall,
+    MIRPreludeCallID,
+    MIRPreludeFamily,
+    MIRProgram,
+    MIRProjection,
+    MIRScopeID,
+    MIRSymbol,
+    MIRType,
+    MIRTypeKind,
+    MIRValueID,
+    Span,
+    TComptimeValue,
+    diagnostic_from_registry,
+    mir_type_display_name,
+    mir_type_from_kind,
+    stable_id,
+]
 
 struct JetEvalTaskRootsSharedPayload {
     marker: Int
@@ -82,11 +111,11 @@ pub fn jet_eval_task_roots_fixture_escaping_callback_owner(seed: Int) -> fn(Int)
 }
 
 fn jet_eval_task_roots_fixture_cell_aliases(machine: &JetEvalMachine, index: Int, expected: Int) -> Bool {
-    jet_eval_shared_cell_aliases(&machine, index) == Val(expected)
+    jet_eval_shared_cell_aliases(machine, index) == Val(expected)
 }
 
 fn jet_eval_task_roots_fixture_token_aliases(machine: &JetEvalMachine, token: Int, expected: Int) -> Bool {
-    jet_eval_foreign_token_aliases(&machine, token) == Val(expected)
+    jet_eval_foreign_token_aliases(machine, token) == Val(expected)
 }
 
 fn jet_eval_task_roots_fixture_register_weak(registry: JetEvalSharedRuntime, weak: JetEvalSharedWeak) -> Bool {
@@ -95,7 +124,7 @@ fn jet_eval_task_roots_fixture_register_weak(registry: JetEvalSharedRuntime, wea
     true
 }
 
-fn jet_eval_task_roots_fixture_set_element_type(metadata: Shared<JetEvalSharedValueMeta>, element_type: MirType) -> Bool {
+fn jet_eval_task_roots_fixture_set_element_type(metadata: Shared<JetEvalSharedValueMeta>, element_type: MIRType) -> Bool {
     permit := metadata.guard_edit()
     permit.value.element_type = element_type
     true
@@ -110,15 +139,15 @@ fn jet_eval_task_roots_fixture_clean(machine: &JetEvalMachine) -> Bool {
     machine.failure == None && machine.internal_problem == None
 }
 
-fn jet_eval_task_roots_fixture_shared_row(module_name: String, member: String, symbol: String, borrow_mask: ^[Bool]) -> MirPreludeCall? {
+fn jet_eval_task_roots_fixture_shared_row(module_name: String, member: String, symbol: String, borrow_mask: ^[Bool]) -> MIRPreludeCall? {
     row := jet_eval_exact_integer_row("add", 2) ?? return None
     arity :: borrow_mask.len()
-    row.id = MirPreludeCallId{value: stable_id("mir-prelude-call", "task-root-shared:{module_name}:{member}:{symbol}")}
-    row.family = MirPreludeFamily.StaticPrelude
+    row.id = MIRPreludeCallID{value: stable_id("mir-prelude-call", "task-root-shared:{module_name}:{member}:{symbol}")}
+    row.family = MIRPreludeFamily.StaticPrelude
     row.module_name = ~module_name
     row.member = ~member
-    row.symbol = MirSymbol.Prelude{name: ~symbol}
-    row.signature = MirCallSignature{arity: arity, max_arity: arity, borrow_mask: ~borrow_mask}
+    row.symbol = MIRSymbol.Prelude{name: ~symbol}
+    row.signature = MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: ~borrow_mask}
     Val(row)
 }
 
@@ -135,7 +164,7 @@ fn jet_eval_task_roots_fixture_shared_field(value: JetEvalRuntimeValue, name: St
     None
 }
 
-fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: String, span: Span) -> MirType? {
+fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: String, span: Span) -> MIRType? {
     found := None
     loop candidate in machine.program.type_instances {
         if candidate.kind == .Apply(_, _) && mir_type_display_name(candidate) == name {
@@ -152,27 +181,27 @@ fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: S
 // This producer owns the Source Machine only for the duration of creating and
 // exporting one pre-adopted Shared carrier. Its OwnedRoot is the only Source
 // runtime authority that survives the return.
-pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: ^JetEvalConfig, span: Span) -> JetEvalSharedHostCarrier? {
+pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: ^JetEvalConfig, span: Span) -> JetEvalSharedHostCarrier? {
     source_config :: jet_eval_runtime_config(^config)
     source_machine := jet_eval_machine(^program, ^source_config)
-    int_type :: mir_type_from_kind(MirTypeKind.Int)
-    inner_shared_type :: mir_type_from_kind(MirTypeKind.Shared{inner: int_type})
+    int_type :: mir_type_from_kind(MIRTypeKind.Int)
+    inner_shared_type :: mir_type_from_kind(MIRTypeKind.Shared{inner: int_type})
     payload_type :: jet_eval_task_roots_fixture_checked_nominal(&source_machine, "JetEvalTaskRootsSharedPayload", span) ?? return None
     payload_name :: mir_type_display_name(payload_type)
-    shared_type :: mir_type_from_kind(MirTypeKind.Shared{inner: payload_type})
-    option_shared_type :: mir_type_from_kind(MirTypeKind.Option{inner: shared_type})
+    shared_type :: mir_type_from_kind(MIRTypeKind.Shared{inner: payload_type})
+    option_shared_type :: mir_type_from_kind(MIRTypeKind.Option{inner: shared_type})
     new_row :: jet_eval_task_roots_fixture_shared_row("jet_std::JetShared", "new", "jet_std::JetShared::new", [Bool]{false}) ?? return None
     set_row :: jet_eval_task_roots_fixture_shared_row("core.host", "Shared.set", "jet_shared_set", [Bool]{true, false}) ?? return None
     count_row :: jet_eval_task_roots_fixture_shared_row("core.host", "Shared.strong_count", "jet_shared_strong_count", [Bool]{true}) ?? return None
     downgrade_row :: jet_eval_task_roots_fixture_shared_row("core.host", "Shared.downgrade", "jet_shared_downgrade", [Bool]{true}) ?? return None
     upgrade_row := jet_eval_task_roots_fixture_shared_row("core.host", "Shared.Weak.upgrade", "jet_shared_weak_upgrade", [Bool]{true}) ?? return None
-    upgrade_row.fallibility = MirCallFallibility.Failure{failure: MirFailureCarrier.Optional{value: shared_type}}
+    upgrade_row.fallibility = MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: shared_type}}
 
     inner_source :: jet_eval_shared_runtime_route(
         &source_machine,
         new_row,
         [JetEvalRuntimeValue]{JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 11}}},
-        [MirType]{int_type},
+        [MIRType]{int_type},
         Val(inner_shared_type),
         span,
     ) ?? return None
@@ -185,13 +214,13 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
         &source_machine,
         new_row,
         [JetEvalRuntimeValue]{initial_payload},
-        [MirType]{payload_type},
+        [MIRType]{payload_type},
         Val(shared_type),
         span,
     ) ?? return None
     if !jet_eval_drop_value(&source_machine, initial_payload, span) -> return None
     source_index :: if source_value == {.Shared(index) -> Val(index) else -> None} ?? return None
-    source_entry :: jet_eval_shared_runtime_value(&source_machine, source_index) ?? return None
+    source_entry :: jet_eval_shared_runtime_value(source_machine, source_index) ?? return None
     source_capability :: source_entry.metadata.guard_read().value.physical_root ?? return None
     source_owner_tokens := source_entry.metadata.guard_read().value.owner_alias_tokens
     if source_owner_tokens.len() != 1 -> return None
@@ -202,7 +231,7 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
         &source_machine,
         new_row,
         [JetEvalRuntimeValue]{JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 19}}},
-        [MirType]{int_type},
+        [MIRType]{int_type},
         Val(inner_shared_type),
         span,
     ) ?? return None
@@ -215,8 +244,8 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
         &source_machine,
         set_row,
         [JetEvalRuntimeValue]{source_value, late_payload},
-        [MirType]{},
-        Val(mir_type_from_kind(MirTypeKind.Unit)),
+        [MIRType]{},
+        Val(mir_type_from_kind(MIRTypeKind.Unit)),
         span,
     ) != Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}) -> return None
     if !jet_eval_drop_value(&source_machine, late_payload, span) -> return None
@@ -225,33 +254,33 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
     // pre-adopted token into the exported carrier without another retain.
     guard :: jet_eval_shared_runtime_guard_acquire(&source_machine, source_index, set_row, true, span) ?? return None
     guard_index :: if guard == {.SharedGuard(index) -> Val(index) else -> None} ?? return None
-    guard_record :: jet_eval_shared_runtime_guard(&source_machine, guard_index) ?? return None
+    guard_record :: jet_eval_shared_runtime_guard(source_machine, guard_index) ?? return None
     if !guard_record.metadata.guard_read().value.active -> return None
     count_before :: jet_eval_shared_runtime_route(
         &source_machine,
         count_row,
         [JetEvalRuntimeValue]{source_value},
-        [MirType]{},
+        [MIRType]{},
         Val(int_type),
         span,
     ) ?? return None
     count_before_value :: jet_eval_task_roots_fixture_int_data(count_before) ?? return None
     if count_before_value != 1 -> return None
     source_weak_value :: jet_eval_shared_runtime_route(
-        &source_machine, downgrade_row, [JetEvalRuntimeValue]{source_value}, [MirType]{}, None, span,
+        &source_machine, downgrade_row, [JetEvalRuntimeValue]{source_value}, [MIRType]{}, None, span,
     ) ?? return None
     source_initial_upgrade_result := jet_eval_shared_runtime_route(
         &source_machine,
         upgrade_row,
         [JetEvalRuntimeValue]{source_weak_value},
-        [MirType]{},
+        [MIRType]{},
         Val(option_shared_type),
         span,
     ) ?? return None
     source_initial_upgrade_payload :: jet_eval_task_roots_fixture_ok_payload(source_initial_upgrade_result) ?? return None
     source_initial_upgrade_value :: if source_initial_upgrade_payload == {.Shared(_) -> Val(source_initial_upgrade_payload) else -> None} ?? return None
     transfer_index :: if source_initial_upgrade_value == {.Shared(index) -> Val(index) else -> None} ?? return None
-    transfer_entry :: jet_eval_shared_runtime_value(&source_machine, transfer_index) ?? return None
+    transfer_entry :: jet_eval_shared_runtime_value(source_machine, transfer_index) ?? return None
     transfer_capability :: transfer_entry.metadata.guard_read().value.physical_root ?? return None
     if !jet_eval_shared_runtime_same_physical_owner(Val(source_capability), Val(transfer_capability)) -> return None
     if transfer_capability.raw == source_capability.raw
@@ -264,10 +293,10 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
     if transfer_entry.metadata.guard_read().value.pending_owner_alias_transfers.len() != 1 -> return None
     if program.core_owners.len() == 0 -> return None
     invalid_owner := program.core_owners[0]
-    invalid_payload_type :: mir_type_from_kind(MirTypeKind.Apply{name: MirNominalRef{
+    invalid_payload_type :: mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{
         id: invalid_owner.nominal_id,
         name: "{invalid_owner.name}__task_roots_invalid",
-    }, args: [MirType]{}})
+    }, args: [MIRType]{}})
     shape_failure_machine := jet_eval_machine(^program, ^source_config)
     isolated_shared_runtime := shape_failure_machine.registry.shared_runtime
     shape_failure_machine.registry.shared_runtime = source_machine.registry.shared_runtime
@@ -325,7 +354,7 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MirProgram, config: 
 // Its final strong release must run the Source-owned payload finalizer, then its
 // weak capability must observe the missing physical owner.
 pub fn jet_eval_task_roots_fixture_shared_consume(
-    program: ^MirProgram,
+    program: ^MIRProgram,
     config: ^JetEvalConfig,
     carrier: ^JetEvalSharedHostCarrier,
     span: Span,
@@ -333,17 +362,17 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     updated := carrier
     receiver_config :: jet_eval_runtime_config(^config)
     receiver := jet_eval_machine(^program, ^receiver_config)
-    int_type :: mir_type_from_kind(MirTypeKind.Int)
+    int_type :: mir_type_from_kind(MIRTypeKind.Int)
     payload_type :: jet_eval_task_roots_fixture_checked_nominal(&receiver, "JetEvalTaskRootsSharedPayload", span) ?? return false
     payload_name :: mir_type_display_name(payload_type)
-    shared_type :: mir_type_from_kind(MirTypeKind.Shared{inner: payload_type})
-    option_shared_type :: mir_type_from_kind(MirTypeKind.Option{inner: shared_type})
+    shared_type :: mir_type_from_kind(MIRTypeKind.Shared{inner: payload_type})
+    option_shared_type :: mir_type_from_kind(MIRTypeKind.Option{inner: shared_type})
     get_row :: jet_eval_task_roots_fixture_shared_row("core.host", "Shared.get", "jet_shared_get", [Bool]{true}) ?? return false
     set_row :: jet_eval_task_roots_fixture_shared_row("core.host", "Shared.set", "jet_shared_set", [Bool]{true, false}) ?? return false
     count_row :: jet_eval_task_roots_fixture_shared_row("core.host", "Shared.strong_count", "jet_shared_strong_count", [Bool]{true}) ?? return false
     downgrade_row :: jet_eval_task_roots_fixture_shared_row("core.host", "Shared.downgrade", "jet_shared_downgrade", [Bool]{true}) ?? return false
     upgrade_row := jet_eval_task_roots_fixture_shared_row("core.host", "Shared.Weak.upgrade", "jet_shared_weak_upgrade", [Bool]{true}) ?? return false
-    upgrade_row.fallibility = MirCallFallibility.Failure{failure: MirFailureCarrier.Optional{value: shared_type}}
+    upgrade_row.fallibility = MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: shared_type}}
 
     if updated.kind != JetEvalSharedHostKind.Shared
         || updated.origin != JetEvalSharedHostOrigin.Native
@@ -376,7 +405,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     updated.registry = receiver.registry.shared_runtime
     received_value :: jet_eval_shared_runtime_host_adopt(&receiver, updated, Val(shared_type), span) ?? return false
     receiver_index :: if received_value == {.Shared(index) -> Val(index) else -> None} ?? return false
-    receiver_entry :: jet_eval_shared_runtime_value(&receiver, receiver_index) ?? return false
+    receiver_entry :: jet_eval_shared_runtime_value(receiver, receiver_index) ?? return false
     received_metadata := receiver_entry.metadata.guard_read().value
     received_capability :: received_metadata.physical_root ?? return false
     if !jet_eval_shared_runtime_same_root_capability(Val(transfer_capability), Val(received_capability)) -> return false
@@ -390,7 +419,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         &receiver,
         count_row,
         [JetEvalRuntimeValue]{received_value},
-        [MirType]{},
+        [MIRType]{},
         Val(int_type),
         span,
     ) ?? return false
@@ -405,18 +434,18 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     read_loan :: jet_eval_shared_runtime_host_entry_loan(&receiver, read_carrier, Val(shared_type), span) ?? return false
     read_value :: jet_eval_shared_runtime_host_entry_loan_value(read_loan)
     read_count :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{read_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{read_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     if read_count != (JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 1}}) -> return false
     cloned_read_value :: jet_eval_copy_value(read_value, &receiver, span) ?? return false
     cloned_read_count :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{cloned_read_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{cloned_read_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     if cloned_read_count != (JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 2}}) -> return false
     if !jet_eval_shared_runtime_host_entry_loan_end(&receiver, read_loan, span) -> return false
     if !jet_eval_drop_value(&receiver, cloned_read_value, span) -> return false
     restored_read_count :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     if restored_read_count != (JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 1}}) -> return false
     borrowed_metadata := receiver_entry.metadata.guard_read().value
@@ -426,7 +455,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
 
     guard_value :: jet_eval_shared_runtime_guard_acquire(&receiver, receiver_index, set_row, true, span) ?? return false
     guard_index :: if guard_value == {.SharedGuard(index) -> Val(index) else -> None} ?? return false
-    guard_record :: jet_eval_shared_runtime_guard(&receiver, guard_index) ?? return false
+    guard_record :: jet_eval_shared_runtime_guard(receiver, guard_index) ?? return false
     source_guard_metadata := guard_record.metadata.guard_read().value
     source_guard_lease := source_guard_metadata.lease
     source_lease_metadata := source_guard_lease.metadata.guard_read().value
@@ -438,9 +467,9 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         span,
     ) ?? return false
     payload_nominal :: if payload_type.kind == {.Apply(name, _) -> Val(name) else -> None} ?? return false
-    guard_type :: mir_type_from_kind(MirTypeKind.Apply{
-        name: MirNominalRef{id: payload_nominal.id, name: "SharedGuard"},
-        args: [MirType]{payload_type},
+    guard_type :: mir_type_from_kind(MIRTypeKind.Apply{
+        name: MIRNominalRef{id: payload_nominal.id, name: "SharedGuard"},
+        args: [MIRType]{payload_type},
     })
     selector :: 41
     carrier_guard :: JetEvalSharedGuard{
@@ -486,10 +515,10 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     }
 
     guard_count_before_loan :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     entry_loan_count :: receiver.entry_shared_loans.len()
-    receiver.entry_access = Val(MirAccess.Read)
+    receiver.entry_access = Val(MIRAccess.Read)
     adopted_guard :: jet_eval_host_value_adopt(
         &receiver, None, Val(guard_type), JetEvalHostValue.SharedCarrier{carrier: physical_guard_carrier}, false, span,
     )
@@ -498,19 +527,19 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     if receiver.entry_shared_loans.len() != entry_loan_count + 1 -> return false
     guard_loan := receiver.entry_shared_loans[entry_loan_count]
     borrowed_guard_index :: if borrowed_guard_value == {.SharedGuard(index) -> Val(index) else -> None} ?? return false
-    borrowed_guard_record :: jet_eval_shared_runtime_guard(&receiver, borrowed_guard_index) ?? return false
+    borrowed_guard_record :: jet_eval_shared_runtime_guard(receiver, borrowed_guard_index) ?? return false
     borrowed_guard_metadata := borrowed_guard_record.metadata.guard_read().value
     borrowed_guard_lease := borrowed_guard_metadata.lease.metadata.guard_read().value
     if borrowed_guard_lease.shared == source_shared_index
         || borrowed_guard_metadata.physical_borrow_selector != Val(selector) -> return false
-    borrowed_root :: jet_eval_shared_runtime_value(&receiver, borrowed_guard_lease.shared) ?? return false
+    borrowed_root :: jet_eval_shared_runtime_value(receiver, borrowed_guard_lease.shared) ?? return false
     borrowed_root_capability :: borrowed_root.metadata.guard_read().value.physical_root ?? return false
     source_root_capability :: root_metadata_before_guard_loan.physical_root ?? return false
     if !jet_eval_shared_runtime_same_root_capability(Val(borrowed_root_capability), Val(source_root_capability)) -> return false
     if borrowed_guard_record.metadata.guard_read().value.physical_borrow_selector != Val(selector) -> return false
     if borrowed_guard_metadata.editable || !borrowed_guard_lease.editable -> return false
     borrowed_child_index :: jet_eval_shared_runtime_guard_create(
-        &receiver,
+        receiver,
         borrowed_guard_lease.shared,
         borrowed_guard_metadata.owner_row,
         borrowed_guard_metadata.editable,
@@ -519,8 +548,8 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         false,
         None,
     )
-    if !jet_eval_shared_runtime_entry_read_guard_loan_link(&receiver, borrowed_child_index, guard_loan.index)
-        || !jet_eval_shared_runtime_guard_set_active(&receiver, borrowed_child_index, true, span) -> return false
+    if !jet_eval_shared_runtime_entry_read_guard_loan_link(receiver, borrowed_child_index, guard_loan.index)
+        || !jet_eval_shared_runtime_guard_set_active(receiver, borrowed_child_index, true, span) -> return false
     borrowed_child_receipt :: JetEvalSharedEntryLoan{
         kind: JetEvalSharedHostKind.Guard,
         index: borrowed_child_index,
@@ -531,7 +560,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         borrowed_child_receipt,
         selector + 1,
     ) -> return false
-    borrowed_child_guard :: jet_eval_shared_runtime_guard(&receiver, borrowed_child_index) ?? return false
+    borrowed_child_guard :: jet_eval_shared_runtime_guard(receiver, borrowed_child_index) ?? return false
     if borrowed_guard_record.metadata.guard_read().value.physical_borrow_selector != Val(selector)
         || borrowed_child_guard.metadata.guard_read().value.physical_borrow_selector != Val(selector + 1) -> return false
     if jet_eval_shared_runtime_guard_consume(&receiver, borrowed_guard_index, 1, span) == None -> return false
@@ -544,7 +573,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     }
 
     guard_count_during_loan :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     if guard_count_during_loan != guard_count_before_loan -> return false
     if !jet_eval_shared_runtime_host_entry_loan_end(&receiver, guard_loan, span) -> return false
@@ -573,19 +602,19 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         || parent_guard_after_loan.dropped || !parent_guard_after_loan.active
         || parent_lease_after_loan.released || parent_lease_after_loan.handles != source_lease_metadata.handles -> return false
     guard_count_after_loan :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     if guard_count_after_loan != guard_count_before_loan -> return false
     if !jet_eval_shared_runtime_guard_release(&receiver, guard_index, span) -> return false
     released_guard_count :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     if released_guard_count != (JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 1}}) -> return false
     receiver_payload :: jet_eval_shared_runtime_route(
         &receiver,
         get_row,
         [JetEvalRuntimeValue]{received_value},
-        [MirType]{},
+        [MIRType]{},
         Val(payload_type),
         span,
     ) ?? return false
@@ -595,7 +624,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     receiver_nested :: jet_eval_copy_value(receiver_nested_borrowed, &receiver, span) ?? return false
     if !jet_eval_drop_value(&receiver, receiver_payload, span) -> return false
     receiver_nested_initial :: jet_eval_shared_runtime_route(
-        &receiver, get_row, [JetEvalRuntimeValue]{receiver_nested}, [MirType]{}, Val(int_type), span,
+        &receiver, get_row, [JetEvalRuntimeValue]{receiver_nested}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     if receiver_nested_initial != (JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 19}}) -> return false
 
@@ -608,13 +637,13 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         &receiver,
         set_row,
         [JetEvalRuntimeValue]{received_value, receiver_payload_for_write},
-        [MirType]{},
-        Val(mir_type_from_kind(MirTypeKind.Unit)),
+        [MIRType]{},
+        Val(mir_type_from_kind(MIRTypeKind.Unit)),
         span,
     ) != Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}) -> return false
     if !jet_eval_drop_value(&receiver, receiver_payload_for_write, span) -> return false
     receiver_payload_after_write :: jet_eval_shared_runtime_route(
-        &receiver, get_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(payload_type), span,
+        &receiver, get_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(payload_type), span,
     ) ?? return false
     receiver_marker_after_write :: jet_eval_task_roots_fixture_shared_field(receiver_payload_after_write, "marker") ?? return false
     if receiver_marker_after_write != (JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 31}}) -> return false
@@ -623,35 +652,35 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         &receiver,
         set_row,
         [JetEvalRuntimeValue]{receiver_nested, JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 42}}},
-        [MirType]{},
-        Val(mir_type_from_kind(MirTypeKind.Unit)),
+        [MIRType]{},
+        Val(mir_type_from_kind(MIRTypeKind.Unit)),
         span,
     ) != Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}) -> return false
     if jet_eval_shared_runtime_route(
-        &receiver, get_row, [JetEvalRuntimeValue]{receiver_nested}, [MirType]{}, Val(int_type), span,
+        &receiver, get_row, [JetEvalRuntimeValue]{receiver_nested}, [MIRType]{}, Val(int_type), span,
     ) != Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 42}}) -> return false
 
     weak_value :: jet_eval_shared_runtime_route(
-        &receiver, downgrade_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, None, span,
+        &receiver, downgrade_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, None, span,
     ) ?? return false
     count_before_upgrade :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     count_before_upgrade_value :: jet_eval_task_roots_fixture_int_data(count_before_upgrade) ?? return false
     upgraded_result :: jet_eval_shared_runtime_route(
-        &receiver, upgrade_row, [JetEvalRuntimeValue]{weak_value}, [MirType]{}, Val(option_shared_type), span,
+        &receiver, upgrade_row, [JetEvalRuntimeValue]{weak_value}, [MIRType]{}, Val(option_shared_type), span,
     ) ?? return false
     upgraded_payload :: jet_eval_task_roots_fixture_ok_payload(upgraded_result) ?? return false
     upgraded_value :: if upgraded_payload == {.Shared(_) -> Val(upgraded_payload) else -> None} ?? return false
     upgraded_index :: if upgraded_value == {.Shared(index) -> Val(index) else -> None} ?? return false
-    upgraded_entry :: jet_eval_shared_runtime_value(&receiver, upgraded_index) ?? return false
+    upgraded_entry :: jet_eval_shared_runtime_value(receiver, upgraded_index) ?? return false
     upgraded_capability :: upgraded_entry.metadata.guard_read().value.physical_root ?? return false
     if upgraded_capability.type_identity != received_capability.type_identity
         || upgraded_capability.physical_identity != received_capability.physical_identity -> return false
     if upgraded_capability.raw == received_capability.raw
         && upgraded_capability.generation == received_capability.generation -> return false
     count_after_upgrade :: jet_eval_shared_runtime_route(
-        &receiver, count_row, [JetEvalRuntimeValue]{upgraded_value}, [MirType]{}, Val(int_type), span,
+        &receiver, count_row, [JetEvalRuntimeValue]{upgraded_value}, [MIRType]{}, Val(int_type), span,
     ) ?? return false
     count_after_upgrade_value :: jet_eval_task_roots_fixture_int_data(count_after_upgrade) ?? return false
     if count_after_upgrade_value != count_before_upgrade_value + 1 -> return false
@@ -665,13 +694,13 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
         &receiver,
         set_row,
         [JetEvalRuntimeValue]{upgraded_value, upgraded_payload_for_write},
-        [MirType]{},
-        Val(mir_type_from_kind(MirTypeKind.Unit)),
+        [MIRType]{},
+        Val(mir_type_from_kind(MIRTypeKind.Unit)),
         span,
     ) != Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}) -> return false
     if !jet_eval_drop_value(&receiver, upgraded_payload_for_write, span) -> return false
     receiver_payload_after_upgrade :: jet_eval_shared_runtime_route(
-        &receiver, get_row, [JetEvalRuntimeValue]{received_value}, [MirType]{}, Val(payload_type), span,
+        &receiver, get_row, [JetEvalRuntimeValue]{received_value}, [MIRType]{}, Val(payload_type), span,
     ) ?? return false
     receiver_marker_after_upgrade :: jet_eval_task_roots_fixture_shared_field(receiver_payload_after_upgrade, "marker") ?? return false
     if receiver_marker_after_upgrade != (JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 42}}) -> return false
@@ -679,11 +708,11 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
 
     // Distinct rootcaps for one canonical physical owner are one transaction
     // participant, so ordered acquisition takes its permit only once.
-    transaction :: jet_eval_shared_runtime_allocate_transaction(&receiver, JetEvalSharedTransaction{
+    transaction :: jet_eval_shared_runtime_allocate_transaction(receiver, JetEvalSharedTransaction{
         storage: shared JetEvalSharedTransactionState{
             machine: receiver.identity,
             frame_index: 0,
-            scope: MirScopeId{value: stable_id("mir-scope", "task-roots-shared-alias-transaction")},
+            scope: MIRScopeID{value: stable_id("mir-scope", "task-roots-shared-alias-transaction")},
             parent: None,
             active: true,
             participants: [JetEvalSharedTransactionPart]{},
@@ -700,7 +729,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
     if !jet_eval_drop_value(&receiver, received_value, span) -> return false
     if !jet_eval_drop_value(&receiver, upgraded_result, span) -> return false
     no_owner_upgrade :: jet_eval_shared_runtime_route(
-        &receiver, upgrade_row, [JetEvalRuntimeValue]{weak_value}, [MirType]{}, Val(option_shared_type), span,
+        &receiver, upgrade_row, [JetEvalRuntimeValue]{weak_value}, [MIRType]{}, Val(option_shared_type), span,
     ) ?? return false
     no_owner_absent :: if no_owner_upgrade == {
         .Absent(_) -> true
@@ -716,7 +745,7 @@ pub fn jet_eval_task_roots_fixture_shared_consume(
 // Keep the original end-to-end fixture convenient while exercising the same
 // producer/consumer boundary used by the ResourceSession retirement proof.
 fn jet_eval_task_roots_fixture_shared_roundtrip(machine: &JetEvalMachine, span: Span) -> Bool {
-    config :: jet_eval_task_config(&machine)
+    config :: jet_eval_task_config(machine)
     carrier :: jet_eval_task_roots_fixture_shared_produce(^machine.program, ^config, span) ?? return false
     jet_eval_task_roots_fixture_shared_consume(^machine.program, ^config, ^carrier, span)
 }
@@ -729,8 +758,8 @@ fn jet_eval_task_roots_fixture_interleaved(parent: &JetEvalMachine, child: &JetE
     child_cells := [JetEvalRuntimeValue]{}
     parent_cursors := [JetEvalRuntimeValue]{}
     child_cursors := [JetEvalRuntimeValue]{}
-    base_cell :: jet_eval_shared_cell_aliases(&parent, cell_id) ?? return false
-    base_cursor :: jet_eval_foreign_token_aliases(&parent, cursor_token) ?? return false
+    base_cell :: jet_eval_shared_cell_aliases(parent, cell_id) ?? return false
+    base_cursor :: jet_eval_foreign_token_aliases(parent, cursor_token) ?? return false
     loop _ in 0..<4 {
         &parent_cells.push(jet_eval_copy_value(cell, &parent, span) ?? return false)
         &child_cells.push(jet_eval_copy_value(cell, &child, span) ?? return false)
@@ -752,26 +781,26 @@ fn jet_eval_task_roots_fixture_interleaved(parent: &JetEvalMachine, child: &JetE
 
 // Failure paths run on a separate child machine built from a reusable root so
 // the ownership failures they provoke never poison the parent machine.
-fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirFunctionId, span: Span) -> Bool {
+fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MIRFunctionID, span: Span) -> Bool {
     plain_callback :: JetEvalRuntimeValue.Closure{function: callback, captures: [JetEvalRuntimeValue]{JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}}}
     reusable_lease :: jet_eval_callback_retain(&machine, ^plain_callback, span) ?? return false
     failure_root :: jet_eval_task_root_take(&machine, reusable_lease, span) ?? return false
     // A reusable root stays with the parent: the parent lease is intact and
     // the child received its own copy.
     if machine.callback_roots.get(reusable_lease) == None -> return false
-    failure_config :: jet_eval_task_config(&machine)
+    failure_config :: jet_eval_task_config(machine)
     failure_child := jet_eval_task_machine(^failure_root, ^failure_config)
     if failure_child.identity == machine.identity -> return false
     if !jet_eval_task_roots_fixture_shared_roundtrip(&failure_child, span) -> return false
 
     // Failed transfer cleanup: a closure that captures a stack address is
     // rejected and every other alias it carried is discharged.
-    fail_cell :: jet_eval_new_shared_cell(&failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MirAccess.Write)
+    fail_cell :: jet_eval_new_shared_cell(failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MIRAccess.Write)
     fail_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(fail_cell) ?? return false
     fail_capture :: jet_eval_copy_value(fail_cell, &failure_child, span) ?? return false
     if !jet_eval_task_roots_fixture_cell_aliases(&failure_child, fail_cell_id, 2) -> return false
     bad_payload :: JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: [JetEvalRuntimeValue]{
-        JetEvalRuntimeValue.Address{frame: 0, place: MirPlaceId{value: 0}, access: MirAccess.Read},
+        JetEvalRuntimeValue.Address{frame: 0, place: MIRPlaceID{value: 0}, access: MIRAccess.Read},
         fail_capture,
     }}}
     bad_callback :: JetEvalRuntimeValue.Closure{function: callback, captures: [JetEvalRuntimeValue]{bad_payload}}
@@ -784,7 +813,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
 
     // A second release is invalid only after the aggregate alias count reaches
     // zero; the registry cannot distinguish two copies while another alias is live.
-    double_cell :: jet_eval_new_shared_cell(&failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 5}}, MirAccess.Read)
+    double_cell :: jet_eval_new_shared_cell(failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 5}}, MIRAccess.Read)
     double_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(double_cell) ?? return false
     double_copy :: jet_eval_copy_value(double_cell, &failure_child, span) ?? return false
     if !jet_eval_task_roots_fixture_cell_aliases(&failure_child, double_cell_id, 2) -> return false
@@ -797,8 +826,8 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     failure_child.internal_problem = None
 
     // Re-adopting one exact Native binding identity reuses its live token.
-    native_callable_type :: mir_type_from_kind(MirTypeKind.Fn{signature: MirFunctionSignature{
-        params: [MirType]{},
+    native_callable_type :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{
+        params: [MIRType]{},
         ret: None,
         effect_bound: None,
         param_contract: None,
@@ -809,7 +838,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
         key: "task-root-native-alias",
         callable_type: native_callable_type,
     }}}
-    native_handle :: MirHandleId{value: stable_id("mir-handle", "task-root-native-alias")}
+    native_handle :: MIRHandleID{value: stable_id("mir-handle", "task-root-native-alias")}
     native_first :: jet_eval_host_handle_new_mode(&failure_child, None, None, native_owner, native_handle, 31, JetEvalHostValue.Data{value: TComptimeValue.Unit}, true, span) ?? return false
     native_token :: jet_eval_task_roots_fixture_foreign_token(native_first) ?? return false
     native_second :: jet_eval_host_handle_new_mode(&failure_child, None, None, native_owner, native_handle, 31, JetEvalHostValue.Data{value: TComptimeValue.Unit}, true, span) ?? return false
@@ -829,7 +858,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
         JetEvalHostField{
             name: "malformed",
             value: JetEvalHostValue.Handle{
-                handle: MirHandleId{value: stable_id("mir-handle", "task-root-duplicate-malformed-cursor")},
+                handle: MIRHandleID{value: stable_id("mir-handle", "task-root-duplicate-malformed-cursor")},
                 raw: 47,
                 owner: JetEvalHostOwner.Cursor,
                 payload: JetEvalHostValue.Data{value: TComptimeValue.Unit},
@@ -839,15 +868,15 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
         JetEvalHostField{name: "second", value: JetEvalHostValue.Handle{handle: native_handle, raw: 31, owner: native_owner, payload: JetEvalHostValue.Data{value: TComptimeValue.Unit}}},
     }}
     duplicate_drop_adapter :: jet_eval_host_adapter_clone(&failure_child, span) ?? return false
-    duplicate_drop_root := jet_eval_owned_root(&failure_child)
+    duplicate_drop_root := jet_eval_owned_root(failure_child)
     duplicate_drop :: jet_eval_owned_root_drop_host(&duplicate_drop_root, duplicate_native_root, duplicate_drop_adapter, span)
     if duplicate_drop.disposition != JetEvalOwnedRootDropDisposition.ConsumedFailure || duplicate_drop.internal_problem == None -> return false
-    if jet_eval_resource_handle_alias(&failure_child, native_handle, 31, JetEvalForeignTokenKind.Native{binding: native_identity}) != None -> return false
+    if jet_eval_resource_handle_alias(failure_child, native_handle, 31, JetEvalForeignTokenKind.Native{binding: native_identity}) != None -> return false
     failure_child.internal_problem = None
 
     // A token whose physical ownership left Source (committed native transfer)
     // still discharges its single Source alias exactly once, as Detached.
-    detached :: jet_eval_cursor_handle_new(&failure_child, jet_eval_loop_cursor_handle_id(), 13, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
+    detached :: jet_eval_cursor_handle_new(failure_child, jet_eval_loop_cursor_handle_id(), 13, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     detached_token :: jet_eval_task_roots_fixture_foreign_token(detached) ?? return false
     if !jet_eval_foreign_handle_transfer_retire(&failure_child, detached_token, span) -> return false
     if !jet_eval_task_roots_fixture_token_aliases(&failure_child, detached_token, 0) -> return false
@@ -861,13 +890,13 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     // A borrowed Native Shared.Weak physical root can be imported from an
     // independent registry; malformed earlier host fields must not skip it.
     weak_capability :: JetEvalSharedHostWeakCapability{
-        handle: MirHandleId{value: stable_id("mir-handle", "task-root-external-weak")},
+        handle: MIRHandleID{value: stable_id("mir-handle", "task-root-external-weak")},
         raw: 53,
         generation: 1,
         type_identity: stable_id("mir-type", "task-root-external-weak-i32"),
         physical_identity: stable_id("source-shared-physical-owner", "task-root-external-weak"),
     }
-    weak_element_type :: mir_type_from_kind(MirTypeKind.Int)
+    weak_element_type :: mir_type_from_kind(MIRTypeKind.Int)
     weak_payload_shape :: jet_eval_host_type_shape(&failure_child, Val(weak_element_type), span) ?? return false
     weak_root :: JetEvalSharedWeak{
         metadata: shared JetEvalSharedWeakMeta{
@@ -896,14 +925,14 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     // A writeback to a checked address adopts and installs exactly one weak
     // alias; retiring the replacement discharges that alias once.
     address_function := jet_eval_find_function(failure_child.program, callback) ?? return false
-    address_value_id :: MirValueId{value: stable_id("mir-value", "task-root-writeback-address")}
-    address_place :: MirPlace{
-        id: MirPlaceId{value: stable_id("mir-place", "task-root-writeback-address")},
+    address_value_id :: MIRValueID{value: stable_id("mir-value", "task-root-writeback-address")}
+    address_place :: MIRPlace{
+        id: MIRPlaceID{value: stable_id("mir-place", "task-root-writeback-address")},
         span: span,
-        ty: mir_type_from_kind(MirTypeKind.Int),
-        base: MirPlaceBase.Temporary{value: address_value_id},
-        projections: [MirProjection]{},
-        access: MirAccess.Write,
+        ty: mir_type_from_kind(MIRTypeKind.Int),
+        base: MIRPlaceBase.Temporary{value: address_value_id},
+        projections: [MIRProjection]{},
+        access: MIRAccess.Write,
         persist_key: None,
     }
     &address_function.places.push(address_place)
@@ -920,7 +949,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     address_frame :: failure_child.frames.len()
     &failure_child.frames.push(jet_eval_frame(address_function, [JetEvalRuntimeValue]{}, [JetEvalRuntimeValue]{}))
     failure_child.frames[address_frame].values[address_value_id.value] = JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 5}}
-    address_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.Address{frame: address_frame, place: address_place.id, access: MirAccess.Write}}
+    address_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.Address{frame: address_frame, place: address_place.id, access: MIRAccess.Write}}
     address_writeback :: [JetEvalHostWriteback]{JetEvalHostWriteback{
         argument: 0,
         value: JetEvalHostValue.SharedCarrier{carrier: weak_carrier},
@@ -936,13 +965,13 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
 
     // The same replacement path through a SharedCell retains the adopted
     // alias until the cell retires, and a read owns a separate temporary alias.
-    writeback_cell :: jet_eval_new_shared_cell(&failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MirAccess.Write)
+    writeback_cell :: jet_eval_new_shared_cell(failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MIRAccess.Write)
     writeback_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(writeback_cell) ?? return false
     cell_writeback :: [JetEvalHostWriteback]{JetEvalHostWriteback{
         argument: 0,
         value: JetEvalHostValue.SharedCarrier{carrier: weak_carrier},
     }}
-    cell_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.SharedCell{index: writeback_cell_id, access: MirAccess.Write}}
+    cell_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.SharedCell{index: writeback_cell_id, access: MIRAccess.Write}}
     if !jet_eval_host_writebacks_from(&failure_child, cell_target, cell_writeback, 0, span) -> return false
     if weak_root.metadata.guard_read().value.references != 2 -> return false
     cell_replacement :: jet_eval_shared_read(&failure_child, writeback_cell_id, span) ?? return false
@@ -956,19 +985,19 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     // A writeback can commit before dropping the previous payload reports a
     // physical cursor-close error. The replacement remains in the cell and is
     // still consumed exactly once when that cell retires.
-    old_cursor := jet_eval_cursor_handle_new(&failure_child, jet_eval_loop_cursor_handle_id(), 13, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
+    old_cursor := jet_eval_cursor_handle_new(failure_child, jet_eval_loop_cursor_handle_id(), 13, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     old_cursor_token :: jet_eval_task_roots_fixture_foreign_token(old_cursor) ?? return false
-    failing_cell :: jet_eval_new_shared_cell(&failure_child, old_cursor, MirAccess.Write)
+    failing_cell :: jet_eval_new_shared_cell(failure_child, old_cursor, MIRAccess.Write)
     failing_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(failing_cell) ?? return false
     old_cursor = JetEvalRuntimeValue.Moved
-    failing_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.SharedCell{index: failing_cell_id, access: MirAccess.Write}}
+    failing_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.SharedCell{index: failing_cell_id, access: MIRAccess.Write}}
     failing_writeback :: [JetEvalHostWriteback]{JetEvalHostWriteback{
         argument: 0,
         value: JetEvalHostValue.SharedCarrier{carrier: weak_carrier},
     }}
     if jet_eval_host_writebacks_from(&failure_child, failing_target, failing_writeback, 0, span) -> return false
     if failure_child.internal_problem == None && failure_child.failure == None -> return false
-    if jet_eval_foreign_token_aliases(&failure_child, old_cursor_token) != None -> return false
+    if jet_eval_foreign_token_aliases(failure_child, old_cursor_token) != None -> return false
     if weak_root.metadata.guard_read().value.references != 2 -> return false
     failure_child.internal_problem = None
     failure_child.failure = None
@@ -983,13 +1012,13 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     // A Write address may still target a read-only/unsupported place. Its
     // replacement remains owned until the place accepts it.
     writeback_function := jet_eval_find_function(failure_child.program, callback) ?? return false
-    writeback_place :: MirPlace{
-        id: MirPlaceId{value: stable_id("mir-place", "task-root-writeback-reject")},
+    writeback_place :: MIRPlace{
+        id: MIRPlaceID{value: stable_id("mir-place", "task-root-writeback-reject")},
         span: span,
-        ty: mir_type_from_kind(MirTypeKind.Int),
-        base: MirPlaceBase.Static{name: "task_root_writeback"},
-        projections: [MirProjection]{},
-        access: MirAccess.Write,
+        ty: mir_type_from_kind(MIRTypeKind.Int),
+        base: MIRPlaceBase.Static{name: "task_root_writeback"},
+        projections: [MIRProjection]{},
+        access: MIRAccess.Write,
         persist_key: None,
     }
     &writeback_function.places.push(writeback_place)
@@ -1010,7 +1039,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
         argument: 0,
         value: JetEvalHostValue.SharedCarrier{carrier: weak_carrier},
     }}
-    failed_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.Address{frame: writeback_frame, place: writeback_place.id, access: MirAccess.Write}}
+    failed_target :: [JetEvalRuntimeValue]{JetEvalRuntimeValue.Address{frame: writeback_frame, place: writeback_place.id, access: MIRAccess.Write}}
     if jet_eval_host_writebacks_from(&failure_child, failed_target, failed_writeback, 0, span) -> return false
     if weak_root.metadata.guard_read().value.references != 1 -> return false
     if failure_child.internal_problem == None && failure_child.failure == None -> return false
@@ -1037,7 +1066,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
         JetEvalHostField{
             name: "malformed",
             value: JetEvalHostValue.Handle{
-                handle: MirHandleId{value: stable_id("mir-handle", "task-root-malformed-cursor")},
+                handle: MIRHandleID{value: stable_id("mir-handle", "task-root-malformed-cursor")},
                 raw: 47,
                 owner: JetEvalHostOwner.Cursor,
                 payload: JetEvalHostValue.Data{value: TComptimeValue.Unit},
@@ -1046,7 +1075,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
         JetEvalHostField{name: "later", value: JetEvalHostValue.SharedCarrier{carrier: weak_carrier}},
     }}
     host_drop_adapter :: jet_eval_host_adapter_clone(&failure_child, span) ?? return false
-    host_drop_root := jet_eval_owned_root(&failure_child)
+    host_drop_root := jet_eval_owned_root(failure_child)
     host_drop :: jet_eval_owned_root_drop_host(&host_drop_root, malformed_host_root, host_drop_adapter, span)
     if host_drop.disposition != JetEvalOwnedRootDropDisposition.ConsumedFailure || host_drop.internal_problem == None -> return false
     if weak_root.metadata.guard_read().value.references != 1 -> return false
@@ -1054,12 +1083,12 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     if after_host_drop_weak_count != source_weak_count -> return false
 
     // A failed whole-root validation still consumes every valid alias in it.
-    drop_cell :: jet_eval_new_shared_cell(&failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MirAccess.Read)
+    drop_cell :: jet_eval_new_shared_cell(failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MIRAccess.Read)
     drop_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(drop_cell) ?? return false
     invalid_handle :: JetEvalRuntimeValue.ForeignHandle{handle: jet_eval_loop_cursor_handle_id(), raw: 13, token: detached_token}
     malformed_runtime_root :: JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: [JetEvalRuntimeValue]{drop_cell, invalid_handle}}}
     runtime_drop_adapter :: jet_eval_host_adapter_clone(&failure_child, span) ?? return false
-    runtime_drop_root := jet_eval_owned_root(&failure_child)
+    runtime_drop_root := jet_eval_owned_root(failure_child)
     runtime_drop :: jet_eval_owned_root_drop(&runtime_drop_root, malformed_runtime_root, runtime_drop_adapter, span)
     if runtime_drop.disposition != JetEvalOwnedRootDropDisposition.ConsumedFailure || runtime_drop.internal_problem == None -> return false
     if !jet_eval_task_roots_fixture_cell_aliases(&failure_child, drop_cell_id, 0) -> return false
@@ -1080,8 +1109,8 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
 
     // Checked Result carriers remain runtime Results even when their payloads
     // are scalar data; Option retains the compile-time Present representation.
-    checked_result_ty :: mir_type_from_kind(MirTypeKind.Result{ok: mir_type_from_kind(MirTypeKind.Int), err: mir_type_from_kind(MirTypeKind.String)})
-    checked_option_ty :: mir_type_from_kind(MirTypeKind.Option{inner: mir_type_from_kind(MirTypeKind.Int)})
+    checked_result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: mir_type_from_kind(MIRTypeKind.Int), err: mir_type_from_kind(MIRTypeKind.String)})
+    checked_option_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: mir_type_from_kind(MIRTypeKind.Int)})
     result_success :: jet_eval_host_value_adopt(&failure_child, None, Val(checked_result_ty), JetEvalHostValue.Present{value: JetEvalHostValue.Data{value: TComptimeValue.Int{value: 73}}}, false, span) ?? return false
     if result_success != (JetEvalRuntimeValue.Result{ok: true, value: JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 73}}}) -> return false
     result_failure :: jet_eval_host_value_adopt(&failure_child, None, Val(checked_result_ty), JetEvalHostValue.Failed{value: JetEvalHostValue.Data{value: TComptimeValue.String{value: "failed"}}}, false, span) ?? return false
@@ -1092,9 +1121,9 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
     // A physical host failure still carries committed transfer receipts and
     // writable-argument replacements; apply receipts and writebacks before
     // surfacing the operation's Source diagnostic.
-    writeback_cell :: jet_eval_new_shared_cell(&failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MirAccess.Write)
+    writeback_cell :: jet_eval_new_shared_cell(failure_child, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MIRAccess.Write)
     writeback_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(writeback_cell) ?? return false
-    transferred_cursor :: jet_eval_cursor_handle_new(&failure_child, jet_eval_loop_cursor_handle_id(), 17, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
+    transferred_cursor :: jet_eval_cursor_handle_new(failure_child, jet_eval_loop_cursor_handle_id(), 17, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     transferred_token :: jet_eval_task_roots_fixture_foreign_token(transferred_cursor) ?? return false
     writeback_args :: [JetEvalRuntimeValue]{writeback_cell, transferred_cursor}
     failed_reply :: JetEvalHostResult{
@@ -1129,15 +1158,15 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MirF
 // `callback` must be a real checked escaping closure function with one capture
 // parameter. The harness supplies its ID from the fixture MIR; this function
 // deliberately never fabricates capture facts for a zero-capture function.
-pub fn jet_eval_task_roots_fixture(program: ^MirProgram, config: ^JetEvalConfig, callback: MirFunctionId, resource_handle: MirHandleId, resource_raw: Int, span: Span) -> Bool {
+pub fn jet_eval_task_roots_fixture(program: ^MIRProgram, config: ^JetEvalConfig, callback: MIRFunctionID, resource_handle: MIRHandleID, resource_raw: Int, span: Span) -> Bool {
     // A Cursor-kind token closes only under the canonical loop-cursor identity,
     // so the harness must register its capability under that handle id; the
     // raw capability must be a live arena registration the adapter can release.
     if resource_handle != jet_eval_loop_cursor_handle_id() -> return false
     machine := jet_eval_machine(^program, ^config)
-    cell :: jet_eval_new_shared_cell(&machine, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MirAccess.Write)
+    cell :: jet_eval_new_shared_cell(machine, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MIRAccess.Write)
     cell_id :: jet_eval_task_roots_fixture_shared_cell_index(cell) ?? return false
-    cursor :: jet_eval_cursor_handle_new(&machine, resource_handle, resource_raw, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
+    cursor :: jet_eval_cursor_handle_new(machine, resource_handle, resource_raw, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     cursor_token :: jet_eval_task_roots_fixture_foreign_token(cursor) ?? return false
     if !jet_eval_task_roots_fixture_cell_aliases(&machine, cell_id, 1) -> return false
     if !jet_eval_task_roots_fixture_token_aliases(&machine, cursor_token, 1) -> return false
@@ -1150,9 +1179,9 @@ pub fn jet_eval_task_roots_fixture(program: ^MirProgram, config: ^JetEvalConfig,
     if !jet_eval_task_roots_fixture_cell_aliases(&machine, cell_id, 3) -> return false
     if !jet_eval_task_roots_fixture_token_aliases(&machine, cursor_token, 3) -> return false
     duplicate :: JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: [JetEvalRuntimeValue]{cell, cell_copy, cursor, cursor_copy}}}
-    unrelated_cell :: jet_eval_new_shared_cell(&machine, JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 3}}, MirAccess.Write)
+    unrelated_cell :: jet_eval_new_shared_cell(machine, JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 3}}, MIRAccess.Write)
     unrelated_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(unrelated_cell) ?? return false
-    unrelated_cursor :: jet_eval_cursor_handle_new(&machine, jet_eval_loop_cursor_handle_id(), 9, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
+    unrelated_cursor :: jet_eval_cursor_handle_new(machine, jet_eval_loop_cursor_handle_id(), 9, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     unrelated_cursor_token :: jet_eval_task_roots_fixture_foreign_token(unrelated_cursor) ?? return false
 
     // FnOnce transfer moves the closure into the callback root: no count change.
@@ -1174,7 +1203,7 @@ pub fn jet_eval_task_roots_fixture(program: ^MirProgram, config: ^JetEvalConfig,
     machine.internal_problem = None
 
     // The child shares the registry with a fresh identity and owns the root.
-    child_config :: jet_eval_task_config(&machine)
+    child_config :: jet_eval_task_config(machine)
     child := jet_eval_task_machine(^root, ^child_config)
     if child.identity == machine.identity -> return false
     if child.callback_roots.get(lease) == None -> return false
@@ -1182,12 +1211,12 @@ pub fn jet_eval_task_roots_fixture(program: ^MirProgram, config: ^JetEvalConfig,
 
     // Child-created entries published into the parent's cell resolve in the
     // parent, both before and after the child retires.
-    child_cell :: jet_eval_new_shared_cell(&child, JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 41}}, MirAccess.Write)
+    child_cell :: jet_eval_new_shared_cell(child, JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 41}}, MIRAccess.Write)
     child_cell_id :: jet_eval_task_roots_fixture_shared_cell_index(child_cell) ?? return false
-    child_cursor :: jet_eval_cursor_handle_new(&child, jet_eval_loop_cursor_handle_id(), 11, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
+    child_cursor :: jet_eval_cursor_handle_new(child, jet_eval_loop_cursor_handle_id(), 11, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     child_cursor_token :: jet_eval_task_roots_fixture_foreign_token(child_cursor) ?? return false
     published :: JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: [JetEvalRuntimeValue]{child_cell, child_cursor}}}
-    if !jet_eval_shared_write(&child, cell_id, MirAccess.Write, published, span) -> return false
+    if !jet_eval_shared_write(&child, cell_id, MIRAccess.Write, published, span) -> return false
     if !jet_eval_task_roots_fixture_cell_aliases(&child, child_cell_id, 1) -> return false
     if !jet_eval_task_roots_fixture_token_aliases(&child, child_cursor_token, 1) -> return false
     resolved :: jet_eval_shared_read(&machine, cell_id, span) ?? return false

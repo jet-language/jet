@@ -1,0 +1,8 @@
+Error [E2404]: `sort_by` fails with `PriceError`, which can't propagate into `KeyError` here
+  --> callback_error_generic_mismatch.jet:30:5
+    |
+ 30 |     sort_by(names, parse_price)
+    |     ^^^^^^^
+ Why: `sort_by` is defined at `callback_error_generic_mismatch.jet:15:4` with effective failure contract `explicit !E`; the caller's `explicit !KeyError` contract has no route from `PriceError` to `KeyError`
+ Fix: Declare the caller with `PriceError` as its failure domain, or add `impl PriceError -> KeyError { … }`; otherwise handle `sort_by` locally with `??`
+More: jet-lang.dev/e/E2404

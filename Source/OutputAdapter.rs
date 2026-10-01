@@ -220,15 +220,6 @@ pub(crate) fn write_status(profile: OutputProfile, text: &str) {
     }
 }
 
-/// Write ephemeral progress only when the profile enables it.
-pub(crate) fn write_progress(profile: OutputProfile, text: &str) {
-    if profile.progress_enabled()
-        && profile.channel(OutputKind::Progress) == OutputChannel::HumanStderr
-    {
-        eprint!("{text}");
-    }
-}
-
 /// Write structured records only to machine stdout.
 pub(crate) fn write_machine(profile: OutputProfile, text: &str) {
     if profile.channel(OutputKind::Machine) == OutputChannel::MachineStdout {

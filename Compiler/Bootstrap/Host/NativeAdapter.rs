@@ -1,60 +1,39 @@
 use super::{BootstrapCodecSymbols, BootstrapHostCodecError};
+use crate::Codegen::MIRRust::MirRustTraitMethodMetadata;
 use std::fmt::Write as _;
+
+/// Adapter methods the host answers with a native operation. Each takes the
+/// Source machine first and is served by `__jet_bootstrap_native_{name}`; any
+/// other machine method of the trait is answered as unavailable (`None`), which
+/// the evaluator reports as an explicit unsupported-host diagnostic.
+const HOST_OPERATIONS: &[&str] = &["host_call", "foreign_call", "handle_call"];
 
 pub(crate) fn emit_bootstrap_native_adapter_impl(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    const METHODS: &[(&str, usize)] = &[
-        ("new_session", 0),
-        ("clone_adapter", 0),
-        ("poll_callbacks", 1),
-        ("drain_callbacks", 1),
-        ("host_call", 6),
-        ("foreign_call", 4),
-        ("handle_call", 5),
-        ("physical_binding", 0),
-        ("task_group", 6),
-        ("native_call", 5),
-        ("channel_select", 6),
-        ("shared_call", 10),
-    ];
     let trait_symbol = symbols.trait_symbol("JetEvalHostAdapter")?;
-    let mut methods = Vec::with_capacity(METHODS.len());
-    for (name, arity) in METHODS {
-        let metadata = symbols.trait_method_metadata("JetEvalHostAdapter", name)?;
-        if metadata.name != *name
-            || metadata.receiver_access.is_none()
-            || metadata.parameter_types.len() != *arity
-            || metadata.parameter_access.len() != *arity
+    // The Jet trait is the only method list; every method it declares gets a
+    // trait-impl body and an interface binding below.
+    let methods = symbols.trait_methods("JetEvalHostAdapter")?;
+    for metadata in &methods {
+        let name = &metadata.name;
+        if metadata.receiver_access.is_none()
+            || metadata.parameter_types.len() != metadata.parameter_access.len()
         {
             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
                 "JetEvalHostAdapter.{name} has an incompatible checked Rust signature"
             )));
         }
-        if !matches!(*name, "new_session" | "clone_adapter" | "physical_binding")
-            && metadata.parameter_access.first()
-                != Some(&jet_foundation::MIR::MirAccess::Write)
+        if !metadata.parameter_access.is_empty()
+            && metadata.parameter_access[0] != jet_foundation::MIR::MirAccess::Write
         {
             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
                 "JetEvalHostAdapter.{name} does not expose the required checked Machine WRITE borrow"
             )));
         }
-        methods.push((metadata, *arity));
     }
-    let Some((first_method, _)) = methods.first() else {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
-            "JetEvalHostAdapter has no checked methods".to_string(),
-        ));
-    };
-    if methods
-        .iter()
-        .any(|(method, _)| method.trait_id != first_method.trait_id)
-    {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
-            "JetEvalHostAdapter method metadata spans multiple checked traits".to_string(),
-        ));
-    }
+    let first_method = methods[0];
 
     let host_adapter = symbols.field_binding("JetEvalConfig", "host_adapter")?;
     let receiver_type = host_adapter.ty.option_inner().ok_or_else(|| {
@@ -84,7 +63,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
         ));
     }
 
-    let source_program = symbols.type_symbol("MirProgram")?;
+    let source_program = symbols.type_symbol("MIRProgram")?;
     let source_binding_type = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
     let source_binding_identity = "::jet_jit::SourceResources::SourceNativeBindingIdentity";
     let resource_handle = "::jet_jit::SourceResources::SourceResourceHandle";
@@ -183,7 +162,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
-    for (metadata, _) in &methods {
+    for metadata in &methods {
         let method_name = &metadata.name;
         let method_id = metadata.method_id.0;
         let trait_id = metadata.trait_id.0;
@@ -307,7 +286,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
-    for (metadata, arity) in &methods {
+    for metadata in &methods {
         let receiver = match metadata.receiver_access {
             Some(jet_foundation::MIR::MirAccess::Read) => "&self",
             Some(jet_foundation::MIR::MirAccess::Write) => "&mut self",
@@ -329,17 +308,27 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
         let result = match metadata.name.as_str() {
             "new_session" => "if self.borrowed_session { Box::new(self.clone()) } else { Box::new(__jet_bootstrap_native_adapter_new_scope(self.root.clone(), self.resources.clone(), self.cleanup.clone()).unwrap_or_else(|error| panic!(\"Source callback-scope adapter construction failed: {error}\"))) }".to_string(),
             "clone_adapter" => "Box::new(self.clone())".to_string(),
-            "poll_callbacks" => "{ let _ = __jet_arg_0; __jet_bootstrap_native_poll_callbacks(self) }".to_string(),
-            "drain_callbacks" => "{ let _ = __jet_arg_0; __jet_bootstrap_native_drain_callbacks(self) }".to_string(),
-            "host_call" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); let compiler_program = self.root.program.as_ref(); let physical = __JetBootstrapNativePhysicalBindings::new(self); __jet_bootstrap_native_host_call(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3, __jet_arg_4, __jet_arg_5, compiler_program, &physical) }".to_string(),
-            "foreign_call" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); __jet_bootstrap_native_foreign_call(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3) }".to_string(),
-            "handle_call" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); __jet_bootstrap_native_handle_call(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3, __jet_arg_4) }".to_string(),
+            "poll_callbacks" => "__jet_bootstrap_native_poll_callbacks(&self.root, &self.callbacks, __jet_arg_0)".to_string(),
+            "drain_callbacks" => "__jet_bootstrap_native_drain_callbacks(&self.root, &self.callbacks, __jet_arg_0)".to_string(),
             "physical_binding" => "__jet_bootstrap_native_adapter_physical_binding(self)".to_string(),
-            "task_group" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); __jet_bootstrap_native_task_group(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3, __jet_arg_4, __jet_arg_5) }".to_string(),
-            "native_call" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); __jet_bootstrap_native_call(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3, __jet_arg_4) }".to_string(),
-            "channel_select" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); __jet_bootstrap_native_channel_select(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3, __jet_arg_4, __jet_arg_5) }".to_string(),
-            "shared_call" => "{ let _jet_resource_scope = self.resources.activate(); let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); __jet_bootstrap_native_shared_call(&mut machine, __jet_arg_1, __jet_arg_2, __jet_arg_3, __jet_arg_4, __jet_arg_5, __jet_arg_6, __jet_arg_7, __jet_arg_8, __jet_arg_9) }".to_string(),
-            _ => unreachable!("adapter method list and implementation map are synchronized"),
+            _ if metadata.parameter_types.is_empty() => {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "JetEvalHostAdapter.{} has no native adapter implementation",
+                    metadata.name
+                )))
+            }
+            _ => {
+                let arguments = native_operation_arguments(metadata);
+                let (physical_binding, operation) = native_operation(metadata);
+                let physical_binding = if physical_binding {
+                    "let compiler_program = self.root.program.as_ref(); let physical = __JetBootstrapNativePhysicalBindings::new(self); "
+                } else {
+                    ""
+                };
+                format!(
+                    "{{ let _jet_resource_scope = self.resources.activate(); {physical_binding}let mut machine = crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Typed(__jet_arg_0); {operation}(&mut machine{arguments}) }}"
+                )
+            }
         };
         let return_type = &metadata.return_type;
         writeln!(
@@ -348,14 +337,70 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
             metadata.symbol,
         )
         .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-        let _ = arity;
     }
     writeln!(out, "}}")
         .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    emit_native_unavailable_operations(out, &methods)?;
     emit_native_interface_helpers(out, &methods)?;
     emit_native_callback_scope_helpers(out)?;
     emit_native_callback_helpers(out, symbols)?;
     emit_native_binding_helpers(out, symbols)
+}
+
+/// The Rust helper serving a machine method, and whether it also takes the
+/// compiler program and physical bindings (`host_call` resolves Source
+/// resources through them).
+fn native_operation(metadata: &MirRustTraitMethodMetadata) -> (bool, String) {
+    let name = metadata.name.as_str();
+    if HOST_OPERATIONS.contains(&name) {
+        (name == "host_call", format!("__jet_bootstrap_native_{name}"))
+    } else {
+        (false, format!("__jet_bootstrap_native_unavailable_{name}"))
+    }
+}
+
+/// `, __jet_arg_1, ...` for the operation arguments after the machine, plus
+/// the program and physical bindings when the helper needs them.
+fn native_operation_arguments(metadata: &MirRustTraitMethodMetadata) -> String {
+    let mut arguments = (1..metadata.parameter_types.len())
+        .map(|index| format!(", __jet_arg_{index}"))
+        .collect::<String>();
+    if native_operation(metadata).0 {
+        arguments.push_str(", compiler_program, &physical");
+    }
+    arguments
+}
+
+/// Machine methods without a host implementation answer `None`: the Source
+/// evaluator reports the operation as unavailable to the typed host adapter.
+fn emit_native_unavailable_operations(
+    out: &mut String,
+    methods: &[&MirRustTraitMethodMetadata],
+) -> Result<(), BootstrapHostCodecError> {
+    for metadata in methods {
+        let name = metadata.name.as_str();
+        if metadata.parameter_types.is_empty()
+            || matches!(name, "poll_callbacks" | "drain_callbacks")
+            || HOST_OPERATIONS.contains(&name)
+        {
+            continue;
+        }
+        let parameters = metadata.parameter_types[1..]
+            .iter()
+            .map(|ty| format!(", _: {ty}"))
+            .collect::<String>();
+        let return_type = &metadata.return_type;
+        writeln!(
+            out,
+            "fn __jet_bootstrap_native_unavailable_{name}<T>(\n\
+             \x20   _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>{parameters},\n\
+             ) -> {return_type} {{\n\
+             \x20   Err(Default::default())\n\
+             }}"
+        )
+        .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    }
+    Ok(())
 }
 
 fn mir_access_expression(access: jet_foundation::MIR::MirAccess) -> &'static str {
@@ -578,7 +623,7 @@ impl ::jet_jit::SourceCallbacks::SourceCallbackJobOwner for __JetBootstrapNative
 
 fn emit_native_interface_helpers(
     out: &mut String,
-    methods: &[(&crate::Codegen::MIRRust::MirRustTraitMethodMetadata, usize)],
+    methods: &[&MirRustTraitMethodMetadata],
 ) -> Result<(), BootstrapHostCodecError> {
     out.push_str(
         r#"fn __jet_bootstrap_native_adapter_for_interface_call(
@@ -626,7 +671,7 @@ fn emit_native_interface_helpers(
 "#,
     );
 
-    for (metadata, _) in methods {
+    for metadata in methods {
         let name = metadata.name.as_str();
         let trait_id = metadata.trait_id.0;
         let method_id = metadata.method_id.0;
@@ -648,60 +693,40 @@ fn emit_native_interface_helpers(
                 .to_string(),
             _ => {
                 let closure = match name {
-                    "poll_callbacks" => {
-                        "|_machine| Ok(__jet_bootstrap_native_poll_callbacks(&adapter))".to_string()
-                    }
-                    "drain_callbacks" => {
-                        "|_machine| Ok(__jet_bootstrap_native_drain_callbacks(&adapter))".to_string()
-                    }
+                    // Callback pumping runs Source callbacks against the typed
+                    // machine; a MIR-borrowed machine cannot host them.
+                    "poll_callbacks" | "drain_callbacks" => format!(
+                        "|mut machine| match machine.typed_mut() {{ Some(machine) => Ok(__jet_bootstrap_native_{name}(&adapter.root, &adapter.callbacks, machine)), None => Err(\"native adapter {name} needs the typed Source machine\".to_string()) }}"
+                    ),
                     "physical_binding" => {
                         "|| Ok(__jet_bootstrap_native_adapter_physical_binding(&adapter))".to_string()
                     }
-                    operation => {
-                        let helper = match operation {
-                            "host_call" => "host_call",
-                            "foreign_call" => "foreign_call",
-                            "handle_call" => "handle_call",
-                            "task_group" => "task_group",
-                            "native_call" => "call",
-                            "channel_select" => "channel_select",
-                            "shared_call" => "shared_call",
-                            _ => {
-                                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-                                    "JetEvalHostAdapter.{operation} has no native operation handler"
-                                )))
-                            }
-                        };
-                        let arguments = (1..metadata.parameter_types.len())
-                            .map(|index| format!("__jet_arg_{index}"))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        let separator = if arguments.is_empty() { "" } else { ", " };
-                        let physical_arguments = if operation == "host_call" {
-                            ", compiler_program, &physical"
-                        } else {
-                            ""
-                        };
+                    _ if metadata.parameter_types.is_empty() => {
+                        return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                            "JetEvalHostAdapter.{name} has no native interface handler"
+                        )))
+                    }
+                    _ => {
+                        let parameters = (1..metadata.parameter_types.len())
+                            .map(|index| format!(", __jet_arg_{index}"))
+                            .collect::<String>();
+                        let arguments = native_operation_arguments(metadata);
+                        let (_, operation) = native_operation(metadata);
                         format!(
-                            "|machine, {arguments}| {{ let mut machine = machine; Ok(__jet_bootstrap_native_{helper}(&mut machine{separator}{arguments}{physical_arguments})) }}"
+                            "|machine{parameters}| {{ let mut machine = machine; Ok({operation}(&mut machine{arguments})) }}"
                         )
                     }
                 };
-                let compiler_program_binding = if name == "host_call" {
+                let compiler_program_binding = if native_operation(metadata).0 {
                     "let compiler_program = adapter.root.program.as_ref(); "
                 } else {
                     ""
-                };
-                let compiler_program_argument = if name == "host_call" {
-                    "compiler_program"
-                } else {
-                    "adapter.root.program.as_ref()"
                 };
                 format!(
                     "let _jet_resource_scope = adapter.resources.activate(); {compiler_program_binding}let physical = __JetBootstrapNativePhysicalBindings::new(&adapter);\n\
                      crate::__jet_bootstrap_entry_native_interface_{name}(\n\
                          call,\n\
-                         {compiler_program_argument},\n\
+                         &adapter.root.program,\n\
                          &adapter.root.machine_abi_shape,\n\
                          &physical,\n\
                          {closure},\n\
@@ -1141,15 +1166,15 @@ fn emit_native_binding_helpers(
     let weak_cap_physical_identity = symbols.field_symbol("JetEvalSharedHostWeakCapability", "physical_identity")?;
     let ct_unit = symbols.variant_path("TComptimeValue", "Unit")?;
     let host_field = symbols.field_binding("JetEvalConfig", "host_adapter")?;
-    let numeric_field = symbols.field_binding("JetEvalConfig", "numeric_unit_conversion_exact")?;
+    let numeric_field = symbols.field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
     let numeric_callable_type = numeric_field.ty.option_inner().ok_or_else(|| {
         BootstrapHostCodecError::InvalidMetadata(
-            "JetEvalConfig.numeric_unit_conversion_exact is not the checked optional callable field".to_string(),
+            "SemaRegistrationHostHooks.numeric_unit_conversion_exact is not the checked optional callable field".to_string(),
         )
     })?;
     let jet_foundation::MIR::MirTypeKind::Fn(numeric_signature) = numeric_callable_type.kind() else {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "JetEvalConfig.numeric_unit_conversion_exact is not a checked Fn".to_string(),
+            "SemaRegistrationHostHooks.numeric_unit_conversion_exact is not a checked Fn".to_string(),
         ));
     };
     let numeric_parameters_match = numeric_signature.params.len() == 5
@@ -1388,7 +1413,7 @@ fn emit_native_binding_helpers(
             {
                 // These are the only native Source fields owned by this adapter.
             } else {
-                return Err("native binding is not attached to an approved checked JetEvalConfig leaf".to_string());
+                return Err("native binding is not attached to an approved checked JetEvalConfig/SemaRegistrationHostHooks leaf".to_string());
             }
             let checked_host = crate::__jet_bootstrap_entry_field_type(
                 program,
@@ -1403,7 +1428,7 @@ fn emit_native_binding_helpers(
                 ::jet_foundation::MIR::MirFieldId(__JET_NUMERIC_FIELD__),
             )?;
             let expected_numeric = checked_numeric.option_inner()
-                .ok_or_else(|| "checked JetEvalConfig.numeric_unit_conversion_exact lost its Option leaf".to_string())?;
+                .ok_or_else(|| "checked SemaRegistrationHostHooks.numeric_unit_conversion_exact lost its Option leaf".to_string())?;
             let expected_execution = program.execution_identity(Some(artifact))
                 .map_err(|error| error.to_string())?;
             match (&identity, &binding) {

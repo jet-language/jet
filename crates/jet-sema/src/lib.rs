@@ -7,6 +7,7 @@ pub use jet_parser::{
     CanonicalAST, Collections, Diagnostics, Formatter, Generics, Lexer, Numeric, Parser, Policy,
     Registry, Syntax, TargetMachine, Traits, AST, SHA256,
 };
+pub mod CoreSources;
 pub mod Sema;
 pub use Sema::{cognitive_complexity_reports, CognitiveComplexityReport};
 pub use Sema::{

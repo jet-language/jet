@@ -9,7 +9,6 @@
 //! otherwise).
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet::ExitCodes;
@@ -17,6 +16,8 @@ use jet::Sema::SemIndexEffectFacts;
 use jet::AST::{Binding, Expr, Item, ProgramBundle, Stmt, Type};
 use jet_foundation::Layout::{TargetLayout, TargetLayoutEngine};
 use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue, SemIndex};
+
+use crate::absolutize;
 
 /// One registered lens: name, one-line description for `--facts <unknown>`
 /// listings and the bare-form group header, and the renderer that turns a
@@ -162,7 +163,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     });
     let bundle = &checked.bundle;
     let facts = &checked.facts;
-    let index = &checked.index;
+    let index = checked.index();
 
     // JSON is the canonical semantic-index document with one additive
     // `expand` projection. The checked bundle and effect facts above are the
@@ -1818,15 +1819,4 @@ fn render_callable_signature_json(
             ]))
         })
         .collect()
-}
-
-fn absolutize(path: &str) -> PathBuf {
-    let p = Path::new(path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(p)
-    }
 }

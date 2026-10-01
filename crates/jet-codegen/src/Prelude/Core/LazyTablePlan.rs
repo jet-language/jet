@@ -1043,11 +1043,6 @@ impl JetTableNode {
         node
     }
 
-    pub fn with_callable(mut self, callable: JetTableCallable) -> Self {
-        self.callable = Some(callable);
-        self
-    }
-
     pub fn with_stream(mut self, stream: JetTableStreamMode) -> Self {
         self.stream = stream;
         self
@@ -1078,11 +1073,6 @@ impl JetTableNode {
 
     pub fn with_facts(mut self, facts: JetTableFacts) -> Self {
         self.facts = facts;
-        self
-    }
-
-    pub fn with_note(mut self, note: impl Into<String>) -> Self {
-        self.note = note.into();
         self
     }
 
@@ -1278,11 +1268,6 @@ impl JetTableSource {
 
     pub fn with_rows(mut self, rows: u128) -> Self {
         self.rows = JetTableEstimate::exact(rows);
-        self
-    }
-
-    pub fn with_row_width_bytes(mut self, bytes: u128) -> Self {
-        self.row_width_bytes = JetTableEstimate::exact(bytes);
         self
     }
 
@@ -2224,21 +2209,6 @@ impl JetTablePlan {
         Ok(self.inspect()?.to_json())
     }
 
-    /// Open a bounded metadata batch state only after plan validation.  The
-    /// state carries batch descriptors, never row values, so a backend remains
-    /// responsible for actual storage and operator execution.
-    pub fn begin_batches(&self, capacity: usize) -> Result<JetTableBatchState, JetTablePlanError> {
-        self.validate()?;
-        let output = self
-            .output_node()
-            .ok_or(JetTablePlanError::InvalidOutput(self.output))?;
-        let JetTableStreamMode::Bounded { batch_rows } = &output.stream else {
-            return Err(JetTablePlanError::NotStreaming(output.id));
-        };
-        let max_rows = output.facts.cardinality.output_rows.exact_value().copied();
-        JetTableBatchState::with_limits(capacity, *batch_rows, max_rows)
-            .map_err(JetTablePlanError::Batch)
-    }
 }
 
 
@@ -2474,10 +2444,6 @@ impl JetTableBatchState {
         self.queue.len()
     }
 
-    pub fn available_slots(&self) -> usize {
-        self.capacity - self.queue.len()
-    }
-
     pub fn accepted_rows(&self) -> u128 {
         self.accepted_rows
     }
@@ -2500,14 +2466,6 @@ impl JetTableBatchState {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.is_some()
-    }
-
-    pub fn cancellation_reason(&self) -> Option<&str> {
-        self.cancelled.as_deref()
-    }
-
-    pub fn is_truncated(&self) -> bool {
-        self.truncated
     }
 
     pub fn is_closed(&self) -> bool {

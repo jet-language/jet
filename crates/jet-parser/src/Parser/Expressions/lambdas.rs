@@ -289,11 +289,14 @@ impl<'a> Parser<'a> {
             // checking belongs to sema, including the unit diagnostic.
             let previous_tail_depth = self.callable_tail_block_depth;
             let previous_tail_value = self.callable_tail_expects_value;
+            let previous_lambda_depth = self.lambda_tail_block_depth;
             self.callable_tail_block_depth = Some(self.block_depth + 1);
             self.callable_tail_expects_value = true;
+            self.lambda_tail_block_depth = Some(self.block_depth + 1);
             let statements = self.block_stmts();
             self.callable_tail_block_depth = previous_tail_depth;
             self.callable_tail_expects_value = previous_tail_value;
+            self.lambda_tail_block_depth = previous_lambda_depth;
             // `block_stmts` consumes the closing brace. Keep it in the
             // lambda span: formatter comment ownership must distinguish a
             // comment inside the lambda from one trailing the enclosing

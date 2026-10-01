@@ -1999,7 +1999,7 @@ fn web_form_field_spec(
     let control = match rt.heap.record_get_int(field(5), 0) {
         Some(0) => web_rt::JetWebFormControl::Text,
         Some(1) => web_rt::JetWebFormControl::Email,
-        Some(2) => web_rt::JetWebFormControl::Url,
+        Some(2) => web_rt::JetWebFormControl::URL,
         Some(3) => web_rt::JetWebFormControl::Password,
         Some(4) => web_rt::JetWebFormControl::Number,
         Some(5) => web_rt::JetWebFormControl::Date,

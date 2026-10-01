@@ -33,6 +33,9 @@ pub const ADD: &str = "Add";
 pub const SUB: &str = "Sub";
 pub const MUL: &str = "Mul";
 pub const DIV: &str = "Div";
+/// D-TRAIT-OVERLOAD1=A: the prelude trait that builds on Add, Sub, Mul, and
+/// Comparable and adds the static `zero()` / `one()` members.
+pub const NUMERIC: &str = Syntax::TRAIT_NUMERIC;
 /// D-FOUND-LITERAL1=A (card #2789): semantic capability names for contextual
 /// integer and floating-point literal construction. They are compiler hooks,
 /// not ordinary Rust traits and therefore stay outside `BUILTIN_TRAITS`.
@@ -44,22 +47,10 @@ pub fn is_literal_capability(name: &str) -> bool {
     matches!(name, LITERAL_INT | LITERAL_FLOAT)
 }
 
-pub fn literal_capability_for_source(source: &str) -> Option<&'static str> {
-    match source {
-        Syntax::TYPE_INT => Some(LITERAL_INT),
-        Syntax::TYPE_FLOAT => Some(LITERAL_FLOAT),
-        _ => None,
-    }
-}
-
 /// D-TEXTHEAD-TYPE1=A: the ordinary library-defined checked text contract.
 pub const CHECKED_TEXT: &str = "CheckedText";
 pub fn quantity_bound(dimension: &str, kind: &str) -> String {
     format!("{}<{}, .{}>", Syntax::BOUND_QUANTITY, dimension, kind)
-}
-
-pub fn is_quantity_bound(bound: &str) -> bool {
-    parse_quantity_bound(bound).is_some()
 }
 
 pub fn parse_quantity_bound(bound: &str) -> Option<(&str, &str)> {
@@ -81,26 +72,12 @@ pub const BUILTIN_TRAITS: &[&str] = &[
     SUB,
     MUL,
     DIV,
+    NUMERIC,
     CHECKED_TEXT,
 ];
 
 pub fn is_builtin_trait(name: &str) -> bool {
     BUILTIN_TRAITS.contains(&name)
-}
-fn rust_operator_bound(bound: &str) -> Option<String> {
-    let (trait_name, rhs) = bound.strip_suffix('>')?.split_once('<')?;
-    if !matches!(trait_name, ADD | SUB | MUL | DIV) {
-        return None;
-    }
-    let rust_trait = rust_trait_bound(trait_name)?;
-    let rust_rhs = match rhs {
-        "Int" => "i64".to_string(),
-        "Float" => "f64".to_string(),
-        "Bool" => "bool".to_string(),
-        "String" => "String".to_string(),
-        name => crate::Names::mangle_path(name),
-    };
-    Some(format!("{rust_trait}<{rust_rhs}>"))
 }
 
 /// Rust trait bound for codegen.
@@ -419,57 +396,6 @@ fn types_equal_modulo_self(a: &Type, b: &Type) -> bool {
         _ => a == b,
     }
 }
-pub fn rust_type_param_list(
-    params: &[TypeParam],
-    extra_bounds: &HashMap<String, Vec<String>>,
-) -> String {
-    if params.is_empty() {
-        return String::new();
-    }
-    let parts: Vec<String> = params
-        .iter()
-        .map(|p| {
-            let mut bounds: Vec<String> = p
-                .bounds
-                .iter()
-                .filter_map(|b| {
-                    if is_quantity_bound(b) {
-                        Some("crate::JetQuantity".to_string())
-                    } else if let Some(operator) = rust_operator_bound(b) {
-                        Some(operator)
-                    } else if matches!(b.as_str(), IO_READER | IO_WRITER | DRIVER) {
-                        rust_trait_bound(b).map(str::to_string)
-                    } else if is_builtin_trait(b) {
-                        rust_trait_bound(b).map(str::to_string)
-                    } else {
-                        Some(crate::Names::mangle(b))
-                    }
-                })
-                .collect();
-            if let Some(ex) = extra_bounds.get(&p.name) {
-                for b in ex {
-                    let rb = match b.as_str() {
-                        "Clone" | "JetShow" | "JetDebug" | "PartialEq" | "PartialOrd" => b.clone(),
-                        _ if matches!(b.as_str(), IO_READER | IO_WRITER | DRIVER) => {
-                            rust_trait_bound(b).unwrap_or("").to_string()
-                        }
-                        _ if is_builtin_trait(b) => rust_trait_bound(b).unwrap_or("").to_string(),
-                        _ => crate::Names::mangle(b),
-                    };
-                    if !rb.is_empty() && !bounds.contains(&rb) {
-                        bounds.push(rb);
-                    }
-                }
-            }
-            if bounds.is_empty() {
-                p.name.clone()
-            } else {
-                format!("{}: {}", p.name, bounds.join(" + "))
-            }
-        })
-        .collect();
-    format!("<{}>", parts.join(", "))
-}
 
 pub fn e0904(span: Span, param: &str) -> Diagnostic {
     Diagnostic::error(
@@ -488,8 +414,10 @@ pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) 
         format!("write `#{trait_name}` before `{type_name}`, or use a different approach")
     } else if trait_name == COMPARABLE {
         format!("write `#Comparable` before `{type_name}`, or use `sort_by` with a key")
+    } else if trait_name == NUMERIC {
+        format!("write `#Numeric` on a distinct number type, or `impl {type_name}.Numeric {{ … }}` with `zero` and `one` on a struct that implements Add, Sub, Mul, and Comparable")
     } else {
-        format!("write `impl {type_name}: {trait_name} {{ … }}` with every required method")
+        format!("write `impl {type_name}.{trait_name} {{ … }}` with every required method")
     };
     Diagnostic::error(
         "E0905",
@@ -909,27 +837,6 @@ pub fn e0909(chain: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// Extra Rust `Clone` bounds for the type parameters that a nominal shape
-/// actually reaches. The walk is recursive, so `Outer<List<Inner<T>>>`
-/// constrains `T` without constraining a phantom parameter. The decision is
-/// structural; it never guesses from a library trait name. Function pointers
-/// and shared handles clone their representation without cloning their payload
-/// type, so their nested type arguments do not create a Rust bound.
-pub fn rust_extra_clone_bounds_for_types(
-    params: &[TypeParam],
-    types: &[Type],
-) -> HashMap<String, Vec<String>> {
-    let param_names: HashSet<&str> = params.iter().map(|param| param.name.as_str()).collect();
-    let mut required = HashSet::new();
-    for ty in types {
-        collect_clone_type_param_mentions(ty, &param_names, &mut required);
-    }
-    required
-        .into_iter()
-        .map(|name| (name, vec!["Clone".to_string()]))
-        .collect()
-}
-
 /// Collect type parameters whose values must themselves implement `Clone` for
 /// the enclosing Rust value to clone. This follows representation composition,
 /// not source names: ordinary containers and nominal applications recurse,
@@ -987,22 +894,6 @@ pub fn collect_clone_type_param_mentions(
     }
 }
 
-/// Extra Rust `JetShow` bounds for generic `JetShow` impls.
-pub fn rust_extra_jetshow_bounds(params: &[TypeParam]) -> HashMap<String, Vec<String>> {
-    params
-        .iter()
-        .map(|p| (p.name.clone(), vec!["JetShow".to_string()]))
-        .collect()
-}
-
-/// Extra Rust `JetDebug` bounds for generic `JetDebug` impls.
-pub fn rust_extra_jetdebug_bounds(params: &[TypeParam]) -> HashMap<String, Vec<String>> {
-    params
-        .iter()
-        .map(|p| (p.name.clone(), vec!["JetDebug".to_string()]))
-        .collect()
-}
-
 /// Collect every type-parameter name (drawn from `param_names`) that the type
 /// `ty` mentions anywhere in its structure. A type parameter `T` appears as
 /// `Type::Named("T")`; nested positions (`[T]`, `[String:T]`, `Box<T>`, …)
@@ -1057,71 +948,6 @@ pub fn collect_type_param_mentions(
         Type::Quantity { base, .. } => collect_type_param_mentions(base, param_names, out),
         Type::InlineRange { base, .. } => collect_type_param_mentions(base, param_names, out),
         _ => {}
-    }
-}
-
-/// D-SERDE9/D-SERDE10: extra Rust serde bounds for a generic `#[Codable]`/
-/// `#[Encode]`/`#[Decode]` impl. The compiler injects `T: __jet_Encode` /
-/// `T: __jet_Decode` — never spelled by the user — for *exactly* the type params
-/// that reach the wire (D-SERDE10: those mentioned by some non-skipped field
-/// type in `wire_types`). A phantom/skip-only param gets no serde bound, so e.g.
-/// `Id<Kind>` serializes regardless of `Kind`.
-///
-/// `bound` is the serde trait name (`Encode`/`Decode`); it flows through
-/// `rust_type_param_list`'s builtin-trait mapping to `__jet_Encode`/`__jet_Decode`.
-pub fn rust_extra_serde_bounds(
-    params: &[TypeParam],
-    wire_types: &[&Type],
-    bound: &str,
-) -> HashMap<String, Vec<String>> {
-    let names: HashSet<&str> = params.iter().map(|p| p.name.as_str()).collect();
-    let mut reaching: HashSet<String> = HashSet::new();
-    for ty in wire_types {
-        collect_type_param_mentions(ty, &names, &mut reaching);
-    }
-    reaching
-        .into_iter()
-        .map(|n| (n, vec![bound.to_string()]))
-        .collect()
-}
-
-pub fn type_param_rust_list(params: &[TypeParam]) -> String {
-    if params.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<{}>",
-            params
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-}
-
-pub fn format_type_params(params: &[TypeParam]) -> String {
-    if params.is_empty() {
-        return String::new();
-    }
-    // D-VARARGBOUND1 (c7jaiany, owner-amended): multi-trait bounds are a
-    // consistent list form everywhere, never `+` — `<T: [A, B]>`. A single
-    // bound stays bare (`<T: A>`).
-    let inner: Vec<String> = params
-        .iter()
-        .map(|p| match p.bounds.as_slice() {
-            [] => p.name.clone(),
-            [one] => format!("{}: {}", p.name, one),
-            many => format!("{}: [{}]", p.name, many.join(", ")),
-        })
-        .collect();
-    format!("<{}>", inner.join(", "))
-}
-
-pub fn split_qualified(name: &str) -> (Option<&str>, &str) {
-    match name.rsplit_once('.') {
-        Some((mod_name, ty)) => (Some(mod_name), ty),
-        None => (None, name),
     }
 }
 

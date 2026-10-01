@@ -1280,20 +1280,6 @@ pub fn jet_web_store_subscription_active(subscription: &JetWebStoreSubscription)
     subscription.active()
 }
 
-pub fn jet_web_store_transaction_diff<T>(
-    transaction: &JetWebStoreTransaction<T>,
-) -> String {
-    transaction.diff_json()
-}
-
-pub fn jet_web_store_event_transaction_label(event: &JetWebStoreEvent) -> String {
-    event.transaction_label()
-}
-
-pub fn jet_web_store_event_diff(event: &JetWebStoreEvent) -> String {
-    event.diff_json()
-}
-
 fn jet_web_store_default_history_limit() -> i64 {
     JET_WEB_STORE_DEFAULT_HISTORY_LIMIT as i64
 }

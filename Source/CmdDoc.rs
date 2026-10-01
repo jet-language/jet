@@ -37,7 +37,7 @@ pub(crate) fn run_doc(target: &str, mode: OutputMode, check: bool) {
                 exit(ExitCodes::USER_ERROR);
             }
         };
-    let graph = build_doc_graph(&projection.bundle, &projection.index);
+    let graph = build_doc_graph(&projection.bundle, projection.index());
 
     if check {
         let diagnostics = undocumented_diagnostics(&graph);

@@ -1,10 +1,15 @@
 // D-NEVER2: a `-> Never` helper is a complete non-returning contract. It can
 // report through `term.eprint` (which cannot fail) and stop with
 // `process.exit(1)`, and it serves as the `??` fallback of a fallible parse.
+package {
+    name: "fatal_exit"
+    authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }
+}
+
 use core.process as process
 use core.term as term
 
-struct Rgb {
+struct RGB {
     r: U8
     g: U8
     b: U8
@@ -16,12 +21,12 @@ fn fatal(message: String) -> Never {
 }
 
 // "#9bbc0f" -> Rgb{r: 155, g: 188, b: 15}
-fn hex2rgb(text: String) -> Rgb {
+fn hex2rgb(text: String) -> RGB {
     hex :: if text.starts_with("#") -> text.slice(1, text.len()) else -> text
     r :: Int.from_radix(hex.slice(0, 2), 16) ?? fatal("bad color: {text}")
     g :: Int.from_radix(hex.slice(2, 4), 16) ?? fatal("bad color: {text}")
     b :: Int.from_radix(hex.slice(4, 6), 16) ?? fatal("bad color: {text}")
-    Rgb{r: U8{r}, g: U8{g}, b: U8{b}}
+    RGB{r: U8{r}, g: U8{g}, b: U8{b}}
 }
 
 fn run() {

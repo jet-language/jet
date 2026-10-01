@@ -1,5 +1,28 @@
 // Shared structural collection checker and TIR producer. Zip and para_* stay
 // in their dedicated paths so their input-shape and crossing proofs are not duplicated.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    ParamZone,
+    SemaCollectionMethodContract,
+    Span,
+    TBuiltinOp,
+    TClosureOp,
+    TExpr,
+    TExprKind,
+    Type,
+    sema_collection_is_map,
+    sema_collection_method_argument_type,
+    sema_collection_method_contract,
+    sema_collection_method_effect_row,
+    sema_collection_method_operation,
+    sema_collection_method_result_type,
+    sema_collection_receiver_element,
+    type_name,
+    type_tuple_struct_name,
+]
 
 fn sema_call_collections_label(argument: CallArg) -> String? {
     return if argument.label == {
@@ -139,8 +162,8 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     }
     typed := [TExpr]{}
     required_types := [Type]{}
-    seed := None
-    callback_return := None
+    seed := Type?{None}
+    callback_return := Type?{None}
     callback_mutable := false
     loop index in 0..<updated_args.len() {
         callback := contract.callback_indices.contains(index)
@@ -213,8 +236,8 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
             if {
                 closure == TClosureOp.FlatMap -> {
                     inner :: if result_type == {
-                        .Apply(name, updated_args) -> {
-                            if name == "Iter" && updated_args.len() == 1 -> updated_args[0] else -> Type.Int
+                        .Apply(name, apply_args) -> {
+                            if name == "Iter" && apply_args.len() == 1 -> apply_args[0] else -> Type.Int
                         }
                         else -> Type.Int
                     }

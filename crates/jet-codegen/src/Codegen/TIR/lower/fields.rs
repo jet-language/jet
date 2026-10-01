@@ -16,6 +16,31 @@ pub(crate) fn imported_type_owners(bundle: &ProgramBundle, module_idx: usize) ->
         .collect()
 }
 
+/// D-MOD-CYCLE1=A: the module that declares the nominal an `impl` in
+/// `module_idx` extends. A package is one namespace, so `impl Span` may sit in
+/// a sibling file of `Span`'s declaration; its methods and impl row belong to
+/// the declaring module's type identity, never to a phantom `<impl file>::Span`.
+pub(crate) fn impl_owner_module(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    type_name: &str,
+) -> usize {
+    if module_owned_type_names(&bundle.modules[module_idx].items).contains(type_name) {
+        return module_idx;
+    }
+    bundle
+        .name_ledger
+        .namespace_siblings(module_idx)
+        .into_iter()
+        .find(|&sibling| {
+            bundle
+                .modules
+                .get(sibling)
+                .is_some_and(|module| module_owned_type_names(&module.items).contains(type_name))
+        })
+        .unwrap_or(module_idx)
+}
+
 pub(crate) fn module_owned_type_names(items: &[Item]) -> HashSet<String> {
     let mut names = HashSet::new();
     // `Ordering` is NOT listed. It has no source Item because it is declared
@@ -545,7 +570,15 @@ pub(crate) fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
 /// Look up a field's declared type on a resolved struct receiver type. Returns
 /// `None` when the receiver is not a known struct or the field is absent — both
 /// impossible for a covered function (sema validated the access).
+///
+/// A stored callable uses the effective `Result` carrier, the same as a `fn`
+/// parameter or a list element: a named function value always returns its
+/// carrier, so a raw `fn(T) U` field slot would read that carrier as `U`.
 pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Type> {
+    declared_struct_field_type(cx, recv_ty, field).map(|ty| ty.with_effective_fn_returns())
+}
+
+fn declared_struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Type> {
     // D-PIN2=A / D-PIN3=A: a pin is a window onto a place, so reaching a field
     // through `Pin<T>` resolves against `T`. The field's own declared type is
     // the mark: a `Pin<U>` field comes back as `Pin<U>` and stays a window.

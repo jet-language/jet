@@ -1,4 +1,23 @@
 // Shared checker and TIR producer for the zip family.
+use jet_foundation.[
+    AccessConvention,
+    Call,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Span,
+    SymbolKind,
+    TBuiltinOp,
+    TExpr,
+    TExprKind,
+    TZipFillMode,
+    TZipMode,
+    Type,
+    TypeTupleField,
+    type_name,
+    type_tuple_struct_name,
+]
+
 fn sema_expression_zip_family_name(name: String) -> Bool Never! {
     name == "zip" || name == "zip_short" || name == "zip_pad"
 }
@@ -126,7 +145,7 @@ fn sema_expression_zip_family(method: String, inputs: [TExpr], fields: [String],
                 .Tuple(fill_fields) -> {
                     loop (index, element) in elements {
                         field_name :: names[index]
-                        field := None
+                        field := Type?{None}
                         loop candidate in fill_fields {
                             if candidate.name == field_name {
                                 field = Val(candidate.ty)
@@ -198,15 +217,15 @@ fn sema_expression_zip_free_call(call: Call, expected: Type?, environment: SemaS
         &inputs.push(checked)
     }
 
-    common_fill_arg := None
-    column_fills_arg := None
+    common_fill_arg := CallArg?{None}
+    column_fills_arg := CallArg?{None}
     loop arg in call.args {
         label := if arg.label == {.Val(value) -> Val(value.name) else -> None}
         if is_pad && label == (Val("fill")) -> common_fill_arg = Val(arg)
         if is_pad && label == (Val("fills")) -> column_fills_arg = Val(arg)
     }
-    common_fill := None
-    column_fills := None
+    common_fill := TExpr?{None}
+    column_fills := TExpr?{None}
     if common_fill_arg == .Val(arg) {
         checked :: sema_expression_zip_infer_arg(arg, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         common_fill = Val(checked)
@@ -251,8 +270,8 @@ fn sema_expression_zip_method(receiver: Expr, receiver_value: TExpr, method: Str
     is_pad := method == "zip_pad"
     inputs := [TExpr]{receiver_value}
     fields := [String]{sema_expression_zip_field_name(0, None)}
-    common_fill := None
-    column_fills := None
+    common_fill := TExpr?{None}
+    column_fills := TExpr?{None}
     fill_args := [TExpr]{}
     loop arg in args {
         label := if arg.label == {.Val(value) -> Val(value.name) else -> None}

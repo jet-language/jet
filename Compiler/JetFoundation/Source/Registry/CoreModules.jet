@@ -23,14 +23,14 @@ pub struct CoreModuleDeclaration {
     pub dependencies: [String]
 }
 
-fn core_module_export(module_name: String) -> CoreModuleExportNames? {
+pub fn core_module_export(module_name: String) -> CoreModuleExportNames? {
     loop row in CORE_MODULE_EXPORTS {
         if row.module_name == module_name -> return Val(row)
     }
     None
 }
 
-fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
+pub fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
     loop item in names {
         if item == name -> return true
     }
@@ -47,7 +47,7 @@ pub fn core_module_has_type(module_name: String, name: String) -> Bool Never! {
     core_module_export_has_name(row.type_exports, name)
 }
 
-fn core_module_type_leaf(name: String) -> String Never! {
+pub fn core_module_type_leaf(name: String) -> String Never! {
     bytes :: name.bytes()
     namespace_separator := -1
     module_separator := -1

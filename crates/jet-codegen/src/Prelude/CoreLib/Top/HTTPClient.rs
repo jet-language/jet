@@ -406,7 +406,7 @@ macro_rules! jet_http_client_bridge {
     ($bridge:ident) => {
         fn native_http_error(error: $bridge::JetHTTPBridgeError) -> JetHTTPError {
             match error {
-                $bridge::JetHTTPBridgeError::InvalidUrl => JetHTTPError::InvalidUrl,
+                $bridge::JetHTTPBridgeError::InvalidURL => JetHTTPError::InvalidURL,
                 $bridge::JetHTTPBridgeError::InvalidHeader => JetHTTPError::InvalidHeader,
                 $bridge::JetHTTPBridgeError::InvalidFraming => JetHTTPError::InvalidFraming,
                 $bridge::JetHTTPBridgeError::UnsupportedEncoding => JetHTTPError::UnsupportedEncoding,

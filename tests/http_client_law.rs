@@ -121,7 +121,7 @@ fn run() {{
     if http.get("http://{addr}/safe\nInjected: yes") == {{
         .Ok(_) -> print("accepted")
         .Err(error) -> {{
-            if error == .InvalidUrl -> print("rejected")
+            if error == .InvalidURL -> print("rejected")
             else -> print("wrong error")
         }}
         else -> print("unexpected")
@@ -847,7 +847,7 @@ use core.http.client as http
 fn run() {{
     client :: http.Client.new()
         .cookies(.Memory)
-        .proxy(.Url("http://{proxy_addr}"))
+        .proxy(.URL("http://{proxy_addr}"))
         .protocols(false, true, false)
     seed :: client.send(http.request("GET", "http://shop.example.co.uk/dir/seed")) ?? panic("seed")
     same :: client.send(http.request("GET", "http://other.example.co.uk/dir/start")) ?? panic("same site")
@@ -905,7 +905,7 @@ fn cookie_jar_rejects_domain_attributes_on_ip_hosts() {
         }
     });
     let src = format!(
-        "use core.http.client as http\nfn run() {{\n    client :: http.Client.new().cookies(.Memory).proxy(.Url(\"http://{proxy_addr}\")).protocols(false, true, false)\n    seed :: client.send(http.request(\"GET\", \"http://127.0.0.1/seed\")) ?? panic(\"seed\")\n    check :: client.send(http.request(\"GET\", \"http://127.0.0.1/check\")) ?? panic(\"check\")\n}}\n"
+        "use core.http.client as http\nfn run() {{\n    client :: http.Client.new().cookies(.Memory).proxy(.URL(\"http://{proxy_addr}\")).protocols(false, true, false)\n    seed :: client.send(http.request(\"GET\", \"http://127.0.0.1/seed\")) ?? panic(\"seed\")\n    check :: client.send(http.request(\"GET\", \"http://127.0.0.1/check\")) ?? panic(\"check\")\n}}\n"
     );
     let (code, _, stderr) = common::build_and_run("jet_http_client_law", "cookie_ip_domain", &src);
     server.join().unwrap();
@@ -968,7 +968,7 @@ fn cookie_jar_enforces_per_domain_and_global_count_bounds() {
         }
     }
     let src = format!(
-        "use core.http.client as http\nfn run() {{\n    client :: http.Client.new().cookies(.Memory).proxy(.Url(\"http://{proxy_addr}\")).protocols(false, true, false)\n{sends}    verify :: client.send(http.request(\"GET\", \"http://d0.xn--55qx5d.cn/verify\")) ?? panic(\"verify\")\n}}\n"
+        "use core.http.client as http\nfn run() {{\n    client :: http.Client.new().cookies(.Memory).proxy(.URL(\"http://{proxy_addr}\")).protocols(false, true, false)\n{sends}    verify :: client.send(http.request(\"GET\", \"http://d0.xn--55qx5d.cn/verify\")) ?? panic(\"verify\")\n}}\n"
     );
     let (code, _, stderr) = common::build_and_run("jet_http_client_law", "cookie_bounds", &src);
     server.join().unwrap();
@@ -2228,7 +2228,7 @@ fn public_client_proxy_url_sends_absolute_form() {
         r#"
 use core.http.client as http
 fn run() {{
-    client :: http.Client.new().proxy(.Url("http://{proxy_addr}"))
+    client :: http.Client.new().proxy(.URL("http://{proxy_addr}"))
     resp :: client.send(http.request("GET", "http://example.invalid/via-proxy")) ?? panic("send")
     print(resp.body().text(16) ?? panic("body"))
 }}
@@ -2462,13 +2462,13 @@ fn run() {{
     pem :: fs.read_bytes("{ca}") ?? panic("ca")
     roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
     base :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
-    only13 :: base.with_version_bounds(min: .Tls13, max: .Tls13) ?? panic("tls13")
+    only13 :: base.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("tls13")
     client13 :: http.Client.new().tls(only13).protocols(false, true, false)
     if client13.send(http.request("GET", "https://localhost:{port}/")) == {{
         .Ok(_) -> print("tls13-ok")
         .Err(_) -> print("tls13-fail")
     }}
-    only12 :: base.with_version_bounds(min: .Tls12, max: .Tls12) ?? panic("tls12")
+    only12 :: base.with_version_bounds(min: .TLS12, max: .TLS12) ?? panic("tls12")
     client12 :: http.Client.new().tls(only12).protocols(false, true, false)
     resp :: client12.send(http.request("GET", "https://localhost:{port}/")) ?? panic("tls12 send")
     print(resp.status())

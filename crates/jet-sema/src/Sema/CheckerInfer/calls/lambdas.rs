@@ -1,7 +1,7 @@
 use crate::Diagnostics::{Diagnostic, TextEdit};
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::CheckerInfer::is_reactive_handle_ty;
-use crate::Sema::Diagnostics::{is_cloneable, type_fix_hint};
+use crate::Sema::Diagnostics::type_fix_hint;
 use crate::Sema::{
     Checker, LocalInfo, SendCrossing, SendProblemKind, SendabilityProblem, ViewAccess,
 };
@@ -414,7 +414,7 @@ impl<'a> Checker<'a> {
                         lam.meta.frozen_captures.push(name.clone());
                     }
                 }
-                let cloneable = is_cloneable(&cap_ty, self.registry);
+                let cloneable = self.is_cloneable_type(&cap_ty);
                 // D-TASKBORROW1=A: a `task.group` child is joined by its group,
                 // so it may borrow places the owner still holds. Reads are free;
                 // writes need proven-disjoint places. Detached tasks, channels,
@@ -514,7 +514,7 @@ impl<'a> Checker<'a> {
                         && read_only
                         && copy_ty
                             .as_ref()
-                            .is_some_and(|ty| is_cloneable(ty, self.registry))
+                            .is_some_and(|ty| self.is_cloneable_type(ty))
                     {
                         // The capture is an owning slot. Record the same
                         // materialization fact for AOT/JIT/interpreter;

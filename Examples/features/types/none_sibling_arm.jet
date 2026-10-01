@@ -1,0 +1,43 @@
+// A bare `None` arm takes its optional type from the sibling arm of the same
+// value `if` or match, so no annotation is needed when another arm already
+// produces a `T?`.
+fn pick(flag: Bool) -> Int {
+    x := if flag -> Val(5) else -> None
+    x ?? 0
+}
+
+fn pick_first(flag: Bool) -> Int {
+    x := if flag -> None else -> Val(7)
+    x ?? 0
+}
+
+fn name_of(n: Int) -> String {
+    name := if n == {
+        0 -> None
+        1 -> Val("one")
+        else -> Val("many")
+    }
+    name ?? "none"
+}
+
+fn size_of(n: Int) -> String {
+    size := if {
+        n > 9 -> Val("big")
+        n > 0 -> None
+        else -> None
+    }
+    size ?? "small"
+}
+
+fn run() {
+    print(pick(true))
+    print(pick(false))
+    print(pick_first(true))
+    print(pick_first(false))
+    print(name_of(0))
+    print(name_of(1))
+    print(name_of(2))
+    print(size_of(10))
+    print(size_of(5))
+    print(size_of(0))
+}

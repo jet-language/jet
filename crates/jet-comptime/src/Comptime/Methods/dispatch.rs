@@ -18,7 +18,6 @@ use super::super::Builtins::{
     apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp_for_sort,
 };
 use super::super::Diagnostics::{comptime_panic, unsupported};
-use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
 use super::core_calls::{
     apply_core_call_with_type, apply_data_line_call, apply_history_rng_method,
@@ -163,12 +162,12 @@ pub fn apply_seeded_rng_method_with_type(
 ) -> Result<CtValue, Diagnostic> {
     let float = |index| {
         args.get(index)
-            .ok_or_else(|| unsupported("this Rng method argument", span))
+            .ok_or_else(|| unsupported("this RNG method argument", span))
             .and_then(|value| as_float(value, span))
     };
     let list = |index| match args.get(index) {
         Some(CtValue::List(values)) => Ok(values.as_slice()),
-        _ => Err(unsupported("this Rng method list argument", span)),
+        _ => Err(unsupported("this RNG method list argument", span)),
     };
     match method {
         "int" => {
@@ -228,7 +227,7 @@ pub fn apply_seeded_rng_method_with_type(
                 Some(value) => Ok(CtValue::Present(Box::new(value))),
                 None => Ok(CtValue::absent(
                     CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
-                        unsupported("Rng.pick needs a resolved element type", span)
+                        unsupported("RNG.pick needs a resolved element type", span)
                     })?,
                 )),
             }
@@ -239,7 +238,7 @@ pub fn apply_seeded_rng_method_with_type(
             if values.is_empty() || values.len() != weights.len() {
                 return Ok(CtValue::absent(
                     CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
-                        unsupported("Rng.weighted_pick needs a resolved element type", span)
+                        unsupported("RNG.weighted_pick needs a resolved element type", span)
                     })?,
                 ));
             }
@@ -255,7 +254,7 @@ pub fn apply_seeded_rng_method_with_type(
                 Some(value) => Ok(CtValue::Present(Box::new(value))),
                 None => Ok(CtValue::absent(
                     CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
-                        unsupported("Rng.weighted_pick needs a resolved element type", span)
+                        unsupported("RNG.weighted_pick needs a resolved element type", span)
                     })?,
                 )),
             }
@@ -271,12 +270,12 @@ pub fn apply_seeded_rng_method_with_type(
         }
         "shuffle" => {
             let Some(CtValue::List(values)) = args.first_mut() else {
-                return Err(unsupported("Rng.shuffle with a non-list argument", span));
+                return Err(unsupported("RNG.shuffle with a non-list argument", span));
             };
             seeded_random_kernel::jet_seeded_rng_shuffle(state, values);
             Ok(CtValue::Unit)
         }
-        _ => Err(unsupported("this Rng method", span)),
+        _ => Err(unsupported("this RNG method", span)),
     }
 }
 
@@ -285,17 +284,6 @@ pub fn apply_seeded_rng_method_with_type(
 /// never escaping via `..`. Computed or escaping paths can't be audited at
 /// build time and open a supply-chain hole, so they are E0957, not file reads.
 /// `builtin` names the function (`embed_file` / `embed_bytes` / `find`) for the message.
-fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, Diagnostic> {
-    let path = match &arg.expr {
-        Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-            StrPart::Lit(s) => s.clone(),
-            _ => return Err(embed_path_err(builtin, "literal", span)),
-        },
-        _ => return Err(embed_path_err(builtin, "literal", span)),
-    };
-    check_literal_embed_path(builtin, &path, span)
-}
-
 pub(crate) fn check_literal_embed_path(
     builtin: &str,
     path: &str,
@@ -1186,22 +1174,6 @@ impl<'a> Interp<'a> {
         let value = match result {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(CtValue::Unit),
-            Err(ref d) if d.code == ERR_PROPAGATE_CODE => {
-                // c97/D-STRPARSE1: `?` on an `Err` or `null` propagated via
-                // the sentinel — convert to an `Err` return from this callee
-                // so the caller can handle it (e.g. with `??`).
-                let msg = d.what.clone();
-                Ok(CtValue::failed(Box::new(CtValue::Str(msg))))
-            }
-            Err(ref d) if d.code == EARLY_RETURN_CODE => {
-                // `?? return expr` inside a function — the return value was
-                // encoded as a string; use Unit since we can't re-parse it.
-                // In practice comptime code rarely uses `?? return` in a callee;
-                // the primary use case is `?? return` at the top-level comptime
-                // binding site where `exec_block` gets it directly.
-                let _ = d; // diagnostic already matched; nothing to extract
-                Ok(CtValue::Unit)
-            }
             Err(e) => Err(e),
         }?;
         let value = func.return_type.as_ref().map_or(value.clone(), |ty| {
@@ -1347,70 +1319,6 @@ impl<'a> Interp<'a> {
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
         self.call_closure_inner(f, args, span, None)
-    }
-    /// Invoke one closure with a mutable state argument. Store transactions use
-    /// this path so field assignments in the closure write back to the value
-    /// handed to the shared Prelude transaction kernel.
-    pub(in super::super) fn call_closure_mut_arg(
-        &mut self,
-        f: &CtValue,
-        arg: &mut CtValue,
-        span: Span,
-    ) -> Result<CtValue, Diagnostic> {
-        let mut args = vec![arg.clone()];
-        if let Some(result) =
-            crate::Comptime::try_ambient_standalone_closure_mut(f, &mut args, span)
-        {
-            let result = result?;
-            *arg = args
-                .into_iter()
-                .next()
-                .expect("ambient mutable closure received one argument");
-            return Ok(result);
-        }
-        let CtValue::Closure(data) = f else {
-            return Err(unsupported(
-                "calling this value (it isn't a function)",
-                span,
-            ));
-        };
-        if data.lambda.params.len() != 1 {
-            return Err(unsupported(
-                "this closure (wrong number of arguments)",
-                span,
-            ));
-        }
-        let mut frame = data.captured.clone();
-        let parameter = &data.lambda.params[0];
-        frame.insert(
-            parameter.name.clone(),
-            parameter.ty.as_ref().map_or_else(
-                || arg.clone(),
-                |ty| super::super::Interpreter::coerce_value_to_type(arg.clone(), ty),
-            ),
-        );
-        let previous_types = self.binding_types.clone();
-        if let Some(ty) = &parameter.ty {
-            self.binding_types.insert(parameter.name.clone(), ty.clone());
-        }
-        let result = (|| match &data.lambda.body {
-            LambdaBody::Expr(e) => self.eval(e, &mut frame),
-            LambdaBody::Block(stmts) => match self.exec_block(stmts, &mut frame)? {
-                Flow::Return(v) => Ok(v),
-                _ => Ok(CtValue::Unit),
-            },
-        })();
-        self.binding_types = previous_types;
-        if result.is_ok() {
-            if let Some(value) = frame.get(&parameter.name) {
-                *arg = value.clone();
-            }
-        }
-        result.map(|value| {
-            data.return_type.as_ref().map_or(value.clone(), |ty| {
-                super::super::Interpreter::coerce_value_to_type(value, ty)
-            })
-        })
     }
     /// Invoke a closure with mutable arguments. This is the callback seam for
     /// APIs whose callback mutates more than one value (for example a history
@@ -1731,46 +1639,6 @@ impl<'a> Interp<'a> {
             Some(&mut self.embed_inputs),
             span,
         )
-    }
-
-    /// Shared `embed_file`/`embed_bytes` front half: validate the path (E0957)
-    /// and read the file (E0955 missing/unreadable). Returns the relative path
-    /// (for messages) and the raw bytes; the UTF-8 decision is the caller's.
-    ///
-    /// D-CTEFFECT1 Tier-1: the sha256 of the bytes is pushed to `self.embed_inputs`
-    /// so the caller can record it in `.jet/lock` for reproducible builds.
-    fn read_embed(
-        &mut self,
-        builtin: &str,
-        args: &[CallArg],
-        span: Span,
-    ) -> Result<(String, Vec<u8>), Diagnostic> {
-        let arg = args
-            .first()
-            .ok_or_else(|| unsupported(&format!("{builtin} with no path"), span))?;
-        let rel = check_embed_path(builtin, arg, span)?;
-        match jet_foundation::CheckReads::read_nofollow_at_root(
-            &self.base_dir,
-            Path::new(&rel),
-            crate::SHA256::MAX_TREE_FILE_BYTES,
-        ) {
-            Ok(bytes) => {
-                // D-CTEFFECT1 Tier-1: record the embed input hash for .jet/lock.
-                let hash = crate::SHA256::sha256_hex(&bytes);
-                self.embed_inputs.push(crate::AST::ComptimeInput {
-                    path: rel.clone(),
-                    hash,
-                });
-                Ok((rel, bytes))
-            }
-            Err(e) => Err(Diagnostic::error(
-                "E0955",
-                format!("`{builtin}` can't open `{rel}`"),
-                format!("{} (looked next to the file doing the embedding)", e),
-                "check the path — it is relative to the file's own directory".to_string(),
-                Some(span),
-            )),
-        }
     }
 
     /// c139: write `new_value` back to the place `target` reads from — the

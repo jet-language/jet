@@ -5,6 +5,19 @@
 // of the checker wrappers `types_comparable_type`/`is_equatable_type`
 // (Sema/CheckerItems.rs): a registered implementation or bound first, then
 // the structural rule. Every user of the decision reads it from here (I8).
+use jet_foundation.[
+    BinOp,
+    Diagnostic,
+    Span,
+    SymbolKind,
+    TCallArg,
+    TExpr,
+    TExprKind,
+    TTypeDef,
+    Type,
+    type_identity_equal,
+    type_name,
+]
 
 // One comparability query. A recursive type (`enum Expr { Neg(inner: Expr) }`)
 // reaches itself through its fields, and shared field types are reached many
@@ -55,13 +68,14 @@ fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool Never! {
 // alias types are qualified in their declaring module, so nested lookups pass
 // that module rather than the caller's.
 fn sema_comparability_definition(environment: SemaScopeEnvironment, module_identity: String, name: String, query: &SemaComparabilityQuery) -> TTypeDef? {
-    graph :: environment.registration_graph ?? return sema_serde_type_definition(environment, name)
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return sema_serde_type_definition(environment, name)
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
     if resolved.symbol.kind != SymbolKind.Type -> return None
     if !query.indexed {
         loop (index, definition) in environment.checked_types {
             key := sema_comparability_definition_key(definition)
-            if query.definitions.get(key) == None -> query.definitions.add(key, index)
+            if query.definitions.get(key) == None -> query.definitions[key] = index
         }
         query.indexed = true
     }
@@ -73,7 +87,8 @@ fn sema_comparability_definition(environment: SemaScopeEnvironment, module_ident
 // auto-derived `Equatable` counts as registered, selected by the same
 // declaration-marker rule codegen uses for the generated body.
 fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, trait_name: String) -> Bool Never! {
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
     if bound -> return true
     name :: sema_type_graph_base_name(ty) ?? return false
@@ -167,7 +182,7 @@ fn sema_comparability_named_fields(environment: SemaScopeEnvironment, module_ide
     definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
     key := sema_comparability_definition_key(definition)
     if query.visited.get(key) != None -> return true
-    query.visited.add(key, true)
+    query.visited[key] = true
     sema_comparability_definition_incomparable_field(environment, definition, &query) == None
 }
 
@@ -206,7 +221,7 @@ fn sema_comparability_incomparable_field(environment: SemaScopeEnvironment, modu
         .Named(name) -> {
             definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return None
             key := sema_comparability_definition_key(definition)
-            if query.visited.get(key) == None -> query.visited.add(key, true)
+            if query.visited.get(key) == None -> query.visited[key] = true
             sema_comparability_definition_incomparable_field(environment, definition, &query)
         }
         .Option(inner) -> sema_comparability_incomparable_field(environment, module_identity, inner, &query)
@@ -251,12 +266,14 @@ pub fn sema_type_equatable(environment: SemaScopeEnvironment, ty: Type) -> Bool 
         .Named(name) -> {
             leaf := sema_serde_named_leaf(name)
             if leaf == "U8" || leaf == "Ordering" || sema_comparability_encoding_value(leaf) || sema_comparability_data_equatable_value(leaf) -> return true
+            // D-FACT-ENUM-TIR: compiler fact enums compare by variant; codegen folds the test.
+            if sema_fact_enum_menu(ty, environment) != None -> return true
             sema_comparability_implements(environment, ty, "Equatable")
         }
         .Apply(name, args) -> {
             leaf := sema_serde_named_leaf(name)
             if leaf == "KeyRef" -> return true
-            if leaf == "Id" -> return sema_comparability_implements(environment, ty, "Equatable")
+            if leaf == "ID" -> return sema_comparability_implements(environment, ty, "Equatable")
             if sema_comparability_sealed_crypto_plan(leaf) -> return false
             if !sema_comparability_implements(environment, ty, "Equatable") -> return false
             loop arg in args {

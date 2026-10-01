@@ -28,7 +28,7 @@ pub(crate) fn http_nominal_leaf(name: &str) -> Option<&str> {
             | "HTTPMux"
             | "HTTPHandler"
             | "HTTPServer"
-            | "HTTPServerTls"
+            | "HTTPServerTLS"
             | "HTTPError"
             | "HTTPMethod"
             | "HTTPStatus"

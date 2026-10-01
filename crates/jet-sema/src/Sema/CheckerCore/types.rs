@@ -77,6 +77,37 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A struct field keeps its declared spelling in the registry, so a bare
+    /// trait name there is still `Named`. Lift every declared trait name to
+    /// the S48 trait value, as `resolve_type` does for signatures, against the
+    /// field's owning module: `config.adapter: Adapter?` then dispatches and
+    /// coerces exactly like an `Adapter?` parameter.
+    pub(crate) fn owner_trait_values(&self, owner: usize, ty: Type) -> Type {
+        let (registry, trait_reg) = if owner == self.module_idx {
+            (self.registry, self.trait_reg)
+        } else {
+            match self.modules.and_then(|modules| modules.get(owner)) {
+                Some(module) => (&module.registry, &module.trait_reg),
+                None => return ty,
+            }
+        };
+        let traits = std::cell::RefCell::new(HashMap::new());
+        ty.map_named_types(&|name| {
+            if trait_reg.traits.contains_key(name) && !registry.contains(name) {
+                traits
+                    .borrow_mut()
+                    .insert(name.to_string(), Type::TraitObject(vec![name.to_string()]));
+            }
+            None
+        });
+        let traits = traits.into_inner();
+        if traits.is_empty() {
+            ty
+        } else {
+            substitute_type(&ty, &traits)
+        }
+    }
+
     /// A source-owned `core.crypto` struct under its owner's canonical
     /// identity, the one its signatures and methods carry. Enums keep their
     /// leaf spelling so contextual `.Variant` inference is unchanged.
@@ -97,7 +128,9 @@ impl<'a> Checker<'a> {
         let (import_ns, leaf) = Self::split_type_name(name);
         if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
-                return leaf.to_string();
+                return self
+                    .core_nominal_shadowing_builtin(module, leaf)
+                    .unwrap_or_else(|| leaf.to_string());
             }
         }
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
@@ -124,7 +157,7 @@ impl<'a> Checker<'a> {
         self.record_type_import_name_use(name);
     }
 
-    fn record_type_import_name_use(&mut self, name: &str) {
+    pub(crate) fn record_type_import_name_use(&mut self, name: &str) {
         let alias = name.split_once('.').map_or(name, |(alias, _)| alias);
         if self.lookup(alias).is_none()
             && (self.core_imports.contains_key(alias)
@@ -190,7 +223,11 @@ impl<'a> Checker<'a> {
                         crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
                     })
                 } else {
-                    Type::Named(n)
+                    let item = self.core_item_imports.get(&n).map_or(n.as_str(), String::as_str);
+                    match self.core_nominal_shadowing_builtin(module, item) {
+                        Some(canonical) => Type::Named(canonical),
+                        None => Type::Named(n),
+                    }
                 }
             }
             Type::Named(n)
@@ -226,7 +263,10 @@ impl<'a> Checker<'a> {
                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Generic(_))
                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal)
-                        | None => Type::Named(leaf.to_string()),
+                        | None => Type::Named(
+                            self.core_nominal_shadowing_builtin(module, leaf)
+                                .unwrap_or_else(|| leaf.to_string()),
+                        ),
                     }
                 }
             }

@@ -1,5 +1,5 @@
 Error [E2805]: Invalid HTTP route `/users/{id}`: brace interpolation is not allowed in route patterns; it is indistinguishable from the retired `{name}` parameter spelling
-  --> tests/ui/http_route_invalid_literal.jet:9:16
+  --> http_route_invalid_literal.jet:9:16
     |
   9 |     router.get("/users/{id}", handle)
     |                ^^^^^^^^^^^^^
@@ -8,10 +8,208 @@ Error [E2805]: Invalid HTTP route `/users/{id}`: brace interpolation is not allo
 More: jet-lang.dev/e/E2805
 
 Error [E2805]: Invalid HTTP route `/teams/{name}`: use `:name` or final `*name`; braces are not route markers
-  --> tests/ui/http_route_invalid_literal.jet:11:16
+  --> http_route_invalid_literal.jet:11:16
     |
  11 |     router.get(doubled, handle)
     |                ^^^^^^^
  Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
  Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
 More: jet-lang.dev/e/E2805
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/http.jet:886:15
+    |
+886 |     if parsed.scheme != "http" && parsed.scheme != "https" -> return false
+    |               ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/http.jet:886:42
+    |
+886 |     if parsed.scheme != "http" && parsed.scheme != "https" -> return false
+    |                                          ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.host` only works on struct and tuple values
+  --> Core/http/http.jet:887:15
+    |
+887 |     if parsed.host.bytes().len() == 0 || parsed.userinfo().bytes().len() > 0 -> return false
+    |               ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.host`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.host` only works on struct and tuple values
+  --> Core/http/http.jet:975:12
+    |
+975 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |            ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.host`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.path` only works on struct and tuple values
+  --> Core/http/http.jet:975:85
+    |
+975 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |                                                                                     ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.path`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.query` only works on struct and tuple values
+  --> Core/http/http.jet:975:107
+    |
+975 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |                                                                                                           ^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.query`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.fragment` only works on struct and tuple values
+  --> Core/http/http.jet:975:142
+    |
+975 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |                                                                                                                                              ^^^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.fragment`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.host` only works on struct and tuple values
+  --> Core/http/http.jet:986:12
+    |
+986 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |            ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.host`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.path` only works on struct and tuple values
+  --> Core/http/http.jet:986:85
+    |
+986 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |                                                                                     ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.path`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.query` only works on struct and tuple values
+  --> Core/http/http.jet:986:107
+    |
+986 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |                                                                                                           ^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.query`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.fragment` only works on struct and tuple values
+  --> Core/http/http.jet:986:142
+    |
+986 |     parsed.host.bytes().len() > 0 && parsed.userinfo().bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+    |                                                                                                                                              ^^^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.fragment`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/client.jet:401:10
+    |
+401 |     from.scheme == "https" && to.scheme == "http"
+    |          ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/client.jet:401:34
+    |
+401 |     from.scheme == "https" && to.scheme == "http"
+    |                                  ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/client.jet:407:7
+    |
+407 |     a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    |       ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/client.jet:407:19
+    |
+407 |     a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    |                   ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.host` only works on struct and tuple values
+  --> Core/http/client.jet:407:31
+    |
+407 |     a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    |                               ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.host`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.host` only works on struct and tuple values
+  --> Core/http/client.jet:407:41
+    |
+407 |     a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    |                                         ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.host`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.port` only works on struct and tuple values
+  --> Core/http/client.jet:407:51
+    |
+407 |     a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    |                                                   ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.port`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.port` only works on struct and tuple values
+  --> Core/http/client.jet:407:61
+    |
+407 |     a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    |                                                             ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.port`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/client.jet:496:15
+    |
+496 |     if parsed.scheme != "http" && parsed.scheme != "https" -> return false
+    |               ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.scheme` only works on struct and tuple values
+  --> Core/http/client.jet:496:42
+    |
+496 |     if parsed.scheme != "http" && parsed.scheme != "https" -> return false
+    |                                          ^^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.scheme`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.host` only works on struct and tuple values
+  --> Core/http/client.jet:497:15
+    |
+497 |     if parsed.host.bytes().len() == 0 || parsed.userinfo().bytes().len() > 0 -> return false
+    |               ^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.host`
+More: jet-lang.dev/e/E0302

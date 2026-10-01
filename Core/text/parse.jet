@@ -15,7 +15,7 @@ use core.text as unicode
 // These sit beside Unicode segmentation in `core.text`. Python's `str.split`
 // `partition`, `find`, `replace`, `int()`, and `float()` are the bar; Jet
 // returns `None` instead of raising on a bad number.
-pub fn split(text: String, sep: String) -> [String] {
+pub fn split(text: String, sep: String) -> [String] Never! {
     if sep.bytes().len() == 0 -> return chars(text)
     out := [String]{}
     raw :: text.bytes()
@@ -35,7 +35,7 @@ pub fn split(text: String, sep: String) -> [String] {
     out
 }
 
-pub fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] {
+pub fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] Never! {
     parts :: split(text, sep)
     if maxsplit < 0 || parts.len() <= maxsplit + 1 -> return parts
     keep := parts.len() - maxsplit
@@ -54,28 +54,28 @@ pub fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] {
     out
 }
 
-pub fn split_once(text: String, sep: String) -> (found: Bool, head: String, tail: String) {
+pub fn split_once(text: String, sep: String) -> (found: Bool, head: String, tail: String) Never! {
     i :: find(text, sep)
     if i < 0 -> return (head: text, tail: "", found: false)
     n :: sep.bytes().len()
     (head: slice_str(text, 0, i), tail: slice_str(text, i + n, text.bytes().len()), found: true)
 }
 
-pub fn partition(text: String, sep: String) -> (head: String, sep: String, tail: String) {
+pub fn partition(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
     i :: find(text, sep)
     if i < 0 -> return (head: text, sep: "", tail: "")
     n :: sep.bytes().len()
     (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
 }
 
-pub fn rpartition(text: String, sep: String) -> (head: String, sep: String, tail: String) {
+pub fn rpartition(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
     i :: rfind(text, sep)
     if i < 0 -> return (head: "", sep: "", tail: text)
     n :: sep.bytes().len()
     (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
 }
 
-pub fn find(text: String, needle: String) -> Int {
+pub fn find(text: String, needle: String) -> Int Never! {
     if needle.bytes().len() == 0 -> return 0
     raw :: text.bytes()
     nd :: needle.bytes()
@@ -86,7 +86,7 @@ pub fn find(text: String, needle: String) -> Int {
     -1
 }
 
-pub fn rfind(text: String, needle: String) -> Int {
+pub fn rfind(text: String, needle: String) -> Int Never! {
     if needle.bytes().len() == 0 -> return text.bytes().len()
     raw :: text.bytes()
     nd :: needle.bytes()
@@ -99,7 +99,7 @@ pub fn rfind(text: String, needle: String) -> Int {
     -1
 }
 
-pub fn count(text: String, needle: String) -> Int {
+pub fn count(text: String, needle: String) -> Int Never! {
     if needle.bytes().len() == 0 -> return text.bytes().len() + 1
     n := 0
     i := 0
@@ -112,7 +112,7 @@ pub fn count(text: String, needle: String) -> Int {
     }
 }
 
-pub fn replace(text: String, old: String, new: String, count: Int) -> String {
+pub fn replace(text: String, old: String, new: String, count: Int) -> String Never! {
     if old.bytes().len() == 0 -> return ~text
     out := ""
     i := 0
@@ -127,7 +127,7 @@ pub fn replace(text: String, old: String, new: String, count: Int) -> String {
     }
 }
 
-pub fn starts_with(text: String, prefix: String) -> Bool {
+pub fn starts_with(text: String, prefix: String) -> Bool Never! {
     a :: text.bytes()
     b :: prefix.bytes()
     if b.len() > a.len() -> return false
@@ -137,7 +137,7 @@ pub fn starts_with(text: String, prefix: String) -> Bool {
     true
 }
 
-pub fn ends_with(text: String, suffix: String) -> Bool {
+pub fn ends_with(text: String, suffix: String) -> Bool Never! {
     a :: text.bytes()
     b :: suffix.bytes()
     if b.len() > a.len() -> return false
@@ -148,24 +148,24 @@ pub fn ends_with(text: String, suffix: String) -> Bool {
     true
 }
 
-pub fn strip_prefix(text: String, prefix: String) -> String {
+pub fn strip_prefix(text: String, prefix: String) -> String Never! {
     if starts_with(text, prefix) -> return slice_str(text, prefix.bytes().len(), text.bytes().len())
     return ~text
 }
 
-pub fn strip_suffix(text: String, suffix: String) -> String {
+pub fn strip_suffix(text: String, suffix: String) -> String Never! {
     if ends_with(text, suffix) {
         return slice_str(text, 0, text.bytes().len() - suffix.bytes().len())
     }
     return ~text
 }
 
-pub fn parse_int(text: String) -> Int? { parse_int_base(text, 10) }
+pub fn parse_int(text: String) -> Int? Never! { parse_int_base(text, 10) }
 
 /// Parse the canonical integer representation used by String.parse.
-pub fn parse(text: String) -> Int? { parse_int(text) }
+pub fn parse(text: String) -> Int? Never! { parse_int(text) }
 
-pub fn parse_int_base(text: String, base: Int) -> Int? {
+pub fn parse_int_base(text: String, base: Int) -> Int? Never! {
     if base < 2 || base > 36 -> return None
     raw :: text.bytes()
     if raw.len() == 0 -> return None
@@ -192,7 +192,7 @@ pub fn parse_int_base(text: String, base: Int) -> Int? {
     Val(sign * n)
 }
 
-pub fn parse_float(text: String) -> Float? {
+pub fn parse_float(text: String) -> Float? Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return None
     sign := Float{1}
@@ -260,7 +260,7 @@ pub fn parse_float(text: String) -> Float? {
     Val(sign * acc)
 }
 
-pub fn is_digit(text: String) -> Bool {
+pub fn is_digit(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -269,7 +269,7 @@ pub fn is_digit(text: String) -> Bool {
     true
 }
 
-pub fn is_alnum(text: String) -> Bool {
+pub fn is_alnum(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -280,7 +280,7 @@ pub fn is_alnum(text: String) -> Bool {
     true
 }
 
-fn chars(text: String) -> [String] { unicode.scalars(text) }
+fn chars(text: String) -> [String] Never! { unicode.scalars(text) }
 
 
 fn match_at(raw: [U8], i: Int, needle: [U8]) -> Bool {
@@ -310,7 +310,7 @@ fn digit_value(b: U8) -> Int Never! {
     return -1
 }
 
-pub fn join(parts: [String], sep: String) -> String {
+pub fn join(parts: [String], sep: String) -> String Never! {
     s := ""
     i := 0
     loop i < parts.len() {
@@ -320,7 +320,7 @@ pub fn join(parts: [String], sep: String) -> String {
     s
 }
 
-pub fn splitlines(text: String, keepends: Bool) -> [String] {
+pub fn splitlines(text: String, keepends: Bool) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     start := 0
@@ -344,7 +344,7 @@ pub fn splitlines(text: String, keepends: Bool) -> [String] {
     out
 }
 
-pub fn lstrip(text: String) -> String {
+pub fn lstrip(text: String) -> String Never! {
     raw :: text.bytes()
     i := 0
     loop i < raw.len() {
@@ -355,7 +355,7 @@ pub fn lstrip(text: String) -> String {
     ""
 }
 
-pub fn rstrip(text: String) -> String {
+pub fn rstrip(text: String) -> String Never! {
     raw :: text.bytes()
     i := raw.len()
     loop i > 0 {
@@ -366,23 +366,23 @@ pub fn rstrip(text: String) -> String {
     ""
 }
 
-pub fn strip(text: String) -> String { lstrip(rstrip(text)) }
+pub fn strip(text: String) -> String Never! { lstrip(rstrip(text)) }
 
-pub fn ljust(text: String, width: Int, fill: String) -> String {
+pub fn ljust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
     if n <= 0 -> return ~text
     "{text}{repeat_char(pad, n)}"
 }
 
-pub fn rjust(text: String, width: Int, fill: String) -> String {
+pub fn rjust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
     if n <= 0 -> return ~text
     "{repeat_char(pad, n)}{text}"
 }
 
-pub fn center(text: String, width: Int, fill: String) -> String {
+pub fn center(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
     if n <= 0 -> return ~text
@@ -390,7 +390,7 @@ pub fn center(text: String, width: Int, fill: String) -> String {
     "{repeat_char(pad, left)}{text}{repeat_char(pad, n - left)}"
 }
 
-pub fn zfill(text: String, width: Int) -> String {
+pub fn zfill(text: String, width: Int) -> String Never! {
     raw :: text.bytes()
     sign := ""
     rest := text
@@ -403,7 +403,7 @@ pub fn zfill(text: String, width: Int) -> String {
     "{sign}{repeat_char("0", n)}{rest}"
 }
 
-pub fn capitalize(text: String) -> String {
+pub fn capitalize(text: String) -> String Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return ~text
     first :: ascii_case(raw[0], true)
@@ -416,7 +416,7 @@ pub fn capitalize(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-pub fn title(text: String) -> String {
+pub fn title(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     word := true
@@ -435,7 +435,7 @@ pub fn title(text: String) -> String {
 }
 
 /// Python `string.capwords`: collapse whitespace and capitalize each word.
-pub fn capwords(text: String) -> String {
+pub fn capwords(text: String) -> String Never! {
     parts := split_ws(text)
     i := 0
     loop i < parts.len() {
@@ -445,7 +445,7 @@ pub fn capwords(text: String) -> String {
     join(parts, " ")
 }
 
-pub fn swapcase(text: String) -> String {
+pub fn swapcase(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
@@ -458,7 +458,7 @@ pub fn swapcase(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-pub fn lower(text: String) -> String {
+pub fn lower(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
@@ -467,7 +467,7 @@ pub fn lower(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-pub fn upper(text: String) -> String {
+pub fn upper(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
@@ -476,7 +476,7 @@ pub fn upper(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-pub fn is_space(text: String) -> Bool {
+pub fn is_space(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -485,7 +485,7 @@ pub fn is_space(text: String) -> Bool {
     true
 }
 
-pub fn is_lower(text: String) -> Bool {
+pub fn is_lower(text: String) -> Bool Never! {
     any := false
     loop b in text.bytes() {
         n :: b
@@ -495,7 +495,7 @@ pub fn is_lower(text: String) -> Bool {
     any
 }
 
-pub fn is_upper(text: String) -> Bool {
+pub fn is_upper(text: String) -> Bool Never! {
     any := false
     loop b in text.bytes() {
         n :: b
@@ -505,9 +505,9 @@ pub fn is_upper(text: String) -> Bool {
     any
 }
 
-pub fn is_title(text: String) -> Bool { text == title(text) && text.bytes().len() > 0 }
+pub fn is_title(text: String) -> Bool Never! { text == title(text) && text.bytes().len() > 0 }
 
-pub fn is_ascii(text: String) -> Bool {
+pub fn is_ascii(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n :: b
         if n > 127 -> return false
@@ -515,7 +515,7 @@ pub fn is_ascii(text: String) -> Bool {
     true
 }
 
-pub fn is_identifier(text: String) -> Bool {
+pub fn is_identifier(text: String) -> Bool Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     n0 :: raw[0]
@@ -533,13 +533,13 @@ pub fn is_identifier(text: String) -> Bool {
 }
 
 /// Python `str` spellings over the same UTF-8 byte-preserving primitives.
-pub fn startswith(text: String, prefix: String) -> Bool { starts_with(text, prefix) }
-pub fn endswith(text: String, suffix: String) -> Bool { ends_with(text, suffix) }
-pub fn removeprefix(text: String, prefix: String) -> String { strip_prefix(text, prefix) }
-pub fn removesuffix(text: String, suffix: String) -> String { strip_suffix(text, suffix) }
-pub fn rindex(text: String, needle: String) -> Int { rfind(text, needle) }
-pub fn encode(text: String) -> [U8] { text.bytes() }
-pub fn isalpha(text: String) -> Bool {
+pub fn startswith(text: String, prefix: String) -> Bool Never! { starts_with(text, prefix) }
+pub fn endswith(text: String, suffix: String) -> Bool Never! { ends_with(text, suffix) }
+pub fn removeprefix(text: String, prefix: String) -> String Never! { strip_prefix(text, prefix) }
+pub fn removesuffix(text: String, suffix: String) -> String Never! { strip_suffix(text, suffix) }
+pub fn rindex(text: String, needle: String) -> Int Never! { rfind(text, needle) }
+pub fn encode(text: String) -> [U8] Never! { text.bytes() }
+pub fn isalpha(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -547,24 +547,24 @@ pub fn isalpha(text: String) -> Bool {
     }
     true
 }
-pub fn isdecimal(text: String) -> Bool { is_digit(text) }
-pub fn isnumeric(text: String) -> Bool { is_digit(text) }
-pub fn isalnum(text: String) -> Bool { is_alnum(text) }
-pub fn isascii(text: String) -> Bool { is_ascii(text) }
-pub fn isdigit(text: String) -> Bool { is_digit(text) }
-pub fn isidentifier(text: String) -> Bool { is_identifier(text) }
-pub fn islower(text: String) -> Bool { is_lower(text) }
-pub fn isspace(text: String) -> Bool { is_space(text) }
-pub fn istitle(text: String) -> Bool { is_title(text) }
-pub fn isupper(text: String) -> Bool { is_upper(text) }
-pub fn isprintable(text: String) -> Bool {
+pub fn isdecimal(text: String) -> Bool Never! { is_digit(text) }
+pub fn isnumeric(text: String) -> Bool Never! { is_digit(text) }
+pub fn isalnum(text: String) -> Bool Never! { is_alnum(text) }
+pub fn isascii(text: String) -> Bool Never! { is_ascii(text) }
+pub fn isdigit(text: String) -> Bool Never! { is_digit(text) }
+pub fn isidentifier(text: String) -> Bool Never! { is_identifier(text) }
+pub fn islower(text: String) -> Bool Never! { is_lower(text) }
+pub fn isspace(text: String) -> Bool Never! { is_space(text) }
+pub fn istitle(text: String) -> Bool Never! { is_title(text) }
+pub fn isupper(text: String) -> Bool Never! { is_upper(text) }
+pub fn isprintable(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n :: b
         if n < 32 || n > 126 -> return false
     }
     true
 }
-pub fn expandtabs(text: String, tabsize: Int) -> String {
+pub fn expandtabs(text: String, tabsize: Int) -> String Never! {
     out := ""
     column := 0
     width := tabsize
@@ -589,7 +589,7 @@ pub fn expandtabs(text: String, tabsize: Int) -> String {
 }
 
 
-pub fn find_from(text: String, needle: String, start: Int) -> Int {
+pub fn find_from(text: String, needle: String, start: Int) -> Int Never! {
     s := start
     if s < 0 -> s = 0
     rest :: slice_str(text, s, text.bytes().len())
@@ -598,21 +598,21 @@ pub fn find_from(text: String, needle: String, start: Int) -> Int {
     s + j
 }
 
-pub fn rfind_from(text: String, needle: String, end: Int) -> Int {
+pub fn rfind_from(text: String, needle: String, end: Int) -> Int Never! {
     e := end
     if e > text.bytes().len() -> e = text.bytes().len()
     rfind(slice_str(text, 0, e), needle)
 }
 
-pub fn index(text: String, needle: String) -> Int {
+pub fn index(text: String, needle: String) -> Int Never! {
     i :: find(text, needle)
     if i < 0 -> return -1
     i
 }
 
-pub fn contains(text: String, needle: String) -> Bool { find(text, needle) >= 0 }
+pub fn contains(text: String, needle: String) -> Bool Never! { find(text, needle) >= 0 }
 
-pub fn parse_bool(text: String) -> Bool? {
+pub fn parse_bool(text: String) -> Bool? Never! {
     stripped :: strip(text) ?? return None
     t :: lower(stripped) ?? return None
     if t == {
@@ -622,13 +622,13 @@ pub fn parse_bool(text: String) -> Bool? {
     }
 }
 
-pub fn parse_kv(text: String, sep: String) -> (key: String, ok: Bool, value: String) {
+pub fn parse_kv(text: String, sep: String) -> (key: String, ok: Bool, value: String) Never! {
     p :: partition(text, sep)
     if p.sep.bytes().len() == 0 -> return (key: strip(text), value: "", ok: false)
     (key: strip(p.head), value: strip(p.tail), ok: true)
 }
 
-pub fn split_ws(text: String) -> [String] {
+pub fn split_ws(text: String) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     start := -1
@@ -653,7 +653,7 @@ pub fn split_ws(text: String) -> [String] {
     out
 }
 
-pub fn unescape_c(text: String) -> String {
+pub fn unescape_c(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := 0
@@ -677,7 +677,7 @@ pub fn unescape_c(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-pub fn escape_c(text: String) -> String {
+pub fn escape_c(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
         n :: b

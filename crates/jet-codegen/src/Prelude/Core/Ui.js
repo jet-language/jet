@@ -6,7 +6,7 @@ const JET_UI_WEB_MAX_QUEUED_EVENTS = 256;
 const JET_UI_WEB_CAPABILITIES = [
   "FileDialog",
   "Clipboard",
-  "Ime",
+  "IME",
   "DragDrop",
   "Shortcuts",
   "Accessibility",
@@ -66,7 +66,7 @@ function jet_ui_web_default_capabilities() {
     Clipboard: clipboard != null
       && typeof clipboard.readText === "function"
       && typeof clipboard.writeText === "function",
-    Ime: true,
+    IME: true,
     DragDrop: true,
     Shortcuts: true,
     Accessibility: true,
@@ -659,7 +659,7 @@ function jet_ui_web_ime_queue(value, phase, text, start, end) {
 }
 
 function jet_ui_host_ime_poll() {
-  const requirement = jet_ui_web_require("Ime");
+  const requirement = jet_ui_web_require("IME");
   if (requirement) return requirement;
   const event = jet_ui_web_host_state().ime.shift();
   return jet_ui_web_ok(jet_ui_web_option(event));
@@ -667,7 +667,7 @@ function jet_ui_host_ime_poll() {
 
 function jet_ui_web_drop_item(value) {
   if (value?.tag != null) return value;
-  if (value?.uri != null) return jet_ui_web_enum("Uri", jet_ui_web_text(value.uri));
+  if (value?.uri != null) return jet_ui_web_enum("URI", jet_ui_web_text(value.uri));
   return jet_ui_web_enum("Text", jet_ui_web_text(value?.text ?? value));
 }
 

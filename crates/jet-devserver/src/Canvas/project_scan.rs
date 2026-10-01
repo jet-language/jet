@@ -828,7 +828,6 @@ fn output_kind_label(kind: &jet_driver::Package::PackageOutputKind) -> &'static 
         PackageOutputKind::Bundle => "bundle",
         PackageOutputKind::System => "system",
         PackageOutputKind::Fleet => "fleet",
-        PackageOutputKind::Model => "model",
     }
 }
 

@@ -88,64 +88,6 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
     jet_ring_csv_render(&rows)
 }
 
-/// D-SHAPE-ONE1=A: CSV is only an adapter over the canonical shape projection.
-/// The projection supplies field identities and order; this function only
-/// renders the selected values.
-fn jet_enc_csv_to_string_shape<T: __jet_Encode>(
-    values: &Vec<T>,
-    projection: &ShapeProjection,
-) -> Result<String, Vec<jet_std::FieldError>> {
-    if projection.kind != ShapeProjectionKind::Csv {
-        return Err(jet_std::FieldError::one("CSV needs a CSV shape projection"));
-    }
-    let encoded = jet_std::DataTree::Array(
-        values
-            .iter()
-            .map(|value| value.jet_encode())
-            .collect::<Vec<_>>(),
-    );
-    let projected = jet_std::jet_datatree_project(&encoded, projection)?;
-    let jet_std::DataTree::Array(rows) = projected else {
-        return Err(jet_std::FieldError::one(
-            "CSV shape projection needs object rows",
-        ));
-    };
-    let header = match rows.first() {
-        Some(jet_std::DataTree::Object(entries)) => entries
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>(),
-        Some(_) => {
-            return Err(jet_std::FieldError::one(
-                "CSV shape projection needs object rows",
-            ))
-        }
-        None => Vec::new(),
-    };
-    let mut output = vec![header.clone()];
-    for row in &rows {
-        let jet_std::DataTree::Object(_) = row else {
-            return Err(jet_std::FieldError::one(
-                "CSV shape projection needs object rows",
-            ));
-        };
-        output.push(
-            header
-                .iter()
-                .map(|name| match jet_std::datatree_get(row, name) {
-                    Some(jet_std::DataTree::Text(value)) => value.clone(),
-                    Some(jet_std::DataTree::Int(value)) => jet_std::jet_int_to_string(*value),
-                    Some(jet_std::DataTree::Float(value)) => format!("{value:?}"),
-                    Some(jet_std::DataTree::Bool(value)) => value.to_string(),
-                    Some(jet_std::DataTree::Null) | None => String::new(),
-                    Some(other) => jet_std::render_datatree_json(other, false, 0),
-                })
-                .collect::<Vec<_>>(),
-        );
-    }
-    Ok(jet_ring_csv_render(&output))
-}
-
 // D-ENC-DYN1=A+ (c152): TOML is a full serde-equivalent adapter over the one rich
 // `DataTree` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
 // The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
@@ -208,28 +150,6 @@ fn jet_enc_toml_to_string<T: __jet_Encode>(v: &T) -> String {
 }
 fn jet_enc_yaml_to_string<T: __jet_Encode>(v: &T) -> String {
     jet_std::yaml::render(&v.jet_encode())
-}
-
-fn jet_enc_toml_to_string_shape<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-) -> Result<String, Vec<jet_std::FieldError>> {
-    if projection.kind != ShapeProjectionKind::Toml {
-        return Err(jet_std::FieldError::one("TOML needs a TOML shape projection"));
-    }
-    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
-    Ok(jet_std::toml::render(&projected))
-}
-
-fn jet_enc_yaml_to_string_shape<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-) -> Result<String, Vec<jet_std::FieldError>> {
-    if projection.kind != ShapeProjectionKind::Yaml {
-        return Err(jet_std::FieldError::one("YAML needs a YAML shape projection"));
-    }
-    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
-    Ok(jet_std::yaml::render(&projected))
 }
 
 // D-SQL-SURFACE1=C: the query plan and field comparison live in the shared

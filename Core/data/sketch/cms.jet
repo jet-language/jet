@@ -1,33 +1,40 @@
 // Count-min sketch. Width 256, depth 4. Update and query are Jet.
 //
-// A CountMin value is immutable at the API boundary: add/increment/merge
-// return a fresh table, so two callers never race through a shared counter
-// array.  Hashing and merge order are fixed, which keeps estimates stable
-// across execution tiers.
+// `add` updates the counter table in place through a write receiver; `merge`
+// returns a fresh table.  Hashing and merge order are fixed, which keeps
+// estimates stable across execution tiers.
 pub struct CountMin {
     pub depth: Int
     pub width: Int
     pub table: [Int]
 }
 
-pub fn new() -> CountMin {
+pub fn new() -> CountMin Never! {
     table := [Int]{}
     loop i in 0..<1024 -> &table.push(0)
     CountMin{depth: 4, width: 256, table: table}
 }
 
-pub fn add(sketch: CountMin, key: String, n: Int) -> CountMin {
-    if !shape_ok(sketch) -> return ~sketch
-    table := copy_table(sketch.table)
-    loop d in 0..<sketch.depth {
-        h :: bucket(key, d, sketch.width)
-        idx :: d * sketch.width + h
-        table[idx] = table[idx] + n
+impl CountMin {
+    /// Count `n` occurrences of `key` (one by default).
+    pub fn add(&self, key: String, n: Int{1}) Never! {
+        if !shape_ok(self) {
+            fresh :: new()
+            self.depth = fresh.depth
+            self.width = fresh.width
+            self.table = fresh.table
+        }
+        loop d in 0..<self.depth {
+            idx :: d * self.width + bucket(key, d, self.width)
+            self.table[idx] = self.table[idx] + n
+        }
     }
-    CountMin{depth: sketch.depth, width: sketch.width, table: table}
+
+    /// The estimated count for `key`; never below the true count.
+    pub fn count(self, key: String) -> Int Never! { estimate(self, key) }
 }
 
-pub fn estimate(sketch: CountMin, key: String) -> Int {
+fn estimate(sketch: CountMin, key: String) -> Int Never! {
     if !shape_ok(sketch) -> return 0
     min := 0
     first := true
@@ -58,7 +65,7 @@ fn bucket(key: String, d: Int, width: Int) -> Int {
     (hashd(key, d) % width + width) % width
 }
 
-pub fn merge(a: CountMin, b: CountMin) -> CountMin {
+pub fn merge(a: CountMin, b: CountMin) -> CountMin Never! {
     // A malformed public value cannot contribute a trustworthy counter.
     // Preserve the valid side instead of fabricating an empty success.
     if !shape_ok(a) {
@@ -88,14 +95,6 @@ pub fn merge(a: CountMin, b: CountMin) -> CountMin {
         d = d + 1
     }
     CountMin{depth: depth, width: width, table: table}
-}
-
-pub fn increment(sketch: CountMin, key: String) -> CountMin { add(sketch, key, 1) }
-
-fn copy_table(table: [Int]) -> [Int] {
-    out := [Int]{}
-    loop value in table -> &out.push(value)
-    out
 }
 
 fn shape_ok(sketch: CountMin) -> Bool {

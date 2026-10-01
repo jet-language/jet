@@ -323,8 +323,8 @@ pub enum JetTLSTrust {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum JetTLSVersion {
-    Tls12,
-    Tls13,
+    TLS12,
+    TLS13,
 }
 
 /// D-CORESURF-SMALL1 / I9: the one `JetShow` rendering of a negotiated TLS
@@ -337,8 +337,8 @@ pub enum JetTLSVersion {
 impl JetShow for JetTLSVersion {
     fn jet_show(&self) -> String {
         match self {
-            JetTLSVersion::Tls12 => "Tls12",
-            JetTLSVersion::Tls13 => "Tls13",
+            JetTLSVersion::TLS12 => "TLS12",
+            JetTLSVersion::TLS13 => "TLS13",
         }
         .to_string()
     }
@@ -362,8 +362,8 @@ fn jet_tls_client_config_default() -> JetTLSClientConfig {
     JetTLSClientConfig {
         trust: JetTLSTrust::System,
         identity: None,
-        min_version: JetTLSVersion::Tls12,
-        max_version: JetTLSVersion::Tls13,
+        min_version: JetTLSVersion::TLS12,
+        max_version: JetTLSVersion::TLS13,
         alpn: Vec::new(),
     }
 }
@@ -437,8 +437,8 @@ fn jet_tls_client_config_with_version_bounds(
     max: JetTLSVersion,
 ) -> Result<JetTLSClientConfig, jet_std::IOError> {
     let value = |version| match version {
-        JetTLSVersion::Tls12 => 12,
-        JetTLSVersion::Tls13 => 13,
+        JetTLSVersion::TLS12 => 12,
+        JetTLSVersion::TLS13 => 13,
     };
     if value(min) > value(max) {
         return Err(jet_tls_config_error(
@@ -471,8 +471,8 @@ fn jet_tls_client_config_http_parts(
         })
         .unwrap_or((empty.clone(), empty));
     let version = |version| match version {
-        JetTLSVersion::Tls12 => 12i64,
-        JetTLSVersion::Tls13 => 13i64,
+        JetTLSVersion::TLS12 => 12i64,
+        JetTLSVersion::TLS13 => 13i64,
     };
     (
         trust,
@@ -603,7 +603,7 @@ impl JetShow for JetUDPPacket {
 impl JetShow for JetDNSSrv {
     fn jet_show(&self) -> String {
         format!(
-            "DNSSrv(priority={}, weight={}, port={}, target={})",
+            "DNSSRV(priority={}, weight={}, port={}, target={})",
             self.priority, self.weight, self.port, self.target
         )
     }
@@ -1583,8 +1583,8 @@ fn jet_net_tls_client_scheduler_config_deadline(
         .map(|identity| (&identity.cert_chain, identity.private_key.as_vec()))
         .unwrap_or((&empty, &empty));
     let version = |version| match version {
-        JetTLSVersion::Tls12 => 12,
-        JetTLSVersion::Tls13 => 13,
+        JetTLSVersion::TLS12 => 12,
+        JetTLSVersion::TLS13 => 13,
     };
     jet_net_tls_client_scheduler_with_begin(
         stream,
@@ -1788,8 +1788,8 @@ fn jet_net_tls_peer_identity_from_snapshot(
         ))
     })?;
     let tls_version = match tls_version {
-        12 => JetTLSVersion::Tls12,
-        13 => JetTLSVersion::Tls13,
+        12 => JetTLSVersion::TLS12,
+        13 => JetTLSVersion::TLS13,
         other => {
             return Err(JetNetError::TLS(jet_net_detail(
                 "tls peer identity",

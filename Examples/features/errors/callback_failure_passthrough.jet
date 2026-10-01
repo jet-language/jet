@@ -1,0 +1,38 @@
+// D-CALLBACK-ERR1=A: a function passes a callback's failure through to its
+// caller with a failure-type parameter. `fn(T) -> String E!` takes the key
+// function's own failure type, so the caller matches `.Missing` directly. A
+// key function that cannot fail makes the whole call unable to fail.
+use core.web.table as table
+
+#Error
+enum PriceError {
+    Missing(String)
+}
+
+fn first_key<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> String E! {
+    if rows.len() == 0 -> return Ok("")
+    key_fn(rows[0])
+}
+
+fn parse_price(name: String) -> String PriceError! {
+    if name == "" -> return Err(PriceError.Missing("blank name"))
+    Ok("price of {name}")
+}
+
+fn plain_key(name: String) -> String Never! { ~name }
+
+fn run() {
+    if first_key(["", "b"], parse_price) == {
+        .Ok(key) -> print(key)
+        .Err(.Missing(why)) -> print("missing: {why}")
+    }
+    print(first_key(["b", ""], plain_key))
+    print(first_key([7, 8], n -> "#{n}"))
+
+    if table.sort(["b", "", "a"], false, parse_price) == {
+        .Ok(rows) -> print(rows.join(","))
+        .Err(.Missing(why)) -> print("sort stopped: {why}")
+    }
+    print(table.sort(["b", "c", "a"], false, plain_key).join(","))
+    print(table.sort(["b", "c", "a"], true, name -> "{name}").join(","))
+}

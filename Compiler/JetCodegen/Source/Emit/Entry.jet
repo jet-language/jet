@@ -1,0 +1,1129 @@
+// Artifact assembly: program entry (`fn main`), CLI decoding, job dispatch,
+// exports, and hardware host wiring for the selected MIR artifact. Ports
+// MIRRust.rs emit_entry / entry_invoke / cli_* / emit_jobs / emit_exports so the
+// Jet emitter assembles the same artifact text for the same MIR. The cached
+// runtime and Prelude text, crate packaging, and rustc invocation stay on the
+// host side of the bootstrap boundary (Compiler/Bootstrap/Runner.rs
+// prepare_bootstrap_artifact), which splices this fragment.
+use jet_foundation.[
+    MIRAccess,
+    MIRArtifactKind,
+    MIRArtifactPlan,
+    MIRArtifactTarget,
+    MIRCLIDefault,
+    MIRCLIEntry,
+    MIRCLIInput,
+    MIRCLIValueKind,
+    MIREntryKind,
+    MIREntryOutput,
+    MIREntrySpec,
+    MIRField,
+    MIRFunction,
+    MIRFunctionForm,
+    MIRFunctionID,
+    MIRJob,
+    MIRJobID,
+    MIRParam,
+    MIRRuntimePartID,
+    MIRType,
+    MIRTypeKind,
+    MIRWebBucket,
+    MIRWebParamReconstruction,
+    MIRWebPartitionMarker,
+    ParamZone,
+    mir_type_display_name,
+    mir_type_is_unit,
+    mir_type_same_checked_type,
+]
+
+fn jet_rust_emit_selected_artifact(ctx: &JetRustEmitContext) -> MIRArtifactPlan? {
+    wanted :: if ctx.config.target == "web" -> MIRArtifactTarget.Web else -> MIRArtifactTarget.RustAOT
+    selected := MIRArtifactPlan?{None}
+    loop artifact in ctx.program.artifacts {
+        if artifact.target != wanted -> next
+        if selected != None {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR program has more than one artifact for the emission target", "source emission assembles exactly one checked artifact plan per target", None)
+            return None
+        }
+        selected = Val(artifact)
+    }
+    selected
+}
+
+fn jet_rust_emit_find_function(ctx: &JetRustEmitContext, id: MIRFunctionID) -> MIRFunction? {
+    loop function in ctx.program.functions {
+        if function.id == id -> return Val(function)
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR artifact references a missing function row", "entry, command, job, and export rows must resolve to one checked function", None)
+    None
+}
+
+fn jet_rust_emit_debug_option_string(value: String?) -> String Never! {
+    if value == .Val(text) -> "Some({jet_rust_emit_quote(text)})" else -> "None"
+}
+
+fn jet_rust_emit_entry_kind_debug(kind: MIREntryKind) -> String Never! {
+    if kind == {
+        .Library -> "Library"
+        .Command -> "Command"
+        .App -> "App"
+        .Service -> "Service"
+        .Test -> "Test"
+    }
+}
+
+fn jet_rust_emit_entry_output_debug(output: MIREntryOutput) -> String Never! {
+    if output == {
+        .NoOutput -> "None"
+        .ReturnValue -> "ReturnValue"
+        .StandardOutput -> "StandardOutput"
+        .ExitStatus -> "ExitStatus"
+    }
+}
+
+fn jet_rust_emit_param_zone_debug(zone: ParamZone) -> String Never! {
+    if zone == {
+        .PositionalOnly -> "PositionalOnly"
+        .Either -> "Either"
+        .LabelOnly -> "LabelOnly"
+    }
+}
+
+fn jet_rust_emit_cli_value_kind_debug(kind: MIRCLIValueKind) -> String Never! {
+    if kind == {
+        .Bool -> "Bool"
+        .Int -> "Int"
+        .Float -> "Float"
+        .String -> "String"
+        .Path -> "Path"
+    }
+}
+
+fn jet_rust_emit_cli_input_metadata(ctx: &JetRustEmitContext, input: MIRCLIInput) -> String Never! {
+    shape :: if input.shape == {
+        .Flag -> "flag"
+        .Value(kind, optional, default) -> {
+            default_text :: if default == {
+                .Val(value) -> {
+                    if value == {
+                        .TypeDefault -> "Some(TypeDefault)"
+                        .Value(constant) -> "Some(Value({jet_rust_emit_constant(&ctx, constant, input.ty)}))"
+                    }
+                }
+                None -> "None"
+            }
+            "value:{jet_rust_emit_cli_value_kind_debug(kind)}:optional={jet_rust_emit_bool_text(optional)}:default={default_text}"
+        }
+    }
+    positional :: if input.positional == .Val(index) -> "Some({index})" else -> "None"
+    "// jet-mir-cli-input: parameter={input.parameter} name={input.name} label={input.label} type={jet_rust_emit_type(&ctx, input.ty)} zone={jet_rust_emit_param_zone_debug(input.zone)} short={jet_rust_emit_debug_option_string(input.short)} env={jet_rust_emit_debug_option_string(input.env)} metavar={jet_rust_emit_debug_option_string(input.metavar)} positional={positional} variadic={jet_rust_emit_bool_text(input.variadic)} shape={shape}"
+}
+
+fn jet_rust_emit_cli_value_kind(kind: MIRCLIValueKind) -> String Never! {
+    if kind == {
+        .Bool | .String | .Path -> "String"
+        .Int -> "Int"
+        .Float -> "Float"
+    }
+}
+
+fn jet_rust_emit_cli_default_expr(ctx: &JetRustEmitContext, default: MIRCLIDefault?, ty: MIRType) -> String Never! {
+    value :: default ?? return "None"
+    if value == {
+        .TypeDefault -> "Some((Default::default() as {jet_rust_emit_type(&ctx, ty)}).jet_show())"
+        .Value(constant) -> "Some(({jet_rust_emit_constant(&ctx, constant, ty)}).jet_show())"
+    }
+}
+
+fn jet_rust_emit_cli_spec_expr(ctx: &JetRustEmitContext, inputs: [MIRCLIInput], description: String?, standard: Bool, version: String?, program: String) -> String Never! {
+    root :: ~ctx.config.root_prefix
+    spec := "{root}jet_args_program({root}jet_args_spec(), {program})"
+    if description == .Val(text) -> spec = "{root}jet_args_description({spec}, &{jet_rust_emit_quote(text)}.to_string())"
+    if standard {
+        spec = "{root}jet_args_flag_short({spec}, &\"verbose\".to_string(), &\"v\".to_string(), &\"print extra detail\".to_string())"
+        spec = "{root}jet_args_flag_short({spec}, &\"quiet\".to_string(), &\"q\".to_string(), &\"suppress normal output\".to_string())"
+        spec = "{root}jet_args_option_choice({spec}, &\"color\".to_string(), &\"control terminal color\".to_string(), &\"MODE\".to_string(), &\"auto,always,never\".to_string())"
+        if version == .Val(text) -> spec = "{root}jet_args_version({spec}, &{jet_rust_emit_quote(text)}.to_string())"
+    }
+    loop input in inputs {
+        if input.name.len() == 0 || input.help.len() == 0 {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI input has no canonical name/help", "checked CLI rows carry the option name and help text", None)
+            return spec
+        }
+        if input.shape == {
+            .Flag -> {
+                if input.ty.kind != MIRTypeKind.Bool || input.variadic {
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI flag row is not a non-variadic Bool", "CLI flags decode one Bool", None)
+                    return spec
+                }
+                spec = if input.short == {
+                    .Val(short) -> "{root}jet_args_flag_short({spec}, &{jet_rust_emit_quote(input.name)}.to_string(), &{jet_rust_emit_quote(short)}.to_string(), &{jet_rust_emit_quote(input.help)}.to_string())"
+                    None -> "{root}jet_args_flag({spec}, &{jet_rust_emit_quote(input.name)}.to_string(), &{jet_rust_emit_quote(input.help)}.to_string())"
+                }
+            }
+            .Value(kind, optional, default) -> {
+                metavar :: input.metavar ?? "VALUE"
+                default_text :: jet_rust_emit_cli_default_expr(&ctx, default, input.ty)
+                required :: !optional && default_text == "None" && input.positional == None
+                short :: if input.short == .Val(text) -> "Some({jet_rust_emit_quote(text)}.to_string())" else -> "None"
+                env :: if input.env == .Val(text) -> "Some({jet_rust_emit_quote(text)}.to_string())" else -> "None"
+                spec = "{root}jet_args_option_base({spec}, &{jet_rust_emit_quote(input.name)}.to_string(), {short}, &{jet_rust_emit_quote(input.help)}.to_string(), &{jet_rust_emit_quote(metavar)}.to_string(), {default_text}, {env}, {jet_rust_emit_bool_text(required)}, {jet_rust_emit_bool_text(input.variadic)}, {root}JetArgValueKind::{jet_rust_emit_cli_value_kind(kind)})"
+                if input.positional != None {
+                    spec = "{root}jet_args_positional({spec}, &{jet_rust_emit_quote(input.name)}.to_string(), &{jet_rust_emit_quote(input.help)}.to_string())"
+                }
+            }
+        }
+    }
+    spec
+}
+
+fn jet_rust_emit_cli_int_error(name: String, raw: String) -> String Never! {
+    "return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {jet_rust_emit_quote(name)}, {raw}, __spec.help()))"
+}
+
+fn jet_rust_emit_cli_float_error(name: String, raw: String) -> String Never! {
+    "return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {jet_rust_emit_quote(name)}, {raw}, __spec.help()))"
+}
+
+fn jet_rust_emit_cli_scalar_int(ctx: &JetRustEmitContext, name: String, ty: MIRType, raw: String) -> String Never! {
+    root :: ~ctx.config.root_prefix
+    if ty.kind == {
+        .Int -> return "match {root}jet_std::jet_int_owned_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => {jet_rust_emit_cli_int_error(name, raw)} }}"
+        .IntN(_, _) -> return "(match {root}jet_std::jet_int_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => {jet_rust_emit_cli_int_error(name, raw)} }}) as {jet_rust_emit_type(&ctx, ty)}"
+        .InlineRange(_, lo, hi) -> return "match {root}jet_inline_range_from_int(match {raw}.parse::<i64>() {{ Ok(__n) => __n, Err(_) => {jet_rust_emit_cli_int_error(name, raw)} }}, {lo}, {hi}) {{ Ok(__n) => __n, Err(__reason) => return Err(format!(\"invalid value for --{{}}: {{}}\\n\\n{{}}\", {jet_rust_emit_quote(name)}, __reason, __spec.help())) }}"
+        .Tagged(_, inner) -> return jet_rust_emit_cli_scalar_int(&ctx, name, inner, raw)
+        .Quantity(base, _) -> return jet_rust_emit_cli_scalar_int(&ctx, name, base, raw)
+        else -> {}
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI Int row has a non-integer checked type", "Int CLI values decode into Int, IntN, inline-range, tagged, or quantity integers", None)
+    "unreachable!(\"CLI Int row type\")"
+}
+
+fn jet_rust_emit_cli_scalar_expr(ctx: &JetRustEmitContext, input: MIRCLIInput, ty: MIRType, raw: String) -> String Never! {
+    root :: ~ctx.config.root_prefix
+    kind :: if input.shape == {
+        .Value(value_kind, _, _) -> value_kind
+        .Flag -> {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI scalar decoder received a flag row", "flags decode through jet_parsed_flag", None)
+            return "unreachable!(\"CLI flag scalar\")"
+        }
+    }
+    if kind == {
+        .Bool -> "match {raw}.to_ascii_lowercase().as_str() {{ \"true\" => true, \"false\" => false, _ => return Err(format!(\"invalid value for --{{}}: `{{}}` is not true or false\\n\\n{{}}\", {jet_rust_emit_quote(input.name)}, {raw}, __spec.help())) }}"
+        .Int -> jet_rust_emit_cli_scalar_int(&ctx, input.name, ty, raw)
+        .Float -> {
+            if ty.kind == {
+                .Float -> return "match {raw}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => {jet_rust_emit_cli_float_error(input.name, raw)} }}"
+                .Float32 -> return "(match {raw}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => {jet_rust_emit_cli_float_error(input.name, raw)} }}) as f32"
+                else -> {}
+            }
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI Float row has a non-floating checked type", "Float CLI values decode into Float or Float32", None)
+            "unreachable!(\"CLI Float row type\")"
+        }
+        .String -> {
+            if ty.kind != MIRTypeKind.String -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI String row has a non-String checked type", "String CLI values decode into String", None)
+            "{raw}.clone()"
+        }
+        .Path -> {
+            is_path := false
+            if ty.kind == {
+                .Apply(name, _) -> is_path = name.name == "Path"
+                else -> {}
+            }
+            if !is_path -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI Path row has a non-Path checked type", "Path CLI values decode into Path", None)
+            "{root}jet_path_from(&{raw})"
+        }
+    }
+}
+
+fn jet_rust_emit_cli_decode_lines(ctx: &JetRustEmitContext, inputs: [MIRCLIInput], indent: Int, prefix: String, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    pad := ""
+    loop pad.len() < indent { pad = "{pad} " }
+    loop input in inputs {
+        variable :: "{prefix}{input.parameter}"
+        if input.shape == {
+            .Flag -> {
+                if input.ty.kind != MIRTypeKind.Bool -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI flag decoder has a non-Bool type", "CLI flags decode one Bool", None)
+                &lines.push("{pad}let {variable}: bool = {root}jet_parsed_flag(&__parsed, &{jet_rust_emit_quote(input.name)}.to_string());")
+            }
+            .Value(_, optional, default) -> {
+                if input.variadic {
+                    if input.ty.kind == {
+                        .List(inner) -> {
+                            result :: "Ok({jet_rust_emit_cli_scalar_expr(&ctx, input, inner, "__v")})"
+                            &lines.push("{pad}let {variable}: Vec<{jet_rust_emit_type(&ctx, inner)}> = match {root}jet_parsed_options(&__parsed, &{jet_rust_emit_quote(input.name)}.to_string()).into_iter().map(|__v| {result}).collect::<Result<Vec<_>, String>>() {{ Ok(__v) => __v, Err(__e) => return Err(__e) }};")
+                        }
+                        else -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR variadic CLI input must have a List type", "variadic CLI values decode into a List", None)
+                    }
+                    next
+                }
+                if optional {
+                    if input.ty.kind == {
+                        .Option(inner) -> {
+                            value :: jet_rust_emit_cli_scalar_expr(&ctx, input, inner, "__v")
+                            &lines.push("{pad}let {variable}: {root}JetOutcome<{jet_rust_emit_type(&ctx, inner)}, {root}JetAbsent> = match {root}jet_parsed_option(&__parsed, &{jet_rust_emit_quote(input.name)}.to_string()) {{ Ok(__v) => Ok({value}), Err({root}JetAbsent) => Err({root}JetAbsent) }};")
+                        }
+                        else -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR optional CLI input must have an Option type", "optional CLI values decode into an Option", None)
+                    }
+                    next
+                }
+                value :: jet_rust_emit_cli_scalar_expr(&ctx, input, input.ty, "__v")
+                fallback :: if default == {
+                    .Val(row) -> {
+                        if row == {
+                            .TypeDefault -> "Default::default()"
+                            .Value(constant) -> jet_rust_emit_constant(&ctx, constant, input.ty)
+                        }
+                    }
+                    None -> "return Err(format!(\"missing required argument --{{}}\\n\\n{{}}\", {jet_rust_emit_quote(input.name)}, __spec.help()))"
+                }
+                &lines.push("{pad}let {variable}: {jet_rust_emit_type(&ctx, input.ty)} = match {root}jet_parsed_option(&__parsed, &{jet_rust_emit_quote(input.name)}.to_string()) {{ Ok(__v) => {value}, Err(_) => {fallback} }};")
+            }
+        }
+    }
+}
+
+fn jet_rust_emit_cli_record_fields(ctx: &JetRustEmitContext, ty: MIRType) -> [MIRField]? {
+    identity :: ty.identity ?? return None
+    loop definition in ctx.program.types {
+        if definition.id != identity -> next
+        if definition.kind == {
+            .Struct(fields, _) -> {
+                declared := [MIRField]{}
+                loop field in fields {
+                    if !field.computed -> &declared.push(field)
+                }
+                return Val(declared)
+            }
+            else -> return None
+        }
+    }
+    None
+}
+
+fn jet_rust_emit_cli_field_input(field: MIRField, inputs: [MIRCLIInput]) -> MIRCLIInput? {
+    loop input in inputs {
+        if field.name == input.name || field.shape_names.args == input.name -> return Val(input)
+    }
+    None
+}
+
+// A job whose one parameter is a CLI record carries that record's fields as
+// its inputs and decodes like a record entry.
+fn jet_rust_emit_job_record_inputs(ctx: &JetRustEmitContext, function: MIRFunction, job: MIRJob) -> Bool Never! {
+    if function.params.len() != 1 -> return false
+    fields :: jet_rust_emit_cli_record_fields(&ctx, function.params[0].ty) ?? return false
+    if fields.len() != job.inputs.len() -> return false
+    loop field in fields {
+        if jet_rust_emit_cli_field_input(field, job.inputs) == None -> return false
+    }
+    true
+}
+
+fn jet_rust_emit_cli_owned_argument(parameter: MIRParam, value: String) -> String Never! {
+    if parameter.access == {
+        .Write -> "&mut {value}"
+        .Read -> if jet_rust_emit_type_is_borrowed(parameter.ty) -> "&{value}" else -> value
+        .Move -> value
+    }
+}
+
+// `values` holds one rendered expression per non-computed record field in
+// declaration order.
+fn jet_rust_emit_cli_record_literal(ctx: &JetRustEmitContext, function: MIRFunction, values: [String]) -> String Never! {
+    fields :: jet_rust_emit_cli_record_fields(&ctx, function.params[0].ty) ?? [MIRField]{}
+    rendered := [String]{}
+    loop (index, field) in fields {
+        if index < values.len() -> &rendered.push("{jet_rust_emit_field_name(&ctx, field.id)}: {values[index]}")
+    }
+    record :: "{jet_rust_emit_type(&ctx, function.params[0].ty)} {{ {rendered.join(", ")} }}"
+    jet_rust_emit_cli_owned_argument(function.params[0], record)
+}
+
+fn jet_rust_emit_cli_record_argument(ctx: &JetRustEmitContext, function: MIRFunction, inputs: [MIRCLIInput], prefix: String) -> String Never! {
+    fields :: jet_rust_emit_cli_record_fields(&ctx, function.params[0].ty) ?? [MIRField]{}
+    values := [String]{}
+    loop field in fields {
+        input :: jet_rust_emit_cli_field_input(field, inputs) ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI record input is absent from its record", "each non-computed record field has one CLI input row", Val(function.span))
+            return "unreachable!(\"CLI record input\")"
+        }
+        &values.push("{prefix}{input.parameter}")
+    }
+    jet_rust_emit_cli_record_literal(&ctx, function, values)
+}
+
+fn jet_rust_emit_cli_web_default_argument(ctx: &JetRustEmitContext, input: MIRCLIInput) -> String? {
+    if input.shape == {
+        .Flag -> { Val("false") }
+        .Value(_, optional, default) -> {
+            if default == {
+                .Val(row) -> {
+                    if row == {
+                        .TypeDefault -> { Val("Default::default()") }
+                        .Value(constant) -> Val(jet_rust_emit_constant(&ctx, constant, input.ty))
+                    }
+                }
+                None -> if optional -> Val("Default::default()") else -> String?{None}
+            }
+        }
+    }
+}
+
+fn jet_rust_emit_cli_web_record_argument(ctx: &JetRustEmitContext, function: MIRFunction, cli: MIRCLIEntry) -> String? {
+    if !cli.record_inputs || function.params.len() != 1 -> return None
+    fields :: jet_rust_emit_cli_record_fields(&ctx, function.params[0].ty) ?? return None
+    if fields.len() != cli.inputs.len() -> return None
+    values := [String]{}
+    loop field in fields {
+        input :: jet_rust_emit_cli_field_input(field, cli.inputs) ?? return None
+        &values.push(jet_rust_emit_cli_web_default_argument(&ctx, input) ?? return None)
+    }
+    Val(jet_rust_emit_cli_record_literal(&ctx, function, values))
+}
+
+fn jet_rust_emit_cli_argument(parameter: MIRParam) -> String Never! {
+    jet_rust_emit_cli_owned_argument(parameter, "__jet_cli_{parameter.index}")
+}
+
+fn jet_rust_emit_is_jet_err_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, _) -> name.name == "Err"
+        else -> false
+    }
+}
+
+fn jet_rust_emit_type_has_entry_show(ctx: &JetRustEmitContext, ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .List(inner) -> {
+            if inner.kind == {
+                .Apply(name, args) -> {
+                    if name.name == "FieldError" && args.len() == 0 -> return true
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    id := ty.identity
+    if id == None {
+        if ty.kind == {
+            .Apply(name, _) -> id = Val(name.id)
+            else -> {}
+        }
+    }
+    type_id :: id ?? return false
+    loop definition in ctx.program.types {
+        if definition.id != type_id -> next
+        if definition.key == "IOError" || definition.auto_printable -> return true
+        loop implementation in ctx.program.impls {
+            if implementation.trait_ref == .Val(trait_ref) {
+                if (trait_ref.name == "Printable" || trait_ref.name.ends_with("::Printable")) && mir_type_same_checked_type(implementation.self_type, ty) -> return true
+            }
+        }
+    }
+    false
+}
+
+fn jet_rust_emit_entry_error_exit(ctx: &JetRustEmitContext, function: MIRFunction, error: String, service: Bool) -> String Never! {
+    error_ty :: if function.failure == {
+        .Result(_, ty) -> Val(ty)
+        .Optional(_) -> MIRType?{None}
+        else -> {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR entry error edge requested for an infallible or diverging function", "only Result and Optional entries have an error exit", Val(function.span))
+            return "unreachable!(\"entry error edge\")"
+        }
+    }
+    root :: ~ctx.config.root_prefix
+    is_jet_err :: if error_ty == .Val(ty) -> jet_rust_emit_is_jet_err_type(ty) else -> false
+    has_jet_show :: if error_ty == .Val(ty) -> !is_jet_err && jet_rust_emit_type_has_entry_show(&ctx, ty) else -> false
+    if ctx.config.target == "web" {
+        if is_jet_err -> return "{root}jet_wasm_store_error(&{error})"
+        if error_ty == None -> return "{root}jet_wasm_store_error(&{root}jet_err_from_message(\"entry returned no value\".to_string()))"
+        if has_jet_show -> return "{root}jet_wasm_store_error(&{root}jet_err_from_message({root}jet_entry_error_text_show(&{error})))"
+        return "{root}jet_wasm_store_error(&{root}jet_err_from_message(format!(\"{{:?}}\", {error})))"
+    }
+    if jet_rust_emit_is_no_os(&ctx) {
+        if error_ty == None -> return "{root}jet_entry_error_exit(\"entry returned no value\")"
+        if has_jet_show -> return "{root}jet_entry_error_exit({root}jet_entry_error_text_show(&{error}))"
+        return "{root}jet_entry_error_exit({error})"
+    }
+    helper :: if {
+        service && is_jet_err -> "jet_service_edge_report_jet"
+        service -> "jet_service_edge_report"
+        is_jet_err -> "jet_entry_error_exit_jet"
+        else -> "jet_entry_error_exit"
+    }
+    if is_jet_err -> return "{root}{helper}({error})"
+    if error_ty == None -> return "{root}{helper}(\"entry returned no value\".to_string())"
+    if has_jet_show -> return "{root}{helper}({root}jet_entry_error_text_show(&{error}))"
+    "{root}{helper}(format!(\"{{:?}}\", {error}))"
+}
+
+fn jet_rust_emit_entry_output(ctx: &JetRustEmitContext, output: MIREntryOutput, value: String, app: Bool) -> String Never! {
+    if app -> return "{value}.serve();"
+    if output == {
+        .NoOutput | .ReturnValue -> "let _ = {value};"
+        .StandardOutput -> "print!(\"{{}}\", {value});"
+        .ExitStatus -> if jet_rust_emit_is_no_os(&ctx) -> "{ctx.config.root_prefix}jet_target_exit(({value}) as i32);" else -> "std::process::exit(({value}) as i32);"
+    }
+}
+
+fn jet_rust_emit_type_is_app(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, _) -> name.name == "App"
+        .Result(ok, _) -> {
+            if ok.kind == {
+                .Apply(name, _) -> name.name == "App"
+                else -> false
+            }
+        }
+        else -> false
+    }
+}
+
+fn jet_rust_emit_entry_invoke(ctx: &JetRustEmitContext, function: MIRFunction, call: String, output: MIREntryOutput, serves_until_stopped: Bool, service: Bool, indent: String, lines: &[String]) Never! {
+    app :: serves_until_stopped && jet_rust_emit_type_is_app(function.return_type)
+    action :: if function.failure == {
+        .Diverges(_) -> call
+        .Infallible -> jet_rust_emit_entry_output(&ctx, output, call, app)
+        .Result(_, _) | .Optional(_) -> {
+            error :: jet_rust_emit_entry_error_exit(&ctx, function, "__jet_error", service)
+            value :: jet_rust_emit_entry_output(&ctx, output, "__jet_value", app)
+            "match {call} {{ Ok(__jet_value) => {{ {value} }}, Err(__jet_error) => {{ {error} }} }}"
+        }
+    }
+    &lines.push("{indent}{ctx.config.root_prefix}jet_runtime_boundary(|| {{")
+    &lines.push("{indent}    {action}")
+    &lines.push("{indent}}});")
+}
+
+// Decode one CLI entry or command and call it. A command method also receives
+// `receiver_inputs`: the root CLI record fields decoded into its `self` value.
+fn jet_rust_emit_cli_decode_and_invoke(ctx: &JetRustEmitContext, function: MIRFunction, inputs: [MIRCLIInput], record_inputs: Bool, receiver_inputs: [MIRCLIInput]?, output: MIREntryOutput, serves_until_stopped: Bool, service: Bool, indent: String, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    is_method :: if function.form == {
+        .Method(_, _) -> true
+        else -> false
+    }
+    form_ok :: if receiver_inputs == None -> function.form == MIRFunctionForm.TopLevel else -> !record_inputs && ((function.form == MIRFunctionForm.TopLevel && function.params.len() > 0) || (is_method && function.params.len() > 0 && jet_rust_emit_is_receiver(function, function.params[0].index)))
+    if !form_ok || function.capture_params.len() > 0 {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI entry function is neither a top-level callable nor a command method", "CLI entries and commands call capture-free top-level functions or command methods", Val(function.span))
+        return
+    }
+    program_param :: if receiver_inputs != None -> Val(function.params[0].index) else -> Int?{None}
+    if receiver_inputs == .Val(receiver_rows) {
+        fields :: jet_rust_emit_cli_record_fields(&ctx, function.params[0].ty) ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI command receiver is not a record", "command receivers decode from the root CLI record", Val(function.span))
+            return
+        }
+        loop input in receiver_rows {
+            present := false
+            loop field in fields {
+                if (field.name == input.name || field.shape_names.args == input.name) && mir_type_same_checked_type(field.ty, input.ty) -> present = true
+            }
+            if !present {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI root input is absent from its command receiver", "every root CLI input must decode into the command receiver record", Val(function.span))
+                return
+            }
+        }
+    }
+    seen := [Int]{}
+    loop input in inputs {
+        if seen.contains(input.parameter) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI input parameter is duplicated", "each CLI input row binds one distinct parameter", Val(function.span))
+            return
+        }
+        &seen.push(input.parameter)
+    }
+    if record_inputs {
+        fields :: jet_rust_emit_cli_record_fields(&ctx, if function.params.len() == 1 -> function.params[0].ty else -> function.return_type) ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI record entry must take one record parameter", "record CLI entries decode every input into their single record parameter", Val(function.span))
+            return
+        }
+        if function.params.len() != 1 || fields.len() != inputs.len() {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI record input count disagrees with its function", "each non-computed record field has one CLI input row", Val(function.span))
+            return
+        }
+        loop input in inputs {
+            matched := false
+            loop field in fields {
+                if (field.name == input.name || field.shape_names.args == input.name) && mir_type_same_checked_type(field.ty, input.ty) -> matched = true
+            }
+            if !matched {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI record input is absent from or disagrees with its function", "record CLI inputs match one field by name and checked type", Val(function.span))
+                return
+            }
+        }
+    } else {
+        loop input in inputs {
+            matched := false
+            loop parameter in function.params {
+                if parameter.index == input.parameter && mir_type_same_checked_type(parameter.ty, input.ty) -> matched = true
+            }
+            if !matched {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI input parameter is absent from or disagrees with its function", "CLI inputs bind one parameter by index and checked type", Val(function.span))
+                return
+            }
+        }
+        loop parameter in function.params {
+            if program_param != Val(parameter.index) && !seen.contains(parameter.index) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI entry function has a parameter with no input row", "every CLI entry parameter decodes from one CLI input row", Val(function.span))
+                return
+            }
+        }
+    }
+    positional := [String]{}
+    loop parameter in function.params {
+        if program_param != Val(parameter.index) -> &positional.push(jet_rust_emit_cli_argument(parameter))
+    }
+    args := positional.join(", ")
+    if record_inputs -> args = jet_rust_emit_cli_record_argument(&ctx, function, inputs, "__jet_cli_")
+    call := "{jet_rust_emit_function_name(&ctx, function.id)}({args})"
+    if receiver_inputs == .Val(receiver_rows) {
+        receiver :: jet_rust_emit_cli_record_argument(&ctx, function, receiver_rows, "__jet_cli_self_")
+        separator :: if args.len() == 0 -> "" else -> ", "
+        call = if is_method -> "({receiver}).{jet_rust_emit_sanitize(function.name)}({args})" else -> "{jet_rust_emit_function_name(&ctx, function.id)}({receiver}{separator}{args})"
+    }
+    pad :: "{indent}    "
+    &lines.push("{indent}let __jet_cli_result = (|| -> Result<(), String> {{")
+    if receiver_inputs == .Val(receiver_rows) -> jet_rust_emit_cli_decode_lines(&ctx, receiver_rows, pad.len(), "__jet_cli_self_", &lines)
+    jet_rust_emit_cli_decode_lines(&ctx, inputs, pad.len(), "__jet_cli_", &lines)
+    jet_rust_emit_entry_invoke(&ctx, function, call, output, serves_until_stopped, service, pad, &lines)
+    &lines.push("{pad}Ok(())")
+    &lines.push("{indent}}})();")
+    &lines.push("{indent}if let Err(__jet_error) = __jet_cli_result {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__jet_error)); std::process::exit(2); }}")
+}
+
+fn jet_rust_emit_web_entry(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
+    entry :: artifact.entry ?? return
+    function_id :: entry.function ?? return
+    function :: jet_rust_emit_find_function(&ctx, function_id) ?? return
+    if function.web_bucket == .Val(bucket) {
+        if bucket == MIRWebBucket.JS -> return
+    }
+    if !jet_rust_emit_function_target_enabled(ctx.config, function) {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Web entry function is not selected for this artifact", "the checked Wasm entry must be emitted in the Wasm bucket", Val(function.span))
+        return
+    }
+    web_argument :: if entry.cli == .Val(cli) -> jet_rust_emit_cli_web_record_argument(&ctx, function, cli) else -> String?{None}
+    if function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 || (function.params.len() > 0 && web_argument == None) {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Web entry has no checked zero-argument invocation", "Web entries are capture-free top-level functions with no inputs or a defaulted CLI record", Val(function.span))
+        return
+    }
+    root :: ~ctx.config.root_prefix
+    &lines.push("#[no_mangle]")
+    &lines.push("pub extern \"C\" fn jet_entry_{function.id.value}() {{")
+    &lines.push("    jet_wasm_error_clear();")
+    if entry.initialize_environment -> &lines.push("    {root}jet_std_env_init();")
+    if entry.initialize_gc -> &lines.push("    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());")
+    call :: "{jet_rust_emit_function_name(&ctx, function.id)}({web_argument ?? ""})"
+    jet_rust_emit_entry_invoke(&ctx, function, call, entry.output, false, false, "    ", &lines)
+    &lines.push("}}")
+    &lines.push("")
+}
+
+fn jet_rust_emit_entry(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
+    if ctx.config.target == "web" {
+        jet_rust_emit_web_entry(&ctx, artifact, &lines)
+        return
+    }
+    entry :: artifact.entry ?? return
+    root :: ~ctx.config.root_prefix
+    service :: entry.kind == MIREntryKind.Service
+    &lines.push("// jet-mir-entry: kind={jet_rust_emit_entry_kind_debug(entry.kind)} output={jet_rust_emit_entry_output_debug(entry.output)} version={entry.package_version} init_env={jet_rust_emit_bool_text(entry.initialize_environment)} init_gc={jet_rust_emit_bool_text(entry.initialize_gc)} serves_until_stopped={jet_rust_emit_bool_text(entry.serves_until_stopped)}")
+    if entry.cli == .Val(cli) {
+        &lines.push("// jet-mir-cli: standard={jet_rust_emit_bool_text(cli.standard)} description={jet_rust_emit_debug_option_string(cli.description)}")
+        loop input in cli.inputs -> &lines.push(jet_rust_emit_cli_input_metadata(&ctx, input))
+        loop command in cli.commands {
+            receiver :: if command.receiver == .Val(id) -> "Some(MirTypeId({id.value}))" else -> "None"
+            &lines.push("// jet-mir-cli-command: name={command.name} description={jet_rust_emit_debug_option_string(command.description)} receiver={receiver}")
+            command_function :: jet_rust_emit_find_function(&ctx, command.function) ?? return
+            if !jet_rust_emit_function_target_enabled(ctx.config, command_function) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR CLI command targets an unselected function", "every CLI command calls a function selected for this artifact", Val(command_function.span))
+                return
+            }
+            loop input in command.inputs -> &lines.push(jet_rust_emit_cli_input_metadata(&ctx, input))
+        }
+    }
+    if entry.kind == MIREntryKind.Library -> return
+    no_os :: jet_rust_emit_is_no_os(&ctx)
+    if no_os {
+        &lines.push("#[no_mangle]")
+        &lines.push("pub extern \"C\" fn __jet_program_entry() {{")
+    } else {
+        &lines.push("fn main() {{")
+    }
+    has_hardware_host :: ctx.program.facts.hardware_profile != None && !no_os
+    has_jobs :: artifact.jobs.len() > 0
+    if has_jobs -> &lines.push("    let _jet_job_registry = {root}jet_job_register_specs(__JET_JOB_SPECS);")
+    if has_hardware_host {
+        &lines.push("    let mut __jet_hardware_host = {root}JetHardwareReplayHost::new(__JET_HARDWARE_FACTS);")
+        &lines.push("    let _jet_hardware_facts_scope = {root}jet_hardware_facts_scope(&__JET_HARDWARE_FACTS);")
+        &lines.push("    {root}jet_hardware_with_host(&mut __jet_hardware_host, || {{")
+    }
+    jet_rust_emit_hardware_setups(&ctx, "    ", &lines)
+    if jet_rust_emit_has_hardware_interrupts(&ctx) -> &lines.push("    __jet_hardware_poll();")
+    if entry.initialize_environment -> &lines.push("    {root}jet_std_env_init();")
+    if entry.initialize_gc -> &lines.push("    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());")
+    if has_jobs || entry.cli != None {
+        &lines.push("    let __argv = {root}jet_std_io_args();")
+        if has_jobs -> &lines.push("    if __jet_job_dispatch(&__argv, {jet_rust_emit_bool_text(service)}) {{ return; }}")
+    }
+    harness_run :: entry.kind == MIREntryKind.Test && artifact.harness != None
+    if harness_run -> &lines.push("    {root}jet_runtime_boundary(|| {{ if !__jet_harness_run() {{ std::process::exit(1); }} }});")
+    if !harness_run {
+        if entry.cli == .Val(cli) -> jet_rust_emit_cli_main(&ctx, entry, cli, service, &lines) else -> jet_rust_emit_plain_main(&ctx, entry, service, &lines)
+    }
+    if has_hardware_host -> &lines.push("    }});")
+    &lines.push("}}")
+    &lines.push("")
+}
+
+fn jet_rust_emit_plain_main(ctx: &JetRustEmitContext, entry: MIREntrySpec, service: Bool, lines: &[String]) Never! {
+    function_id :: entry.function ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR executable entry has no function row", "an executable artifact entry names its checked entry function", None)
+        return
+    }
+    function :: jet_rust_emit_find_function(&ctx, function_id) ?? return
+    if !jet_rust_emit_function_target_enabled(ctx.config, function) || function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 || function.params.len() > 0 {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR entry function has no checked CLI decoder row", "an entry without CLI facts is a selected capture-free zero-argument top-level function", Val(function.span))
+        return
+    }
+    call :: "{jet_rust_emit_function_name(&ctx, function.id)}()"
+    jet_rust_emit_entry_invoke(&ctx, function, call, entry.output, entry.serves_until_stopped, service, "    ", &lines)
+}
+
+fn jet_rust_emit_cli_help_text(root: String, command_names: [String], command_bindings: [String]) -> String Never! {
+    if command_names.len() == 0 -> return "__spec.help()"
+    arms := ""
+    loop (index, name) in command_names -> arms = "{arms}Some({jet_rust_emit_quote(name)}) => {command_bindings[index]}.help(), "
+    "match {root}jet_parsed_subcommand(&__parsed).ok().as_deref() {{ {arms}_ => __spec.help() }}"
+}
+
+fn jet_rust_emit_cli_main(ctx: &JetRustEmitContext, entry: MIREntrySpec, cli: MIRCLIEntry, service: Bool, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    program :: "&{root}jet_args_source_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"))"
+    version :: if cli.standard -> Val(entry.package_version) else -> String?{None}
+    spec := jet_rust_emit_cli_spec_expr(&ctx, cli.inputs, cli.description, cli.standard, version, program)
+    command_names := [String]{}
+    command_bindings := [String]{}
+    loop (index, command) in cli.commands {
+        command_program :: "&{root}jet_args_source_program_name(&format!(\"{{}} {{}}\", {program}, {jet_rust_emit_quote(command.name)}))"
+        command_spec :: jet_rust_emit_cli_spec_expr(&ctx, command.inputs, command.description, false, None, command_program)
+        binding :: "__jet_command_spec_{index}"
+        &lines.push("    let {binding} = {command_spec};")
+        spec = "{root}jet_args_subcommand({spec}, &{jet_rust_emit_quote(command.name)}.to_string(), &{jet_rust_emit_quote(command.description ?? "")}.to_string(), {binding}.clone())"
+        &command_names.push(command.name)
+        &command_bindings.push(binding)
+    }
+    &lines.push("    let __spec = {spec};")
+    &lines.push("    let __argv = match {root}jet_args_guided_argv_tui(&__spec, &__argv) {{ Ok(__guided) => __guided, Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }} }};")
+    &lines.push("    match {root}jet_args_parse(&__spec, &__argv) {{")
+    &lines.push("        Ok(__parsed) => {{")
+    help_text :: jet_rust_emit_cli_help_text(root, command_names, command_bindings)
+    &lines.push("            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&{help_text})); return; }}")
+    if cli.standard -> &lines.push("            if {root}jet_parsed_flag(&__parsed, &\"version\".to_string()) {{ println!({jet_rust_emit_quote(entry.package_version)}); return; }}")
+    if cli.commands.len() == 0 {
+        function_id :: entry.function ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR CLI entry has no function row", "a CLI entry without commands calls its entry function", None)
+            return
+        }
+        function :: jet_rust_emit_find_function(&ctx, function_id) ?? return
+        if !jet_rust_emit_function_target_enabled(ctx.config, function) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR entry function is not selected for this artifact", "the entry function must be emitted for the artifact target", Val(function.span))
+            return
+        }
+        jet_rust_emit_cli_decode_and_invoke(&ctx, function, cli.inputs, cli.record_inputs, None, entry.output, entry.serves_until_stopped, service, "            ", &lines)
+    }
+    if cli.commands.len() > 0 {
+        &lines.push("            match {root}jet_parsed_subcommand(&__parsed).ok().as_deref() {{")
+        loop command in cli.commands {
+            function :: jet_rust_emit_find_function(&ctx, command.function) ?? return
+            &lines.push("                Some({jet_rust_emit_quote(command.name)}) => {{")
+            receiver_rows :: if command.receiver != None -> Val(cli.inputs) else -> [MIRCLIInput]?{None}
+            jet_rust_emit_cli_decode_and_invoke(&ctx, function, command.inputs, false, receiver_rows, entry.output, entry.serves_until_stopped, service, "                    ", &lines)
+            &lines.push("                }}")
+        }
+        &lines.push("                None => {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}")
+        &lines.push("                Some(__other) => {{ eprintln!(\"unknown command: {{}}\", __other); std::process::exit(2); }}")
+        &lines.push("            }}")
+    }
+    &lines.push("        }}")
+    &lines.push("        Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }}")
+    &lines.push("    }}")
+}
+
+fn jet_rust_emit_find_job(ctx: &JetRustEmitContext, id: MIRJobID) -> MIRJob? {
+    loop job in ctx.program.jobs {
+        if job.id == id -> return Val(job)
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR job ID has no row", "artifact job references must resolve to one checked job row", None)
+    None
+}
+
+fn jet_rust_emit_quoted_list(values: [String]) -> String Never! {
+    rendered := [String]{}
+    loop value in values -> &rendered.push(jet_rust_emit_quote(value))
+    "&[{rendered.join(", ")}]"
+}
+
+fn jet_rust_emit_job_queue_wrapper(ctx: &JetRustEmitContext, function: MIRFunction, job: MIRJob, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    param :: function.params[0]
+    payload_rust :: jet_rust_emit_type(&ctx, param.ty)
+    binding :: if param.access == MIRAccess.Write -> "let mut __value" else -> "let __value"
+    argument :: if param.access == {
+        .Write -> "&mut __value"
+        .Read -> if jet_rust_emit_type_is_borrowed(param.ty) -> "&__value" else -> "__value"
+        .Move -> "__value"
+    }
+    name :: jet_rust_emit_function_name(&ctx, function.id)
+    &lines.push("fn __jet_job_queue_{job.id.value}(__payload: &{root}JetJobPayload) -> Result<{root}JetJobResult, {root}JetJobError> {{")
+    &lines.push("    let __bytes = __payload.bytes.clone();")
+    &lines.push("    {binding} = match {root}jet_enc_cbor_decode::<{payload_rust}>(&__bytes, {root}jet_std::CBOROptions::safe()) {{ Ok(__value) => __value, Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"decode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}), }};")
+    encode_error :: "Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),"
+    // MIRRust builds these rows with `\n\` continuations, which drop the
+    // leading indentation of every continued line.
+    result_ok :: if function.return_type.kind == {
+        .Result(ok, _) -> Val(ok)
+        else -> MIRType?{None}
+    }
+    if mir_type_is_unit(function.return_type) {
+        &lines.push("    {name}({argument});")
+        &lines.push("Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }})")
+    }
+    if !mir_type_is_unit(function.return_type) && result_ok != None {
+        ok :: result_ok
+        &lines.push("    let __job_result = {name}({argument});")
+        &lines.push("match __job_result {{")
+        &lines.push("Ok(__ok) => {{")
+        &lines.push("let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{")
+        &lines.push("Ok(__bytes) => __bytes,")
+        &lines.push(encode_error)
+        &lines.push("}};")
+        &lines.push("Ok({root}JetJobResult {{ type_id: {jet_rust_emit_quote(mir_type_display_name(ok) ?? "")}.to_string(), bytes: __bytes, publish: false }})")
+        &lines.push("}}")
+        &lines.push("}}")
+    }
+    if !mir_type_is_unit(function.return_type) && result_ok == None {
+        &lines.push("    let __job_result = {name}({argument});")
+        &lines.push("let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__job_result) {{")
+        &lines.push("Ok(__bytes) => __bytes,")
+        &lines.push(encode_error)
+        &lines.push("}};")
+        &lines.push("Ok({root}JetJobResult {{ type_id: {jet_rust_emit_quote(mir_type_display_name(function.return_type) ?? "")}.to_string(), bytes: __bytes, publish: false }})")
+    }
+    &lines.push("}}")
+    &lines.push("")
+}
+
+fn jet_rust_emit_jobs(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
+    root :: ~ctx.config.root_prefix
+    loop job_id in artifact.jobs {
+        job :: jet_rust_emit_find_job(&ctx, job_id) ?? return
+        function :: jet_rust_emit_find_function(&ctx, job.function) ?? return
+        if !jet_rust_emit_function_target_enabled(ctx.config, function) || function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR job requires a selected top-level non-capturing function", "job wrappers call a capture-free top-level function selected for this artifact", Val(function.span))
+            return
+        }
+        record_inputs :: jet_rust_emit_job_record_inputs(&ctx, function, job)
+        if job.inputs.len() == 0 {
+            &lines.push("fn __jet_job_validate_{job.id.value}(__argv: &[String]) -> Result<(), String> {{ if __argv.is_empty() {{ Ok(()) }} else {{ Err(\"job takes no arguments\".to_string()) }} }}")
+        } else {
+            validator_spec :: jet_rust_emit_cli_spec_expr(&ctx, job.inputs, Val(job.name), false, None, "\"job\"")
+            &lines.push("fn __jet_job_validate_{job.id.value}(__argv: &[String]) -> Result<(), String> {{ let mut __job_argv = vec![\"job\".to_string()]; __job_argv.extend_from_slice(__argv); let __spec = {validator_spec}; match {root}jet_args_parse(&__spec, &__job_argv) {{ Ok(_) => Ok(()), Err(__e) => Err(__e) }} }}")
+        }
+        &lines.push("fn __jet_job_{job.id.value}(__program: &str, __argv: &[String]) {{")
+        if job.inputs.len() == 0 {
+            if function.params.len() > 0 {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR job has parameters but no checked input rows", "job parameters decode from checked CLI input rows", Val(function.span))
+                return
+            }
+            job_call :: "{jet_rust_emit_function_name(&ctx, function.id)}()"
+            jet_rust_emit_entry_invoke(&ctx, function, job_call, MIREntryOutput.NoOutput, false, false, "    ", &lines)
+        } else {
+            spec :: jet_rust_emit_cli_spec_expr(&ctx, job.inputs, Val(job.name), false, None, "__program")
+            &lines.push("    let mut __job_argv = vec![__program.to_string()];")
+            &lines.push("    __job_argv.extend_from_slice(__argv);")
+            &lines.push("    let __spec = {spec};")
+            &lines.push("    match {root}jet_args_parse(&__spec, &__job_argv) {{")
+            &lines.push("        Ok(__parsed) => {{")
+            &lines.push("            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}")
+            jet_rust_emit_cli_decode_and_invoke(&ctx, function, job.inputs, record_inputs, None, MIREntryOutput.NoOutput, false, false, "            ", &lines)
+            &lines.push("        }}")
+            &lines.push("        Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }}")
+            &lines.push("    }}")
+        }
+        &lines.push("}}")
+        &lines.push("")
+        if function.params.len() == 1 && (record_inputs || job.inputs.len() == 1) -> jet_rust_emit_job_queue_wrapper(&ctx, function, job, &lines)
+    }
+    &lines.push("static __JET_JOB_SPECS: &[{root}JetJobSpec] = &[")
+    loop job_id in artifact.jobs {
+        job :: jet_rust_emit_find_job(&ctx, job_id) ?? return
+        function :: jet_rust_emit_find_function(&ctx, job.function) ?? return
+        scope :: if job.scope == {
+            .Dev -> "{root}JetJobScope::Dev"
+            .Ship -> "{root}JetJobScope::Ship"
+            .Internal -> "{root}JetJobScope::Internal"
+        }
+        schedule :: if job.schedule == {
+            .Val(row) -> {
+                if row == {
+                    .Duration(nanos) -> "Some({root}JetJobSchedule::Duration {{ nanos: {nanos} }})"
+                    .WallClockTime(hour, minute) -> "Some({root}JetJobSchedule::WallClockTime {{ hour: {hour}, minute: {minute} }})"
+                }
+            }
+            None -> "None"
+        }
+        dispatch :: if job.dispatch == {
+            .Direct -> "{root}JetJobDispatch::Direct"
+            .Spawn -> "{root}JetJobDispatch::Spawn"
+            .Scheduled -> "{root}JetJobDispatch::Scheduled"
+        }
+        skip :: if job.skip == {
+            .Val(row) -> {
+                if row == {
+                    .Always(reason) -> "Some({root}JetJobSkip::Always({jet_rust_emit_quote(reason)}))"
+                    .UnlessPlatform(platform) -> "Some({root}JetJobSkip::UnlessPlatform({jet_rust_emit_quote(platform)}))"
+                }
+            }
+            None -> "None"
+        }
+        cache :: if job.cache == {
+            .Uncached -> "{root}JetJobCachePolicy::Uncached"
+            .Local -> "{root}JetJobCachePolicy::Local"
+            .Shared -> "{root}JetJobCachePolicy::Shared"
+        }
+        limit_rows := [String]{}
+        loop limit in job.limits -> &limit_rows.push("({jet_rust_emit_quote(limit.name)}, {jet_rust_emit_quote(limit.value)})")
+        working_directory :: jet_rust_emit_debug_option_string(job.working_directory)
+        record_inputs :: jet_rust_emit_job_record_inputs(&ctx, function, job)
+        queue_enabled :: function.params.len() == 1 && (record_inputs || job.inputs.len() == 1)
+        payload_type := "None"
+        if queue_enabled {
+            payload :: if record_inputs -> function.params[0].ty else -> job.inputs[0].ty
+            if payload.kind == {
+                .Apply(name, _) -> payload_type = "Some({jet_rust_emit_quote(name.name)})"
+                .TraitObject(bounds) -> {
+                    if bounds.len() == 1 -> payload_type = "Some({jet_rust_emit_quote(bounds[0].name)})"
+                }
+                else -> {}
+            }
+        }
+        queue_invoke :: if queue_enabled -> "Some(__jet_job_queue_{job.id.value})" else -> "None"
+        parallel :: if job.parallel > 1 -> job.parallel else -> 1
+        &lines.push("        {root}JetJobSpec {{ entry: {root}JetJobEntry {{ name: {jet_rust_emit_quote(job.name)}, scope: {scope}, schedule: {schedule}, invoke: __jet_job_{job.id.value} }}, payload_type: {payload_type}, queue_invoke: {queue_invoke}, dispatch: {dispatch}, packages: {jet_rust_emit_quoted_list(job.packages)}, working_directory: {working_directory}, input_paths: {jet_rust_emit_quoted_list(job.input_paths)}, output_paths: {jet_rust_emit_quoted_list(job.output_paths)}, skip: {skip}, cache: {cache}, limits: &[{limit_rows.join(", ")}], after: {jet_rust_emit_quoted_list(job.after)}, parallel: {parallel}, validate: Some(__jet_job_validate_{job.id.value}) }},")
+    }
+    &lines.push("];")
+    &lines.push("fn __jet_job_dispatch(__argv: &[String], __service: bool) -> bool {{")
+    &lines.push("    let __jobs = __JET_JOB_SPECS;")
+    if artifact.runtime_parts.contains(MIRRuntimePartID.Services) {
+        &lines.push("    let __job_service_endpoint = match {root}jet_services_active_execution_endpoint_if_present() {{")
+        &lines.push("        Ok(__endpoint) => Ok(__endpoint),")
+        &lines.push("        Err(__error) => Err(format!(\"{{__error:?}}\")),")
+        &lines.push("    }};")
+        &lines.push("    let __job_scope = move || -> Result<Option<{root}JetServiceExecutionScope>, String> {{")
+        &lines.push("        match &__job_service_endpoint {{")
+        &lines.push("            Ok(Some(__endpoint)) => {root}jet_services_execution_scope(__endpoint)")
+        &lines.push("                .map(Some)")
+        &lines.push("                .map_err(|__error| format!(\"{{__error:?}}\")),")
+        &lines.push("            Ok(None) => Ok(None),")
+        &lines.push("            Err(__reason) => Err(__reason.clone()),")
+        &lines.push("        }}")
+        &lines.push("    }};")
+        &lines.push("    if {root}jet_job_dispatch_specs(__argv, __jobs, __job_scope.clone()) {{ return true; }}")
+        scope_arg :: "__job_scope"
+        jet_rust_emit_job_service_tick(root, scope_arg, &lines)
+    } else {
+        &lines.push("    if {root}jet_job_dispatch_specs(__argv, __jobs, {root}jet_job_no_scope) {{ return true; }}")
+        jet_rust_emit_job_service_tick(root, "{root}jet_job_no_scope", &lines)
+    }
+}
+
+fn jet_rust_emit_job_service_tick(root: String, scope: String, lines: &[String]) Never! {
+    &lines.push("    if __service {{")
+    &lines.push("        {root}jet_job_service_tick_specs_retained(")
+    &lines.push("            __jobs,")
+    &lines.push("            __argv.first().map(String::as_str).unwrap_or(\"program\"),")
+    &lines.push("            {scope},")
+    &lines.push("        );")
+    &lines.push("    }}")
+    &lines.push("    false")
+    &lines.push("}}")
+}
+
+// MIRRust web_abi_type: the marshalling rail of a Web export value, if any.
+fn jet_rust_emit_web_abi_rail(ctx: &JetRustEmitContext, ty: MIRType) -> String? {
+    if mir_type_is_unit(ty) -> return None
+    if ty.kind == {
+        .Tagged(_, inner) -> return jet_rust_emit_web_abi_rail(&ctx, inner)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_web_abi_rail(&ctx, base)
+        .Int -> return Val("int")
+        .String -> return Val("string")
+        .List(inner) -> {
+            inner_rail :: jet_rust_emit_web_abi_rail(&ctx, inner)
+            if inner_rail == (Val("int")) -> return Val("list_int")
+            if inner_rail == (Val("string")) -> return Val("list_string")
+            if inner_rail == None && jet_rust_emit_web_abi_scalar(&ctx, inner) == "i64" -> return Val("list_i64")
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked Web list has no ABI rail", "Web export lists carry Int, String or I64 elements", None)
+            return None
+        }
+        .Map(key, value) -> {
+            if jet_rust_emit_web_abi_rail(&ctx, key) == (Val("string")) && jet_rust_emit_web_abi_rail(&ctx, value) == (Val("int")) -> return Val("map_string_int")
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked Web map has no ABI rail", "Web export maps are [String:Int]", None)
+            return None
+        }
+        else -> return None
+    }
+}
+
+// MIRRust web_abi_type: the Wasm scalar that carries a Web export value.
+fn jet_rust_emit_web_abi_scalar(ctx: &JetRustEmitContext, ty: MIRType) -> String Never! {
+    if mir_type_is_unit(ty) -> return "()"
+    if jet_rust_emit_web_abi_rail(&ctx, ty) != None -> return "u64"
+    if ty.kind == {
+        .Tagged(_, inner) -> return jet_rust_emit_web_abi_scalar(&ctx, inner)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_web_abi_scalar(&ctx, base)
+        .Float -> return "f64"
+        .Float32 -> return "f32"
+        .Bool -> return "i32"
+        .Char -> return "u32"
+        .IntN(signed, bits) -> {
+            if bits == 8 || bits == 16 || bits == 32 || bits == 64 -> return if signed -> "i{bits}" else -> "u{bits}"
+        }
+        else -> {}
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked Web export has no ABI rail", "Web exports carry scalars, String, or Int/String lists and [String:Int] maps", None)
+    "()"
+}
+
+fn jet_rust_emit_web_abi_decode(ctx: &JetRustEmitContext, ty: MIRType, value: String) -> String Never! {
+    if jet_rust_emit_web_abi_rail(&ctx, ty) == .Val(rail) -> return "jet_abi_{rail}_arg({value})"
+    if ty.kind == {
+        .Tagged(_, inner) -> return jet_rust_emit_web_abi_decode(&ctx, inner, value)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_web_abi_decode(&ctx, base, value)
+        .Bool -> return "({value} != 0)"
+        .Char -> return "char::from_u32({value}).expect(\"Web Char scalar\")"
+        else -> {}
+    }
+    ~value
+}
+
+fn jet_rust_emit_web_abi_encode(ctx: &JetRustEmitContext, ty: MIRType, value: String) -> String Never! {
+    if jet_rust_emit_web_abi_rail(&ctx, ty) == .Val(rail) -> return "jet_abi_{rail}_ret({value})"
+    if ty.kind == {
+        .Tagged(_, inner) -> return jet_rust_emit_web_abi_encode(&ctx, inner, value)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_web_abi_encode(&ctx, base, value)
+        .Bool -> return "if {value} {{ 1 }} else {{ 0 }}"
+        .Char -> return "({value} as u32)"
+        else -> {}
+    }
+    ~value
+}
+
+// MIRRust emit_web_exports: one `jet_export_<name>` Wasm wrapper per checked
+// WasmExport function. The Web ABI helpers and embedded time-zone table are
+// runtime text supplied with the rest of the runtime by the host.
+fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    loop function in ctx.program.functions {
+        if !jet_rust_emit_function_target_enabled(ctx.config, function) || function.web_marker != Val(MIRWebPartitionMarker.WasmExport) -> next
+        if function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked Web export is not a top-level callable", "Wasm exports call capture-free top-level functions", Val(function.span))
+            return
+        }
+        params := [String]{}
+        decode := ""
+        args := [String]{}
+        loop parameter in function.params {
+            name :: jet_rust_emit_sanitize(parameter.name)
+            reconstruction := MIRWebParamReconstruction?{None}
+            loop candidate in function.web_param_reconstructions {
+                if candidate.local == parameter.name && reconstruction == None -> reconstruction = Val(candidate)
+            }
+            if reconstruction == .Val(row) {
+                fields := [String]{}
+                loop field in row.fields {
+                    flat :: jet_rust_emit_sanitize(field.parameter)
+                    &params.push("{flat}: {jet_rust_emit_web_abi_scalar(&ctx, field.ty)}")
+                    &fields.push("{jet_rust_emit_sanitize(field.field)}: {jet_rust_emit_web_abi_decode(&ctx, field.ty, flat)}")
+                }
+                decode = "{decode}    let mut {name} = {jet_rust_emit_type(&ctx, row.ty)} {{ {fields.join(", ")} }};\n"
+            } else {
+                &params.push("{name}: {jet_rust_emit_web_abi_scalar(&ctx, parameter.ty)}")
+                decode = "{decode}    let mut {name} = {jet_rust_emit_web_abi_decode(&ctx, parameter.ty, name)};\n"
+            }
+            &args.push(jet_rust_emit_cli_owned_argument(parameter, name))
+        }
+        direct :: "{jet_rust_emit_function_name(&ctx, function.id)}({args.join(", ")})"
+        call :: if function.is_unsafe -> "unsafe {{ {direct} }}" else -> direct
+        success :: if function.failure == {
+            .Result(value, _) -> value
+            .Optional(value) -> value
+            else -> function.return_type
+        }
+        encoded :: jet_rust_emit_web_abi_encode(&ctx, success, "__jet_value")
+        body :: if function.failure == {
+            .Result(_, _) -> "match {call} {{ Ok(__jet_value) => {encoded}, Err(__jet_error) => {{ jet_wasm_store_error(&__jet_error); Default::default() }} }}"
+            .Optional(_) -> "match {call} {{ Ok(__jet_value) => {encoded}, Err(_) => {{ jet_wasm_store_absent(); Default::default() }} }}"
+            else -> "let __jet_value = {call};\n    {encoded}"
+        }
+        export_name :: jet_rust_emit_quote("jet_export_{function.name}")
+        &lines.push("#[export_name = {export_name}]")
+        &lines.push("pub extern \"C\" fn __jet_web_export_{function.id.value}({params.join(", ")}) -> {jet_rust_emit_web_abi_scalar(&ctx, success)} {{")
+        &lines.push("    jet_wasm_error_clear();")
+        &lines.push("{decode}    {body}")
+        &lines.push("}}")
+        &lines.push("")
+    }
+}
+
+fn jet_rust_emit_exports(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
+    // Library and sandbox adapters own their checked boundary wrappers.
+    if artifact.kind == MIRArtifactKind.NativeLibrary || artifact.kind == MIRArtifactKind.SandboxPlugin -> return
+    if ctx.config.target == "web" {
+        jet_rust_emit_web_exports(&ctx, &lines)
+        return
+    }
+    callback_ids :: jet_rust_emit_callback_ids(&ctx)
+    symbols := [String]{}
+    loop export in artifact.exports {
+        function :: jet_rust_emit_find_function(&ctx, export.function) ?? return
+        collides := false
+        loop callback in ctx.program.callbacks {
+            if callback.symbol == export.symbol && callback_ids.contains(callback.id.value) -> collides = true
+        }
+        if export.symbol.len() == 0 || symbols.contains(export.symbol) || collides {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR export symbol is empty, duplicated, or collides with a callback trampoline", "each exported symbol is non-empty and unique across exports and callbacks", Val(function.span))
+            return
+        }
+        &symbols.push(export.symbol)
+        if !jet_rust_emit_function_target_enabled(ctx.config, function) || function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR export targets a non-exportable function", "exports call a selected capture-free top-level function", Val(function.span))
+            return
+        }
+        params := [String]{}
+        args := [String]{}
+        loop parameter in function.params {
+            name :: jet_rust_emit_parameter_name(function, parameter.index)
+            &params.push("{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
+            &args.push(name)
+        }
+        call :: "{jet_rust_emit_function_name(&ctx, function.id)}({args.join(", ")})"
+        body :: if function.is_unsafe -> "unsafe {{ {call} }}" else -> call
+        &lines.push("#[no_mangle]")
+        &lines.push("pub extern \"{jet_rust_emit_foreign_abi(export.abi)}\" fn {export.symbol}({params.join(", ")}) -> {jet_rust_emit_type(&ctx, function.return_type)} {{ {body} }}")
+        &lines.push("")
+    }
+}
+
+// Program-level assembly after items (MIRRust order): exports, entry, then the
+// test/fuzz/coverage harness, which also emits jobs.
+fn jet_rust_emit_artifact_assembly(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    artifact :: jet_rust_emit_selected_artifact(&ctx) ?? return
+    jet_rust_emit_exports(&ctx, artifact, &lines)
+    jet_rust_emit_entry(&ctx, artifact, &lines)
+    jet_rust_emit_harness(&ctx, artifact, &lines)
+}

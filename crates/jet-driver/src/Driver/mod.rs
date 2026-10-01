@@ -3162,6 +3162,12 @@ impl PreparedBuildFrontEnd {
         self.program_value = Some(value);
     }
 
+    /// Whether this front end selected a `fn build` entry, the only consumer
+    /// of the program snapshot `set_program_value` attaches.
+    pub fn selects_build_entry(&self) -> bool {
+        self.build_index.is_some()
+    }
+
     /// The checked runtime program, when this front end checked it directly.
     ///
     /// `None` when a package build entry in another file was selected: the
@@ -4619,6 +4625,43 @@ fn compile_build_from_front_end(
         build_facts,
         runtime_effect_facts,
     })
+}
+
+/// #3953: the Rust a native `jet build` hands rustc, generated from a checked
+/// runtime bundle whose build skipped code generation for the Cranelift dev
+/// backend and then fell back to rustc. The lowering and emitter settings are
+/// those of the native arm of `compile_build_from_front_end`.
+pub fn emit_native_rust_for_checked_bundle(
+    bundle: &crate::AST::ProgramBundle,
+    profile: &str,
+    ffi: Option<&crate::FFI::FfiLink>,
+) -> String {
+    let request = mir_artifact_request_for_build(
+        bundle,
+        crate::Sema::CompileMode::Run,
+        profile,
+        false,
+        false,
+        false,
+    );
+    let (mir, artifact) = lower_checked_mir_program_for(bundle, request);
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi;
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile);
+    execution.emit_types = true;
+    execution.emit_foreign = true;
+    execution.emit_metadata = false;
+    execution.emit_debug_linemap = false;
+    execution.emit_runtime = true;
+    crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts),
+            target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution,
+        },
+    )
 }
 
 fn bundle_source_closure(bundle: &crate::AST::ProgramBundle) -> Vec<(std::path::PathBuf, String)> {
@@ -6632,15 +6675,55 @@ fn apply_application_authority(
         .push_str(&invocation_authority.authority);
 }
 
-fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
+/// Check an immutable source closure for native artifact lowering without
+/// lowering it. The bundle carries the host target, the seeded build facts and
+/// the refreshed target dossier, next to the gated lints and the prepared FFI
+/// link. The caller selects the MIR artifact request, such as a
+/// `NativeLibrary` for a unit without a runnable entry (D4), and emits it.
+pub fn check_bundle_path_with_source_closure_for_artifact(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    profile: &str,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<
+    (
+        crate::AST::ProgramBundle,
+        Vec<Diagnostic>,
+        Option<crate::FFI::FfiLink>,
+    ),
+    Vec<Diagnostic>,
+> {
+    crate::run_compiler_work(|| {
+        check_bundle_for_artifact_on_compiler_stack(
+            file,
+            mode,
+            false,
+            crate::Policy::GateSet::default(),
+            false,
+            false,
+            None,
+            None,
+            profile,
+            &BTreeMap::new(),
+            false,
+            None,
+            None,
+            None,
+            Some(source_closure),
+        )
+    })
+}
+
+/// The checked front half of artifact compilation: load, select the target,
+/// seed build facts, check, refresh the target dossier, gate diagnostics and
+/// prepare the FFI link. Returns the bundle, its lints and the FFI link.
+fn check_bundle_for_artifact_on_compiler_stack(
     file: &str,
     mode: crate::Sema::CompileMode,
     no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
-    plugin_target: bool,
     library_target: bool,
-    debug_linemap: bool,
     cross_target: Option<&str>,
     explicit_output: Option<&str>,
     profile: &str,
@@ -6650,8 +6733,14 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
     overlay: Option<(&std::path::Path, &str)>,
     target_dossier: Option<jet_foundation::Facts::TargetDossier>,
     source_closure: Option<&[(std::path::PathBuf, String)]>,
-    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
+) -> Result<
+    (
+        crate::AST::ProgramBundle,
+        Vec<Diagnostic>,
+        Option<crate::FFI::FfiLink>,
+    ),
+    Vec<Diagnostic>,
+> {
     if locked {
         crate::Loader::verify_locked_dependency_sources(file)?;
     }
@@ -6712,17 +6801,53 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?;
-    let ffi_result = match cross_target {
+    let ffi = match cross_target {
         Some(target) => crate::FFI::prepare_for_target(&bundle, target),
         None if web_target => {
             crate::FFI::prepare_for_target(&bundle, &bundle.build_facts.target_triple)
         }
         None => crate::FFI::prepare(&bundle),
-    };
-    let ffi = match ffi_result {
-        Ok(link) => link,
-        Err(ffi_diags) => return Err(ffi_diags),
-    };
+    }?;
+    Ok((bundle, lints, ffi))
+}
+
+fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    no_os: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    library_target: bool,
+    debug_linemap: bool,
+    cross_target: Option<&str>,
+    explicit_output: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    locked: bool,
+    entry_fn: Option<&str>,
+    overlay: Option<(&std::path::Path, &str)>,
+    target_dossier: Option<jet_foundation::Facts::TargetDossier>,
+    source_closure: Option<&[(std::path::PathBuf, String)]>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
+    let (mut bundle, lints, ffi) = check_bundle_for_artifact_on_compiler_stack(
+        file,
+        mode,
+        no_os,
+        gates,
+        web_target,
+        library_target,
+        cross_target,
+        explicit_output,
+        profile,
+        setting_overrides,
+        locked,
+        entry_fn,
+        overlay,
+        target_dossier,
+        source_closure,
+    )?;
     let plugin_name = if plugin_target {
         Some(crate::PluginExport::resolve_export_name(&bundle))
     } else {

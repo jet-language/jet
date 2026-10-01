@@ -1319,10 +1319,10 @@ impl ComputeCallback {
                 let pull = JetComputeHandle::new(pull);
                 let grads = JetComputeHandle::new(grads);
                 let Type::Apply { name, args: types } = &self.result_type else {
-                    return Err(unsupported("checked VjpRun result type", span));
+                    return Err(unsupported("checked VJPRun result type", span));
                 };
                 let [gradient_type] = types.as_slice() else {
-                    return Err(unsupported("checked VjpRun gradient type", span));
+                    return Err(unsupported("checked VJPRun gradient type", span));
                 };
                 let captures = std::sync::Arc::new(vec![
                     self.clone().into_value(),

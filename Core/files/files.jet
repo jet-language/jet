@@ -59,7 +59,9 @@ pub struct Stat {
 
 pub struct WalkEntry {
     pub path: String
+    pub relative: String
     pub is_dir: Bool
+    pub depth: Int
 }
 
 pub struct FileScope {
@@ -650,12 +652,17 @@ fn walk_rec(path: String, root: String, skip: [String], files_only: Bool) -[FS]>
     entries :: core.files.list_dir(~path)
     loop e in entries {
         if ignored(e.name, ~e.path, ~root, ~skip) -> next
+        rel :: relative_impl(~e.path, ~root)
+        depth := 1
+        loop b in rel.bytes() {
+            if is_separator(b) -> depth = depth + 1
+        }
         if e.is_dir {
-            if !files_only -> &out.push(WalkEntry{path: e.path, is_dir: true})
+            if !files_only -> &out.push(WalkEntry{path: e.path, relative: rel, is_dir: true, depth: depth})
             kids :: walk_rec(~e.path, ~root, ~skip, files_only)
             loop k in kids -> &out.push(k)
         } else if !files_only || !e.is_dir {
-            &out.push(WalkEntry{path: e.path, is_dir: false})
+            &out.push(WalkEntry{path: e.path, relative: rel, is_dir: false, depth: depth})
         }
     }
     Ok(out)

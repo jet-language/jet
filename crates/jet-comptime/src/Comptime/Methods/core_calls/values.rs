@@ -228,7 +228,7 @@ pub(crate) fn url_parts_to_ct(u: &super::super::super::UrlLite::UrlParts) -> CtV
         fields.push((URL_TYPED_PATH.to_string(), url_typed_parts_value(parts)));
     }
     CtValue::Struct {
-        type_name: "Url".to_string(),
+        type_name: "URL".to_string(),
         fields,
     }
 }
@@ -243,7 +243,7 @@ pub(crate) fn url_parts_from_ct(
     let type_name = type_name
         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
         .unwrap_or(type_name);
-    if type_name != "Url" {
+    if type_name != "URL" {
         return Err(unsupported("malformed URL value", span));
     }
     let field = |name: &str| {

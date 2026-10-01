@@ -2,6 +2,29 @@
 // Registry/Core/module candidates are supplied by Registration through
 // sema_call_check_method_candidate_owned; the local collector only exposes
 // declarations already present in SemaScopeTable.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Func,
+    Span,
+    SymbolID,
+    SymbolKind,
+    TCallArg,
+    TContract,
+    TCoreClosureKind,
+    TExpr,
+    TExprKind,
+    THostCall,
+    TMethodRef,
+    TStmt,
+    Type,
+    TypeTupleField,
+    expr_span,
+    symbol_id,
+    type_name,
+]
 
 pub struct SemaMethodSpecialCheck {
     pub handled: Bool
@@ -102,7 +125,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
         &diagnostics.push(sema_call_builtin_host_arity_diagnostic(method, args.len(), span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    inner :: sema_shared_access_inner(receiver_value.ty) ?? sema_shared_access_cell_inner(receiver_value.ty) ?? {
+    inner :: sema_shared_access_guarded_inner(receiver_value.ty) ?? {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     callback_expected :: Val(Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
@@ -115,14 +138,18 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    callback_value :: callback ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    callback_value := callback ?? return SemaMethodSpecialCheck{handled: true, value: None}
     callback_result_raw :: sema_call_signature_return(callback_value.ty) ?? Type.Named{name: "Unit"}
     callback_result :: sema_call_resolved_type(callback_result_raw, environment)
     result_type :: sema_call_shared_access_result_type(receiver_value.ty, method, callback_result, scopes.transaction_depth)
     if sema_shared_access_is_shared_type(receiver_value.ty) && method == "edit" && scopes.transaction_depth > 0 {
-        if callback_value.kind == .Lambda(lambda) -> lambda.is_move = true
+        if callback_value.kind == .Lambda(lambda) {
+            moved_lambda := lambda
+            moved_lambda.is_move = true
+            callback_value.kind = TExprKind.Lambda{value: moved_lambda}
+        }
     }
-    callback_value.ty = sema_call_host_callback_type(sema_shared_access_inner(receiver_value.ty) ?? sema_shared_access_cell_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty))
+    callback_value.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty))
     callback_name :: sema_shared_access_host_method_name(receiver_value.ty, method)
     value :: sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
     checked :: sema_expr_expected(value, expected, environment, &diagnostics)
@@ -154,8 +181,9 @@ fn sema_call_method_candidate_from_func(func: Func, module_name: String, owner_n
     if raw_signature == {
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
             if params.len() == 0 -> return None
-            params[0] = owner_type
-            signature = Type.Fn{params: params, ret: ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+            updated_params := ~params
+            updated_params[0] = owner_type
+            signature = Type.Fn{params: updated_params, ret: ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }
         else -> return None
     }
@@ -167,7 +195,7 @@ fn sema_call_method_candidate_from_func(func: Func, module_name: String, owner_n
     }
 
     mangled :: trait_name == None
-    trait_owner := None
+    trait_owner := SymbolID?{None}
     if trait_name == .Val(trait_name_value) -> trait_owner = Val(symbol_id(SymbolKind.Trait, module_name, "", trait_name_value))
 
     reference :: TMethodRef{symbol: symbol, name: func.name, mangled: mangled, trait_owner: trait_owner, operator_identity: None}
@@ -216,7 +244,7 @@ fn sema_call_local_method_candidates(environment: SemaScopeEnvironment, method: 
     filtered
 }
 
-fn sema_call_method_function_for_symbol(target: SymbolId, environment: SemaScopeEnvironment) -> Func? {
+fn sema_call_method_function_for_symbol(target: SymbolID, environment: SemaScopeEnvironment) -> Func? {
     loop declaration in environment.declarations {
         if declaration.item == {
             .Struct(value) -> {
@@ -243,7 +271,7 @@ fn sema_call_method_function_for_symbol(target: SymbolId, environment: SemaScope
     None
 }
 
-fn sema_call_method_callable_abi(candidate: SemaCallMethodCandidate, environment: SemaScopeEnvironment) -> SemaRegistrationCallableAbi? {
+fn sema_call_method_callable_abi(candidate: SemaCallMethodCandidate, environment: SemaScopeEnvironment) -> SemaRegistrationCallableABI? {
     if environment.registration_graph == .Val(graph) {
         abi :: sema_registration_callable_abi(graph, candidate.method.symbol)
         if abi != None -> return abi
@@ -311,7 +339,8 @@ fn sema_call_collect_method_inference_facts(candidate: SemaCallMethodCandidate, 
     facts :: sema_call_collect_inference_facts(params, binding, args, environment, &scopes, &state, &tail_store, &context)
     parameter_types := [Type]{}
     argument_types := [Type]{}
-    receiver_type :: sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset) ?? sema_call_method_receiver_candidate_type(candidate)
+    receiver_type := sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset)
+    if receiver_type == None -> receiver_type = candidate.receiver_type
     if receiver_type == .Val(receiver_ty) {
         &parameter_types.push(receiver_ty)
         &argument_types.push(receiver_value.ty)
@@ -322,7 +351,9 @@ fn sema_call_collect_method_inference_facts(candidate: SemaCallMethodCandidate, 
 }
 
 fn sema_call_method_candidate_types_compatible(candidate: SemaCallMethodCandidate, receiver_type: Type, argument_types: [Type?], binding: SemaCallBinding, params: [SemaCallParam], expected: Type?, environment: SemaScopeEnvironment) -> Bool Never! {
-    receiver_expected :: sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset) ?? sema_call_method_receiver_candidate_type(candidate) ?? return false
+    receiver_signature := sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset)
+    if receiver_signature == None -> receiver_signature = candidate.receiver_type
+    receiver_expected :: receiver_signature ?? return false
     receiver_compatible :: sema_call_type_assignable(receiver_expected, receiver_type, environment) ?? return false
     if !receiver_compatible -> return false
     loop index in 0..<argument_types.len() {
@@ -422,7 +453,7 @@ fn sema_call_host_callback_assignable(required: Type, offered: Type, environment
     sema_call_type_assignable(required, offered, environment)
 }
 
-fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableAbi?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], host_write: Bool, host_stored: Bool) -> SemaCallTypedArguments? {
+fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], host_write: Bool, host_stored: Bool) -> SemaCallTypedArguments? {
     if !sema_call_validate_binding(callee, params, binding, args, span, &diagnostics) -> return None
     values := [TExpr]{}
     slots := [Int]{}
@@ -506,40 +537,48 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         resolved_binding = resolved
     }
     abi :: sema_call_method_callable_abi(resolved_candidate, environment)
-    typed :: if host_method -> sema_call_typecheck_host_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, sema_shared_access_host_method_writes(receiver_value.ty, resolved_candidate.method.name), sema_shared_access_is_shared_type(receiver_value.ty) && resolved_candidate.method.name == "edit" && scopes.transaction_depth > 0) else -> sema_call_typecheck_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
+    host_stored :: sema_shared_access_is_shared_type(receiver_value.ty) && resolved_candidate.method.name == "edit" && scopes.transaction_depth > 0
+    typed_option :: if host_method -> sema_call_typecheck_host_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, sema_shared_access_host_method_writes(receiver_value.ty, resolved_candidate.method.name), host_stored) else -> sema_call_typecheck_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false)
+    typed :: typed_option ?? return None
     ownership :: sema_ownership_check_method_call(&state, resolved_candidate.method.name, receiver, resolved_candidate.receiver_convention, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &checked_args, environment)
     result_type_raw :: sema_call_signature_return(resolved_candidate.signature) ?? return None
     result_type_declared :: sema_call_resolved_type(result_type_raw, environment)
-    result_type :: sema_call_shared_access_result_type(receiver_value.ty, resolved_candidate.method.name, result_type_declared, scopes.transaction_depth)
+    transaction_depth :: scopes.transaction_depth
+    result_type :: sema_call_shared_access_result_type(receiver_value.ty, resolved_candidate.method.name, result_type_declared, transaction_depth)
+    call_receiver := receiver_value
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     if sema_contract_function_for_symbol(environment, resolved_candidate.method.symbol) == .Val(contract) {
-        receiver_arg :: TCallArg{value: receiver_value, template_items: [SymbolId]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(receiver_value.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, receiver_value.ty, environment), label: None, spread: false}
+        receiver_arg :: TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(receiver_value.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, receiver_value.ty, environment), label: None, spread: false}
         all_args := [TCallArg]{receiver_arg}
         loop argument in lowered -> &all_args.push(argument)
         receiver_slot :: resolved_candidate.receiver_offset - 1
         slots := [Int]{receiver_slot}
         loop (source_index, source) in resolved_binding.sources {
-            &slots.push(sema_call_bound_slot(resolved_binding, source, lowered[source_index]) + resolved_candidate.receiver_offset)
+            &slots.push(sema_call_bound_slot(resolved_binding, source, checked_args[source_index]) + resolved_candidate.receiver_offset)
         }
         checked_contract :: sema_contract_check_call(contract, &all_args, slots, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        receiver_value = all_args[0].value
+        call_receiver = all_args[0].value
         lowered = [TCallArg]{}
         loop index in 1..<all_args.len() -> &lowered.push(all_args[index])
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts
     }
-    call_value := sema_tir_expr(result_type, TExprKind.MethodCall{receiver: receiver_value, method: resolved_candidate.method, type_args: resolved_candidate.type_args, args: lowered}, span)
+    call_value := sema_tir_expr(result_type, TExprKind.MethodCall{receiver: call_receiver, method: resolved_candidate.method, type_args: resolved_candidate.type_args, args: lowered}, span)
     if host_method && lowered.len() > 0 {
         callback := lowered[0].value
-        if sema_shared_access_is_shared_type(receiver_value.ty) && resolved_candidate.method.name == "edit" && scopes.transaction_depth > 0 {
-            if callback.kind == .Lambda(lambda) -> lambda.is_move = true
+        if host_stored {
+            if callback.kind == .Lambda(lambda) {
+                moved_lambda := lambda
+                moved_lambda.is_move = true
+                callback.kind = TExprKind.Lambda{value: moved_lambda}
+            }
         }
-        callback.ty = sema_call_host_callback_type(sema_shared_access_inner(receiver_value.ty) ?? sema_shared_access_cell_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty))
+        callback.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty))
         callback_name :: sema_shared_access_host_method_name(receiver_value.ty, resolved_candidate.method.name)
-        call_value = sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback}}}, span)
+        call_value = sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
     }
     value :: if {
         contract_nodes.len() > 0 -> {
@@ -562,7 +601,7 @@ pub fn sema_call_check_method_candidate_from_value_owned(state: &SemaOwnershipSt
 
 pub fn sema_call_check_method_candidate_owned(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     receiver_value :: sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    sema_call_method_checked_from_value(&state, receiver, receiver_value, candidate, args, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics)
+    sema_call_method_checked_from_value(&state, receiver, receiver_value, candidate, args, defaults, expected, environment, &scopes, &tail_store, &context, span, &diagnostics)
 }
 
 pub fn sema_call_check_method_candidate(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

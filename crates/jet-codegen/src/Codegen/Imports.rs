@@ -450,7 +450,13 @@ pub(crate) fn register_foreign_enum_variants(
         if is_c_import_after_frontend(imp) {
             continue;
         }
-        if matches!(imp.kind, ImportKind::Unqualified { .. }) || imp.core_module_path().is_some() {
+        if let Some(core_module) = imp.core_module_path() {
+            if let Some((_, target)) = core_source_target(bundle, &core_module) {
+                register_core_source_enum_layouts(cx, bundle, target);
+            }
+            continue;
+        }
+        if matches!(imp.kind, ImportKind::Unqualified { .. }) {
             continue;
         }
         let target = required_import_target(bundle, module_idx, imp);
@@ -527,6 +533,47 @@ pub(crate) fn register_foreign_enum_variants(
                 .entry(variant.name.clone())
                 .or_insert_with(|| identity.clone());
         }
+    }
+}
+
+/// D-PERF-ERR1 / D-MOD-ERR1: a Core source function can fail with its own
+/// module's enum (`PerfError`, `ModError`) even when the module does not export
+/// the type by name. The consumer still destructures the payload
+/// (`.Err(.OutOfRange(rejected))`), so it needs the enum's layout under its
+/// canonical identity; without it the payload binding lost its type and the
+/// resident JIT rendered a `Float` as its raw bits. Variant owners stay unset:
+/// leading-dot resolution in the consumer belongs to sema, and a Core leaf
+/// must not claim a bare variant name.
+fn register_core_source_enum_layouts(cx: &mut Cx, bundle: &ProgramBundle, target: usize) {
+    let rust_mod = mangle(&bundle.modules[target].alias);
+    for item in &bundle.modules[target].items {
+        let Item::Enum(e) = item else { continue };
+        if !e.is_pub || !e.type_params.is_empty() {
+            continue;
+        }
+        let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) else {
+            continue;
+        };
+        cx.foreign_types
+            .entry(identity.clone())
+            .or_insert_with(|| rust_mod.clone());
+        cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
+            e.variants
+                .iter()
+                .map(|variant| {
+                    (
+                        variant.name.clone(),
+                        qualify_imported_variant_payload(
+                            bundle,
+                            target,
+                            &identity,
+                            &[],
+                            &variant.payload,
+                        ),
+                    )
+                })
+                .collect()
+        });
     }
 }
 
@@ -1317,6 +1364,28 @@ pub(crate) fn inline_core_import_maps(
     (scopes, reexports)
 }
 
+/// D-MOD-CYCLE1=A: the member file of `target`'s package that declares the
+/// top-level `name`: `target` itself, else the sibling that declares it, else
+/// `target` (so a missing name keeps its ordinary diagnostic path).
+pub(crate) fn namespace_member_owner(bundle: &ProgramBundle, target: usize, name: &str) -> usize {
+    let declares = |module: usize| {
+        bundle.name_ledger.declaration(module, name).is_some()
+            || bundle.modules[module]
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Func(function) if function.name == name))
+    };
+    if declares(target) {
+        return target;
+    }
+    bundle
+        .name_ledger
+        .namespace_siblings(target)
+        .into_iter()
+        .find(|&sibling| declares(sibling))
+        .unwrap_or(target)
+}
+
 /// Build signature/return entries for selective imports whose target is a file
 /// module. The local key is the spelling used in the body; the second key is
 /// the target's declared function name. This is needed for both top-level and
@@ -1361,6 +1430,9 @@ fn unqualified_file_function_entries(
                 .original
                 .expect("member walker returned a binding without a member");
             let local = binding.local;
+            // D-MOD-CYCLE1=A: a dependency package is bound through one member
+            // file; the member belongs to whichever of its files declares it.
+            let target = namespace_member_owner(bundle, target, orig);
             let Some(item) = bundle.modules[target].items.iter().find(|item| match item {
                 Item::Func(f) => {
                     f.name == orig && bundle.name_ledger.visible(module_idx, target, &f.name)

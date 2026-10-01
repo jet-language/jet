@@ -65,7 +65,7 @@ pub struct UnixListener {
 }
 
 
-pub struct SrvRecord {
+pub struct SRVRecord {
     pub target: String
     pub port: Int
     pub priority: Int
@@ -303,11 +303,11 @@ pub fn udp_receive(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket N
     core.net.udp_receive(socket, limit)
 }
 
-pub fn udp_packet_data(packet: UDPPacket) -> String { core.net.udp_packet_data(packet) }
-pub fn udp_packet_addr(packet: UDPPacket) -> SocketAddr { core.net.udp_packet_addr(packet) }
-pub fn udp_packet_bytes(packet: UDPPacket) -> [U8] { core.net.udp_packet_bytes(packet) }
-pub fn udp_packet_original_len(packet: UDPPacket) -> Int { core.net.udp_packet_original_len(packet) }
-pub fn udp_packet_truncated(packet: UDPPacket) -> Bool { core.net.udp_packet_truncated(packet) }
+pub fn udp_packet_data(packet: UDPPacket) -> String Never! { core.net.udp_packet_data(packet) }
+pub fn udp_packet_addr(packet: UDPPacket) -> SocketAddr Never! { core.net.udp_packet_addr(packet) }
+pub fn udp_packet_bytes(packet: UDPPacket) -> [U8] Never! { core.net.udp_packet_bytes(packet) }
+pub fn udp_packet_original_len(packet: UDPPacket) -> Int Never! { core.net.udp_packet_original_len(packet) }
+pub fn udp_packet_truncated(packet: UDPPacket) -> Bool Never! { core.net.udp_packet_truncated(packet) }
 
 pub fn unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener NetError! {
     if !valid_text(path) -> return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
@@ -399,13 +399,13 @@ pub fn dns_ptr(addr: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
     core.net.dns_ptr(addr, ms)
 }
 
-pub fn dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [DNSSrv] NetError! {
+pub fn dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [DNSSRV] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_srv", name, "DNS name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_srv", name, "DNS timeout must be non-negative"))
     core.net.dns_srv(name, ms)
 }
 
-pub fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [DNSSrv] NetError! {
+pub fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [DNSSRV] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_srv_at", name, "DNS server/name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_srv_at", name, "DNS timeout must be non-negative"))
     _ :: socket_addr_parse(server) ?? return Err(net_err("dns_srv_at", server, "DNS server must be an IP socket address"))
@@ -424,10 +424,10 @@ pub fn gethostbyaddr(addr: String) -[Net, Time.Wait]> String NetError! {
     names[0]
 }
 
-pub fn dns_srv_target(record: DNSSrv) -> String { core.net.dns_srv_target(record) }
-pub fn dns_srv_port(record: DNSSrv) -> Int { core.net.dns_srv_port(record) }
-pub fn dns_srv_priority(record: DNSSrv) -> Int { core.net.dns_srv_priority(record) }
-pub fn dns_srv_weight(record: DNSSrv) -> Int { core.net.dns_srv_weight(record) }
+pub fn dns_srv_target(record: DNSSRV) -> String Never! { core.net.dns_srv_target(record) }
+pub fn dns_srv_port(record: DNSSRV) -> Int Never! { core.net.dns_srv_port(record) }
+pub fn dns_srv_priority(record: DNSSRV) -> Int Never! { core.net.dns_srv_priority(record) }
+pub fn dns_srv_weight(record: DNSSRV) -> Int Never! { core.net.dns_srv_weight(record) }
 
 pub fn getservbyname(name: String) -[Net, Time.Wait]> Int NetError! {
     if !valid_text(name) -> return Err(net_err("getservbyname", name, "service name is empty or contains control bytes"))
@@ -439,13 +439,13 @@ pub fn getservbyport(port: Int) -[Net, Time.Wait]> String NetError! {
     core.net.getservbyport(port)
 }
 
-pub fn error_operation(err: NetError) -> String { return core.net.error_operation(err) }
-pub fn error_message(err: NetError) -> String { return core.net.error_message(err) }
-pub fn error_address(err: NetError) -> String? { return core.net.error_address(err) }
-pub fn error_name(err: NetError) -> String? { return core.net.error_name(err) }
-pub fn error_os_code(err: NetError) -> Int? { return core.net.error_os_code(err) }
+pub fn error_operation(err: NetError) -> String Never! { return core.net.error_operation(err) }
+pub fn error_message(err: NetError) -> String Never! { return core.net.error_message(err) }
+pub fn error_address(err: NetError) -> String? Never! { return core.net.error_address(err) }
+pub fn error_name(err: NetError) -> String? Never! { return core.net.error_name(err) }
+pub fn error_os_code(err: NetError) -> Int? Never! { return core.net.error_os_code(err) }
 
-pub fn addressfamily(addr: SocketAddr) -> String {
+pub fn addressfamily(addr: SocketAddr) -> String Never! {
     if contains_byte(addr.host, 58) -> "IPv6" else -> "IPv4"
 }
 

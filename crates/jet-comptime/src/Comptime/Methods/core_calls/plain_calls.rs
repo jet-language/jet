@@ -1687,10 +1687,17 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 &text, width, &fill,
             )))
         }
-        // --- D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 (pure) ---
+        // --- core.encoding.hex / base64 / base32 rows (pure). These are the
+        // host kernels the Core wrappers forward to; the evaluator binds the
+        // same Rust kernels AOT and the JIT call (EncodingBase.rs,
+        // BaseEncodingDispatch.rs). ---
         ("core.encoding.hex", "encode") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(hex_encode(bytes)))
+        }
+        ("core.encoding.hex", "encode_upper") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_upper(&bytes)))
         }
         ("core.encoding.hex", "decode") => {
             let s = as_string(one(0)?, span)?;
@@ -1699,14 +1706,44 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }
-        ("core.encoding.base64", "encode" | "b64encode" | "standard_b64encode") => {
+        ("core.encoding.hex", "is_hex") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            Ok(CtValue::Bool(encoding_base_kernel::jet_std_hex_is_hex(&s)))
+        }
+        ("core.encoding.hex", "crc_hqx") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            let value = as_int(one(1)?, span)?;
+            Ok(CtValue::Int(encoding_base_kernel::jet_std_crc_hqx(&bytes, value)))
+        }
+        ("core.encoding.hex", "crc32") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Int(encoding_base_kernel::jet_std_crc32(&bytes)))
+        }
+        ("core.encoding.hex", "encode_sep") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            let separator = as_string(one(1)?, span)?.to_string();
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_sep(
+                &bytes, &separator,
+            )))
+        }
+        ("core.encoding.hex", "dump") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_dump(&bytes)))
+        }
+        ("core.encoding.hex", "b2a_base64") | ("core.encoding.base64", "encode") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(base64_encode(bytes)))
         }
-        ("core.encoding.base64", "decode" | "b64decode" | "standard_b64decode") => {
+        ("core.encoding.base64", "encodebytes") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_encodebytes(&bytes)))
+        }
+        ("core.encoding.base64", "decode") | ("core.encoding.base64", "decodebytes")
+        | ("core.encoding.hex", "a2b_base64") => {
             let s = as_string(one(0)?, span)?;
-            let allow_whitespace = args_bool(1, false)?;
-            let allow_missing_padding = args_bool(2, false)?;
+            // `decodebytes` is the MIME form: whitespace between quanta is allowed.
+            let allow_whitespace = method != "decode" || args_bool(1, false)?;
+            let allow_missing_padding = method == "decode" && args_bool(2, false)?;
             let edition = jet_foundation::PackageEdition::package_edition();
             Ok(
                 match jet_foundation::base_encoding_dispatch::decode_base64(
@@ -1720,17 +1757,27 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 },
             )
         }
-        // --- core.encoding.base64 URL-safe variant (pure; mirrors AOT's
-        // `jet_std_b64url_*`, EncodingCodecs.rs — the same alphabet with
-        // `+`/`/` swapped for `-`/`_` and no padding) ---
-        // parity: include path=crates/jet-codegen/src/Prelude/Core/EncodingBase.rs
-        ("core.encoding.base64", "encode_url" | "urlsafe_b64encode") => {
+        ("core.encoding.base64", "encode_url") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode(
                 &bytes,
             )))
         }
-        ("core.encoding.base64", "decode_url" | "urlsafe_b64decode") => {
+        ("core.encoding.base64", "encode_url_padded") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode_padded(
+                &bytes,
+            )))
+        }
+        ("core.encoding.base64", "pad") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_pad(&s)))
+        }
+        ("core.encoding.base64", "unpad") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_unpad(&s)))
+        }
+        ("core.encoding.base64", "decode_url") => {
             let s = as_string(one(0)?, span)?;
             let allow_whitespace = args_bool(1, false)?;
             let allow_padding = args_bool(2, false)?;
@@ -1747,14 +1794,15 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 },
             )
         }
-        // --- core.encoding.base32 (pure; mirrors AOT's `jet_std_base32_*`,
-        // EncodingCodecs.rs, byte-for-byte — same alphabet, same bit-packing) ---
-        // parity: guard tests/encoding_parity.rs::whole_value_codecs_match_aot_comptime_and_default_dev
-        ("core.encoding.base32", "encode") => {
+        ("core.encoding.base32", "encode" | "b32encode") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(base32_encode(&bytes)))
         }
-        ("core.encoding.base32", "decode") => {
+        ("core.encoding.base32", "b32hexencode") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_base32hex_encode(&bytes)))
+        }
+        ("core.encoding.base32", "decode" | "b32decode") => {
             let s = as_string(one(0)?, span)?;
             let allow_whitespace = args_bool(1, false)?;
             let allow_missing_padding = args_bool(2, false)?;
@@ -1768,6 +1816,16 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     allow_missing_padding,
                     allow_lowercase,
                 ) {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
+                },
+            )
+        }
+        ("core.encoding.base32", "b32hexdecode") => {
+            let s = as_string(one(0)?, span)?;
+            let edition = jet_foundation::PackageEdition::package_edition();
+            Ok(
+                match jet_foundation::base_encoding_dispatch::decode_base32hex(&edition, s) {
                     Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
                     Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
                 },

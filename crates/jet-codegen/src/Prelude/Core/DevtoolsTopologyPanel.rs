@@ -658,12 +658,6 @@ impl JetDevtoolsTopologyEndpointFact {
         self
     }
 
-    pub fn with_bytes(mut self, bytes_in: u64, bytes_out: u64) -> Self {
-        self.bytes_in = Some(bytes_in);
-        self.bytes_out = Some(bytes_out);
-        self
-    }
-
     pub fn with_restart_policy(
         mut self,
         restart_policy: JetDevtoolsTopologyRestartPolicy,

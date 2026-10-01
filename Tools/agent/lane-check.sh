@@ -27,8 +27,10 @@ set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
 
+# The default run also checks the feature-gated bootstrap host
+# (Compiler/Bootstrap/Host), so drift against the Jet compiler fails here (#3874).
 if [ "$#" -eq 0 ]; then
-  set -- --workspace --all-targets
+  set -- --workspace --all-targets --features jet/compiler-bootstrap-host
 fi
 
 # /tmp is RAM-backed here, and a check can fork rustc: keep scratch on disk and

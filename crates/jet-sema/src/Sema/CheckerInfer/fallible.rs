@@ -416,11 +416,18 @@ impl<'a> Checker<'a> {
         let (module_idx, name, signature) = match inner.without_parens() {
             Expr::Call(call) => self.resolve_failure_function(&call.name)?,
             Expr::MethodCall {
-                receiver, method, ..
+                receiver,
+                method,
+                args,
+                ..
             } => {
                 if let Some((module, _, _)) = self.core_module_path_from_receiver(receiver) {
                     let source = jet_foundation::CoreModuleExports::core_source_module(&module)?;
-                    if !jet_foundation::CoreModuleExports::core_source_owns(&module, method) {
+                    if !jet_foundation::CoreModuleExports::core_source_owns_call(
+                        &module,
+                        method,
+                        args.len(),
+                    ) {
                         return None;
                     }
                     let source_idx = self
@@ -1363,6 +1370,7 @@ impl<'a> Checker<'a> {
                 },
             );
         }
+        let success_path = self.flow.clone();
         let result = match fallback {
             OrFallback::Value(e) => {
                 // Infer in place: sema rewrites inside the fallback (index
@@ -1405,8 +1413,9 @@ impl<'a> Checker<'a> {
             OrFallback::Block { body, value, .. } => {
                 // A `??` fallback block runs only on the failure path. A
                 // diverging tail leaves the enclosing function/loop for real;
-                // ordinary body statements remain conditional (#2006).
-                self.check_conditional_block(body, false);
+                // `join_fallback_path` below joins its end with the success
+                // path, so statements after the `??` stay reachable (#2006).
+                self.check_block(body, false);
                 if let Some(value) = value {
                     let saved = self.expected_type.clone();
                     self.expected_type = (!success_never).then(|| payload.clone());
@@ -1574,12 +1583,33 @@ impl<'a> Checker<'a> {
                 Some(payload)
             }
         };
+        self.join_fallback_path(success_path, fallback);
         if ambient_scope {
             self.pop_scope();
         }
         self.fallback_has_err = saved_fallback_has_err;
         self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
         result
+    }
+
+    /// A `??` fallback runs only on the miss path, so the flow after the `??`
+    /// joins the success path with the end of the fallback. A route that
+    /// leaves (`return`, `panic`, `break`, `next`, or a block that always
+    /// does) never reaches that join: a move made on it must not poison a
+    /// later use of the same place.
+    fn join_fallback_path(
+        &mut self,
+        success_path: crate::Sema::FlowFacts::FlowFacts,
+        fallback: &OrFallback,
+    ) {
+        let mut miss_path = std::mem::take(&mut self.flow);
+        if !matches!(fallback, OrFallback::Value(_) | OrFallback::Block { .. }) {
+            miss_path.reachable = false;
+        }
+        self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(
+            &success_path,
+            &[success_path.clone(), miss_path],
+        );
     }
 
     /// D-CHOOSE-TEST1=A: the miss route of a refutable statement binding must
@@ -1619,6 +1649,7 @@ impl<'a> Checker<'a> {
             );
         }
 
+        let success_path = self.flow.clone();
         match fallback {
             OrFallback::Value(value) => {
                 self.infer(value);
@@ -1640,7 +1671,7 @@ impl<'a> Checker<'a> {
                 span: fallback_span,
             } => {
                 let diverges = value.is_none() && fallback_block_diverges(body);
-                self.check_conditional_block(body, false);
+                self.check_block(body, false);
                 if let Some(value) = value {
                     self.infer(value);
                 }
@@ -1747,6 +1778,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        self.join_fallback_path(success_path, fallback);
 
         if has_err {
             self.pop_scope();

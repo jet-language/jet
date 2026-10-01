@@ -1,0 +1,25 @@
+// E0201: `^` cannot take a field out of a `&` parameter, because the caller
+// still owns that storage. The diagnostic names the borrowed root and teaches
+// the copy or an owning parameter; it offers no source edit.
+struct Session {
+    id: Int
+    names: [String]
+}
+
+struct Root {
+    session: Session
+}
+
+fn consume(s: Session) -> Int {
+    s.id
+}
+
+fn take_field(r: &Root) -> Int {
+    taken := ^r.session
+    consume(taken)
+}
+
+fn run() {
+    root := Root{session: Session{id: 3, names: [String]{}}}
+    print(take_field(&root))
+}

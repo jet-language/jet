@@ -492,8 +492,12 @@ pub(crate) struct JitResultValue {
 mod api_debug;
 #[path = "jit/backend.rs"]
 mod backend;
+#[path = "jit/define_batch.rs"]
+mod define_batch;
 #[path = "jit/deopt.rs"]
 mod deopt;
+#[path = "jit/dev_aot.rs"]
+mod dev_aot;
 #[path = "jit/functions_compile.rs"]
 mod functions_compile;
 #[path = "jit/gap.rs"]
@@ -579,6 +583,11 @@ pub fn bind_interpreter_ffi(
 pub use resident::{
     apply_hot_swap, apply_hot_swap_with_program, discard_hot_swap_plan, resident_boot_console,
     ConsoleServiceBinding, ResidentConsoleLease,
+};
+pub use define_batch::CompiledCodeStore;
+pub use dev_aot::{
+    compile_dev_aot_image, is_dev_aot_trailer, run_dev_aot_executable, DEV_AOT_TRAILER_LEN,
+    RUNTIME_ID_PROBE,
 };
 pub use tier_cache::{cached_artifact_id, run_cached_module, take_last_tier_artifact};
 pub use tiers::{

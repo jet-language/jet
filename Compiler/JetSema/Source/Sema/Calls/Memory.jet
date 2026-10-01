@@ -1,6 +1,29 @@
 // Compiler-owned allocator and SharedGuard operations. Ordinary Shared/Cell
 // access remains in Methods.jet; this file owns only allocation and projected
 // guard capabilities.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    InternalTag,
+    ParamZone,
+    Span,
+    SymbolID,
+    SymbolKind,
+    TAllocCtor,
+    TCallArg,
+    TExpr,
+    TExprKind,
+    TFieldRef,
+    THandleOp,
+    TagMarker,
+    Type,
+    TypeTupleField,
+    measure_literal_value,
+]
 
 fn sema_call_memory_allocator_name(ty: Type) -> String? {
     if ty == .Named(name) && (name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed") -> return Val(name)
@@ -12,10 +35,10 @@ fn sema_call_memory_discard_args(args: [CallArg], environment: SemaScopeEnvironm
 }
 
 fn sema_call_memory_call_arg(argument: CallArg, value: TExpr, borrow: Bool, mut_borrow: Bool) -> TCallArg Never! {
-    label := if argument.label == {.Val(value) -> Val(value.name) else -> None}
+    label := if argument.label == {.Val(found) -> Val(found.name) else -> None}
     return TCallArg{
         value: value,
-        template_items: [SymbolId]{},
+        template_items: [SymbolID]{},
         borrow: borrow,
         mut_borrow: mut_borrow,
         clone: argument.flags.implicit_clone || argument.flags.shared_auto_clone,
@@ -62,38 +85,13 @@ fn sema_call_memory_compiletime_int(expression: Expr, checked: TExpr, environmen
         if number != None -> return number
     }
     return if expression == {
-        .ComptimeName(_, _, value) -> {
-            number :: if value == {
-                .Val(inner) -> if inner == {
-                    .Int(number) -> Val(number)
-                    else -> None
-                }
-                else -> None
-            }
-            number
-        }
+        .ComptimeName(_, _, value) -> if value == .Val(inner) && inner == .Int(number) -> Val(number) else -> None
         .Ident(name, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return None
             symbol := scopes.bindings[index].symbol
             if symbol.kind != SymbolKind.Constant -> return None
             declaration :: sema_scope_resolve_declaration(environment, symbol.id) ?? return None
-            number :: if declaration == {
-                .Const(definition) -> {
-                    ct_value :: if definition.ct == {
-                        .Val(inner) -> Val(inner)
-                        else -> None
-                    }
-                    if ct_value == .Val(inner) {
-                        if inner == {
-                            .Int(number) -> return Val(number)
-                            else -> {}
-                        }
-                    }
-                    None
-                }
-                else -> None
-            }
-            number
+            if declaration == .Const(definition) && definition.ct == .Val(inner) && inner == .Int(number) -> Val(number) else -> None
         }
         else -> None
     }
@@ -114,7 +112,8 @@ fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environm
         return false
     }
     parameter := SemaCallParam{label: "buffer", name: "buffer", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(value.ty), variadic: false}
-    ownership := sema_ownership_check_call_arguments(&state, "Fixed.over", [SemaCallParam]{parameter}, &[CallArg]{argument}, scopes, &diagnostics)
+    call_args := [CallArg]{argument}
+    ownership := sema_ownership_check_call_arguments(&state, "Fixed.over", [SemaCallParam]{parameter}, &call_args, scopes, &diagnostics)
     return ownership.accepted && ownership.complete
 }
 
@@ -262,8 +261,8 @@ struct SemaCallMemoryGuard {
 }
 
 fn sema_call_memory_guard_shape(receiver: Expr, ty: Type, scopes: SemaScopeTable) -> SemaCallMemoryGuard? {
-    marker := None
-    inner := None
+    marker := TagMarker?{None}
+    inner := Type?{None}
     editable := false
     if ty == {
         .Tagged(found_marker, value) -> {
@@ -483,5 +482,5 @@ pub fn sema_call_try_memory_method(receiver: Expr, receiver_value: TExpr, method
     if allocator != None -> return sema_call_memory_allocator_method(receiver, receiver_value, allocator, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     guard :: sema_call_memory_guard_shape(receiver, receiver_value.ty, scopes)
     if guard != None -> return sema_call_memory_shared_guard_method(receiver, receiver_value, guard, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    return SemaMethodSpecialCheck{handled: false, value: None}
+    sema_call_try_shared_owner_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }

@@ -120,10 +120,6 @@ impl JetNotebook {
         self.cells.last_mut().unwrap()
     }
 
-    pub fn paste_cell(&mut self, kind: CellKind, source: impl Into<String>) -> &mut NotebookCell {
-        self.add_cell(kind, source)
-    }
-
     /// Refresh dependency edges from the source while preserving authored
     /// edges.  The graph is source-owned; layout never supplies an implicit
     /// execution order.

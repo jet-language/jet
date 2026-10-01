@@ -31,9 +31,6 @@ impl<T> JetStreamEvent<T> {
     }
 }
 
-pub(crate) fn jet_stream_event<T>(value: T, event_time: JetDateTime) -> JetStreamEvent<T> {
-    JetStreamEvent::new(value, event_time)
-}
 /// Event-time callback results use the same source-facing timestamp shapes as
 /// the rest of the time API.  `Int` is Unix seconds; `DateTime` remains exact.
 pub(crate) trait JetStreamEventTime {

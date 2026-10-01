@@ -33,16 +33,16 @@ fn collect_names(symbols: &BootstrapCodecSymbols<'_>) -> Result<BTreeMap<String,
         "DiagnosticErrorField",
         "DiagnosticErrorSpan",
         "DiagnosticErrorJourneyFrame",
-        "MirDecisionRow",
-        "MirDecisionEdit",
-        "MirDecisionIdentity",
-        "MirDerivationRef",
-        "MirFunctionId",
-        "MirDerivationMethod",
-        "MirDerivationDisposition",
-        "MirDecisionKind",
-        "MirDecisionDisposition",
-        "MirSourceFile",
+        "MIRDecisionRow",
+        "MIRDecisionEdit",
+        "MIRDecisionIdentity",
+        "MIRDerivationRef",
+        "MIRFunctionID",
+        "MIRDerivationMethod",
+        "MIRDerivationDisposition",
+        "MIRDecisionKind",
+        "MIRDecisionDisposition",
+        "MIRSourceFile",
         "JetDriverCompileResult",
     ];
     for name in types {
@@ -113,34 +113,34 @@ fn collect_names(symbols: &BootstrapCodecSymbols<'_>) -> Result<BTreeMap<String,
         ("DiagnosticErrorJourneyFrame", "line"),
         ("DiagnosticErrorJourneyFrame", "note"),
         ("DiagnosticErrorJourneyFrame", "hops"),
-        ("MirDecisionRow", "id"),
-        ("MirDecisionRow", "kind"),
-        ("MirDecisionRow", "disposition"),
-        ("MirDecisionRow", "function"),
-        ("MirDecisionRow", "function_name"),
-        ("MirDecisionRow", "span"),
-        ("MirDecisionRow", "rule"),
-        ("MirDecisionRow", "reason"),
-        ("MirDecisionRow", "producer"),
-        ("MirDecisionRow", "evidence"),
-        ("MirDecisionRow", "edit"),
-        ("MirDecisionRow", "derivation"),
-        ("MirDecisionRow", "identity"),
-        ("MirDecisionRow", "evidence_method"),
-        ("MirDecisionRow", "derivation_disposition"),
-        ("MirDecisionEdit", "span"),
-        ("MirDecisionEdit", "replacement"),
-        ("MirDecisionIdentity", "source"),
-        ("MirDecisionIdentity", "configuration"),
-        ("MirDecisionIdentity", "profile"),
-        ("MirDecisionIdentity", "target"),
-        ("MirDecisionIdentity", "implementation"),
-        ("MirDecisionIdentity", "artifact"),
-        ("MirDecisionIdentity", "run"),
-        ("MirDerivationRef", "id"),
-        ("MirFunctionId", "value"),
-        ("MirSourceFile", "path"),
-        ("MirSourceFile", "source"),
+        ("MIRDecisionRow", "id"),
+        ("MIRDecisionRow", "kind"),
+        ("MIRDecisionRow", "disposition"),
+        ("MIRDecisionRow", "function"),
+        ("MIRDecisionRow", "function_name"),
+        ("MIRDecisionRow", "span"),
+        ("MIRDecisionRow", "rule"),
+        ("MIRDecisionRow", "reason"),
+        ("MIRDecisionRow", "producer"),
+        ("MIRDecisionRow", "evidence"),
+        ("MIRDecisionRow", "edit"),
+        ("MIRDecisionRow", "derivation"),
+        ("MIRDecisionRow", "identity"),
+        ("MIRDecisionRow", "evidence_method"),
+        ("MIRDecisionRow", "derivation_disposition"),
+        ("MIRDecisionEdit", "span"),
+        ("MIRDecisionEdit", "replacement"),
+        ("MIRDecisionIdentity", "source"),
+        ("MIRDecisionIdentity", "configuration"),
+        ("MIRDecisionIdentity", "profile"),
+        ("MIRDecisionIdentity", "target"),
+        ("MIRDecisionIdentity", "implementation"),
+        ("MIRDecisionIdentity", "artifact"),
+        ("MIRDecisionIdentity", "run"),
+        ("MIRDerivationRef", "id"),
+        ("MIRFunctionID", "value"),
+        ("MIRSourceFile", "path"),
+        ("MIRSourceFile", "source"),
         ("JetDriverCompileResult", "diagnostics"),
         ("JetDriverCompileResult", "generated_source_files"),
     ];
@@ -159,7 +159,7 @@ fn collect_names(symbols: &BootstrapCodecSymbols<'_>) -> Result<BTreeMap<String,
         ("DiagnosticFixApplicability", "Suggested"),
         ("DiagnosticFixSafety", "Formatting"),
         ("DiagnosticFixSafety", "BehaviorPreserving"),
-        ("DiagnosticFixSafety", "ApiChanging"),
+        ("DiagnosticFixSafety", "APIChanging"),
         ("DiagnosticFixSafety", "TargetChanging"),
         ("DiagnosticFixSafety", "NeedsReview"),
         ("DiagnosticNoFixReasonKind", "Behavior"),
@@ -180,33 +180,33 @@ fn collect_names(symbols: &BootstrapCodecSymbols<'_>) -> Result<BTreeMap<String,
         ("DiagnosticCryptoMisuseReason", "RawNonce"),
         ("DiagnosticCryptoMisuseReason", "RawAlgorithm"),
         ("DiagnosticCryptoMisuseReason", "DeterministicEntropy"),
-        ("MirDecisionKind", "Tier"),
-        ("MirDecisionKind", "Inline"),
-        ("MirDecisionKind", "Vectorize"),
-        ("MirDecisionKind", "Parallel"),
-        ("MirDecisionKind", "Copy"),
-        ("MirDecisionKind", "Bounds"),
-        ("MirDecisionKind", "Deopt"),
-        ("MirDecisionKind", "Unreachable"),
-        ("MirDecisionKind", "LoopInvariant"),
-        ("MirDecisionDisposition", "Accepted"),
-        ("MirDecisionDisposition", "Rejected"),
-        ("MirDecisionDisposition", "Selected"),
-        ("MirDecisionDisposition", "NotAttempted"),
-        ("MirDecisionDisposition", "Unavailable"),
-        ("MirDerivationMethod", "StaticDerivation"),
-        ("MirDerivationMethod", "FormalProof"),
-        ("MirDerivationMethod", "RecordedExecution"),
-        ("MirDerivationMethod", "SampledAgreement"),
-        ("MirDerivationMethod", "ExternalAssumption"),
-        ("MirDerivationDisposition", "Current"),
-        ("MirDerivationDisposition", "Stale"),
-        ("MirDerivationDisposition", "Expired"),
-        ("MirDerivationDisposition", "Redacted"),
-        ("MirDerivationDisposition", "Unavailable"),
-        ("MirDerivationDisposition", "Unsupported"),
-        ("MirDerivationDisposition", "BudgetExhausted"),
-        ("MirDerivationDisposition", "Unknown"),
+        ("MIRDecisionKind", "Tier"),
+        ("MIRDecisionKind", "Inline"),
+        ("MIRDecisionKind", "Vectorize"),
+        ("MIRDecisionKind", "Parallel"),
+        ("MIRDecisionKind", "Copy"),
+        ("MIRDecisionKind", "Bounds"),
+        ("MIRDecisionKind", "Deopt"),
+        ("MIRDecisionKind", "Unreachable"),
+        ("MIRDecisionKind", "LoopInvariant"),
+        ("MIRDecisionDisposition", "Accepted"),
+        ("MIRDecisionDisposition", "Rejected"),
+        ("MIRDecisionDisposition", "Selected"),
+        ("MIRDecisionDisposition", "NotAttempted"),
+        ("MIRDecisionDisposition", "Unavailable"),
+        ("MIRDerivationMethod", "StaticDerivation"),
+        ("MIRDerivationMethod", "FormalProof"),
+        ("MIRDerivationMethod", "RecordedExecution"),
+        ("MIRDerivationMethod", "SampledAgreement"),
+        ("MIRDerivationMethod", "ExternalAssumption"),
+        ("MIRDerivationDisposition", "Current"),
+        ("MIRDerivationDisposition", "Stale"),
+        ("MIRDerivationDisposition", "Expired"),
+        ("MIRDerivationDisposition", "Redacted"),
+        ("MIRDerivationDisposition", "Unavailable"),
+        ("MIRDerivationDisposition", "Unsupported"),
+        ("MIRDerivationDisposition", "BudgetExhausted"),
+        ("MIRDerivationDisposition", "Unknown"),
     ];
     for (owner, variant) in variants {
         names.insert(
@@ -288,7 +288,7 @@ fn __jet_bootstrap_origin_from_host(value: &::jet_foundation::Diagnostics::Diagn
 fn __jet_bootstrap_validate_origin(
     value: &::jet_foundation::Diagnostics::DiagnosticOrigin,
     source_path: Option<&String>,
-    generated_source_files: &[@t.MirSourceFile@],
+    generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
 ) -> Result<bool, String> {
     let expected_revision = ::jet_foundation::SHA256::sha256_hex(value.source.as_bytes());
@@ -302,7 +302,7 @@ fn __jet_bootstrap_validate_origin(
     }
     let mut generated = None;
     for file in generated_source_files {
-        if file.@f.MirSourceFile.path@ == value.path {
+        if file.@f.MIRSourceFile.path@ == value.path {
             if generated.is_some() {
                 return Err(format!("Jet generated diagnostic origin path `{}` is ambiguous", value.path));
             }
@@ -325,7 +325,7 @@ fn __jet_bootstrap_validate_origin(
     }
     let generated_origin = generated.is_some();
     let expected_source = if let Some(file) = generated {
-        file.@f.MirSourceFile.source@.as_str()
+        file.@f.MIRSourceFile.source@.as_str()
     } else {
         selected
             .ok_or_else(|| format!("diagnostic origin path `{}` is absent from the authorized snapshot and generated sidecar", value.path))?
@@ -339,7 +339,7 @@ fn __jet_bootstrap_validate_origin(
 }
 fn __jet_bootstrap_cause_to_host(
     value: &@t.DiagnosticCause@,
-    generated_source_files: &[@t.MirSourceFile@],
+    generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
 ) -> Result<::jet_foundation::Diagnostics::DiagnosticCause, String> {
     Ok(::jet_foundation::Diagnostics::DiagnosticCause {
@@ -510,86 +510,86 @@ fn __jet_bootstrap_build_error_from_host(value: &::jet_foundation::Outcome::JetE
     emit_template(
         out,
         r#"
-fn __jet_bootstrap_decision_to_host(value: &@t.MirDecisionRow@) -> Result<::jet_foundation::MIR::MirDecisionRow, String> {
-    let kind = match &value.@f.MirDecisionRow.kind@ {
-        @v.MirDecisionKind.Tier@ => ::jet_foundation::MIR::MirDecisionKind::Tier,
-        @v.MirDecisionKind.Inline@ => ::jet_foundation::MIR::MirDecisionKind::Inline,
-        @v.MirDecisionKind.Vectorize@ => ::jet_foundation::MIR::MirDecisionKind::Vectorize,
-        @v.MirDecisionKind.Parallel@ => ::jet_foundation::MIR::MirDecisionKind::Parallel,
-        @v.MirDecisionKind.Copy@ => ::jet_foundation::MIR::MirDecisionKind::Copy,
-        @v.MirDecisionKind.Bounds@ => ::jet_foundation::MIR::MirDecisionKind::Bounds,
-        @v.MirDecisionKind.Deopt@ => ::jet_foundation::MIR::MirDecisionKind::Deopt,
-        @v.MirDecisionKind.Unreachable@ => ::jet_foundation::MIR::MirDecisionKind::Unreachable,
-        @v.MirDecisionKind.LoopInvariant@ => ::jet_foundation::MIR::MirDecisionKind::LoopInvariant,
+fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_foundation::MIR::MirDecisionRow, String> {
+    let kind = match &value.@f.MIRDecisionRow.kind@ {
+        @v.MIRDecisionKind.Tier@ => ::jet_foundation::MIR::MirDecisionKind::Tier,
+        @v.MIRDecisionKind.Inline@ => ::jet_foundation::MIR::MirDecisionKind::Inline,
+        @v.MIRDecisionKind.Vectorize@ => ::jet_foundation::MIR::MirDecisionKind::Vectorize,
+        @v.MIRDecisionKind.Parallel@ => ::jet_foundation::MIR::MirDecisionKind::Parallel,
+        @v.MIRDecisionKind.Copy@ => ::jet_foundation::MIR::MirDecisionKind::Copy,
+        @v.MIRDecisionKind.Bounds@ => ::jet_foundation::MIR::MirDecisionKind::Bounds,
+        @v.MIRDecisionKind.Deopt@ => ::jet_foundation::MIR::MirDecisionKind::Deopt,
+        @v.MIRDecisionKind.Unreachable@ => ::jet_foundation::MIR::MirDecisionKind::Unreachable,
+        @v.MIRDecisionKind.LoopInvariant@ => ::jet_foundation::MIR::MirDecisionKind::LoopInvariant,
     };
-    let disposition = match &value.@f.MirDecisionRow.disposition@ {
-        @v.MirDecisionDisposition.Accepted@ => ::jet_foundation::MIR::MirDecisionDisposition::Accepted,
-        @v.MirDecisionDisposition.Rejected@ => ::jet_foundation::MIR::MirDecisionDisposition::Rejected,
-        @v.MirDecisionDisposition.Selected@ => ::jet_foundation::MIR::MirDecisionDisposition::Selected,
-        @v.MirDecisionDisposition.NotAttempted@ => ::jet_foundation::MIR::MirDecisionDisposition::NotAttempted,
-        @v.MirDecisionDisposition.Unavailable@ => ::jet_foundation::MIR::MirDecisionDisposition::Unavailable,
+    let disposition = match &value.@f.MIRDecisionRow.disposition@ {
+        @v.MIRDecisionDisposition.Accepted@ => ::jet_foundation::MIR::MirDecisionDisposition::Accepted,
+        @v.MIRDecisionDisposition.Rejected@ => ::jet_foundation::MIR::MirDecisionDisposition::Rejected,
+        @v.MIRDecisionDisposition.Selected@ => ::jet_foundation::MIR::MirDecisionDisposition::Selected,
+        @v.MIRDecisionDisposition.NotAttempted@ => ::jet_foundation::MIR::MirDecisionDisposition::NotAttempted,
+        @v.MIRDecisionDisposition.Unavailable@ => ::jet_foundation::MIR::MirDecisionDisposition::Unavailable,
     };
-    let function = match value.@f.MirDecisionRow.function@.as_ref().ok() {
-        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(__jet_bootstrap_int_u64(&function.@f.MirFunctionId.value@, "decision function ID")?)),
+    let function = match value.@f.MIRDecisionRow.function@.as_ref().ok() {
+        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(__jet_bootstrap_int_u64(&function.@f.MIRFunctionID.value@, "decision function ID")?)),
         None => None,
     };
-    let edit = match value.@f.MirDecisionRow.edit@.as_ref().ok() {
+    let edit = match value.@f.MIRDecisionRow.edit@.as_ref().ok() {
         Some(edit) => Some(::jet_foundation::MIR::MirDecisionEdit {
-            span: __jet_bootstrap_span_to_host(&edit.@f.MirDecisionEdit.span@)?,
-            replacement: edit.@f.MirDecisionEdit.replacement@.clone(),
+            span: __jet_bootstrap_span_to_host(&edit.@f.MIRDecisionEdit.span@)?,
+            replacement: edit.@f.MIRDecisionEdit.replacement@.clone(),
         }),
         None => None,
     };
-    let derivation = match value.@f.MirDecisionRow.derivation@.as_ref().ok() {
-        Some(derivation) => Some(::jet_foundation::FactsDerivation::DerivationRef { id: derivation.@f.MirDerivationRef.id@.clone() }),
+    let derivation = match value.@f.MIRDecisionRow.derivation@.as_ref().ok() {
+        Some(derivation) => Some(::jet_foundation::FactsDerivation::DerivationRef { id: derivation.@f.MIRDerivationRef.id@.clone() }),
         None => None,
     };
-    let identity = match value.@f.MirDecisionRow.identity@.as_ref().ok() {
+    let identity = match value.@f.MIRDecisionRow.identity@.as_ref().ok() {
         Some(identity) => Some(::jet_foundation::MIR::MirDecisionIdentity {
-            source: identity.@f.MirDecisionIdentity.source@.clone(),
-            configuration: identity.@f.MirDecisionIdentity.configuration@.clone(),
-            profile: identity.@f.MirDecisionIdentity.profile@.clone(),
-            target: identity.@f.MirDecisionIdentity.target@.clone(),
-            implementation: identity.@f.MirDecisionIdentity.implementation@.clone(),
-            artifact: identity.@f.MirDecisionIdentity.artifact@.clone(),
-            run: identity.@f.MirDecisionIdentity.run@.clone(),
+            source: identity.@f.MIRDecisionIdentity.source@.clone(),
+            configuration: identity.@f.MIRDecisionIdentity.configuration@.clone(),
+            profile: identity.@f.MIRDecisionIdentity.profile@.clone(),
+            target: identity.@f.MIRDecisionIdentity.target@.clone(),
+            implementation: identity.@f.MIRDecisionIdentity.implementation@.clone(),
+            artifact: identity.@f.MIRDecisionIdentity.artifact@.clone(),
+            run: identity.@f.MIRDecisionIdentity.run@.clone(),
         }),
         None => None,
     };
-    let evidence_method = match value.@f.MirDecisionRow.evidence_method@.as_ref().ok() {
+    let evidence_method = match value.@f.MIRDecisionRow.evidence_method@.as_ref().ok() {
         Some(method) => Some(match method {
-            @v.MirDerivationMethod.StaticDerivation@ => ::jet_foundation::FactsDerivation::DerivationMethod::StaticDerivation,
-            @v.MirDerivationMethod.FormalProof@ => ::jet_foundation::FactsDerivation::DerivationMethod::FormalProof,
-            @v.MirDerivationMethod.RecordedExecution@ => ::jet_foundation::FactsDerivation::DerivationMethod::RecordedExecution,
-            @v.MirDerivationMethod.SampledAgreement@ => ::jet_foundation::FactsDerivation::DerivationMethod::SampledAgreement,
-            @v.MirDerivationMethod.ExternalAssumption@ => ::jet_foundation::FactsDerivation::DerivationMethod::ExternalAssumption,
+            @v.MIRDerivationMethod.StaticDerivation@ => ::jet_foundation::FactsDerivation::DerivationMethod::StaticDerivation,
+            @v.MIRDerivationMethod.FormalProof@ => ::jet_foundation::FactsDerivation::DerivationMethod::FormalProof,
+            @v.MIRDerivationMethod.RecordedExecution@ => ::jet_foundation::FactsDerivation::DerivationMethod::RecordedExecution,
+            @v.MIRDerivationMethod.SampledAgreement@ => ::jet_foundation::FactsDerivation::DerivationMethod::SampledAgreement,
+            @v.MIRDerivationMethod.ExternalAssumption@ => ::jet_foundation::FactsDerivation::DerivationMethod::ExternalAssumption,
         }),
         None => None,
     };
-    let derivation_disposition = match value.@f.MirDecisionRow.derivation_disposition@.as_ref().ok() {
+    let derivation_disposition = match value.@f.MIRDecisionRow.derivation_disposition@.as_ref().ok() {
         Some(disposition) => Some(match disposition {
-            @v.MirDerivationDisposition.Current@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Current,
-            @v.MirDerivationDisposition.Stale@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Stale,
-            @v.MirDerivationDisposition.Expired@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Expired,
-            @v.MirDerivationDisposition.Redacted@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Redacted,
-            @v.MirDerivationDisposition.Unavailable@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Unavailable,
-            @v.MirDerivationDisposition.Unsupported@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Unsupported,
-            @v.MirDerivationDisposition.BudgetExhausted@ => ::jet_foundation::FactsDerivation::DerivationDisposition::BudgetExhausted,
-            @v.MirDerivationDisposition.Unknown@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Unknown,
+            @v.MIRDerivationDisposition.Current@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Current,
+            @v.MIRDerivationDisposition.Stale@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Stale,
+            @v.MIRDerivationDisposition.Expired@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Expired,
+            @v.MIRDerivationDisposition.Redacted@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Redacted,
+            @v.MIRDerivationDisposition.Unavailable@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Unavailable,
+            @v.MIRDerivationDisposition.Unsupported@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Unsupported,
+            @v.MIRDerivationDisposition.BudgetExhausted@ => ::jet_foundation::FactsDerivation::DerivationDisposition::BudgetExhausted,
+            @v.MIRDerivationDisposition.Unknown@ => ::jet_foundation::FactsDerivation::DerivationDisposition::Unknown,
         }),
         None => None,
     };
     Ok(::jet_foundation::MIR::MirDecisionRow {
-        id: __jet_bootstrap_int_u64(&value.@f.MirDecisionRow.id@, "decision row ID")?,
+        id: __jet_bootstrap_int_u64(&value.@f.MIRDecisionRow.id@, "decision row ID")?,
         kind,
         disposition,
         function,
-        function_name: value.@f.MirDecisionRow.function_name@.clone(),
-        span: __jet_bootstrap_span_to_host(&value.@f.MirDecisionRow.span@)?,
-        rule: value.@f.MirDecisionRow.rule@.clone(),
-        reason: value.@f.MirDecisionRow.reason@.clone(),
-        producer: value.@f.MirDecisionRow.producer@.clone(),
-        evidence: value.@f.MirDecisionRow.evidence@.clone(),
+        function_name: value.@f.MIRDecisionRow.function_name@.clone(),
+        span: __jet_bootstrap_span_to_host(&value.@f.MIRDecisionRow.span@)?,
+        rule: value.@f.MIRDecisionRow.rule@.clone(),
+        reason: value.@f.MIRDecisionRow.reason@.clone(),
+        producer: value.@f.MIRDecisionRow.producer@.clone(),
+        evidence: value.@f.MIRDecisionRow.evidence@.clone(),
         edit,
         derivation,
         identity,
@@ -597,74 +597,74 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MirDecisionRow@) -> Result<::jet_
         derivation_disposition,
     })
 }
-fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecisionRow) -> Result<@t.MirDecisionRow@, String> {
-    Ok(@t.MirDecisionRow@ {
-        @f.MirDecisionRow.id@: __jet_bootstrap_u64_int(value.id, "decision row ID")?,
-        @f.MirDecisionRow.kind@: match value.kind {
-            ::jet_foundation::MIR::MirDecisionKind::Tier => @v.MirDecisionKind.Tier@,
-            ::jet_foundation::MIR::MirDecisionKind::Inline => @v.MirDecisionKind.Inline@,
-            ::jet_foundation::MIR::MirDecisionKind::Vectorize => @v.MirDecisionKind.Vectorize@,
-            ::jet_foundation::MIR::MirDecisionKind::Parallel => @v.MirDecisionKind.Parallel@,
-            ::jet_foundation::MIR::MirDecisionKind::Copy => @v.MirDecisionKind.Copy@,
-            ::jet_foundation::MIR::MirDecisionKind::Bounds => @v.MirDecisionKind::Bounds@,
-            ::jet_foundation::MIR::MirDecisionKind::Deopt => @v.MirDecisionKind.Deopt@,
-            ::jet_foundation::MIR::MirDecisionKind::Unreachable => @v.MirDecisionKind.Unreachable@,
-            ::jet_foundation::MIR::MirDecisionKind::LoopInvariant => @v.MirDecisionKind::LoopInvariant@,
+fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecisionRow) -> Result<@t.MIRDecisionRow@, String> {
+    Ok(@t.MIRDecisionRow@ {
+        @f.MIRDecisionRow.id@: __jet_bootstrap_u64_int(value.id, "decision row ID")?,
+        @f.MIRDecisionRow.kind@: match value.kind {
+            ::jet_foundation::MIR::MirDecisionKind::Tier => @v.MIRDecisionKind.Tier@,
+            ::jet_foundation::MIR::MirDecisionKind::Inline => @v.MIRDecisionKind.Inline@,
+            ::jet_foundation::MIR::MirDecisionKind::Vectorize => @v.MIRDecisionKind.Vectorize@,
+            ::jet_foundation::MIR::MirDecisionKind::Parallel => @v.MIRDecisionKind.Parallel@,
+            ::jet_foundation::MIR::MirDecisionKind::Copy => @v.MIRDecisionKind.Copy@,
+            ::jet_foundation::MIR::MirDecisionKind::Bounds => @v.MIRDecisionKind.Bounds@,
+            ::jet_foundation::MIR::MirDecisionKind::Deopt => @v.MIRDecisionKind.Deopt@,
+            ::jet_foundation::MIR::MirDecisionKind::Unreachable => @v.MIRDecisionKind.Unreachable@,
+            ::jet_foundation::MIR::MirDecisionKind::LoopInvariant => @v.MIRDecisionKind.LoopInvariant@,
         },
-        @f.MirDecisionRow.disposition@: match value.disposition {
-            ::jet_foundation::MIR::MirDecisionDisposition::Accepted => @v.MirDecisionDisposition.Accepted@,
-            ::jet_foundation::MIR::MirDecisionDisposition::Rejected => @v.MirDecisionDisposition.Rejected@,
-            ::jet_foundation::MIR::MirDecisionDisposition::Selected => @v.MirDecisionDisposition.Selected@,
-            ::jet_foundation::MIR::MirDecisionDisposition::NotAttempted => @v.MirDecisionDisposition.NotAttempted@,
-            ::jet_foundation::MIR::MirDecisionDisposition::Unavailable => @v.MirDecisionDisposition.Unavailable@,
+        @f.MIRDecisionRow.disposition@: match value.disposition {
+            ::jet_foundation::MIR::MirDecisionDisposition::Accepted => @v.MIRDecisionDisposition.Accepted@,
+            ::jet_foundation::MIR::MirDecisionDisposition::Rejected => @v.MIRDecisionDisposition.Rejected@,
+            ::jet_foundation::MIR::MirDecisionDisposition::Selected => @v.MIRDecisionDisposition.Selected@,
+            ::jet_foundation::MIR::MirDecisionDisposition::NotAttempted => @v.MIRDecisionDisposition.NotAttempted@,
+            ::jet_foundation::MIR::MirDecisionDisposition::Unavailable => @v.MIRDecisionDisposition.Unavailable@,
         },
-        @f.MirDecisionRow.function@: match value.function {
-            Some(function) => Ok(@t.MirFunctionId@ { @f.MirFunctionId.value@: __jet_bootstrap_u64_int(function.0, "decision function ID")? }),
+        @f.MIRDecisionRow.function@: match value.function {
+            Some(function) => Ok(@t.MIRFunctionID@ { @f.MIRFunctionID.value@: __jet_bootstrap_u64_int(function.0, "decision function ID")? }),
             None => Err(::jet_foundation::Outcome::JetAbsent),
         },
-        @f.MirDecisionRow.function_name@: value.function_name.clone(),
-        @f.MirDecisionRow.span@: __jet_bootstrap_span_from_host(&value.span)?,
-        @f.MirDecisionRow.rule@: value.rule.clone(),
-        @f.MirDecisionRow.reason@: value.reason.clone(),
-        @f.MirDecisionRow.producer@: value.producer.clone(),
-        @f.MirDecisionRow.evidence@: value.evidence.clone(),
-        @f.MirDecisionRow.edit@: match value.edit.as_ref() {
-            Some(edit) => Ok(@t.MirDecisionEdit@ { @f.MirDecisionEdit.span@: __jet_bootstrap_span_from_host(&edit.span)?, @f.MirDecisionEdit.replacement@: edit.replacement.clone() }),
+        @f.MIRDecisionRow.function_name@: value.function_name.clone(),
+        @f.MIRDecisionRow.span@: __jet_bootstrap_span_from_host(&value.span)?,
+        @f.MIRDecisionRow.rule@: value.rule.clone(),
+        @f.MIRDecisionRow.reason@: value.reason.clone(),
+        @f.MIRDecisionRow.producer@: value.producer.clone(),
+        @f.MIRDecisionRow.evidence@: value.evidence.clone(),
+        @f.MIRDecisionRow.edit@: match value.edit.as_ref() {
+            Some(edit) => Ok(@t.MIRDecisionEdit@ { @f.MIRDecisionEdit.span@: __jet_bootstrap_span_from_host(&edit.span)?, @f.MIRDecisionEdit.replacement@: edit.replacement.clone() }),
             None => Err(::jet_foundation::Outcome::JetAbsent),
         },
-        @f.MirDecisionRow.derivation@: match value.derivation.as_ref() {
-            Some(derivation) => Ok(@t.MirDerivationRef@ { @f.MirDerivationRef.id@: derivation.id.clone() }),
+        @f.MIRDecisionRow.derivation@: match value.derivation.as_ref() {
+            Some(derivation) => Ok(@t.MIRDerivationRef@ { @f.MIRDerivationRef.id@: derivation.id.clone() }),
             None => Err(::jet_foundation::Outcome::JetAbsent),
         },
-        @f.MirDecisionRow.identity@: match value.identity.as_ref() {
-            Some(identity) => Ok(@t.MirDecisionIdentity@ {
-                @f.MirDecisionIdentity.source@: identity.source.clone(), @f.MirDecisionIdentity.configuration@: identity.configuration.clone(),
-                @f.MirDecisionIdentity.profile@: identity.profile.clone(), @f.MirDecisionIdentity.target@: identity.target.clone(),
-                @f.MirDecisionIdentity.implementation@: identity.implementation.clone(), @f.MirDecisionIdentity.artifact@: identity.artifact.clone(),
-                @f.MirDecisionIdentity.run@: identity.run.clone(),
+        @f.MIRDecisionRow.identity@: match value.identity.as_ref() {
+            Some(identity) => Ok(@t.MIRDecisionIdentity@ {
+                @f.MIRDecisionIdentity.source@: identity.source.clone(), @f.MIRDecisionIdentity.configuration@: identity.configuration.clone(),
+                @f.MIRDecisionIdentity.profile@: identity.profile.clone(), @f.MIRDecisionIdentity.target@: identity.target.clone(),
+                @f.MIRDecisionIdentity.implementation@: identity.implementation.clone(), @f.MIRDecisionIdentity.artifact@: identity.artifact.clone(),
+                @f.MIRDecisionIdentity.run@: identity.run.clone(),
             }),
             None => Err(::jet_foundation::Outcome::JetAbsent),
         },
-        @f.MirDecisionRow.evidence_method@: match value.evidence_method {
+        @f.MIRDecisionRow.evidence_method@: match value.evidence_method {
             Some(method) => Ok(match method {
-                ::jet_foundation::FactsDerivation::DerivationMethod::StaticDerivation => @v.MirDerivationMethod.StaticDerivation@,
-                ::jet_foundation::FactsDerivation::DerivationMethod::FormalProof => @v.MirDerivationMethod.FormalProof@,
-                ::jet_foundation::FactsDerivation::DerivationMethod::RecordedExecution => @v.MirDerivationMethod.RecordedExecution@,
-                ::jet_foundation::FactsDerivation::DerivationMethod::SampledAgreement => @v.MirDerivationMethod.SampledAgreement@,
-                ::jet_foundation::FactsDerivation::DerivationMethod::ExternalAssumption => @v.MirDerivationMethod.ExternalAssumption@,
+                ::jet_foundation::FactsDerivation::DerivationMethod::StaticDerivation => @v.MIRDerivationMethod.StaticDerivation@,
+                ::jet_foundation::FactsDerivation::DerivationMethod::FormalProof => @v.MIRDerivationMethod.FormalProof@,
+                ::jet_foundation::FactsDerivation::DerivationMethod::RecordedExecution => @v.MIRDerivationMethod.RecordedExecution@,
+                ::jet_foundation::FactsDerivation::DerivationMethod::SampledAgreement => @v.MIRDerivationMethod.SampledAgreement@,
+                ::jet_foundation::FactsDerivation::DerivationMethod::ExternalAssumption => @v.MIRDerivationMethod.ExternalAssumption@,
             }),
             None => Err(::jet_foundation::Outcome::JetAbsent),
         },
-        @f.MirDecisionRow.derivation_disposition@: match value.derivation_disposition {
+        @f.MIRDecisionRow.derivation_disposition@: match value.derivation_disposition {
             Some(disposition) => Ok(match disposition {
-                ::jet_foundation::FactsDerivation::DerivationDisposition::Current => @v.MirDerivationDisposition.Current@,
-                ::jet_foundation::FactsDerivation::DerivationDisposition::Stale => @v.MirDerivationDisposition.Stale@,
-                ::jet_foundation::FactsDerivation::DerivationDisposition::Expired => @v.MirDerivationDisposition.Expired@,
-                ::jet_foundation::FactsDerivation::DerivationDisposition::Redacted => @v.MirDerivationDisposition.Redacted@,
-                ::jet_foundation::FactsDerivation::DerivationDisposition::Unavailable => @v.MirDerivationDisposition.Unavailable@,
-                ::jet_foundation::FactsDerivation::DerivationDisposition::Unsupported => @v.MirDerivationDisposition.Unsupported@,
-                ::jet_foundation::FactsDerivation::DerivationDisposition::BudgetExhausted => @v.MirDerivationDisposition::BudgetExhausted@,
-                ::jet_foundation::FactsDerivation::DerivationDisposition::Unknown => @v.MirDerivationDisposition::Unknown@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::Current => @v.MIRDerivationDisposition.Current@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::Stale => @v.MIRDerivationDisposition.Stale@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::Expired => @v.MIRDerivationDisposition.Expired@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::Redacted => @v.MIRDerivationDisposition.Redacted@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::Unavailable => @v.MIRDerivationDisposition.Unavailable@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::Unsupported => @v.MIRDerivationDisposition.Unsupported@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::BudgetExhausted => @v.MIRDerivationDisposition.BudgetExhausted@,
+                ::jet_foundation::FactsDerivation::DerivationDisposition::Unknown => @v.MIRDerivationDisposition.Unknown@,
             }),
             None => Err(::jet_foundation::Outcome::JetAbsent),
         },
@@ -773,7 +773,7 @@ fn __jet_bootstrap_safety_to_host(value: &@t.DiagnosticFixSafety@) -> ::jet_foun
     match value {
         @v.DiagnosticFixSafety.Formatting@ => ::jet_foundation::Report::FixSafety::Formatting,
         @v.DiagnosticFixSafety.BehaviorPreserving@ => ::jet_foundation::Report::FixSafety::BehaviorPreserving,
-        @v.DiagnosticFixSafety.ApiChanging@ => ::jet_foundation::Report::FixSafety::ApiChanging,
+        @v.DiagnosticFixSafety.APIChanging@ => ::jet_foundation::Report::FixSafety::ApiChanging,
         @v.DiagnosticFixSafety.TargetChanging@ => ::jet_foundation::Report::FixSafety::TargetChanging,
         @v.DiagnosticFixSafety.NeedsReview@ => ::jet_foundation::Report::FixSafety::NeedsReview,
     }
@@ -782,7 +782,7 @@ fn __jet_bootstrap_safety_from_host(value: ::jet_foundation::Report::FixSafety) 
     match value {
         ::jet_foundation::Report::FixSafety::Formatting => @v.DiagnosticFixSafety.Formatting@,
         ::jet_foundation::Report::FixSafety::BehaviorPreserving => @v.DiagnosticFixSafety.BehaviorPreserving@,
-        ::jet_foundation::Report::FixSafety::ApiChanging => @v.DiagnosticFixSafety.ApiChanging@,
+        ::jet_foundation::Report::FixSafety::ApiChanging => @v.DiagnosticFixSafety.APIChanging@,
         ::jet_foundation::Report::FixSafety::TargetChanging => @v.DiagnosticFixSafety.TargetChanging@,
         ::jet_foundation::Report::FixSafety::NeedsReview => @v.DiagnosticFixSafety.NeedsReview@,
     }
@@ -886,7 +886,7 @@ fn __jet_bootstrap_validate_diagnostic_channel(
 }
 fn __jet_bootstrap_diagnostic_to_host_with_sources(
     diagnostic: &@t.Diagnostic@,
-    generated_source_files: &[@t.MirSourceFile@],
+    generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
 ) -> Result<::jet_foundation::Diagnostics::Diagnostic, String> {
     let code = diagnostic.@f.Diagnostic.code@.clone();
@@ -923,7 +923,7 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
             .map_err(|_| "diagnostic source start exceeds usize".to_string())?;
         let mut generated = None;
         for file in generated_source_files {
-            if file.@f.MirSourceFile.path@ == *source_path {
+            if file.@f.MIRSourceFile.path@ == *source_path {
                 if generated.is_some() {
                     return Err(format!("Jet generated diagnostic source path `{source_path}` is ambiguous"));
                 }
@@ -945,11 +945,11 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
             return Err(format!("Jet generated diagnostic source path `{source_path}` collides with an authorized disk source"));
         }
         if let Some(file) = generated {
-            report_source = file.@f.MirSourceFile.source@.as_str();
+            report_source = file.@f.MIRSourceFile.source@.as_str();
             origin = Some(::std::sync::Arc::new(::jet_foundation::Diagnostics::DiagnosticOrigin::new(
-                file.@f.MirSourceFile.path@.clone(),
-                file.@f.MirSourceFile.path@.clone(),
-                file.@f.MirSourceFile.source@.clone(),
+                file.@f.MIRSourceFile.path@.clone(),
+                file.@f.MIRSourceFile.path@.clone(),
+                file.@f.MIRSourceFile.source@.clone(),
             )));
             generated_origin = true;
         } else {

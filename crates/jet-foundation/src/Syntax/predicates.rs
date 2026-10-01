@@ -52,6 +52,10 @@ pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
 // keys (jet_pkg_model::Package), not language tokens; effect names reuse D-EFF4.
 // D-ANY-JAI1 + D-VARARGBOUND1: reuses D-VARIADIC1 `...T`; multi-trait
 // bounds use the owner-amended list form (`T: [A, B]`, `...items: [A, B]`).
+// D-TRAIT-OVERLOAD1=A: no new token — `trait Name: [A, B] { … }` reuses the
+// D-VARARGBOUND1 bound list after a trait name to list the traits it builds
+// on (a single one stays bare: `trait Name: A`). A bound on such a trait
+// admits the listed traits' operators and methods in generic bodies.
 // D-UFCS1 (B), D-POINTERCHAIN1 (A), D-ERRCTX1 (D): no typeable surface.
 
 // ── Module name resolution helpers ───────────────────────────────────────────

@@ -45,12 +45,15 @@ use jet_foundation::MIR::{
     MirHardwareOp, MirHardwareSetup, MirHarnessId, MirIndexKind, MirInstruction, MirJobId,
     MirLinkUnitId,
     MirLoopSourceKind, MirOperation, MirOwnershipMode, MirPanicContext, MirPanicLoc, MirPlaceBase,
-    MirPlaceId, MirPreludeCall, MirPreludeCallId, MirProjection, MirRequireKind, MirScopeId,
+    MirPayloadKind, MirPlaceId, MirPreludeCall, MirPreludeCallId, MirProjection, MirRequireKind,
+    MirScopeId,
     MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSourceFileId, MirStringPart, MirTagMarker,
     MirInternalTag, MirTaskGroupKind, MirTerminator, MirTestScopeMember, MirTextHoleKind,
     MirTextPatternPart, MirTraitMethodId, MirTraitRef, MirType, MirTypeDefKind, MirTypeKind,
     MirUnaryOp, MirValueId, MirVariantPayload, MirViewCopyKind, mir_view_copy_kind,
 };
+mod PureFold;
+pub(crate) use PureFold::fold_pure_calls;
 #[allow(dead_code, unused_imports)]
 mod mir_ui_kernel {
     use jet_foundation::Devtools::{JetDevtoolsEnvelope, JetDevtoolsViewState};
@@ -224,20 +227,20 @@ fn mir_ui_present(value: Option<&CtValue>) -> Option<&CtValue> {
 
 fn mir_ui_node(value: &CtValue, span: Span) -> Result<mir_ui_kernel::JetUiNode, Diagnostic> {
     let CtValue::Struct { type_name, .. } = value else {
-        return Err(mir_error_at("MIR UI backend expects a UiNode", span));
+        return Err(mir_error_at("MIR UI backend expects a UINode", span));
     };
-    if type_name != "UiNode" {
-        return Err(mir_error_at("MIR UI backend expects a UiNode", span));
+    if type_name != "UINode" {
+        return Err(mir_error_at("MIR UI backend expects a UINode", span));
     }
     let label = match mir_ui_field(value, "label") {
         Some(CtValue::Str(value)) => value.clone(),
-        _ => return Err(mir_error_at("MIR UiNode has no String label", span)),
+        _ => return Err(mir_error_at("MIR UINode has no String label", span)),
     };
     let width = mir_ui_field(value, "width")
-        .ok_or_else(|| mir_error_at("MIR UiNode has no width", span))
+        .ok_or_else(|| mir_error_at("MIR UINode has no width", span))
         .and_then(|value| mir_ui_float(value, span))?;
     let height = mir_ui_field(value, "height")
-        .ok_or_else(|| mir_error_at("MIR UiNode has no height", span))
+        .ok_or_else(|| mir_error_at("MIR UINode has no height", span))
         .and_then(|value| mir_ui_float(value, span))?;
     let role = match mir_ui_present(mir_ui_field(value, "role")) {
         Some(CtValue::Enum { variant, .. }) => match variant.as_str() {
@@ -1117,15 +1120,6 @@ pub mod game_dev_protocol {
 
     pub fn game_debug_data_enabled(policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy) -> bool {
         !policy.is_release()
-    }
-
-    pub fn enqueue_control_payload(session_id: &str, payload: &str) -> Result<(), String> {
-        let request = jet_game_decode_control_request(session_id, payload)?;
-        jet_devtools_enqueue_game_control(request)
-    }
-
-    pub fn ingest_command_frame(frame: &str, session_id: &str) -> Result<usize, String> {
-        jet_game_ingest_devtools_command_frame(frame, session_id)
     }
 }
 
@@ -2498,15 +2492,6 @@ impl ArrowProviderBridgeGuard {
     }
 }
 
-/// Execute one stable MIR function ID with the default target configuration.
-pub fn evaluate_mir_function(
-    program: &jet_foundation::MIR::MirProgram,
-    function: MirFunctionId,
-    args: &[MirValue],
-) -> Result<MirEvalResult, MirEvalError> {
-    evaluate_mir_function_with_config(program, function, args, &MirEvalConfig::default())
-}
-
 /// Execute one stable MIR function ID after the caller has selected target and
 /// host capability facts.
 pub fn evaluate_mir_function_with_config(
@@ -2521,30 +2506,6 @@ pub fn evaluate_mir_function_with_config(
             None,
         ))
     })?;
-    evaluate_function_with_config(program, function, args, config)
-}
-
-/// Execute one stable MIR function ID with a caller-selected artifact.
-///
-/// The artifact supplies the scoped provider/library lease used by callbacks
-/// that perform data reads. The guard drops before this function returns, so
-/// an existing resident provider remains installed and owned by its caller.
-pub fn evaluate_mir_function_with_artifact_config(
-    program: &jet_foundation::MIR::MirProgram,
-    artifact: MirArtifactId,
-    function: MirFunctionId,
-    args: &[MirValue],
-    config: &MirEvalConfig,
-) -> Result<MirEvalResult, MirEvalError> {
-    jet_foundation::MIR::require_canonical_mir_optimization(program).map_err(|error| {
-        MirEvalError::from(mir_error(
-            &format!("MIR optimization precondition failed: {error}"),
-            None,
-        ))
-    })?;
-    let selection = select_artifact_for_eval(program, artifact)?;
-    let _arrow_provider =
-        ArrowProviderBridgeGuard::prepare(program, &selection).map_err(MirEvalError::from)?;
     evaluate_function_with_config(program, function, args, config)
 }
 
@@ -6546,6 +6507,35 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         ))))
     }
 
+    fn eval_range_cursor(
+        &mut self,
+        start: i64,
+        end: i64,
+        step: Option<i64>,
+        exclusive: bool,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let cursor = crate::Comptime::CollectionEval::LoopRangeCursor::new(
+            start, end, step, exclusive,
+        )
+        .map_err(|message| {
+            if self.config.runtime_execution {
+                self.located_runtime_stop("E3001", "<core.prelude>", 0, message, span)
+            } else {
+                crate::Comptime::comptime_panic(message, span)
+            }
+        })?;
+        let source = Rc::new(RefCell::new(MirInterpreterStream::Range { cursor }));
+        let current = mir_stream_pull_handle(&source, self, span)?;
+        Ok(RuntimeValue::StreamCursor(Rc::new(RefCell::new(
+            MirInterpreterStreamCursor {
+                source,
+                current,
+                step: 1,
+            },
+        ))))
+    }
+
     fn eval_operation(
         &mut self,
         frame_index: usize,
@@ -6962,7 +6952,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         type_name,
                         variant: actual,
                         ..
-                    } if type_name == &owner && variant_name_matches(actual, variant),
+                    } if enum_owner_matches(self.program, type_name, &owner)
+                        && variant_name_matches(actual, variant),
                 );
                 Ok(RuntimeValue::Data(MirEvalValue::Bool(matched)))
             }
@@ -6985,7 +6976,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     ));
                 };
-                if type_name != owner || !variant_name_matches(&actual, variant) {
+                if !enum_owner_matches(self.program, &type_name, &owner)
+                    || !variant_name_matches(&actual, variant)
+                {
                     return Err(mir_error_at(
                         "MIR enum payload variant does not match",
                         span,
@@ -7513,25 +7506,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         )
                     })
                     .transpose()?;
-                let cursor = crate::Comptime::CollectionEval::LoopRangeCursor::new(
-                    start, end, step, *exclusive,
-                )
-                .map_err(|message| {
-                    if self.config.runtime_execution {
-                        self.located_runtime_stop("E3001", "<core.prelude>", 0, message, span)
-                    } else {
-                        crate::Comptime::comptime_panic(message, span)
-                    }
-                })?;
-                let source = Rc::new(RefCell::new(MirInterpreterStream::Range { cursor }));
-                let current = mir_stream_pull_handle(&source, self, span)?;
-                Ok(RuntimeValue::StreamCursor(Rc::new(RefCell::new(
-                    MirInterpreterStreamCursor {
-                        source,
-                        current,
-                        step: 1,
-                    },
-                ))))
+                self.eval_range_cursor(start, end, step, *exclusive, span)
             }
             MirOperation::LoopRangeHasNext { call, cursor }
             | MirOperation::LoopIterHasNext { call, cursor } => {
@@ -7779,6 +7754,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             })
                             .collect();
                         return self.eval_plain_list_cursor(values, step_value, span);
+                    }
+                    // A `Range` value (a parameter or binding, not a literal
+                    // `a..b` header) walks the same cursor as `LoopRangeInit`.
+                    (MirLoopSourceKind::Plain, RuntimeValue::Data(range @ MirEvalValue::Struct { .. }))
+                        if matches!(&range, MirEvalValue::Struct { type_name, .. } if type_name == crate::Syntax::TYPE_RANGE) =>
+                    {
+                        let (start, end, exclusive) = mir_range_parts(&range, span)?;
+                        let step = step_value
+                            .map(|value| int_value(value, span))
+                            .transpose()?;
+                        return self.eval_range_cursor(start, end, step, exclusive, span);
                     }
                     (_, value) => value,
                 };
@@ -9972,6 +9958,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             | "Shared.capture_with"
                             | "Shared.capture_txn"
                             | "Shared.try_replace"
+                            | "Shared.same"
                             | "Shared.read_txn"
                             | "Shared.edit_txn"
                             | "SharedSnapshot.value"
@@ -10410,6 +10397,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         crate::Comptime::Builtins::apply_method(&receiver, method, values, span)?;
                     return runtime_from_ct(result, span);
                 }
+                // `Path.home()` is receiver-free: the TIR handle method carries
+                // a Unit placeholder receiver the nullary Prelude row never takes.
+                if route.member == "path.home" {
+                    if !args.is_empty() {
+                        return Err(mir_error_at(
+                            "MIR path.home handle method received unexpected arguments",
+                            span,
+                        ));
+                    }
+                    return self.eval_prelude_runtime_values(*call, Vec::new(), result_ty, span);
+                }
                 if route.module == "core.transaction" && route.member == "commit" {
                     if !args.is_empty() {
                         return Err(mir_error_at(
@@ -10725,8 +10723,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 if route.family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
                     && route.module == "core.handle"
-                    && route.member.starts_with("reader.")
-                    && route.member != "reader.over"
+                    && ((route.member.starts_with("reader.") && route.member != "reader.over")
+                        || (route.member.starts_with("cursor.") && route.member != "cursor.over"))
                 {
                     let mut values = Vec::with_capacity(args.len() + 1);
                     values.push(receiver_value.clone());
@@ -11773,7 +11771,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             MirCoreClosureKind::UiPreview { .. } => {
                 if values.len() != 2 {
                     return Err(mir_error_at(
-                        "MIR UiPreview CoreClosureCall expects name and viewport values",
+                        "MIR UIPreview CoreClosureCall expects name and viewport values",
                         span,
                     ));
                 }
@@ -12504,10 +12502,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .find_map(|scope| frame.shared_transactions.get(scope).cloned())
     }
 
+    /// The STM operand is a write borrow of the transaction's `stm` local, so
+    /// it arrives as an address into the frame that opened the transaction.
     fn shared_transaction_handle(
+        &mut self,
         value: RuntimeValue,
         span: Span,
     ) -> Result<Rc<MirSharedTransaction>, Diagnostic> {
+        let value = match value {
+            RuntimeValue::Address(address) => {
+                require_address_access(&address, MirAccess::Write, span)?;
+                self.read_place(address.frame, address.place, span)?
+            }
+            value => value,
+        };
         match value {
             RuntimeValue::SharedTransaction(transaction) => Ok(transaction),
             _ => Err(mir_error_at(
@@ -12958,7 +12966,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             _ => None,
         };
         let Some(index) = index else {
-            return Err(mir_error_at("MIR Pool index is not a valid Id", span));
+            return Err(mir_error_at("MIR Pool index is not a valid ID", span));
         };
         let value = {
             let pool = pool.lock().unwrap_or_else(|error| error.into_inner());
@@ -13404,6 +13412,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     storage.replace(value, span).map(RuntimeValue::Data)
                 }
             }
+            "Shared.same" => {
+                let other = args.next().ok_or_else(|| {
+                    mir_error_at("MIR Shared.same is missing its other handle", span)
+                })?;
+                if args.next().is_some() {
+                    return Err(mir_error_at(
+                        "MIR Shared.same received extra arguments",
+                        span,
+                    ));
+                }
+                let other = self.shared_root_storage(other, span)?;
+                Ok(RuntimeValue::Data(MirEvalValue::Bool(Rc::ptr_eq(
+                    &storage, &other,
+                ))))
+            }
             "Shared.capture" => {
                 if args.next().is_some() {
                     return Err(mir_error_at(
@@ -13437,7 +13460,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
             }
             "Shared.capture_txn" => {
-                let transaction = Self::shared_transaction_handle(
+                let transaction = self.shared_transaction_handle(
                     args.next().ok_or_else(|| {
                         mir_error_at("MIR Shared.capture_txn is missing its STM handle", span)
                     })?,
@@ -13454,7 +13477,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .map(RuntimeValue::SharedSnapshot)
             }
             "Shared.read_txn" | "Shared.edit_txn" => {
-                let transaction = Self::shared_transaction_handle(
+                let transaction = self.shared_transaction_handle(
                     args.next().ok_or_else(|| {
                         mir_error_at(
                             "MIR Shared transaction route is missing its STM handle",
@@ -23544,6 +23567,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     });
                 }
                 MirProjection::Deref { .. } => steps.push(MoveStep::Deref),
+                MirProjection::Payload { kind, .. } => steps.push(MoveStep::Payload(kind.clone())),
+                MirProjection::Range { range, .. } => {
+                    let range = runtime_to_data(self.value(frame_index, *range, span)?, span)?;
+                    let (start, end, exclusive) = mir_range_parts(&range, span)?;
+                    steps.push(MoveStep::Range {
+                        start,
+                        end,
+                        exclusive,
+                    });
+                }
             }
         }
         Ok(steps)
@@ -23601,6 +23634,57 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         self.canonicalize_move_steps_from_type(current_ty, steps, span)
     }
 
+    /// The item count of the list a write address reaches — a range window, or
+    /// the owner's whole list — following write parameters passed onward;
+    /// `None` when the address does not end at a list the frame holds.
+    fn write_window_len(
+        &self,
+        frame_index: usize,
+        place_id: MirPlaceId,
+        span: Span,
+    ) -> Result<Option<i64>, Diagnostic> {
+        let function = program_function(self.program, self.frames[frame_index].function)?;
+        let place = function
+            .places
+            .iter()
+            .find(|place| place.id == place_id)
+            .ok_or_else(|| mir_error_at("MIR place is unavailable", span))?;
+        if matches!(place.projections.last(), Some(MirProjection::Range { .. })) {
+            let steps = self.raw_move_steps_for_place(frame_index, place_id, span)?;
+            if let Some(MoveStep::Range {
+                start,
+                end,
+                exclusive,
+            }) = steps.last()
+            {
+                let end_exclusive = if *exclusive { *end } else { end.saturating_add(1) };
+                return Ok(Some(end_exclusive.saturating_sub(*start)));
+            }
+            return Ok(None);
+        }
+        if !place.projections.is_empty() {
+            return Ok(None);
+        }
+        let frame = &self.frames[frame_index];
+        let base = match &place.base {
+            MirPlaceBase::Parameter(source) | MirPlaceBase::Capture(source) => {
+                frame.values.get(source)
+            }
+            MirPlaceBase::Local(local) => frame
+                .place_overrides
+                .get(&place_id)
+                .or_else(|| frame.locals.get(local)),
+            _ => None,
+        };
+        match base {
+            Some(RuntimeValue::Address(address)) => {
+                self.write_window_len(address.frame, address.place, span)
+            }
+            Some(RuntimeValue::Data(MirEvalValue::List(items))) => Ok(Some(items.len() as i64)),
+            _ => Ok(None),
+        }
+    }
+
     fn canonicalize_move_steps_from_type(
         &self,
         mut current_ty: MirType,
@@ -23620,13 +23704,46 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     current_ty = field_ty;
                 }
                 MoveStep::Index { value, kind } => {
+                    // An element of a range window is the owner's element
+                    // at the window's offset.
+                    let value = match canonical.last() {
+                        Some(MoveStep::Range {
+                            start,
+                            end,
+                            exclusive,
+                        }) => {
+                            let index = range_window_index(
+                                *start,
+                                *end,
+                                *exclusive,
+                                int_value(value.clone(), span)?,
+                                span,
+                            )?;
+                            canonical.pop();
+                            MirEvalValue::Int(index)
+                        }
+                        _ => value.clone(),
+                    };
                     canonical.push(MoveStep::Index {
-                        value: value.clone(),
+                        value,
                         kind: *kind,
                     });
                     current_ty = indexed_value_type(&current_ty, *kind);
                 }
                 MoveStep::Deref => canonical.push(MoveStep::Deref),
+                MoveStep::Payload(kind) => {
+                    canonical.push(MoveStep::Payload(kind.clone()));
+                    current_ty = payload_value_type(self.program, &current_ty, kind);
+                }
+                MoveStep::Range {
+                    start,
+                    end,
+                    exclusive,
+                } => canonical.push(MoveStep::Range {
+                    start: *start,
+                    end: *end,
+                    exclusive: *exclusive,
+                }),
             }
         }
         Ok(canonical)
@@ -23800,6 +23917,19 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     "MIR place dereference move requires an address or guard",
                     span,
                 )),
+            },
+            MoveStep::Range { .. } => Err(mir_error_at("MIR range window cannot be moved", span)),
+            MoveStep::Payload(kind) => match value {
+                RuntimeValue::Data(data) => {
+                    let (updated, moved) = take_data_steps(data, steps, span)?;
+                    Ok((RuntimeValue::Data(updated), RuntimeValue::Data(moved)))
+                }
+                RuntimeValue::Moved => Err(mir_error_at("MIR place value was moved", span)),
+                other => {
+                    let payload = runtime_payload(other.clone(), kind, span)?;
+                    let (replacement, moved) = self.take_runtime_steps(payload, rest, span)?;
+                    Ok((runtime_payload_replace(other, kind, replacement, span)?, moved))
+                }
             },
         }
     }
@@ -24037,6 +24167,34 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 self.eval_prelude(*call, args, None, span)
                     .map(RuntimeValue::Data)
             }
+            MirProjection::Payload { kind, .. } => runtime_payload(value, kind, span),
+            MirProjection::Range {
+                range, location, ..
+            } => {
+                let MirEvalValue::List(values) = runtime_to_data(value, span)? else {
+                    return Err(mir_error_at("MIR range window requires a list", span));
+                };
+                let range = runtime_to_data(self.value(frame_index, *range, span)?, span)?;
+                let (start, end, exclusive) = mir_range_parts(&range, span)?;
+                match mir_range_prelude::jet_checked_view_bounds(
+                    start,
+                    end,
+                    exclusive,
+                    values.len() as i64,
+                ) {
+                    Ok((start, end)) => Ok(RuntimeValue::Data(MirEvalValue::List(
+                        values[start as usize..end as usize].to_vec(),
+                    ))),
+                    Err(message) => {
+                        let MirEvalValue::String(file) =
+                            self.source_file_path(location.file, span)?
+                        else {
+                            return Err(mir_error_at("MIR source-file path is not String", span));
+                        };
+                        Err(self.located_runtime_stop("E3010", &file, location.line, &message, span))
+                    }
+                }
+            }
             MirProjection::Deref { .. } => match value {
                 RuntimeValue::SharedGuard(guard) => self.deref_shared_guard(guard, span),
                 RuntimeValue::Address(address) => {
@@ -24231,6 +24389,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             require_address_access(&address, MirAccess::Write, span)?;
             let mut steps = self.raw_move_steps_for_place(frame_index, place.id, span)?;
             steps.extend_from_slice(extra_steps);
+            // An element index outside the list a write parameter reaches (a
+            // range window or the owner's whole list) is the user's index
+            // stop, as on AOT and the JIT.
+            if let (Some(MirProjection::Index { location, .. }), Some(MoveStep::Index { value: index, .. })) =
+                (place.projections.first(), steps.first())
+            {
+                if let Some(len) = self.write_window_len(address.frame, address.place, span)? {
+                    let index = int_value(index.clone(), span)?;
+                    if index < 0 || index >= len {
+                        let MirEvalValue::String(file) = self.source_file_path(location.file, span)? else {
+                            return Err(mir_error_at("MIR source-file path is not String", span));
+                        };
+                        let message = format!("the list has {len} items, so position {index} doesn't exist");
+                        return Err(self.located_runtime_stop("E3010", &file, location.line, &message, span));
+                    }
+                }
+            }
             let steps = self.canonicalize_address_steps(
                 address.frame,
                 address.place,
@@ -24355,7 +24530,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     for step in rest {
                         match step {
                             MoveStep::Field { name, .. } => nested.path.push(name.clone()),
-                            MoveStep::Index { .. } | MoveStep::Deref => {
+                            MoveStep::Index { .. }
+                            | MoveStep::Deref
+                            | MoveStep::Payload(_)
+                            | MoveStep::Range { .. } => {
                                 return Err(mir_error_at(
                                     "MIR projected Shared write requires field-only projection",
                                     span,
@@ -24453,7 +24631,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     for step in rest {
                         match step {
                             MoveStep::Field { name, .. } => cell.path.push(name.clone()),
-                            MoveStep::Index { .. } | MoveStep::Deref => {
+                            MoveStep::Index { .. }
+                            | MoveStep::Deref
+                            | MoveStep::Payload(_)
+                            | MoveStep::Range { .. } => {
                                 return Err(mir_error_at(
                                     "MIR projected SharedGuard write requires field-only projection",
                                     span,
@@ -24469,7 +24650,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     for step in rest {
                         match step {
                             MoveStep::Field { field, .. } => mapped.path.push(*field),
-                            MoveStep::Index { .. } | MoveStep::Deref => {
+                            MoveStep::Index { .. }
+                            | MoveStep::Deref
+                            | MoveStep::Payload(_)
+                            | MoveStep::Range { .. } => {
                                 return Err(mir_error_at(
                                     "MIR projected CellGuard write requires field-only projection",
                                     span,
@@ -24507,6 +24691,38 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     "MIR projected dereference write requires an address",
                     span,
                 )),
+            },
+            MoveStep::Range { .. } => match value {
+                RuntimeValue::Data(mut data) => {
+                    let replacement = runtime_to_data(replacement, span)?;
+                    replace_data_steps(&mut data, steps, replacement, span)?;
+                    Ok(RuntimeValue::Data(data))
+                }
+                RuntimeValue::Address(address) => {
+                    require_address_access(&address, MirAccess::Write, span)?;
+                    self.write_place_path(address.frame, address.place, steps, replacement, span)?;
+                    Ok(RuntimeValue::Address(address))
+                }
+                RuntimeValue::Moved => Err(mir_error_at("MIR write parent is moved", span)),
+                _ => Err(mir_error_at("MIR range window requires a list", span)),
+            },
+            MoveStep::Payload(kind) => match value {
+                RuntimeValue::Data(mut data) => {
+                    let replacement = runtime_to_data(replacement, span)?;
+                    replace_data_steps(&mut data, steps, replacement, span)?;
+                    Ok(RuntimeValue::Data(data))
+                }
+                RuntimeValue::Address(address) => {
+                    require_address_access(&address, MirAccess::Write, span)?;
+                    self.write_place_path(address.frame, address.place, steps, replacement, span)?;
+                    Ok(RuntimeValue::Address(address))
+                }
+                RuntimeValue::Moved => Err(mir_error_at("MIR write parent is moved", span)),
+                other => {
+                    let payload = runtime_payload(other.clone(), kind, span)?;
+                    let updated = self.replace_runtime_steps(payload, rest, replacement, span)?;
+                    runtime_payload_replace(other, kind, updated, span)
+                }
             },
         }
     }
@@ -24589,6 +24805,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             self.publish_live_value_update(&place, &value, span);
             return Ok(());
         }
+        // D-SHAPE-PLACE1=A: a range window place writes through its owner.
+        if place
+            .projections
+            .iter()
+            .any(|projection| matches!(projection, MirProjection::Range { .. }))
+        {
+            return self.write_place_path(frame_index, place_id, &[], value, span);
+        }
         if self.write_local_list_index(frame_index, &place, &value, span)? {
             return Ok(());
         }
@@ -24656,12 +24880,29 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     ));
                 }
+                MirProjection::Payload { kind, .. } => {
+                    let parent = current.clone();
+                    current = runtime_payload(current, kind, span)?;
+                    updates.push(PlaceUpdate::Payload {
+                        parent,
+                        kind: kind.clone(),
+                    });
+                }
+                MirProjection::Range { .. } => {
+                    return Err(mir_error_at(
+                        "MIR range window write must take the owner path",
+                        span,
+                    ));
+                }
             }
         }
 
         let mut updated = value.clone();
         for update in updates.into_iter().rev() {
             match update {
+                PlaceUpdate::Payload { parent, kind } => {
+                    updated = runtime_payload_replace(parent, &kind, updated, span)?;
+                }
                 PlaceUpdate::Field {
                     parent,
                     field,
@@ -25796,6 +26037,10 @@ enum PlaceUpdate {
         write_call: Option<MirPreludeCallId>,
         location: MirPanicLoc,
         context: Option<MirPanicContext>,
+    },
+    Payload {
+        parent: RuntimeValue,
+        kind: MirPayloadKind,
     },
 }
 #[derive(Debug, Clone)]
@@ -27838,6 +28083,138 @@ enum MoveStep {
         kind: MirIndexKind,
     },
     Deref,
+    /// D-SHAPE-PLACE1=A: the payload slot of a checked variant value.
+    Payload(MirPayloadKind),
+    /// D-SHAPE-PLACE1=A: the checked range window of a list value.
+    Range {
+        start: i64,
+        end: i64,
+        exclusive: bool,
+    },
+}
+
+/// The checked type of a `MirProjection::Payload` slot inside `ty`.
+fn payload_value_type(
+    program: &jet_foundation::MIR::MirProgram,
+    ty: &MirType,
+    kind: &MirPayloadKind,
+) -> MirType {
+    match kind {
+        MirPayloadKind::Option => ty.option_inner().cloned().unwrap_or_else(|| ty.clone()),
+        MirPayloadKind::Result { ok } => ty
+            .result_parts()
+            .map(|(success, error)| if *ok { success.clone() } else { error.clone() })
+            .unwrap_or_else(|| ty.clone()),
+        MirPayloadKind::Enum {
+            owner,
+            variant,
+            index,
+        } => program
+            .types
+            .iter()
+            .find(|definition| definition.id == *owner)
+            .and_then(|definition| match &definition.kind {
+                MirTypeDefKind::Enum { variants, .. } => variants
+                    .iter()
+                    .find(|candidate| variant_name_matches(&candidate.name, variant)),
+                _ => None,
+            })
+            .and_then(|candidate| match &candidate.payload {
+                jet_foundation::MIR::MirVariantPayload::Single(payload) if *index == 0 => {
+                    Some(payload.clone())
+                }
+                jet_foundation::MIR::MirVariantPayload::Named(fields) => {
+                    fields.get(*index).map(|field| field.ty.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| ty.clone()),
+    }
+}
+
+/// The payload slot a `MirProjection::Payload` names inside a data value.
+fn data_payload_slot<'a>(
+    data: &'a mut MirEvalValue,
+    kind: &MirPayloadKind,
+    span: Span,
+) -> Result<&'a mut MirEvalValue, Diagnostic> {
+    match (kind, data) {
+        (
+            MirPayloadKind::Option | MirPayloadKind::Result { ok: true },
+            MirEvalValue::Present(inner),
+        )
+        | (MirPayloadKind::Result { ok: false }, MirEvalValue::FailedTold(inner)) => {
+            Ok(inner.as_mut())
+        }
+        (
+            MirPayloadKind::Enum { variant, index, .. },
+            MirEvalValue::Enum {
+                variant: actual,
+                args,
+                ..
+            },
+        ) if variant_name_matches(actual, variant) => args
+            .get_mut(*index)
+            .map(|(_, value)| value)
+            .ok_or_else(|| mir_error_at("MIR payload index is out of range", span)),
+        _ => Err(mir_error_at(
+            "MIR payload projection does not match the value's variant",
+            span,
+        )),
+    }
+}
+
+/// Whether a `RuntimeValue::Result` carrier holds the slot `kind` names.
+fn payload_result_side(kind: &MirPayloadKind) -> Option<bool> {
+    match kind {
+        MirPayloadKind::Option => Some(true),
+        MirPayloadKind::Result { ok } => Some(*ok),
+        MirPayloadKind::Enum { .. } => None,
+    }
+}
+
+/// Read the payload slot of a runtime variant value.
+fn runtime_payload(
+    value: RuntimeValue,
+    kind: &MirPayloadKind,
+    span: Span,
+) -> Result<RuntimeValue, Diagnostic> {
+    match value {
+        RuntimeValue::Result { ok, value } if payload_result_side(kind) == Some(ok) => Ok(*value),
+        RuntimeValue::Data(mut data) => {
+            let slot = data_payload_slot(&mut data, kind, span)?;
+            Ok(RuntimeValue::Data(std::mem::replace(slot, MirEvalValue::Unit)))
+        }
+        _ => Err(mir_error_at(
+            "MIR payload projection requires a variant value",
+            span,
+        )),
+    }
+}
+
+/// Rebuild a runtime variant value with its payload slot replaced.
+fn runtime_payload_replace(
+    parent: RuntimeValue,
+    kind: &MirPayloadKind,
+    payload: RuntimeValue,
+    span: Span,
+) -> Result<RuntimeValue, Diagnostic> {
+    match parent {
+        RuntimeValue::Result { ok, .. } if payload_result_side(kind) == Some(ok) => {
+            Ok(RuntimeValue::Result {
+                ok,
+                value: Box::new(payload),
+            })
+        }
+        RuntimeValue::Data(mut data) => {
+            *data_payload_slot(&mut data, kind, span)? = runtime_to_data(payload, span)?;
+            Ok(RuntimeValue::Data(data))
+        }
+        _ => Err(mir_error_at(
+            "MIR payload write requires a variant value",
+            span,
+        )),
+    }
 }
 
 fn mir_value_contains_native_owned(value: &MirEvalValue) -> bool {
@@ -28091,6 +28468,18 @@ fn take_data_steps(
             "MIR data value cannot be dereferenced for a move",
             span,
         )),
+        MoveStep::Range { .. } => Err(mir_error_at("MIR range window cannot be moved", span)),
+        MoveStep::Payload(kind) => {
+            let mut data = data;
+            let slot = data_payload_slot(&mut data, kind, span)?;
+            if matches!(slot, MirEvalValue::Moved) {
+                return Err(mir_error_at("MIR place value was moved", span));
+            }
+            let child = std::mem::replace(slot, MirEvalValue::Moved);
+            let (replacement, moved) = take_data_steps(child, rest, span)?;
+            *data_payload_slot(&mut data, kind, span)? = replacement;
+            Ok((data, moved))
+        }
     }
 }
 
@@ -28212,6 +28601,35 @@ fn replace_ct_steps(
             "MIR comptime value cannot be dereferenced for a write",
             span,
         )),
+        MoveStep::Range { .. } => Err(mir_error_at(
+            "MIR comptime value has no range window write",
+            span,
+        )),
+        MoveStep::Payload(kind) => {
+            let slot = match (kind, root) {
+                (
+                    MirPayloadKind::Option | MirPayloadKind::Result { ok: true },
+                    CtValue::Present(inner),
+                ) => inner.as_mut(),
+                (MirPayloadKind::Enum { index, .. }, CtValue::Enum { args, .. }) => {
+                    let Some((_, value)) = args.get_mut(*index) else {
+                        return Err(mir_error_at("MIR payload index is out of range", span));
+                    };
+                    value
+                }
+                _ => {
+                    return Err(mir_error_at(
+                        "MIR comptime payload write requires a matching variant",
+                        span,
+                    ))
+                }
+            };
+            if rest.is_empty() {
+                *slot = replacement;
+                return Ok(());
+            }
+            replace_ct_steps(slot, rest, replacement, span)
+        }
     }
 }
 
@@ -28346,7 +28764,65 @@ fn replace_data_steps(
             "MIR data value cannot be dereferenced for a write",
             span,
         )),
+        MoveStep::Range {
+            start,
+            end,
+            exclusive,
+        } => {
+            let MirEvalValue::List(values) = root else {
+                return Err(mir_error_at("MIR range window requires a list", span));
+            };
+            let (start, end) = mir_range_prelude::jet_checked_view_bounds(
+                *start,
+                *end,
+                *exclusive,
+                values.len() as i64,
+            )
+            .map_err(|message| mir_error_at(&message, span))?;
+            let (start, end) = (start as usize, end as usize);
+            if !rest.is_empty() {
+                return Err(mir_error_at("MIR range window write has trailing steps", span));
+            }
+            let MirEvalValue::List(replacement) = replacement else {
+                return Err(mir_error_at("MIR range window write is not a list", span));
+            };
+            if replacement.len() != end - start {
+                return Err(mir_error_at("MIR range window write changes its length", span));
+            }
+            values.splice(start..end, replacement);
+            Ok(())
+        }
+        MoveStep::Payload(kind) => {
+            let slot = data_payload_slot(root, kind, span)?;
+            if rest.is_empty() {
+                *slot = replacement;
+                return Ok(());
+            }
+            if matches!(slot, MirEvalValue::Moved) {
+                return Err(mir_error_at("MIR write parent is moved", span));
+            }
+            replace_data_steps(slot, rest, replacement, span)
+        }
     }
+}
+
+/// D-SHAPE-PLACE1=A: the owner index of element `index` in a range window.
+fn range_window_index(
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    index: i64,
+    span: Span,
+) -> Result<i64, Diagnostic> {
+    let end_exclusive = if exclusive { end } else { end.saturating_add(1) };
+    let len = end_exclusive.saturating_sub(start);
+    if index < 0 || index >= len {
+        return Err(mir_error_at(
+            &format!("index {index} is outside the {len}-item range window"),
+            span,
+        ));
+    }
+    Ok(start + index)
 }
 
 fn program_function(
@@ -30335,6 +30811,21 @@ fn checked_nominal_name(
         .map(|def| def.name.clone())
 }
 
+/// An enum value names its owner by the display name of the row that built it,
+/// or, for a value prepared while building (`NAME :: prep { … }`) in another
+/// module, by that row's canonical key. Both spell the same checked owner.
+fn enum_owner_matches(
+    program: &jet_foundation::MIR::MirProgram,
+    type_name: &str,
+    owner: &str,
+) -> bool {
+    type_name == owner
+        || program
+            .types
+            .iter()
+            .any(|def| def.key == type_name && def.name == owner)
+}
+
 fn mir_type_display_name(program: &jet_foundation::MIR::MirProgram, ty: &MirType) -> String {
     match ty.kind() {
         MirTypeKind::Apply { name, args } => {
@@ -30661,6 +31152,18 @@ fn mir_show(value: &MirEvalValue) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        // The general `Err` displays as its message on every tier, as AOT's
+        // `JetDisplay for JetErr` does.
+        MirEvalValue::Struct { type_name, fields }
+            if mir_source_name(type_name) == crate::Syntax::TYPE_ERR
+                && fields.iter().any(|(name, _)| name == "message") =>
+        {
+            fields
+                .iter()
+                .find(|(name, _)| name == "message")
+                .map(|(_, message)| mir_show(message))
+                .unwrap_or_default()
+        }
         MirEvalValue::Struct { type_name, fields } => {
             let fields = fields
                 .iter()

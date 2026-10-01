@@ -1,6 +1,15 @@
 // Produce the checked operand contract for an already-admitted #FFI(asm) function.
 // The caller supplies the selected target triple; unsupported targets are errors,
 // never host-derived fallbacks.
+use jet_foundation.[
+    Diagnostic,
+    Func,
+    InlineAsmContract,
+    InlineAsmOutput,
+    Param,
+    Type,
+]
+
 pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics: &[Diagnostic]) -> InlineAsmContract? {
     inline :: function.inline_foreign ?? return None
     if inline.lang != "asm" -> return None
@@ -10,8 +19,8 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
     clobbers := [String]{}
     seen_clobbers := [String]{}
     return_anchors := 0
-    return_destination := None
-    bad := None
+    return_destination := InlineAsmOutput?{None}
+    bad := String?{None}
     target_supported := sema_inline_assembly_target_supported(target)
 
     loop raw_line in inline.source.split("\n") {
@@ -91,7 +100,7 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
                 break
             }
             name := String.from_bytes(bytes.slice(open + 1, close)) ?? ""
-            parameter_index = -1
+            parameter_index := -1
             index = 0
             loop index < params.len() {
                 if params[index].name == name {
@@ -112,7 +121,7 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
         }
     }
 
-    unused_name := None
+    unused_name := String?{None}
     loop parameter in params {
         if !used.contains(parameter.name) {
             unused_name = Val(parameter.name)

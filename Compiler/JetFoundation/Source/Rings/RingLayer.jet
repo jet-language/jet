@@ -4,7 +4,7 @@
 
 pub struct JetRingLayerFact {
     pub key: String
-    pub layer: MirRuntimeLayer
+    pub layer: MIRRuntimeLayer
 }
 
 struct JetRingDependencyRow {
@@ -124,7 +124,7 @@ fn jet_ring_is_closure_marker(usage: String) -> Bool Never! {
     usage.starts_with("__core_source::") || usage.starts_with("__core_intrinsic::")
 }
 
-fn jet_ring_layer_rank(layer: MirRuntimeLayer) -> Int Never! {
+fn jet_ring_layer_rank(layer: MIRRuntimeLayer) -> Int Never! {
     if layer == {
         .Core -> 0
         .Alloc -> 1
@@ -132,7 +132,7 @@ fn jet_ring_layer_rank(layer: MirRuntimeLayer) -> Int Never! {
     }
 }
 
-pub fn jet_ring_layer_name(layer: MirRuntimeLayer) -> String Never! {
+pub fn jet_ring_layer_name(layer: MIRRuntimeLayer) -> String Never! {
     if layer == {
         .Core -> "core"
         .Alloc -> "alloc"
@@ -140,78 +140,78 @@ pub fn jet_ring_layer_name(layer: MirRuntimeLayer) -> String Never! {
     }
 }
 
-pub fn jet_ring_parse_manifest_layer(value: String) -> MirRuntimeLayer? {
+pub fn jet_ring_parse_manifest_layer(value: String) -> MIRRuntimeLayer? {
     trimmed :: value.trim()
     if trimmed == {
-        "core" -> Val(MirRuntimeLayer.Core)
-        "alloc" -> Val(MirRuntimeLayer.Alloc)
-        "hosted" -> Val(MirRuntimeLayer.Std)
+        "core" -> Val(MIRRuntimeLayer.Core)
+        "alloc" -> Val(MIRRuntimeLayer.Alloc)
+        "hosted" -> Val(MIRRuntimeLayer.Std)
         else -> None
     }
 }
 
-fn jet_ring_layer_of_module(module_name: String) -> MirRuntimeLayer Never! {
+fn jet_ring_layer_of_module(module_name: String) -> MIRRuntimeLayer Never! {
     if module_name == {
-        "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> MirRuntimeLayer.Core
-        "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> MirRuntimeLayer.Alloc
-        else -> MirRuntimeLayer.Std
+        "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> MIRRuntimeLayer.Core
+        "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> MIRRuntimeLayer.Alloc
+        else -> MIRRuntimeLayer.Std
     }
 }
 
-pub fn jet_ring_core_module_layer(module_name: String) -> MirRuntimeLayer Never! {
+pub fn jet_ring_core_module_layer(module_name: String) -> MIRRuntimeLayer Never! {
     jet_ring_layer_of_module(module_name)
 }
 
-fn jet_ring_helper_layer(module_name: String, helper: String) -> MirRuntimeLayer? {
+fn jet_ring_helper_layer(module_name: String, helper: String) -> MIRRuntimeLayer? {
     if helper.len() == 0 -> return None
     if module_name == {
-        "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> Val(MirRuntimeLayer.Core)
+        "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> Val(MIRRuntimeLayer.Core)
         "core.mem" -> if helper == {
-            "Ptr" | "from_addr" | "volatile_read" | "volatile_write" | "address_of" | "pin" | "Pin" -> Val(MirRuntimeLayer.Core)
+            "Ptr" | "from_addr" | "volatile_read" | "volatile_write" | "address_of" | "pin" | "Pin" -> Val(MIRRuntimeLayer.Core)
             else -> None
         }
         "core.text" -> if helper == {
-            "Cursor" | "caseless_eq" | "display_width" | "scalar_count" | "byte_count" | "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii" | "starts_any" | "ends_any" -> Val(MirRuntimeLayer.Core)
+            "Cursor" | "caseless_eq" | "display_width" | "scalar_count" | "byte_count" | "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii" | "starts_any" | "ends_any" -> Val(MIRRuntimeLayer.Core)
             else -> None
         }
         "core.time" -> if helper == {
-            "from_unix_ms" | "from_unix_seconds" | "from_unix_microseconds" | "from_unix_nanoseconds" | "from_timestamp" | "days_in_month" | "is_leap_year" | "period" | "period_days" | "period_months" | "period_years" | "utc" -> Val(MirRuntimeLayer.Core)
+            "from_unix_ms" | "from_unix_seconds" | "from_unix_microseconds" | "from_unix_nanoseconds" | "from_timestamp" | "days_in_month" | "is_leap_year" | "period" | "period_days" | "period_months" | "period_years" | "utc" -> Val(MIRRuntimeLayer.Core)
             else -> None
         }
         "core.net" -> if helper == {
-            "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "socket_addr" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" -> Val(MirRuntimeLayer.Alloc)
+            "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "socket_addr" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" -> Val(MIRRuntimeLayer.Alloc)
             else -> None
         }
-        "core.net.url" | "core.net.mime" -> Val(MirRuntimeLayer.Alloc)
+        "core.net.url" | "core.net.mime" -> Val(MIRRuntimeLayer.Alloc)
         "core.files" -> if helper == {
-            "typed_head" | "path_from" | "path_join" | "path_parent" | "path_extension" | "path_stem" | "path_normalize" -> Val(MirRuntimeLayer.Alloc)
+            "typed_head" | "path_from" | "path_join" | "path_parent" | "path_extension" | "path_stem" | "path_normalize" -> Val(MIRRuntimeLayer.Alloc)
             else -> None
         }
         "core.crypto" -> if helper == {
-            "__nominal__" | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Digest256" | "Digest512" | "sha256" | "blake3" | "sha512" | "constant_time_equal_bytes" | "constant_time_equal" | "verify" | "sign" -> Val(MirRuntimeLayer.Core)
-            "file_seal" | "file_open" -> Val(MirRuntimeLayer.Std)
+            "__nominal__" | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Digest256" | "Digest512" | "sha256" | "blake3" | "sha512" | "constant_time_equal_bytes" | "constant_time_equal" | "verify" | "sign" -> Val(MIRRuntimeLayer.Core)
+            "file_seal" | "file_open" -> Val(MIRRuntimeLayer.Std)
             else -> None
         }
         "core.archive" -> if helper == {
-            "zip_decompress" | "crc32" | "adler32" | "deflate" | "inflate" | "zip_names_json" | "tar_names_json" -> Val(MirRuntimeLayer.Alloc)
+            "zip_decompress" | "crc32" | "adler32" | "deflate" | "inflate" | "zip_names_json" | "tar_names_json" -> Val(MIRRuntimeLayer.Alloc)
             else -> None
         }
         "core.email" -> if helper == {
-            "Address" | "Message" | "Attachment" | "Envelope" | "RecipientPolicy" | "Limits" | "address" | "attachment" | "message" | "envelope" | "serialize" -> Val(MirRuntimeLayer.Alloc)
+            "Address" | "Message" | "Attachment" | "Envelope" | "RecipientPolicy" | "Limits" | "address" | "attachment" | "message" | "envelope" | "serialize" -> Val(MIRRuntimeLayer.Alloc)
             else -> None
         }
         else -> None
     }
 }
 
-pub fn jet_ring_core_usage_layer(usage: String) -> MirRuntimeLayer Never! {
+pub fn jet_ring_core_usage_layer(usage: String) -> MIRRuntimeLayer Never! {
     if usage.starts_with("core::") {
         bytes :: usage.bytes()
         rest :: String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
         return if rest == {
-            "json" | "bytes" -> MirRuntimeLayer.Alloc
-            "from_bytes" | "from_bytes_lossy" -> MirRuntimeLayer.Core
-            else -> MirRuntimeLayer.Std
+            "json" | "bytes" -> MIRRuntimeLayer.Alloc
+            "from_bytes" | "from_bytes_lossy" -> MIRRuntimeLayer.Core
+            else -> MIRRuntimeLayer.Std
         }
     }
     parts := usage.split("::").to_list()
@@ -280,7 +280,7 @@ fn jet_ring_has_string(rows: [String], value: String) -> Bool Never! {
     false
 }
 
-fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: MirRuntimeLayer) Never! {
+fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: MIRRuntimeLayer) Never! {
     index := 0
     loop index < rows.len() {
         if rows[index].key == key -> return
@@ -330,8 +330,8 @@ pub fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] Never! {
     keys
 }
 
-pub fn jet_ring_prelude_closure_layer(roots: [String]) -> MirRuntimeLayer Never! {
-    layer := MirRuntimeLayer.Core
+pub fn jet_ring_prelude_closure_layer(roots: [String]) -> MIRRuntimeLayer Never! {
+    layer := MIRRuntimeLayer.Core
     loop row in jet_ring_classify_prelude_closure(roots) {
         if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
     }
@@ -347,13 +347,13 @@ fn jet_ring_usage_matches(used_core: [String], prefixes: [String]) -> Bool Never
     false
 }
 
-fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int Never! {
+fn jet_ring_runtime_part_order(part: MIRRuntimePartID) -> Int Never! {
     if part == {
-        .Gc -> 0
+        .GC -> 0
         .Event -> 1
         .Realtime -> 2
         .EmbeddedHardware -> 3
-        .Ui -> 4
+        .UI -> 4
         .Devtools -> 5
         .Gtk -> 6
         .Apps -> 7
@@ -361,7 +361,7 @@ fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int Never! {
         .Game -> 9
         .Files -> 10
         .Interrupt -> 11
-        .FsRuntime -> 12
+        .FSRuntime -> 12
         .Process -> 13
         .Crypto -> 14
         .Math -> 15
@@ -370,7 +370,7 @@ fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int Never! {
         .Fmt -> 18
         .DataFmt -> 19
         .Compute -> 20
-        .Http -> 21
+        .HTTP -> 21
         .WebSocket -> 22
         .Browser -> 23
         .Args -> 24
@@ -383,7 +383,7 @@ fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int Never! {
     }
 }
 
-fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartId) Never! {
+fn jet_ring_insert_runtime_part(rows: &[MIRRuntimePartID], part: MIRRuntimePartID) Never! {
     order :: jet_ring_runtime_part_order(part)
     index := 0
     loop index < rows.len() {
@@ -400,41 +400,41 @@ fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartI
     rows[index] = part
 }
 
-pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MirRuntimePartId] Never! {
-    parts := [MirRuntimePartId]{}
-    if jet_ring_usage_matches(used_core, [String]{"core.event"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Event)
-    if jet_ring_usage_matches(used_core, [String]{"core.rt", "core.realtime"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Realtime)
-    if jet_ring_usage_matches(used_core, [String]{"core.hardware", "core.embedded", "core.board", "core.device"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.EmbeddedHardware)
-    if jet_ring_usage_matches(used_core, [String]{"core.ui", "core.font", "core.web", "app", "core.args"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Ui)
-    if jet_ring_usage_matches(used_core, [String]{"core.ui", "core.devtools", "core.web", "app"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Devtools)
-    if jet_ring_usage_matches(used_core, [String]{"core.ui::gtk_backend", "core.ui.gtk_backend"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Gtk)
-    if jet_ring_usage_matches(used_core, [String]{"app", "core.web", "core.http", "core.http.client", "core.http.server", "core.web.devserver", "core.web.browser"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Apps)
-    if jet_ring_usage_matches(used_core, [String]{"core.email"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Email)
-    if jet_ring_usage_matches(used_core, [String]{"core.game", "core.game.raylib", "core.raylib"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Game)
-    if jet_ring_usage_matches(used_core, [String]{"core.files", "core.watcher", "core.term", "core.sys", "core.process"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Files)
-    if jet_ring_usage_matches(used_core, [String]{"core.sys::on_interrupt", "core.sys.on_interrupt", "core.process::on_signal", "core.process.on_signal"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Interrupt)
-    if jet_ring_usage_matches(used_core, [String]{"core.files", "core.watcher", "core.term", "core.sys", "core.process", "core.args", "core.testing", "core.perf", "core.mem.scope"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.FsRuntime)
-    if jet_ring_usage_matches(used_core, [String]{"core.crypto"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Crypto)
-    if jet_ring_usage_matches(used_core, [String]{"core.math", "core.math.random", "core.time", "core.time.expiring", "core.units"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Math)
-    if jet_ring_usage_matches(used_core, [String]{"core.encoding", "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.xml", "core.encoding.cbor", "core.encoding.hex", "core.archive.gzip", "core.archive.zstd"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Encoding)
-    if jet_ring_usage_matches(used_core, [String]{"core.data", "core.data.sketch.hll", "core.data.sketch.tdigest", "core.data.sketch.cms", "core.data.sketch.reservoir", "core.db", "core.encoding.csv"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Data)
-    if jet_ring_usage_matches(used_core, [String]{"core.text.fmt"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Fmt)
-    if jet_ring_usage_matches(used_core, [String]{"core.data", "core.data.sketch.hll", "core.data.sketch.tdigest", "core.data.sketch.cms", "core.data.sketch.reservoir", "core.db", "core.encoding", "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.xml", "core.encoding.cbor", "core.encoding.hex", "core.archive.gzip", "core.archive.zstd"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.DataFmt)
-    if jet_ring_usage_matches(used_core, [String]{"core.compute"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Compute)
-    if jet_ring_usage_matches(used_core, [String]{"core.http", "core.http.client", "core.http.server", "core.web", "core.web.devserver"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Http)
-    if jet_ring_usage_matches(used_core, [String]{"core.net.ws", "app", "core.web", "core.db", "core.http", "core.http.client", "core.http.server", "core.web.browser"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.WebSocket)
-    if jet_ring_usage_matches(used_core, [String]{"core.web.browser", "core.web", "core.web.storage", "core.web.storage.local", "core.web.storage.session"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Browser)
-    if jet_ring_usage_matches(used_core, [String]{"core.args"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Args)
-    if jet_ring_usage_matches(used_core, [String]{"core.reflect", "core.compiler.lang"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Reflect)
-    if jet_ring_usage_matches(used_core, [String]{"core.auth"}) || jet_ring_has_runtime_part(parts, MirRuntimePartId.Crypto) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.AuthTokens)
-    if jet_ring_usage_matches(used_core, [String]{"core.auth", "app", "core.web"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.AuthSession)
-    if jet_ring_usage_matches(used_core, [String]{"core.sync", "app", "core.web", "core.db"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Sync)
-    if jet_ring_usage_matches(used_core, [String]{"core.service", "core.jobs"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Services)
-    if jet_ring_usage_matches(used_core, [String]{"core.mod"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Mod)
+pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MIRRuntimePartID] Never! {
+    parts := [MIRRuntimePartID]{}
+    if jet_ring_usage_matches(used_core, [String]{"core.event"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Event)
+    if jet_ring_usage_matches(used_core, [String]{"core.rt", "core.realtime"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Realtime)
+    if jet_ring_usage_matches(used_core, [String]{"core.hardware", "core.embedded", "core.board", "core.device"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.EmbeddedHardware)
+    if jet_ring_usage_matches(used_core, [String]{"core.ui", "core.font", "core.web", "app", "core.args"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.UI)
+    if jet_ring_usage_matches(used_core, [String]{"core.ui", "core.devtools", "core.web", "app"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Devtools)
+    if jet_ring_usage_matches(used_core, [String]{"core.ui::gtk_backend", "core.ui.gtk_backend"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Gtk)
+    if jet_ring_usage_matches(used_core, [String]{"app", "core.web", "core.http", "core.http.client", "core.http.server", "core.web.devserver", "core.web.browser"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Apps)
+    if jet_ring_usage_matches(used_core, [String]{"core.email"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Email)
+    if jet_ring_usage_matches(used_core, [String]{"core.game", "core.game.raylib", "core.raylib"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Game)
+    if jet_ring_usage_matches(used_core, [String]{"core.files", "core.watcher", "core.term", "core.sys", "core.process"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Files)
+    if jet_ring_usage_matches(used_core, [String]{"core.sys::on_interrupt", "core.sys.on_interrupt", "core.process::on_signal", "core.process.on_signal"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Interrupt)
+    if jet_ring_usage_matches(used_core, [String]{"core.files", "core.watcher", "core.term", "core.sys", "core.process", "core.args", "core.testing", "core.perf", "core.mem.scope"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.FSRuntime)
+    if jet_ring_usage_matches(used_core, [String]{"core.crypto"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Crypto)
+    if jet_ring_usage_matches(used_core, [String]{"core.math", "core.math.random", "core.time", "core.time.expiring", "core.units"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Math)
+    if jet_ring_usage_matches(used_core, [String]{"core.encoding", "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.xml", "core.encoding.cbor", "core.encoding.hex", "core.archive.gzip", "core.archive.zstd"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Encoding)
+    if jet_ring_usage_matches(used_core, [String]{"core.data", "core.data.sketch.hll", "core.data.sketch.tdigest", "core.data.sketch.cms", "core.data.sketch.reservoir", "core.db", "core.encoding.csv"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Data)
+    if jet_ring_usage_matches(used_core, [String]{"core.text.fmt"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Fmt)
+    if jet_ring_usage_matches(used_core, [String]{"core.data", "core.data.sketch.hll", "core.data.sketch.tdigest", "core.data.sketch.cms", "core.data.sketch.reservoir", "core.db", "core.encoding", "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.xml", "core.encoding.cbor", "core.encoding.hex", "core.archive.gzip", "core.archive.zstd"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.DataFmt)
+    if jet_ring_usage_matches(used_core, [String]{"core.compute"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Compute)
+    if jet_ring_usage_matches(used_core, [String]{"core.http", "core.http.client", "core.http.server", "core.web", "core.web.devserver"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.HTTP)
+    if jet_ring_usage_matches(used_core, [String]{"core.net.ws", "app", "core.web", "core.db", "core.http", "core.http.client", "core.http.server", "core.web.browser"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.WebSocket)
+    if jet_ring_usage_matches(used_core, [String]{"core.web.browser", "core.web", "core.web.storage", "core.web.storage.local", "core.web.storage.session"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Browser)
+    if jet_ring_usage_matches(used_core, [String]{"core.args"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Args)
+    if jet_ring_usage_matches(used_core, [String]{"core.reflect", "core.compiler.lang"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Reflect)
+    if jet_ring_usage_matches(used_core, [String]{"core.auth"}) || jet_ring_has_runtime_part(parts, MIRRuntimePartID.Crypto) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.AuthTokens)
+    if jet_ring_usage_matches(used_core, [String]{"core.auth", "app", "core.web"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.AuthSession)
+    if jet_ring_usage_matches(used_core, [String]{"core.sync", "app", "core.web", "core.db"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Sync)
+    if jet_ring_usage_matches(used_core, [String]{"core.service", "core.jobs"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Services)
+    if jet_ring_usage_matches(used_core, [String]{"core.mod"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Mod)
     parts
 }
 
-fn jet_ring_has_runtime_part(parts: [MirRuntimePartId], part: MirRuntimePartId) -> Bool Never! {
+fn jet_ring_has_runtime_part(parts: [MIRRuntimePartID], part: MIRRuntimePartID) -> Bool Never! {
     loop item in parts {
         if item == part -> return true
     }

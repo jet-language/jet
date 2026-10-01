@@ -47,13 +47,6 @@ pub(crate) fn fraction_equal(left: &ExactFraction, right: &ExactFraction) -> boo
     left == right
 }
 
-pub(crate) fn fraction_compare(
-    left: &ExactFraction,
-    right: &ExactFraction,
-) -> core::cmp::Ordering {
-    left.cmp(right)
-}
-
 pub(crate) fn fraction_numerator(value: &ExactFraction) -> ExactBigInt {
     value.numerator.clone()
 }

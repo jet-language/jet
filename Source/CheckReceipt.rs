@@ -14,7 +14,7 @@
 //! checked bundle that differs from the hashed closure) is never recorded, so
 //! it checks fresh every time.
 
-use jet_store::{BuildNodeRecord, BuildRecord, ReceiptInput, ReceiptRecord, Store};
+use jet_store::{BuildNodeRecord, BuildRecord, ReceiptInput, ReceiptRecord, RecordKind, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -355,6 +355,7 @@ impl ReceiptClosure {
         duration_ms: f64,
         outputs: &[String],
         packages: &[PackageRow],
+        package_reuse: &[jet::Sema::PackageReuseRow],
     ) {
         use jet::Comptime::Build::{BuildNodeKind, BuildPlanNode, ContentDigest};
         let previous = store
@@ -426,11 +427,83 @@ impl ReceiptClosure {
                 inputs: node.inputs.clone(),
             })
             .collect::<Vec<_>>();
-        nodes.extend(package_nodes(packages, previous.as_ref(), reused));
+        if package_reuse.is_empty() {
+            nodes.extend(package_nodes(packages, previous.as_ref(), reused));
+        } else {
+            nodes.extend(package_reuse_nodes(package_reuse));
+        }
         let record = BuildRecord::new(self.program.clone(), nodes);
         let record_key = jet::SHA256::sha256_hex(record.to_json().as_bytes());
         let _ = store.publish_last_build_record(&self.project_root, &record_key, &record);
     }
+}
+
+/// #2517 S2: the shared record store, as sema's package-record store.
+pub(crate) struct PackageRecords {
+    store: Store,
+}
+
+impl PackageRecords {
+    pub(crate) fn new(store: Store) -> Self {
+        Self { store }
+    }
+}
+
+impl jet::Sema::PackageRecordStore for PackageRecords {
+    fn compiler_identity(&self) -> String {
+        format!(
+            "{}+{}",
+            env!("JET_COMPILER_BUILD_ID"),
+            env!("JET_STDLIB_BUILD_ID")
+        )
+    }
+
+    fn load(&self, schema: &str, key: &str) -> Option<Vec<u8>> {
+        let kind = RecordKind::from_schema(schema)?;
+        self.store.record(kind, key).ok().flatten()
+    }
+
+    fn publish(&self, schema: &str, key: &str, bytes: &[u8]) {
+        if let Some(kind) = RecordKind::from_schema(schema) {
+            // A record that cannot be published only costs the next run speed.
+            let _ = self.store.put_record(kind, key, bytes);
+        }
+    }
+
+    fn load_untouched(&self, schema: &str, key: &str) -> Option<Vec<u8>> {
+        let kind = RecordKind::from_schema(schema)?;
+        self.store.record_untouched(kind, key).ok().flatten()
+    }
+
+    fn publish_batch(&self, schema: &str, touched: &[String], records: Vec<(String, Vec<u8>)>) {
+        if let Some(kind) = RecordKind::from_schema(schema) {
+            self.store.touch_records(kind, touched);
+            // A record that cannot be published only costs the next run speed.
+            let _ = self.store.put_records(kind, records);
+        }
+    }
+
+    fn manifest(&self, root: &Path) -> Option<Vec<u8>> {
+        // The manifest is part of the Receipt closure key already; it is read
+        // here only to fold its bytes into the package source digest.
+        fs::read(root.join(jet::Syntax::PACKAGE_FILE)).ok()
+    }
+}
+
+/// Store-log rows of a check that sealed packages from records: `reused`
+/// (green by key, no body checked), `checked+published`, or `checked` with
+/// the reason the package was not recorded.
+fn package_reuse_nodes(rows: &[jet::Sema::PackageReuseRow]) -> Vec<BuildNodeRecord> {
+    rows.iter()
+        .map(|row| BuildNodeRecord {
+            kind: PACKAGE_NODE.to_string(),
+            key: row.key.clone(),
+            subject: row.identity.clone(),
+            duration_ms: 0.0,
+            why_ran: format!("{}: {}", row.reuse.as_str(), row.detail),
+            inputs: vec![format!("modules:{}", row.modules)],
+        })
+        .collect()
 }
 
 /// Store-log node kind for one package of the checked program.

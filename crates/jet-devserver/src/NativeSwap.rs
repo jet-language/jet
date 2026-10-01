@@ -159,12 +159,6 @@ impl NativeSwapRevision {
         })
     }
 
-    /// Construct revisions from numeric generations without making the
-    /// generation itself an authority or a native address.
-    pub fn from_generations(code: u64, data: u64) -> Result<Self, NativeSwapError> {
-        Self::new(code.to_string(), data.to_string())
-    }
-
     /// Borrow the code revision as an opaque string.
     pub fn code_revision(&self) -> &str {
         self.code.as_str()
@@ -403,18 +397,6 @@ impl NativeSwapRelocationFacts {
             code_symbols: Vec::new(),
             data_slots: Vec::new(),
         }
-    }
-
-    /// Attach canonical code identities in deterministic order.
-    pub fn with_code_symbols(mut self, symbols: Vec<String>) -> Self {
-        self.code_symbols = normalized_facts(symbols);
-        self
-    }
-
-    /// Attach canonical data identities in deterministic order.
-    pub fn with_data_slots(mut self, slots: Vec<String>) -> Self {
-        self.data_slots = normalized_facts(slots);
-        self
     }
 }
 
@@ -1035,58 +1017,6 @@ impl NativeSwapCapability {
         }
     }
 
-    /// Capability with no in-place operation.  It can still report restart
-    /// explanations without mutating a resident state.
-    pub const fn restart_only() -> Self {
-        Self {
-            code: NativeSwapCodePolicy::Restart,
-            data: NativeSwapDataPolicy::Restart,
-            listeners: NativeSwapHandlePolicy::Never,
-            connections: NativeSwapHandlePolicy::Never,
-            restart: true,
-            quiescence: NativeSwapQuiescencePolicy::NotRequired,
-            relocation: NativeSwapRelocationStrategy::Restart,
-            link: NativeSwapLinkStrategy::Restart,
-        }
-    }
-
-    /// Capability that allows checked replacement of code and data facts.
-    pub const fn resident_with_data_replace() -> Self {
-        let mut capability = Self::resident();
-        capability.data = NativeSwapDataPolicy::Replace;
-        capability
-    }
-
-    /// Set the code policy.
-    pub const fn with_code_policy(mut self, policy: NativeSwapCodePolicy) -> Self {
-        self.code = policy;
-        self
-    }
-
-    /// Set the data policy.
-    pub const fn with_data_policy(mut self, policy: NativeSwapDataPolicy) -> Self {
-        self.data = policy;
-        self
-    }
-
-    /// Set listener preservation policy.
-    pub const fn with_listener_policy(mut self, policy: NativeSwapHandlePolicy) -> Self {
-        self.listeners = policy;
-        self
-    }
-
-    /// Set connection preservation policy.
-    pub const fn with_connection_policy(mut self, policy: NativeSwapHandlePolicy) -> Self {
-        self.connections = policy;
-        self
-    }
-
-    /// Set the quiescence policy.
-    pub const fn with_quiescence_policy(mut self, policy: NativeSwapQuiescencePolicy) -> Self {
-        self.quiescence = policy;
-        self
-    }
-
     /// Set the relocation strategy.
     pub const fn with_relocation(mut self, strategy: NativeSwapRelocationStrategy) -> Self {
         self.relocation = strategy;
@@ -1290,55 +1220,6 @@ impl NativeSwapPlan {
         })
     }
 
-    /// Construct a plan directly from source and revision pairs plus the
-    /// sema-owned hot-swap verdict.
-    pub fn for_revisions(
-        source: NativeSwapSourceIdentity,
-        from: NativeSwapRevision,
-        to: NativeSwapRevision,
-        capability: NativeSwapCapability,
-        decision: HotSwapDecision,
-    ) -> Result<Self, NativeSwapError> {
-        let from_image = NativeSwapExecutable::new(source.clone(), from, 0)?;
-        let to_image = NativeSwapExecutable::new(source.clone(), to, 1)?;
-        Self::new(source, from_image, to_image, capability, decision)
-    }
-
-    /// Add a changed semantic identity in deterministic order.
-    pub fn with_changed_items(mut self, items: Vec<String>) -> Self {
-        self.changed_items = normalized_facts(items);
-        self
-    }
-
-    /// Add one removed definition.  Validation turns it into a stale-reference
-    /// refusal rather than allowing an old implementation to run.
-    pub fn with_removed_definition(mut self, item: impl Into<String>) -> Self {
-        self.removed_definitions.push(item.into());
-        self.removed_definitions = normalized_facts(std::mem::take(&mut self.removed_definitions));
-        self
-    }
-
-    /// Mark the candidate with an explicit checked blocking fact.
-    pub fn with_blocking_fact(mut self, fact: NativeSwapBlockingFact) -> Self {
-        self.blocking_fact = Some(fact);
-        self
-    }
-
-    /// Mark an unsafe edit with the standard blocking fact.
-    pub fn mark_unsafe(self) -> Self {
-        self.with_blocking_fact(NativeSwapBlockingFact::UnsafeEdit)
-    }
-
-    /// Mark an incompatible type edit and its restart boundary.
-    pub fn mark_incompatible_type(mut self, affected: Vec<String>) -> Self {
-        self.blocking_fact = Some(NativeSwapBlockingFact::IncompatibleType);
-        self.restart_boundary = NativeSwapRestartBoundary::required(
-            NativeSwapBlockingFact::IncompatibleType,
-            affected,
-        );
-        self
-    }
-
     /// Mark a layout edit and its restart boundary.
     pub fn mark_layout_changed(mut self, affected: Vec<String>) -> Self {
         self.blocking_fact = Some(NativeSwapBlockingFact::LayoutChanged);
@@ -1346,12 +1227,6 @@ impl NativeSwapPlan {
             NativeSwapBlockingFact::LayoutChanged,
             affected,
         );
-        self
-    }
-
-    /// Attach an explicit restart boundary and state explanation.
-    pub fn with_restart_boundary(mut self, boundary: NativeSwapRestartBoundary) -> Self {
-        self.restart_boundary = boundary;
         self
     }
 
@@ -1384,20 +1259,6 @@ impl NativeSwapPlan {
     pub fn preserve_connection(mut self, handle: NativeSwapConnectionHandle) -> Self {
         self.preserve_connections.push(handle);
         self.preserve_connections.sort();
-        self
-    }
-
-    /// Replace the explicit listener preservation set.
-    pub fn with_preserved_listeners(mut self, mut handles: Vec<NativeSwapListenerHandle>) -> Self {
-        handles.sort();
-        self.preserve_listeners = handles;
-        self
-    }
-
-    /// Replace the explicit connection preservation set.
-    pub fn with_preserved_connections(mut self, mut handles: Vec<NativeSwapConnectionHandle>) -> Self {
-        handles.sort();
-        self.preserve_connections = handles;
         self
     }
 

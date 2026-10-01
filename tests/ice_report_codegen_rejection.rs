@@ -19,8 +19,10 @@ fn generated_rust_rejection_is_a_branded_ice_and_preserves_backend_evidence() {
     );
     fs::write(project.join("main.jet"), &source).unwrap();
 
+    // Dev profiles build through Cranelift and generate no Rust (#3953);
+    // `ci` is a rustc profile, so rustc sees the generated source.
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["build", "--profile=debug", "--verbose", "main.jet"])
+        .args(["build", "--profile=ci", "--verbose", "main.jet"])
         .current_dir(&project.path)
         .env("JET_ICE_RUSTC_REJECTION_SELF_TEST", "1")
         .env("JET_PROVE_FRESH_TEST", "1")

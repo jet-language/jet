@@ -22,6 +22,7 @@ mod ExactUnitConversion;
 pub mod ExitCodes;
 pub mod Facts;
 pub mod Generics;
+pub mod Hex;
 pub mod JSON;
 pub mod DataTree;
 pub mod JSONNumber;

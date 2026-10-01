@@ -11,14 +11,13 @@ use crate::Manifest;
 use crate::Parser;
 use crate::Syntax;
 use crate::AST::{
-    ConstDef, EnumLitArg, Expr, ImportDecl, ImportKind, Item, LoadedModule, ModelOutputFact,
-    OutputKind, PackageGuarantees, ProgramBundle, RustConstKind, StrPart, Type,
-
+    ConstDef, EnumLitArg, Expr, ImportDecl, ImportKind, Item, LoadedModule, OutputKind,
+    PackageGuarantees, ProgramBundle, RustConstKind, StrPart, Type,
 };
-use jet_pkg_model::ModelPackageCompiler;
 use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use jet_foundation::Names::normalize_path;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -66,7 +65,6 @@ pub(crate) fn package_guarantees_for_manifest(
         lints_deny: package_manifest.policy.lints_deny.clone(),
         memory_denials,
         authority_needs: package_manifest.authority.needs.clone(),
-        model_outputs: Vec::new(),
         application_authority:
             jet_foundation::Authority::ApplicationAuthority::from_policy(
                 package_manifest.authority.holds.allow.as_deref(),
@@ -76,31 +74,6 @@ pub(crate) fn package_guarantees_for_manifest(
     }
 }
 
-fn model_output_facts_for_manifest(
-    package_manifest: &crate::Package::PackageFacts,
-    package_root: &Path,
-) -> Result<Vec<ModelOutputFact>, Diagnostic> {
-    let mut facts = Vec::new();
-    for (address, output) in package_manifest
-        .outputs
-        .iter()
-        .filter(|(_, output)| output.kind == crate::Package::PackageOutputKind::Model)
-    {
-        let package = jet_pkg_model::ModelPackage::from_facts(package_manifest, address)
-            .map_err(|error| error.diagnostic())?;
-        let descriptor = package.descriptor().map_err(|error| error.diagnostic())?;
-        facts.push(ModelOutputFact {
-            package: package_manifest.name.clone(),
-            output: address.clone(),
-            signature_name: output.fields.get("name").cloned(),
-            package_version: descriptor.package_version,
-            license: descriptor.license,
-            package_root: package_root.to_path_buf(),
-            fields: output.fields.clone(),
-        });
-    }
-    Ok(facts)
-}
 /// Complete one inline Package with the same file-backed Config and member
 /// checks used by the canonical `package.jet` loader. The candidate is mutated
 /// only after each Config has been checked and composed, so a failed inline
@@ -1359,7 +1332,7 @@ fn load_entry_with_overlays_mode_on_stack(
         pkg_resolution,
         package_policy,
         package_lints_deny,
-        mut package_guarantees,
+        package_guarantees,
         package_output_roots,
         package_output_declarations,
         package_defaults,
@@ -1718,18 +1691,7 @@ fn load_entry_with_overlays_mode_on_stack(
                     )
                 })?;
                 let mut policy = organization_policy.clone();
-                let mut package_guarantees =
-                    package_guarantees_for_manifest(&package_manifest);
-                package_guarantees.model_outputs = model_output_facts_for_manifest(
-                    &package_manifest,
-                    &manifest_dir,
-                )
-                .map_err(|diagnostic| record_loader_error(&mut sink, LoaderError::at(
-                    &pack_path.display().to_string(),
-                    &raw,
-                    vec![diagnostic],
-                )))?;
-
+                let package_guarantees = package_guarantees_for_manifest(&package_manifest);
                 let package_output_declarations = package_manifest
 
                     .outputs
@@ -1755,7 +1717,6 @@ fn load_entry_with_overlays_mode_on_stack(
                             crate::Package::PackageOutputKind::Bundle => OutputKind::Bundle,
                             crate::Package::PackageOutputKind::System => OutputKind::System,
                             crate::Package::PackageOutputKind::Fleet => OutputKind::Fleet,
-                            crate::Package::PackageOutputKind::Model => return None,
                         };
                         Some((address.clone(), output.name.clone(), kind, entry))
                     })
@@ -2124,12 +2085,6 @@ fn load_entry_with_overlays_mode_on_stack(
                 )
             })?;
             package_guarantees = package_guarantees_for_manifest(&package_manifest);
-            package_guarantees.model_outputs = model_output_facts_for_manifest(
-                &package_manifest,
-                package_source_root.as_deref().unwrap_or(&entry_dir),
-            )
-            .map_err(|diagnostic| vec![diagnostic])?;
-
             package_output_declarations = package_manifest
 
                 .outputs
@@ -2156,7 +2111,6 @@ fn load_entry_with_overlays_mode_on_stack(
                         crate::Package::PackageOutputKind::Bundle => OutputKind::Bundle,
                         crate::Package::PackageOutputKind::System => OutputKind::System,
                         crate::Package::PackageOutputKind::Fleet => OutputKind::Fleet,
-                        crate::Package::PackageOutputKind::Model => return None,
                     };
                     Some((address.clone(), output.name.clone(), kind, entry))
                 })
@@ -2297,6 +2251,103 @@ fn load_entry_with_overlays_mode_on_stack(
         prepared_frontend.as_deref_mut(),
     ) {
         return Err(record_loader_error(&mut sink, error));
+    }
+    // D-MOD-CYCLE1=A: a package is one namespace. Loading any file of a
+    // package loads every other file of it (and, through their imports, the
+    // packages they use), so each member sees the whole namespace. Members do
+    // not import each other, so their loop never reaches the import stack.
+    let mut namespace_roots: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
+    let mut expanded_roots: HashSet<PathBuf> = HashSet::new();
+    loop {
+        let mut pending = Vec::new();
+        for module_idx in 0..modules.len() {
+            let module_path = modules[module_idx].path.clone();
+            let Some(root) = namespace_root(&module_path, &mut namespace_roots) else {
+                continue;
+            };
+            if !expanded_roots.insert(root.clone()) {
+                continue;
+            }
+            let members = match package_member_files(&root) {
+                Ok(members) => members,
+                Err(diagnostic) => {
+                    return Err(record_loader_error(
+                        &mut sink,
+                        LoaderError::at(&root.display().to_string(), "", vec![diagnostic]),
+                    ));
+                }
+            };
+            for member in members {
+                // The package root listed this file, so it is a member of this
+                // root's namespace. Seed its folder's answer: the upward
+                // manifest walk stops at a world-writable folder, which would
+                // otherwise load the file without its package namespace.
+                if let Some(folder) = member.parent() {
+                    namespace_roots.insert(folder.to_path_buf(), Some(root.clone()));
+                }
+                if !path_to_idx.contains_key(&normalize_path(&member)) {
+                    pending.push(member);
+                }
+            }
+        }
+        if pending.is_empty() {
+            break;
+        }
+        for member in pending {
+            if path_to_idx.contains_key(&normalize_path(&member)) {
+                continue;
+            }
+            let member_display = relative_display(&project_root, &member);
+            if let Err(error) = load_file(
+                &member,
+                &member_display,
+                &project_root,
+                &pkg_dep_dirs,
+                &pkg_resolution,
+                &package_policy,
+                &package_lints_deny,
+                &mut modules,
+                &mut path_to_idx,
+                &mut stack,
+                overlays,
+                for_check,
+                &mut parse_teaching,
+                &project_parts,
+                &project_part_failures,
+                dependencies,
+                prepared_frontend.as_deref_mut(),
+            ) {
+                return Err(record_loader_error(&mut sink, error));
+            }
+        }
+    }
+    // The manifest walk never crosses a world-writable folder (anyone could
+    // plant sources there), and no loaded package root listed this file, so
+    // it would silently lose its package namespace. Name the folder instead.
+    for module in &modules {
+        if module.path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
+            || namespace_root(&module.path, &mut namespace_roots).is_some()
+        {
+            continue;
+        }
+        if let Some((shared, root)) = shared_folder_below_package(&module.path) {
+            let diagnostic = Diagnostic::error(
+                "E1334",
+                format!(
+                    "folder `{}` is world-writable, so `{}` is cut off from package `{}`",
+                    shared.display(),
+                    module.display,
+                    root.display()
+                ),
+                "package discovery never crosses a world-writable folder, because anyone could plant sources in it".to_string(),
+                format!("remove the write bit for others: `chmod o-w {}`", shared.display()),
+                None,
+            );
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError::at(&module.display, &module.source, vec![diagnostic]),
+            ));
+        }
     }
 
     // Explicit project imports report the same conflict at their source span
@@ -2510,6 +2561,11 @@ fn load_entry_with_overlays_mode_on_stack(
             }
         }
     }
+    if let Err(error) =
+        bind_package_namespaces(&mut modules, entry_idx, &mut namespace_roots, &mut name_ledger)
+    {
+        return Err(record_loader_error(&mut sink, error));
+    }
     // PackageFacts owns manifest output references. Credit the entry module's
     // file-module alias before sema populates its aliases, so a checked
     // `run.jet` does not report an output-only import as unused.
@@ -2544,49 +2600,6 @@ fn load_entry_with_overlays_mode_on_stack(
     for (name, dir) in &pkg_resolution.realized_libs {
         dep_roots.entry(name.clone()).or_insert_with(|| dir.clone());
     }
-    for dependency in pkg_dep_dirs.values() {
-        let facts = match package_facts_from_resolver(&dependency.authority) {
-            Ok(facts) => facts,
-            Err(diagnostics) => return Err(diagnostics),
-        };
-        let Some(facts) = facts else {
-            continue;
-        };
-        package_guarantees
-            .model_outputs
-            .extend(
-                model_output_facts_for_manifest(&facts, &dependency.source_root)
-                    .map_err(|diagnostic| vec![diagnostic])?,
-            );
-    }
-    for authority in pkg_resolution.realized_authorities.values() {
-        let facts = match package_facts_from_resolver(authority) {
-            Ok(facts) => facts,
-            Err(diagnostics) => return Err(diagnostics),
-        };
-        let Some(facts) = facts else {
-            continue;
-        };
-        package_guarantees
-            .model_outputs
-            .extend(
-                model_output_facts_for_manifest(&facts, authority.root())
-                    .map_err(|diagnostic| vec![diagnostic])?,
-            );
-    }
-    package_guarantees.model_outputs.sort_by(|left, right| {
-        (&left.package, &left.output, &left.package_root).cmp(&(
-            &right.package,
-            &right.output,
-            &right.package_root,
-        ))
-    });
-    package_guarantees.model_outputs.dedup_by(|left, right| {
-        left.package == right.package
-            && left.output == right.output
-            && left.package_root == right.package_root
-    });
-
     let build_facts = jet_foundation::Facts::BuildFactSnapshot::script(
         &modules[entry_idx].path,
         Syntax::OSTarget::host(),
@@ -2650,7 +2663,9 @@ fn load_entry_with_overlays_mode_on_stack(
     while core_source_module_index < core_source_modules.len() {
         let source_module = core_source_modules[core_source_module_index];
         core_source_module_index += 1;
-        let source = source_module.source.to_string();
+        let source = jet_sema::CoreSources::core_source_text(source_module.module)
+            .unwrap_or_else(|| panic!("Core source module `{}` has no body text", source_module.module))
+            .to_string();
         let display = source_module.path.to_string();
         let source_for_parse = crate::Package::mask_inline_package_source(&source)
             .map_err(|error| {
@@ -3782,21 +3797,52 @@ fn dry_resolve_path_deps(mf: &Manifest::Manifest, project_root: &Path) -> Result
         std::collections::HashMap::new();
     let root_name = mf.package.name.clone();
     // D-MOD-CYCLE1=A: sibling packages (Compiler/JetLexer -> ../JetFoundation)
-    // share a dependency the root also declares. A transitive path may leave
-    // its declaring package only to reach a directory the root package itself
-    // names as a path dependency, so no directory beyond the root's own
+    // share dependencies. A transitive path may leave its declaring package
+    // only to reach a directory the root package itself names as a path
+    // dependency, or a directory beside one the root names outside its own
+    // tree (`Compiler/JetSema -> ../JetParser -> ../JetLexer`): the root has
+    // already opened that sibling directory, so nothing beyond the root's own
     // declarations is ever reached.
-    let root_path_deps: Vec<PathBuf> = mf
-        .dependencies
-        .values()
-        .filter_map(|spec| match spec {
-            Manifest::DepSpec::Path { path } if !Path::new(path).is_absolute() => {
-                std::fs::canonicalize(project_root.join(path)).ok()
+    let canonical_root = std::fs::canonicalize(project_root).ok();
+    let mut root_reach = RootPathReach::default();
+    for spec in mf.dependencies.values() {
+        let Manifest::DepSpec::Path { path } = spec else {
+            continue;
+        };
+        if Path::new(path).is_absolute() {
+            continue;
+        }
+        let Ok(resolved) = std::fs::canonicalize(project_root.join(path)) else {
+            continue;
+        };
+        let outside_root = canonical_root
+            .as_ref()
+            .is_some_and(|root| !resolved.starts_with(root));
+        if outside_root {
+            if let Some(parent) = resolved.parent() {
+                root_reach.sibling_dirs.push(parent.to_path_buf());
             }
-            _ => None,
-        })
-        .collect();
-    dry_resolve_recursive(mf, project_root, &[root_name], &mut seen, false, &root_path_deps)
+        }
+        root_reach.declared.push(resolved);
+    }
+    dry_resolve_recursive(mf, project_root, &[root_name], &mut seen, false, &root_reach)
+}
+
+/// The directories a root package's own path dependencies open to its
+/// transitive path dependencies (D-MOD-CYCLE1=A sibling packages).
+#[derive(Default)]
+struct RootPathReach {
+    /// Every relative path dependency the root declares, canonicalized.
+    declared: Vec<PathBuf>,
+    /// The parent directory of each declared dependency outside the root.
+    sibling_dirs: Vec<PathBuf>,
+}
+
+impl RootPathReach {
+    fn contains(&self, resolved: &Path) -> bool {
+        self.declared.iter().any(|declared| declared == resolved)
+            || self.sibling_dirs.iter().any(|dir| resolved.starts_with(dir))
+    }
 }
 
 fn dry_resolve_recursive(
@@ -3805,7 +3851,7 @@ fn dry_resolve_recursive(
     chain: &[String],
     seen: &mut std::collections::HashMap<String, (String, Vec<String>)>,
     enforce_path_boundary: bool,
-    root_path_deps: &[PathBuf],
+    root_reach: &RootPathReach,
 ) -> Result<(), Diagnostic> {
     for (dep_alias, spec) in &mf.dependencies {
         let Manifest::DepSpec::Path { path } = spec else {
@@ -3814,7 +3860,7 @@ fn dry_resolve_recursive(
         let dep_path = normalize_path(&pkg_dir.join(path));
         let declared_by_root = !Path::new(path).is_absolute()
             && std::fs::canonicalize(&dep_path)
-                .is_ok_and(|resolved| root_path_deps.contains(&resolved));
+                .is_ok_and(|resolved| root_reach.contains(&resolved));
         let enforce_path_boundary = enforce_path_boundary && !declared_by_root;
         if enforce_path_boundary
             && (Path::new(path).is_absolute() || !dep_path.starts_with(pkg_dir))
@@ -3870,7 +3916,7 @@ fn dry_resolve_recursive(
         } else {
             seen.insert(dep_pkg_name.clone(), (dep_version, child_chain.clone()));
             // Recurse into transitive deps.
-            dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen, true, root_path_deps)?;
+            dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen, true, root_reach)?;
         }
     }
     Ok(())
@@ -3883,6 +3929,11 @@ struct DependencyDir {
     authority: AuthorityResolver,
     boundary_policy: Option<ImportBoundaryPolicy>,
     auto_derive_default: Option<bool>,
+    /// True when the root manifest declares this package. A transitive
+    /// dependency is visible only to the packages whose manifests declare it.
+    direct: bool,
+    /// The package names this dependency's own manifest declares.
+    deps: HashSet<String>,
 }
 
 fn dependency_authority_for_path<'a>(
@@ -3896,6 +3947,27 @@ fn dependency_authority_for_path<'a>(
         .chain(pkg_resolution.realized_authorities.values())
         .filter(|authority| path.starts_with(authority.root()))
         .max_by_key(|authority| authority.root().components().count())
+}
+
+/// Whether `use name` from `importing` names a dependency package. A file of
+/// a dependency package sees the packages its own manifest declares; every
+/// other file sees the root manifest's dependencies.
+fn dependency_visible_from(
+    importing: &Path,
+    name: &str,
+    dependencies: &HashMap<String, DependencyDir>,
+) -> bool {
+    let owner = dependencies
+        .values()
+        .filter(|dependency| {
+            importing.starts_with(&dependency.source_root)
+                || importing.starts_with(&dependency.manifest_root)
+        })
+        .max_by_key(|dependency| dependency.manifest_root.components().count());
+    match owner {
+        Some(owner) => owner.deps.contains(name) && dependencies.contains_key(name),
+        None => dependencies.get(name).is_some_and(|dependency| dependency.direct),
+    }
 }
 
 fn dependency_dir_from_resolver(
@@ -3948,7 +4020,7 @@ fn dependency_dir_with_source_root(
             .map_err(|error| vec![error.diagnostic()])?;
         AuthorityResolver::from_checked_directory(&directory)
     };
-    let (boundary_policy, auto_derive_default) =
+    let (boundary_policy, auto_derive_default, deps) =
         dependency_manifest_policy(&authority, &src_root)?;
     Ok(DependencyDir {
         manifest_root: resolver.root().to_path_buf(),
@@ -3956,15 +4028,17 @@ fn dependency_dir_with_source_root(
         authority,
         boundary_policy,
         auto_derive_default,
+        direct: false,
+        deps,
     })
 }
 
 fn dependency_manifest_policy(
     resolver: &AuthorityResolver,
     source_root: &Path,
-) -> Result<(Option<ImportBoundaryPolicy>, Option<bool>), Vec<Diagnostic>> {
+) -> Result<(Option<ImportBoundaryPolicy>, Option<bool>, HashSet<String>), Vec<Diagnostic>> {
     let Some(facts) = package_facts_from_resolver(resolver)? else {
-        return Ok((None, None));
+        return Ok((None, None, HashSet::new()));
     };
     let manifest = crate::Package::to_manifest(&facts, "")
         .map_err(|diagnostic| vec![diagnostic])?;
@@ -3975,12 +4049,46 @@ fn dependency_manifest_policy(
     Ok((
         Some(ImportBoundaryPolicy::from_manifest(&manifest, source_root)),
         Some(auto_derive_default),
+        manifest.dependencies.keys().cloned().collect(),
     ))
 }
 
 
-/// Collect each dependency's owning manifest root and source root.
+/// Collect each dependency's owning manifest root and source root, then the
+/// packages those dependencies declare in turn. A dependency package's own
+/// `use dep` resolves against its manifest (`dependency_visible_from`), so
+/// checking a package loads its whole dependency closure.
 fn collect_dep_dirs(
+    mf: &Manifest::Manifest,
+    project_root: &Path,
+) -> Result<HashMap<String, DependencyDir>, Vec<Diagnostic>> {
+    let mut dirs = collect_declared_dep_dirs(mf, project_root)?;
+    for dependency in dirs.values_mut() {
+        dependency.direct = true;
+    }
+    let mut pending: Vec<DependencyDir> = dirs.values().cloned().collect();
+    let mut expanded: HashSet<PathBuf> = HashSet::new();
+    while let Some(dependency) = pending.pop() {
+        if dependency.deps.is_empty() || !expanded.insert(dependency.manifest_root.clone()) {
+            continue;
+        }
+        let Some(facts) = package_facts_from_resolver(&dependency.authority)? else {
+            continue;
+        };
+        let manifest = crate::Package::to_manifest(&facts, "")
+            .map_err(|diagnostic| vec![diagnostic])?;
+        for (name, nested) in collect_declared_dep_dirs(&manifest, &dependency.manifest_root)? {
+            if !dirs.contains_key(&name) {
+                pending.push(nested.clone());
+                dirs.insert(name, nested);
+            }
+        }
+    }
+    Ok(dirs)
+}
+
+/// Collect the dependencies one manifest declares, resolved from its root.
+fn collect_declared_dep_dirs(
     mf: &Manifest::Manifest,
     project_root: &Path,
 ) -> Result<HashMap<String, DependencyDir>, Vec<Diagnostic>> {
@@ -4369,6 +4477,39 @@ fn load_file_located(
     path_to_idx.insert(norm.clone(), module_idx);
 
     let mut imports = std::mem::take(&mut prog.imports);
+    // D-MOD-CYCLE1=A: `use dep.[names]` names members of a dependency
+    // package directly; it binds the package itself, as `use dep` would.
+    let mut package_bindings: Vec<ImportDecl> = Vec::new();
+    for imp in &imports {
+        let ImportKind::Unqualified {
+            module_alias,
+            module_alias_span,
+            ..
+        } = &imp.kind
+        else {
+            continue;
+        };
+        let bound = imports.iter().chain(package_bindings.iter()).any(|other| {
+            matches!(other.kind, ImportKind::File(..) | ImportKind::Module(..))
+                && other.import_alias() == *module_alias
+        });
+        if bound || !dependency_visible_from(&norm, module_alias, pkg_dep_dirs) {
+            continue;
+        }
+        let span = Span::new(module_alias_span.start, module_alias_span.start);
+        package_bindings.push(ImportDecl {
+            kind: ImportKind::Module(module_alias.clone(), span),
+            alias: module_alias.clone(),
+            alias_span: span,
+            span,
+            item_spans: Vec::new(),
+            local_spans: Vec::new(),
+            is_pub: false,
+            is_package_pub: false,
+            inline_version: None,
+        });
+    }
+    imports.splice(0..0, package_bindings);
     // Sema binds module/file aliases before checking any member imports,
     // regardless of source order. Classify ambiguous dotted imports against
     // that same set, without treating an import as its own prefix binding.
@@ -4482,6 +4623,20 @@ fn load_file_located(
             continue;
         }
 
+        // D-MOD-CYCLE1=A: the files of one package share one namespace. Only
+        // loose files import other files by relative path; C headers are a
+        // foreign binding, not a Jet file import. A `..` path that leaves the
+        // package keeps its more specific E0602 from `resolve_file_import`.
+        if let ImportKind::File(path_str, path_span) = &imp.kind {
+            if !path_str.ends_with(".h") && !path_str.contains("..") && !is_loose_file(path) {
+                stack.pop();
+                return Err(LoaderError::at(
+                    display,
+                    &source,
+                    vec![Diagnostic::from_row("E0623", &[("path", path_str)], Some(*path_span))],
+                ));
+            }
+        }
         let target = match resolve_import(
             imp,
             path,
@@ -4762,6 +4917,7 @@ fn resolve_import(
         }
         ImportKind::Module(name, span) => resolve_module_import(
             name,
+            importing,
             project_root,
             pkg_dep_dirs,
             pkg_resolution,
@@ -5025,8 +5181,312 @@ fn is_loose_file(importing: &Path) -> bool {
     matches!(find_manifest_root_checked(folder), Ok(None))
 }
 
+/// The world-writable folder between `path` and the nearest package manifest
+/// above it, with that package root. The authority walk stops at such a
+/// folder, so a file below it belongs to no package unless its root lists it.
+#[cfg(unix)]
+fn shared_folder_below_package(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut shared: Option<&Path> = None;
+    for folder in path.ancestors().skip(1) {
+        if folder.as_os_str().is_empty() {
+            continue;
+        }
+        if let Some(below) = shared {
+            if folder.join(Syntax::PACKAGE_FILE).is_file() {
+                return Some((below.to_path_buf(), folder.to_path_buf()));
+            }
+        } else if fs::symlink_metadata(folder)
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o002 != 0)
+        {
+            shared = Some(folder);
+        }
+    }
+    None
+}
+
+#[cfg(not(unix))]
+fn shared_folder_below_package(_path: &Path) -> Option<(PathBuf, PathBuf)> {
+    None
+}
+
+/// D-MOD-CYCLE1=A: the root of the package whose namespace `path` belongs to.
+/// A file under a `package.jet` (and not a one-file package with its own
+/// `package { }` header) is a member of that package. Loose files, one-file
+/// packages, embedded Core sources, and synthetic modules have no namespace.
+fn namespace_root(path: &Path, cache: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<PathBuf> {
+    if path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT) || !path.is_file() {
+        return None;
+    }
+    let has_header = jet_foundation::CheckReads::read_to_string(path)
+        .map(|source| !matches!(crate::Package::extract_inline_package(&source), Ok(None)))
+        .unwrap_or(false);
+    if has_header {
+        return None;
+    }
+    let folder = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    cache
+        .entry(folder.to_path_buf())
+        .or_insert_with(|| {
+            find_manifest_root_checked(folder)
+                .ok()
+                .flatten()
+                .map(|root| normalize_path(&root))
+        })
+        .clone()
+}
+
+/// D-MOD-CYCLE1=A: every `.jet` source of the package rooted at `root`,
+/// excluding its manifest and the files of nested packages, in path order.
+fn package_member_files(root: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
+    let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
+    let files = resolver
+        .discover_source_files()
+        .map_err(|error| error.diagnostic())?;
+    Ok(files
+        .into_iter()
+        .filter(|file| {
+            let name = file.relative.file_name().and_then(|name| name.to_str());
+            name != Some(Syntax::PACKAGE_FILE)
+                && name != Some(Syntax::PAYLOAD_FILE)
+                && name != Some(Syntax::WORKSPACE_FILE)
+        })
+        .map(|file| normalize_path(&file.path))
+        .collect())
+}
+
+/// D-MOD-CYCLE1=A: the top-level names one package file contributes to its
+/// package namespace, with their declaring spans.
+fn namespace_item_names(items: &[Item]) -> Vec<(String, Span)> {
+    let mut names = Vec::new();
+    for item in items {
+        match item {
+            Item::Func(function) => names.push((function.name.clone(), function.name_span)),
+            Item::Struct(definition) => names.push((definition.name.clone(), definition.name_span)),
+            Item::Enum(definition) => names.push((definition.name.clone(), definition.name_span)),
+            Item::Distinct(definition) => {
+                names.push((definition.name.clone(), definition.name_span))
+            }
+            Item::TypeAlias(definition) => {
+                names.push((definition.name.clone(), definition.name_span))
+            }
+            Item::UnitFamily(family) => {
+                for definition in family.distinct_defs() {
+                    names.push((definition.name.clone(), definition.name_span));
+                }
+            }
+            Item::Trait(definition) => names.push((definition.name.clone(), definition.name_span)),
+            Item::Tag(definition) => names.push((definition.name.clone(), definition.name_span)),
+            Item::Const(definition) => names.push((definition.name.clone(), definition.name_span)),
+            Item::ProtocolDecl(protocol) => names.push((protocol.name.clone(), protocol.name_span)),
+            _ => {}
+        }
+    }
+    names
+}
+
+/// A namespace diagnostic at a member file. The entry renders against its own
+/// source already; any other member carries its origin so the span renders
+/// against the file that declares it.
+fn member_error(
+    modules: &[LoadedModule],
+    module_idx: usize,
+    entry_idx: usize,
+    diagnostic: Diagnostic,
+) -> LoaderError {
+    let module = &modules[module_idx];
+    let error = LoaderError::at(&module.display, &module.source, vec![diagnostic]);
+    if module_idx == entry_idx {
+        error
+    } else {
+        error.with_module_origin(&module.display, &module.path)
+    }
+}
+
+/// D-MOD-CYCLE1=A: make every package one namespace. Each member file is
+/// recorded under its package root, a name declared in two member files is
+/// E0624, and each member receives compiler-owned bindings for its siblings'
+/// top-level names. Those bindings use the ordinary file-module and member
+/// import path, so sema, lowering, and every tier resolve a sibling name
+/// exactly like an imported one. They carry zero-width spans: they are not
+/// written source, so they never render, and liveness never reports them.
+fn bind_package_namespaces(
+    modules: &mut [LoadedModule],
+    entry_idx: usize,
+    namespace_roots: &mut HashMap<PathBuf, Option<PathBuf>>,
+    name_ledger: &mut crate::AST::NameLedger,
+) -> Result<(), LoaderError> {
+    let mut groups: Vec<(PathBuf, Vec<usize>)> = Vec::new();
+    for module_idx in 0..modules.len() {
+        let Some(root) = namespace_root(&modules[module_idx].path, namespace_roots) else {
+            continue;
+        };
+        match groups.iter_mut().find(|(group_root, _)| *group_root == root) {
+            Some((_, members)) => members.push(module_idx),
+            None => groups.push((root, vec![module_idx])),
+        }
+    }
+    for (root, members) in &groups {
+        let root_key = root.to_string_lossy().into_owned();
+        for &member in members {
+            name_ledger.set_module_namespace(member, root_key.clone());
+        }
+        // One `fn run` per package, unless the manifest names each entry
+        // (owner ruling B, like Cargo `[[bin]]`): `.Executable{ entry:
+        // tool.run }` lets `tool.jet` keep its own `fn run`. A named entry's
+        // `run` is never shared with its siblings, so it can't collide. A
+        // package-root command home (`@run.jet`, D-ROLEFILE1) is an entry the
+        // command resolver selects the same way, so its command function
+        // stays its own too.
+        let facts = package_facts_for_root(root).ok().flatten();
+        let named_entry_files: HashSet<String> = facts
+            .iter()
+            .flat_map(|facts| facts.outputs.values())
+            .filter(|output| output.kind == crate::Package::PackageOutputKind::Executable)
+            .filter_map(|output| output.entry.as_deref()?.strip_suffix(".run").map(str::to_string))
+            .collect();
+        let names = members
+            .iter()
+            .map(|&member| {
+                let path = &modules[member].path;
+                let named_entry = named_entry_files.contains(&modules[member].alias);
+                let role_command = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| Syntax::COMMAND_ROLE_FILES.contains(name))
+                    .filter(|_| path.parent().is_some_and(|parent| normalize_path(parent) == *root))
+                    .and_then(|name| name.strip_prefix('@')?.strip_suffix(".jet"));
+                namespace_item_names(&modules[member].items)
+                    .into_iter()
+                    .filter(|(name, _)| {
+                        !(named_entry && name == "run") && role_command != Some(name.as_str())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let mut owners: HashMap<&str, usize> = HashMap::new();
+        for (position, member_names) in names.iter().enumerate() {
+            for (name, span) in member_names {
+                match owners.get(name.as_str()) {
+                    Some(&first) if first != position => {
+                        let package = root
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| root_key.clone());
+                        let other = modules[members[first]].display.clone();
+                        return Err(member_error(
+                            modules,
+                            members[position],
+                            entry_idx,
+                            Diagnostic::from_row(
+                                "E0624",
+                                &[("name", name), ("package", &package), ("other", &other)],
+                                Some(*span),
+                            ),
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        owners.insert(name, position);
+                    }
+                }
+            }
+        }
+        // A library package has no `fn run`.
+        let declares_library = facts.as_ref().is_some_and(|facts| {
+            facts.outputs.values().any(|output| {
+                output.kind == crate::Package::PackageOutputKind::Library
+            }) && !facts.outputs.values().any(|output| {
+                output.kind == crate::Package::PackageOutputKind::Executable
+            })
+        });
+        if declares_library {
+            for (position, member_names) in names.iter().enumerate() {
+                if let Some((_, span)) = member_names.iter().find(|(name, _)| name == "run") {
+                    return Err(member_error(
+                        modules,
+                        members[position],
+                        entry_idx,
+                        Diagnostic::from_row("E0625", &[], Some(*span)),
+                    ));
+                }
+            }
+        }
+        for &member in members {
+            // Each binding needs a zero-width span of its own: the name
+            // ledger keys import targets and alias uses by span. A written
+            // `use dep.[…]` already binds its package at the zero-width span
+            // of its alias, and the Prelude binds Core at 0, so skip those.
+            let mut taken: HashSet<usize> = modules[member]
+                .imports
+                .iter()
+                .filter(|import| import.span.start == import.span.end)
+                .map(|import| import.span.start)
+                .collect();
+            taken.insert(0);
+            let mut next_span = 0usize;
+            let mut fresh_span = || {
+                while taken.contains(&next_span) {
+                    next_span += 1;
+                }
+                taken.insert(next_span);
+                Span::new(next_span, next_span)
+            };
+            for (sibling_position, &sibling) in members.iter().enumerate() {
+                if sibling == member || names[sibling_position].is_empty() {
+                    continue;
+                }
+                let alias = format!("__jet_pkg_{}", modules[sibling].alias);
+                let file_span = fresh_span();
+                let list_span = fresh_span();
+                let bound = names[sibling_position]
+                    .iter()
+                    .map(|(name, _)| (name.clone(), None))
+                    .collect::<Vec<_>>();
+                let count = bound.len();
+                let sibling_display = modules[sibling].display.clone();
+                let imports = &mut modules[member].imports;
+                imports.push(ImportDecl {
+                    kind: ImportKind::File(sibling_display, file_span),
+                    alias: alias.clone(),
+                    alias_span: file_span,
+                    span: file_span,
+                    item_spans: Vec::new(),
+                    local_spans: Vec::new(),
+                    is_pub: false,
+                    is_package_pub: false,
+                    inline_version: None,
+                });
+                imports.push(ImportDecl {
+                    kind: ImportKind::Unqualified {
+                        module_alias: alias.clone(),
+                        module_alias_span: list_span,
+                        items: bound,
+                        items_span: list_span,
+                        span: list_span,
+                    },
+                    alias,
+                    alias_span: list_span,
+                    span: list_span,
+                    item_spans: vec![list_span; count],
+                    local_spans: vec![list_span; count],
+                    is_pub: false,
+                    is_package_pub: false,
+                    inline_version: None,
+                });
+                name_ledger.record_import_target(member, file_span, sibling);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn resolve_module_import(
     name: &str,
+    importing: &Path,
     project_root: &Path,
     pkg_dep_dirs: &HashMap<String, DependencyDir>,
     pkg_resolution: &PkgResolution,
@@ -5067,7 +5527,10 @@ fn resolve_module_import(
     // M12.1: check package dep dirs first.
     // `import words;` where "words" is a dep name → look in the dep's source root.
     let first_segment = name.split('.').next().unwrap_or(name);
-    if let Some(dependency) = pkg_dep_dirs.get(first_segment) {
+    if let Some(dependency) = pkg_dep_dirs
+        .get(first_segment)
+        .filter(|_| dependency_visible_from(importing, first_segment, pkg_dep_dirs))
+    {
         // Search within the dep's source tree for the module.
         let dep_matches = find_module_files_with_authority(name, &dependency.authority)?;
         if !dep_matches.is_empty() {
@@ -5087,7 +5550,17 @@ fn resolve_module_import(
                         .map_err(|error| error.diagnostic())?;
                     return Ok(run_jet.path);
                 }
-                Err(error) if error.is_missing() => {}
+                Err(error) if error.is_missing() => {
+                    // D-MOD-CYCLE1=A: a dependency package is one namespace;
+                    // any member file stands for it, and loading that member
+                    // loads the whole package.
+                    if let Some(member) = package_member_files(dependency.authority.root())?
+                        .into_iter()
+                        .next()
+                    {
+                        return Ok(member);
+                    }
+                }
                 Err(error) => return Err(error.diagnostic()),
             }
         }
@@ -5341,20 +5814,6 @@ fn e0602(span: Span) -> Diagnostic {
         "use a path without `..`, or move the file inside the package tree".to_string(),
         Some(span),
     )
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 fn relative_display(root: &Path, path: &Path) -> String {

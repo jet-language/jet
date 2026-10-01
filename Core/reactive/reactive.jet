@@ -34,51 +34,51 @@ pub struct Effect {
     pub active: Bool
 }
 
-pub fn unsubscribe(e: Effect) -> Effect {
+pub fn unsubscribe(e: Effect) -> Effect Never! {
     Effect{last: e.last, active: false}
 }
 
-pub fn is_active(e: Effect) -> Bool { e.active }
+pub fn is_active(e: Effect) -> Bool Never! { e.active }
 
-pub fn set<T>(sig: Signal<T>, value: T) -> Signal<T> {
+pub fn set<T>(sig: Signal<T>, value: T) -> Signal<T> Never! {
     Signal<T>{value: value, version: sig.version + 1}
 }
 
-pub fn set_if_changed(sig: Signal<Int>, value: Int) -> Signal<Int> {
+pub fn set_if_changed(sig: Signal<Int>, value: Int) -> Signal<Int> Never! {
     if sig.value == value -> return ~sig
     set(sig, value)
 }
 
-pub fn changed(sig: Signal<Int>, value: Int) -> Bool { sig.value != value }
+pub fn changed(sig: Signal<Int>, value: Int) -> Bool Never! { sig.value != value }
 
-pub fn computed_update(c: Computed<Int>, delta: Int) -> Computed<Int> {
+pub fn computed_update(c: Computed<Int>, delta: Int) -> Computed<Int> Never! {
     computed_set(c, c.value + delta)
 }
 
-pub fn computed_version<T>(c: Computed<T>) -> Int { c.version }
+pub fn computed_version<T>(c: Computed<T>) -> Int Never! { c.version }
 
-pub fn effect_run_if(e: Effect, value: Int) -> Effect {
+pub fn effect_run_if(e: Effect, value: Int) -> Effect Never! {
     if e.active && e.last == value -> return ~e
     effect_run(e, value)
 }
 
-pub fn effect_changed(e: Effect, value: Int) -> Bool { !e.active || e.last != value }
+pub fn effect_changed(e: Effect, value: Int) -> Bool Never! { !e.active || e.last != value }
 
-pub fn get<T>(sig: Signal<T>) -> T { sig.value }
+pub fn get<T>(sig: Signal<T>) -> T Never! { sig.value }
 
-pub fn version<T>(sig: Signal<T>) -> Int { sig.version }
+pub fn version<T>(sig: Signal<T>) -> Int Never! { sig.version }
 
-pub fn update(sig: Signal<Int>, delta: Int) -> Signal<Int> { set(sig, sig.value + delta) }
+pub fn update(sig: Signal<Int>, delta: Int) -> Signal<Int> Never! { set(sig, sig.value + delta) }
 
-pub fn computed_get<T>(c: Computed<T>) -> T { c.value }
+pub fn computed_get<T>(c: Computed<T>) -> T Never! { c.value }
 
-pub fn computed_set<T>(c: Computed<T>, value: T) -> Computed<T> {
+pub fn computed_set<T>(c: Computed<T>, value: T) -> Computed<T> Never! {
     Computed<T>{value: value, version: c.version + 1}
 }
 
-pub fn effect_run(e: Effect, value: Int) -> Effect {
+pub fn effect_run(e: Effect, value: Int) -> Effect Never! {
     if !e.active || e.last != value -> return Effect{last: value, active: true}
     ~e
 }
 
-pub fn effect_last(e: Effect) -> Int { e.last }
+pub fn effect_last(e: Effect) -> Int Never! { e.last }

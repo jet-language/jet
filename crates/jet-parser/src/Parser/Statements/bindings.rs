@@ -46,6 +46,7 @@ impl<'a> Parser<'a> {
                 fallback,
                 names,
                 span,
+                synthesized: false,
             }),
             ty: None,
             ty_span: None,
@@ -245,8 +246,12 @@ impl<'a> Parser<'a> {
             return Ok(None);
         }
         let (mutable, sigil_span) = self.expect_bind_sigil()?;
+        // The value's source text runs from its first token to the last one
+        // parsed; `init.span()` is only the head of some forms (a method
+        // call's span is its method name), which truncated the fix text.
+        let value_start = self.peek().span.start;
         let init = self.expr()?;
-        let value_span = init.span();
+        let value_span = Span::new(value_start, self.toks[self.pos - 1].span.end);
         let sigil = if mutable {
             Syntax::SIGIL_BIND_MUT
         } else {
@@ -779,20 +784,73 @@ impl<'a> Parser<'a> {
         if mutable || !self.at_prep_verb(&TokKind::LBrace) {
             return Ok((self.expr()?, false));
         }
+        // A binding statement directly inside another prepared value block
+        // means that block was never closed (a value block holds a single
+        // expression, never a binding). Hand the binding back to the enclosing
+        // binding's parse, which reports the unclosed block; nesting every
+        // later `name :: prep { … }` inside the first one recursed without
+        // bound and overflowed the stack.
+        if let Some((_, statements_depth)) = self.prep_value_block {
+            let binding_start = self.pos.checked_sub(2).filter(|name| {
+                matches!(self.toks[*name].kind, TokKind::Ident(_))
+                    && matches!(self.toks[name + 1].kind, TokKind::ColonColon)
+            });
+            if let Some(binding_start) = binding_start.filter(|_| statements_depth == self.block_depth) {
+                self.prep_value_escape = Some(binding_start);
+                return Err(Diagnostic::from_row("E0391", &[], Some(self.peek().span)));
+            }
+        }
         let start = self.bump().span.start;
-        self.bump(); // `{`
+        let open_span = self.bump().span; // `{`
         // The block's final expression is its value, as in a callable body,
         // so a bare literal tail is accepted here.
         let saved_tail = (self.callable_tail_block_depth, self.callable_tail_expects_value);
         self.callable_tail_block_depth = Some(self.block_depth + 1);
         self.callable_tail_expects_value = true;
+        let saved_block = self.prep_value_block.replace((open_span, self.block_depth + 1));
+        let diags_before = self.diags.len();
         let mut body = self.block_stmts();
+        self.prep_value_block = saved_block;
         (self.callable_tail_block_depth, self.callable_tail_expects_value) = saved_tail;
+        if let Some(binding_start) = self.prep_value_escape.take() {
+            // The block's contents were read against the wrong end, so their
+            // own reports are noise; the unclosed `{` is the one finding.
+            self.diags.truncate(diags_before);
+            return Ok((self.unclosed_prep_value(open_span, binding_start), true));
+        }
         let end = self.toks[self.pos - 1].span.end;
         match (body.pop(), body.is_empty()) {
             (Some(Stmt::Expr(value)), true) => Ok((value, true)),
             _ => Err(Diagnostic::from_row("E0391", &[], Some(Span::new(start, end)))),
         }
+    }
+
+    /// E0083 at the `{` of a prepared value block that a later binding showed
+    /// was never closed. The parse resumes at the end of the line before that
+    /// binding, so it is read again as the next statement or declaration.
+    fn unclosed_prep_value(&mut self, open_span: Span, binding_start: usize) -> Expr {
+        self.pos = binding_start;
+        if binding_start > 0 && matches!(self.toks[binding_start - 1].kind, TokKind::Semi) {
+            self.pos = binding_start - 1;
+        }
+        let name = match &self.toks[binding_start].kind {
+            TokKind::Ident(name) => name.clone(),
+            _ => String::new(),
+        };
+        let cutoff = format!("the binding `{name}`");
+        let diagnostic = self
+            .unclosed_report(open_span, "{", "}", &cutoff, "prepared value")
+            .unwrap_or_else(|| {
+                Diagnostic::error(
+                    "E0003",
+                    format!("expected `}}` to close this block, found {cutoff}"),
+                    "every `{` needs a matching `}`".to_string(),
+                    "add a closing `}`".to_string(),
+                    Some(open_span),
+                )
+            });
+        self.diags.push(diagnostic);
+        Expr::Unit(open_span)
     }
 
     /// D-PREP-BRANCH1=A / D-PREP-FN1=A: the retired `@if`, `@loop` and `@fn`

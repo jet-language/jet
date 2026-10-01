@@ -1,5 +1,21 @@
 // Lower the checked hardware and receipt-only THandleOp families.
-fn jet_codegen_lower_special_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MirValueId {
+use jet_foundation.[
+    MIRAccess,
+    MIRCallArg,
+    MIRHardwareOp,
+    MIROperation,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRSemanticOp,
+    MIRType,
+    MIRValueID,
+    TExpr,
+    THandleOp,
+    THardwareCall,
+    core_receiver_method,
+]
+
+fn jet_codegen_lower_special_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
     return if operation == {
         .Hardware(hardware_operation) -> jet_codegen_lower_hardware_handle_method(&builder, expression, receiver, hardware_operation, args)
         .ReceiptAttach -> jet_codegen_lower_receipt_attach(&builder, expression, args)
@@ -7,63 +23,63 @@ fn jet_codegen_lower_special_handle_method(builder: &JetCodegenBuilder, expressi
     }
 }
 
-fn jet_codegen_lower_hardware_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, hardware_operation: THardwareCall, args: [TExpr]) -> MirValueId {
+fn jet_codegen_lower_hardware_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, hardware_operation: THardwareCall, args: [TExpr]) -> MIRValueID {
     is_dma_start := if hardware_operation == {
-        .DmaStart(_, _, _) -> true
+        .DMAStart(_, _, _) -> true
         else -> false
     }
     if is_dma_start && args.len() == 0 -> panic("DMA start MIR projection requires a checked buffer operand")
 
-    lowered_receiver := None
-    if hardware_operation == .DmaWait(_, _, _) -> lowered_receiver = Val(jet_codegen_lower_expr(&builder, receiver))
+    lowered_receiver := MIRValueID?{None}
+    if hardware_operation == .DMAWait(_, _, _) -> lowered_receiver = Val(jet_codegen_lower_expr(&builder, receiver))
 
-    lowered_args := [MirCallArg]{}
+    lowered_args := [MIRCallArg]{}
     loop (index, argument) in args {
         if is_dma_start && index == 0 -> next
         value := jet_codegen_lower_expr(&builder, argument)
-        access := if is_dma_start && lowered_args.len() == 0 -> MirAccess.Move else -> MirAccess.Read
+        access := if is_dma_start && lowered_args.len() == 0 -> MIRAccess.Move else -> MIRAccess.Read
         &lowered_args.push(jet_codegen_host_call_value_arg(value, argument.span, access, None))
     }
 
     member := if hardware_operation == {
         .RegisterRead(_, _, _, _) -> "register_read"
         .RegisterWrite(_, _, _, _) -> "register_write"
-        .DmaStart(_, _, _) -> "dma_start"
-        .DmaWait(_, _, _) -> "dma_wait"
+        .DMAStart(_, _, _) -> "dma_start"
+        .DMAWait(_, _, _) -> "dma_wait"
     }
     symbol := if hardware_operation == {
         .RegisterRead(_, _, _, _) -> "jet_hardware_register_read"
         .RegisterWrite(_, _, _, _) -> "jet_hardware_register_write"
-        .DmaStart(_, _, _) -> "jet_hardware_dma_start"
-        .DmaWait(_, _, _) -> "jet_hardware_dma_wait"
+        .DMAStart(_, _, _) -> "jet_hardware_dma_start"
+        .DMAWait(_, _, _) -> "jet_hardware_dma_wait"
     }
     borrow_mask := if hardware_operation == {
-        .RegisterWrite(_, _, _, _) | .DmaStart(_, _, _) -> [Bool]{false}
-        .RegisterRead(_, _, _, _) | .DmaWait(_, _, _) -> [Bool]{}
+        .RegisterWrite(_, _, _, _) | .DMAStart(_, _, _) -> [Bool]{false}
+        .RegisterRead(_, _, _, _) | .DMAWait(_, _, _) -> [Bool]{}
     }
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.hardware", member, symbol, borrow_mask.len(), borrow_mask, None, carrier, MirPreludeAbi.Value)
+    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.HandleMethod, "core.hardware", member, symbol, borrow_mask.len(), borrow_mask, None, carrier, MIRPreludeABI.Value)
     mir_hardware_operation := if hardware_operation == {
-        .RegisterRead(profile_id, block, register, width) -> MirHardwareOp.RegisterRead{profile_id: profile_id, block: block, register: register, width: width}
-        .RegisterWrite(profile_id, block, register, width) -> MirHardwareOp.RegisterWrite{profile_id: profile_id, block: block, register: register, width: width}
-        .DmaStart(profile_id, channel, buffer_ty) -> MirHardwareOp.DmaStart{profile_id: profile_id, channel: channel, buffer_ty: jet_codegen_lower_type_for_function(buffer_ty, &builder)}
-        .DmaWait(profile_id, channel, buffer_ty) -> MirHardwareOp.DmaWait{profile_id: profile_id, channel: channel, buffer_ty: jet_codegen_lower_type_for_function(buffer_ty, &builder)}
+        .RegisterRead(profile_id, block, register, width) -> MIRHardwareOp.RegisterRead{profile_id: profile_id, block: block, register: register, width: width}
+        .RegisterWrite(profile_id, block, register, width) -> MIRHardwareOp.RegisterWrite{profile_id: profile_id, block: block, register: register, width: width}
+        .DMAStart(profile_id, channel, buffer_ty) -> MIRHardwareOp.DMAStart{profile_id: profile_id, channel: channel, buffer_ty: jet_codegen_lower_type_for_function(buffer_ty, builder)}
+        .DMAWait(profile_id, channel, buffer_ty) -> MIRHardwareOp.DMAWait{profile_id: profile_id, channel: channel, buffer_ty: jet_codegen_lower_type_for_function(buffer_ty, builder)}
     }
-    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HardwareCall{call: call, op: mir_hardware_operation, receiver: lowered_receiver, args: lowered_args}})
+    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HardwareCall{call: call, op: mir_hardware_operation, receiver: lowered_receiver, args: lowered_args}})
 }
 
-fn jet_codegen_lower_receipt_attach(builder: &JetCodegenBuilder, expression: TExpr, args: [TExpr]) -> MirValueId {
+fn jet_codegen_lower_receipt_attach(builder: &JetCodegenBuilder, expression: TExpr, args: [TExpr]) -> MIRValueID {
     record :: core_receiver_method(String.from_bytes([U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{114}, U8{101}, U8{99}, U8{101}, U8{105}, U8{112}, U8{116}, U8{46}, U8{104}, U8{97}, U8{110}, U8{100}, U8{108}, U8{101}}) ?? "", "attach") ?? panic("receipt.attach Core row is not registered")
     if args.len() != 4 -> panic("receipt.attach MIR projection requires payload and three metadata operands")
 
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_core_call(&builder, record)
     route := jet_codegen_intern_core_route(&builder, record, carrier)
-    fallibility := jet_codegen_core_call_fallibility(carrier, &builder)
-    lowered_args := [MirCallArg]{}
+    fallibility := jet_codegen_core_call_fallibility(carrier, builder)
+    lowered_args := [MIRCallArg]{}
     loop (index, argument) in args {
         &lowered_args.push(jet_codegen_lower_core_call_arg(&builder, argument, index, record, false))
     }
-    payload_type := jet_codegen_lower_type_for_function(args[0].ty, &builder)
-    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.CoreCall{call: call, route: route, args: lowered_args, type_args: [MirType]{payload_type}, fallibility: fallibility, data_plan: None})
+    payload_type := jet_codegen_lower_type_for_function(args[0].ty, builder)
+    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: lowered_args, type_args: [MIRType]{payload_type}, fallibility: fallibility, data_plan: None})
 }

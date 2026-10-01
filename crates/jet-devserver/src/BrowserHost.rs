@@ -1133,14 +1133,6 @@ impl BrowserHost {
         }
     }
 
-    /// Alias for callers that name action handling explicitly.
-    pub fn handle_action(
-        &mut self,
-        action: BrowserHostAction,
-    ) -> Result<BrowserHostEffect, BrowserHostError> {
-        self.dispatch(action)
-    }
-
     /// Approve a source navigation only when the grant is current and the
     /// node still exists in the current canonical event.
     pub fn navigate_source(
@@ -1263,16 +1255,6 @@ impl BrowserHost {
             panels,
             elements,
         }
-    }
-
-    /// Explicitly named alias for renderers that consume an HTML view model.
-    pub fn html_view_model(&self, placement: BrowserPlacement) -> BrowserHtmlViewModel {
-        self.view_model(placement)
-    }
-
-    /// Alias matching host callers that call the model a view.
-    pub fn html_view(&self, placement: BrowserPlacement) -> BrowserHtmlViewModel {
-        self.view_model(placement)
     }
 
     fn require_panel(&mut self, panel_id: &str) -> Result<&mut PanelState, BrowserHostError> {

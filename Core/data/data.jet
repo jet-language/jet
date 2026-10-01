@@ -377,7 +377,7 @@ pub enum JetDataPlotInteraction {
 }
 
 pub enum JetDataPlotBackend {
-    Svg
+    SVG
     Text
 }
 
@@ -394,9 +394,9 @@ pub enum JetDataPlotErrorKind {
 }
 
 pub enum JetDataPlotRenderFormat {
-    Svg
+    SVG
     Text
-    Json
+    JSON
 }
 
 pub struct JetDataPlotField {
@@ -498,7 +498,7 @@ pub struct JetDataPlotPlan {
 
 // Typed data declarations and provider-backed boundaries.
 impl DataLimits {
-    pub fn safe() -> DataLimits {
+    pub fn safe() -> DataLimits Never! {
         DataLimits{
             encoding: encoding.EncodingLimits.safe(),
             max_groups: 100000,
@@ -567,9 +567,9 @@ pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> Dat
 }
 
 
-pub fn schema<T>(rows: [T]) -> [DataColumn] { core.data.schema(rows) }
+pub fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema(rows) }
 
-pub fn count<T>(rows: [T]) -> Int { rows.len() }
+pub fn count<T>(rows: [T]) -> Int Never! { rows.len() }
 
 pub fn describe(values: [Float]) -> DataSummary DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
@@ -728,7 +728,7 @@ pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     Ok(out)
 }
 
-pub fn query<T>(rows: [T]) -> Query<T> {
+pub fn query<T>(rows: [T]) -> Query<T> Never! {
     Query<T>{rows: rows, sql: "", operations: [String]{"scan"}}
 }
 
@@ -891,7 +891,7 @@ pub fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
 }
 
 pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
-    render<T>(plot, JetDataPlotBackend.Svg)
+    render<T>(plot, JetDataPlotBackend.SVG)
 }
 
 pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
@@ -899,7 +899,7 @@ pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPl
     if backend == JetDataPlotBackend.Text {
         return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
     }
-    Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Svg, body: render_plot_svg(plan)})
+    Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.SVG, body: render_plot_svg(plan)})
 }
 
 pub fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
@@ -968,7 +968,7 @@ pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> Str
     Ok(render_line_options_svg(labels, values, options))
 }
 
-pub fn status() -> [DataStatus] { core.data.status() }
+pub fn status() -> [DataStatus] Never! { core.data.status() }
 
 pub fn require_bridge(provider: String) DataError! {
     core.data.require_bridge(provider)

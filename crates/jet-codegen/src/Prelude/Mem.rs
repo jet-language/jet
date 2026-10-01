@@ -135,40 +135,6 @@
         ptr
     }
 
-    /// Validate a raw pointer before a foreign call. Raw pointers retain the
-    /// strict provenance rule used by Jet memory operations.
-    pub fn jet_sentry_foreign_ptr<T>(ptr: *mut T, component: &str) -> *mut T {
-        jet_sentry_check_foreign_strict(
-            ptr.cast_const(),
-            "ffi_ptr",
-            "ffi_contract",
-            component,
-        );
-        ptr
-    }
-
-    /// Validate both the pointer slot and the pointee of an exclusive raw
-    /// pointer argument. The slot may be ordinary foreign-visible storage,
-    /// while the pointee must retain Jet's strict raw-pointer provenance.
-    pub fn jet_sentry_foreign_ptr_ref<'a, T>(
-        ptr: &'a mut *mut T,
-        component: &str,
-    ) -> &'a mut *mut T {
-        jet_sentry_check_foreign(
-            ptr as *const *mut T,
-            "ffi_write",
-            "ffi_contract",
-            component,
-        );
-        jet_sentry_check_foreign_strict(
-            (*ptr).cast_const(),
-            "ffi_ptr",
-            "ffi_contract",
-            component,
-        );
-        ptr
-    }
-
     pub fn jet_sentry_address_of<T>(ptr: *const T) -> i64 {
         jet_sentry_register_allocation(ptr.cast_mut().cast::<u8>(), std::mem::size_of::<T>());
         ptr as usize as i64
@@ -184,13 +150,6 @@
         // SAFETY: the source gate owns the raw operation; the shared sentry
         // kernel has already observed the active allocation when on.
         unsafe { ptr.read() }
-    }
-
-    pub fn jet_sentry_write<T>(ptr: *mut T, value: T, obligation: &str) {
-        jet_sentry_check(ptr.cast_const(), "write", obligation);
-        // SAFETY: the source gate owns the raw operation; the shared sentry
-        // kernel has already observed the active allocation when on.
-        unsafe { ptr.write(value) };
     }
 
     pub fn jet_sentry_volatile_read<T>(ptr: *const T, obligation: &str) -> T {
@@ -863,12 +822,6 @@
             std::cell::Cell::new(None);
     }
 
-    /// Query the ambient allocator.  `None` means use the default heap.
-    /// Called by generated ambient-allocating calls that sema marked "uses ambient".
-    pub fn jet_ctx_alloc_ptr() -> Option<*const u8> {
-        JET_CTX_ALLOC.with(|c| c.get())
-    }
-
     /// RAII guard: pushes a new ambient allocator on construction, pops it on Drop.
     /// Drop is called on all exit paths (return, break, ?, panic unwind).
     pub struct JetContextGuard {
@@ -879,22 +832,4 @@
         fn drop(&mut self) {
             JET_CTX_ALLOC.with(|c| c.set(self.saved));
         }
-    }
-
-    /// Push a new ambient allocator for the current block's dynamic extent.
-    /// Returns a guard whose Drop restores the previous value.
-    ///
-    /// Safe to call: the `&T` borrow ensures the allocator lives at least as long
-    /// as the borrow exists; Jet sema guarantees it lives for the whole block.
-    /// The unsafe pointer cast happens here, never
-    /// in emitted user code (I1).
-    pub fn jet_ctx_push_alloc<T>(alloc: &T) -> JetContextGuard {
-        let saved = JET_CTX_ALLOC.with(|c| c.get());
-        // SAFETY: we store a *const u8 alias of `alloc`. Dereferencing it is only
-        // valid as long as `alloc` is live; the Jet sema ensures the arena variable
-        // is declared before the `#Context` block and lives for its duration.
-        // This is the same audited lifetime-extension trust as `JetArena::alloc`.
-        let ptr = alloc as *const T as *const u8;
-        JET_CTX_ALLOC.with(|c| c.set(Some(ptr)));
-        JetContextGuard { saved }
     }

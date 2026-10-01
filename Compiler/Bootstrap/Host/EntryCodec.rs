@@ -1506,27 +1506,15 @@ impl<'a> BootstrapEntryCodec<'a> {
     }
 }
 
+/// The checked `JetEvalHostAdapter` methods, taken from the trait itself. A
+/// method with parameters takes the Source machine as its first, WRITE
+/// parameter; the parameterless ones (session, clone, physical binding) do not.
 fn checked_native_adapter_methods(
     program: &MirProgram,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<Vec<MirTraitMethod>, BootstrapHostCodecError> {
-    const METHODS: &[(&str, usize)] = &[
-        ("new_session", 0),
-        ("clone_adapter", 0),
-        ("poll_callbacks", 1),
-        ("drain_callbacks", 1),
-        ("host_call", 6),
-        ("foreign_call", 4),
-        ("handle_call", 5),
-        ("physical_binding", 0),
-        ("task_group", 6),
-        ("native_call", 5),
-        ("channel_select", 6),
-        ("shared_call", 10),
-    ];
-    let trait_id = symbols
-        .trait_method_metadata("JetEvalHostAdapter", "new_session")?
-        .trait_id;
+    let rust_methods = symbols.trait_methods("JetEvalHostAdapter")?;
+    let trait_id = rust_methods[0].trait_id;
     let checked_trait = program
         .traits
         .iter()
@@ -1534,32 +1522,24 @@ fn checked_native_adapter_methods(
         .ok_or_else(|| BootstrapHostCodecError::MissingEntry(
             "checked JetEvalHostAdapter trait".to_string(),
         ))?;
-    if checked_trait.methods.len() != METHODS.len() {
+    if checked_trait.methods.len() != rust_methods.len() {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "checked JetEvalHostAdapter method set changed".to_string(),
+            "JetEvalHostAdapter Rust metadata and checked MIR list different methods".to_string(),
         ));
     }
-    let mut methods = Vec::with_capacity(METHODS.len());
-    for (name, arity) in METHODS {
-        let metadata = symbols.trait_method_metadata("JetEvalHostAdapter", name)?;
-        if metadata.trait_id != trait_id
-            || metadata.name != *name
-            || metadata.parameter_types.len() != *arity
-            || metadata.parameter_access.len() != *arity
-            || metadata.return_type.is_empty()
-        {
-            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-                "JetEvalHostAdapter.{name} has incompatible checked Rust metadata"
-            )));
-        }
-        let method = checked_trait
-            .methods
+    let mut methods = Vec::with_capacity(checked_trait.methods.len());
+    for method in &checked_trait.methods {
+        let name = &method.name;
+        let metadata = rust_methods
             .iter()
-            .find(|row| row.id == metadata.method_id && row.name == *name)
+            .find(|row| row.method_id == method.id && row.name == *name)
             .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!(
-                "checked JetEvalHostAdapter.{name} method"
+                "Rust metadata for checked JetEvalHostAdapter.{name}"
             )))?;
-        if method.params.len() != *arity
+        let arity = method.params.len();
+        if metadata.parameter_types.len() != arity
+            || metadata.parameter_access.len() != arity
+            || metadata.return_type.is_empty()
             || method.self_access != metadata.receiver_access
             || method.params.iter().zip(&metadata.parameter_access)
                 .any(|(parameter, access)| parameter.access != *access)
@@ -1568,8 +1548,7 @@ fn checked_native_adapter_methods(
                 "JetEvalHostAdapter.{name} Rust metadata differs from its checked MIR parameters"
             )));
         }
-        if !matches!(*name, "new_session" | "clone_adapter" | "physical_binding") {
-            let machine = &method.params[0];
+        if let Some(machine) = method.params.first() {
             let definition = checked_nominal_definition(program, &machine.ty)?;
             if machine.access != jet_foundation::MIR::MirAccess::Write
                 || definition.name != "JetEvalMachine"
@@ -1699,22 +1678,36 @@ fn entry_rust_type(
     })
 }
 
+/// Emit the typed argument/result codecs and one dispatch shim per checked
+/// `JetEvalHostAdapter` method. The native adapter's interface handler calls
+/// `__jet_bootstrap_entry_native_interface_{method}` with the live call and a
+/// typed operation; the shim decodes each checked argument (Move arguments are
+/// consumed through the call's transfer ledger), borrows the Source machine in
+/// place, runs the operation, and encodes its typed result. Methods returning
+/// the adapter trait object (sessions and clones) are answered by the adapter
+/// itself and get no shim.
 fn emit_entry_native_interface_codecs(
     out: &mut String,
     program: &MirProgram,
     symbols: &BootstrapCodecSymbols<'_>,
     methods: &[MirTraitMethod],
 ) -> Result<(), BootstrapHostCodecError> {
+    out.push_str(ENTRY_NATIVE_INTERFACE_ARGUMENT);
     for method in methods {
-        let machine_parameter = !matches!(
-            method.name.as_str(),
-            "new_session" | "clone_adapter" | "physical_binding"
-        );
+        let machine_parameter = !method.params.is_empty();
+        let mut argument_types = Vec::with_capacity(method.params.len());
         for (index, parameter) in method.params.iter().enumerate() {
             if machine_parameter && index == 0 {
                 continue;
             }
+            if parameter.access == jet_foundation::MIR::MirAccess::Write {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "JetEvalHostAdapter.{} argument {index} is a WRITE borrow; only the machine may be written back",
+                    method.name
+                )));
+            }
             let source_type = entry_rust_type(program, symbols, &parameter.ty)?;
+            argument_types.push(source_type.clone());
             let checked_key = format!("{:?}", parameter.ty.canonical_key());
             let path_error = format!(
                 "checked JetEvalHostAdapter.{} argument {index} has the wrong MIR type",
@@ -1753,7 +1746,7 @@ pub(crate) fn __jet_bootstrap_entry_native_interface_{method}_arg_{index}_from_r
             .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
         }
 
-        if matches!(method.name.as_str(), "new_session" | "clone_adapter") {
+        if matches!(method.return_type.kind(), MirTypeKind::TraitObject(_)) {
             continue;
         }
         let source_type = entry_rust_type(program, symbols, &method.return_type)?;
@@ -1795,8 +1788,135 @@ pub(crate) fn __jet_bootstrap_entry_native_interface_{method}_result_to_runtime<
             method = method.name,
         )
         .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+        emit_entry_native_interface_shim(out, program, symbols, method, &argument_types, &source_type)?;
     }
     Ok(())
+}
+
+/// Read one checked non-machine argument of a native interface call. A Read
+/// argument is decoded from the call row. A Move argument is decoded from its
+/// guarded payload first and consumed only after decoding succeeded, so a
+/// decode failure leaves the value with the call for Source cleanup.
+const ENTRY_NATIVE_INTERFACE_ARGUMENT: &str = r#"
+#[doc(hidden)]
+pub(crate) fn __jet_bootstrap_entry_native_interface_argument<P, T>(
+    call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
+    index: usize,
+    compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+    physical: &P,
+    decode: fn(
+        ::jet_foundation::MIR::MirRuntimeValue,
+        &::jet_foundation::MIR::MirType,
+        &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+        &[String],
+        &P,
+    ) -> Result<T, String>,
+) -> Result<T, String>
+where
+    P: crate::BootstrapEntryPhysicalBindings,
+{
+    let argument = call
+        .argument(index)
+        .ok_or_else(|| format!("native interface argument {index} is missing"))?;
+    let checked = argument.ty.clone();
+    let path = vec![format!("argument {index}")];
+    if argument.access != ::jet_foundation::MIR::MirAccess::Move {
+        let value = argument.value.clone();
+        return decode(value, &checked, compiler_program, &path, physical);
+    }
+    let transfer = call.take_owned_argument(index).map_err(|error| error.to_string())?;
+    let guard = transfer.take_value().map_err(|error| error.to_string())?;
+    let payload = guard.with_value(|value| value.clone()).map_err(|error| error.to_string())?;
+    let decoded = decode(payload, &checked, compiler_program, &path, physical)?;
+    call.consume_owned_argument(transfer, guard, |guard, commit| {
+        guard.commit_and_extract(::jet_foundation::MIR::MirRuntimeValue::Unit, commit)?;
+        Ok(())
+    })
+    .map_err(|error| error.to_string())?;
+    Ok(decoded)
+}
+"#;
+
+/// Emit `__jet_bootstrap_entry_native_interface_{method}`: decode the checked
+/// arguments, run `operation` with the in-place Source machine borrow (when the
+/// method takes one), and encode the typed result.
+fn emit_entry_native_interface_shim(
+    out: &mut String,
+    program: &MirProgram,
+    symbols: &BootstrapCodecSymbols<'_>,
+    method: &MirTraitMethod,
+    argument_types: &[String],
+    result_type: &str,
+) -> Result<(), BootstrapHostCodecError> {
+    let name = &method.name;
+    let arity = method.params.len();
+    let first_argument = usize::from(!method.params.is_empty());
+    let argument_names = (first_argument..arity)
+        .map(|index| format!("__jet_arg_{index}"))
+        .collect::<Vec<_>>();
+    let mut argument_lets = String::new();
+    for (index, argument) in (first_argument..arity).zip(&argument_names) {
+        writeln!(
+            argument_lets,
+            "    let {argument} = __jet_bootstrap_entry_native_interface_argument(call, {index}, compiler_program, physical, __jet_bootstrap_entry_native_interface_{name}_arg_{index}_from_runtime::<P>)?;"
+        )
+        .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    }
+    let arguments = argument_names.join(", ");
+    let (operation_parameters, invoke) = match method.params.first() {
+        Some(machine) => {
+            let machine_type = entry_rust_type(program, symbols, &machine.ty)?;
+            let mut parameters = vec![format!(
+                "crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, {machine_type}>"
+            )];
+            parameters.extend(argument_types.iter().cloned());
+            let separator = if arguments.is_empty() { "" } else { ", " };
+            let invoke = format!(
+                "    let __jet_machine_type = call.signature().parameters[0].ty.clone();\n\
+                 \x20   let __jet_result = call\n\
+                 \x20       .with_writeback_argument(0, |__jet_machine_value| {{\n\
+                 \x20           let __jet_machine = physical.borrow_interpreter_machine_write(\n\
+                 \x20               __jet_machine_value,\n\
+                 \x20               &__jet_machine_type,\n\
+                 \x20               machine_abi_shape,\n\
+                 \x20           )?;\n\
+                 \x20           operation(crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess::Mir(__jet_machine){separator}{arguments})\n\
+                 \x20       }})\n\
+                 \x20       .map_err(|error| error.to_string())??;\n"
+            );
+            (parameters.join(", "), invoke)
+        }
+        None => (
+            String::new(),
+            "    let _ = machine_abi_shape;\n    let __jet_result = operation()?;\n".to_string(),
+        ),
+    };
+    let arity_error = format!("native JetEvalHostAdapter.{name} call does not have {arity} checked arguments");
+    writeln!(
+        out,
+        r#"
+#[doc(hidden)]
+pub(crate) fn __jet_bootstrap_entry_native_interface_{name}<P, F>(
+    call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
+    compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
+    machine_abi_shape: &crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,
+    physical: &P,
+    operation: F,
+) -> Result<::jet_foundation::MIR::MirRuntimeValue, String>
+where
+    P: crate::BootstrapEntryPhysicalBindings,
+    F: FnOnce({operation_parameters}) -> Result<{result_type}, String>,
+{{
+    if call.signature().parameters.len() != {arity} || call.arguments().len() != {arity} {{
+        return Err({arity_error:?}.to_string());
+    }}
+    let __jet_result_type = call.signature().return_type.clone();
+{argument_lets}{invoke}    let path = vec![{name:?}.to_string()];
+    __jet_bootstrap_entry_native_interface_{name}_result_to_runtime(&__jet_result, &__jet_result_type, compiler_program, &path, physical)
+}}
+"#
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
 
 /// Append typed request/result conversion code to the private emitted artifact.
@@ -1864,7 +1984,7 @@ pub(crate) fn append_bootstrap_entry_codec(
                 }
             }
         }
-        if !matches!(method.name.as_str(), "new_session" | "clone_adapter") {
+        if !matches!(method.return_type.kind(), MirTypeKind::TraitObject(_)) {
             validate_binding_graph(program, bindings, symbols, &method.return_type)?;
             let mut graph = Vec::new();
             collect_nominal_types(program, &method.return_type, &mut HashSet::new(), &mut graph)?;
@@ -1882,8 +2002,8 @@ pub(crate) fn append_bootstrap_entry_codec(
         "JetEvalCallbackResult",
         "JetEvalTaskCallbackInvokeResult",
         "JetEvalSharedHostCarrier",
-        "MirProgram",
-        "MirType",
+        "MIRProgram",
+        "MIRType",
         "JetEvalHostTypeShape",
         "JetEvalConfig",
         "Span",
@@ -2360,11 +2480,11 @@ fn emit_prepared_interpreter_transfer(
         ),
         (
             "__TYPE_ID_VALUE__",
-            symbols.field_symbol("MirTypeId", "value")?,
+            symbols.field_symbol("MIRTypeID", "value")?,
         ),
         (
             "__FUNCTION_ID_VALUE__",
-            symbols.field_symbol("MirFunctionId", "value")?,
+            symbols.field_symbol("MIRFunctionID", "value")?,
         ),
         (
             "__SHAPE_ROOT__",
@@ -2594,7 +2714,7 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_from_source(
                         __jet_bootstrap_type_to_host(ty)?,
                     ),
                     __SHAPE_OWNER_CORE__(owner) => Owner::Core {
-                        fact: __jet_bootstrap_mir_MirCoreOwner_to_host(
+                        fact: __jet_bootstrap_mir_MIRCoreOwner_to_host(
                             &owner.__SHAPE_CORE_FACT__,
                         )?,
                         ty: __jet_bootstrap_type_to_host(&owner.__SHAPE_CORE_TYPE__)?,
@@ -2640,7 +2760,7 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_to_source(
                 __SHAPE_OWNER_DECLARED__(__jet_bootstrap_type_from_host(ty)?)
             }
             Owner::Core { fact, ty } => __SHAPE_OWNER_CORE__(__SHAPE_CORE_OWNER__ {
-                __SHAPE_CORE_FACT__: __jet_bootstrap_mir_MirCoreOwner_from_host(fact)?,
+                __SHAPE_CORE_FACT__: __jet_bootstrap_mir_MIRCoreOwner_from_host(fact)?,
                 __SHAPE_CORE_TYPE__: __jet_bootstrap_type_from_host(ty)?,
             }),
             Owner::NativeCallable {
@@ -2680,7 +2800,7 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_to_source(
                 args,
                 fields,
             } => __SHAPE_STRUCT__(
-                __jet_bootstrap_mir_MirTypeId_from_host(type_id)?,
+                __jet_bootstrap_mir_MIRTypeID_from_host(type_id)?,
                 type_name.clone(),
                 args.iter().map(|node| source_index(*node))
                     .collect::<Result<Vec<_>, String>>()?,
@@ -2697,7 +2817,7 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_to_source(
                 args,
                 variants,
             } => __SHAPE_ENUM__(
-                __jet_bootstrap_mir_MirTypeId_from_host(type_id)?,
+                __jet_bootstrap_mir_MIRTypeID_from_host(type_id)?,
                 type_name.clone(),
                 args.iter().map(|node| source_index(*node))
                     .collect::<Result<Vec<_>, String>>()?,
@@ -2722,7 +2842,7 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_to_source(
                 ty,
             } => __SHAPE_CLOSURE__(
                 __jet_bootstrap_type_from_host(ty)?,
-                __jet_bootstrap_mir_MirFunctionId_from_host(function)?,
+                __jet_bootstrap_mir_MIRFunctionID_from_host(function)?,
                 captures.iter().map(|node| source_index(*node))
                     .collect::<Result<Vec<_>, String>>()?,
             ),
@@ -4111,8 +4231,8 @@ fn emit_entry_helper_root_transports(
         ),
         ("JetEvalSharedPayloadFinalizer", "jet_eval_shared_payload_finalizer"),
         ("JetEvalSharedValueData", "jet_eval_shared_value_data"),
-        ("MirProgram", "mir_program"),
-        ("MirType", "mir_type"),
+        ("MIRProgram", "mir_program"),
+        ("MIRType", "mir_type"),
         ("JetEvalHostTypeShape", "jet_eval_host_type_shape"),
         ("JetEvalConfig", "jet_eval_config"),
         ("Span", "span"),
@@ -4696,8 +4816,8 @@ fn emit_entry_no_physical_data_helpers(
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
     for (root_name, stem) in [
-        ("MirProgram", "mir_program"),
-        ("MirType", "mir_type"),
+        ("MIRProgram", "mir_program"),
+        ("MIRType", "mir_type"),
         ("Span", "span"),
         ("JetEvalHostTypeShape", "jet_eval_host_type_shape"),
     ] {
@@ -4872,12 +4992,12 @@ fn emit_entry_machine_access_helpers(
 ) -> Result<(), BootstrapHostCodecError> {
     let machine_type = symbols.type_symbol("JetEvalMachine")?;
     let machine_program_field = symbols.field_symbol("JetEvalMachine", "program")?;
-    let program_core_owners_field = symbols.field_symbol("MirProgram", "core_owners")?;
+    let program_core_owners_field = symbols.field_symbol("MIRProgram", "core_owners")?;
     let program_definition = program
         .types
         .iter()
-        .find(|definition| definition.name == "MirProgram")
-        .ok_or_else(|| BootstrapHostCodecError::MissingType("MirProgram".to_string()))?;
+        .find(|definition| definition.name == "MIRProgram")
+        .ok_or_else(|| BootstrapHostCodecError::MissingType("MIRProgram".to_string()))?;
     let MirTypeDefKind::Struct {
         fields: program_fields,
         ..
@@ -4891,7 +5011,7 @@ fn emit_entry_machine_access_helpers(
         .iter()
         .find(|field| field.name == "core_owners")
         .ok_or_else(|| BootstrapHostCodecError::MissingField {
-            owner: "MirProgram".to_string(),
+            owner: "MIRProgram".to_string(),
             field: "core_owners".to_string(),
         })?
         .ty;
@@ -4907,7 +5027,7 @@ fn emit_entry_machine_access_helpers(
             _ => unreachable!(),
         },
     )?;
-    if core_owner_definition.name != "MirCoreOwner" {
+    if core_owner_definition.name != "MIRCoreOwner" {
         return Err(BootstrapHostCodecError::InvalidMetadata(
             "checked MirProgram.core_owners does not contain MirCoreOwner rows".to_string(),
         ));

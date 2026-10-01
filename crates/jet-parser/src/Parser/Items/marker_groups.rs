@@ -1996,6 +1996,14 @@ impl<'a> Parser<'a> {
         };
         self.expect_kw(TokKind::KwTrait, "to start a trait definition")?;
         let (name, name_span) = self.expect_ident("after `trait`")?;
+        // D-TRAIT-OVERLOAD1=A: `trait Name: [A, B] { … }` lists the traits it
+        // builds on with the ordinary bound spelling.
+        let supertraits = if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            self.parse_trait_bounds()?
+        } else {
+            Vec::new()
+        };
         self.expect(TokKind::LBrace, "to open the trait body")?;
         let mut methods = Vec::new();
         let mut assoc_types = Vec::new();
@@ -2059,6 +2067,7 @@ impl<'a> Parser<'a> {
             is_package_pub,
             name,
             name_span,
+            supertraits,
             assoc_types,
             methods,
         })

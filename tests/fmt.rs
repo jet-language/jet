@@ -2807,7 +2807,7 @@ fn fmt_test_faults_stability() {
     // D-TESTFAULT1=A: the typed effect-root list is part of the Test marker
     // contract and must survive both property-test formatting passes.
     let src = "\
-#Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
+#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
     assert(true)
 }
 fn run() {}
@@ -2815,7 +2815,7 @@ fn run() {}
     let once = jet::format_source(src).expect("fault-configured test should format");
     assert!(
         once.contains(
-            "#Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic()"
+            "#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic()"
         ),
         "formatter dropped the fault selector: {once}"
     );
@@ -3655,7 +3655,7 @@ fn fmt_preserves_capbundle_markers() {
     let src = "\
 #[Numeric, Comparable] Usd :: distinct Int
 
-#[Printable, CodableAsBase] CustomerId :: distinct Int
+#[Printable, CodableAsBase] CustomerID :: distinct Int
 
 fn run() {
     a :: Usd.from_int(100)

@@ -301,24 +301,6 @@ impl BinOp {
         }
     }
 
-    /// The Rust operator that carries this operation, for generated code.
-    /// It matches `spell` everywhere the two languages agree; `~|`
-    /// (D-XORSPELL1) is Rust's `^`, and Jet's `%%` is Rust's `%` — both
-    /// truncate.
-    ///
-    /// `None` means Rust has no operator for it and codegen must call the
-    /// Prelude instead: `^` (D-EXPSEM1), `/%` (D-FLOORDIV1), and the floored
-    /// `%` (D-MODSEM1) are all shaped that way. Returning `None` rather than
-    /// panicking keeps the answer a value the caller has to handle.
-    pub fn rust_spell(self) -> Option<&'static str> {
-        Some(match self {
-            BinOp::BitXor => "^",
-            BinOp::Rem => "%",
-            BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Compare => return None,
-            other => other.spell(),
-        })
-    }
-
     /// S17 compound-assignment spelling for this binary op, when one exists.
     pub fn compound_spell(self) -> Option<&'static str> {
         match self {
@@ -1101,10 +1083,6 @@ impl Func {
     /// S27: first parameter named `self`.
     pub fn self_param(&self) -> Option<&Param> {
         self.params.first().filter(|p| p.name == Syntax::KW_SELF)
-    }
-
-    pub fn is_static_method(&self) -> bool {
-        self.self_param().is_none()
     }
 }
 

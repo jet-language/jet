@@ -1,6 +1,26 @@
 // Declaration-side signature projection. This preserves call obligations and
 // default source identity while lowering parser Func metadata into foundation
 // Type, rather than reconstructing it at call sites.
+use jet_foundation.[
+    AccessConvention,
+    Call,
+    CallContractRow,
+    CallLabel,
+    CallablePolicy,
+    CallablePolicyChain,
+    EffectRowEntry,
+    Expr,
+    Func,
+    FunctionCallMetadata,
+    FunctionDefaultRef,
+    ParamZone,
+    StrPart,
+    SymbolID,
+    Type,
+    expr_span,
+    type_name,
+    type_with_effective_fn_returns,
+]
 
 pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
     if return_type == None -> return Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
@@ -9,7 +29,7 @@ pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
         .Named(name) -> if name == "Never" -> return raw
         .Option(_) -> return raw
         .Result(ok, err) -> {
-            if err == {.Named(name) -> if name == "Never" -> return Type.Result{ok: ok, err: err}}
+            if err == .Named(name) && name == "Never" -> return Type.Result{ok: ok, err: err}
             return raw
         }
         else -> {}
@@ -26,7 +46,7 @@ pub fn sema_failure_contract_source(return_type: Type?) -> String Never! {
         .Named(name) -> if name == "Never" -> return "declared Never return"
         .Option(_) -> return "optional success"
         .Result(_, error) -> {
-            if error == {.Named(name) -> if name == "Never" -> return "explicit !Never (proven unreachable)"}
+            if error == .Named(name) && name == "Never" -> return "explicit !Never (proven unreachable)"
             return "explicit !{type_name(error)}"
         }
         else -> {}
@@ -66,14 +86,10 @@ fn sema_callable_policies(func: Func) -> CallablePolicyChain Never! {
     loop marker in func.markers {
         if marker.name == "Policy" {
             loop argument in marker.args {
-                if argument == {
-                    .Expr(value) -> {
-                        if value == {
-                            .Call(call) -> {
-                                arguments :: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
-                                &policies.push(CallablePolicy{name: call.name, arguments: arguments})
-                            }
-                        }
+                if argument == .Expr(value) {
+                    if value == .Call(call) {
+                        arguments :: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
+                        &policies.push(CallablePolicy{name: call.name, arguments: arguments})
                     }
                 }
             }
@@ -105,7 +121,7 @@ fn sema_function_param_contract(func: Func) -> [CallContractRow]? {
     if has_contract -> Val(contract) else -> None
 }
 
-fn sema_function_call_metadata(func: Func, owner: SymbolId, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
+fn sema_function_call_metadata(func: Func, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
     names := [String]{}
     defaults := [FunctionDefaultRef?]{}
     variadic := [Bool]{}
@@ -132,7 +148,7 @@ fn sema_function_call_metadata(func: Func, owner: SymbolId, fallback_source_file
     }
 }
 
-pub fn sema_function_symbol_type(func: Func, owner: SymbolId, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
+pub fn sema_function_symbol_type(func: Func, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
     effect_bound :: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
     Type.Fn{
         params: sema_function_param_types(func),

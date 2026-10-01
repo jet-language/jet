@@ -2,6 +2,17 @@
 // The value types are the exact Core owners selected by Registration; URL and
 // Regex construction still enters through the existing typed literal/CoreCall
 // paths, never through a second parser or constructor route.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Span,
+    SymbolKind,
+    TExpr,
+    THandleOp,
+    Type,
+]
 
 fn sema_text_handle_parameter(name: String, ty: Type) -> SemaCallParam Never! {
     sema_network_handle_argument(name, ty)
@@ -21,20 +32,20 @@ fn sema_text_handle_regex_spec(owner: String, method: String, argc: Int) -> Sema
     match_ty := Type.Named{name: "Match"}
     if owner == "URL" {
         if method == "scheme" || method == "path" || method == "query" || method == "to_string" || method == "username" || method == "password" || method == "userinfo" || method == "authority" {
-            if argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
+            if argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
         }
-        if (method == "host" || method == "fragment") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Option{inner: string}, [SemaCallParam]{}, AccessConvention.Read))
-        if (method == "port" || method == "default_port") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Option{inner: int}, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "path_segments" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.List{element: string}, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "query_pairs" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "normalize" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Named{name: "URL"}, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "join" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, sema_text_handle_result(Type.Named{name: "URL"}, string), [SemaCallParam]{sema_text_handle_parameter("reference", string)}, AccessConvention.Read))
-        if (method == "set_query" || method == "add_query") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Named{name: "URL"}, [SemaCallParam]{sema_text_handle_parameter("key", string), sema_text_handle_parameter("value", string)}, AccessConvention.Read))
+        if (method == "host" || method == "fragment") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, Type.Option{inner: string}, [SemaCallParam]{}, AccessConvention.Read))
+        if (method == "port" || method == "default_port") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, Type.Option{inner: int}, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "path_segments" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, Type.List{element: string}, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "query_pairs" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
+        if method == "normalize" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, Type.Named{name: "URL"}, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "join" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, sema_text_handle_result(Type.Named{name: "URL"}, string), [SemaCallParam]{sema_text_handle_parameter("reference", string)}, AccessConvention.Read))
+        if (method == "set_query" || method == "add_query") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "URL", method: method}, Type.Named{name: "URL"}, [SemaCallParam]{sema_text_handle_parameter("key", string), sema_text_handle_parameter("value", string)}, AccessConvention.Read))
     }
     if owner == "MIME" {
-        if (method == "media_type" || method == "subtype" || method == "essence" || method == "to_string") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "MIME", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "param" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "MIME", method: method}, Type.Option{inner: string}, [SemaCallParam]{sema_text_handle_parameter("name", string)}, AccessConvention.Read))
-        if method == "params" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "MIME", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
+        if (method == "media_type" || method == "subtype" || method == "essence" || method == "to_string") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "MIME", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "param" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "MIME", method: method}, Type.Option{inner: string}, [SemaCallParam]{sema_text_handle_parameter("name", string)}, AccessConvention.Read))
+        if method == "params" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.URLMIMEMethod{kind: "MIME", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
     }
     if owner == "Regex" {
         if (method == "pattern" || method == "source" || method == "flags" || method == "options") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
@@ -66,7 +77,7 @@ fn sema_text_handle_regex_spec(owner: String, method: String, argc: Int) -> Sema
     None
 }
 
-fn sema_text_handle_known_method(owner: String, method: String) -> Bool Never! {
+pub fn sema_text_handle_known_method(owner: String, method: String) -> Bool Never! {
     if owner == "URL" -> return method == "scheme" || method == "host" || method == "port" || method == "path" || method == "path_segments" || method == "query" || method == "query_pairs" || method == "fragment" || method == "normalize" || method == "to_string" || method == "username" || method == "password" || method == "userinfo" || method == "authority" || method == "default_port" || method == "join" || method == "set_query" || method == "add_query"
     if owner == "MIME" -> return method == "media_type" || method == "subtype" || method == "essence" || method == "to_string" || method == "param" || method == "params"
     if owner == "Regex" -> return method == "pattern" || method == "source" || method == "flags" || method == "options" || method == "names" || method == "count" || method == "is_match" || method == "full_match" || method == "match" || method == "find" || method == "find_all" || method == "matches" || method == "split" || method == "replace" || method == "replace_first" || method == "split_limit" || method == "replace_all_with"
@@ -109,7 +120,8 @@ fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment
     actual :: sema_text_handle_nominal_owner(receiver_type) ?? return false
     if actual != owner -> return false
     expected_module := sema_text_handle_owner_module(owner)
-    graph :: environment.registration_graph ?? return true
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return true
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
     if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && symbol.symbol.module_name == expected_module
     false
@@ -126,7 +138,7 @@ pub fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, m
         &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", sema_text_handle_expected_arity(owner, method), args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.UrlMimeMethod{kind: "URL", method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
+    signature := spec ?? SemaNetworkHandleSpec{operation: THandleOp.URLMIMEMethod{kind: "URL", method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
     signature.effect_name = Val("")
     typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), AccessConvention.Read, signature.callback_non_escaping, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)

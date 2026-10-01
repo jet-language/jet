@@ -2506,19 +2506,6 @@ fn ensure_plot_column(
     Ok(column)
 }
 
-fn alloc_plot_string_result(
-    rt: &mut crate::JitRuntime,
-    value: Result<String, DataError>,
-) -> i64 {
-    match value {
-        Ok(value) => {
-            let handle = rt.heap.alloc_string(value);
-            crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
-        }
-        Err(error) => result_data_err(error),
-    }
-}
-
 fn jet_jit_data_count(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(value).unwrap_or(0))
 }
@@ -2793,18 +2780,6 @@ fn decode_legend_position(
         2 => Ok(data_plot_rt::JetDataPlotLegendPosition::Bottom),
         3 => Ok(data_plot_rt::JetDataPlotLegendPosition::Left),
         value => Err(data_decode_error(operation, format!("unknown legend position {value}"))),
-    }
-}
-
-fn decode_facet_kind(
-    rt: &mut crate::JitRuntime,
-    record: i64,
-    operation: &str,
-) -> Result<data_plot_rt::JetDataPlotFacetKind, DataError> {
-    match enum_discriminant(rt, record, operation)? {
-        0 => Ok(data_plot_rt::JetDataPlotFacetKind::Row),
-        1 => Ok(data_plot_rt::JetDataPlotFacetKind::Column),
-        value => Err(data_decode_error(operation, format!("unknown facet kind {value}"))),
     }
 }
 
@@ -3089,37 +3064,6 @@ fn decode_legend(
             .heap
             .record_get_bool(record, 3)
             .ok_or_else(|| data_decode_error(operation, "legend visible is not bool"))?,
-    })
-}
-
-fn decode_facet(
-    rt: &mut crate::JitRuntime,
-    record: i64,
-    operation: &str,
-) -> Result<data_plot_rt::JetDataPlotFacet, DataError> {
-    let field = rt
-        .heap
-        .record_get_record(record, 0)
-        .ok_or_else(|| data_decode_error(operation, "facet field is not a record"))?;
-    let kind = rt
-        .heap
-        .record_get_record(record, 1)
-        .ok_or_else(|| data_decode_error(operation, "facet kind is not an enum"))?;
-    Ok(data_plot_rt::JetDataPlotFacet {
-        field: decode_plot_field(rt, field, operation)?,
-        kind: decode_facet_kind(rt, kind, operation)?,
-        title: rt
-            .heap
-            .record_clone_string(record, 2)
-            .ok_or_else(|| data_decode_error(operation, "facet title is not a string"))?,
-        columns: rt
-            .heap
-            .record_get_int(record, 3)
-            .ok_or_else(|| data_decode_error(operation, "facet columns is not integer"))?,
-        rows: rt
-            .heap
-            .record_get_int(record, 4)
-            .ok_or_else(|| data_decode_error(operation, "facet rows is not integer"))?,
     })
 }
 

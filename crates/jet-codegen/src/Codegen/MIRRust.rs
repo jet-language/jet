@@ -45,6 +45,10 @@ fn allocator_view_inner(ty: &MirType) -> Option<&MirType> {
         _ => None,
     }
 }
+/// The MIR nominal the TIR lowering gives a `#Transact` block's Shared STM
+/// guard; generated Rust carries it as the root `JetSharedTransaction`.
+const STM_TYPE: &str = "Stm";
+
 fn is_shared_guard_type(ty: &MirType) -> bool {
     match ty.kind() {
         MirTypeKind::Tagged { inner, .. } => is_shared_guard_type(inner),
@@ -82,236 +86,6 @@ fn is_view_type(ty: &MirType) -> bool {
         MirTypeKind::Tagged { inner, .. } => is_view_type(inner),
         _ => false,
     }
-}
-
-
-#[derive(Debug)]
-enum ModelDimensionFact {
-    Static(u64),
-    Dynamic { name: String, min: u64, max: u64 },
-}
-
-#[derive(Debug)]
-struct ModelTensorFact {
-    name: String,
-    dtype: String,
-    shape: Vec<ModelDimensionFact>,
-}
-
-fn model_unquote(value: &str) -> String {
-    let value = value.trim();
-    if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
-        return value.to_string();
-    }
-    let mut result = String::with_capacity(value.len() - 2);
-    let mut escaped = false;
-    for character in value[1..value.len() - 1].chars() {
-        if escaped {
-            result.push(match character {
-                'n' => '\n',
-                'r' => '\r',
-                't' => '\t',
-                other => other,
-            });
-            escaped = false;
-        } else if character == '\\' {
-            escaped = true;
-        } else {
-            result.push(character);
-        }
-    }
-    if escaped {
-        result.push('\\');
-    }
-    result
-}
-
-fn model_list_items(value: &str) -> Vec<String> {
-    let value = value.trim();
-    let body = value
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .unwrap_or(value);
-    let characters = body.chars().collect::<Vec<_>>();
-    let mut result = Vec::new();
-    let mut start = 0;
-    let mut depth = 0usize;
-    let mut quoted = false;
-    let mut escaped = false;
-    for index in 0..=characters.len() {
-        let character = characters.get(index).copied();
-        if quoted {
-            if escaped {
-                escaped = false;
-            } else if character == Some('\\') {
-                escaped = true;
-            } else if character == Some('"') {
-                quoted = false;
-            }
-            continue;
-        }
-        match character {
-            Some('"') => quoted = true,
-            Some('{') | Some('[') => depth += 1,
-            Some('}') | Some(']') => depth = depth.saturating_sub(1),
-            Some(',') if depth == 0 => {
-                let item = body
-                    .chars()
-                    .skip(start)
-                    .take(index.saturating_sub(start))
-                    .collect::<String>();
-                if !item.trim().is_empty() {
-                    result.push(item.trim().to_string());
-                }
-                start = index + 1;
-            }
-            Some(character) if character.is_whitespace() && depth == 0 => {
-                let item = body
-                    .chars()
-                    .skip(start)
-                    .take(index.saturating_sub(start))
-                    .collect::<String>();
-                if !item.trim().is_empty() {
-                    result.push(item.trim().to_string());
-                }
-                start = index + 1;
-            }
-            None => {
-                let item = body
-                    .chars()
-                    .skip(start)
-                    .take(index.saturating_sub(start))
-                    .collect::<String>();
-                if !item.trim().is_empty() {
-                    result.push(item.trim().to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    result
-}
-
-fn model_object_entries(value: &str) -> BTreeMap<String, String> {
-    let value = value.trim();
-    let body = value
-        .strip_prefix('{')
-        .and_then(|value| value.strip_suffix('}'))
-        .unwrap_or(value);
-    let characters = body.chars().collect::<Vec<_>>();
-    let mut result = BTreeMap::new();
-    let mut index = 0usize;
-    while index < characters.len() {
-        while index < characters.len()
-            && (characters[index].is_whitespace() || characters[index] == ',')
-        {
-            index += 1;
-        }
-        if index >= characters.len() {
-            break;
-        }
-        let key_start = index;
-        while index < characters.len() && characters[index] != ':' {
-            index += 1;
-        }
-        if index >= characters.len() {
-            break;
-        }
-        let key = model_unquote(&characters[key_start..index].iter().collect::<String>());
-        index += 1;
-        while index < characters.len() && characters[index].is_whitespace() {
-            index += 1;
-        }
-        let value_start = index;
-        if characters.get(index) == Some(&'"') {
-            index += 1;
-            let mut escaped = false;
-            while index < characters.len() {
-                let character = characters[index];
-                index += 1;
-                if escaped {
-                    escaped = false;
-                } else if character == '\\' {
-                    escaped = true;
-                } else if character == '"' {
-                    break;
-                }
-            }
-        } else if matches!(characters.get(index), Some('{') | Some('[')) {
-            let mut depth = 0usize;
-            let mut quoted = false;
-            let mut escaped = false;
-            while index < characters.len() {
-                let character = characters[index];
-                if quoted {
-                    if escaped {
-                        escaped = false;
-                    } else if character == '\\' {
-                        escaped = true;
-                    } else if character == '"' {
-                        quoted = false;
-                    }
-                } else {
-                    match character {
-                        '"' => quoted = true,
-                        '{' | '[' => depth += 1,
-                        '}' | ']' => {
-                            depth = depth.saturating_sub(1);
-                            if depth == 0 {
-                                index += 1;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                index += 1;
-            }
-        } else {
-            while index < characters.len()
-                && !characters[index].is_whitespace()
-                && characters[index] != ','
-            {
-                index += 1;
-            }
-        }
-        let parsed = characters[value_start..index]
-            .iter()
-            .collect::<String>()
-            .trim()
-            .trim_end_matches(',')
-            .trim()
-            .to_string();
-        result.insert(key, parsed);
-    }
-    result
-}
-
-fn model_tensor_fact(raw: &str) -> Option<ModelTensorFact> {
-    let fields = model_object_entries(raw);
-    let name = model_unquote(fields.get("name")?);
-    let dtype = model_unquote(fields.get("dtype")?);
-    let shape = model_list_items(fields.get("shape")?)
-        .into_iter()
-        .filter_map(|dimension| {
-            if dimension.starts_with('{') {
-                let fields = model_object_entries(&dimension);
-                let name = model_unquote(fields.get("name")?);
-                let min = model_unquote(fields.get("min")?).parse().ok()?;
-                let max = model_unquote(fields.get("max")?).parse().ok()?;
-                Some(ModelDimensionFact::Dynamic { name, min, max })
-            } else {
-                Some(ModelDimensionFact::Static(
-                    model_unquote(&dimension).parse().ok()?,
-                ))
-            }
-        })
-        .collect::<Vec<_>>();
-    (!name.is_empty() && !dtype.is_empty() && !shape.is_empty()).then_some(ModelTensorFact {
-        name,
-        dtype,
-        shape,
-    })
 }
 
 /// Formatting-only policy for the MIR Rust adapter.
@@ -546,7 +320,7 @@ fn mir_program_uses_atomic_word(program: &MirProgram) -> bool {
 fn mir_type_uses_shared_kernel(ty: &MirType) -> bool {
     match ty.kind() {
         MirTypeKind::Apply { name, args } => {
-            matches!(name.name.as_str(), "Pool" | "Id" | "Shared")
+            matches!(name.name.as_str(), "Pool" | "ID" | "Shared")
                 || args.iter().any(mir_type_uses_shared_kernel)
         }
         MirTypeKind::List(inner)
@@ -755,36 +529,15 @@ pub fn mir_rust_aot_metadata(
     metadata
 }
 
-
-/// Append a complete Rust fragment from optimized canonical MIR.
-pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: &mut String) {
-    let canonical_input = CanonicalPass::enabled().then(|| canonical_payload(program));
-    let canonical_input_identity = CanonicalPass::enabled().then(|| canonical_identity(program));
-    if let Err(error) = program.cffi.validate_boundaries() {
-        panic!("MIR Rust emission received invalid foreign boundary facts: {error}");
-    }
-    let artifact_identity = program
-        .artifact_identity(config.execution.artifact)
-        .unwrap_or_else(|error| {
-            panic!("MIR Rust emission requires canonical artifact identity: {error}")
-        });
-    let emitter = RustEmitter::new(program, config, artifact_identity.clone());
-    let target_supports_atomic =
-        program
-            .facts
-            .target_dossier
-            .machine
-            .as_deref()
-            .is_some_and(|machine| {
-                machine
-                    .provides_capability(jet_foundation::TargetMachine::TargetCapability::Atomic64)
-            });
-    assert!(
-        !mir_program_uses_atomic_word(program) || target_supports_atomic,
-        "MIR Atomic<T> reached Rust emission without Target.Atomic64 sema admission for target `{}`",
-        config.target.triple
-    );
-    let mut emitted_methods = BTreeSet::new();
+/// The runtime and Core block for one artifact (gated by
+/// `config.execution.emit_runtime`): decided by build facts only, never by user
+/// source, so `jet_store::runtime::prepare` links it as the `jet_runtime` rlib.
+fn emit_runtime_block(
+    emitter: &RustEmitter<'_>,
+    program: &MirProgram,
+    config: &MirRustConfig<'_>,
+    out: &mut String,
+) {
     if config.execution.emit_runtime {
         if emitter.is_no_os() {
             out.push_str("#![no_std]\n#![no_main]\n");
@@ -876,11 +629,59 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             out.push('\n');
         }
     }
+}
+
+/// Runtime prefix of one artifact: the runtime/Core block plus the coverage
+/// prelude. The self-hosted Jet emitter produces user items only; its host
+/// prepends exactly this text so both compilers link the same `jet_runtime`
+/// rlib through `jet_store::runtime::prepare`.
+pub fn emit_mir_runtime_text(program: &MirProgram, config: &MirRustConfig<'_>) -> String {
+    let artifact_identity = program
+        .artifact_identity(config.execution.artifact)
+        .unwrap_or_else(|error| {
+            panic!("MIR runtime text requires canonical artifact identity: {error}")
+        });
+    let emitter = RustEmitter::new(program, config, artifact_identity);
+    let mut out = String::new();
+    emit_runtime_block(&emitter, program, config, &mut out);
+    if emitter.coverage_enabled() {
+        super::push_coverage_prelude(&mut out);
+    }
+    out
+}
+
+/// Append a complete Rust fragment from optimized canonical MIR.
+pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: &mut String) {
+    let canonical_input = CanonicalPass::enabled().then(|| canonical_payload(program));
+    let canonical_input_identity = CanonicalPass::enabled().then(|| canonical_identity(program));
+    if let Err(error) = program.cffi.validate_boundaries() {
+        panic!("MIR Rust emission received invalid foreign boundary facts: {error}");
+    }
+    let artifact_identity = program
+        .artifact_identity(config.execution.artifact)
+        .unwrap_or_else(|error| {
+            panic!("MIR Rust emission requires canonical artifact identity: {error}")
+        });
+    let emitter = RustEmitter::new(program, config, artifact_identity.clone());
+    let target_supports_atomic =
+        program
+            .facts
+            .target_dossier
+            .machine
+            .as_deref()
+            .is_some_and(|machine| {
+                machine
+                    .provides_capability(jet_foundation::TargetMachine::TargetCapability::Atomic64)
+            });
+    assert!(
+        !mir_program_uses_atomic_word(program) || target_supports_atomic,
+        "MIR Atomic<T> reached Rust emission without Target.Atomic64 sema admission for target `{}`",
+        config.target.triple
+    );
+    let mut emitted_methods = BTreeSet::new();
+    emit_runtime_block(&emitter, program, config, out);
     if emitter.coverage_enabled() {
         super::push_coverage_prelude(out);
-    }
-    if !program.facts.model_outputs.is_empty() {
-        out.push_str("extern crate jet_rt;\n");
     }
     emitter.emit_hardware_facts(out);
     out.push('\n');
@@ -952,9 +753,6 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             continue;
         }
         emitter.emit_impl(implementation, &mut emitted_methods, out);
-    }
-    if !program.facts.model_outputs.is_empty() {
-        emitter.emit_model_adapters(out);
     }
     for function in &program.functions {
         if !emitter.module_selected(function.module_id) || !emitter.selected_for_target(function) {
@@ -1035,34 +833,6 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
     CanonicalPass::persist_process("emit");
 }
 
-/// Public descriptor used by integration diagnostics and source-map tooling.
-pub fn mir_layout_descriptor(layout: &MirLayout) -> String {
-    let abi = match layout.abi {
-        MirAbi::Scalar(kind) => match kind {
-            jet_foundation::MIR::MirScalarKind::Int => "scalar:int",
-            jet_foundation::MIR::MirScalarKind::Float => "scalar:float",
-            jet_foundation::MIR::MirScalarKind::Float32 => "scalar:float32",
-            jet_foundation::MIR::MirScalarKind::Bool => "scalar:bool",
-            jet_foundation::MIR::MirScalarKind::Char => "scalar:char",
-            jet_foundation::MIR::MirScalarKind::Pointer => "scalar:pointer",
-        },
-        MirAbi::Aggregate => "aggregate",
-        MirAbi::Sequence => "sequence",
-        MirAbi::Function => "function",
-        MirAbi::Nominal => "nominal",
-        MirAbi::Dynamic => "dynamic",
-        MirAbi::Never => "never",
-    };
-    let size = match layout.size {
-        MirSize::Static(value) => format!("static:{value}"),
-        MirSize::Dynamic => "dynamic".to_string(),
-    };
-    let align = match layout.align {
-        MirSize::Static(value) => format!("static:{value}"),
-        MirSize::Dynamic => "dynamic".to_string(),
-    };
-    format!("abi={abi};size={size};align={align}")
-}
 fn select_artifact(
     program: &MirProgram,
     id: MirArtifactId,
@@ -1195,7 +965,7 @@ fn is_source_owned_core_net_shape(name: &str) -> bool {
                 | "UDPPacket"
                 | "UnixStream"
                 | "UnixListener"
-                | "SrvRecord"
+                | "SRVRecord"
         ))
         || (name.starts_with("<corelib>/Core/net/tls::")
             && matches!(leaf, "TLSCertificate" | "TLSPeerIdentity"))
@@ -1338,7 +1108,7 @@ mod core_native_projection_tests {
     #[test]
     fn imported_core_native_names_project_without_matching_user_qualified_names() {
         let compute_error = "<corelib>/Core/compute::Core/compute/compute.jet::ComputeError";
-        let vjp_run = "<corelib>/Core/compute::Core/compute/compute.jet::VjpRun";
+        let vjp_run = "<corelib>/Core/compute::Core/compute/compute.jet::VJPRun";
         let query_mode = "<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode";
         let mutation_status = "<corelib>/Core/web::Core/web/query.jet::WebMutationStatus";
         let query_status = "<corelib>/Core/web::Core/web/query.jet::WebQueryStatus";
@@ -1379,7 +1149,7 @@ mod core_native_projection_tests {
             Some("JetComputeError")
         );
         assert_eq!(
-            crate::Codegen::compute_handle_rust_type("VjpRun"),
+            crate::Codegen::compute_handle_rust_type("VJPRun"),
             Some("JetComputeVjpRun")
         );
         assert_eq!(
@@ -1588,6 +1358,15 @@ struct RustEmitter<'a> {
     history_callback_lifetime: std::cell::Cell<&'static str>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
+    /// D-SHAPE-PLACE1=A: `(function, parameter index)` rows emitted as
+    /// `&mut [T]` because a caller fills them with a range write window.
+    window_params: BTreeSet<(MirFunctionId, usize)>,
+    /// Every source row with its line index, built once so per-function and
+    /// per-instruction locations never rescan the text from byte 0.
+    source_lines: BTreeMap<
+        jet_foundation::MIR::MirSourceFileId,
+        (&'a jet_foundation::MIR::MirSourceFile, jet_foundation::Diagnostics::LineIndex),
+    >,
 }
 
 impl<'a> RustEmitter<'a> {
@@ -1717,6 +1496,15 @@ impl<'a> RustEmitter<'a> {
             history_callback_lifetime: std::cell::Cell::new("'static"),
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
+            window_params: Self::collect_window_params(program),
+            source_lines: program
+                .source_files
+                .iter()
+                .map(|source| {
+                    let lines = jet_foundation::Diagnostics::LineIndex::new(&source.source);
+                    (source.id, (source, lines))
+                })
+                .collect(),
         };
         for function in &program.functions {
             let roots = emitter.plan_partial_moves(function);
@@ -1731,6 +1519,72 @@ impl<'a> RustEmitter<'a> {
         emitter
     }
 
+    /// D-SHAPE-PLACE1=A: a list write parameter that receives a range window,
+    /// directly (`fill(&values[1..3])`) or through a caller's own window
+    /// parameter passed onward, is emitted as `&mut [T]` so the callee edits
+    /// the owner's storage in place. Sema admits a range window only for a
+    /// parameter proven length-preserving, so such a body never grows the
+    /// list; whole-list callers still pass `&mut Vec<T>`, which coerces.
+    fn collect_window_params(program: &MirProgram) -> BTreeSet<(MirFunctionId, usize)> {
+        let mut windows = BTreeSet::new();
+        loop {
+            let before = windows.len();
+            for function in &program.functions {
+                for instruction in function.blocks.iter().flat_map(|block| block.instructions.iter()) {
+                    let MirOperation::Call { callee, args, .. } = &instruction.operation else {
+                        continue;
+                    };
+                    let target = match callee {
+                        MirCallee::User(id)
+                        | MirCallee::Associated { function: id, .. }
+                        | MirCallee::Method { function: id, .. } => *id,
+                        _ => continue,
+                    };
+                    let Some(target_function) =
+                        program.functions.iter().find(|candidate| candidate.id == target)
+                    else {
+                        continue;
+                    };
+                    for (position, arg) in args.iter().enumerate() {
+                        if arg.access != MirAccess::Write {
+                            continue;
+                        }
+                        let Some(place) = arg
+                            .place
+                            .and_then(|id| function.places.iter().find(|place| place.id == id))
+                        else {
+                            continue;
+                        };
+                        let window = match (place.projections.last(), &place.base) {
+                            (Some(MirProjection::Range { .. }), _) => true,
+                            (None, MirPlaceBase::Parameter(value)) => function
+                                .blocks
+                                .iter()
+                                .flat_map(|block| block.instructions.iter())
+                                .find_map(|definition| match &definition.operation {
+                                    MirOperation::Parameter { index, .. }
+                                        if definition.result == Some(*value) =>
+                                    {
+                                        Some(*index)
+                                    }
+                                    _ => None,
+                                })
+                                .is_some_and(|index| windows.contains(&(function.id, index))),
+                            _ => false,
+                        };
+                        if let (true, Some(param)) = (window, target_function.params.get(position)) {
+                            if matches!(param.ty.kind(), MirTypeKind::List(_)) {
+                                windows.insert((target, param.index));
+                            }
+                        }
+                    }
+                }
+            }
+            if windows.len() == before {
+                return windows;
+            }
+        }
+    }
     fn type_identity_from_instances(
         instances: &BTreeMap<MirTypeId, &'a MirType>,
         ty: &MirType,
@@ -2964,11 +2818,16 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         let root = &self.config.root_prefix;
         let absent = format!("{root}JetOutcome::Err({root}JetAbsent)");
+        // A Core-layer program spells `String` as `&'static str`, while the
+        // Prelude constructor owns its text; convert only the typed values.
+        let core_text = self.is_core_layer();
         let message = self
             .named_struct_field_value(type_id, fields, "message")
+            .map(|message| if core_text { format!("String::from({message})") } else { message })
             .unwrap_or_else(|| panic!("MIR default Err literal is missing message"));
         let code = self
             .named_struct_field_value(type_id, fields, "code")
+            .map(|code| if core_text { format!("({code}).map(String::from)") } else { code })
             .unwrap_or_else(|| absent.clone());
         let cause = self
             .named_struct_field_value(type_id, fields, "cause")
@@ -3225,25 +3084,6 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn model_open_call(
-        &self,
-        function: &MirFunction,
-        args: &[MirCallArg],
-        type_args: &[MirType],
-        row: &MirCoreCall,
-    ) -> String {
-        let (definition, _) = self
-            .model_trait_definition(type_args)
-            .unwrap_or_else(|| panic!("model.open has no checked source trait binding"));
-        self.call_symbol_for_function(
-            function,
-            self.model_adapter_symbol(definition),
-            args,
-            &[],
-            Some(&row.borrow_mask),
-        )
-    }
-
     fn core_direct_call(
         &self,
         function: &MirFunction,
@@ -3255,9 +3095,6 @@ impl<'a> RustEmitter<'a> {
         self.validate_core_arity(row, args);
         if row.module == "core.testing" && row.member == "histories" {
             return self.history_call_expression(function, args, type_args, &row.borrow_mask);
-        }
-        if row.module == "core.models" && row.member == "open" {
-            return self.model_open_call(function, args, type_args, row);
         }
         self.call_symbol_for_function(
             function,
@@ -3560,6 +3397,9 @@ impl<'a> RustEmitter<'a> {
         if args.is_empty() && name.name == jet_foundation::Syntax::TYPE_NEVER {
             return "std::convert::Infallible".to_string();
         }
+        if args.is_empty() && name.name == STM_TYPE {
+            return format!("{}JetSharedTransaction", self.config.root_prefix);
+        }
         if name.name == jet_foundation::Syntax::TYPE_PTR {
             let [element] = args else {
                 panic!("MIR Ptr type must have exactly one element argument");
@@ -3739,7 +3579,7 @@ impl<'a> RustEmitter<'a> {
             return format!("JetExpiring<{}>", self.rust_type(&args[0]));
         }
         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
-            if matches!(email_name, "SMTPAuth" | "DkimConfig" | "SMTPConfig") && args.is_empty() {
+            if matches!(email_name, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") && args.is_empty() {
                 let ffi = self
                     .config
                     .execution
@@ -4333,6 +4173,36 @@ impl<'a> RustEmitter<'a> {
             .collect()
     }
 
+    /// A declared parameter's Rust type inside its own function signature.
+    /// A window row (`collect_window_params`) is a `&mut [T]` slice.
+    fn function_parameter_type(
+        &self,
+        function: &MirFunction,
+        param: &jet_foundation::MIR::MirParam,
+    ) -> String {
+        if self.window_params.contains(&(function.id, param.index)) {
+            if let MirTypeKind::List(element) = param.ty.kind() {
+                return format!("&mut [{}]", self.rust_type(element));
+            }
+        }
+        self.parameter_type(param)
+    }
+
+    /// True when `value` is a window parameter row of `function`.
+    fn window_parameter_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .find_map(|instruction| match &instruction.operation {
+                MirOperation::Parameter { index, .. } if instruction.result == Some(value) => {
+                    Some(*index)
+                }
+                _ => None,
+            })
+            .is_some_and(|index| self.window_params.contains(&(function.id, index)))
+    }
+
     fn parameter_type(&self, param: &jet_foundation::MIR::MirParam) -> String {
         let ty = self.rust_parameter_type(&param.ty);
         match param.access {
@@ -4408,29 +4278,29 @@ impl<'a> RustEmitter<'a> {
             .find(|module| module.id == id)
             .unwrap_or_else(|| panic!("MIR module ID {:?} has no row", id))
     }
-    fn coverage_function_line(&self, function: &MirFunction) -> usize {
-        let source = self
-            .program
-            .source_files
-            .iter()
-            .find(|source| source.id == function.source_file)
+    /// Source row of `function` and the line index of its text.
+    fn function_source(
+        &self,
+        function: &MirFunction,
+    ) -> (
+        &'a jet_foundation::MIR::MirSourceFile,
+        &jet_foundation::Diagnostics::LineIndex,
+    ) {
+        let (source, lines) = self
+            .source_lines
+            .get(&function.source_file)
             .unwrap_or_else(|| panic!("MIR source file {:?} has no row", function.source_file));
-        jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start).0
+        (*source, lines)
+    }
+    fn coverage_function_line(&self, function: &MirFunction) -> usize {
+        let (source, lines) = self.function_source(function);
+        lines.line_col(&source.source, function.span.start).0
     }
     fn function_stack_context(&self, function: &MirFunction) -> (String, u32, String) {
-        let source = self
-            .program
-            .source_files
-            .iter()
-            .find(|source| source.id == function.source_file)
-            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", function.source_file));
-        let (line, _) =
-            jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start);
-        let source_line = source
-            .source
-            .lines()
-            .nth(line.saturating_sub(1))
-            .unwrap_or_default()
+        let (source, lines) = self.function_source(function);
+        let (line, _) = lines.line_col(&source.source, function.span.start);
+        let source_line = lines
+            .line_text(&source.source, line)
             .trim_end()
             .to_string();
         let line = u32::try_from(line)
@@ -4442,18 +4312,11 @@ impl<'a> RustEmitter<'a> {
         function: &MirFunction,
         instruction: &MirInstruction,
     ) -> MirPanicLoc {
-        let source = self
-            .program
-            .source_files
-            .iter()
-            .find(|source| source.id == function.source_file)
-            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", function.source_file));
+        let (source, lines) = self.function_source(function);
         let line = instruction
             .source_line
             .map(|line| line as usize)
-            .unwrap_or_else(|| {
-                jet_foundation::Diagnostics::span_line_col(&source.source, instruction.span.start).0
-            });
+            .unwrap_or_else(|| lines.line_col(&source.source, instruction.span.start).0);
         let line = u32::try_from(line)
             .unwrap_or_else(|_| panic!("MIR instruction source line {line} exceeds u32"));
         MirPanicLoc {
@@ -4592,663 +4455,6 @@ impl<'a> RustEmitter<'a> {
                 .find(|import| import.id == id)
                 .map(|import| mangle(&import.alias))
                 .unwrap_or_else(|| panic!("MIR import ID {:?} has no row", id)),
-        }
-    }
-    fn model_trait_definition<'b>(
-        &'b self,
-        type_args: &[MirType],
-    ) -> Option<(&'b MirTraitDef, &'b jet_foundation::AST::ModelOutputFact)> {
-        let nominal = match type_args.first()?.kind() {
-            MirTypeKind::Apply { name, .. } => name.name.as_str(),
-            MirTypeKind::TraitObject(bounds) => bounds.first()?.name.as_str(),
-            _ => return None,
-        };
-        let leaf = nominal
-            .rsplit("::")
-            .next()
-            .unwrap_or(nominal)
-            .rsplit('.')
-            .next()
-            .unwrap_or(nominal);
-        let definition = self.program.traits.iter().find(|definition| {
-            definition.name == leaf
-                || definition.key == nominal
-                || definition.key.ends_with(&format!("::{leaf}"))
-                || definition.key.ends_with(&format!(".{leaf}"))
-        })?;
-        let fact = self
-            .program
-            .facts
-            .model_outputs
-            .iter()
-            .find(|fact| fact.signature_name.as_deref() == Some(definition.name.as_str()))?;
-        Some((definition, fact))
-    }
-
-    fn model_type_definition(&self, ty: &MirType) -> &MirTypeDef {
-        if let Some(identity) = ty.identity {
-            if let Some(definition) = self
-                .program
-                .types
-                .iter()
-                .find(|definition| definition.id == identity)
-            {
-                return definition;
-            }
-        }
-        let name = match ty.kind() {
-            MirTypeKind::Apply { name, .. } => name.name.clone(),
-            _ => ty.display_name(),
-        };
-        self.program
-            .types
-            .iter()
-            .find(|definition| definition.name == name || definition.key == name)
-            .unwrap_or_else(|| panic!("model carrier type `{name}` has no MIR declaration"))
-    }
-
-    fn model_tensor_expr(&self, tensor: &ModelTensorFact) -> String {
-        let dtype = match tensor.dtype.as_str() {
-            "bool" => "Bool",
-            "i8" => "I8",
-            "i16" => "I16",
-            "i32" => "I32",
-            "i64" => "I64",
-            "u8" => "U8",
-            "u16" => "U16",
-            "u32" => "U32",
-            "u64" => "U64",
-            "f16" => "F16",
-            "bf16" => "BF16",
-            "f32" => "F32",
-            "f64" => "F64",
-            other => panic!("checked model tensor has unsupported dtype `{other}`"),
-        };
-        let dimensions = tensor
-            .shape
-            .iter()
-            .map(|dimension| match dimension {
-                ModelDimensionFact::Static(value) => {
-                    format!("jet_rt::model::TensorDimension::Static({value})")
-                }
-                ModelDimensionFact::Dynamic { name, min, max } => format!(
-                    "jet_rt::model::TensorDimension::Dynamic {{ name: {}, min: {min}, max: {max} }}",
-                    quote_rust_string(name)
-                ),
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(
-            "jet_rt::model::TensorSpec {{ name: {}, dtype: jet_rt::model::TensorDType::{dtype}, shape: jet_rt::model::TensorShape {{ dimensions: vec![{dimensions}] }} }}",
-            quote_rust_string(&tensor.name)
-        )
-    }
-
-    fn model_descriptor_expr(&self, fact: &jet_foundation::AST::ModelOutputFact) -> String {
-        let field = |name: &str| {
-            fact.fields
-                .get(name)
-                .unwrap_or_else(|| panic!("checked model output is missing `{name}`"))
-        };
-        let artifact = |role: &str| {
-            format!(
-                "jet_rt::model::ModelArtifact {{ path: {}, sha256: {} }}",
-                quote_rust_string(model_unquote(field(role)).as_str()),
-                quote_rust_string(model_unquote(field(&format!("{role}_sha256"))).as_str())
-            )
-        };
-        let optional_artifact = |role: &str| {
-            fact.fields
-                .get(role)
-                .map(|path| {
-                    format!(
-                        "Some(jet_rt::model::ModelArtifact {{ path: {}, sha256: {} }})",
-                        quote_rust_string(model_unquote(path).as_str()),
-                        quote_rust_string(model_unquote(field(&format!("{role}_sha256"))).as_str())
-                    )
-                })
-                .unwrap_or_else(|| "None".to_string())
-        };
-        let tensor_list = |name: &str| {
-            model_list_items(field(name))
-                .into_iter()
-                .map(|raw| {
-                    model_tensor_fact(&raw)
-                        .unwrap_or_else(|| panic!("checked model tensor `{name}` is malformed"))
-                })
-                .map(|tensor| self.model_tensor_expr(&tensor))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let option_u64 = |name: &str| {
-            fact.fields
-                .get(name)
-                .map(|value| {
-                    format!(
-                        "Some({})",
-                        model_unquote(value)
-                            .parse::<u64>()
-                            .unwrap_or_else(|_| panic!(
-                                "checked model limit `{name}` is not an integer"
-                            ))
-                    )
-                })
-                .unwrap_or_else(|| "None".to_string())
-        };
-        let custom_operators = fact
-            .fields
-            .get("custom_operators")
-            .map(|value| model_unquote(value))
-            .unwrap_or_else(|| "false".to_string());
-        let signature_name = fact
-            .signature_name
-            .as_deref()
-            .map(|name| format!("Some({})", quote_rust_string(name)))
-            .unwrap_or_else(|| "None".to_string());
-        format!(
-            "jet_rt::model::ModelDescriptor {{ package: {}, output: {}, signature_name: {signature_name}, package_version: {}, license: {}, graph: {}, weights: {}, tokenizer: {}, adapter: {}, preprocessing: {}, pooling: {}, normalization: {}, output_meaning: {}, metric: {}, contract: jet_rt::model::ModelContract {{ inputs: vec![{}], outputs: vec![{}], provider: {}, custom_operators: {custom_operators}, max_context: {}, max_batch: {}, max_buffer_bytes: {} }} }}",
-            quote_rust_string(&fact.package),
-            quote_rust_string(&fact.output),
-            quote_rust_string(&fact.package_version),
-            quote_rust_string(&fact.license),
-            artifact("graph"),
-            artifact("weights"),
-            artifact("tokenizer"),
-            optional_artifact("adapter"),
-            quote_rust_string(model_unquote(field("preprocessing")).as_str()),
-            quote_rust_string(model_unquote(field("pooling")).as_str()),
-            quote_rust_string(model_unquote(field("normalization")).as_str()),
-            quote_rust_string(model_unquote(field("output_meaning")).as_str()),
-            quote_rust_string(model_unquote(field("metric")).as_str()),
-            tensor_list("inputs"),
-            tensor_list("outputs"),
-            quote_rust_string(model_unquote(field("provider")).as_str()),
-            option_u64("max_context"),
-            option_u64("max_batch"),
-            option_u64("max_buffer_bytes"),
-        )
-    }
-    fn model_web_files_expr(&self, fact: &jet_foundation::AST::ModelOutputFact) -> String {
-        let mut entries = Vec::new();
-        for role in ["graph", "weights", "tokenizer", "adapter"] {
-            let Some(raw_path) = fact.fields.get(role) else {
-                continue;
-            };
-            let relative = model_unquote(raw_path);
-            let path = fact.package_root.join(&relative);
-            entries.push(format!(
-                "({}, include_bytes!({}).to_vec())",
-                quote_rust_string(&relative),
-                quote_rust_string(&path.display().to_string()),
-            ));
-        }
-        format!("std::collections::BTreeMap::from([{}])", entries.join(", "))
-    }
-
-    fn model_adapter_types<'b>(
-        &'b self,
-        definition: &'b MirTraitDef,
-    ) -> (&'b MirTraitMethod, &'b MirTypeDef, &'b MirTypeDef) {
-        let method = definition
-            .methods
-            .iter()
-            .find(|method| method.name == "embed")
-            .unwrap_or_else(|| panic!("model trait `{}` has no embed method", definition.name));
-        let MirTypeKind::Result { ok, .. } = method.return_type.kind() else {
-            panic!(
-                "model trait `{}` embed method is not fallible",
-                definition.name
-            );
-        };
-        let batch = self.model_type_definition(ok);
-        let space_type = match &batch.kind {
-            MirTypeDefKind::Struct { fields, .. } => fields
-                .iter()
-                .find(|field| field.name == "space")
-                .map(|field| &field.ty)
-                .unwrap_or_else(|| panic!("model batch `{}` has no space field", batch.name)),
-            _ => panic!("model batch `{}` is not a struct", batch.name),
-        };
-        let space = self.model_type_definition(space_type);
-        (method, batch, space)
-    }
-
-    fn model_space_expr(&self, space: &MirTypeDef, batch: &str) -> String {
-        let MirTypeDefKind::Struct { fields, .. } = &space.kind else {
-            panic!("model space `{}` is not a struct", space.name);
-        };
-        let values = fields
-            .iter()
-            .map(|field| {
-                let value = match field.name.as_str() {
-                    "model_digest" => format!("{batch}.space().model_digest().to_string()"),
-                    "dimension" => format!("{batch}.space().dimension() as _"),
-                    "metric" => format!("{batch}.space().metric().to_string()"),
-                    "normalization" => format!("{batch}.space().normalization().to_string()"),
-                    other => panic!(
-                        "model space `{}` has unsupported field `{other}`",
-                        space.name
-                    ),
-                };
-                format!("{}: {value}", mangle(&field.name))
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{} {{ {values} }}", self.type_name(space.id))
-    }
-
-    fn model_batch_expr(&self, batch: &MirTypeDef, space: &MirTypeDef) -> String {
-        let MirTypeDefKind::Struct { fields, .. } = &batch.kind else {
-            panic!("model batch `{}` is not a struct", batch.name);
-        };
-        let values = fields
-            .iter()
-            .map(|field| {
-                let value = match field.name.as_str() {
-                    "values" => "jet_batch.values().iter().map(|row| row.iter().map(|value| *value as _).collect()).collect()".to_string(),
-                    "space" => self.model_space_expr(space, "jet_batch"),
-                    other => panic!("model batch `{}` has unsupported field `{other}`", batch.name),
-                };
-                format!("{}: {value}", mangle(&field.name))
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{} {{ {values} }}", self.type_name(batch.id))
-    }
-
-    fn model_adapter_symbol(&self, definition: &MirTraitDef) -> String {
-        format!("__jet_model_open_{}", mangle_path(&definition.key))
-    }
-
-    fn emit_model_web_bridge(
-        &self,
-        out: &mut String,
-        definition: &MirTraitDef,
-        fact: &jet_foundation::AST::ModelOutputFact,
-    ) {
-        if self.config.target_kind != MirRustTarget::WebWasm {
-            return;
-        }
-        let prefix = mangle_path(&definition.key);
-        let module = format!("__jet_model_web_{prefix}");
-        let descriptor = self.model_descriptor_expr(fact);
-        let web_files = self.model_web_files_expr(fact);
-        let output = quote_rust_string(&fact.output);
-        let mut add = |line: &str| {
-            out.push_str(line);
-            out.push('\n');
-        };
-        add("#[cfg(target_arch = \"wasm32\")]");
-        add(&format!("mod {module} {{\n"));
-        add("    use super::*;");
-        add("    use std::cell::{Cell, RefCell};");
-        add("    use std::collections::BTreeMap;");
-        add("    use std::future::Future;");
-        add("    use std::pin::Pin;");
-        add("    use std::sync::Arc;");
-        add("    use std::task::{Context, Poll, Wake, Waker};");
-        add("");
-        add("    type OpenFuture = Pin<Box<dyn Future<Output = Result<jet_rt::model::provider::OnnxRuntimeSession, String>>>>;");
-        add("    type EmbedFuture = Pin<Box<dyn Future<Output = Result<Vec<u8>, String>>>>;");
-        add("    enum FutureState { Open(Option<OpenFuture>), Embed(Option<EmbedFuture>) }");
-        add("    struct Job { state: FutureState, status: u32, result: Vec<u8>, cancellation: jet_rt::model::provider::CancellationToken }");
-        add("");
-        add("    thread_local! {");
-        add("        static NEXT_ID: Cell<u32> = const { Cell::new(1) };");
-        add("        static INPUTS: RefCell<BTreeMap<u32, Vec<u8>>> = const { RefCell::new(BTreeMap::new()) };");
-        add("        static SESSIONS: RefCell<BTreeMap<u32, jet_rt::model::provider::OnnxRuntimeSession>> = const { RefCell::new(BTreeMap::new()) };");
-        add("        static JOBS: RefCell<BTreeMap<u32, Job>> = const { RefCell::new(BTreeMap::new()) };");
-        add("    }");
-        add("");
-        add("    fn next_id() -> u32 {");
-        add("        NEXT_ID.with(|next| {");
-        add("            let id = next.get();");
-        add("            if id == 0 || id == u32::MAX { return 0; }");
-        add("            next.set(id + 1);");
-        add("            id");
-        add("        })");
-        add("    }");
-        add("");
-        add("    fn task_token() -> jet_rt::model::provider::CancellationToken {");
-        add("        let control = jet_scheduler_current_task_control().unwrap_or_else(jet_scheduler_root_task_control);");
-        add("        jet_rt::model::provider::CancellationToken::from_cancel_flag(control.cancelled.clone())");
-        add("    }");
-        add("");
-        add("    fn insert_error(handle: u32, open: bool, message: String) {");
-        add("        JOBS.with(|jobs| {");
-        add("            jobs.borrow_mut().insert(handle, Job {");
-        add("                state: if open { FutureState::Open(None) } else { FutureState::Embed(None) },");
-        add("                status: 2,");
-        add("                result: message.into_bytes(),");
-        add("                cancellation: task_token(),");
-        add("            });");
-        add("        });");
-        add("    }");
-        add("");
-        add("    fn read_input(pointer: u32, length: u32) -> Result<Vec<u8>, String> {");
-        add("        INPUTS.with(|inputs| {");
-        add("            let inputs = inputs.borrow();");
-        add("            let bytes = inputs.get(&pointer).ok_or_else(|| \"model Web input handle is stale\".to_string())?;");
-        add("            if bytes.len() != usize::try_from(length).map_err(|_| \"model Web input length is invalid\".to_string())? {");
-        add("                return Err(\"model Web input length differs from its allocation\".to_string());");
-        add("            }");
-        add("            Ok(bytes.clone())");
-        add("        })");
-        add("    }");
-        add("");
-        add("    fn decode_documents(bytes: &[u8]) -> Result<Vec<String>, String> {");
-        add("        let mut cursor = 0usize;");
-        add("        let take_u32 = |bytes: &[u8], cursor: &mut usize| -> Result<u32, String> {");
-        add("            let end = cursor.checked_add(4).ok_or_else(|| \"model Web document packet overflow\".to_string())?;");
-        add("            let value = bytes.get(*cursor..end).ok_or_else(|| \"truncated model Web document packet\".to_string())?;");
-        add("            *cursor = end;");
-        add("            Ok(u32::from_le_bytes(value.try_into().map_err(|_| \"invalid model Web document integer\".to_string())?))");
-        add("        };");
-        add("        let count = usize::try_from(take_u32(bytes, &mut cursor)?).map_err(|_| \"model Web document count is invalid\".to_string())?;");
-        add("        let mut documents = Vec::with_capacity(count);");
-        add("        for _ in 0..count {");
-        add("            let length = usize::try_from(take_u32(bytes, &mut cursor)?).map_err(|_| \"model Web document length is invalid\".to_string())?;");
-        add("            let end = cursor.checked_add(length).ok_or_else(|| \"model Web document packet overflow\".to_string())?;");
-        add("            let text = String::from_utf8(bytes.get(cursor..end).ok_or_else(|| \"truncated model Web document\".to_string())?.to_vec()).map_err(|_| \"model Web document is not UTF-8\".to_string())?;");
-        add("            cursor = end;");
-        add("            documents.push(text);");
-        add("        }");
-        add("        if cursor != bytes.len() { return Err(\"trailing model Web document packet bytes\".to_string()); }");
-        add("        Ok(documents)");
-        add("    }");
-        add("");
-        add("    fn encode_text(output: &mut Vec<u8>, value: &str) {");
-        add("        output.extend_from_slice(&(value.len() as u32).to_le_bytes());");
-        add("        output.extend_from_slice(value.as_bytes());");
-        add("    }");
-        add("");
-        add("    fn encode_batch(batch: jet_rt::model::EmbeddingBatch) -> Vec<u8> {");
-        add("        let mut output = Vec::new();");
-        add("        output.extend_from_slice(&(batch.values().len() as u32).to_le_bytes());");
-        add("        for row in batch.values() {");
-        add("            output.extend_from_slice(&(row.len() as u32).to_le_bytes());");
-        add("            for value in row { output.extend_from_slice(&value.to_le_bytes()); }");
-        add("        }");
-        add("        let space = batch.space();");
-        add("        encode_text(&mut output, space.model_digest());");
-        add("        output.extend_from_slice(&space.dimension().to_le_bytes());");
-        add("        encode_text(&mut output, space.metric());");
-        add("        encode_text(&mut output, space.normalization());");
-        add("        output");
-        add("    }");
-        add("");
-        add("    struct NoopWaker;");
-        add("    impl Wake for NoopWaker { fn wake(self: Arc<Self>) {} }");
-        add("");
-        add("    fn poll_open(handle: u32) -> u32 {");
-        add("        JOBS.with(|jobs| {");
-        add("            let mut jobs = jobs.borrow_mut();");
-        add("            let Some(job) = jobs.get_mut(&handle) else { return 2; };");
-        add("            let FutureState::Open(future_slot) = &mut job.state else { return 2; };");
-        add("            let Some(mut future) = future_slot.take() else { return job.status; };");
-        add("            let waker = Waker::from(Arc::new(NoopWaker));");
-        add("            let mut context = Context::from_waker(&waker);");
-        add("            match future.as_mut().poll(&mut context) {");
-        add("                Poll::Pending => { *future_slot = Some(future); 0 }");
-        add("                Poll::Ready(Ok(session)) => {");
-        add("                    let session_handle = next_id();");
-        add("                    if session_handle == 0 { job.status = 2; job.result = b\"model Web session handle space exhausted\".to_vec(); return 2; }");
-        add("                    SESSIONS.with(|sessions| { sessions.borrow_mut().insert(session_handle, session); });");
-        add("                    job.result = session_handle.to_le_bytes().to_vec();");
-        add("                    job.status = 1;");
-        add("                    1");
-        add("                }");
-        add("                Poll::Ready(Err(error)) => { job.result = error.into_bytes(); job.status = 2; 2 }");
-        add("            }");
-        add("        })");
-        add("    }");
-        add("");
-        add("    fn poll_embed(handle: u32) -> u32 {");
-        add("        JOBS.with(|jobs| {");
-        add("            let mut jobs = jobs.borrow_mut();");
-        add("            let Some(job) = jobs.get_mut(&handle) else { return 2; };");
-        add("            let FutureState::Embed(future_slot) = &mut job.state else { return 2; };");
-        add("            let Some(mut future) = future_slot.take() else { return job.status; };");
-        add("            let waker = Waker::from(Arc::new(NoopWaker));");
-        add("            let mut context = Context::from_waker(&waker);");
-        add("            match future.as_mut().poll(&mut context) {");
-        add("                Poll::Pending => { *future_slot = Some(future); 0 }");
-        add(
-            "                Poll::Ready(Ok(result)) => { job.result = result; job.status = 1; 1 }",
-        );
-        add("                Poll::Ready(Err(error)) => { job.result = error.into_bytes(); job.status = 2; 2 }");
-        add("            }");
-        add("        })");
-        add("    }");
-        add("");
-        add("    fn result_ptr(handle: u32, open: bool) -> u32 {");
-        add("        JOBS.with(|jobs| {");
-        add("            let jobs = jobs.borrow();");
-        add("            let Some(job) = jobs.get(&handle) else { return 0; };");
-        add("            if job.status == 0 || matches!((&job.state, open), (FutureState::Open(_), false) | (FutureState::Embed(_), true)) { return 0; }");
-        add("            job.result.as_ptr() as usize as u32");
-        add("        })");
-        add("    }");
-        add("    fn result_len(handle: u32, open: bool) -> u32 {");
-        add("        JOBS.with(|jobs| {");
-        add("            let jobs = jobs.borrow();");
-        add("            let Some(job) = jobs.get(&handle) else { return 0; };");
-        add("            if job.status == 0 || matches!((&job.state, open), (FutureState::Open(_), false) | (FutureState::Embed(_), true)) { return 0; }");
-        add("            job.result.len().try_into().unwrap_or(0)");
-        add("        })");
-        add("    }");
-        add("");
-        add("    fn result_free(handle: u32, open: bool) {");
-        add("        JOBS.with(|jobs| {");
-        add("            let mut jobs = jobs.borrow_mut();");
-        add("            if jobs.get(&handle).is_some_and(|job| matches!((&job.state, open), (FutureState::Open(_), true) | (FutureState::Embed(_), false))) { jobs.remove(&handle); }");
-        add("        });");
-        add("    }");
-        add("");
-        add("    fn cancel(handle: u32, open: bool) {");
-        add("        JOBS.with(|jobs| {");
-        add("            let mut jobs = jobs.borrow_mut();");
-        add("            let matches_operation = jobs.get(&handle).is_some_and(|job| matches!((&job.state, open), (FutureState::Open(_), true) | (FutureState::Embed(_), false)));");
-        add("            if !matches_operation { return; }");
-        add("            let job = jobs.remove(&handle).expect(\"model Web job disappeared\");");
-        add("            job.cancellation.cancel();");
-        add("        });");
-        add("    }");
-        add("");
-        out.push_str(&format!(
-            "    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_input_alloc_{prefix}(length: u32) -> u32 {{\n        let length = match usize::try_from(length) {{ Ok(value) => value, Err(_) => return 0 }};\n        let mut bytes = Vec::new();\n        if bytes.try_reserve_exact(length.max(1)).is_err() {{ return 0; }}\n        bytes.resize(length, 0);\n        let pointer = bytes.as_mut_ptr() as usize;\n        if pointer == 0 || pointer > u32::MAX as usize {{ return 0; }}\n        INPUTS.with(|inputs| inputs.borrow_mut().insert(pointer as u32, bytes));\n        pointer as u32\n    }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_input_free_{prefix}(pointer: u32) {{ INPUTS.with(|inputs| {{ inputs.borrow_mut().remove(&pointer); }}); }}\n",
-        ));
-        out.push_str(&format!(
-            "    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_open_start_{prefix}(pointer: u32, length: u32) -> u32 {{\n",
-            prefix = prefix,
-        ));
-        out.push_str(
-            r#"        let handle = next_id();
-        if handle == 0 { return 0; }
-        let bytes = match read_input(pointer, length) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                INPUTS.with(|inputs| { inputs.borrow_mut().remove(&pointer); });
-                insert_error(handle, true, error);
-                return handle;
-            }
-        };
-        INPUTS.with(|inputs| { inputs.borrow_mut().remove(&pointer); });
-        let output = match String::from_utf8(bytes) {
-            Ok(value) => value,
-            Err(_) => {
-                insert_error(handle, true, "model Web output name is not UTF-8".to_string());
-                return handle;
-            }
-        };
-"#,
-        );
-        out.push_str(&format!(
-            "        if output != {output} {{ insert_error(handle, true, format!(\"model output {{output:?}} is not declared by this adapter\")); return handle; }}\n",
-            output = output,
-        ));
-        out.push_str(&format!(
-            r#"        let __jet_descriptor = {descriptor};
-        let __jet_package = match jet_rt::model::ModelPackage::from_descriptor(__jet_descriptor) {{
-            Ok(package) => package,
-            Err(error) => {{ insert_error(handle, true, error.to_string()); return handle; }}
-        }};
-        let __jet_files = {web_files};
-        let __jet_graph = match __jet_package.artifacts.first() {{
-            Some(artifact) => match __jet_files.get(&artifact.path) {{
-                Some(bytes) => bytes.clone(),
-                None => {{ insert_error(handle, true, "declared model graph bytes are absent".to_string()); return handle; }}
-            }},
-            None => {{ insert_error(handle, true, "model package has no graph artifact".to_string()); return handle; }}
-        }};
-        let __jet_policy = match jet_rt::model::provider::OnnxRuntimePolicy::cpu_for_graph(&__jet_graph) {{
-            Ok(policy) => policy,
-            Err(error) => {{ insert_error(handle, true, error.to_string()); return handle; }}
-        }};
-"#,
-            descriptor = descriptor,
-            web_files = web_files,
-        ));
-        out.push_str(
-            r#"        let __jet_provider = match jet_rt::model::provider::WebOnnxProvider::browser(__jet_policy) {
-            Ok(provider) => jet_rt::model::provider::OnnxRuntimeProvider::Web(provider),
-            Err(error) => {
-                insert_error(handle, true, error.to_string());
-                return handle;
-            }
-        };
-        let __jet_control = jet_scheduler_current_task_control().unwrap_or_else(jet_scheduler_root_task_control);
-        let __jet_cancel = jet_rt::model::provider::CancellationToken::from_cancel_flag(__jet_control.cancelled.clone());
-        let __jet_callback_token = __jet_cancel.clone();
-        let __jet_cancel_guard = __jet_control.register_cancel_callback(std::sync::Arc::new(move || __jet_callback_token.cancel()));
-        let __jet_job_cancel = __jet_cancel.clone();
-        let future: OpenFuture = Box::pin(async move {
-            let _jet_cancel_guard = __jet_cancel_guard;
-            let session = jet_rt::model::ModelPackage::open_with(&__jet_package, jet_rt::model::ModelSource::Bytes(&__jet_files), &__jet_provider, &__jet_cancel).await.map_err(|error| error.to_string())?;
-            Ok(session)
-        });
-        JOBS.with(|jobs| jobs.borrow_mut().insert(handle, Job { state: FutureState::Open(Some(future)), status: 0, result: Vec::new(), cancellation: __jet_job_cancel }));
-        handle
-    }
-"#,
-        );
-        out.push_str(&format!(
-            "    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_open_poll_{prefix}(handle: u32) -> u32 {{ poll_open(handle) }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_open_result_ptr_{prefix}(handle: u32) -> u32 {{ result_ptr(handle, true) }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_open_result_len_{prefix}(handle: u32) -> u32 {{ result_len(handle, true) }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_open_result_free_{prefix}(handle: u32) {{ result_free(handle, true); }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_open_cancel_{prefix}(handle: u32) {{ cancel(handle, true); }}\n",
-        ));
-        out.push_str(&format!(
-            "    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_embed_start_{prefix}(session: u32, pointer: u32, length: u32) -> u32 {{\n        let handle = next_id();\n        if handle == 0 {{ return 0; }}\n        let bytes = match read_input(pointer, length) {{ Ok(bytes) => bytes, Err(error) => {{ INPUTS.with(|inputs| inputs.borrow_mut().remove(&pointer)); insert_error(handle, false, error); return handle; }} }};\n        INPUTS.with(|inputs| inputs.borrow_mut().remove(&pointer));\n        let documents = match decode_documents(&bytes) {{ Ok(documents) => documents, Err(error) => {{ insert_error(handle, false, error); return handle; }} }};\n        let session = match SESSIONS.with(|sessions| sessions.borrow_mut().remove(&session)) {{ Some(session) => session, None => {{ insert_error(handle, false, \"model Web session handle is stale\".to_string()); return handle; }} }};\n        let __jet_control = jet_scheduler_current_task_control().unwrap_or_else(jet_scheduler_root_task_control);\n        let __jet_cancel = jet_rt::model::provider::CancellationToken::from_cancel_flag(__jet_control.cancelled.clone());\n        let __jet_callback_token = __jet_cancel.clone();\n        let __jet_cancel_guard = __jet_control.register_cancel_callback(std::sync::Arc::new(move || __jet_callback_token.cancel()));\n        let __jet_job_cancel = __jet_cancel.clone();\n        let future: EmbedFuture = Box::pin(async move {{\n            let _jet_cancel_guard = __jet_cancel_guard;\n            let mut session = session;\n            let batch = session.embed_documents(&documents, &__jet_cancel).await.map_err(|error| error.to_string())?;\n            Ok(encode_batch(batch))\n        }});\n        JOBS.with(|jobs| jobs.borrow_mut().insert(handle, Job {{ state: FutureState::Embed(Some(future)), status: 0, result: Vec::new(), cancellation: __jet_job_cancel }}));\n        handle\n    }}\n",
-        ));
-        out.push_str(&format!(
-            "    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_embed_poll_{prefix}(handle: u32) -> u32 {{ poll_embed(handle) }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_embed_result_ptr_{prefix}(handle: u32) -> u32 {{ result_ptr(handle, false) }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_embed_result_len_{prefix}(handle: u32) -> u32 {{ result_len(handle, false) }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_embed_result_free_{prefix}(handle: u32) {{ result_free(handle, false); }}\n    #[no_mangle]\n    pub extern \"C\" fn __jet_model_web_embed_cancel_{prefix}(handle: u32) {{ cancel(handle, false); }}\n",
-        ));
-        out.push_str("}\n\n");
-    }
-
-    fn emit_model_adapters(&self, out: &mut String) {
-        for definition in &self.program.traits {
-            let Some(fact) = self
-                .program
-                .facts
-                .model_outputs
-                .iter()
-                .find(|fact| fact.signature_name.as_deref() == Some(definition.name.as_str()))
-            else {
-                continue;
-            };
-            if !self.module_selected(definition.module) {
-                continue;
-            }
-            let (method, batch, space) = self.model_adapter_types(definition);
-            let trait_name = self.trait_name(definition.id);
-            let adapter_name = format!("__JetModelAdapter_{}", mangle_path(&definition.key));
-            let return_type = self.rust_type(&method.return_type);
-            let root = &self.config.root_prefix;
-            let descriptor = self.model_descriptor_expr(fact);
-            let output = quote_rust_string(&fact.output);
-            let web_files = self.model_web_files_expr(fact);
-            let root_path = quote_rust_string(&fact.package_root.display().to_string());
-            let batch_expr = self.model_batch_expr(batch, space);
-            let _ = writeln!(
-                out,
-                "struct {adapter_name} {{ session: jet_rt::model::provider::OnnxRuntimeSession }}\n\
-                 impl {trait_name} for {adapter_name} {{\n\
-                     fn {}(self, documents: Vec<String>) -> {return_type} {{\n\
-                         let mut __jet_session = self.session;\n\
-                         let __jet_control = jet_scheduler_current_task_control().unwrap_or_else(jet_scheduler_root_task_control);\n\
-                         let __jet_cancel = jet_rt::model::provider::CancellationToken::from_cancel_flag(__jet_control.cancelled.clone());\n\
-                         let __jet_callback_token = __jet_cancel.clone();\n\
-                         let __jet_cancel_guard = __jet_control.register_cancel_callback(std::sync::Arc::new(move || __jet_callback_token.cancel()));\n\
-                         let jet_batch = match jet_rt::model::provider::run_ready(__jet_session.embed_documents(&documents, &__jet_cancel)) {{\n\
-                             Ok(value) => value,\n\
-                             Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                         }};\n\
-                         drop(__jet_cancel_guard);\n\
-                         Ok({batch_expr})\n\
-                     }}\n\
-                 }}\n\
-                 fn {}(output: &str) -> {root}JetOutcome<Box<dyn {trait_name}>, {root}JetErr> {{\n\
-                     if output != {output} {{\n\
-                         return Err({root}jet_err_from_message(format!(\"model output {{output:?}} is not declared by this adapter\")));\n\
-                     }}\n\
-                     let __jet_root = std::path::PathBuf::from({root_path});\n\
-                     let __jet_descriptor = {descriptor};\n\
-                     let __jet_package = match jet_rt::model::ModelPackage::from_descriptor(__jet_descriptor) {{\n\
-                         Ok(package) => package,\n\
-                         Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                     }};\n\
-                     let __jet_graph = match __jet_package.artifacts.first() {{\n\
-                         Some(artifact) => match __jet_package.read_artifact(&__jet_root, artifact) {{\n\
-                             Ok(bytes) => bytes,\n\
-                             Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                         }},\n\
-                         None => return Err({root}jet_err_from_message(\"model package has no graph artifact\".to_string())),\n\
-                     }};\n\
-                     let __jet_policy = match jet_rt::model::provider::OnnxRuntimePolicy::cpu_for_graph(&__jet_graph) {{\n\
-                         Ok(policy) => policy,\n\
-                         Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                     }};\n\
-                     let __jet_control = jet_scheduler_current_task_control().unwrap_or_else(jet_scheduler_root_task_control);\n\
-                     let __jet_cancel = jet_rt::model::provider::CancellationToken::from_cancel_flag(__jet_control.cancelled.clone());\n\
-                     let __jet_callback_token = __jet_cancel.clone();\n\
-                     let __jet_cancel_guard = __jet_control.register_cancel_callback(std::sync::Arc::new(move || __jet_callback_token.cancel()));\n\
-                     #[cfg(not(target_arch = \"wasm32\"))]\n\
-                     let __jet_session = {{\n\
-                         let __jet_runtime = match std::env::var_os(\"JET_ONNX_RUNTIME_LIBRARY\") {{\n\
-                             Some(path) => path,\n\
-                             None => return Err({root}jet_err_from_message(\"JET_ONNX_RUNTIME_LIBRARY is required for model execution\".to_string())),\n\
-                         }};\n\
-                         let __jet_pin = match jet_rt::model::provider::RuntimePin::official_linux_x64(__jet_runtime) {{\n\
-                             Ok(pin) => pin,\n\
-                             Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                         }};\n\
-                         let __jet_provider = match jet_rt::model::provider::OnnxRuntimeProvider::native(__jet_pin, __jet_policy) {{\n\
-                             Ok(provider) => provider,\n\
-                             Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                         }};\n\
-                         match jet_rt::model::provider::run_ready(__jet_package.open_with(jet_rt::model::ModelSource::Directory(&__jet_root), &__jet_provider, &__jet_cancel)) {{\n\
-                             Ok(session) => session,\n\
-                             Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                         }}\n\
-                     }};\n\
-                     #[cfg(target_arch = \"wasm32\")]\n\
-                     let __jet_files = {web_files};\n\
-                     #[cfg(target_arch = \"wasm32\")]\n\
-                     let __jet_session = {{\n\
-                         let __jet_provider = match jet_rt::model::provider::WebOnnxProvider::browser(__jet_policy) {{\n\
-                             Ok(provider) => jet_rt::model::provider::OnnxRuntimeProvider::Web(provider),\n\
-                             Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                         }};\n\
-                         match jet_rt::model::provider::run_ready(__jet_package.open_with(jet_rt::model::ModelSource::Bytes(&__jet_files), &__jet_provider, &__jet_cancel)) {{\n\
-                             Ok(session) => session,\n\
-                             Err(error) => return Err({root}jet_err_from_message(error.to_string())),\n\
-                         }}\n\
-                     }};\n\
-                     Ok(Box::new({adapter_name} {{ session: __jet_session }}) as Box<dyn {trait_name}>)\n\
-                 }}\n",
-                mangle(&method.name),
-                self.model_adapter_symbol(definition),
-            );
-            self.emit_model_web_bridge(out, definition, fact);
         }
     }
     fn is_synthetic_rollback_trait(&self, definition: &MirTraitDef) -> bool {
@@ -7252,7 +6458,7 @@ impl<'a> RustEmitter<'a> {
             .or_else(|| nominal_name.rsplit_once('.'))
             .map_or(nominal_name, |(_, leaf)| leaf);
         match nominal_name {
-            "HandleId" | "TaskId" | "EventId" => {
+            "HandleID" | "TaskID" | "EventID" => {
                 format!("jet_std::DataTree::Int({value}.value as i64)")
             }
             _ => format!("{value}.jet_encode()"),
@@ -7358,7 +6564,7 @@ impl<'a> RustEmitter<'a> {
         let name = crate::Codegen::history_rust_type_name(name)?;
         Some(match name {
             "HistoryStrategy" => format!("{}JetHistoryStrategy", self.config.root_prefix),
-            "HistoryRng" => format!("{}JetHistoryRng", self.config.root_prefix),
+            "HistoryRNG" => format!("{}JetHistoryRng", self.config.root_prefix),
             _ => format!("crate::jet_testing_history_foundation::{name}"),
         })
     }
@@ -7561,7 +6767,7 @@ impl<'a> RustEmitter<'a> {
                     {
                         format!("{tree}::Text(value.to_string())")
                     } else if crate::Codegen::history_rust_type_name(&nominal.name)
-                        == Some("HistoryRng")
+                        == Some("HistoryRNG")
                     {
                         unavailable.to_string()
                     } else if matches!(
@@ -8059,7 +7265,7 @@ impl<'a> RustEmitter<'a> {
                     }
                     let _ = writeln!(
                         out,
-                        "fn {generate_name}(_: &mut {foundation}::HistoryRng, _: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{ None }}\n\
+                        "fn {generate_name}(_: &mut {foundation}::HistoryRNG, _: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{ None }}\n\
                          fn {rebuild_name}(_: &{foundation}::HistoryOperation) -> Option<{command_ty}> {{ None }}\n\
                          fn {valid_name}(_: &{foundation}::HistoryOperation, _: &{command_ty}) -> bool {{ false }}\n"
                     );
@@ -8068,7 +7274,7 @@ impl<'a> RustEmitter<'a> {
                 let specs = specs.unwrap_or_default();
                 let _ = writeln!(
                     out,
-                    "fn {generate_name}(rng: &mut {foundation}::HistoryRng, index: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{"
+                    "fn {generate_name}(rng: &mut {foundation}::HistoryRNG, index: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{"
                 );
                 for (field_index, field) in fields.iter().enumerate() {
                     let expression = self
@@ -12050,7 +11256,7 @@ impl<'a> RustEmitter<'a> {
                     } else {
                         ""
                     },
-                    self.parameter_type(param)
+                    self.function_parameter_type(function, param)
                 )
             }
         }));
@@ -15248,6 +14454,7 @@ impl<'a> RustEmitter<'a> {
             {
                 true
             }
+            MirOperation::Semantic(MirSemanticOp::SharedGuardWait { guard, .. }) => *guard == value,
             _ => false,
         }
     }
@@ -16950,6 +16157,11 @@ impl<'a> RustEmitter<'a> {
             };
         }
         let name = mangle(&param.name);
+        // A window parameter is a `&mut [T]` slice; its whole read is an
+        // owned copy.
+        if self.window_params.contains(&(function.id, param.index)) {
+            return format!("(*{name}).to_vec()");
+        }
         match param.access {
             MirAccess::Write => format!("(*{name}).clone()"),
             MirAccess::Read if self.parameter_borrowed(param) => format!("(*{name}).clone()"),
@@ -19762,11 +18974,11 @@ impl<'a> RustEmitter<'a> {
             "vjp" => {
                 let gradient_type = match result_type.kind() {
                     MirTypeKind::Apply { name, args }
-                        if name.name == "VjpRun" && args.len() == 1 =>
+                        if name.name == "VJPRun" && args.len() == 1 =>
                     {
                         &args[0]
                     }
-                    _ => panic!("MIR compute.vjp result is not VjpRun"),
+                    _ => panic!("MIR compute.vjp result is not VJPRun"),
                 };
                 let gradient = self.compute_gradient(gradient_type, "__jet_pull_gradients");
                 let gradient_for_grads =
@@ -21898,6 +21110,12 @@ impl<'a> RustEmitter<'a> {
             (None, true) => panic!("MIR qualified enum variant has no owner type"),
         }
     }
+    /// Jet `DataTree.Int` is exact; the native carrier's crossing lives in the
+    /// Prelude (`jet_datatree_int` and its test and payload readers).
+    fn is_datatree_int(&self, owner: MirTypeId, variant: &str) -> bool {
+        variant == "Int"
+            && crate::Codegen::core_rust_type_name(&self.type_def(owner).key) == Some("DataTree")
+    }
     fn enum_value(
         &self,
         function: &MirFunction,
@@ -21951,6 +21169,9 @@ impl<'a> RustEmitter<'a> {
                 }
                 let boxed = self.declared_boxed_edge(owner, variant);
                 let value = self.enum_arg_value(function, &args[0], payload, boxed, location);
+                if self.is_datatree_int(owner, variant) {
+                    return format!("{}jet_std::jet_datatree_int({value})", self.config.root_prefix);
+                }
                 let mut value = if native {
                     self.native_int_input(&value, payload, location)
                         .unwrap_or(value)
@@ -22034,6 +21255,11 @@ impl<'a> RustEmitter<'a> {
                 "matches!({}, {head})",
                 self.value_slot_reference(subject, false)
             ),
+            MirVariantPayload::Single(_) if self.is_datatree_int(effective_owner, variant) => format!(
+                "{}jet_std::jet_datatree_is_int(&{})",
+                self.config.root_prefix,
+                self.value_slot_reference(subject, false)
+            ),
             MirVariantPayload::Single(_) => format!(
                 "matches!({}, {head}(_))",
                 self.value_slot_reference(subject, false)
@@ -22077,6 +21303,15 @@ impl<'a> RustEmitter<'a> {
         let native = has_native_type_projection(&self.type_def(effective_owner).key);
         match self.enum_variant_payload(effective_owner, variant) {
             MirVariantPayload::Unit => panic!("MIR unit variant has no payload"),
+            MirVariantPayload::Single(_) if self.is_datatree_int(effective_owner, variant) => {
+                if index != 0 {
+                    panic!("MIR single variant payload index out of range")
+                }
+                format!(
+                    "{}jet_std::jet_datatree_int_payload(&{value}).expect(\"MIR enum payload variant mismatch\")",
+                    self.config.root_prefix
+                )
+            }
             MirVariantPayload::Single(payload_type) => {
                 if index != 0 {
                     panic!("MIR single variant payload index out of range")
@@ -23193,6 +22428,15 @@ impl<'a> RustEmitter<'a> {
                 .unwrap_or_else(|| panic!("MIR foreign-handle drop has no lifecycle row"));
             return self.close_handle_drop(handle, self.value_move(value));
         }
+        // The Shared plane of `#Transact`: the STM guard's scope cleanup is its
+        // commit, matching the interpreter and JIT, which commit at the
+        // transaction scope exit. Dropping the guard itself would roll back.
+        if matches!(
+            self.value_type(function, value).kind(),
+            MirTypeKind::Apply { name, args } if args.is_empty() && name.name == STM_TYPE
+        ) {
+            return format!("{{ {}.commit(); () }}", self.value_move(value));
+        }
         match kind {
             MirDropKind::None => format!("{{ let _ = {}; () }}", self.value_move(value)),
             MirDropKind::Value => format!("{{ drop({}); () }}", self.value_move(value)),
@@ -23937,7 +23181,7 @@ impl<'a> RustEmitter<'a> {
         let Some(owner) = crate::Codegen::history_rust_type_name(owner) else {
             return value;
         };
-        if (matches!(owner, "HandleId" | "TaskId" | "EventId") && field == "value")
+        if (matches!(owner, "HandleID" | "TaskID" | "EventID") && field == "value")
             || (owner == "HistoryCase" && field == "seed")
             || (owner == "HistoryOperation" && field == "index")
             || (owner == "HistoryScheduleChoice" && field == "operation")
@@ -24012,7 +23256,7 @@ impl<'a> RustEmitter<'a> {
         }
         // Prelude VJP continuations use native Rc<Fn> carriers. Projecting
         // one into a checked Jet function value must cross the callable ABI.
-        if ty.nominal_name() == Some("VjpRun") {
+        if ty.nominal_name() == Some("VJPRun") {
             let closure = match field_name.as_str() {
                 "pull" => Some(format!(
                     "move |__jet_seed: {}| (__jet_native_callback)(&__jet_seed)",
@@ -24044,9 +23288,9 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         let type_name = self.type_name(type_id);
         let field_name = self.field_name(field);
-        if type_name.ends_with("HandleId")
-            || type_name.ends_with("TaskId")
-            || type_name.ends_with("EventId")
+        if type_name.ends_with("HandleID")
+            || type_name.ends_with("TaskID")
+            || type_name.ends_with("EventID")
         {
             if field_name == "value" {
                 return format!(
@@ -24456,7 +23700,19 @@ impl<'a> RustEmitter<'a> {
                 guard,
                 condition,
                 predicate,
-            } => self.prelude_values(*call, &[*guard, *condition, *predicate]),
+            } => {
+                // The guard owns a held lock and is not Clone; the wait kernel
+                // borrows it straight from the guard's place.
+                let row = self.prelude_row(*call);
+                self.validate_prelude_count(row, 3);
+                format!(
+                    "{}({}, {}, {})",
+                    self.prelude_symbol(*call),
+                    self.borrowed_value_reference(function, *guard, MirAccess::Read),
+                    self.value_slot_reference(*condition, false),
+                    self.value_read(*predicate)
+                )
+            }
             MirSemanticOp::ConditionNotify {
                 call,
                 condition,
@@ -25346,11 +24602,11 @@ impl<'a> RustEmitter<'a> {
             }
             MirCoreClosureKind::UiPreview { .. } => {
                 let closure = closure.unwrap_or_else(|| {
-                    panic!("MIR CoreClosureCall UiPreview has no checked closure value")
+                    panic!("MIR CoreClosureCall UIPreview has no checked closure value")
                 });
                 if values.len() != 2 {
                     panic!(
-                        "MIR CoreClosureCall UiPreview has {} value operands; expected name and viewport",
+                        "MIR CoreClosureCall UIPreview has {} value operands; expected name and viewport",
                         values.len()
                     );
                 }
@@ -25710,7 +24966,15 @@ impl<'a> RustEmitter<'a> {
                 value
             }
         }));
-        format!("{}({})", self.prelude_symbol(call), values.join(", "))
+        // An exact adapter that changes only the result carrier (`Int.parse`
+        // returns an owned `Int`, never a packed native word) applies to this
+        // receiver route exactly as it does to a direct Prelude call.
+        let symbol = self.prelude_symbol(call);
+        let symbol = match self.exact_prelude_adapter(&symbol) {
+            Some((name, [])) => format!("{}{name}", self.config.root_prefix),
+            _ => symbol,
+        };
+        format!("{symbol}({})", values.join(", "))
     }
 
     fn prelude_receiver_is_mutating(&self, row: &MirPreludeCall) -> bool {
@@ -25993,7 +25257,14 @@ impl<'a> RustEmitter<'a> {
             Some(MirProjection::Field { field, .. }) => Some(*field),
             _ => None,
         };
-        let read = if last_field.is_some_and(|field| self.boxed_field(field)) {
+        let range_window = match (place.projections.last(), &place.base) {
+            (Some(MirProjection::Range { .. }), _) => true,
+            (None, MirPlaceBase::Parameter(value)) => self.window_parameter_value(function, *value),
+            _ => false,
+        };
+        let read = if range_window {
+            format!("({value}).to_vec()")
+        } else if last_field.is_some_and(|field| self.boxed_field(field)) {
             format!("({value}).as_ref().clone()")
         } else {
             format!("({value}).clone()")
@@ -26147,6 +25418,17 @@ impl<'a> RustEmitter<'a> {
             }
             MirProjection::Deref { .. } => {
                 panic!("MIR MovePlace dereference has no canonical owned representation")
+            }
+            MirProjection::Payload { kind, .. } => {
+                let (pattern, boxed) = self.payload_pattern(kind);
+                let payload = if boxed { "*payload" } else { "payload" };
+                expression = format!(
+                    "(match {expression} {{ {pattern} => {payload}, _ => unreachable!(\"MIR payload variant mismatch\") }})"
+                );
+                self.move_projection_chain(expression, &projections[1..])
+            }
+            MirProjection::Range { .. } => {
+                panic!("MIR MovePlace range window has no canonical owned representation")
             }
         }
     }
@@ -26334,9 +25616,77 @@ impl<'a> RustEmitter<'a> {
                     );
                 }
                 MirProjection::Deref { .. } => expression = format!("*({expression})"),
+                MirProjection::Payload { kind, .. } => {
+                    let (pattern, boxed) = self.payload_pattern(kind);
+                    let borrow = if mutable { "&mut" } else { "&" };
+                    let payload = if boxed {
+                        format!("{borrow} **payload")
+                    } else {
+                        "payload".to_string()
+                    };
+                    expression = format!(
+                        "*(match {borrow} ({expression}) {{ {pattern} => {payload}, _ => unreachable!(\"MIR payload variant mismatch\") }})"
+                    );
+                }
+                MirProjection::Range {
+                    range, location, ..
+                } => {
+                    let (symbol, borrow) = if mutable {
+                        ("jet_view_mut_new_range", "&mut")
+                    } else {
+                        ("jet_view_new_range", "&")
+                    };
+                    expression = format!(
+                        "*{}{symbol}({borrow} ({expression}), &({}), {:?}, {}u32)",
+                        self.config.root_prefix,
+                        self.value_read(*range),
+                        self.source_file_path(location.file),
+                        location.line
+                    );
+                }
             }
         }
         expression
+    }
+
+    /// The Rust pattern that binds a `MirProjection::Payload` slot as
+    /// `payload`, and whether that slot holds a boxed recursive edge.
+    fn payload_pattern(&self, kind: &MirPayloadKind) -> (String, bool) {
+        match kind {
+            MirPayloadKind::Option => ("Ok(payload)".to_string(), false),
+            MirPayloadKind::Result { ok: true } => ("Ok(payload)".to_string(), false),
+            MirPayloadKind::Result { ok: false } => ("Err(payload)".to_string(), false),
+            MirPayloadKind::Enum {
+                owner,
+                variant,
+                index,
+            } => {
+                let head = self.variant_path(Some(*owner), variant, false);
+                let boxed_edges = &self.type_def(*owner).boxed_edges;
+                match self.enum_variant_payload(*owner, variant) {
+                    MirVariantPayload::Unit => panic!("MIR unit variant has no payload place"),
+                    MirVariantPayload::Single(_) => {
+                        if *index != 0 {
+                            panic!("MIR single variant payload index out of range")
+                        }
+                        (
+                            format!("{head}(payload)"),
+                            boxed_edges.iter().any(|edge| edge == variant),
+                        )
+                    }
+                    MirVariantPayload::Named(fields) => {
+                        let field = fields
+                            .get(*index)
+                            .unwrap_or_else(|| panic!("MIR named variant payload index out of range"));
+                        let edge = format!("{variant}.{}", field.name);
+                        (
+                            format!("{head} {{ {}: payload, .. }}", self.field_name(field.id)),
+                            boxed_edges.contains(&edge),
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fn capture_place(&self, function: &MirFunction, value: MirValueId, mutable: bool) -> String {

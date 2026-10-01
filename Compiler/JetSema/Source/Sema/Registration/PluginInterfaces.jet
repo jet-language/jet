@@ -1,5 +1,35 @@
 // Frozen Component interfaces are immutable semantic facts. Snapshot decoding
 // belongs to the bundle boundary; callers pass its complete typed result here.
+use jet_foundation.[
+    AccessConvention,
+    BinOp,
+    Dimension,
+    DimensionAxis,
+    Expr,
+    Func,
+    InternalTag,
+    Item,
+    Measure,
+    Type,
+    TypeParam,
+    UnitRatio,
+    UnitScaleProvenance,
+    ViewProvenance,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    access_sigil,
+    dimension_identity,
+    measure_expression,
+    measure_signed_value,
+    mir_sha256_hex_bytes,
+    type_name,
+]
+use jet_parser.[
+    parse_source,
+]
+
 pub struct SemaPluginInterfaceExport {
     pub name: String
     pub signature: String
@@ -236,7 +266,7 @@ fn sema_plugin_add_dimension_axis(axes: &[DimensionAxis], name: String, exponent
             next := current + exponent
             if {
                 next == 0 -> {
-                    _ := axes.remove(index)
+                    _ := &axes.remove(index, .Slot)
                 }
                 else -> {
                     axes[index].exponent = Measure.SignedLiteral{kind: "dimension", value: next}
@@ -268,7 +298,7 @@ fn sema_plugin_combine_unit_dimensions(left: Dimension, right: Dimension, multip
         if !sema_plugin_add_dimension_axis(&axes, axis.name, exponent) -> return None
     }
     loop axis in right.axes {
-        exponent :: measure_signed_value(axis.exponent) ?? return None
+        exponent := measure_signed_value(axis.exponent) ?? return None
         if !multiply -> exponent = -exponent
         if !sema_plugin_add_dimension_axis(&axes, axis.name, exponent) -> return None
     }
@@ -286,10 +316,8 @@ fn sema_plugin_unit_dimensions_in_items(items: [Item], package_name: String, out
                         sema_plugin_put_resolved_unit_dimension(&resolved, definition.family, dimension)
                     }
                     else -> {
-                        is_base_dimension :: if definition.dimension == {
-                            .Base(_) -> true
-                            else -> false
-                        }
+                        is_base_dimension := false
+                        if definition.dimension == .Val(declared) -> is_base_dimension = declared == .Base(_)
                         if is_base_dimension {
                             dimension := Dimension{axes: [DimensionAxis]{DimensionAxis{name: "{package_name}::{definition.family}", exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}}
                             sema_plugin_put_resolved_unit_dimension(&resolved, definition.family, dimension)
@@ -309,8 +337,8 @@ fn sema_plugin_unit_dimensions_in_items(items: [Item], package_name: String, out
                     if sema_plugin_resolved_unit_dimension(resolved, definition.family) == None {
                         if definition.dimension == .Val(dimension) {
                             if dimension == .Derived(expression) {
-                                dimension :: sema_plugin_resolve_unit_dimension_expression(expression, resolved) ?? next
-                                sema_plugin_put_resolved_unit_dimension(&resolved, definition.family, dimension)
+                                resolved_dimension :: sema_plugin_resolve_unit_dimension_expression(expression, resolved) ?? next
+                                sema_plugin_put_resolved_unit_dimension(&resolved, definition.family, resolved_dimension)
                                 progress = true
                             }
                         }
@@ -330,14 +358,14 @@ fn sema_plugin_unit_dimensions_in_items(items: [Item], package_name: String, out
                     owner = "core.units"
                 }
                 base := definition.base.map(value -> sema_registration_unit_type_name(value.name))
-                affine := base != None && loop member in definition.members {
+                affine := base != None && (loop member in definition.members {
                     if member.offset.numerator != 0 -> break true
-                } ?? false
+                } ?? false)
                 loop member in definition.members {
                     names :: if affine -> [String]{"{sema_registration_unit_type_name(member.name)}Point", "{sema_registration_unit_type_name(member.name)}Delta"} else -> [String]{sema_registration_unit_type_name(member.name)}
                     offsets :: if affine -> [String]{sema_plugin_unit_ratio(member.offset), "0"} else -> [String]{sema_plugin_unit_ratio(member.offset)}
                     loop index in 0..<names.len() {
-                        identity := None
+                        identity := String?{None}
                         if {
                             base == None && dimension_identity != None -> {
                                 identity = Val("{{family={definition.family}; base=Float; dimension={dimension_identity ?? ""}}}")
@@ -381,11 +409,11 @@ fn sema_plugin_internal_tag_name(internal_tag: InternalTag) -> String Never! {
         .SharedGuardRead -> "shared_guard.read"
         .SharedGuardEdit -> "shared_guard.edit"
         .TerminalFactSet -> "terminal.fact_set"
-        .CppCallbackAbi -> "cpp.callback_abi"
+        .CppCallbackABI -> "cpp.callback_abi"
         .AllocatorView -> "allocator.view"
     }
 }
-fn sema_plugin_api_type_name(ty: Type, dimensions: [SemaPluginUnitDimension]) -> String {
+fn sema_plugin_api_type_name(ty: Type, dimensions: [SemaPluginUnitDimension]) -> String Never! {
     if ty == {
         .Named(name) -> return sema_plugin_unit_dimension(dimensions, name).map(identity -> "{name}{identity}") ?? type_name(ty)
         .List(inner) -> return "[{sema_plugin_api_type_name(inner, dimensions)}]"
@@ -431,7 +459,7 @@ fn sema_plugin_api_type_name(ty: Type, dimensions: [SemaPluginUnitDimension]) ->
 
 // D-TYPE-SUFFIX1=A: a type written before a suffix mark is grouped when the
 // mark would otherwise bind to its last member.
-fn sema_plugin_api_marked_name(ty: Type, dimensions: [SemaPluginUnitDimension]) -> String {
+fn sema_plugin_api_marked_name(ty: Type, dimensions: [SemaPluginUnitDimension]) -> String Never! {
     name :: sema_plugin_api_type_name(ty, dimensions)
     if ty == {
         .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> "({name})"
@@ -615,7 +643,7 @@ fn sema_plugin_sha256(text: String) -> String Never! {
     mir_sha256_hex_bytes(text.bytes())
 }
 
-fn sema_plugin_active_interface(graph: SemaRegistrationGraph, input: SemaPluginInterfaceBuildInput, complete: &[Bool]) -> SemaPluginInterface? {
+fn sema_plugin_active_interface(graph: SemaRegistrationGraph, input: SemaPluginInterfaceBuildInput, complete: &Bool) -> SemaPluginInterface? {
     artifact := if input.package_name != "" -> "plugin__{input.package_name}" else -> input.entry_artifact
     if artifact == "" {
         complete = false
@@ -646,9 +674,9 @@ fn sema_plugin_active_interface(graph: SemaRegistrationGraph, input: SemaPluginI
 }
 
 fn sema_plugin_snapshot_signature_source(signature: String) -> String? {
-    effect_parts := signature.split(" -[")
+    effect_parts := signature.split(" -[").to_list()
     before_effects :: effect_parts[0]
-    metadata_parts := before_effects.split(" ;")
+    metadata_parts := before_effects.split(" ;").to_list()
     canonical := metadata_parts[0].trim()
     bytes := canonical.bytes()
     open := -1
@@ -679,14 +707,14 @@ fn sema_plugin_snapshot_signature_source(signature: String) -> String? {
 }
 
 fn sema_plugin_parse_frozen_export(frozen: SemaPluginFrozenExportInput) -> SemaPluginInterfaceExport? {
-    signature_parts := frozen.signature.split(" -[")
+    signature_parts := frozen.signature.split(" -[").to_list()
     before_effects :: signature_parts[0]
-    metadata_parts := before_effects.split(" ;")
+    metadata_parts := before_effects.split(" ;").to_list()
     signature := metadata_parts[0].trim()
     source :: sema_plugin_snapshot_signature_source(signature) ?? return None
-    parsed := parse_source(source.bytes())
+    parsed := parse_source(source.bytes()) ?? return None
     if parsed.diagnostics.len() != 0 -> return None
-    function := None
+    function := Func?{None}
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
@@ -716,7 +744,7 @@ fn sema_plugin_snapshot_capability_digest(snapshot: SemaPluginFrozenSnapshotInpu
     signatures.join("\n")
 }
 
-fn sema_plugin_frozen_interface(snapshot: SemaPluginFrozenSnapshotInput, complete: &[Bool]) -> SemaPluginInterface? {
+fn sema_plugin_frozen_interface(snapshot: SemaPluginFrozenSnapshotInput, complete: &Bool) -> SemaPluginInterface? {
     exports := [SemaPluginInterfaceExport]{}
     loop frozen in snapshot.funcs {
         export :: sema_plugin_parse_frozen_export(frozen) ?? {
@@ -759,8 +787,8 @@ pub fn sema_plugin_interface_facts(graph: SemaRegistrationGraph, input: SemaPlug
 fn sema_plugin_strip_prefix(value: String, prefix: String) -> String {
     bytes := value.bytes()
     prefix_bytes := prefix.bytes()
-    if bytes.len() < prefix_bytes.len() -> return value
-    if String.from_bytes(bytes.slice(0, prefix_bytes.len())) != prefix -> return value
+    if bytes.len() < prefix_bytes.len() -> return ~value
+    if String.from_bytes(bytes.slice(0, prefix_bytes.len())) != prefix -> return ~value
     String.from_bytes(bytes.slice(prefix_bytes.len(), bytes.len())) ?? value
 }
 

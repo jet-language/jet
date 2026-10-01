@@ -6,7 +6,7 @@ use crate::AST::{
 use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures, stmt_refs_name};
 use crate::Sema::Diagnostics::{
-    edit_distance, field_read_to_clone, is_cloneable, is_task_type, type_fix_hint,
+    edit_distance, field_read_to_clone, is_task_type, type_fix_hint,
 };
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
@@ -280,6 +280,161 @@ fn canonical_fragment_type(
     }
 }
 
+/// The declared signature of `function` in module `owner`, with every nominal
+/// spelled by its canonical identity.
+fn fragment_signature(
+    function: &crate::AST::Func,
+    owner: usize,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &HashMap<(usize, String), String>,
+    struct_identities: &HashMap<(usize, String), String>,
+    known_identities: &HashSet<String>,
+) -> crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
+    let canonical = |ty: &Type| {
+        canonical_fragment_type(
+            ty,
+            owner,
+            modules,
+            source_paths,
+            struct_identities,
+            known_identities,
+        )
+    };
+    crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
+        type_params: function
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+        params: function
+            .params
+            .iter()
+            .map(|param| {
+                let ty = if param.variadic {
+                    Type::List(Box::new(param.ty.clone()))
+                } else {
+                    param.ty.clone()
+                };
+                (param.convention, canonical(&ty))
+            })
+            .collect(),
+        return_type: function.return_type.as_ref().map(|ty| canonical(ty)),
+    }
+}
+
+/// Signatures of every cross-module call module `owner` can spell, keyed by
+/// (source alias or local name, function name).
+type FragmentImportSignatures =
+    HashMap<(String, String), crate::Comptime::MirBridge::MirFragmentCoreSourceSignature>;
+
+/// The user-module call surface of module `owner` for a comptime fragment:
+/// its `use` aliases and member-imported functions keyed to the loaded source
+/// rows (a user module's row key is its loader alias), and the declared
+/// signatures of those callees. Core modules keep their own Core route.
+fn fragment_module_imports(
+    owner: usize,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &HashMap<(usize, String), String>,
+    struct_identities: &HashMap<(usize, String), String>,
+    known_identities: &HashSet<String>,
+) -> (
+    HashMap<String, String>,
+    HashMap<String, (String, String)>,
+    FragmentImportSignatures,
+) {
+    let mut module_imports = HashMap::new();
+    let mut imported_functions = HashMap::new();
+    let mut signatures = HashMap::new();
+    let Some(state) = modules.get(owner) else {
+        return (module_imports, imported_functions, signatures);
+    };
+    let user_module = |target: usize| {
+        modules.get(target).filter(|target_state| {
+            jet_foundation::CoreModuleExports::core_source_module_by_alias(
+                &target_state.module_alias,
+            )
+            .is_none()
+        })
+    };
+    let signature = |function: &crate::AST::Func, target: usize| {
+        fragment_signature(
+            function,
+            target,
+            modules,
+            source_paths,
+            struct_identities,
+            known_identities,
+        )
+    };
+    for (alias, &target) in &state.imports {
+        let Some(target_state) = user_module(target) else {
+            continue;
+        };
+        module_imports.insert(alias.clone(), target_state.module_alias.clone());
+        for item in &target_state.items {
+            if let crate::AST::Item::Func(function) = item {
+                signatures.insert(
+                    (alias.clone(), function.name.clone()),
+                    signature(function, target),
+                );
+            }
+        }
+    }
+    for (local, (name, target)) in &state.unqualified_file {
+        let Some(target_state) = user_module(*target) else {
+            continue;
+        };
+        let Some(function) = target_state.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(function) if function.name == *name => Some(function),
+            _ => None,
+        }) else {
+            continue;
+        };
+        imported_functions.insert(
+            local.clone(),
+            (target_state.module_alias.clone(), name.clone()),
+        );
+        signatures.insert((local.clone(), name.clone()), signature(function, *target));
+    }
+    (module_imports, imported_functions, signatures)
+}
+
+/// Every type spelling a body of user module `owner` can write, to its
+/// canonical identity: its own declarations, member-imported types,
+/// `alias.Type` through its imports, and the identities themselves.
+fn fragment_module_nominals(
+    owner: usize,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &HashMap<(usize, String), String>,
+    struct_identities: &HashMap<(usize, String), String>,
+    known_identities: &HashSet<String>,
+) -> HashMap<String, String> {
+    let mut identities = known_identities
+        .iter()
+        .map(|identity| (identity.clone(), identity.clone()))
+        .collect::<HashMap<_, _>>();
+    for ((module, source), path) in source_paths {
+        if *module == owner {
+            identities.insert(source.clone(), path.clone());
+        }
+    }
+    for ((module, leaf), identity) in struct_identities {
+        if *module == owner {
+            identities.insert(leaf.clone(), identity.clone());
+        }
+    }
+    if let Some(state) = modules.get(owner) {
+        for (alias, &target) in &state.imports {
+            for ((module, leaf), identity) in struct_identities {
+                if *module == target {
+                    identities.insert(format!("{alias}.{leaf}"), identity.clone());
+                }
+            }
+        }
+    }
+    identities
+}
+
 /// S47/M2: a bound lambda used only by direct local calls borrows the names it
 /// writes, so every write lands on the owner. Without a written capture, it
 /// owns copyable values at closure creation. Non-copyable/view captures retain
@@ -427,7 +582,7 @@ impl<'a> Checker<'a> {
             if written_locals.contains(capture) {
                 continue;
             }
-            if written_locals.is_empty() && is_cloneable(&cap_ty, self.registry) {
+            if written_locals.is_empty() && self.is_cloneable_type(&cap_ty) {
                 return true;
             }
             if self.is_resource_type(&cap_ty) && !mut_caps.contains(capture) {
@@ -510,6 +665,16 @@ pub(crate) fn checked_comptime_nominals_for_context(
             }
         }
     }
+    // D-MOD-CYCLE1=A: a package is one namespace, so a sibling file's
+    // nominals are visible here by bare name. Registration evaluates
+    // compile-time items before imports resolve, so read the loader's
+    // namespace instead of this module's import table.
+    let siblings = name_ledger.namespace_siblings(module_idx);
+    for &sibling in &siblings {
+        if queued.insert(sibling) {
+            queue.push_back(sibling);
+        }
+    }
 
     let mut facts = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
     for item in &current.items {
@@ -542,7 +707,13 @@ pub(crate) fn checked_comptime_nominals_for_context(
         let Some(state) = modules.get(target) else {
             continue;
         };
-        for &nested in state.imports.values() {
+        let nested_targets = state
+            .imports
+            .values()
+            .copied()
+            .chain(state.unqualified_file.values().map(|(_, nested)| *nested))
+            .collect::<Vec<_>>();
+        for nested in nested_targets {
             if queued.insert(nested) {
                 queue.push_back(nested);
             }
@@ -559,85 +730,88 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
         let source_module =
             jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
-        if let Some(source) = source_module {
-            let mut body_module = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
-                alias: state.module_alias.clone(),
-                module_identity: name_ledger
-                    .module_identity(target)
-                    .unwrap_or_else(|| state.module_path.clone()),
-                core_imports: state.core_imports.clone(),
-                functions: HashMap::new(),
-            };
-            for item in &state.items {
-                let crate::AST::Item::Func(function) = item else {
-                    continue;
-                };
-                body_module
-                    .functions
-                    .insert(function.name.clone(), function.clone());
-                if !function.is_pub
-                    || !jet_foundation::CoreModuleExports::core_source_owns(
-                        source.module,
-                        &function.name,
-                    )
-                {
+        let mut body_module = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
+            alias: state.module_alias.clone(),
+            module_identity: name_ledger
+                .module_identity(target)
+                .unwrap_or_else(|| state.module_path.clone()),
+            core_imports: state.core_imports.clone(),
+            functions: HashMap::new(),
+            constants: Vec::new(),
+            module_imports: HashMap::new(),
+            imported_functions: HashMap::new(),
+            import_signatures: HashMap::new(),
+            nominal_identities: HashMap::new(),
+        };
+        for item in &state.items {
+            let function = match item {
+                crate::AST::Item::Func(function) => function,
+                crate::AST::Item::Const(constant) => {
+                    body_module.constants.push(constant.clone());
                     continue;
                 }
-                let params = function
-                    .params
-                    .iter()
-                    .map(|param| {
-                        let ty = if param.variadic {
-                            Type::List(Box::new(param.ty.clone()))
-                        } else {
-                            param.ty.clone()
-                        };
-                        (
-                            param.convention,
-                            canonical_fragment_type(
-                                &ty,
-                                target,
-                                modules,
-                                &source_paths,
-                                &struct_identities,
-                                &known_identities,
-                            ),
-                        )
-                    })
-                    .collect();
-                let return_type = function.return_type.as_ref().map(|ty| {
-                    canonical_fragment_type(
-                        ty,
+                _ => continue,
+            };
+            body_module
+                .functions
+                .insert(function.name.clone(), function.clone());
+            let Some(source) = source_module else {
+                continue;
+            };
+            if !function.is_pub
+                || !jet_foundation::CoreModuleExports::core_source_owns(
+                    source.module,
+                    &function.name,
+                )
+            {
+                continue;
+            }
+            facts.core_source_sigs.insert(
+                (source.module.to_string(), function.name.clone()),
+                fragment_signature(
+                    function,
+                    target,
+                    modules,
+                    &source_paths,
+                    &struct_identities,
+                    &known_identities,
+                ),
+            );
+        }
+        // A Core row is keyed by its Core module path; a user file module's
+        // row by its loader alias, the name its import aliases resolve to.
+        let row_key = match source_module {
+            Some(source) => source.module.to_string(),
+            None => {
+                let (module_imports, imported_functions, import_signatures) =
+                    fragment_module_imports(
                         target,
                         modules,
                         &source_paths,
                         &struct_identities,
                         &known_identities,
-                    )
-                });
-                facts.core_source_sigs.insert(
-                    (source.module.to_string(), function.name.clone()),
-                    crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
-                        type_params: function
-                            .type_params
-                            .iter()
-                            .map(|param| param.name.clone())
-                            .collect(),
-                        params,
-                        return_type,
-                    },
+                    );
+                body_module.module_imports = module_imports;
+                body_module.imported_functions = imported_functions;
+                body_module.import_signatures = import_signatures;
+                body_module.nominal_identities = fragment_module_nominals(
+                    target,
+                    modules,
+                    &source_paths,
+                    &struct_identities,
+                    &known_identities,
                 );
+                state.module_alias.clone()
             }
-            std::sync::Arc::make_mut(&mut facts.core_source_bodies)
-                .insert(source.module.to_string(), body_module);
-        }
+        };
+        std::sync::Arc::make_mut(&mut facts.core_source_bodies).insert(row_key, body_module);
+        // A Core module exposes only its public leaves; every nominal of a
+        // user module is declared, since its demanded bodies may name a
+        // private type.
         let source_leaf_visible = |name: &str| {
-            source_module.map_or_else(
-                || name_ledger.visible(module_idx, target, name),
-                |source| {
-                    jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
-                },
-            )
+            source_module.is_none_or(|source| {
+                jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
+            })
         };
         for item in &state.items {
             if let crate::AST::Item::Enum(def) = item {
@@ -710,6 +884,15 @@ pub(crate) fn checked_comptime_nominals_for_context(
             facts.structs.entry(identity).or_insert(row);
         }
     }
+    let (_, imported_functions, import_signatures) = fragment_module_imports(
+        module_idx,
+        modules,
+        &source_paths,
+        &struct_identities,
+        &known_identities,
+    );
+    facts.imported_functions = imported_functions;
+    facts.import_signatures = import_signatures;
 
     let foreign_identities: HashSet<String> = facts.foreign_modules.keys().cloned().collect();
     for identity in &foreign_identities {
@@ -767,6 +950,26 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 facts
                     .nominal_identities
                     .insert(local.clone(), identity.clone());
+            }
+        }
+    }
+    for &sibling in &siblings {
+        let Some(state) = modules.get(sibling) else {
+            continue;
+        };
+        for item in &state.items {
+            let name = match item {
+                crate::AST::Item::Struct(def) => &def.name,
+                crate::AST::Item::Enum(def) => &def.name,
+                _ => continue,
+            };
+            if let Some(identity) = struct_identities.get(&(sibling, name.clone())) {
+                if foreign_identities.contains(identity) {
+                    facts
+                        .nominal_identities
+                        .entry(name.clone())
+                        .or_insert_with(|| identity.clone());
+                }
             }
         }
     }
@@ -1072,49 +1275,6 @@ impl<'a> Checker<'a> {
             _ => true,
         }
     }
-    /// An implicit fold must not bake a call whose run-time behavior stays
-    /// observable:
-    ///
-    /// - `#Memo` is result-pure but runtime-observable through `name.cache()`.
-    ///   Baking a binding that reaches a memoized function would erase that
-    ///   call from the one runtime store and make its counters tier-dependent.
-    /// - D-PREPOST1: a `#Pre`/`#Post` clause is checked in every build, so a
-    ///   call that carries one cannot become literal data. The comptime
-    ///   interpreter models no contracts (there is no `contract` in
-    ///   `crates/jet-comptime/src/Comptime/Interpreter.rs`), so folding
-    ///   `_ :: checked(0)` would evaluate the body with the claim never asked
-    ///   and then drop the call itself — the program would exit 0 where AOT,
-    ///   the resident tier, and the interpreter all owe a `Stop [E3005]` (I9).
-    ///
-    /// One call-graph walk answers both. Callers ask only once a fold is
-    /// otherwise possible: the walk follows every reachable body, so running
-    /// it for every binding made checking quadratic in program size.
-    fn implicit_fold_reaches_observable_function(&self, init: &Expr) -> bool {
-        crate::Comptime::walk_purity_expr(
-            init,
-            self.ct_funcs,
-            &|name| {
-                self.ct_funcs.get(name).is_some_and(|function| {
-                    crate::AST::memo_bound_from_markers(&function.markers).is_some()
-                        || !function.pre.is_empty()
-                        || !function.post.is_empty()
-                })
-            },
-            // The shared call-graph walker carries its short-circuit as a
-            // diagnostic; only `is_err` below observes this value.
-            &|name, _, span| {
-                Diagnostic::error(
-                    "E0938",
-                    format!("`{name}` is memoized or carries a contract"),
-                    "its run-time behavior is observable".to_string(),
-                    "leave this call for runtime evaluation".to_string(),
-                    Some(span),
-                )
-            },
-            crate::Comptime::PurityStage::BuildTime,
-        )
-        .is_err()
-    }
 
     pub(crate) fn ct_value_is_emittable(&self, value: &crate::AST::CtValue) -> bool {
         use crate::AST::{CtReport, CtValue};
@@ -1301,6 +1461,7 @@ impl<'a> Checker<'a> {
             mut fallback,
             names,
             span,
+            synthesized,
         }) = b.pattern.clone()
         else {
             return;
@@ -1334,7 +1495,24 @@ impl<'a> Checker<'a> {
                 .or_else(|| bindings.get(&name.name))
                 .cloned()
                 .unwrap_or(Type::Int);
-            self.declare_bound(name.local_name(), name.span, ty, false, b.sigil_span);
+            // D-FLOWTYPE1=A: sema's rewrite of an exiting `x == None` guard
+            // into `x == .Val(x) ?? { … }` refines the stable Optional `x`
+            // itself, like `if x == .Val(x)` does in a branch; the payload
+            // holds for the rest of this scope. A written binding that
+            // reuses the subject's name is an ordinary shadow (E0118).
+            let refines_subject = synthesized
+                && matches!(
+                    &b.init,
+                    Expr::Ident(subject, _) if subject == name.local_name()
+                )
+                && self.is_optional_flow_refine(name.local_name(), &ty);
+            if refines_subject {
+                // The payload replaces the tested carrier under the same name.
+                self.flow.moved.remove(name.local_name());
+                self.record_optional_flow_narrow(name.local_name(), name.span, ty);
+            } else {
+                self.declare_bound(name.local_name(), name.span, ty, false, b.sigil_span);
+            }
         }
     }
 
@@ -1373,7 +1551,11 @@ impl<'a> Checker<'a> {
             return;
         }
         let mut annot_valid = true;
-        let saved_expected = self.expected_type.clone();
+        // An unannotated binding takes its initializer's own type: the
+        // expectation of an enclosing value (a value-if arm, a block tail)
+        // never reaches it. Only a written annotation gives the initializer
+        // an expected type.
+        let saved_expected = self.expected_type.take();
         if let (Some(ty), Some(span)) = (&mut b.ty, b.ty_span) {
             let t = self.resolve_type(ty.clone());
             *ty = t.clone();
@@ -1490,14 +1672,21 @@ impl<'a> Checker<'a> {
         // `field_read_to_clone` kept every field read out of the wrap; this
         // narrows the restoration back to the shapes a window is for.
         //
-        // Only a FIELD projection is judged here, because only there is the
-        // type exact: `compound_expr_type`'s index arm answers with the
-        // element type even when the index is a range (`xs[band]`), which is
-        // a real window over many elements.
-        let copy_field_read = matches!(&b.init, Expr::Field(..))
-            && self
+        // Only a FIELD projection or a bare name is judged here, because only
+        // there is the type exact: `compound_expr_type`'s index arm answers
+        // with the element type even when the index is a range (`xs[band]`),
+        // which is a real window over many elements. A bare name matters for
+        // write parameters: `held :: a` with `a: &Int` copies the Int, so it
+        // must not stay a live read view that blocks the later `a = b`.
+        let copy_field_read = match &b.init {
+            Expr::Field(..) => self
                 .compound_expr_type(&b.init)
-                .is_some_and(|ty| crate::Sema::Diagnostics::type_is_copy(&ty));
+                .is_some_and(|ty| crate::Sema::Diagnostics::type_is_copy(&ty)),
+            Expr::Ident(name, _) => self
+                .lookup(name)
+                .is_some_and(|info| crate::Sema::Diagnostics::type_is_copy(&info.ty)),
+            _ => false,
+        };
         if !b.mutable
             && !copy_field_read
             && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
@@ -1507,6 +1696,29 @@ impl<'a> Checker<'a> {
             let span = b.init.span();
             let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
             b.init = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+        }
+        // `g :: param.field ?? fallback` reads the payload through the same
+        // non-owning window as `o :: param.field` then `g :: o ?? fallback`:
+        // a read view of the borrowed parameter, not an owned copy.
+        if !b.mutable {
+            if let Expr::OrFallback { value, .. } = &mut b.init {
+                let place: &Expr = value;
+                let borrowed_view = matches!(place, Expr::Field(..) | Expr::Index { .. })
+                    && crate::Sema::Diagnostics::expr_root_ident(place).is_some_and(|root| {
+                        self.lookup(root).is_some_and(|info| {
+                            matches!(
+                                info.param_conv,
+                                Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                            ) && !self.type_contains_shared(&info.ty)
+                        })
+                    })
+                    && self.place_from_expr(place).is_some();
+                if borrowed_view {
+                    let span = value.span();
+                    let inner = std::mem::replace(&mut **value, Expr::Absent(span));
+                    **value = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+                }
+            }
         }
         let saved_fixed_constructor = self.allow_fixed_constructor;
         self.allow_fixed_constructor = direct_fixed_constructor(&b.init);
@@ -1556,18 +1768,6 @@ impl<'a> Checker<'a> {
                         if self.registry.distinct_range(type_name).is_some()
                 )
         );
-        let preserve_result_carrier = match b.init.without_parens() {
-            Expr::If { .. } | Expr::Try(..) => true,
-            Expr::Call(call) => {
-                matches!(call.name.as_str(), Syntax::LIT_OK | Syntax::LIT_ERR)
-            }
-            _ => false,
-        };
-        let saved_ordinary_binding_root_depth = self.ordinary_binding_root_depth;
-        self.ordinary_binding_root_depth = (b.ty.is_none()
-            && !preserve_result_carrier
-            && matches!(self.expected_type, Some(Type::Result { .. })))
-        .then_some(self.source_nesting + 1);
         // D-MEM-COPYSEM1: a value-if is not a maximal place. When it feeds a
         // non-view binding, its arm tails occupy the same owning destination
         // as the conditional result; route them through `infer_owning_value`.
@@ -1575,10 +1775,6 @@ impl<'a> Checker<'a> {
         let owning_if_value = matches!(b.init.without_parens(), Expr::If { .. })
             && !matches!(
                 b.ty.as_ref(),
-                Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
-            )
-            && !matches!(
-                self.expected_type.as_ref(),
                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
             );
         let mut it = if distinct_range_constructor {
@@ -1588,13 +1784,12 @@ impl<'a> Checker<'a> {
         } else {
             self.infer(&mut b.init)
         };
-        self.ordinary_binding_root_depth = saved_ordinary_binding_root_depth;
         self.borrow_ctx = saved_borrow_ctx;
         let arena_alloc_source = arena_alloc_source.or_else(|| self.arena_alloc_source(&b.init));
         if implicit_field_read
             && it
                 .as_ref()
-                .is_some_and(|ty| crate::Sema::Diagnostics::is_cloneable(ty, self.registry))
+                .is_some_and(|ty| self.is_cloneable_type(ty))
         {
             let span = b.init.span();
             let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
@@ -1856,25 +2051,6 @@ impl<'a> Checker<'a> {
             b.ty = Some(final_ty.clone());
         }
         self.report_lending_view_escape(&b.init, "be stored in a binding");
-        // A folded value cannot preserve the owner provenance carried by a
-        // view nested inside a task/result/aggregate. More importantly,
-        // implicit folding can evaluate a function before its body has
-        // completed sema, leaving its range metadata unresolved. Keep
-        // view-bearing runtime values on the ordinary typed path.
-        let skip_ct_view_bake = self.type_contains_view_boundary(&final_ty);
-        // A field read never bakes at compile time, whichever shape it took
-        // above: `Expr::Copy` when an owning destination materialized it, or
-        // `Expr::Place` when the `::` binding kept it as a read window
-        // (spec.md:339-340). Matching only the copy form would have started
-        // folding the window form the moment the window was restored.
-        let skip_ct_field_read_bake = match &b.init {
-            Expr::Copy(inner, _) | Expr::Place(inner, _, _) => {
-                field_read_to_clone(inner, self.registry, self.imports)
-            }
-            _ => false,
-        };
-        // The call-graph walk for memoized or contracted callees runs only
-        // when an optional fold is otherwise eligible (below).
         // D-DECIMAL1: default-on float-money lint for money-like binding names.
         if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
             self.diags.push(Diagnostic::lint(
@@ -1901,9 +2077,10 @@ impl<'a> Checker<'a> {
             // start with the gate already open.
             let mut mutated = std::collections::HashMap::new();
             let checked_nominals = self.checked_comptime_nominals();
+            let ct_checked_funcs = self.ct_checked_funcs_for_evaluation();
             let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
                 &b.init,
-                self.ct_checked_funcs,
+                ct_checked_funcs,
                 self.ct_externs,
                 self.ct_base_dir,
                 &globals,
@@ -1929,8 +2106,8 @@ impl<'a> Checker<'a> {
                             b.ty = Some(final_ty.clone());
                         }
                     }
-                    // Same guard as the implicit path below: a value codegen
-                    // cannot write back out must not become literal data.
+                    // A value codegen cannot write back out must not become
+                    // literal data.
                     if self.ct_value_fits_binding(&v, &final_ty) {
                         b.ct = Some(v.clone());
                     }
@@ -1941,69 +2118,6 @@ impl<'a> Checker<'a> {
                     self.ct_embed_inputs.extend(inputs);
                 }
                 Err(d) => self.diags.push(d),
-            }
-        } else if !self.defer_ct_evaluation
-            && !b.mutable
-            && !skip_ct_view_bake
-            && !skip_ct_field_read_bake
-        {
-            let is_patch_binding =
-                matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
-            // D-VERDICT-1308-1: an ordinary immutable binding is an
-            // implicit folding opportunity. Failure is silent; only
-            // explicit `@` demands a compile-time answer.
-            // (mem.address_of specifically always declines to fold — see
-            // the runtime_execution guard at its mint point in
-            // crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, which
-            // covers this path, the `@` path above, method_calls.rs's
-            // evaluate_constant, and any Expr::Paren-wrapped spelling —
-            // one guard where the value is minted, not a syntactic
-            // pattern match here that a stray `(...)` could dodge.)
-            // Eligibility reads the globals in place; the call-graph walk and
-            // the owned copy the evaluator needs follow only for an eligible
-            // fold, not for every binding.
-            let eligible = self
-                .optional_comptime_fold_is_eligible(&b.init, &self.current_ct_globals())
-                && !self.implicit_fold_reaches_observable_function(&b.init);
-            if eligible {
-                let globals = self.current_ct_globals().into_owned();
-                let binding_types = self.current_ct_binding_types(&globals);
-                let mut mutated = std::collections::HashMap::new();
-                let checked_nominals = self.checked_comptime_nominals();
-                let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
-                    &b.init,
-                    self.ct_checked_funcs,
-                    self.ct_externs,
-                    self.ct_base_dir,
-                    &globals,
-                    &binding_types,
-                    self.core_imports,
-                    self.gates,
-                    0,
-                    self.ct_items,
-                    checked_nominals,
-                    Some(&mut mutated),
-                );
-                let changed = Self::ct_mutated_names(&globals, &mutated);
-                if !changed.is_empty() {
-                    // The initializer advanced a receiver. Baking either side
-                    // would desync the emitted runtime copy, so hand the whole
-                    // chain back to run time.
-                    self.forget_ct_bindings(&changed);
-                } else if let Ok((v, _)) = folded {
-                    // Optional folding must not turn a runtime-sized result into
-                    // a giant generated literal. Keep the checked type/effects
-                    // and the original initializer; only the optimization is
-                    // declined when the evaluator's result exceeds its generic
-                    // structural output budget.
-                    let fold_allowed = crate::Comptime::implicit_fold_value_within_budget(&v);
-                    if fold_allowed && self.ct_value_fits_binding(&v, &final_ty) {
-                        b.ct = Some(v.clone());
-                    }
-                    if !is_patch_binding && fold_allowed {
-                        self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
-                    }
-                }
             }
         }
         if b.name == "_" {
@@ -2449,7 +2563,7 @@ impl<'a> Checker<'a> {
                     // The applied run is the reserved generic `VjpRun<T>` even
                     // when resolution qualified its head through the
                     // non-generic source-owned `core.compute` record.
-                    if Self::split_type_name(name).1 == "VjpRun" && args.len() == 1 && elems.len() == 2 {
+                    if Self::split_type_name(name).1 == "VJPRun" && args.len() == 1 && elems.len() == 2 {
                         let pull_ty = Type::Fn {
                             params: vec![Type::Named("Tensor".to_string())],
                             ret: Some(Box::new(args[0].clone())),

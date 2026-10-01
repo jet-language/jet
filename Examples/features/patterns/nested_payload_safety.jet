@@ -6,7 +6,7 @@ enum Msg {
         Packet(Int)
         Ping(Int)
     }
-    Ui {
+    UI {
         Click(Int)
         Key(String)
     }
@@ -29,8 +29,8 @@ fn route(m: Msg) -> String {
     if m == {
         .Net.Packet(bytes) && bytes > 1000 -> "jumbo {bytes}B"
         .Net.Packet(bytes) -> "packet {bytes}B"
-        .Net.Ping(n) | .Ui.Click(n) -> "tick {n}"
-        .Ui.Key(k) -> "key {k}"
+        .Net.Ping(n) | .UI.Click(n) -> "tick {n}"
+        .UI.Key(k) -> "key {k}"
         .Quit -> "quit"
         else -> "unreachable"
     }
@@ -40,7 +40,7 @@ fn route(m: Msg) -> String {
 fn group(m: Msg) -> String {
     if m == {
         .Net -> "net"
-        .Ui -> "ui"
+        .UI -> "ui"
         .Quit -> "none"
     }
 }
@@ -65,10 +65,10 @@ fn run() {
     print(route(Msg.Net.Packet(1500)))
     print(route(Msg.Net.Packet(64)))
     print(route(Msg.Net.Ping(3)))
-    print(route(Msg.Ui.Click(9)))
-    print(route(Msg.Ui.Key("q")))
+    print(route(Msg.UI.Click(9)))
+    print(route(Msg.UI.Key("q")))
     print(route(Msg.Quit))
-    print(group(Msg.Ui.Key("z")))
+    print(group(Msg.UI.Key("z")))
     print(group(Msg.Net.Ping(1)))
     print(describe(.Ok(Shape.Rect{ w: 3, h: 4 })))
     print(describe(.Ok(Shape.Rect{ w: 5, h: 5 })))

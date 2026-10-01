@@ -1277,15 +1277,15 @@ struct State {
     event_count: Int{0}
 }
 
-fn panel_lines(state: State) -> [UiNode] {
-    return [UiNode]{
+fn panel_lines(state: State) -> [UINode] {
+    return [UINode]{
         ui.text(state.selected),
         ui.text("{state.event_count}")
     }
 }
 
 #DevPanel
-pub fn panel(state: State) -> UiNode {
+pub fn panel(state: State) -> UINode {
     return ui.box(panel_lines(state))
 }
 

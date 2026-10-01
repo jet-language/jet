@@ -301,14 +301,4 @@ impl DevtoolsRegistry {
             .then(|| candidate.state_field(field))
             .flatten()
     }
-
-    /// Collect the package's ordinary items for sema callers that have not yet
-    /// built a separate inspect index. This deliberately returns source items,
-    /// not a second registry or synthesized panel list.
-    pub fn panel_items<'a>(items: &'a [Item]) -> impl Iterator<Item = &'a Func> {
-        items.iter().filter_map(|item| match item {
-            Item::Func(function) if function.dev_panel_marker().is_some() => Some(function),
-            _ => None,
-        })
-    }
 }

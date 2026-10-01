@@ -135,6 +135,14 @@ pub fn jet_shared_strong_count<T: 'static>(shared: &jet_std::JetShared<T>) -> i6
 }
 
 #[inline]
+pub fn jet_shared_same<T: 'static>(
+    shared: &jet_std::JetShared<T>,
+    other: &jet_std::JetShared<T>,
+) -> bool {
+    shared.same(other)
+}
+
+#[inline]
 pub fn jet_shared_weak_upgrade<T: 'static>(
     weak: &jet_std::JetSharedWeak<T>,
 ) -> crate::JetOutcome<jet_std::JetShared<T>, crate::JetAbsent> {

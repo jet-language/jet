@@ -5287,7 +5287,7 @@ fn jet_http_devtools_publish_response(
 fn jet_http_devtools_error_code(error: &JetHTTPError) -> &'static str {
     match error {
         JetHTTPError::InvalidMethod => "InvalidMethod",
-        JetHTTPError::InvalidUrl => "InvalidUrl",
+        JetHTTPError::InvalidURL => "InvalidURL",
         JetHTTPError::InvalidHeader => "InvalidHeader",
         JetHTTPError::InvalidStatus => "InvalidStatus",
         JetHTTPError::BodyConsumed => "BodyConsumed",

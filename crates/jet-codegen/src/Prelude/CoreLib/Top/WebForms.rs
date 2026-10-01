@@ -1089,7 +1089,7 @@ pub fn jet_web_forms_show(form: &JetWebForm) -> String {
 pub enum JetWebFormControl {
     Text,
     Email,
-    Url,
+    URL,
     Password,
     Number,
     Date,
@@ -1102,7 +1102,7 @@ impl JetWebFormControl {
         match self {
             Self::Text => "text",
             Self::Email => "email",
-            Self::Url => "url",
+            Self::URL => "url",
             Self::Password => "password",
             Self::Number => "number",
             Self::Date => "date",

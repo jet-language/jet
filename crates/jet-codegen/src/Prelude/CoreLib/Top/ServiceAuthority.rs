@@ -3319,11 +3319,6 @@ impl JetJobEnqueue {
         self
     }
 
-    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
-        self.request_id = Some(request_id.into());
-        self
-    }
-
     pub fn delayed(mut self, delay_ms: i64) -> Self {
         self.delay_ms = delay_ms;
         self
@@ -3773,16 +3768,6 @@ static JET_JOB_QUEUE_STORE_PROVIDER: std::sync::LazyLock<
     std::sync::Mutex<Option<Box<dyn JetJobQueueStoreProvider>>>,
 > = std::sync::LazyLock::new(std::sync::Mutex::default);
 
-pub fn jet_job_queue_install_store_provider(
-    provider: Option<Box<dyn JetJobQueueStoreProvider>>,
-) -> bool {
-    let Ok(mut current) = JET_JOB_QUEUE_STORE_PROVIDER.lock() else {
-        return false;
-    };
-    *current = provider;
-    true
-}
-
 /// Install the built-in provider only when no explicit provider or factory
 /// has already been selected.  A configured provider remains authoritative;
 /// the default bridge must not silently replace it during first use.
@@ -3803,18 +3788,6 @@ pub fn jet_job_queue_install_store_provider_if_absent(
     }
     *current = Some(provider);
     true
-}
-
-/// Install the explicitly selected database provider.  Passing `None` removes
-/// the provider; no in-memory or log fallback is installed implicitly.
-pub fn jet_job_queue_install_store_factory(
-    factory: Option<JetJobQueueStoreFactory>,
-) -> Option<JetJobQueueStoreFactory> {
-    let mut current = jet_job_queue_store_factory()
-        .lock()
-        .map_err(|_| ())
-        .ok()?;
-    Some(std::mem::replace(&mut *current, factory)).flatten()
 }
 
 pub fn jet_job_queue_default_path() -> String {
@@ -4432,26 +4405,6 @@ impl<'a> JetJobQueue<'a> {
             )
             .map_err(|error| jet_job_queue_sql_error("idempotency lookup", error))?;
         rows.first().map(jet_job_queue_stored_record).transpose()
-    }
-
-    fn find_by_id(
-        &self,
-        store: &mut dyn JetJobQueueStore,
-        id: &str,
-    ) -> Result<JetJobQueueStoredRecord, JetServiceError> {
-        let rows = store
-            .query(
-                &format!("{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND id = ? LIMIT 1"),
-                &[
-                    JetJobQueueValue::Text(self.authority.clone()),
-                    JetJobQueueValue::Text(self.name.clone()),
-                    JetJobQueueValue::Text(id.to_string()),
-                ],
-            )
-            .map_err(|error| jet_job_queue_sql_error("receipt lookup", error))?;
-        rows.first()
-            .ok_or_else(|| JetServiceError::Unknown(format!("queue job `{id}` is unknown")))
-            .and_then(jet_job_queue_stored_record)
     }
 
     fn insert_event(

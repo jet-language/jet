@@ -8,7 +8,7 @@ const JET_WS_DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::fr
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetWsError {
-    InvalidUrl,
+    InvalidURL,
     InvalidHandshake,
     Protocol,
     MessageTooLarge { limit: i64 },
@@ -22,7 +22,7 @@ enum JetWsError {
 impl JetShow for JetWsError {
     fn jet_show(&self) -> String {
         match self {
-            Self::InvalidUrl => "websocket URL is invalid".to_string(),
+            Self::InvalidURL => "websocket URL is invalid".to_string(),
             Self::InvalidHandshake => "websocket handshake failed".to_string(),
             Self::Protocol => "websocket protocol error".to_string(),
             Self::MessageTooLarge { limit } => {
@@ -247,32 +247,32 @@ fn jet_ws_apply_mask(payload: &mut [u8], mask: [u8; 4]) {
 fn jet_ws_parse_url(url: &str) -> Result<(String, u16, String), JetWsError> {
     let rest = url
         .strip_prefix("ws://")
-        .ok_or(JetWsError::InvalidUrl)?;
+        .ok_or(JetWsError::InvalidURL)?;
     let (authority, path) = match rest.split_once('/') {
         Some((authority, path)) => (authority, format!("/{path}")),
         None => (rest, "/".to_string()),
     };
     if authority.is_empty() || authority.contains('@') {
-        return Err(JetWsError::InvalidUrl);
+        return Err(JetWsError::InvalidURL);
     }
     let (host, port) = if let Some(host) = authority.strip_prefix('[') {
-        let (host, rest) = host.split_once(']').ok_or(JetWsError::InvalidUrl)?;
+        let (host, rest) = host.split_once(']').ok_or(JetWsError::InvalidURL)?;
         let port = if rest.is_empty() {
             80
         } else {
             rest.strip_prefix(':')
-                .ok_or(JetWsError::InvalidUrl)?
+                .ok_or(JetWsError::InvalidURL)?
                 .parse::<u16>()
-                .map_err(|_| JetWsError::InvalidUrl)?
+                .map_err(|_| JetWsError::InvalidURL)?
         };
         (host.to_string(), port)
     } else if let Some((host, port)) = authority.rsplit_once(':') {
         if host.contains(':') {
-            return Err(JetWsError::InvalidUrl);
+            return Err(JetWsError::InvalidURL);
         }
         (
             host.to_string(),
-            port.parse::<u16>().map_err(|_| JetWsError::InvalidUrl)?,
+            port.parse::<u16>().map_err(|_| JetWsError::InvalidURL)?,
         )
     } else {
         (authority.to_string(), 80)
@@ -286,7 +286,7 @@ fn jet_ws_parse_url(url: &str) -> Result<(String, u16, String), JetWsError> {
             .bytes()
             .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
     {
-        return Err(JetWsError::InvalidUrl);
+        return Err(JetWsError::InvalidURL);
     }
     Ok((host, port, path))
 }

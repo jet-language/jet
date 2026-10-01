@@ -3,6 +3,22 @@
 // Shared field syntax is lowered to the existing read/edit callback methods;
 // the callback argument is tagged with CallArgFlags.shared_access_desugar so
 // retired user-written Shared.read/edit spelling cannot reach this route.
+use jet_foundation.[
+    AccessConvention,
+    BinOp,
+    CallArg,
+    Expr,
+    LValue,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    NamedSpan,
+    Span,
+    Stmt,
+    Type,
+    ast_empty_call_arg_flags,
+    ast_empty_lambda_meta,
+]
 
 SEMA_SHARED_PAYLOAD_PARAM :: prep { "__jet_shared_value" }
 SEMA_SHARED_HOISTED_RHS :: prep { "__jet_shared_rhs" }
@@ -30,6 +46,12 @@ pub fn sema_shared_access_is_cell_guard_type(ty: Type) -> Bool Never! {
         .Apply(name, _) -> name == "CellReadGuard" || name == "CellEditGuard"
         else -> false
     }
+}
+
+// The value a `Shared<T>` or a `Cell<T>`-family handle guards.
+pub fn sema_shared_access_guarded_inner(ty: Type) -> Type? {
+    if sema_shared_access_inner(ty) == .Val(inner) -> return Val(inner)
+    sema_shared_access_cell_inner(ty)
 }
 
 pub fn sema_shared_access_cell_inner(ty: Type) -> Type? {
@@ -121,9 +143,7 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
         .Ident(_, _) -> return false
         .Str(parts, _) -> {
             loop part in parts {
-                if part == {
-                    .Interp(inner, _) -> if sema_shared_access_expr_touches_shared(inner, scopes) -> return true
-                }
+                if part == .Interp(inner, _) && sema_shared_access_expr_touches_shared(inner, scopes) -> return true
             }
         }
         .ListLit(values, _) -> return sema_shared_access_expr_list_touches_shared(values, scopes)
@@ -154,10 +174,18 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
             }
         }
         .TypedLit(_, body, _) -> {
-            loop field in body.fields {
-                if sema_shared_access_expr_touches_shared(field.value, scopes) -> return true
+            if body == {
+                .Fields(fields) -> loop field in fields {
+                    if sema_shared_access_expr_touches_shared(field.value, scopes) -> return true
+                }
+                .Elements(elements) -> return sema_shared_access_expr_list_touches_shared(elements, scopes)
+                .Entries(entries) -> loop entry in entries {
+                    if sema_shared_access_expr_touches_shared(entry.key, scopes) || sema_shared_access_expr_touches_shared(entry.value, scopes) -> return true
+                }
+                .Value(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes)
+                else -> {}
             }
-            return sema_shared_access_expr_list_touches_shared(body.elements, scopes)
+            return false
         }
         .EnumLit(_, _, _, args, _, _) -> {
             loop argument in args {
@@ -181,16 +209,17 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
                 .Value(inner) -> return sema_shared_access_expr_touches_shared(inner, scopes)
                 .Return(inner, _) -> {
                     if inner == {
-                        .Val(value) -> return sema_shared_access_expr_touches_shared(value, scopes)
+                        .Val(returned) -> return sema_shared_access_expr_touches_shared(returned, scopes)
                         else -> {}
                     }
                 }
                 .Block(_, inner, _) -> {
                     if inner == {
-                        .Val(value) -> return sema_shared_access_expr_touches_shared(value, scopes)
+                        .Val(produced) -> return sema_shared_access_expr_touches_shared(produced, scopes)
                         else -> {}
                     }
                 }
+                else -> {}
             }
         }
         .TupleLit(fields, _, _) -> {

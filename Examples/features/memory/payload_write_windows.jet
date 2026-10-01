@@ -1,0 +1,71 @@
+// Matching on a write window (`&place`) binds each payload name as a write
+// window into the matched place: edits through the binding land in the
+// owner's storage, like Rust `if let Some(s) = &mut x`.
+
+struct Machine {
+    n: Int
+    log: [String]
+}
+
+struct Session {
+    machine: Machine
+    retired: Bool
+}
+
+struct Res {
+    session: Session?
+    count: Int?
+}
+
+enum Slot {
+    Empty
+    Held(Int)
+}
+
+fn bump(machine: &Machine) -> Bool {
+    machine.n = machine.n + 1
+    &machine.log.push("bumped")
+    true
+}
+
+fn retire(result: &Res) -> Bool {
+    if &result.session == {
+        None -> return false
+        .Val(session) -> {
+            if !bump(&session.machine) -> return false
+            session.retired = true
+        }
+    }
+    true
+}
+
+fn tick(result: &Res) {
+    if &result.count == {
+        .Val(count) -> count = count + 10
+        None -> {}
+    }
+}
+
+fn double(slot: &Slot) {
+    if &slot == {
+        .Held(value) -> value = value * 2
+        .Empty -> {}
+    }
+}
+
+fn run() {
+    result := Res{session: Val(Session{machine: Machine{n: 1, log: [String]{}}, retired: false}), count: Val(3)}
+    print(retire(&result))
+    tick(&result)
+    session :: result.session ?? return
+    print(session.machine.n)
+    print(session.machine.log.len())
+    print(session.retired)
+    print(result.count ?? 0)
+    slot := Slot.Held(21)
+    double(&slot)
+    if slot == {
+        .Held(value) -> print(value)
+        .Empty -> print("empty")
+    }
+}

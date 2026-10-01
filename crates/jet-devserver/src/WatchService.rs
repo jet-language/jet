@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::file_mtime;
 use jet_driver::Diagnostics::Diagnostic;
 use jet_foundation::JSON::json_escape;
 use jet_foundation::Game::JetGameChangeKind;
@@ -459,13 +458,6 @@ pub struct InvalidationReceipt {
     pub dev_entries: Vec<DevWatchEntry>,
     pub edit_to_visible_ms: Option<u128>,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GameAssetWatchChange {
-    pub path: PathBuf,
-    pub change_kind: &'static str,
-    pub digest: Option<String>,
-}
-
 /// Checked game change metadata projected from the dependency watcher.
 ///
 /// `old_digest`/`new_digest` are filesystem observations. Schema ids remain
@@ -507,33 +499,6 @@ impl InvalidationReceipt {
                 .map(|ms| ms.to_string())
                 .unwrap_or_else(|| "null".to_string()),
         )
-    }
-
-    /// Return only game asset paths from this generic invalidation receipt.
-    /// The watcher keeps ownership of filesystem facts; the game asset
-    /// pipeline consumes this projection and performs its own typed import
-    /// transaction.
-    pub fn game_asset_paths(&self) -> Vec<PathBuf> {
-        self.changed
-            .iter()
-            .zip(self.kinds.iter())
-            .filter(|(_, kind)| **kind == RootKind::Asset.as_str())
-            .map(|(path, _)| path.clone())
-            .collect()
-    }
-    pub fn game_asset_changes(&self) -> Vec<GameAssetWatchChange> {
-        self.changed
-            .iter()
-            .zip(self.change_kinds.iter())
-            .zip(self.content_digests.iter())
-            .zip(self.kinds.iter())
-            .filter(|(((_, _), _), kind)| **kind == RootKind::Asset.as_str())
-            .map(|(((path, change), digest), _)| GameAssetWatchChange {
-                path: path.clone(),
-                change_kind: *change,
-                digest: digest.clone(),
-            })
-            .collect()
     }
     pub fn game_dev_entries(&self) -> &[DevWatchEntry] {
         &self.dev_entries
@@ -1733,18 +1698,6 @@ impl WatchSession {
         }
     }
 
-    /// Poll the shared watcher once and route only cycles containing a
-    /// `RootKind::Asset` change to the game asset producer. The returned
-    /// receipt remains the canonical invalidation transaction input.
-    pub fn poll_game_assets(&mut self) -> Option<InvalidationReceipt> {
-        let receipt = self.poll()?;
-        if receipt.game_asset_paths().is_empty() {
-            None
-        } else {
-            Some(receipt)
-        }
-    }
-
     /// Mark a receipt applied. Later polls with older generations are stale.
     /// Stamps refresh in place; newly discovered imports merge in without
     /// dropping previously tracked roots (assets, manual links, etc.).
@@ -2011,14 +1964,6 @@ impl HotReplaceTxn {
         }
     }
 
-    pub fn set_policy(&mut self, policy: HotReplacePolicy) -> Result<(), String> {
-        if self.phase != HotReplacePhase::Begun {
-            return Err("hot replacement policy must be selected before pause".to_string());
-        }
-        self.policy = policy;
-        Ok(())
-    }
-
     pub fn policy(&self) -> HotReplacePolicy {
         self.policy
     }
@@ -2189,11 +2134,6 @@ pub fn any_stamp_changed(graph: &WatchGraph) -> bool {
         let now = PathStamp::capture(&node.path);
         node.stamp.changed_since(&now)
     })
-}
-
-/// Re-export for callers that previously only had `file_mtime`.
-pub fn path_mtime(path: &Path) -> Option<SystemTime> {
-    file_mtime(path)
 }
 
 /// The session-owned source boundary. Canvas and project transactions use one

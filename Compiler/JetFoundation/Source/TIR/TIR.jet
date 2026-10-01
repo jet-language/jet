@@ -24,7 +24,7 @@ pub fn integer_bounds_exact(value: Int) -> TIntegerBounds Never! {
 
 pub struct TLocal {
     pub name: String
-    pub symbol_id: SymbolId?{None}
+    pub symbol_id: SymbolID?{None}
     pub span: Span
     pub generated: Bool
     pub deref: Bool
@@ -43,7 +43,7 @@ pub fn tir_user_local(name: String, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
 }
 
-pub fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolId) -> TLocal Never! {
+pub fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
     local := tir_user_local(name, span)
     local.symbol_id = Val(symbol_id)
     local
@@ -127,7 +127,7 @@ pub enum TStrPart {
 
 pub struct TCallArg {
     pub value: TExpr
-    pub template_items: [SymbolId]
+    pub template_items: [SymbolID]
     pub borrow: Bool
     pub mut_borrow: Bool
     pub clone: Bool
@@ -146,8 +146,8 @@ pub struct TFnCoerce {
 }
 
 pub struct TFieldRef {
-    pub owner: SymbolId?
-    pub field: SymbolId
+    pub owner: SymbolID?
+    pub field: SymbolID
     pub name: String
     pub ty: Type
     pub boxed: Bool
@@ -194,7 +194,7 @@ pub enum TPatternShape {
 // S31: a checked nested payload pattern with the payload type's owner.
 pub struct TNestedPattern {
     pub shape: TPatternShape
-    pub enum_type: SymbolId?
+    pub enum_type: SymbolID?
 }
 
 pub enum TPatternPosition {
@@ -210,13 +210,13 @@ pub struct TPatternBindingFact {
     pub ty: Type
     pub mutable: Bool
     pub boxed: Bool
-    pub symbol_id: SymbolId?
+    pub symbol_id: SymbolID?
 }
 
 pub struct TPattern {
     pub shape: TPatternShape
     pub bindings: [TPatternBindingFact]
-    pub enum_type: SymbolId?
+    pub enum_type: SymbolID?
     pub position: TPatternPosition
     pub mutable: Bool
     pub boxed: Bool
@@ -273,16 +273,16 @@ pub enum TLetTy {
     SendFn(ty: Type)
 }
 
-pub struct TGcPromotion {
+pub struct TGCPromotion {
     pub span: Span
     pub scope: String
     pub policy_provenance: String
     pub reason: String
-    pub edges: [TGcPromotionEdge]
+    pub edges: [TGCPromotionEdge]
     pub collection_len: Int?
 }
 
-pub struct TGcPromotionEdge {
+pub struct TGCPromotionEdge {
     pub binding: String
     pub slot: String
     pub group: Int
@@ -318,7 +318,7 @@ pub struct TDestructureBinding {
 pub enum TStmt {
     Contract(contract: TContract)
     ContractScope(pre: [TContract], body: [TStmt], post: [TContract], result: TContractResult, span: Span)
-    Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGcPromotion?, gc_transferred: Bool, span: Span)
+    Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span)
     RefutableBind(pattern: TPattern, init: TExpr, fallback: [TStmt], span: Span)
     TupleDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
     StructDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
@@ -330,7 +330,7 @@ pub enum TStmt {
     ExprStmt(value: TExpr, span: Span)
     Return(value: TExpr?, span: Span)
     TaskGroup(group: TLocal, limit: TExpr?, body: [TStmt], span: Span)
-    DeferClose(close: TExpr, resource: SymbolId, scope_id: Int, span: Span)
+    DeferClose(close: TExpr, resource: SymbolID, scope_id: Int, span: Span)
     If(condition: TIfCond, then_body: [TStmt], else_body: [TStmt]?, else_is_elseif: Bool, span: Span)
     Loop(label: String?, body: [TStmt], span: Span)
     While(label: String?, condition: TExpr, body: [TStmt], span: Span)
@@ -360,7 +360,7 @@ pub enum TStmt {
     Shield(body: [TStmt], span: Span)
     ScopeMember(kind: TScopeMemberKind, body: [TStmt], span: Span)
     Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span)
-    GcEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
+    GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
     SplitViews(owner: TExpr?, root: String, len: String, source: String, source_start: Int, before: String, split_tail: String, segment: String, after: String, name: String, start: Int, end: Int, single: Bool, write: Bool, elem_ty: Type?, line: Int, span: Span)
     Erased(construct: String, span: Span, reason: TErasureReason)
     InvariantViolation(construct: String, span: Span)
@@ -485,15 +485,15 @@ pub enum TExprKind {
     DefaultLit
     Uninit
     CtLit(value: TComptimeValue)
-    ConstRef(symbol: SymbolId)
-    Call(callee: SymbolId, type_args: [Type], args: [TCallArg])
+    ConstRef(symbol: SymbolID)
+    Call(callee: SymbolID, type_args: [Type], args: [TCallArg])
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
-    DistinctCtor(owner: SymbolId, argument: TExpr, base: Type)
-    RangeCheckedCtor(owner: SymbolId, argument: TExpr, failure: TFailureCarrier)
-    DistinctConvert(owner: SymbolId, argument: TExpr, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
+    DistinctCtor(owner: SymbolID, argument: TExpr, base: Type)
+    RangeCheckedCtor(owner: SymbolID, argument: TExpr, failure: TFailureCarrier)
+    DistinctConvert(owner: SymbolID, argument: TExpr, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
     TraitBox(value: TExpr, target: Type)
-    UnitConvert(destination: SymbolId, argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
+    UnitConvert(destination: SymbolID, argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
     MathBuiltin(type_name: String, function: String, args: [TExpr])
     PreciseBuiltin(type_name: String, function: String, args: [TExpr])
     Print(value: TExpr)
@@ -509,13 +509,13 @@ pub enum TExprKind {
     Unary(op: TUnaryOp, operand: TExpr)
     StructLit(fields: [TStructFieldValue], extra: TStructExtra?, as_trait: TCoercionTarget?)
     Field(receiver: TExpr, field: TFieldRef)
-    Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolId?, location: TPanicLoc)
+    Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
     Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc)
     Range(start: TExpr, end: TExpr, exclusive: Bool)
     Tuple(values: [TExpr])
     List(values: [TExpr], trait_coercion: Type?)
     Map(entries: [TMapEntry])
-    EnumCtor(owner: SymbolId, variant: SymbolId, payload: [TEnumArg])
+    EnumCtor(owner: SymbolID, variant: SymbolID, payload: [TEnumArg])
     Try(value: TExpr, conversion: TTryConvert, failure: TFailureCarrier)
     TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String)
     Lambda(value: TLambda)
@@ -531,7 +531,7 @@ pub enum TExprKind {
     SharedGuardSplit(guard: TExpr, first: [TFieldRef], second: [TFieldRef], editable: Bool)
     SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda)
     ConditionNotify(condition: TExpr, all: Bool)
-    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MirDataPlan?, fallibility: TFailureCarrier)
+    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MIRDataPlan?, fallibility: TFailureCarrier)
     HostCall(call: THostCall)
     AllocNew(ctor: TAllocCtor, args: [TCallArg])
     EnumLit(enum_type: String, variant: String, payload: TEnumPayload)
@@ -724,7 +724,7 @@ pub enum TTypedTextForm {
     HTMLText
 }
 
-pub enum TGcEditKind {
+pub enum TGCEditKind {
     Clear
     Pop
     RemoveIndex
@@ -744,8 +744,8 @@ pub enum THostCall {
     TypedText(kind: TTypedTextForm, argument: TExpr)
     FnName(name: String)
     MemoStats(name: String)
-    GcEdit(root: TLocal, method_span_start: Int, edges: [TLocal], edit: TExpr, index_temp: TExpr?, kind: TGcEditKind)
-    GcRead(root: TLocal)
+    GCEdit(root: TLocal, method_span_start: Int, edges: [TLocal], edit: TExpr, index_temp: TExpr?, kind: TGCEditKind)
+    GCRead(root: TLocal)
     OptionProbe(inner: TExpr, kind: TOptionProbe)
     StrMatchScan(subject: TExpr, parts: [StrMatchPart], probe: TMatchProbe)
     BinMatchScan(subject: TExpr, parts: [BinMatchPart], probe: TMatchProbe)
@@ -753,7 +753,7 @@ pub enum THostCall {
     SwitchSubjectField(field: String)
     SwitchSubjectValue
     YieldSend(value: TExpr)
-    TypedTextInterp(kind: MirTypedHeadKind, literals: [String], holes: [TExpr], trusted_html: [Bool])
+    TypedTextInterp(kind: MIRTypedHeadKind, literals: [String], holes: [TExpr], trusted_html: [Bool])
     ExpectSnapshot(value: TExpr, snap_path: String)
     EnvSet(name: TExpr, value: TExpr, location: TPanicLoc)
     NumericBounds(ty: Type, member: String)
@@ -770,12 +770,12 @@ pub enum TCoreClosureKind {
     Guard(executable: TLambda)
     OnCommit(handle_name: String, executable: TLambda)
     OnRollback(handle_name: String, executable: TLambda)
-    UiButtonOnClick(label: TExpr, shortcut: TExpr, accessible_label: TExpr, executable: TLambda, site: Int)
-    UiTextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda, site: Int)
-    UiPreview(name: TExpr, viewport: TExpr?, executable: TLambda, site: Int, playground: Bool, source_file: String, source_span: Span, source_start_line: Int, source_start_column: Int, source_end_line: Int, source_end_column: Int, build_id: String, revision: String)
+    UIButtonOnClick(label: TExpr, shortcut: TExpr, accessible_label: TExpr, executable: TLambda, site: Int)
+    UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda, site: Int)
+    UIPreview(name: TExpr, viewport: TExpr?, executable: TLambda, site: Int, playground: Bool, source_file: String, source_span: Span, source_start_line: Int, source_start_column: Int, source_end_line: Int, source_end_column: Int, build_id: String, revision: String)
     ReactiveDerived(executable: TLambda, site: Int)
     ReactiveEffect(executable: TLambda, site: Int)
-    UiReactiveRender(executable: TLambda, site: Int)
+    UIReactiveRender(executable: TLambda, site: Int)
 }
 
 pub enum TFnValueKind {
@@ -843,22 +843,22 @@ pub enum TClosureOp {
 }
 
 pub enum THardwareCall {
-    RegisterRead(profile_id: String, block: String, register: String, width: MirRegisterWidth)
-    RegisterWrite(profile_id: String, block: String, register: String, width: MirRegisterWidth)
-    DmaStart(profile_id: String, channel: String, buffer_ty: Type)
-    DmaWait(profile_id: String, channel: String, buffer_ty: Type)
+    RegisterRead(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
+    RegisterWrite(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
+    DMAStart(profile_id: String, channel: String, buffer_ty: Type)
+    DMAWait(profile_id: String, channel: String, buffer_ty: Type)
 }
-pub struct TDbTableFact {
+pub struct TDBTableFact {
     pub table_id: String
     pub read: Bool
     pub write: Bool
 }
 
-pub struct TDbQueryMetadata {
+pub struct TDBQueryMetadata {
     pub source_file: String
     pub source_span: Span
     pub statement_identity: String
-    pub table_facts: [TDbTableFact]
+    pub table_facts: [TDBTableFact]
 }
 
 pub struct TCanonicalField {
@@ -911,12 +911,12 @@ pub enum THandleOp {
     StdoutWriteLine
     StdoutWriteBytes
     StdoutFlush
-    StdoutIsTty
+    StdoutIsTTY
     StderrWrite
     StderrWriteLine
     StderrWriteBytes
     StderrFlush
-    StderrIsTty
+    StderrIsTTY
     ClockNow
     ClockTick
     ClockAdvance
@@ -929,8 +929,8 @@ pub enum THandleOp {
     RealtimeReceipt
     RealtimeCancel
     RealtimeIsCancelled
-    HistoryRngNextU64
-    HistoryRngBelow
+    HistoryRNGNextU64
+    HistoryRNGBelow
     FakeLocale
     FakeName
     FakeEmail
@@ -952,19 +952,19 @@ pub enum THandleOp {
     GameAssetsSound
     GameInputBind
     GameInputPressed
-    RngInt
-    RngFloat
-    RngFloatRange
-    RngBool
-    RngBoolP
-    RngNormal
-    RngExponential
-    RngBytes
-    RngSplit
-    RngPick
-    RngWeightedPick
-    RngSample
-    RngShuffle
+    RNGInt
+    RNGFloat
+    RNGFloatRange
+    RNGBool
+    RNGBoolP
+    RNGNormal
+    RNGExponential
+    RNGBytes
+    RNGSplit
+    RNGPick
+    RNGWeightedPick
+    RNGSample
+    RNGShuffle
     DurationIn(unit: String?)
     DurationIsZero
     DurationTotalSeconds
@@ -984,30 +984,30 @@ pub enum THandleOp {
     AllocTryAlloc
     AllocReset
     PreciseMethod(type_name: String, method: String)
-    TcpListenerAccept
-    TcpListenerAcceptDeadline
-    TcpListenerLocalAddr
-    TcpStreamRead
-    TcpStreamWrite
-    TcpStreamPeerAddr
-    TcpStreamLocalAddr
-    TcpStreamClose
-    TcpStreamReadBytes
-    TcpStreamReadBytesDeadline
-    TcpStreamReadText
-    TcpStreamReadTextDeadline
-    TcpStreamWriteBytes
-    TcpStreamWriteBytesDeadline
-    TcpStreamWriteAllBytes
-    TcpStreamWriteAllBytesDeadline
-    TcpStreamWriteText
-    TcpStreamWriteTextDeadline
-    TcpStreamShutdown
-    TcpStreamReady
-    UdpSocketReady
-    UdpSocketClose
-    UdpSocketReceiveDeadline
-    UdpSocketSendToDeadline
+    TCPListenerAccept
+    TCPListenerAcceptDeadline
+    TCPListenerLocalAddr
+    TCPStreamRead
+    TCPStreamWrite
+    TCPStreamPeerAddr
+    TCPStreamLocalAddr
+    TCPStreamClose
+    TCPStreamReadBytes
+    TCPStreamReadBytesDeadline
+    TCPStreamReadText
+    TCPStreamReadTextDeadline
+    TCPStreamWriteBytes
+    TCPStreamWriteBytesDeadline
+    TCPStreamWriteAllBytes
+    TCPStreamWriteAllBytesDeadline
+    TCPStreamWriteText
+    TCPStreamWriteTextDeadline
+    TCPStreamShutdown
+    TCPStreamReady
+    UDPSocketReady
+    UDPSocketClose
+    UDPSocketReceiveDeadline
+    UDPSocketSendToDeadline
     UnixListenerAcceptDeadline
     UnixStreamReadDeadline
     UnixStreamWriteAllDeadline
@@ -1021,9 +1021,9 @@ pub enum THandleOp {
     TLSStreamCloseWrite
     TLSStreamPeerIdentity
     TLSClientConfigDefault
-    TLSClientConfigWithAlpn
-    TLSRootCertificatesFromPem
-    TLSClientIdentityFromPem
+    TLSClientConfigWithALPN
+    TLSRootCertificatesFromPEM
+    TLSClientIdentityFromPEM
     TLSClientConfigWithTrust
     TLSClientConfigWithIdentity
     TLSClientConfigWithVersionBounds
@@ -1086,13 +1086,13 @@ pub enum THandleOp {
     ChannelDelayMs
     ChannelClose
     SenderSend
-    HTTPRouterRegister(verb: MirHttpMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
+    HTTPRouterRegister(verb: MIRHTTPMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
     MathMethod(type_name: String, method: String, reduce_op: String?)
     ReactiveGet
     ReactiveSet
     ReactiveEffectMethod(method: String)
     EventMethod(method: String)
-    FfiCallbackEventStop
+    FFICallbackEventStop
     WatchMethod(method: String, callback_index: Int?)
     MeasurementMethod(method: String)
     LayoutMethod(method: String)
@@ -1100,7 +1100,7 @@ pub enum THandleOp {
     ExpiringMethod(method: String)
     SketchMethod(sketch: String, method: String)
     CivilTimeMethod(kind: String, method: String)
-    UrlMimeMethod(kind: String, method: String)
+    URLMIMEMethod(kind: String, method: String)
     EmailMethod(method: String)
     RegexMethod(kind: String, method: String)
     HTTPClientMethod(kind: String, method: String)
@@ -1134,7 +1134,7 @@ pub enum THandleOp {
     PathToString
     PathWriteAtomic
     PathWalk
-    UiBackendMethod(method: String)
+    UIBackendMethod(method: String)
     AppMethod(method: String, args_len: Int)
     WebVirtualWindowFacts
     DBWithPolicy
@@ -1149,9 +1149,9 @@ pub enum THandleOp {
     ServiceRuntimeDeadLetter
     ServiceRuntimeRetain
     ServiceRuntimeCommit
-    DBQuery(metadata: TDbQueryMetadata?)
-    DBQueryOne(metadata: TDbQueryMetadata?)
-    DBExecute(metadata: TDbQueryMetadata?)
+    DBQuery(metadata: TDBQueryMetadata?)
+    DBQueryOne(metadata: TDBQueryMetadata?)
+    DBExecute(metadata: TDBQueryMetadata?)
     DBLive
     DBBegin
     DBCommit
@@ -1163,7 +1163,7 @@ pub enum THandleOp {
     DBValueBool
     DBValueBlob
     DBValueIsNull
-    PluginInvoke(export_name: String, signature: MirComponentSignatureDescriptor)
+    PluginInvoke(export_name: String, signature: MIRComponentSignatureDescriptor)
     ModOnTick
     ReaderOver(owned: Bool)
     ReaderReadU8
@@ -1277,7 +1277,7 @@ pub enum TBuiltinOp {
     StringIsAlphabetic
     StringIsNumeric
     StringIsWhitespace
-    StringIsAscii
+    StringIsASCII
     StringToTitle
     StringMethod(method: String)
     StringSplitOnce(tuple_struct: String)
@@ -1293,8 +1293,8 @@ pub enum TBuiltinOp {
     Replace
     ToUpper
     ToLower
-    ToAsciiLower
-    ToAsciiUpper
+    ToASCIILower
+    ToASCIIUpper
     Repeat
     Slice(line: Int)
     After
@@ -1392,12 +1392,12 @@ pub enum TBuiltinOp {
     PriorityQueuePeek
     PriorityQueueToSortedList
     PriorityQueueRemove(line: Int, mode: TListRemoveMode)
-    LruPut
-    LruAddNew
-    LruGet
-    LruRemove
-    LruCapacity
-    LruKeys
+    LRUPut
+    LRUAddNew
+    LRUGet
+    LRURemove
+    LRUCapacity
+    LRUKeys
     BitSetAdd
     BitSetRemove
     BitSetCount
@@ -1444,15 +1444,15 @@ pub enum TStructExtra {
 }
 
 pub struct TCoercionTarget {
-    pub trait_symbol: SymbolId
-    pub concrete_type: SymbolId
+    pub trait_symbol: SymbolID
+    pub concrete_type: SymbolID
 }
 
 pub struct TMethodRef {
-    pub symbol: SymbolId
+    pub symbol: SymbolID
     pub name: String
     pub mangled: Bool
-    pub trait_owner: SymbolId?
+    pub trait_owner: SymbolID?
     pub operator_identity: String?
 }
 
@@ -1543,7 +1543,7 @@ pub struct TForeignProvenance {
 
 pub struct TGenericParam {
     pub name: String
-    pub bounds: [SymbolId]
+    pub bounds: [SymbolID]
 }
 pub struct TDeclarationFacts {
     pub type_defs: [TTypeDef]
@@ -1561,7 +1561,7 @@ pub enum TDeclarationOwnership {
     Move
 }
 pub struct TCoreBuiltinOwner {
-    pub symbol: SymbolId
+    pub symbol: SymbolID
     pub module_identity: String?
     pub name: String
     pub ownership: TDeclarationOwnership
@@ -1801,7 +1801,7 @@ pub struct TTraitDef {
     pub methods: [TTraitMethod]
 }
 
-pub enum TTargetOs {
+pub enum TTargetOS {
     Linux
     MacOS
     Windows
@@ -1825,7 +1825,7 @@ pub struct TImplDef {
     pub serde: TSerdeCodec?
     pub operator_rhs: Type?
     pub operator_marker: TOperatorMarker?
-    pub target_os: TTargetOs?
+    pub target_os: TTargetOS?
 }
 
 pub struct TConstantDef {
@@ -1861,7 +1861,7 @@ pub struct TLambda {
     pub effects: TEffectFacts
     pub host_param_conventions: [AccessConvention]?
     pub source_params: [String]
-    pub source_param_symbols: [SymbolId]
+    pub source_param_symbols: [SymbolID]
     pub jit_name: String
     pub param_types: [Type]
     pub ret: Type?
@@ -1960,7 +1960,7 @@ pub enum TSerdeCodec { Encode Decode }
 pub enum TFuncKind {
     TopLevel
     Method(self_convention: AccessConvention?, owner_type: Type)
-    TraitMethod(is_unsafe: Bool, self_convention: AccessConvention?, owner_type: Type, trait_name: SymbolId, serde_codec: TSerdeCodec?)
+    TraitMethod(is_unsafe: Bool, self_convention: AccessConvention?, owner_type: Type, trait_name: SymbolID, serde_codec: TSerdeCodec?)
 }
 
 pub enum TPlace {
@@ -2290,7 +2290,7 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] Never! {
             loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .Transact(_, _, _, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
-        .GcEdit(_, _, _, _, index_temp, edited, _) -> {
+        .GCEdit(_, _, _, _, index_temp, edited, _) -> {
             if index_temp == Val(nested) -> &children.push(nested)
             loop child in tir_stmt_children(edited) -> &children.push(child)
         }
@@ -2376,7 +2376,7 @@ fn tir_host_call_children(call: THostCall) -> [TExpr] Never! {
             &children.push(index)
         }
         .TypedText(_, argument) -> &children.push(argument)
-        .GcEdit(_, _, _, edit, index_temp, _) -> {
+        .GCEdit(_, _, _, edit, index_temp, _) -> {
             &children.push(edit)
             if index_temp == Val(index_value) -> &children.push(index_value)
         }
@@ -2418,7 +2418,7 @@ fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] Never! {
             &children.push(frames)
             loop child in tir_lambda_children(executable) -> &children.push(child)
         }
-        .UiTextInputOnDrop(state, ime, executable, _) -> {
+        .UITextInputOnDrop(state, ime, executable, _) -> {
             &children.push(state)
             &children.push(ime)
             loop child in tir_lambda_children(executable) -> &children.push(child)
@@ -2429,15 +2429,15 @@ fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] Never! {
         }
         .OnInterrupt(callback) -> &children.push(callback)
         .Guard(executable) -> loop child in tir_lambda_children(executable) -> &children.push(child)
-        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UiReactiveRender(executable, _) -> loop child in tir_lambda_children(executable) -> &children.push(child)
+        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UIReactiveRender(executable, _) -> loop child in tir_lambda_children(executable) -> &children.push(child)
         .OnCommit(_, executable) | .OnRollback(_, executable) -> loop child in tir_lambda_children(executable) -> &children.push(child)
-        .UiButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
+        .UIButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
             &children.push(label)
             &children.push(shortcut)
             &children.push(accessible_label)
             loop child in tir_lambda_children(executable) -> &children.push(child)
         }
-        .UiPreview(name, viewport, executable, site, playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision) -> {
+        .UIPreview(name, viewport, executable, site, playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision) -> {
             _ := site
             _ := playground
             _ := source_file

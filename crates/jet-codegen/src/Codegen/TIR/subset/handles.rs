@@ -212,7 +212,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Stderr", "write_bytes", 1) => THandleOp::StderrWriteBytes,
         ("Stderr", "flush", 0) => THandleOp::StderrFlush,
         ("Stderr", "is_tty", 0) => THandleOp::StderrIsTty,
-        ("Stopwatch", "elapsed_millis", 0) => THandleOp::StopwatchElapsedMillis,
         ("TestSuite", "run", 0) => THandleOp::TestSuiteRun,
         // D-DET1: deterministic injected Clock/Rng capability methods.
         ("Clock", "now", 0) => THandleOp::ClockNow,
@@ -228,21 +227,21 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("RealtimeStream", "receipt", 0) => THandleOp::RealtimeReceipt,
         ("RealtimeStream", "cancel", 0) => THandleOp::RealtimeCancel,
         ("RealtimeStream", "is_cancelled", 0) => THandleOp::RealtimeIsCancelled,
-        ("Rng", "int", 2) => THandleOp::RngInt,
-        ("Rng", "float", 0) => THandleOp::RngFloat,
-        ("Rng", "float_range", 2) => THandleOp::RngFloatRange,
-        ("Rng", "bool", 0) => THandleOp::RngBool,
-        ("Rng", "bool", 1) => THandleOp::RngBoolP,
-        ("Rng", "normal", 2) => THandleOp::RngNormal,
-        ("Rng", "exponential", 1) => THandleOp::RngExponential,
-        ("Rng", "bytes", 1) => THandleOp::RngBytes,
-        ("Rng", "split", 0) => THandleOp::RngSplit,
-        ("Rng", "pick", 1) => THandleOp::RngPick,
-        ("Rng", "weighted_pick", 2) => THandleOp::RngWeightedPick,
-        ("Rng", "sample", 2) => THandleOp::RngSample,
-        ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
-        ("HistoryRng", "next_u64", 0) => THandleOp::HistoryRngNextU64,
-        ("HistoryRng", "below", 1) => THandleOp::HistoryRngBelow,
+        ("RNG", "int", 2) => THandleOp::RngInt,
+        ("RNG", "float", 0) => THandleOp::RngFloat,
+        ("RNG", "float_range", 2) => THandleOp::RngFloatRange,
+        ("RNG", "bool", 0) => THandleOp::RngBool,
+        ("RNG", "bool", 1) => THandleOp::RngBoolP,
+        ("RNG", "normal", 2) => THandleOp::RngNormal,
+        ("RNG", "exponential", 1) => THandleOp::RngExponential,
+        ("RNG", "bytes", 1) => THandleOp::RngBytes,
+        ("RNG", "split", 0) => THandleOp::RngSplit,
+        ("RNG", "pick", 1) => THandleOp::RngPick,
+        ("RNG", "weighted_pick", 2) => THandleOp::RngWeightedPick,
+        ("RNG", "sample", 2) => THandleOp::RngSample,
+        ("RNG", "shuffle", 1) => THandleOp::RngShuffle,
+        ("HistoryRNG", "next_u64", 0) => THandleOp::HistoryRngNextU64,
+        ("HistoryRNG", "below", 1) => THandleOp::HistoryRngBelow,
         ("Fake", "locale", 1) => THandleOp::FakeLocale,
         ("Fake", "name", 0) => THandleOp::FakeName,
         ("Fake", "email", 0) => THandleOp::FakeEmail,
@@ -561,7 +560,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         handle,
         Syntax::CLOCK_TYPE
             | Syntax::RNG_TYPE
-            | "HistoryRng"
+            | "HistoryRNG"
             | Syntax::FAKE_TYPE
             | Syntax::SOLVER_TYPE
     ) {
@@ -617,7 +616,7 @@ pub(crate) fn handle_method_return_ty(
     if let Some(ret) = resolved_ret {
         return ret.clone();
     }
-    if handle == "HistoryRng" {
+    if handle == "HistoryRNG" {
         return match (method, nargs) {
             ("next_u64", 0) | ("below", 1) => Type::IntN {
                 signed: false,

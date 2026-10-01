@@ -2894,25 +2894,6 @@ pub fn run_native_scripted(
     )
 }
 
-/// Scripted native session with one live command boundary. It uses the same
-/// structured status contract as [`run_session_result_paused`], but the
-/// execution is delegated to the compiled binary through the native lldb
-/// adapter.
-#[allow(clippy::too_many_arguments)]
-pub fn run_native_session_result_paused(
-    binary: &std::path::Path,
-    rust_file: &str,
-    rust_src: &str,
-    jet_file: &str,
-    jet_src: &str,
-    raw_frames: bool,
-    inputs: &[&str],
-) -> SessionResult {
-    run_native_session_result_with_mode(
-        binary, rust_file, rust_src, jet_file, jet_src, raw_frames, inputs, true,
-    )
-}
-
 /// Scripted native session with completion semantics matching
 /// [`run_session_result`].
 #[allow(clippy::too_many_arguments)]

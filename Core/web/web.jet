@@ -74,59 +74,59 @@ pub struct LiveQuery {
     pub subscribers: Int
 }
 
-pub fn app() -> App { App{name: "app", pages: [WebPage]{}, live: [LiveQuery]{}, sessions: [Session]{}} }
+pub fn app() -> App Never! { App{name: "app", pages: [WebPage]{}, live: [LiveQuery]{}, sessions: [Session]{}} }
 
-pub fn page(title: String, body: String) -> WebPage { WebPage{title: title, body: body} }
+pub fn page(title: String, body: String) -> WebPage Never! { WebPage{title: title, body: body} }
 
 pub fn form(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
     core.web.forms.typed(input, action)
 }
 
 
-pub fn on(path: String, title: String, handler: fn(WebEvent)) -[Browser]> {
+pub fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
     core.web.on(path, title, handler)
 }
 
-pub fn openapi(router: HTTPRouter) -> String {
+pub fn openapi(router: HTTPRouter) -> String Never! {
     core.web.openapi(router)
 }
 
-pub fn value(key: String) -[Browser]> String { core.web.value(key) }
+pub fn value(key: String) -[Browser]> String Never! { core.web.value(key) }
 
-pub fn storage() -> String { "local" }
+pub fn storage() -> String Never! { "local" }
 
-pub fn auth(kind: String) -> Auth { Auth{kind: kind, client_id: ""} }
+pub fn auth(kind: String) -> Auth Never! { Auth{kind: kind, client_id: ""} }
 
-pub fn auth_oauth(auth: Auth, client_id: String) -> Auth {
+pub fn auth_oauth(auth: Auth, client_id: String) -> Auth Never! {
     Auth{kind: "oauth", client_id: client_id}
 }
 
-pub fn auth_routes(auth: Auth) -> [String] {
+pub fn auth_routes(auth: Auth) -> [String] Never! {
     if {
         auth.kind == "oauth" -> return [String]{"/auth/login", "/auth/callback", "/auth/logout"}
         else -> [String]{"/login", "/logout"}
     }
 }
 
-pub fn auth_show(auth: Auth) -> String { "{auth.kind}:{auth.client_id}" }
+pub fn auth_show(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 
-pub fn live(key: String, data: String) -> LiveQuery { LiveQuery{key: key, data: data, generation: 1, subscribers: 0} }
+pub fn live(key: String, data: String) -> LiveQuery Never! { LiveQuery{key: key, data: data, generation: 1, subscribers: 0} }
 
-pub fn subscribe(key: String) -> LiveQuery { LiveQuery{key: key, data: "", generation: 1, subscribers: 1} }
+pub fn subscribe(key: String) -> LiveQuery Never! { LiveQuery{key: key, data: "", generation: 1, subscribers: 1} }
 
-pub fn invalidate(key: String) -> Int { key_token(key) }
+pub fn invalidate(key: String) -> Int Never! { key_token(key) }
 
-pub fn transact_invalidate(key: String) -> Int { key_token(key) + 1 }
+pub fn transact_invalidate(key: String) -> Int Never! { key_token(key) + 1 }
 
-pub fn live_get(q: LiveQuery) -> String { q.data }
+pub fn live_get(q: LiveQuery) -> String Never! { q.data }
 
-pub fn live_show(q: LiveQuery) -> String { "{q.key}@{q.generation}" }
+pub fn live_show(q: LiveQuery) -> String Never! { "{q.key}@{q.generation}" }
 
-pub fn live_stats() -> String { core.web.live_stats() }
+pub fn live_stats() -> String Never! { core.web.live_stats() }
 
-pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery { sync_query(q, payload) }
+pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { sync_query(q, payload) }
 
-pub fn sync(key: String, data: String) -> String {
+pub fn sync(key: String, data: String) -> String Never! {
     "{key}:{data}"
 }
 

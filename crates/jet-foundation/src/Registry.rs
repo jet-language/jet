@@ -2172,19 +2172,6 @@ pub fn block_marker(
     marker_row_and_args(name, false, args)
 }
 
-/// Expression markers use the same row lookup as block markers. A value-tag
-/// prefix may resolve to a fact row rather than an applied-rule row; both are
-/// still rows in the one registry.
-pub fn expression_marker(expr: &crate::AST::Expr) -> Option<MarkerRowAndArgs> {
-    match expr {
-        crate::AST::Expr::Todo { .. } => {
-            marker_row_and_args(crate::Syntax::KW_TODO, false, Vec::new())
-        }
-        crate::AST::Expr::Tainted(_, Some(name), _) => marker_row_and_args(name, false, Vec::new()),
-        _ => None,
-    }
-}
-
 /// The callable formatter's line break is a row property, not a formatter
 /// vocabulary list. The rows below retain the established readable layout;
 /// all other callable markers stay beside `fn`.
@@ -2210,21 +2197,7 @@ pub fn is_inline_foreign_marker(name: &str) -> bool {
     rule.sites.len() == 1
         && rule.sites[0] == RuleSite::Function
         && rule.signature.params.len() == 1
-        && rule.signature.params[0].source_type == "FfiLanguage"
-}
-
-/// The lexer keeps arbitrary-precision integers only in the registered type
-/// marker whose signature identifies unit-family conversion metadata.
-pub fn is_exact_integer_metadata_marker(name: &str) -> bool {
-    let Some(rule) = row(name).and_then(|row| row.rule) else {
-        return false;
-    };
-    rule.sites.len() == 1
-        && rule.sites[0] == RuleSite::Type
-        && rule.signature.params.len() == 3
-        && rule.signature.params[0].source_type == "Ident"
-        && rule.signature.params[1].source_type == "Value"
-        && rule.signature.params[2].source_type == "Ident"
+        && rule.signature.params[0].source_type == "FFILanguage"
 }
 
 /// Whether a diagnostic row is currently produced by the compiler.
@@ -2740,12 +2713,6 @@ pub fn validate_diagnostic_coverage(
     validate_registry_coverage(entries, &baseline)
 }
 
-
-/// Validate the current source registry against the checked-in per-plane
-/// coverage floor.
-pub fn current_diagnostic_coverage() -> Result<Vec<CoverageFact>, String> {
-    validate_diagnostic_coverage(diagnostic_coverage_entries())
-}
 /// D-REPORT-HOME1=A: the compile-time row source. Explain and terminal
 /// renderers project this table; generated website pages are projections too,
 /// never another authority.

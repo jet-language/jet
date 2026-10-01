@@ -28,10 +28,14 @@ pub enum RecordKind {
     Program,
     /// Action record for one package's compiled output.
     PkgObject,
+    /// Action record under one item's check key (#2517 S3R item reuse).
+    ItemCheck,
+    /// Action record under one compile-time constant's evaluation key.
+    ComptimeValue,
 }
 
 impl RecordKind {
-    pub const ALL: [RecordKind; 7] = [
+    pub const ALL: [RecordKind; 9] = [
         Self::PkgCheck,
         Self::Iface,
         Self::Diags,
@@ -39,6 +43,8 @@ impl RecordKind {
         Self::Body,
         Self::Program,
         Self::PkgObject,
+        Self::ItemCheck,
+        Self::ComptimeValue,
     ];
 
     pub fn schema(self) -> &'static str {
@@ -50,6 +56,8 @@ impl RecordKind {
             Self::Body => "jet.body/v1",
             Self::Program => "jet.program/v1",
             Self::PkgObject => "jet.pkg-object/v1",
+            Self::ItemCheck => "jet.item-check/v1",
+            Self::ComptimeValue => "jet.comptime-value/v1",
         }
     }
 
@@ -60,7 +68,10 @@ impl RecordKind {
     /// True for kinds addressed by a caller key; false for content-addressed
     /// blobs.
     pub fn is_action(self) -> bool {
-        matches!(self, Self::PkgCheck | Self::Program | Self::PkgObject)
+        matches!(
+            self,
+            Self::PkgCheck | Self::Program | Self::PkgObject | Self::ItemCheck | Self::ComptimeValue
+        )
     }
 
     fn action(self, key: &str) -> ActionHandle {
@@ -105,6 +116,42 @@ impl Store {
             self.blob_by_digest(&digest)?
         };
         Ok(bytes.filter(|bytes| RecordReader::open_schema(bytes, kind.schema()).is_ok()))
+    }
+
+    /// Load one action record without recording its use; a run that reads
+    /// many records records their uses together with `touch_records`.
+    pub fn record_untouched(&self, kind: RecordKind, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        if !kind.is_action() {
+            return self.record(kind, key);
+        }
+        let bytes = self.get_action_untouched(&kind.action(key))?;
+        Ok(bytes.filter(|bytes| RecordReader::open_schema(bytes, kind.schema()).is_ok()))
+    }
+
+    /// Record one use of each action record `keys` names, in one journal
+    /// write.
+    pub fn touch_records(&self, kind: RecordKind, keys: &[String]) {
+        if kind.is_action() {
+            let actions = keys.iter().map(|key| kind.action(key)).collect::<Vec<_>>();
+            self.touch_actions(&actions);
+        }
+    }
+
+    /// Publish many action records of one kind in one store transaction.
+    /// Bytes that do not decode as the kind's schema are skipped.
+    pub fn put_records(&self, kind: RecordKind, records: Vec<(String, Vec<u8>)>) -> Result<(), StoreError> {
+        if !kind.is_action() {
+            return Err(StoreError::Config(format!(
+                "{} records are content addressed; publish them one by one",
+                kind.schema()
+            )));
+        }
+        let actions = records
+            .into_iter()
+            .filter(|(_, bytes)| RecordReader::open_schema(bytes, kind.schema()).is_ok())
+            .map(|(key, bytes)| (kind.action(&key), bytes))
+            .collect::<Vec<_>>();
+        self.publish_actions(&actions)
     }
 }
 

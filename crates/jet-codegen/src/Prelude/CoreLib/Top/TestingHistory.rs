@@ -517,17 +517,6 @@ where
     }
 }
 
-pub(crate) fn jet_testing_histories_schema(
-    seed: i64,
-    cases: i64,
-    model: Box<dyn Fn(Vec<jet_std::DataTree>) -> jet_std::DataTree>,
-    actual: Box<dyn Fn(Vec<jet_std::DataTree>) -> jet_std::DataTree>,
-    observe: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
-    _command_type: &str,
-) -> Result<jet_std::JetTestComparison, String> {
-    jet_testing_histories::<jet_std::DataTree>(seed, cases, None, model, actual, observe)
-}
-
 
 fn jet_testing_histories_result_with_strategy<'callback, Command, Strategy>(
     seed: i64,
@@ -825,25 +814,10 @@ mod jet_testing_history_web {
         )
     }
 
-    fn required_unsigned(root: &Tree, name: &str) -> Result<u64, String> {
-        unsigned(
-            field(root, name).ok_or_else(|| format!("history wire field `{name}` is missing"))?,
-            name,
-        )
-    }
-
     fn required_text(root: &Tree, name: &str) -> Result<String, String> {
         match field(root, name) {
             Some(Tree::Text(value) | Tree::TypedText(value)) => Ok(value.clone()),
             Some(_) => Err(format!("{name} must be text")),
-            None => Err(format!("history wire field `{name}` is missing")),
-        }
-    }
-
-    fn required_array<'a>(root: &'a Tree, name: &str) -> Result<&'a [Tree], String> {
-        match field(root, name) {
-            Some(Tree::Array(values)) => Ok(values),
-            Some(_) => Err(format!("{name} must be an array")),
             None => Err(format!("history wire field `{name}` is missing")),
         }
     }

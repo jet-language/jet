@@ -34,6 +34,7 @@ use jet_devserver::EditorHost::{
     EDITOR_SELECT_METHOD, EDITOR_WORKBENCH_METHOD,
 };
 use jet_foundation::DataTree::DataTree;
+use jet_foundation::Hex::nibble as hex_digit;
 use jet_foundation::JSON::{
     json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length,
     MAX_PROTOCOL_MESSAGE_BYTES,
@@ -5923,15 +5924,6 @@ fn percent_decode(value: &str) -> Option<String> {
         i += 1;
     }
     String::from_utf8(out).ok()
-}
-
-fn hex_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 fn normalize_path(path: &str) -> String {

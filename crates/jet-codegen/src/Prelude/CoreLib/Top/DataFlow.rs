@@ -90,17 +90,6 @@ fn jet_data_limits_validate(limits: &jet_std::DataLimits) -> Result<(), jet_std:
     ))
 }
 
-fn jet_data_plot_error(error: DataPlotError) -> jet_std::DataError {
-    let kind = match error.kind {
-        "NonFinite" => jet_std::DataErrorKind::NonFinite,
-        _ => jet_std::DataErrorKind::InvalidArgument,
-    };
-    jet_data_error_at(kind, error.operation, jet_outcome_of(error.index), error.reason)
-}
-
-fn jet_data_typed_plot_error(error: JetDataPlotError) -> jet_std::DataError {
-    error.into_data_error()
-}
 fn jet_data_canonical_unary_plan<T>(
     operation: JetTableOperation,
     operation_name: &str,
@@ -2785,10 +2774,6 @@ fn jet_data_loader_bounded_text(value: &str, max_bytes: usize) -> String {
     jet_foundation::PreludeDataFlow::bounded_text(value, max_bytes)
 }
 
-fn jet_data_loader_sensitive_key(key: &str) -> bool {
-    jet_foundation::PreludeDataFlow::sensitive_key(key)
-}
-
 fn jet_data_loader_sensitive_value(value: &str) -> bool {
     jet_foundation::PreludeDataFlow::sensitive_value(value)
 }
@@ -2851,26 +2836,6 @@ fn jet_data_loader_format(format: &str) -> Result<jet_std::DataFormat, jet_std::
             format!("format `{format}` is provider-owned; import its package"),
         )
     })
-}
-
-fn jet_data_loader_source(
-    kind: jet_std::DataLoaderKind,
-    locator: &str,
-    member: &str,
-    parameters: &[String],
-) -> jet_std::DataSourceIdentity {
-    let source = jet_foundation::PreludeDataFlow::source(
-        jet_data_loader_kernel_kind(kind),
-        locator,
-        member,
-        parameters,
-    );
-    jet_std::DataSourceIdentity {
-        kind,
-        locator: source.locator,
-        member: source.member,
-        parameters: source.parameters,
-    }
 }
 
 fn jet_data_loader_new<T>(
@@ -3058,18 +3023,6 @@ fn jet_data_loader_value<T: __jet_Encode>(
     Ok(loader)
 }
 
-fn jet_data_loader_with_authority<T>(
-    loader: &mut jet_std::DataLoader<T>,
-    scope: &String,
-    revision: &String,
-) -> Result<(), jet_std::DataError> {
-    let mut state = jet_data_loader_kernel_state(loader);
-    jet_foundation::PreludeDataFlow::set_authority(&mut state, scope, revision)
-        .map_err(jet_data_loader_kernel_error)?;
-    jet_data_loader_apply_kernel(loader, state);
-    Ok(())
-}
-
 fn jet_data_loader_check_payload(
     limits: &jet_std::DataLimits,
     bytes: usize,
@@ -3159,10 +3112,6 @@ fn jet_data_loader_schema(
 
 fn jet_data_loader_digest(bytes: &[u8]) -> String {
     jet_foundation::PreludeDataFlow::digest(bytes)
-}
-
-fn jet_data_loader_identity_part(output: &mut String, value: &str) {
-    jet_foundation::PreludeDataFlow::identity_part(output, value);
 }
 
 fn jet_data_loader_csv_tree(

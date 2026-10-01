@@ -886,10 +886,6 @@ impl WebModuleSwapReceipt {
         &self.preserved
     }
 
-    pub fn reset_facts(&self) -> &[WebModuleSwapResetFact] {
-        &self.reset
-    }
-
     /// Stable, line-oriented audit text. It is deliberately not a wire format.
     pub fn audit(&self) -> String {
         let changed = self.changed_modules.join(",");

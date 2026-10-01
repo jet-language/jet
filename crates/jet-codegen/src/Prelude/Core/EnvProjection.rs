@@ -3,26 +3,6 @@
 // raw EnvConfig Prelude source, so multiply-included host fragments stay
 // dependency-minimal.
 
-/// D-SHAPE-ONE1=A: adapt collected environment values to a checked env-name
-/// projection. The projection owns source and environment identities; this
-/// adapter only maps values back to source segments and never renames fields.
-fn jet_env_config_entries_for_shape(
-    prefix: &str,
-    dotenv: Option<&str>,
-    projection: &ShapeProjection,
-    process: impl IntoIterator<Item = (String, String)>,
-) -> Result<Vec<JetEnvConfigEntry>, String> {
-    if projection.kind != ShapeProjectionKind::Env {
-        return Err("environment decoding needs an env shape projection".to_string());
-    }
-    let names = projection
-        .fields
-        .iter()
-        .map(|field| (field.name.as_str(), field.decode_name.as_str()))
-        .collect::<Vec<_>>();
-    jet_env_config_entries_for_names(prefix, dotenv, &[], names, process)
-}
-
 /// Host-neutral environment projection boundary. Hosts provide the process
 /// snapshot and marshal the returned entries into their DataTree carrier.
 pub(crate) fn jet_env_config_entries_for_names<'a>(
@@ -63,12 +43,4 @@ pub(crate) fn jet_env_config_entries_for_names<'a>(
             .then_with(|| left.name.cmp(&right.name))
     });
     Ok(entries)
-}
-
-fn jet_env_config_source_segments(source: &str) -> Vec<String> {
-    source
-        .split("__")
-        .map(|segment| segment.to_ascii_lowercase())
-        .filter(|segment| !segment.is_empty())
-        .collect()
 }

@@ -101,7 +101,7 @@ fn history_strategy_type(command: Type) -> Type {
 
 fn ui_drop_callback_type() -> Type {
     Type::Fn {
-        params: vec![Type::List(Box::new(Type::Named("UiDropItem".to_string())))],
+        params: vec![Type::List(Box::new(Type::Named("UIDropItem".to_string())))],
         ret: Some(Box::new(unit_ty())),
         effect_bound: None,
         param_contract: None,
@@ -1195,7 +1195,7 @@ impl<'a> Checker<'a> {
             compute_gradient_value_type(&output).unwrap_or_else(compute_tensor_type);
         let gradient_ty = compute_tensor_tuple(&gradient_names, &gradient_value_type);
         let run_ty = Type::Apply {
-            name: "VjpRun".to_string(),
+            name: "VJPRun".to_string(),
             args: vec![gradient_ty.clone()],
         };
         let direct_return = match name {
@@ -2191,317 +2191,6 @@ impl<'a> Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    /// D-MODEL-PACKAGE1=A: resolve one source-declared model trait without
-    /// inventing a universal `Embedder` type. Qualified source names select a
-    /// single imported module; bare names must have one unambiguous trait owner.
-    fn model_trait_owner(&self, raw: &Type) -> Result<(usize, String), &'static str> {
-        let (qualified, leaf) = match raw {
-            Type::Named(name) => {
-                let (qualified, leaf) = name.rsplit_once('.').map_or((None, name.as_str()), |(q, l)| {
-                    (Some(q), l)
-                });
-                (qualified, leaf)
-            }
-            Type::TraitObject(names) if names.len() == 1 => (None, names[0].as_str()),
-            _ => return Err("model.open expects one trait type argument"),
-        };
-        let mut candidates = Vec::new();
-        if let Some(alias) = qualified {
-            let Some(&owner) = self.imports.get(alias) else {
-                return Err("model trait module is not imported");
-            };
-            if self
-                .modules
-                .is_some_and(|modules| modules[owner].trait_reg.traits.contains_key(leaf))
-            {
-                candidates.push((owner, leaf.to_string()));
-            }
-        } else {
-            if self.trait_reg.traits.contains_key(leaf) {
-                candidates.push((self.module_idx, leaf.to_string()));
-            }
-            if let Some(modules) = self.modules {
-                for (owner, module) in modules.iter().enumerate() {
-                    if owner != self.module_idx
-                        && module.trait_reg.traits.contains_key(leaf)
-                    {
-                        candidates.push((owner, leaf.to_string()));
-                    }
-                }
-            }
-        }
-        candidates.sort_unstable();
-        candidates.dedup();
-        match candidates.as_slice() {
-            [(owner, name)] => Ok((*owner, name.clone())),
-            [] => Err("model trait is not an exported source declaration"),
-            _ => Err("model trait name is ambiguous"),
-        }
-    }
-
-    fn infer_model_open(
-        &mut self,
-        span: Span,
-        type_args: &[Type],
-        args: &mut [crate::AST::CallArg],
-    ) -> Option<Type> {
-        let invalid = |checker: &mut Self, message: String, detail: String, fix: String| {
-            checker
-                .diags
-                .push(Diagnostic::error("E-MODEL-SIGNATURE", message, detail, fix, Some(span)));
-            None
-        };
-        if args.len() != 1 {
-            self.diags
-                .push(wrong_core_arity("open", 1, args.len(), span));
-            for arg in args {
-                self.infer(&mut arg.expr);
-            }
-            return None;
-        }
-        let Some(raw_trait) = exactly_one_type_arg(self, "models.open", type_args, span) else {
-            self.infer(&mut args[0].expr);
-            return None;
-        };
-        self.expect_core_arg("open", 0, &Type::String, &mut args[0]);
-        let Some(output) = literal_string_value(&args[0].expr) else {
-            return invalid(
-                self,
-                "`models.open` needs a literal output name".to_string(),
-                "model output selection is checked before provider execution".to_string(),
-                "write `models.open<Trait>(\"output\")` with a package output name".to_string(),
-            );
-        };
-        let (owner, trait_name) = match self.model_trait_owner(&raw_trait) {
-            Ok(owner) => owner,
-            Err(reason) => {
-                return invalid(
-                    self,
-                    format!("cannot bind model trait `{}`", raw_trait.name()),
-                    reason.to_string(),
-                    "export one public trait with the declared model signature and import its module".to_string(),
-                )
-            }
-        };
-        let Some(modules) = self.modules else {
-            return invalid(
-                self,
-                "model source binding is unavailable".to_string(),
-                "the checker has no loaded module graph".to_string(),
-                "load the package source before opening its model output".to_string(),
-            );
-        };
-        let items = modules[owner].items.clone();
-        let Some(trait_def) = items.iter().find_map(|item| match item {
-            crate::AST::Item::Trait(definition) if definition.name == trait_name => {
-                Some(definition.clone())
-            }
-            _ => None,
-        }) else {
-            return invalid(
-                self,
-                format!("model trait `{trait_name}` has no source declaration"),
-                "model signatures bind only to ordinary exported Jet traits".to_string(),
-                "declare `pub trait TraitName { fn embed(self, documents: [String]) Batch !Err }`".to_string(),
-            );
-        };
-        if !trait_def.is_pub {
-            return invalid(
-                self,
-                format!("model trait `{trait_name}` is not public"),
-                "a model provider boundary cannot expose a private trait".to_string(),
-                "mark the source trait `pub`".to_string(),
-            );
-        }
-        let Some(method) = trait_def
-            .methods
-            .iter()
-            .find(|method| method.name == "embed")
-            .cloned()
-        else {
-            return invalid(
-                self,
-                format!("model trait `{trait_name}` has no `embed` method"),
-                "the checked model signature is document-to-batch".to_string(),
-                "declare `fn embed(self, documents: [String]) Batch !Err`".to_string(),
-            );
-        };
-        if method.params.len() != 2
-            || method.params[0].name != "self"
-            || method.params[1].name != "documents"
-            || method.params[1].variadic
-            || self.resolve_type(method.params[1].ty.clone())
-                != Type::List(Box::new(Type::String))
-        {
-            return invalid(
-                self,
-                format!("model trait `{trait_name}` has an incompatible `embed` input"),
-                "the model boundary requires `embed(self, documents: [String])`".to_string(),
-                "use exactly one `[String]` documents parameter after `self`".to_string(),
-            );
-        }
-        let Some(Type::Result { ok, err }) = method.return_type.as_ref() else {
-            return invalid(
-                self,
-                format!("model trait `{trait_name}` has an incompatible `embed` result"),
-                "provider failure must remain the explicit `!Err` result domain".to_string(),
-                "declare `EmbeddingBatch !Err` as the method result".to_string(),
-            );
-        };
-        let Some(batch_name) = model_type_leaf(ok) else {
-            return invalid(
-                self,
-                format!("model trait `{trait_name}` has no named batch carrier"),
-                "the provider must return one exported batch struct".to_string(),
-                "return the exported batch carrier from `embed`".to_string(),
-            );
-        };
-        if !matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
-            return invalid(
-                self,
-                format!("model trait `{trait_name}` has a non-`Err` failure domain"),
-                "model provider failures use the ordinary `Err` domain".to_string(),
-                "declare the method as `... Batch !Err`".to_string(),
-            );
-        }
-        let matching_batches = items.iter().filter_map(|item| match item {
-            crate::AST::Item::Struct(definition)
-                if definition.name == batch_name && definition.is_pub =>
-            {
-                Some(definition)
-            }
-            _ => None,
-        }).collect::<Vec<_>>();
-        if matching_batches.len() != 1 {
-            return invalid(
-                self,
-                format!("model batch carrier `{batch_name}` is not uniquely exported"),
-                "exactly one public source struct must carry provider vectors".to_string(),
-                "export exactly one `pub struct Batch` for this model trait".to_string(),
-            );
-        }
-        let batch = matching_batches[0];
-        let Some(values_ty) = batch.fields.iter().find(|field| field.name == "values") else {
-            return invalid(
-                self,
-                format!("model batch carrier `{batch_name}` has no `values` field"),
-                "the provider returns one dense floating-point vector per document".to_string(),
-                "add a public `values: [[Float]]` field to the batch carrier".to_string(),
-            );
-        };
-        if self.resolve_type(values_ty.ty.clone())
-            != Type::List(Box::new(Type::List(Box::new(Type::Float))))
-        {
-            return invalid(
-                self,
-                format!("model batch carrier `{batch_name}` has an incompatible `values` field"),
-                "model providers expose checked dense vectors as `[[Float]]`".to_string(),
-                "declare `pub values: [[Float]]` on the batch carrier".to_string(),
-            );
-        }
-        let Some(space_ty) = batch.fields.iter().find(|field| field.name == "space") else {
-            return invalid(
-                self,
-                format!("model batch carrier `{batch_name}` has no `space` witness"),
-                "embedding vectors must carry their checked model-space identity".to_string(),
-                "add a private `space: Space` field to the batch carrier".to_string(),
-            );
-        };
-        if space_ty.is_pub || space_ty.is_package_pub {
-            return invalid(
-                self,
-                format!("model batch carrier `{batch_name}` exposes its space witness"),
-                "safe consumers must not retag a provider-created embedding space".to_string(),
-                "keep the `space` field private and expose only checked accessors".to_string(),
-            );
-        }
-        let Some(space_name) = model_type_leaf(&space_ty.ty) else {
-            return invalid(
-                self,
-                format!("model batch carrier `{batch_name}` has an unnamed space type"),
-                "the space witness must be one exported source struct".to_string(),
-                "type the private `space` field as the exported space carrier".to_string(),
-            );
-        };
-        let matching_spaces = items.iter().filter_map(|item| match item {
-            crate::AST::Item::Struct(definition)
-                if definition.name == space_name && definition.is_pub =>
-            {
-                Some(definition)
-            }
-            _ => None,
-        }).collect::<Vec<_>>();
-        if matching_spaces.len() != 1 {
-            return invalid(
-                self,
-                format!("model space carrier `{space_name}` is not uniquely exported"),
-                "exactly one public source struct must carry model identity".to_string(),
-                "export exactly one `pub struct Space` for this model trait".to_string(),
-            );
-        }
-        let space = matching_spaces[0];
-        for (required, expected) in [
-            ("model_digest", Type::String),
-            ("dimension", Type::Int),
-            ("metric", Type::String),
-            ("normalization", Type::String),
-        ] {
-            let Some(field) = space.fields.iter().find(|field| field.name == required) else {
-                return invalid(
-                    self,
-                    format!("model space carrier `{space_name}` is missing `{required}`"),
-                    "the embedding-space identity is part of the checked carrier".to_string(),
-                    "add the four private model identity fields".to_string(),
-                );
-            };
-            if field.is_pub || field.is_package_pub {
-                return invalid(
-                    self,
-                    format!("model space field `{required}` is public"),
-                    "safe consumers cannot relabel model identity metadata".to_string(),
-                    "keep model-space identity fields private".to_string(),
-                );
-            }
-            if self.resolve_type(field.ty.clone()) != expected {
-                return invalid(
-                    self,
-                    format!("model space field `{required}` has an incompatible type"),
-                    "model identity fields have fixed String/Int carrier types".to_string(),
-                    format!("declare `{required}` with the checked model-space type"),
-                );
-            }
-        }
-        let matching_outputs = self
-            .model_outputs
-            .iter()
-            .filter(|fact| {
-                fact.output == output
-                    && fact.signature_name.as_deref() == Some(trait_name.as_str())
-            })
-            .collect::<Vec<_>>();
-        if matching_outputs.is_empty() {
-            return invalid(
-                self,
-                format!("model output `{output}` does not bind trait `{trait_name}`"),
-                "the package output's `name` must select exactly one source trait".to_string(),
-                format!("declare `.Model {{ name: \"{trait_name}\", ... }}` for this output"),
-            );
-        }
-        if matching_outputs.len() != 1 {
-            return invalid(
-                self,
-                format!("model output `{output}` binds trait `{trait_name}` more than once"),
-                "missing, ambiguous, and conflicting model exports fail before execution".to_string(),
-                "keep one package output and one source trait binding".to_string(),
-            );
-        }
-        self.record_effect("IO", span);
-        Some(result_ty(
-            Type::TraitObject(vec![trait_name]),
-            Type::Named(crate::Syntax::TYPE_ERR.to_string()),
-        ))
-    }
-
     fn infer_browser_test_core_call(
         &mut self,
         module: &str,
@@ -2539,6 +2228,7 @@ impl<'a> Checker<'a> {
             "write_report" => vec![report.clone(), string.clone()],
             "report_exit_code" => vec![report.clone()],
             "server_start" => vec![config],
+            "server_stop" => vec![server.clone()],
             "watch_changed" => vec![string, int],
             _ => return None,
         };
@@ -2568,6 +2258,7 @@ impl<'a> Checker<'a> {
                 ok: Box::new(server),
                 err: Box::new(browser_error.clone()),
             },
+            "server_stop" => unit_ty(),
             "watch_changed" => Type::Result {
                 ok: Box::new(Type::Bool),
                 err: Box::new(browser_error),
@@ -2686,7 +2377,7 @@ impl<'a> Checker<'a> {
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
-            if jet_foundation::CoreModuleExports::core_source_owns(module, name)
+            if jet_foundation::CoreModuleExports::core_source_owns_call(module, name, args.len())
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
             {
                 let source_idx = self.modules.and_then(|modules| {
@@ -2710,9 +2401,6 @@ impl<'a> Checker<'a> {
         }
         if module == "core.web" && name == "form" {
             return self.infer_web_form_core_call(span, args);
-        }
-        if module == "core.models" && name == "open" {
-            return self.infer_model_open(span, type_args, args);
         }
         // D-FRONTENDAPI1=A: the compiler surface is a read-only
         // compile-time value API. It is intentionally handled before
@@ -3157,6 +2845,7 @@ impl<'a> Checker<'a> {
                     | "getpriority"
                     | "setpriority"
                     | "utime"
+                    | "atexit"
                     | "stop"
             )
             && !self.in_unsafe
@@ -3439,7 +3128,7 @@ impl<'a> Checker<'a> {
                 value_type,
                 span,
                 self.devtools_registry,
-                self.registry,
+                &mut self.devtools_publications,
                 &mut self.diags,
             );
             return Some(unit_ty());
@@ -4220,6 +3909,30 @@ impl<'a> Checker<'a> {
                     self.infer(&mut arg.expr);
                 }
                 return Some(result_ty(json_ty(), encoding_error_ty()));
+            }
+            ("core.sys", "decode") if !type_args.is_empty() => {
+                if args.len() > 3 {
+                    self.diags.push(wrong_core_arity(name, 3, args.len(), span));
+                }
+                for (index, arg) in args.iter_mut().enumerate() {
+                    match index {
+                        0 | 1 => self.expect_core_arg(name, index, &Type::String, arg),
+                        2 => self.expect_core_arg(
+                            name,
+                            index,
+                            &Type::List(Box::new(Type::String)),
+                            arg,
+                        ),
+                        _ => {
+                            self.infer(&mut arg.expr);
+                        }
+                    }
+                }
+                let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                    return None;
+                };
+                self.check_decodable(&t, span);
+                return Some(result_ty(t, decode_error_ty()));
             }
             // D-SHAPE-ONE1=A: decode one existing DB row through the same
             // typed DataTree decoder used by the wire formats. The explicit
@@ -6390,7 +6103,7 @@ impl<'a> Checker<'a> {
             ("core.ui", "button") => {
                 if args.len() == 1 {
                     self.expect_core_arg("button", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("UiNode".to_string()));
+                    return Some(Type::Named("UINode".to_string()));
                 }
                 if args.len() != 4 {
                     self.diags
@@ -6404,7 +6117,7 @@ impl<'a> Checker<'a> {
                 self.expect_core_optional_arg(
                     "button",
                     1,
-                    &Type::Named("UiShortcut".to_string()),
+                    &Type::Named("UIShortcut".to_string()),
                     &mut args[1],
                 );
                 self.expect_core_optional_arg("button", 2, &Type::String, &mut args[2]);
@@ -6420,7 +6133,7 @@ impl<'a> Checker<'a> {
                         Some(args[3].span),
                     ));
                     self.infer(&mut args[3].expr);
-                    return Some(Type::Named("UiNode".to_string()));
+                    return Some(Type::Named("UINode".to_string()));
                 }
                 let callback_ty =
                     self.infer_retained_callback(&mut args[3].expr, Some(&unit_callback_type()));
@@ -6433,7 +6146,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                return Some(Type::Named("UiNode".to_string()));
+                return Some(Type::Named("UINode".to_string()));
             }
             // D-UI-DROP1=A: text input keeps its existing two-value node
             // constructor and adds one typed `on_drop` closure slot.
@@ -6443,10 +6156,10 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "text_input",
                         1,
-                        &Type::Named("UiImeMode".to_string()),
+                        &Type::Named("UIIMEMode".to_string()),
                         &mut args[1],
                     );
-                    return Some(Type::Named("UiNode".to_string()));
+                    return Some(Type::Named("UINode".to_string()));
                 }
                 if args.len() != 3 {
                     self.diags
@@ -6471,7 +6184,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                return Some(Type::Named("UiNode".to_string()));
+                return Some(Type::Named("UINode".to_string()));
             }
             // D-UI-MOUNT1=A: `ui.mount(backend, tree)` or `ui.mount(backend, tree, constraint)`.
             ("core.ui", "mount") => {
@@ -6487,7 +6200,7 @@ impl<'a> Checker<'a> {
                 let tree_ty = self.infer(&mut args[1].expr);
                 if let Some(ty) = &backend_ty {
                     match ty.name().as_str() {
-                        "NullBackend" | "TuiBackend" | "GtkBackend" => {}
+                        "NullBackend" | "TUIBackend" | "GtkBackend" => {}
                         _ => {
                             self.diags.push(Diagnostic::error(
                                     "E0108",
@@ -6504,11 +6217,11 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(ty) = &tree_ty {
-                    if ty.name() != "UiNode" {
+                    if ty.name() != "UINode" {
                         self.diags.push(Diagnostic::error(
                             "E0108",
                             format!(
-                                "`ui.mount` needs a `UiNode` tree, but the second argument is {}",
+                                "`ui.mount` needs a `UINode` tree, but the second argument is {}",
                                 ty.show()
                             ),
                             "build the tree with `ui.text` / `ui.box` / `ui.node` / …".to_string(),
@@ -6853,7 +6566,7 @@ impl<'a> Checker<'a> {
                 "core.sys",
                 "fork" | "setuid" | "setgid" | "setpgid" | "setpgrp" | "setsid" | "initgroups"
                 | "kill" | "wait" | "waitpid" | "pipe" | "close_fd" | "mkfifo" | "umask"
-                | "getpriority" | "setpriority" | "utime" | "stop",
+                | "getpriority" | "setpriority" | "utime" | "atexit" | "stop",
             ) => {
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
@@ -7121,7 +6834,7 @@ impl<'a> Checker<'a> {
                 self.expect_core_optional_arg(
                     "bind",
                     2,
-                    &Type::Named("HTTPServerTls".to_string()),
+                    &Type::Named("HTTPServerTLS".to_string()),
                     &mut args[2],
                 );
                 self.expect_core_optional_arg(
@@ -7155,7 +6868,7 @@ impl<'a> Checker<'a> {
                 self.expect_core_optional_arg(
                     "serve",
                     2,
-                    &Type::Named("HTTPServerTls".to_string()),
+                    &Type::Named("HTTPServerTLS".to_string()),
                     &mut args[2],
                 );
                 self.expect_core_optional_arg(
@@ -7217,7 +6930,7 @@ impl<'a> Checker<'a> {
                 }
                 self.expect_core_arg("tls", 0, &Type::String, &mut args[0]);
                 self.expect_core_arg("tls", 1, &Type::String, &mut args[1]);
-                return Some(Type::Named("HTTPServerTls".to_string()));
+                return Some(Type::Named("HTTPServerTLS".to_string()));
             }
             ("core.http.server", "response") => {
                 if args.len() != 2 {

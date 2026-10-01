@@ -2310,11 +2310,6 @@ fn ffi_int_range_diag(span: Span) -> Diagnostic {
     )
 }
 
-fn ffi_int_range_runtime_stop() {
-    let report = crate::runtime_host::contract_kernel::jet_c_int_range_report();
-    Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(report, 1));
-}
-
 fn runtime_int_result(value: i64) -> MirRuntimeValue {
     const SMALL_MIN: i64 = -(1i64 << 62);
     const SMALL_MAX: i64 = (1i64 << 62) - 1;
@@ -2361,35 +2356,6 @@ fn runtime_string_arg(
             span,
         )),
 
-    }
-}
-
-fn runtime_int_arg(
-    args: &[MirRuntimeValue],
-    index: usize,
-    wrapper: &str,
-    span: Span,
-) -> Result<i64, Diagnostic> {
-    match args.get(index) {
-        Some(MirRuntimeValue::Moved) => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} was moved"),
-            span,
-        )),
-        Some(MirRuntimeValue::Int(value)) => Ok(*value),
-        Some(MirRuntimeValue::BigInt(value)) => {
-            value.parse::<i64>().map_err(|_| ffi_int_range_diag(span))
-        }
-        Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} contains a native-owned payload"),
-            span,
-        )),
-        _ => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} is not an Int"),
-            span,
-        )),
     }
 }
 
@@ -2496,100 +2462,11 @@ fn retire_handle_args(
     }
 }
 
-fn runtime_float_arg(
-    args: &[MirRuntimeValue],
-    index: usize,
-    wrapper: &str,
-    span: Span,
-) -> Result<f64, Diagnostic> {
-    match args.get(index) {
-        Some(MirRuntimeValue::Moved) => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} was moved"),
-            span,
-        )),
-        Some(MirRuntimeValue::Float { value, .. }) => Ok(*value),
-        Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} contains a native-owned payload"),
-            span,
-        )),
-        _ => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} is not a Float"),
-            span,
-        )),
-    }
-}
-
-fn runtime_bool_arg(
-    args: &[MirRuntimeValue],
-    index: usize,
-    wrapper: &str,
-    span: Span,
-) -> Result<bool, Diagnostic> {
-    match args.get(index) {
-        Some(MirRuntimeValue::Moved) => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} was moved"),
-            span,
-        )),
-        Some(MirRuntimeValue::Bool(value)) => Ok(*value),
-        Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} contains a native-owned payload"),
-            span,
-        )),
-        _ => Err(ffi_diag(
-            wrapper,
-            format!("argument {index} is not a Bool"),
-            span,
-        )),
-    }
-}
-
 fn runtime_float_result(value: f64, ret_f32: bool) -> MirRuntimeValue {
     MirRuntimeValue::Float {
         value: if ret_f32 { value as f32 as f64 } else { value },
         f32: ret_f32,
     }
-}
-
-fn call_cabi_string(
-    state: &FfiState,
-    wrapper: &str,
-    span: Span,
-    call: impl FnOnce(*mut *mut u8, *mut usize) -> i32,
-) -> Result<MirRuntimeValue, Diagnostic> {
-    let mut out_ptr = std::ptr::null_mut();
-    let mut out_len = 0;
-    let rc = match call_cabi(state, wrapper, span, || call(&mut out_ptr, &mut out_len)) {
-        Ok(rc) => rc,
-        Err(error) => {
-            release_cabi_buffer(state.free_fn, out_ptr, out_len);
-            return Err(error);
-        }
-    };
-    if rc != 0 {
-        release_cabi_buffer(state.free_fn, out_ptr, out_len);
-        return Err(ffi_diag(wrapper, format!("returned {rc}"), span));
-    }
-    if out_ptr.is_null() && out_len != 0 {
-        return Err(ffi_diag(
-            wrapper,
-            "returned a null buffer with a non-zero length",
-            span,
-        ));
-    }
-    let bytes = if out_ptr.is_null() {
-        Vec::new()
-    } else {
-        unsafe { std::slice::from_raw_parts(out_ptr, out_len) }.to_vec()
-    };
-    release_cabi_buffer(state.free_fn, out_ptr, out_len);
-    String::from_utf8(bytes)
-        .map(MirRuntimeValue::String)
-        .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
 }
 
 fn type_size_align(
@@ -5046,10 +4923,6 @@ fn jet_jit_ffi_callback_unsubscribe(handle: i64) -> i64 {
         }
         0
     })
-}
-
-fn jet_jit_ffi_callback_event_stop_host() -> i64 {
-    jet_jit_ffi_callback_event_stop()
 }
 
 fn jet_jit_ffi_emit_task(wrapper_handle: i64, value: i64) -> i64 {

@@ -148,7 +148,7 @@ pub mod jet_email {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum SMTPSecurity { StartTls, TLS }
+    pub enum SMTPSecurity { StartTLS, TLS }
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum RecipientPolicy { RequireAll, DeliverAccepted }
@@ -317,7 +317,7 @@ pub mod jet_email {
             .map_err(|_| error("smtp_from_env", "SMTP_HOST is required"))?;
         let security_text = std::env::var("SMTP_SECURITY").unwrap_or_else(|_| "starttls".to_string());
         let security = match security_text.to_ascii_lowercase().as_str() {
-            "starttls" => SMTPSecurity::StartTls,
+            "starttls" => SMTPSecurity::StartTLS,
             "tls" => SMTPSecurity::TLS,
             _ => return Err(error("smtp_from_env", "SMTP_SECURITY must be `starttls` or `tls`")),
         };
@@ -400,7 +400,7 @@ pub mod jet_email {
         if !(1..=65_535).contains(&config.port) {
             return Err(error("smtp", "port must be between 1 and 65535"));
         }
-        if config.port == 587 && config.security != SMTPSecurity::StartTls {
+        if config.port == 587 && config.security != SMTPSecurity::StartTLS {
             return Err(error("smtp", "port 587 requires verified STARTTLS"));
         }
         if config.port == 465 && config.security != SMTPSecurity::TLS {
@@ -1130,7 +1130,7 @@ pub mod jet_email {
         if config.security == SMTPSecurity::TLS { state.verified_tls(); }
 
         let mut capabilities = ehlo(transport, config, control, &mut state)?;
-        if config.security == SMTPSecurity::StartTls {
+        if config.security == SMTPSecurity::StartTLS {
             state.start_tls(&capabilities).map_err(|error| with_server(error, &config.host))?;
             command(transport, control, config, "starttls", b"STARTTLS\r\n", false)?;
             let reply = read_reply(transport, config, "starttls", false)?;

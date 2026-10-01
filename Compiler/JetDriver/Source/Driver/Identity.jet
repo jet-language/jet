@@ -1,4 +1,44 @@
 // Source, module, and package identities remain separate at the driver boundary.
+use jet_foundation.[
+    Diagnostic,
+    JetReleaseDevtoolsPolicy,
+    MIRAllocatorPolicy,
+    MIRArtifactBuildMode,
+    MIRArtifactID,
+    MIRFunctionID,
+    MIRProgram,
+    MIRRuntimeLayer,
+    MIRSourceFile,
+    PackageKeyDependency,
+    PackageKeySourceFile,
+    PackageKeyTargetFact,
+    Program,
+    Record,
+    RecordSection,
+    Span,
+    diagnostic_from_registry,
+    diagnostic_with_source_path,
+    mir_sha256_hex,
+    package_key_check_key,
+    package_key_source_digest,
+    package_key_target_facts_digest,
+    record_blob_key,
+    record_decode,
+    record_encode,
+]
+use jet_sema.[
+    SemaRegistrationImportEdge,
+    SemaSourceOrigin,
+    SemaSourceSegment,
+]
+use jet_codegen.[
+    JetRustEmitManifest,
+    JetWebArtifacts,
+    JetWebAssets,
+]
+use jet_eval.[
+    JetEvalConfig,
+]
 
 struct JetDriverAuthorizedSourceFile {
     path: String
@@ -32,13 +72,29 @@ enum JetDriverCompileTarget {
     Web(
         assets: JetWebAssets,
         release_devtools_policy: JetReleaseDevtoolsPolicy,
-        profile: MirArtifactBuildMode,
+        profile: MIRArtifactBuildMode,
     )
 }
 
-struct JetDriverCompileRequest {
+// One Core library source module the host embeds, mirroring a Rust
+// `CoreModuleExports::CORE_SOURCE_MODULES` row or a compiler-private part from
+// `CoreSourceParts` (both generated from Prelude/Core.jet). `path` is the
+// repository path (`Core/perf/perf.jet`); `owner` names the public module that
+// schedules a private part and is "" for a public row; `owned_members` lists
+// the public functions that have crossed the Core cutover.
+struct JetDriverCoreSource {
+    module_name: String
+    alias: String
+    path: String
+    owner: String
+    owned_members: [String]
+    source: String
+}
+
+pub struct JetDriverCompileRequest {
     authorized_sources: JetDriverAuthorizedSourceSnapshot
     canonical_effect_source: String
+    core_sources: [JetDriverCoreSource]
     host_facts: JetDriverHostFacts
     eval_config: JetEvalConfig
     target: JetDriverCompileTarget
@@ -87,18 +143,30 @@ struct JetDriverPackageEntry {
 
 struct JetDriverPackageInfo {
     root_index: Int
+    root_path: String
     identity: String
     name: String
     version: String
     edition: String
-    runtime_ceiling: MirRuntimeLayer?
-    allocator_policy: MirAllocatorPolicy
+    runtime_ceiling: MIRRuntimeLayer?
+    allocator_policy: MIRAllocatorPolicy
     authority_allow: [String]?
     authority_deny: [String]?
     authority_needs: [String]
     entry: JetDriverPackageEntry?
     manifest_path: String?
     dependencies: [JetDriverPackageDependency]
+    // D-MOD-CYCLE1=A: the kinds the manifest's `outputs:` declare. A package
+    // that declares a Library and no Executable has no `fn run` (E0625).
+    outputs: JetDriverPackageOutputs
+}
+
+struct JetDriverPackageOutputs {
+    library: Bool
+    executable: Bool
+    // Owner ruling B: each Executable `entry: stem.run` names a member file
+    // whose `run` stays its own, so it never joins the package namespace.
+    entry_modules: [String]
 }
 
 struct JetDriverSourceIndex {
@@ -115,7 +183,7 @@ struct JetDriverSourceIndexResult {
 }
 
 struct JetDriverSourceFileCollection {
-    files: [MirSourceFile]
+    files: [MIRSourceFile]
     diagnostics: [Diagnostic]
     complete: Bool
 }
@@ -154,23 +222,23 @@ struct JetDriverLoadResult {
     entry_module_identity: String
     modules: [JetDriverLoadedModule]
     imports: [SemaRegistrationImportEdge]
-    source_files: [MirSourceFile]
-    generated_source_files: [MirSourceFile]
+    source_files: [MIRSourceFile]
+    generated_source_files: [MIRSourceFile]
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
 }
 
-struct JetDriverCompileResult {
+pub struct JetDriverCompileResult {
     diagnostics: [Diagnostic]
-    generated_source_files: [MirSourceFile]
+    generated_source_files: [MIRSourceFile]
     package_identity: String
     entry_module_identity: String
-    entry_function: MirFunctionId?
-    runtime_artifact: MirArtifactId?
-    web_artifact: MirArtifactId?
+    entry_function: MIRFunctionID?
+    runtime_artifact: MIRArtifactID?
+    web_artifact: MIRArtifactID?
     web_artifacts: JetWebArtifacts?
-    mir: MirProgram?
+    mir: MIRProgram?
     emitted_source: String?
     emit_manifest: JetRustEmitManifest?
     comptime_stdout: String
@@ -256,11 +324,11 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
             valid = false
         }
         if valid {
-            by_identity.add(identity, index)
-            by_path.add(unit.path, index)
+            _ := &by_identity.add(identity, index)
+            _ := &by_path.add(unit.path, index)
             if {
-                by_module_name.get(module_key) != None -> ambiguous_module_names.add(module_key, true)
-                else -> by_module_name.add(module_key, index)
+                by_module_name.get(module_key) != None -> _ := &ambiguous_module_names.add(module_key, true)
+                else -> _ := &by_module_name.add(module_key, index)
             }
         }
     }
@@ -384,11 +452,13 @@ pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [Je
 // Read one record through the host store. A missing store, a missing record,
 // or bytes that do not open under `schema` are all a miss.
 pub fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, key: String) -> Record? Never! {
-    store :: request.record_store ?? return None
-    bytes :: store.record(schema, key) ?? return None
-    record :: record_decode(bytes).record ?? return None
-    if record.schema != schema -> return None
-    Val(record)
+    if request.record_store == .Val(store) {
+        bytes :: store.record(schema, key) ?? return None
+        record :: record_decode(bytes).record ?? return None
+        if record.schema != schema -> return None
+        return Val(record)
+    }
+    None
 }
 
 // Encode and publish one record. Action kinds use `key`; blob kinds pass
@@ -396,10 +466,12 @@ pub fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, 
 // under, or `None` when there is no store or the record cannot be encoded
 // or written.
 pub fn jet_driver_publish_record(request: JetDriverCompileRequest, schema: String, key: String?, sections: [RecordSection]) -> String? Never! {
-    store :: request.record_store ?? return None
-    encoded :: record_encode(schema, sections)
-    bytes :: encoded.bytes ?? return None
-    address :: key ?? record_blob_key(bytes)
-    if !store.put_record(schema, address, bytes) -> return None
-    Val(address)
+    if request.record_store == .Val(store) {
+        encoded :: record_encode(schema, sections)
+        bytes :: encoded.bytes ?? return None
+        address :: key ?? record_blob_key(bytes)
+        if !store.put_record(schema, address, bytes) -> return None
+        return Val(address)
+    }
+    None
 }

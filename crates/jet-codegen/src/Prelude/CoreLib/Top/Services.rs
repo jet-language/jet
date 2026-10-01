@@ -3107,10 +3107,6 @@ fn jet_services_tree_show(tree: &JetServiceTree) -> String {
     tree.jet_show()
 }
 
-fn jet_services_state_authority_show(authority: &JetServiceStateAuthority) -> String {
-    authority.jet_show()
-}
-
 fn jet_services_set_delivery(
     tree: &mut JetServiceTree,
     delivery: JetServiceDelivery,
@@ -4643,24 +4639,6 @@ fn jet_services_workflow_sync_tree(
         workflow.replay_cursor = cursors.get(&workflow.run_id).copied().unwrap_or(0);
     }
     tree.workflows = workflows;
-    Ok(())
-}
-
-fn jet_services_workflow_sync_handle_into_tree(
-    tree: &mut JetServiceTree,
-    handle: &JetWorkflowHandle,
-) -> Result<(), JetServiceError> {
-    let workflow = handle
-        .state
-        .lock()
-        .map_err(|_| JetServiceError::Policy("workflow handle state lock is poisoned".to_string()))?
-        .clone();
-    let target = tree
-        .workflows
-        .iter_mut()
-        .find(|candidate| candidate.run_id == workflow.run_id)
-        .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {} not found", workflow.run_id)))?;
-    *target = workflow;
     Ok(())
 }
 

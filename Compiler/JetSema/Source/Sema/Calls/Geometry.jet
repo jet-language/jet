@@ -1,5 +1,22 @@
 // Generic coordinate-space Transform receiver contracts. Point/delta binary
 // operations already live in Expressions.jet and are intentionally not repeated.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    ParamZone,
+    Span,
+    TExpr,
+    TExprKind,
+    TFailureCarrier,
+    THandleOp,
+    Type,
+    type_identity_equal,
+    type_name,
+]
 
 pub struct SemaCallGeometryTransformParts {
     pub scalar: Type
@@ -9,7 +26,8 @@ pub struct SemaCallGeometryTransformParts {
 }
 
 fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     sema_type_resolve_nominal(graph, ty, environment.module_identity) == None
 }
 

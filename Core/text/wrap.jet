@@ -13,12 +13,12 @@ use core.text as unicode
 //
 // Python `textwrap` plus display-column-safe width, indentation, and escaping.
 // Width is measured in terminal display columns using `core.text`.
-pub fn wrap(text: String, width: Int) -> [String] {
+pub fn wrap(text: String, width: Int) -> [String] Never! {
     spec :: wrapper(width)
     wrap_with(text, spec)
 }
 
-pub fn fill(text: String, width: Int) -> String {
+pub fn fill(text: String, width: Int) -> String Never! {
     lines :: wrap(text, width)
     s := ""
     i := 0
@@ -29,13 +29,13 @@ pub fn fill(text: String, width: Int) -> String {
     s
 }
 
-pub fn shorten(text: String, width: Int, placeholder: String) -> String {
+pub fn shorten(text: String, width: Int, placeholder: String) -> String Never! {
     if width <= 0 -> return ""
     if unicode.display_width(text) <= width -> return ~text
     shorten_text(text, width, placeholder, false)
 }
 
-pub fn indent(text: String, prefix: String) -> String {
+pub fn indent(text: String, prefix: String) -> String Never! {
     lines :: split_lines(text)
     s := ""
     i := 0
@@ -47,7 +47,7 @@ pub fn indent(text: String, prefix: String) -> String {
     s
 }
 
-pub fn dedent(text: String) -> String {
+pub fn dedent(text: String) -> String Never! {
     lines :: split_lines(text)
     margin := -1
     loop line in lines {
@@ -69,7 +69,7 @@ pub fn dedent(text: String) -> String {
     s
 }
 
-pub fn expand_tabs(text: String, tabsize: Int) -> String {
+pub fn expand_tabs(text: String, tabsize: Int) -> String Never! {
     size := tabsize
     if size <= 0 -> size = 8
     out := ""
@@ -97,7 +97,7 @@ pub fn expand_tabs(text: String, tabsize: Int) -> String {
     out
 }
 
-pub fn html_escape(text: String, quote: Bool) -> String {
+pub fn html_escape(text: String, quote: Bool) -> String Never! {
     out := ""
     loop scalar in unicode.scalars(text) {
         if scalar == "&" -> out = "{out}&amp;"
@@ -110,7 +110,7 @@ pub fn html_escape(text: String, quote: Bool) -> String {
     out
 }
 
-pub fn html_unescape(text: String) -> String {
+pub fn html_unescape(text: String) -> String Never! {
     s := replace_all(text, "&amp;", "&")
     s = replace_all(s, "&lt;", "<")
     s = replace_all(s, "&gt;", ">")
@@ -120,7 +120,7 @@ pub fn html_unescape(text: String) -> String {
     s
 }
 
-fn split_ws(text: String) -> [String] {
+fn split_ws(text: String) -> [String] Never! {
     out := [String]{}
     current := ""
     loop scalar in unicode.scalars(text) {
@@ -137,7 +137,7 @@ fn split_ws(text: String) -> [String] {
     out
 }
 
-fn split_ws_preserving(text: String) -> [String] {
+fn split_ws_preserving(text: String) -> [String] Never! {
     out := [String]{}
     current := ""
     current_whitespace := false
@@ -242,7 +242,7 @@ pub struct Wrapper {
     pub tabsize: Int
 }
 
-pub fn wrapper(width: Int) -> Wrapper {
+pub fn wrapper(width: Int) -> Wrapper Never! {
     {
         width: width,
         initial_indent: "",
@@ -257,7 +257,7 @@ pub fn wrapper(width: Int) -> Wrapper {
     }
 }
 
-pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
+pub fn wrap_with(text: String, spec: Wrapper) -> [String] Never! {
     if spec.width <= 0 -> return [String]{text}
     body := text
     if spec.expand_tabs -> body = expand_tabs(body, spec.tabsize)
@@ -334,9 +334,9 @@ pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
     out
 }
 
-pub fn fill_with(text: String, spec: Wrapper) -> String { join_lines(wrap_with(text, spec)) }
+pub fn fill_with(text: String, spec: Wrapper) -> String Never! { join_lines(wrap_with(text, spec)) }
 
-pub fn indent_with(text: String, prefix: String, predicate_nonblank: Bool) -> String {
+pub fn indent_with(text: String, prefix: String, predicate_nonblank: Bool) -> String Never! {
     lines :: split_lines(text)
     s := ""
     i := 0
@@ -349,7 +349,7 @@ pub fn indent_with(text: String, prefix: String, predicate_nonblank: Bool) -> St
     s
 }
 
-pub fn wrap_paragraphs(text: String, width: Int) -> String {
+pub fn wrap_paragraphs(text: String, width: Int) -> String Never! {
     paras :: split_paragraphs(text)
     s := ""
     i := 0
@@ -361,7 +361,7 @@ pub fn wrap_paragraphs(text: String, width: Int) -> String {
     s
 }
 
-pub fn hanging_indent(text: String, first: String, rest: String, width: Int) -> String {
+pub fn hanging_indent(text: String, first: String, rest: String, width: Int) -> String Never! {
     spec :: Wrapper{
         width: width,
         initial_indent: first,
@@ -377,7 +377,7 @@ pub fn hanging_indent(text: String, first: String, rest: String, width: Int) -> 
     fill_with(text, spec)
 }
 
-fn break_word(word: String, width: Int, break_on_hyphens: Bool) -> [String] {
+fn break_word(word: String, width: Int, break_on_hyphens: Bool) -> [String] Never! {
     if width <= 0 -> return [String]{word}
     units :: unicode.graphemes(word)
     out := [String]{}
@@ -436,7 +436,7 @@ fn join_chunks(chunks: [String], start: Int) -> String {
     out
 }
 
-fn shorten_text(text: String, width: Int, placeholder: String, force_placeholder: Bool) -> String {
+fn shorten_text(text: String, width: Int, placeholder: String, force_placeholder: Bool) -> String Never! {
     if width <= 0 -> return ""
     placeholder_width := unicode.display_width(placeholder)
     text_width := unicode.display_width(text)
@@ -448,7 +448,7 @@ fn shorten_text(text: String, width: Int, placeholder: String, force_placeholder
     "{prefix}{placeholder}"
 }
 
-fn word_prefix(text: String, width: Int) -> String {
+fn word_prefix(text: String, width: Int) -> String Never! {
     if width <= 0 -> return ""
     words :: split_ws(text)
     if words.len() == 0 -> return ""
@@ -468,7 +468,7 @@ fn word_prefix(text: String, width: Int) -> String {
     current
 }
 
-fn take_width(text: String, width: Int) -> String {
+fn take_width(text: String, width: Int) -> String Never! {
     if width <= 0 -> return ""
     out := ""
     current_width := 0
@@ -485,7 +485,7 @@ fn take_width(text: String, width: Int) -> String {
     out
 }
 
-fn line_with_placeholder(line: String, line_indent: String, width: Int, placeholder: String) -> String {
+fn line_with_placeholder(line: String, line_indent: String, width: Int, placeholder: String) -> String Never! {
     capacity := width - unicode.display_width(line_indent)
     if capacity <= 0 -> return ~line_indent
     indent_bytes := line_indent.bytes().len()

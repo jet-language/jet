@@ -606,6 +606,8 @@ pub(crate) fn if_cond_in_subset(
             // fully represented by the typed if-let lowering.
             // HookOutcome/DataEvent are prelude enums. They may also appear in
             // `variant_owner`; the typed if-let lowering still owns both shapes.
+            // Other slot shapes fall through: a user enum may spell a variant
+            // like a builtin (`Int(lo: Int, hi: Int)`).
             if is_data_event_variant(variant) || is_hook_outcome_variant(variant) {
                 if bindings.is_empty() || matches!(bindings.first(), Some(PatSlot::Wildcard)) {
                     return Some(Vec::new());
@@ -615,7 +617,6 @@ pub(crate) fn if_cond_in_subset(
                         return Some(vec![name.clone()]);
                     }
                 }
-                return None;
             }
             if is_json_variant(variant)
                 && bindings.len() == 1
@@ -657,9 +658,7 @@ pub(crate) fn if_cond_in_subset(
             // (they collide with DataTree/etc.), same as `switch_in_subset`'s
             // `union_shaped` fallback — accept the single-bind case and resolve the
             // generated `__JetUnion_*` enum from the subject's type at lowering.
-            if !is_json_variant(variant)
-                && !is_key_variant(variant)
-                && !bindings.is_empty()
+            if !bindings.is_empty()
                 && bindings.iter().all(|slot| {
                     matches!(
                         slot,
@@ -690,10 +689,7 @@ pub(crate) fn if_cond_in_subset(
             // D-TAG1: a binding-free variant/group test (`if d == .Fire { … }`)
             // is a plain Bool condition — the expression subset lowers it to
             // `matches!` (`TExprKind::PatternMatches`), no if-let, no bindings.
-            if !is_json_variant(variant)
-                && bindings.is_empty()
-                && cx.variant_owner.contains_key(variant)
-            {
+            if bindings.is_empty() && cx.variant_owner.contains_key(variant) {
                 return Some(Vec::new());
             }
             return None;

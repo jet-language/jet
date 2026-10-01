@@ -28,8 +28,8 @@ pub struct TLSPeerIdentity {
     pub tls_version: TLSVersion
 }
 pub enum TLSVersion {
-    Tls12
-    Tls13
+    TLS12
+    TLS13
 }
 
 // The two-argument native leaf consumes a connected TCPStream and a server
@@ -77,7 +77,7 @@ pub fn close(stream: TLSStream) IOError! {
     working.close()
 }
 
-pub fn sni(stream: TLSStream) -[Net]> String {
+pub fn sni(stream: TLSStream) -[Net]> String Never! {
     peer :: stream.peer_identity()
     peer.verified_server_name
 }
@@ -94,29 +94,29 @@ pub fn peer_port(stream: TLSStream) -[Net]> Int IOError! {
 pub fn unwrap(stream: TLSStream) -[Net]> TCPStream IOError! {
     Err(tls_error("unwrap", "", "TLS stream cannot be downgraded"))
 }
-pub fn version_name(v: TLSVersion) -> String {
-    if v == TLSVersion.Tls12 -> return "TLSv1.2"
+pub fn version_name(v: TLSVersion) -> String Never! {
+    if v == TLSVersion.TLS12 -> return "TLSv1.2"
     return "TLSv1.3"
 }
 
-pub fn parse_version(name: String) -> TLSVersion? {
+pub fn parse_version(name: String) -> TLSVersion? Never! {
     n := ascii_lower(trim_ascii(name))
     if n == {
-        "tlsv1.2" | "tls1.2" | "1.2" | "tls12" -> Val(TLSVersion.Tls12)
-        "tlsv1.3" | "tls1.3" | "1.3" | "tls13" -> Val(TLSVersion.Tls13)
+        "tlsv1.2" | "tls1.2" | "1.2" | "tls12" -> Val(TLSVersion.TLS12)
+        "tlsv1.3" | "tls1.3" | "1.3" | "tls13" -> Val(TLSVersion.TLS13)
         else -> None
     }
 }
 
-pub fn is_tls13(v: TLSVersion) -> Bool { v == TLSVersion.Tls13 }
+pub fn is_tls13(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS13 }
 
-pub fn is_tls12(v: TLSVersion) -> Bool { v == TLSVersion.Tls12 }
+pub fn is_tls12(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS12 }
 
 // Constructors are pure carriers. Endpoint, ALPN, identity, and root policy
 // is checked at the operation boundary instead of being silently dropped.
-pub fn config(host: String) -> ClientConfig { ClientConfig{host: host, alpn: [String]{}} }
+pub fn config(host: String) -> ClientConfig Never! { ClientConfig{host: host, alpn: [String]{}} }
 
-pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig {
+pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig Never! {
     alpn := [String]{}
     loop p in cfg.alpn -> &alpn.push(p)
     // Keep the requested value visible. connect_host validates the complete
@@ -126,15 +126,15 @@ pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig {
     ClientConfig{host: cfg.host, alpn: alpn}
 }
 
-pub fn alpn_h2(cfg: ClientConfig) -> ClientConfig {
+pub fn alpn_h2(cfg: ClientConfig) -> ClientConfig Never! {
     with_alpn(with_alpn(cfg, "h2"), "http/1.1")
 }
 
-pub fn identity(cert: String, key: String) -> ClientIdentity {
+pub fn identity(cert: String, key: String) -> ClientIdentity Never! {
     ClientIdentity{cert: cert, key: key}
 }
 
-pub fn roots(path: String) -> RootCertificates {
+pub fn roots(path: String) -> RootCertificates Never! {
     RootCertificates{path: path}
 }
 
@@ -151,9 +151,9 @@ pub fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream I
     client(cfg.host, port)
 }
 
-pub fn flags(cfg: ClientConfig) -> [String] { cfg.alpn }
+pub fn flags(cfg: ClientConfig) -> [String] Never! { cfg.alpn }
 
-pub fn has_alpn(cfg: ClientConfig, proto: String) -> Bool {
+pub fn has_alpn(cfg: ClientConfig, proto: String) -> Bool Never! {
     loop p in cfg.alpn {
         if p == proto -> return true
     }

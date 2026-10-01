@@ -30,10 +30,6 @@ impl CaptureMode {
         matches!(self, Self::Release)
     }
 
-    pub const fn default_capture_enabled(self) -> bool {
-        matches!(self, Self::Development)
-    }
-
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Development => "dev",
@@ -420,10 +416,6 @@ impl CaptureEvictionPlan {
     pub const fn fits(&self) -> bool {
         self.retained_bytes <= self.budget.max_bytes
     }
-
-    pub fn evicted_ids(&self) -> impl Iterator<Item = &str> {
-        self.evicted.iter().map(|item| item.artifact_id.as_str())
-    }
 }
 
 /// Plan oldest-first eviction for an existing index plus one candidate row.
@@ -742,14 +734,6 @@ impl SensitiveCaptureConsent {
         Self { identity, scope }
     }
 
-    pub fn for_attempt(attempt: &CaptureAttempt) -> Self {
-        Self::new(attempt.identity.clone(), attempt.base_consent_scope())
-    }
-
-    pub fn for_policy(policy: &CapturePolicy, attempt: &CaptureAttempt) -> Self {
-        Self::new(attempt.identity.clone(), policy.consent_scope(attempt))
-    }
-
     pub fn identity(&self) -> &CaptureIdentity {
         &self.identity
     }
@@ -809,22 +793,6 @@ impl CaptureAttempt {
 
     pub fn with_source(mut self, source: CaptureSourceFact) -> Self {
         self.sources.push(source);
-        self
-    }
-
-    pub fn with_scope(mut self, mut scope: CaptureConsentScope) -> Self {
-        scope.canonicalize();
-        self.scope = scope;
-        self
-    }
-
-    pub fn with_consent(mut self, consent: SensitiveCaptureConsent) -> Self {
-        self.consent = Some(consent);
-        self
-    }
-
-    pub fn without_terminal(mut self) -> Self {
-        self.terminal_available = false;
         self
     }
 

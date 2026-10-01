@@ -127,27 +127,6 @@ impl Recording {
         })
     }
 
-    /// Build a recording by translating a text tape into event frames.
-    pub fn from_tape(identity: RecordingIdentity, tape: &Tape) -> Result<Self, RecordingError> {
-        let mut recording = Self::new(identity)?;
-        for step in tape.steps() {
-            let event = match step {
-                TapeStep::Type(text) => RecordingEvent::Type(text.clone()),
-                TapeStep::Enter => RecordingEvent::Enter,
-                TapeStep::Sleep(duration) => RecordingEvent::Sleep(duration.as_millis() as u64),
-                TapeStep::Wait(readiness) => RecordingEvent::Wait(readiness.clone()),
-                TapeStep::Require(program) => RecordingEvent::Require(program.clone()),
-                TapeStep::Set { name, value } => RecordingEvent::Set {
-                    name: name.clone(),
-                    value: value.clone(),
-                },
-                TapeStep::Output(expected) => RecordingEvent::Output(expected.clone()),
-            };
-            recording.push(event)?;
-        }
-        Ok(recording)
-    }
-
     /// Convert the interaction events in this recording into the canonical
     /// replay tape. Frame snapshots remain observations owned by the
     /// headless renderer; command results and resize events belong to a
@@ -190,10 +169,6 @@ impl Recording {
         })
     }
 
-    /// Append one captured in-process command result.
-    pub fn push_command(&mut self, result: &CommandResult) -> Result<usize, RecordingError> {
-        self.push(RecordingEvent::Command(result.clone()))
-    }
     /// Append one normalized frame captured by a headless terminal driver.
     pub fn push_frame(&mut self, frame: &crate::Headless::Frame) -> Result<usize, RecordingError> {
         let width = u16::try_from(frame.size.width).map_err(|_| {
@@ -541,16 +516,6 @@ impl Recording {
         let header = CanonicalJson::parse_canonical(&bytes[16..16 + header_length])
             .map_err(RecordingError::Invalid)?;
         parse_header(&header).map(|(_, artifact_id)| artifact_id)
-    }
-
-
-    /// Verify that a replay target has the same explicit command and terminal identity.
-    pub fn verify_identity(&self, expected: &RecordingIdentity) -> Result<(), RecordingError> {
-        validate_identity(expected)?;
-        if &self.identity != expected {
-            return Err(RecordingError::IdentityMismatch);
-        }
-        Ok(())
     }
 }
 

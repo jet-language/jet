@@ -109,10 +109,10 @@ function jet_copy_value(value, key, facts, seen) {
   if (typeKey == null) throw new TypeError("checked Web copy has no type fact");
   const schema = facts?.get(typeKey);
   if (!schema) throw new TypeError("checked Web copy has no schema");
-  // UiNode's public Core record intentionally exposes only its stable source
+  // UINode's public Core record intentionally exposes only its stable source
   // fields. Its retained web carrier also owns renderer-only kind/tree/event
   // slots, so copying through that public schema would erase the UI tree.
-  if (typeKey.startsWith("UiNode<>:")) {
+  if (typeKey.startsWith("UINode<>:")) {
     return jet_copy_remember(value, typeKey);
   }
 

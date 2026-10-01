@@ -1,6 +1,25 @@
 // Direct-call resolution and TIR construction.
 // Ordinary local names resolve through SemaScopeTable. Registration may pass a
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
+use jet_foundation.[
+    BinOp,
+    Call,
+    CallArg,
+    CoreCallRecord,
+    Diagnostic,
+    Expr,
+    ExprField,
+    Span,
+    StrPart,
+    TContract,
+    TExpr,
+    TExprKind,
+    TStmt,
+    Type,
+    core_call_typed_signature,
+    expr_span,
+    type_name,
+]
 
 pub struct SemaDirectSpecialCheck {
     pub handled: Bool
@@ -18,7 +37,7 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     argument :: call.args[0]
-    operation := None
+    operation := BinOp?{None}
     if argument.expr == .Binary(op, _, _, _) {
         if sema_call_is_overflow_operation(op) -> operation = Val(op)
     }
@@ -36,8 +55,8 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
         &diagnostics.push(sema_call_special_diagnostic(call.name, call.name_span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    lhs := None
-    rhs := None
+    lhs := TExpr?{None}
+    rhs := TExpr?{None}
     if argument_value.kind == .Binary(_, _, _, left, right) {
         lhs = Val(left)
         rhs = Val(right)
@@ -97,7 +116,7 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment:
 // Core registry rows are selected by the caller's canonical route.  These
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
-pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     // The compiler query checker has a source-owned lowerer only for the
     // compiler API.  Build graph rows stay on the fixed Core path until their
     // caller-approved lowering exists; no runtime-shaped fallback is invented.
@@ -110,7 +129,7 @@ pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg],
         return SemaDirectSpecialCheck{handled: true, value: value}
     }
 
-    models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, [SemaCallModelOutputInput]{}, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if models.handled -> return SemaDirectSpecialCheck{handled: true, value: models.value}
 
     reactive := sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -130,7 +149,7 @@ pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg],
 
     SemaDirectSpecialCheck{handled: false, value: None}
 }
-pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if !call.name.contains(".") -> return SemaDirectSpecialCheck{handled: false, value: None}
     parts := call.name.split(".").to_list()
     if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
@@ -227,15 +246,15 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
     if call.args.len() < 1 || call.args.len() > 3 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`Err` takes a message and optional `code:` and `cause:`, got {call.args.len()} arguments", "the default error stores one message, one optional code, and one optional cause", "write `Err(\"message\")`, then add `code:` or `cause:` labels if needed"))
     }
-    message := None
-    code := None
-    cause := None
-    code_span := None
-    cause_span := None
+    message := Expr?{None}
+    code := Expr?{None}
+    cause := Expr?{None}
+    code_span := Span?{None}
+    cause_span := Span?{None}
     loop index in 0..<call.args.len() {
         argument :: call.args[index]
         label_span := argument.span
-        label_name := None
+        label_name := String?{None}
         if argument.label == .Val(label) {
             label_span = label.span
             label_name = Val(label.name)
@@ -378,7 +397,50 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
     SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types}
 }
 
-fn sema_call_direct_target_abi(target: SemaCallDirectTarget, environment: SemaScopeEnvironment) -> SemaRegistrationCallableAbi? {
+// D-CALLBACK-ERR1=A: a lambda argument fills a failure-type parameter `E`
+// written as `fn(..) -> U E!` with the failure its body really has. The lambda
+// is probed on its own; a body that cannot fail, or one that cannot be typed
+// before the other type parameters are known, binds `E` to `Never`.
+fn sema_call_lambda_failure_facts(facts: &SemaCallInferenceFacts, generic_params: [SemaInferenceTypeParam], params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) Never! {
+    loop index in 0..<args.len() {
+        slot :: if index < binding.slots.len() -> binding.slots[index] else -> -1
+        if sema_call_inference_needs_context(args[index].expr) && slot >= 0 && slot < params.len() {
+            if sema_call_parameter_type(params[slot]) == .Val(required) {
+                if required == .Fn(_, required_ret, _, _, _, _) {
+                    if required_ret == .Val(ret) {
+                        if ret == .Result(_, error) {
+                            if error == .Named(name) {
+                                generic := false
+                                loop param in generic_params {
+                                    if param.name == name -> generic = true
+                                }
+                                if generic {
+                                    failure := Type.Named{name: "Never"}
+                                    probe_scopes := sema_scope_snapshot(scopes)
+                                    probe_context := sema_check_context_snapshot(context)
+                                    probe_state := sema_ownership_state_snapshot(state)
+                                    probe_diagnostics := [Diagnostic]{}
+                                    value :: sema_check_expression(args[index].expr, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics)
+                                    if value == .Val(checked) {
+                                        if checked.ty == .Fn(_, lambda_ret, _, _, _, _) {
+                                            if lambda_ret == .Val(lambda_value) {
+                                                if lambda_value == .Result(_, lambda_error) -> failure = lambda_error
+                                            }
+                                        }
+                                    }
+                                    &facts.parameter_types.push(error)
+                                    &facts.argument_types.push(failure)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sema_call_direct_target_abi(target: SemaCallDirectTarget, environment: SemaScopeEnvironment) -> SemaRegistrationCallableABI? {
     if environment.registration_graph == .Val(graph) {
         abi := sema_registration_callable_abi(graph, target.symbol.id)
         if abi != None -> return abi
@@ -401,6 +463,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     binding := sema_call_bind_direct(call.name, candidate.signature, &args, call.name_span, &diagnostics) ?? return None
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
         inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
+        sema_call_lambda_failure_facts(&inferred_facts, candidate.generic_params, params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
         inferred :: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, &scopes, call.name_span, &diagnostics) ?? return None
         candidate = inferred
         params = sema_call_params_from_type(candidate.signature) ?? {
@@ -442,7 +505,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     if sema_contract_function_for_symbol(environment, candidate.symbol.id) == .Val(contract) {
-        slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], lowered[source_index])
+        slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], args[source_index])
         checked_contract :: sema_contract_check_call(contract, &lowered, slots, call.name_span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts

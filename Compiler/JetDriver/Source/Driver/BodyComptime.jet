@@ -1,6 +1,22 @@
 // Body expressions enter the ordinary comptime source/value graph. The
 // canonical driver evaluator remains the sole execution path; this file owns
 // body-site discovery, staging, and the value-fed function recheck boundary.
+use jet_foundation.[
+    Diagnostic,
+]
+use jet_sema.[
+    SemaComptimeBodySource,
+    SemaComptimeDeclarationStage,
+    SemaComptimeFunctionResult,
+    SemaComptimeItemKind,
+    SemaComptimeItemSource,
+    SemaComptimeItemValue,
+    SemaGraphResult,
+    SemaRegistrationGraph,
+    sema_comptime_body_item_source,
+    sema_comptime_graph_with_values,
+    sema_finalize_registration_graph,
+]
 
 struct JetDriverComptimeBodyResult {
     graph: SemaGraphResult
@@ -293,7 +309,8 @@ pub fn jet_driver_validate_checked_text(
         }
         return result
     }
-    if !jet_driver_merge_checked_text_functions(&initial_graph, resolved_registration, run.functions) {
+    merged_graph := initial_graph
+    if !jet_driver_merge_checked_text_functions(&merged_graph, resolved_registration, run.functions) {
         return jet_driver_comptime_body_failure(
             initial_graph,
             run.values,
@@ -302,7 +319,7 @@ pub fn jet_driver_validate_checked_text(
             "checked text method closure lost its checked function or registered owner",
         )
     }
-    jet_driver_comptime_body_result(initial_graph, run.values, run.functions, trace, true, false)
+    jet_driver_comptime_body_result(merged_graph, run.values, run.functions, trace, true, false)
 }
 
 pub fn jet_driver_recheck_comptime_bodies(

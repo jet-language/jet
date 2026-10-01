@@ -1,0 +1,15 @@
+// A type is identified by its full path, never by its bare name. The built-in
+// `Path` (from `Path.from`) and the `core.files.path` record `path.Path` share
+// a leaf name but are different types, so one program can use both.
+use core.files.path as path
+
+fn show(p: Path) -> String { "builtin {p.to_string()}" }
+
+fn show_record(p: path.Path) -> String { "record {p.raw}" }
+
+fn run() {
+    record :: path.join(path.of("docs"), "a.txt")
+    print(show_record(record))
+    builtin :: Path.from("docs").join("b.txt")
+    print(show(builtin))
+}

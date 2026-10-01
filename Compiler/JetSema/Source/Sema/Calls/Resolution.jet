@@ -3,6 +3,26 @@
 // This layer resolves only declarations/candidates supplied by Sema. It does
 // not maintain a second registry: module lookup remains SemaScopeTable's job,
 // while cross-module and Core candidates are supplied by Registration.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    Item,
+    Span,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TExpr,
+    TFailureCarrier,
+    TGenericParam,
+    TMethodRef,
+    Type,
+    TypeParam,
+    type_name,
+]
 
 pub struct SemaCallFacts {
     pub return_type: Type
@@ -324,7 +344,7 @@ fn sema_call_trait_nominal_for_bound(graph: SemaRegistrationGraph, bound: String
     None
 }
 
-fn sema_call_trait_nominal_for_symbol(graph: SemaRegistrationGraph, symbol: SymbolId) -> SemaRegistrationNominal? {
+fn sema_call_trait_nominal_for_symbol(graph: SemaRegistrationGraph, symbol: SymbolID) -> SemaRegistrationNominal? {
     loop graph_module in graph.modules {
         loop nominal in graph_module.nominals {
             if nominal.kind == SemaRegistrationNominalKind.Trait && nominal.symbol.id.key == symbol.key -> return Val(nominal)
@@ -403,7 +423,7 @@ pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_
         }
         else -> {
             receiver_name :: sema_call_generic_receiver_name(resolved_receiver) ?? return [SemaCallMethodCandidate]{}
-            parameter := None
+            parameter := TGenericParam?{None}
             index := generic_params.len()
             loop index > 0 {
                 index -= 1

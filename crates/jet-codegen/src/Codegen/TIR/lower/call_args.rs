@@ -12,6 +12,7 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_expr_as_mut_place;
 use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::lower_lambda_expecting_callable;
 use crate::Codegen::TIR::lower_lambda_expecting_host_borrow_with_return;
@@ -45,6 +46,34 @@ pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
         }
         _ => value,
     }
+}
+
+/// S48: `Val(value)` meeting a single-trait optional slot (`Adapter?`) holds
+/// the trait value, not the concrete payload. Sema proved the payload
+/// implements the trait; retype the optional so MIR boxes the payload once
+/// (`lower_carrier_payload` -> `TraitBox`).
+pub(crate) fn box_present_trait_payload(mut value: TExpr, want: &Type, cx: &Cx) -> TExpr {
+    let Type::Option(slot) = want else {
+        return value;
+    };
+    let trait_name = match slot.as_ref() {
+        Type::TraitObject(names) if names.len() == 1 => &names[0],
+        Type::Named(name) if cx.trait_names.contains(name) => name,
+        _ => return value,
+    };
+    let boxes = match &value.kind {
+        TExprKind::Present(payload) => match &payload.ty {
+            Type::Named(concrete) | Type::Apply { name: concrete, .. } => {
+                concrete != trait_name && !cx.trait_names.contains(concrete)
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    if boxes {
+        value.ty = Type::Option(Box::new(Type::TraitObject(vec![trait_name.clone()])));
+    }
+    value
 }
 
 /// Last expression-producing statement in a lambda block (mirrors sema tail rules).
@@ -1146,6 +1175,14 @@ pub(crate) fn lower_call_arg_value(
                 kind: TExprKind::Lambda(Box::new(tl)),
             }
         }
+        // D-SHAPE-PLACE1=A: a projected write window `&node.items` /
+        // `&values[i]` lowers as the exclusive place itself, so the callee's
+        // edits land in the owner's storage on every tier.
+        (Expr::Field(..) | Expr::Index { .. }, Some((AccessConvention::Write, _)))
+            if a.convention == AccessConvention::Write =>
+        {
+            lower_expr_as_mut_place(&a.expr, cx, env)
+        }
         _ => lower_expr(&a.expr, cx, env),
     };
     // `None` carries no payload to type it; the checked parameter does.
@@ -1257,6 +1294,7 @@ pub(crate) fn lower_one_call_arg(
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {
             super::preserve_typed_list_shape(v, want, cx)
         }
+        (Some((_, want @ Type::Option(_))), v) => box_present_trait_payload(v, want, cx),
         (_, v) => v,
     };
     let web_noncopy_int = cx.web_wasm_noncopy_int

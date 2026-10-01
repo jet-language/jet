@@ -1,0 +1,12 @@
+Error [E0121]: `machine` was consumed by `finish`, so it can't be used here
+  --> move_fallback_diverging.jet:45:13
+    |
+ 45 |     finish(^machine, first > 0)
+    |             ^^^^^^^
+  --> move_fallback_diverging.jet:42:22
+    |
+ 42 |         _ := finish(^machine, false)
+    |                      ^^^^^^^ `machine` moved to `finish` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `machine` after the move, or give `finish` a copy with `~machine` where it moved.
+More: jet-lang.dev/e/E0121

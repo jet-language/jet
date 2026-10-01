@@ -38,6 +38,14 @@ now the **package** interface, not the module interface. Inside a package,
 item-level reuse (layer 1) takes the role that module granularity used to
 play.
 
+- **Ruling, 2026-09-30 (granularity).** The package is only the starting
+  point. The target unit of reuse is the **item** (function, type,
+  constant): after a one-line change inside one function, only that function
+  and the items whose inputs actually changed are checked again, and later
+  compiled again. Every stage therefore builds on the item data model of
+  section 3.5, and a package record is a bundle of item records. Item reuse
+  inside a red package (stage S3R) is required, not optional.
+
 ## 1. Where Jet stands today
 
 | Area | Current state | Evidence |
@@ -391,34 +399,80 @@ does the same unless it changes an exported inferred fact. When a body edit
 changes a `pub` function's effect row or failure set, the interface digest
 changes, and only importers that named that function recheck.
 
-### 3.5 Inside a red package: items
+### 3.5 Items: the unit of reuse
 
-A red package runs as a small persisted query graph over its items
-(Skip-style memoized item functions; rustc-style ordered reads). The node
-kinds are:
+Every package check runs as a small persisted query graph over its items
+(Skip-style memoized item functions; rustc-style ordered reads). Package
+granularity is the special case in which every item of a package is green.
 
-- `decl(item)`: the checked declaration. Its output is the item's interface
-  payload.
-- `body(item)`: body checking. Its outputs are diagnostics, the local
-  summary (effect edges and direct effects, failure edges, memory calls,
-  taint returns, view sources), name references, discovered inputs, and the
-  checked body for build.
-- `solve(scc)`: package-local fixpoints over the condensed call graph for
-  effects, failure inference, memory, and taint. Dependency functions enter
-  as **sealed nodes** whose rows come from their interface.
-- `post(item)`: checks that need solved rows (effect boundaries, inferred
+**Item identity.** An item is a top-level function, method, type, trait,
+impl, constant, or effect, marker, fact, or unit declaration. Its identity
+is the package-qualified semantic path (`NameLedger::module_identity` plus
+the item path, for example `pkg:Compiler/JetSema::Source/Sema/Check.jet::
+check_expr`), never a loader alias, module index, or byte offset. Lambdas
+belong to the function that contains them.
+
+**Item fingerprints.** Each item record carries three digests:
+
+| Digest | Covers | Changes when |
+|---|---|---|
+| **signature** | the checked declaration with bodies erased: parameters, access conventions, type parameters and bounds, the written or inferred failure contract, attributes, and, for types, fields, variants, derives, and impls (`item_interface_fingerprint`, extended with the inferred contract) | the item's interface changes |
+| **body** | the canonical item syntax with bodies, spans excluded (`item_source_fingerprint`) | any edit to the item except whitespace and comments |
+| **summary** | the item's local inferred facts: effect summary (direct effects, call edges, `maximal`, regions, callback and autodiff obligations, discarded results), failure edges and `failure_direct`, memory summary, taint returns, view sources, OS gates, web bucket facts | an edit changes what the body does, not only how it is written |
+
+**Reads.** While an item is checked, the checker records the ordered list of
+`(identity, facet)` pairs it read, where the facet is `signature`,
+`summary` (a solved row), `value` (a constant's comptime value),
+`template` (a generic or inline body), or a coarse facet for resolution
+that is not tied to one name: `impls(package)` (the trait and impl table
+of a package), `imports(module)` (the module's resolved import
+environment), and `environment` (compiler, Core, target facts). Name
+references that the checker already records in the `NameLedger` with a
+semantic identity give the precise part of this list; the coarse facets
+keep implicit resolution (method lookup, trait selection, derives, the
+prelude) sound until the checker records those reads one by one.
+
+**Nodes.**
+
+- `decl(item)`: the checked declaration, including the #3708 failure
+  contract from the failure-union probe. Output: the signature digest.
+- `body(item)`: body checking. Reads signatures, values, and templates.
+  Outputs: diagnostics with item-relative spans, the local summary, name
+  references, address-taken names, discovered inputs, and, for build lenses,
+  the lowered body (`jet.body`). The checked AST itself is never persisted.
+- `solve(scc)`: fixpoints over the condensed call graph for effects,
+  failure inference, memory, and taint. Inputs are local summaries; outputs
+  are solved rows per item. Items of other packages enter as **sealed
+  nodes** whose rows come from their records.
+- `post(item)`: checks that read solved rows (effect boundaries, inferred
   purity, replayable effects, secret grants, region caps, callback bounds,
-  discarded results).
+  discarded results, memory facts, web and OS gates). Reads solved-row
+  digests only.
 - `iface(package)`: the projection that produces the interface record.
 
-Each node stores its input fingerprint, its output fingerprint, and its
-ordered reads. On the next check a node is green when its own input is
-unchanged and try-mark-green succeeds on its reads. A re-executed node whose
-output fingerprint is unchanged keeps its readers green. `solve(scc)` reruns
-only for strongly connected components whose member summaries changed, and
-it propagates only changed rows. Item spans are stored relative to the item
-start, so inserting a line above an item does not invalidate it; the
-renderer rebases spans.
+**Red/green with early cutoff.** An item's input fingerprint is H(body
+digest, signature digest, the digests of its reads, in read order). On the
+next check a node is green when its input fingerprint is unchanged. A node
+that runs again and produces the same output digest keeps its readers
+green:
+
+- a body edit that keeps the signature and summary digests rechecks one
+  `body(item)` and nothing else;
+- a body edit that changes the summary reruns `solve` for that item's
+  strongly connected component, and then `post` only for items whose read
+  solved rows changed; callers' `body` nodes stay green, because a body
+  reads its callees' signatures, not their effect rows;
+- a signature edit reruns `body` for items that read that signature.
+
+Item spans are stored relative to the item start, so inserting a line above
+an item does not invalidate it; the renderer rebases spans.
+
+**Records.** The package check record (`jet.pkg-check`) points to one
+`jet.items` blob, the bundle of the package's item records: identity, the
+three digests, input fingerprint, reads, outputs, and diagnostics ranges.
+Package-level reuse (section 3.4) is the case in which the whole bundle is
+green; item-level reuse loads a red package's previous bundle through the
+priors and keeps every item whose input fingerprint still matches.
 
 Within a package, files share one namespace (D-MOD-CYCLE1=A). Declaration
 reads therefore go to item names, not files, which makes Swift-style file
@@ -594,13 +648,105 @@ unless noted):
 | Name ledger publication (`:735`) | per-package ledger in the record; merged for tooling (`jet-semindex`) | references and definitions |
 | Duplicate root panic, Core lint filter, ordering (`:757-773`) | program level | none |
 
-`IncrementalSemaCache` stays as the in-process item cache for editor
-sessions. Its `CachedFunctionBody` fields are exactly a `body(item)` node's
-outputs plus the checked `Func`. Persisting them for the Rust checker (stage
-3R) is optional: completion walks bodies inside a red package, so item reuse
-there also requires every phase to read per-item summaries. That work is
-done only if stage 2 measurement shows large single packages, such as
-JetSema at about 57k lines, still miss the loop target.
+**Item reuse in the Rust checker (S3R, required).** `IncrementalSemaCache`
+already keys one `body(item)` node per function in process memory. Its
+`CachedFunctionBody` fields are that node's outputs plus the checked `Func`.
+The persisted form keeps the outputs and drops the checked `Func`:
+
+- A reused function keeps its parsed body in the bundle and is not checked
+  again. Its stored outputs (diagnostics, effect summary with lambda
+  summaries, pending diagnostics, address-taken names, discovered inputs,
+  name references) are seeded where the body check would have produced
+  them.
+- Every completion phase that walks bodies today splits into a per-item part
+  whose output joins the item record (const address-taken names, web bucket
+  facts and call edges, OS cross-gate calls, fact-tag uses, `used_core`
+  usages, helper-layer usages) and a solve or check over those per-item
+  facts. A phase never walks a reused body.
+- Summary keys and call edges are stored as semantic identities (R4) and
+  mapped to the current bundle's loader aliases when seeded.
+- Build lenses store lowered bodies (`jet.body`) per item, so the checked AST
+  never needs a lossless on-disk form.
+
+The package-level milestone of S2 is the case in which every item of a
+dependency package is green: its modules enter with bodies erased except
+templates, its item records seed the summaries, its diagnostics replay, and
+no phase runs over its items. It uses the same item records, so S3R adds
+partial reuse inside a red package without changing the record format.
+
+**S3R first cut (2026-09-30, `Bundle/ItemReuse.rs`).** Inside a `jet check`
+package-record session, every function and method body of a checked module
+has an item check record (`jet.item-check/v1`, an action record) under a key
+built from: the compiler identity and check environment; the module's reads,
+which are the span-free interface and template bodies (generic and
+`#Inline(Always)` functions, methods of generic types, traits) of every
+module in its package and its transitive imports; the body's cache key; and
+its span-free syntax. On a hit the body is not checked. Its effect summaries
+(edges as module identities), address-taken names, exact-`Int` use, name
+references and import-alias uses are seeded instead. Spans are stored
+relative to the item. A reference into another declaration is anchored to
+the nearest function or method of the defining module and must name the
+same source text when it is replayed, so moving an item keeps it green. A
+body is recorded only when its check produced no diagnostic (lints
+included), pending diagnostic, publication, discovered input or structure
+fact. Modules with compile-time evaluation or view-returning callables do
+not take part. The first cut also required the check to leave the function
+exactly as it was parsed, so that the bundle stayed identical to a cold
+check's. Measured on snapshot62 that rule recorded nothing: the checker
+rewrites every value-block body (`check_value_block` elaborates the tail,
+and receiver types, `Ok`/`Place` wrappers and binding types are filled in),
+even `n - 1`.
+
+**S3R checked-body delta (2026-09-30, `Bundle/BodyDelta.rs`).** The record
+now carries the parts of the function the checker rewrites (parameters,
+return type, body statements, reactive upgrade lines) as they were after the
+check, in a compact binary encoding with spans relative to the function's
+start. On a hit the delta is installed on the parsed function instead of
+checking it, so the bundle is again exactly the one a cold check builds and
+no later phase needs per-item facts yet. Soundness does not rest on the
+encoding being complete: a delta is recorded only when installing it on the
+parsed function rebuilds the checked function exactly (`Debug` equality);
+node kinds the encoding does not list (lambdas, compile-time names, string
+and binary match literals, `#Off`/`#DebugOnly` and policy statements, and
+measure, quantity and fixed-list types), sema-filled fields it does not carry
+(lambda metadata, binding markers, compile-time values), a span the parser
+did not give the function (sema copies spans from other declarations, such
+as a callee's default argument, and those would not move with the item),
+and a published view provenance are refused and counted as "not
+recordable". Item records are read without touching the store journal and
+published, with their uses, in one store transaction when the check ends:
+one lock, capacity scan and synced journal write per item made the sema
+slice three to four times slower. The key adds the digest of the item's source text, so a
+whitespace edit inside an item misses while moving an item keeps it green;
+the record repeats that digest and the delta's digest, and both are checked
+again when it is replayed. The clone and the encoding happen only for bodies
+of modules that take part, that is only inside a package-record session; the
+rebuild check renders the checked function's `Debug` once and streams the
+rebuilt function's rendering against it, stopping at the first difference.
+The package store-log row reports `items: N reused,
+M checked [names], K not recordable (reason: count)`; on the S3R proof
+package a one-line body edit reports `3 reused, 1 checked [fn:area]` for the
+edited module and `4 reused, 0 checked` for its sibling, with output
+byte-identical to a check against an empty store.
+
+**Compile-time constant values (2026-09-30, `Bundle/ComptimeReuse.rs`).**
+Registration evaluates every `prep` and module-value constant through the
+MIR fragment evaluator, which lowers, optimizes and verifies one program per
+constant; on the sema slice this was the largest warm cost. In a
+package-record session a successful evaluation is stored as a
+`jet.comptime-value/v1` action record under a key over everything the
+evaluator reads: the compiler identity and check environment (the build
+clock only when some source reads `$build.stamp`), the loaded source of every
+other module of the bundle, the evaluating module's identity, imports and
+every item that is not a top-level function (span-free), the top-level
+functions the constant reaches by name from its initializer or from those
+items, the values of the constants evaluated before it, and its checked
+initializer. A value is recorded only when its evaluation read no file and
+the value codec (shared with `BodyDelta`) carries it exactly: no closure, no
+told report, no source span, and the decoded bytes rebuild the value
+(`Debug` equality). A body edit to a function no constant reaches keeps
+every constant green; an edit to one a constant reaches evaluates that
+constant and every constant that reads its value again.
 
 ## 5. The self-hosted JetDriver and JetSema
 
@@ -697,17 +843,17 @@ parallel; stage 2 needs #3862.
 |---|---|---|
 | **S1 Identity and records** | Package partition and DAG in the Rust bundle (R1); stable semantic keys for summaries (R4); fingerprint functions (source, interface, item); the std-only binary record codec in `jet-foundation`; `jet-store` record kinds in the shared cache under `~/.cache`; priors, stamps, and the records index in the workspace-root `.jet/` (workspace root resolved first; never per-package folders); `explain-build` rows per package with the reason (green by key, green by usage, red, cutoff); counters. Proof: two runs and two checkout paths give equal digests; a comment or body edit leaves the interface digest unchanged; a signature edit changes it. | **days** (4–6) |
 | **S1b Sealed reader** | One audited reader for check-time file and environment reads in sema, comptime, and the loader, with the injected-read test (#2517 criteria 2/6). Needed before any key is trusted beyond the Receipt's refusals. | **days** (3–5) |
-| **S2 Rust package checks (`jet check`)** | R2 in its re-parse form, R3, R5, the per-phase table in section 4, the program phase, per-package diagnostic records and replay, usage cutoff, and Core as dependency packages. Check mode and the bootstrap check. | **weeks** (2–3) |
+| **S2 Rust package checks (`jet check`)** | R2 in its re-parse form, R3, R5, the per-phase table in section 4, the program phase, usage cutoff, and Core as dependency packages. Records are item bundles from the start (section 3.5): each item record carries its signature, body, and summary digests, its reads, and its outputs; a green package is one whose whole item bundle is green. Check mode and the bootstrap check. | **weeks** (2–3) |
 | **S2g Gates** | The section 6 scenarios on `Compiler/` as corpus rows and focused tests; `--verify`; randomized replay. | **days** (2–4), after S2 |
-| **S3R Rust item reuse (optional)** | Persist `body(item)` outputs and make completion phases read per-item summaries inside a red package. Only if S2g shows JetSema-sized packages miss the loop target. | **weeks** (2) |
+| **S3R Rust item reuse (required, owner ruling)** | Inside a red package, reuse every item whose input fingerprint matches; split the body-walking completion phases into per-item facts (section 4); record reads, starting from the `NameLedger` references plus the coarse facets; item-level early cutoff through the summary digest. Gate: a one-line body edit in one JetSema function checks one `body(item)`. | **weeks** (2–3) |
 | **S4 Build lenses** | `jet.pkg-object` per package (TIR/MIR, then #2519 units); instantiation demands; `run`, `test`, and `eval` reuse green packages; the Receipt remains only for whole-invocation replay. Joins #2519 and #2520. | **weeks** (3–5) |
 | **S5a Self-hosted identity and codec** | `Identity.jet` package keys, the JetFoundation codec with conformance bytes, and the host store call. | **days** (4–6) |
 | **S5b Self-hosted package checks** | Sealed effect nodes, interface projection, package-restricted finalize and body walks, the `Pipeline.jet` package loop, and the program phase in JetSema. | **weeks** (2–3) |
 | **S5c Self-hosted item memo** | `sema_check_function` memo with recorded reads, SCC-local re-solve, and lazy loads. | **weeks** (1–2) |
 
-Order for the bootstrap loop: S1 → S1b → S2 → S2g gives the dogfood win in
-the checker that runs today. S5a starts alongside S1 once the codec layout
-is frozen. S3R is decided by S2g's numbers. S4 follows S2.
+Order for the bootstrap loop: S1 → S1b → S2 → S3R → S2g gives the dogfood
+win in the checker that runs today. S5a starts alongside S1 once the codec
+layout is frozen. S4 follows S2 and stores lowered bodies per item.
 
 ## 8. Owner questions this design surfaces
 

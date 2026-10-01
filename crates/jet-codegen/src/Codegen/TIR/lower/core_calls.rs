@@ -95,7 +95,7 @@ fn unit_callback_type() -> Type {
 }
 fn ui_drop_callback_type() -> Type {
     Type::Fn {
-        params: vec![Type::List(Box::new(Type::Named("UiDropItem".to_string())))],
+        params: vec![Type::List(Box::new(Type::Named("UIDropItem".to_string())))],
         ret: Some(Box::new(unit_type())),
         effect_bound: None,
         param_contract: None,
@@ -106,7 +106,7 @@ fn ui_drop_callback_type() -> Type {
 fn ui_preview_callback_type() -> Type {
     Type::Fn {
         params: Vec::new(),
-        ret: Some(Box::new(Type::Named("UiNode".to_string()))),
+        ret: Some(Box::new(Type::Named("UINode".to_string()))),
         effect_bound: None,
         param_contract: None,
         call_metadata: None,
@@ -1074,13 +1074,13 @@ pub(crate) fn lower_core_closure_call(
             let viewport = if let Some(index) = viewport_index {
                 Box::new(lower_optional_core_arg(
                     &args[index],
-                    &Type::Named("UiPreviewViewport".to_string()),
+                    &Type::Named("UIPreviewViewport".to_string()),
                     cx,
                     env,
                 ))
             } else {
                 Box::new(TExpr {
-                    ty: Type::Option(Box::new(Type::Named("UiPreviewViewport".to_string()))),
+                    ty: Type::Option(Box::new(Type::Named("UIPreviewViewport".to_string()))),
                     kind: TExprKind::Absent,
                 })
             };
@@ -1096,7 +1096,7 @@ pub(crate) fn lower_core_closure_call(
             ));
             let site = jit_spawn_site(lam, cx, env);
             return Some(TExpr {
-                ty: Type::Named("UiPreview".to_string()),
+                ty: Type::Named("UIPreview".to_string()),
                 kind: TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::UiPreview {
                         name: Box::new(lower_owned_expr(&name_arg.expr, cx, env)),
@@ -1106,23 +1106,10 @@ pub(crate) fn lower_core_closure_call(
                         playground: method == "playground",
                         source_file: cx.file.clone(),
                         source_span,
-                        source_start_line: crate::Diagnostics::span_line_col(
-                            &cx.src,
-                            source_span.start,
-                        )
-                        .0 as u32,
-                        source_start_column: crate::Diagnostics::span_line_col(
-                            &cx.src,
-                            source_span.start,
-                        )
-                        .1 as u32,
-                        source_end_line: crate::Diagnostics::span_line_col(&cx.src, source_span.end)
-                            .0 as u32,
-                        source_end_column: crate::Diagnostics::span_line_col(
-                            &cx.src,
-                            source_span.end,
-                        )
-                        .1 as u32,
+                        source_start_line: cx.src_line_col(source_span.start).0 as u32,
+                        source_start_column: cx.src_line_col(source_span.start).1 as u32,
+                        source_end_line: cx.src_line_col(source_span.end).0 as u32,
+                        source_end_column: cx.src_line_col(source_span.end).1 as u32,
                         build_id: cx.preview_build_id.clone(),
                         revision: cx.preview_revision.clone(),
                     },
@@ -1151,7 +1138,7 @@ pub(crate) fn lower_core_closure_call(
             let display = Box::new(lower_owned_expr(&display_arg.expr, cx, env));
             let shortcut = Box::new(lower_optional_core_arg(
                 &args[1],
-                &Type::Named("UiShortcut".to_string()),
+                &Type::Named("UIShortcut".to_string()),
                 cx,
                 env,
             ));
@@ -1165,7 +1152,7 @@ pub(crate) fn lower_core_closure_call(
             ));
             let site = jit_spawn_site_unit(lam, cx, env);
             return Some(TExpr {
-                ty: Type::Named("UiNode".to_string()),
+                ty: Type::Named("UINode".to_string()),
                 kind: TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::UiButtonOnClick {
                         label: display,
@@ -1209,11 +1196,11 @@ pub(crate) fn lower_core_closure_call(
                     lam,
                     cx,
                     env,
-                    &[Type::List(Box::new(Type::Named("UiDropItem".to_string())))],
+                    &[Type::List(Box::new(Type::Named("UIDropItem".to_string())))],
                 )
             });
             return Some(TExpr {
-                ty: Type::Named("UiNode".to_string()),
+                ty: Type::Named("UINode".to_string()),
                 kind: TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::UiTextInputOnDrop {
                         state,

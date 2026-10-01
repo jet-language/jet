@@ -7,7 +7,9 @@ use super::trust::{
     POLICY_VERSION,
 };
 use crate::{is_item_input, ReplFlags, ReplPolicy, ReplTurn, ReplTurnStatus, RerunPlan, Session};
+use jet_foundation::JSON::quote as json_str;
 use jet_foundation::SHA256;
+use jet_semindex::html_escape;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -1409,15 +1411,6 @@ fn table_mime(value: &crate::Comptime::CtValue) -> Option<String> {
     Some(html)
 }
 
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 fn notebook_flags() -> ReplFlags {
     ReplFlags::new(&["IO".into(), "FS".into()], &[])
 }
@@ -1481,21 +1474,4 @@ fn json_strings(values: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!("[{items}]")
-}
-
-fn json_str(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
 }

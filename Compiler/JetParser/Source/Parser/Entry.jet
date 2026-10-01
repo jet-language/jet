@@ -1,7 +1,60 @@
 // Public parser entry points preserve lexer diagnostics and original byte spans.
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    ImportDecl,
+    ParseResult,
+    Program,
+    Span,
+    TextEdit,
+    WebBucket,
+    ast_program,
+    diagnostic_from_registry,
+    diagnostic_with_edit_grade,
+]
+use jet_lexer.[
+    Lexed,
+    STRING_PART_INTERPOLATION,
+    TOKEN_AT,
+    TOKEN_BANG,
+    TOKEN_COLON_COLON,
+    TOKEN_EOF,
+    TOKEN_HASH,
+    TOKEN_IDENT,
+    TOKEN_KW_COMPTIME,
+    TOKEN_KW_CONST,
+    TOKEN_KW_DERIVE,
+    TOKEN_KW_EFFECT,
+    TOKEN_KW_ENUM,
+    TOKEN_KW_EXTERN,
+    TOKEN_KW_FN,
+    TOKEN_KW_IMPL,
+    TOKEN_KW_MODULE,
+    TOKEN_KW_PRIV,
+    TOKEN_KW_PUB,
+    TOKEN_KW_STRUCT,
+    TOKEN_KW_TAG,
+    TOKEN_KW_TRAIT,
+    TOKEN_KW_USE,
+    TOKEN_LBRACKET,
+    TOKEN_LPAREN,
+    TOKEN_RBRACKET,
+    TOKEN_RPAREN,
+    Token,
+    lex,
+    lex_generated,
+]
 
 pub fn parse_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex(source), parser_line_starts(source))
+}
+
+// Embedded Core library sources are vetted stdlib internals: they may spell
+// the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
+// loader's embedded-Core path parses this way; a user file never does.
+pub fn parse_generated_source(source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lex_generated(source), parser_line_starts(source))
 }
 
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
@@ -46,7 +99,48 @@ fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Dia
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
     program.fenced_statements = prepared.fenced_statements
+    program.used_import_names = parser_used_import_names(state.tokens, program.imports)
     ParseResult{program: program, diagnostics: state.diagnostics}
+}
+
+// L0103 (D-LINT-UNUSED1): an import's local name is read when the file spells
+// it outside every import declaration, interpolations included. The module
+// root of a member import (`b` in `use b.[f]`) reads that name as well.
+fn parser_used_import_names(tokens: [Token], imports: [ImportDecl]) -> [String] Never! {
+    candidates := [String]{}
+    used := [String]{}
+    loop declaration in imports {
+        if declaration.kind == {
+            .Unqualified(module_alias, _, items, _, _) -> {
+                if !used.contains(module_alias) -> &used.push(module_alias)
+                loop item in items {
+                    parts :: item.original.split(".").to_list()
+                    &candidates.push(item.alias ?? parts[parts.len() - 1])
+                }
+            }
+            else -> &candidates.push(declaration.alias)
+        }
+    }
+    parser_collect_used_import_names(tokens, imports, candidates, &used)
+    used
+}
+
+fn parser_collect_used_import_names(tokens: [Token], imports: [ImportDecl], candidates: [String], used: &[String]) Never! {
+    loop token in tokens {
+        if token.kind == TOKEN_IDENT && candidates.contains(token.payload.decoded) && !used.contains(token.payload.decoded) {
+            inside_import := false
+            loop declaration in imports {
+                if token.span.start >= declaration.span.start && token.span.end <= declaration.span.end {
+                    inside_import = true
+                    break
+                }
+            }
+            if !inside_import -> &used.push(token.payload.decoded)
+        }
+        loop part in token.payload.string_parts {
+            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_used_import_names(part.tokens, imports, candidates, &used)
+        }
+    }
 }
 
 fn parser_parse_program(state: &JetParserState) -> Program {

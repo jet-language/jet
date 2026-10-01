@@ -46,6 +46,10 @@ pub struct Program {
     // L0303 (#3716): each dispatch table's authored `else` arm, so sema can
     // point at an arm that can never run and delete it.
     pub else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
+    // L0103 (D-LINT-UNUSED1): the local names of this file's imports that the
+    // file spells outside its import declarations, so sema can report an
+    // import that is never read.
+    pub used_import_names: [String]{[String]{}}
 }
 
 pub struct ElseArmSpan {
@@ -286,7 +290,7 @@ pub enum ContribValue {
     System(value: SystemLit)
     Image(value: ImageLit)
     Fleet(value: FleetLit)
-    VmTest(value: VmTestLit)
+    VMTest(value: VMTestLit)
     Profile(value: ProfileLit)
     Perf(value: PerfLit)
 }
@@ -421,20 +425,20 @@ pub struct HostEntry {
     pub span: Span
 }
 
-pub struct VmTestLit {
+pub struct VMTestLit {
     pub explicit_type: Span?
-    pub fields: [VmTestField]
+    pub fields: [VMTestField]
     pub span: Span
 }
 
-pub struct VmTestField {
+pub struct VMTestField {
     pub name: String
     pub name_span: Span
-    pub value: VmTestFieldValue
+    pub value: VMTestFieldValue
     pub span: Span
 }
 
-pub enum VmTestFieldValue {
+pub enum VMTestFieldValue {
     Hosts(entries: [HostEntry])
     Run(span: Span)
     Other(value: Expr)
@@ -445,7 +449,7 @@ pub enum Namespace {
     System
     Image
     Fleet
-    VmTest
+    VMTest
     Perf
     Profile
 }

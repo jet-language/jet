@@ -135,12 +135,6 @@ impl TableColumn {
             alignment: kind.default_alignment(),
         }
     }
-
-    /// Override the inferred alignment for a deliberate presentation choice.
-    pub fn with_alignment(mut self, alignment: TableAlignment) -> Self {
-        self.alignment = alignment;
-        self
-    }
 }
 
 /// One bounded row of typed cells.
@@ -326,11 +320,6 @@ impl<'a> TableLayout<'a> {
     /// Return the requested width after the renderer's safety cap.
     pub const fn width(&self) -> usize {
         self.width
-    }
-
-    /// Return true when the grid was replaced by a label/value layout.
-    pub const fn is_narrow(&self) -> bool {
-        self.narrow
     }
 
     /// Render the layout when the profile permits human output.

@@ -46,7 +46,7 @@ use core.time as time
 fn pure_fn_injected_rng_ok() {
     let src = r#"
 use core.math.random as random
-fn draw(rng: &Rng) -[]> Int {
+fn draw(rng: &RNG) -[]> Int {
     return rng.int(1, 6)
 }
 fn run() {
@@ -55,7 +55,7 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "injected Rng should compile: {:?}", res.err());
+    assert!(res.is_ok(), "injected RNG should compile: {:?}", res.err());
 }
 
 /// The deterministic capability constructors (`Clock.new`, `random.rng`) are
@@ -536,7 +536,7 @@ fn run() {
 fn pure_fn_widened_rng_ok() {
     let src = r#"
 use core.math.random as random
-fn draws(rng: &Rng) -[]> Bool {
+fn draws(rng: &RNG) -[]> Bool {
     flip := rng.bool()
     xs := [1, 2, 3]
     chosen := rng.pick(xs) ?? 0
@@ -552,7 +552,7 @@ fn run() {
     let res = jet::compile(src);
     assert!(
         res.is_ok(),
-        "widened Rng draws should compile: {:?}",
+        "widened RNG draws should compile: {:?}",
         res.err()
     );
 }
@@ -562,7 +562,7 @@ fn run() {
 fn rng_pick_returns_element_option() {
     let src = r#"
 use core.math.random as random
-fn choose(rng: &Rng) -[]> String {
+fn choose(rng: &RNG) -[]> String {
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
 }
@@ -709,15 +709,24 @@ fn run_fresh_draw_program(dir: &std::path::Path, args: &[&str]) -> String {
 /// literal in the generated Rust; a folded seeded draw repeats one value.
 #[test]
 fn ambient_draws_are_never_folded_into_the_build() {
-    let dir = common::unique_tmp("jet_fresh_draws");
+    // Each program is its own package: `unique_tmp` already owns a package.jet
+    // at the fixture root, so an inline `package {}` header there is E1363.
+    let root = common::unique_tmp("jet_fresh_draws");
+    let uuid_dir = root.join("uuid");
+    let seeded_dir = root.join("seeded");
+    for (dir, name) in [(&uuid_dir, "fresh_uuid"), (&seeded_dir, "fresh_seeded")] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("package.jet"),
+            format!(
+                "name: \"{name}\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc, Rand] }} }}\n"
+            ),
+        )
+        .unwrap();
+    }
     std::fs::write(
-        dir.join("uuid.jet"),
-        r#"package {
-    name: "fresh_uuid"
-    version: "0.1.0"
-    authority: { holds: { allow: [IO, Mem.Alloc, Rand] } }
-}
-use core.crypto.uuid as uuid
+        uuid_dir.join("uuid.jet"),
+        r#"use core.crypto.uuid as uuid
 
 fn run() -[Rand, IO]> {
     id :: uuid.v4() ?? panic("uuid")
@@ -727,13 +736,8 @@ fn run() -[Rand, IO]> {
     )
     .unwrap();
     std::fs::write(
-        dir.join("seeded.jet"),
-        r#"package {
-    name: "fresh_seeded"
-    version: "0.1.0"
-    authority: { holds: { allow: [IO, Mem.Alloc, Rand] } }
-}
-use core.math.random as random
+        seeded_dir.join("seeded.jet"),
+        r#"use core.math.random as random
 
 fn run() -[Rand, IO]> {
     random.seed(42)
@@ -744,16 +748,16 @@ fn run() -[Rand, IO]> {
 "#,
     )
     .unwrap();
-    let first = run_fresh_draw_program(&dir, &["run", "--interpret", "uuid.jet"]);
-    let second = run_fresh_draw_program(&dir, &["run", "--interpret", "uuid.jet"]);
+    let first = run_fresh_draw_program(&uuid_dir, &["run", "--interpret", "uuid.jet"]);
+    let second = run_fresh_draw_program(&uuid_dir, &["run", "--interpret", "uuid.jet"]);
     assert_ne!(first.trim(), second.trim(), "uuid.v4 repeated across runs");
-    let rust = run_fresh_draw_program(&dir, &["emit", "--rust", "uuid.jet"]);
+    let rust = run_fresh_draw_program(&uuid_dir, &["emit", "--rust", "uuid.jet"]);
     for id in [first.trim(), second.trim()] {
         assert!(!rust.contains(id), "generated Rust contains the drawn UUID {id}");
     }
     for tier in [&["run", "seeded.jet"][..], &["run", "--interpret", "seeded.jet"]] {
         assert_eq!(
-            run_fresh_draw_program(&dir, tier).trim(),
+            run_fresh_draw_program(&seeded_dir, tier).trim(),
             "true",
             "two seeded draws repeated one folded value on {tier:?}"
         );

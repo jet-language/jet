@@ -115,12 +115,6 @@ fn tcp_stream(handle: i64) -> Option<Arc<Mutex<JetTCPStream>>> {
         _ => None,
     })
 }
-fn ip_addr(handle: i64) -> Option<JetIpAddr> {
-    with_handle(handle, |h| match h {
-        NetHttpHandle::IPAddr(value) => Some(value.clone()),
-        _ => None,
-    })
-}
 
 fn tls_client_config(handle: i64) -> Option<JetTLSClientConfig> {
     with_handle(handle, |h| match h {
@@ -134,10 +128,6 @@ fn tls_root_certificates(handle: i64) -> Option<JetTLSRootCertificates> {
         NetHttpHandle::TLSRootCertificates(roots) => Some(roots.clone()),
         _ => None,
     })
-}
-
-pub(crate) fn tls_root_certificates_for_ambient(handle: i64) -> Option<JetTLSRootCertificates> {
-    tls_root_certificates(handle)
 }
 
 fn tls_client_identity(handle: i64) -> Option<JetTLSClientIdentity> {
@@ -395,10 +385,6 @@ fn option_string_result(s: Option<String>) -> i64 {
     })
 }
 
-fn option_int(value: Option<i64>) -> i64 {
-    value.map(|value| value.wrapping_add(1)).unwrap_or(0)
-}
-
 fn map_net_ok<T>(r: Result<T, JetNetError>, f: impl FnOnce(T) -> i64) -> i64 {
     match r {
         Ok(v) => result_ok_handle(f(v)),
@@ -593,15 +579,6 @@ pub(crate) fn test_capture_http_handler(callable: i64) -> TestHttpHandler {
     TestHttpHandler(wrap_http_handler(callable))
 }
 
-pub(crate) fn test_invoke_captured_http_handler(handler: &TestHttpHandler) -> Result<(), String> {
-    let request = JetHTTPRequest::server("GET", "/".to_string(), Vec::new(), JetHTTPHeaders::new());
-    match (handler.0)(request) {
-        Ok(_) => Ok(()),
-        Err(JetHTTPError::IO { operation }) => Err(operation),
-        Err(_) => Err("HTTP handler returned an error".to_string()),
-    }
-}
-
 fn wrap_http_handler(callable: i64) -> JetHTTPHandler {
     let Some((epoch, slot)) = resident_http_callable(callable) else {
         return invalid_http_handler();
@@ -670,30 +647,6 @@ fn jet_jit_net_socket_addr(host: i64, port: i64) -> i64 {
         push_handle(NetHttpHandle::SocketAddr(a))
     })
 }
-fn jet_jit_net_ip_addr(text: i64) -> i64 {
-    let text = clone_string(text);
-    map_net_ok(jet_net_ip_addr(&text), |ip| {
-        push_handle(NetHttpHandle::IPAddr(ip))
-    })
-}
-
-fn jet_jit_net_ip_to_string(ip: i64) -> i64 {
-    ip_addr(ip)
-        .map(|ip| alloc_string(jet_net_ip_to_string(&ip)))
-        .unwrap_or_else(|| alloc_string(String::new()))
-}
-
-fn jet_jit_net_ip_is_ipv4(ip: i64) -> i64 {
-    i64::from(ip_addr(ip).is_some_and(|ip| jet_net_ip_is_ipv4(&ip)))
-}
-
-fn jet_jit_net_socket_addr_parse(text: i64) -> i64 {
-    let text = clone_string(text);
-    map_net_ok(jet_net_socket_addr_parse(&text), |addr| {
-        push_handle(NetHttpHandle::SocketAddr(addr))
-    })
-}
-
 fn jet_jit_net_tcp_connect_addr(addr: i64) -> i64 {
     let Some(addr) = with_handle(addr, |h| match h {
         NetHttpHandle::SocketAddr(addr) => Some(addr.clone()),
@@ -704,14 +657,6 @@ fn jet_jit_net_tcp_connect_addr(addr: i64) -> i64 {
     map_net_ok(jet_net_tcp_connect_addr(&addr), |stream| {
         push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream))))
     })
-}
-
-fn jet_jit_net_tcp_connect_happy(host: i64, port: i64, timeout_ms: i64) -> i64 {
-    let host = clone_string(host);
-    map_net_ok(
-        jet_net_tcp_connect_happy(&host, port, timeout_ms),
-        |stream| push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream)))),
-    )
 }
 
 fn jet_jit_net_socket_to_string(addr: i64) -> i64 {
@@ -1155,17 +1100,6 @@ fn jet_jit_net_udp_bind(addr: i64) -> i64 {
     let addr = clone_string(addr);
     map_net_ok(jet_net_udp_bind(&addr), |s| {
         push_handle(NetHttpHandle::UdpSocket(Arc::new(s)))
-    })
-}
-fn jet_jit_net_udp_bind_addr(addr: i64) -> i64 {
-    let Some(addr) = with_handle(addr, |h| match h {
-        NetHttpHandle::SocketAddr(addr) => Some(addr.clone()),
-        _ => None,
-    }) else {
-        return net_invalid("udp bind", "SocketAddr");
-    };
-    map_net_ok(jet_net_udp_bind_addr(&addr), |socket| {
-        push_handle(NetHttpHandle::UdpSocket(Arc::new(socket)))
     })
 }
 
@@ -1655,8 +1589,8 @@ fn jet_jit_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
 
 fn tls_version_bits(version: JetTLSVersion) -> i64 {
     match version {
-        JetTLSVersion::Tls12 => 0,
-        JetTLSVersion::Tls13 => 1,
+        JetTLSVersion::TLS12 => 0,
+        JetTLSVersion::TLS13 => 1,
     }
 }
 
@@ -1673,8 +1607,8 @@ fn tls_trust_bits(value: i64) -> Option<JetTLSTrust> {
 
 fn tls_version_from_bits(value: i64) -> Option<JetTLSVersion> {
     match value & 0xff {
-        0 => Some(JetTLSVersion::Tls12),
-        1 => Some(JetTLSVersion::Tls13),
+        0 => Some(JetTLSVersion::TLS12),
+        1 => Some(JetTLSVersion::TLS13),
         _ => None,
     }
 }
@@ -2626,7 +2560,7 @@ fn net_http_error_from_packed(bits: i64) -> Option<JetHTTPError> {
     let payload = bits >> 8;
     match ordinal {
         0 => Some(JetHTTPError::InvalidMethod),
-        1 => Some(JetHTTPError::InvalidUrl),
+        1 => Some(JetHTTPError::InvalidURL),
         2 => Some(JetHTTPError::InvalidHeader),
         3 => Some(JetHTTPError::InvalidStatus),
         4 => Some(JetHTTPError::BodyConsumed),
@@ -2681,30 +2615,6 @@ fn net_http_error_from_packed(bits: i64) -> Option<JetHTTPError> {
         },
         _ => None,
     }
-}
-
-fn jet_jit_net_error_operation(bits: i64) -> i64 {
-    net_error_from_packed(bits)
-        .map(|error| alloc_string(jet_net_error_operation(&error)))
-        .unwrap_or_else(|| alloc_string(String::new()))
-}
-
-fn jet_jit_net_error_address(bits: i64) -> i64 {
-    option_string(net_error_from_packed(bits).and_then(|error| jet_net_error_address(&error)))
-}
-
-fn jet_jit_net_error_name(bits: i64) -> i64 {
-    option_string(net_error_from_packed(bits).and_then(|error| jet_net_error_name(&error)))
-}
-
-fn jet_jit_net_error_message(bits: i64) -> i64 {
-    net_error_from_packed(bits)
-        .map(|error| alloc_string(jet_net_error_message(&error)))
-        .unwrap_or_else(|| alloc_string(String::new()))
-}
-
-fn jet_jit_net_error_os_code(bits: i64) -> i64 {
-    option_int(net_error_from_packed(bits).and_then(|error| jet_net_error_os_code(&error)))
 }
 
 fn net_error_from_packed(bits: i64) -> Option<JetNetError> {
@@ -2897,14 +2807,14 @@ fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, JetHTTPE
         Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_result_parts(rt, raw))
     else {
         return Err(JetHTTPError::IO {
-            operation: "invalid HTTPServerTls option".to_string(),
+            operation: "invalid HTTPServerTLS option".to_string(),
         });
     };
     if !present {
         return Ok(None);
     }
     let record = i64::try_from(bits).map_err(|_| JetHTTPError::IO {
-        operation: "invalid HTTPServerTls option".to_string(),
+        operation: "invalid HTTPServerTLS option".to_string(),
     })?;
     let (cert, key) = Concurrency::with_runtime_mut(|rt| {
         Some((
@@ -2917,7 +2827,7 @@ fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, JetHTTPE
         ))
     })
     .ok_or_else(|| JetHTTPError::IO {
-        operation: "invalid HTTPServerTls option".to_string(),
+        operation: "invalid HTTPServerTLS option".to_string(),
     })?;
     Ok(Some(jet_http_srv_tls(&cert, &key)))
 }

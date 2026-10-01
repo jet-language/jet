@@ -1,5 +1,4 @@
 use core.encoding.json as json
-use "exact"
 
 // #2774 remains visible here on purpose: AOT currently folds this exact
 // division incorrectly, while the runtime path stays mathematically exact.
@@ -8,8 +7,8 @@ TEN :: prep { 10 }
 THIRD :: prep { TEN / 3 }
 
 fn run() {
-    first :: exact.rational(2, 4) ?? panic("first rational")
-    second :: exact.rational(1, 3) ?? panic("second rational")
+    first :: rational(2, 4) ?? panic("first rational")
+    second :: rational(1, 3) ?? panic("second rational")
     sum :: first + second
     difference :: first - second
     product :: first * second
@@ -41,8 +40,8 @@ fn run() {
     if rational_reverse_times != rational_times_int -> panic("commutative rational multiply")
     print("rational mixed {rational_plus_int} {rational_times_int} {rational_minus_int} {rational_div_int}")
 
-    big_first :: exact.rational(123456789012345678901234567890, 7) ?? panic("big first")
-    big_second :: exact.rational(1, 7) ?? panic("big second")
+    big_first :: rational(123456789012345678901234567890, 7) ?? panic("big first")
+    big_second :: rational(1, 7) ?? panic("big second")
     big_sum :: big_first + big_second
     if big_sum.numerator != 123456789012345678901234567891 || big_sum.denominator != 7 {
         panic("big rational precision")
@@ -71,16 +70,16 @@ fn run() {
     print("scaled decimal {decimal_sum} {decimal_product} {decimal_sum.coefficient == 12940 && decimal_sum.scale == 3}")
     print("scaled mixed {scaled_plus_int} {scaled_times_int}")
     scaled_wire :: json.to_string(decimal_sum)
-    decoded_decimal :: json.decode<exact.ScaledDecimal>(scaled_wire) ?? panic("scaled decode")
+    decoded_decimal :: json.decode<ScaledDecimal>(scaled_wire) ?? panic("scaled decode")
     if decoded_decimal != decimal_sum -> panic("scaled JSON round trip")
     print("scaled json {scaled_wire}")
     print("scaled roundtrip {decoded_decimal == decimal_sum}")
 
     // D-FOUND-LITERAL1=A: the expected parameter type selects each exact
     // literal carrier without a suffix or a lossy Float conversion.
-    literal_rational :: exact.accept_rational(7)
-    literal_decimal :: exact.add_decimals(0.10, 0.20)
-    literal_money :: exact.accept_money(19)
+    literal_rational :: accept_rational(7)
+    literal_decimal :: add_decimals(0.10, 0.20)
+    literal_money :: accept_money(19)
     if literal_rational.numerator != 7 || literal_rational.denominator != 1 {
         panic("Rational literal")
     }
@@ -101,19 +100,19 @@ fn run() {
     if money_reverse_times != money_times_int -> panic("commutative money multiply")
     if money_minus_int.cents != 10000 -> panic("money minus Int")
     if money_div_int.cents != 5003 -> panic("money divide Int")
-    down :: exact.round_tax(invoice, 1750, exact.Rounding.Down)
-    up :: exact.round_tax(invoice, 1750, exact.Rounding.Up)
-    half_up :: exact.round_tax(invoice, 1750, exact.Rounding.HalfUp)
+    down :: round_tax(invoice, 1750, Rounding.Down)
+    up :: round_tax(invoice, 1750, Rounding.Up)
+    half_up :: round_tax(invoice, 1750, Rounding.HalfUp)
     if down.cents != 1751 || up.cents != 1752 || half_up.cents != 1751 -> panic("money rounding")
     print("money {invoice} {down} {up} {half_up}")
     money_wire :: json.to_string(invoice)
-    money_back :: json.decode<exact.Money>(money_wire) ?? panic("money decode")
+    money_back :: json.decode<Money>(money_wire) ?? panic("money decode")
     if money_back != invoice -> panic("money JSON round trip")
     print("money mixed {money_plus_int} {money_times_int} {money_minus_int} {money_div_int}")
     print("money json {money_wire} {money_back == invoice}")
 
     rational_wire :: json.to_string(sum)
-    rational_back :: json.decode<exact.Rational>(rational_wire) ?? panic("rational decode")
+    rational_back :: json.decode<Rational>(rational_wire) ?? panic("rational decode")
     if rational_back != sum -> panic("rational JSON round trip")
     print("rational json {rational_wire} {rational_back == sum}")
 
@@ -126,10 +125,10 @@ fn run() {
     print("decimal literal {builtin_decimal} {builtin_decimal == 0.3}")
 
     built_in_raw :: "{{\"amount\":12.340,\"whole\":123456789012345678901234567890}}"
-    built_in :: json.decode<exact.BuiltInExact>(built_in_raw) ?? panic("built-in decode")
+    built_in :: json.decode<BuiltInExact>(built_in_raw) ?? panic("built-in decode")
     print("built-in json {built_in.amount.to_string()} {built_in.whole.to_string()} {json.to_string(built_in)}")
 
-    million :: exact.million_money()
+    million :: million_money()
     if million.cents != 49500000 -> panic("million money sum")
     print("million money {million}")
 }

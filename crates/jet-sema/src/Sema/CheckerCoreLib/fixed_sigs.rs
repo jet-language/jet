@@ -142,6 +142,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "core.encoding.yaml",
                 "to_string" | "to_string_pretty" | "decode",
             )
+            | ("core.sys", "decode")
             | ("core.db", "decode")
             | ("core.encoding.csv", "query")
             | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
@@ -1254,12 +1255,12 @@ fn core_fixed_sig_impl(
 
     let path = Type::Union(vec![Type::String, Type::Named("Path".to_string())]);
     let io_unit = result_ty(unit.clone(), io.clone());
-    let ui_error = Type::Named("UiHostError".to_string());
+    let ui_error = Type::Named("UIHostError".to_string());
     let ui_result = |ok| result_ty(ok, ui_error.clone());
-    let ui_preview = Type::Named("UiPreview".to_string());
+    let ui_preview = Type::Named("UIPreview".to_string());
     let ui_node_callback = Type::Fn {
         params: vec![],
-        ret: Some(Box::new(Type::Named("UiNode".to_string()))),
+        ret: Some(Box::new(Type::Named("UINode".to_string()))),
         effect_bound: None,
         return_view_provenance: None,
         param_contract: None,
@@ -1560,6 +1561,20 @@ fn core_fixed_sig_impl(
         )),
         ("core.sys", "sync") => Some((vec![], None)),
         ("core.sys", "stop") => Some((vec![(read, Type::Int)], None)),
+        ("core.sys", "atexit") => Some((
+            vec![(
+                read,
+                Type::Fn {
+                    params: vec![],
+                    ret: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                    call_metadata: None,
+                },
+            )],
+            None,
+        )),
         ("core.sys", "set_current_dir") => Some((
             vec![(read, path)],
             Some(result_ty(unit_ty(), io_error_ty())),
@@ -1826,7 +1841,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.testing", "fake_rng") => Some((
             vec![(read, Type::Int)],
-            Some(Type::Named("Rng".to_string())),
+            Some(Type::Named("RNG".to_string())),
         )),
         ("core.testing", "fake_data") => Some((
             vec![(read, Type::Int)],
@@ -5220,7 +5235,7 @@ fn core_fixed_sig_impl(
         ("core.net", "dns_srv") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("DNSSrv".to_string()))),
+                Type::List(Box::new(Type::Named("DNSSRV".to_string()))),
                 Type::Named("NetError".to_string()),
             )),
         )),
@@ -5231,16 +5246,16 @@ fn core_fixed_sig_impl(
                 (read, Type::Int),
             ],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("DNSSrv".to_string()))),
+                Type::List(Box::new(Type::Named("DNSSRV".to_string()))),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "dns_srv_target") => Some((
-            vec![(read, Type::Named("DNSSrv".to_string()))],
+            vec![(read, Type::Named("DNSSRV".to_string()))],
             Some(Type::String),
         )),
         ("core.net", "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight") => Some((
-            vec![(read, Type::Named("DNSSrv".to_string()))],
+            vec![(read, Type::Named("DNSSRV".to_string()))],
             Some(Type::Int),
         )),
         ("core.net", "tls_connect") => Some((
@@ -5416,7 +5431,7 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("HTTPMux".to_string())),
                 (
                     read,
-                    Type::Option(Box::new(Type::Named("HTTPServerTls".to_string()))),
+                    Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string()))),
                 ),
                 (
                     read,
@@ -5434,7 +5449,7 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("HTTPMux".to_string())),
                 (
                     read,
-                    Type::Option(Box::new(Type::Named("HTTPServerTls".to_string()))),
+                    Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string()))),
                 ),
                 (
                     read,
@@ -5983,19 +5998,19 @@ fn core_fixed_sig_impl(
         // typed callback tree and use an optional viewport label.
         ("core.ui", "phone" | "tablet" | "desktop") => Some((
             vec![],
-            Some(Type::Named("UiPreviewViewport".to_string())),
+            Some(Type::Named("UIPreviewViewport".to_string())),
         )),
         ("core.ui", "preview" | "playground") => Some((
             vec![
                 (read, string.clone()),
-                (read, Type::Option(Box::new(Type::Named("UiPreviewViewport".to_string())))),
+                (read, Type::Option(Box::new(Type::Named("UIPreviewViewport".to_string())))),
                 (read, ui_node_callback),
             ],
             Some(ui_preview),
         )),
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
         ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
-        ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TuiBackend".to_string())))),
+        ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TUIBackend".to_string())))),
         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
         ("core.ui", "gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
         ("core.ui", "point") => Some((
@@ -6026,21 +6041,21 @@ fn core_fixed_sig_impl(
         )),
         ("core.ui", "node") => Some((
             vec![(read, string.clone()), (read, float.clone()), (read, float)],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         // D-UITREE1=A: canonical typed constructors. These are plain Core
         // functions returning the same UiNode tree consumed by each backend.
         // `button` is bespoke in core_call (arity 1, or 2 with `on_click:`).
         ("core.ui", "text") => Some((
             vec![(read, string.clone())],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.ui", "box") => Some((
             vec![(
                 read,
-                Type::List(Box::new(Type::Named("UiNode".to_string()))),
+                Type::List(Box::new(Type::Named("UINode".to_string()))),
             )],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.ui", "key_event") => Some((
             vec![(read, string)],
@@ -6059,9 +6074,9 @@ fn core_fixed_sig_impl(
                 (read, string),
                 (read, float.clone()),
                 (read, float),
-                (read, Type::Named("UiAriaRole".to_string())),
+                (read, Type::Named("UIAriaRole".to_string())),
             ],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         // D-STYLESHAPE1=A wiring: a node with an explicit fill color (a `#RRGGBB`
         // string, matching `JetPaintCmd::FillRect`'s existing color representation —
@@ -6073,12 +6088,12 @@ fn core_fixed_sig_impl(
                 (read, float),
                 (read, string),
             ],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         (
             "core.ui",
             "aria_role_button" | "aria_role_text_input" | "aria_role_label" | "aria_role_container",
-        ) => Some((vec![], Some(Type::Named("UiAriaRole".to_string())))),
+        ) => Some((vec![], Some(Type::Named("UIAriaRole".to_string())))),
         // D-FOUND-PLATFORM1=A: shared font model and scoped host service
         // surface. Result aliases retain Completed/Cancelled/Failed as one
         // typed value instead of collapsing cancellation into an I/O error.
@@ -6095,65 +6110,65 @@ fn core_fixed_sig_impl(
         )),
         ("core.ui", "node_accessibility") => Some((
             vec![
-                (read, Type::Named("UiNode".to_string())),
-                (read, Type::Named("UiAccessibility".to_string())),
+                (read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UIAccessibility".to_string())),
             ],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.ui", "node_shortcut") => Some((
             vec![
-                (read, Type::Named("UiNode".to_string())),
-                (read, Type::Named("UiShortcut".to_string())),
+                (read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UIShortcut".to_string())),
             ],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.ui", "text_input") => Some((
             vec![
                 (read, string.clone()),
-                (read, Type::Named("UiImeMode".to_string())),
+                (read, Type::Named("UIIMEMode".to_string())),
             ],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         // D-DX-TUIKIT1=A: one typed model/update/view support vocabulary. The
         // constructors stay ordinary Core calls; the shared Prelude owns
         // event, style, constraint, and widget semantics for every tier.
         ("core.tui", "capabilities") => Some((
             vec![],
-            Some(Type::Named("TuiCapabilities".to_string())),
+            Some(Type::Named("TUICapabilities".to_string())),
         )),
         ("core.tui", "key_event") => Some((
             vec![(read, string.clone())],
-            Some(Type::Named("TuiEvent".to_string())),
+            Some(Type::Named("TUIEvent".to_string())),
         )),
         ("core.tui", "key_event_modifiers") => Some((
             vec![(read, string.clone()), (read, int.clone())],
-            Some(Type::Named("TuiEvent".to_string())),
+            Some(Type::Named("TUIEvent".to_string())),
         )),
         ("core.tui", "resize_event") => Some((
             vec![(read, float.clone()), (read, float.clone())],
-            Some(Type::Named("TuiEvent".to_string())),
+            Some(Type::Named("TUIEvent".to_string())),
         )),
         ("core.tui", "timer_event") => Some((
             vec![(read, string.clone()), (read, int.clone())],
-            Some(Type::Named("TuiEvent".to_string())),
+            Some(Type::Named("TUIEvent".to_string())),
         )),
         ("core.tui", "io_event") => Some((
             vec![
                 (read, string.clone()),
                 (moved, list_u8.clone()),
             ],
-            Some(Type::Named("TuiEvent".to_string())),
+            Some(Type::Named("TUIEvent".to_string())),
         )),
         ("core.tui", "focus_event") => Some((
             vec![(read, bool_)],
-            Some(Type::Named("TuiEvent".to_string())),
+            Some(Type::Named("TUIEvent".to_string())),
         )),
         ("core.tui", "interrupt_event" | "close_event") => {
-            Some((vec![], Some(Type::Named("TuiEvent".to_string()))))
+            Some((vec![], Some(Type::Named("TUIEvent".to_string()))))
         }
         ("core.tui", "color_ansi16" | "color_ansi256") => Some((
             vec![(read, int.clone())],
-            Some(Type::Named("TuiColor".to_string())),
+            Some(Type::Named("TUIColor".to_string())),
         )),
         ("core.tui", "color_rgb") => Some((
             vec![
@@ -6161,31 +6176,31 @@ fn core_fixed_sig_impl(
                 (read, int.clone()),
                 (read, int.clone()),
             ],
-            Some(Type::Named("TuiColor".to_string())),
+            Some(Type::Named("TUIColor".to_string())),
         )),
         ("core.tui", "style") => Some((
             vec![],
-            Some(Type::Named("TuiStyle".to_string())),
+            Some(Type::Named("TUIStyle".to_string())),
         )),
         ("core.tui", "style_foreground" | "style_background") => Some((
             vec![
-                (moved, Type::Named("TuiStyle".to_string())),
-                (read, Type::Named("TuiColor".to_string())),
+                (moved, Type::Named("TUIStyle".to_string())),
+                (read, Type::Named("TUIColor".to_string())),
             ],
-            Some(Type::Named("TuiStyle".to_string())),
+            Some(Type::Named("TUIStyle".to_string())),
         )),
         ("core.tui", "style_bold" | "style_dim" | "style_underline") => Some((
             vec![
-                (moved, Type::Named("TuiStyle".to_string())),
+                (moved, Type::Named("TUIStyle".to_string())),
                 (read, bool_),
             ],
-            Some(Type::Named("TuiStyle".to_string())),
+            Some(Type::Named("TUIStyle".to_string())),
         )),
         ("core.tui", "style_text") => Some((
             vec![
                 (read, string.clone()),
-                (read, Type::Named("TuiStyle".to_string())),
-                (read, Type::Named("TuiCapabilities".to_string())),
+                (read, Type::Named("TUIStyle".to_string())),
+                (read, Type::Named("TUICapabilities".to_string())),
             ],
             Some(string.clone()),
         )),
@@ -6199,19 +6214,19 @@ fn core_fixed_sig_impl(
         )),
         ("core.tui", "length" | "min" | "max" | "percent" | "fill") => Some((
             vec![(read, float.clone())],
-            Some(Type::Named("TuiConstraint".to_string())),
+            Some(Type::Named("TUIConstraint".to_string())),
         )),
         ("core.tui", "horizontal" | "vertical") => Some((
             vec![],
-            Some(Type::Named("TuiDirection".to_string())),
+            Some(Type::Named("TUIDirection".to_string())),
         )),
         ("core.tui", "layout") => Some((
             vec![
                 (read, Type::Named("Rect".to_string())),
-                (read, Type::Named("TuiDirection".to_string())),
+                (read, Type::Named("TUIDirection".to_string())),
                 (
                     moved,
-                    Type::List(Box::new(Type::Named("TuiConstraint".to_string()))),
+                    Type::List(Box::new(Type::Named("TUIConstraint".to_string()))),
                 ),
             ],
             Some(Type::List(Box::new(Type::Named("Rect".to_string())))),
@@ -6221,7 +6236,7 @@ fn core_fixed_sig_impl(
                 moved,
                 Type::List(Box::new(string.clone())),
             )],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.tui", "table") => Some((
             vec![
@@ -6231,26 +6246,26 @@ fn core_fixed_sig_impl(
                     Type::List(Box::new(Type::List(Box::new(string.clone())))),
                 ),
             ],
-            Some(Type::Named("UiNode".to_string())),
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.tui", "list_state") => Some((
             vec![],
-            Some(Type::Named("TuiListState".to_string())),
+            Some(Type::Named("TUIListState".to_string())),
         )),
         ("core.tui", "list_state_select" | "list_state_offset") => Some((
             vec![
-                (moved, Type::Named("TuiListState".to_string())),
+                (moved, Type::Named("TUIListState".to_string())),
                 (read, int.clone()),
             ],
-            Some(Type::Named("TuiListState".to_string())),
+            Some(Type::Named("TUIListState".to_string())),
         )),
         ("core.tui", "list_state_selected") => Some((
-            vec![(read, Type::Named("TuiListState".to_string()))],
+            vec![(read, Type::Named("TUIListState".to_string()))],
             Some(int),
         )),
         ("core.ui.host", "capabilities") => Some((
             vec![],
-            Some(Type::Named("UiCapabilityFacts".to_string())),
+            Some(Type::Named("UICapabilityFacts".to_string())),
         )),
         ("core.ui.host", "file_filter") => Some((
             vec![
@@ -6258,90 +6273,90 @@ fn core_fixed_sig_impl(
                 (read, Type::List(Box::new(string.clone()))),
                 (read, Type::List(Box::new(string.clone()))),
             ],
-            Some(ui_result(Type::Named("UiFileFilter".to_string()))),
+            Some(ui_result(Type::Named("UIFileFilter".to_string()))),
         )),
         ("core.ui.host", "file_filter_text") => Some((
             vec![],
-            Some(Type::Named("UiFileFilter".to_string())),
+            Some(Type::Named("UIFileFilter".to_string())),
         )),
         ("core.ui.host", "fs_rights_read" | "fs_rights_write" | "fs_rights_read_write") => {
-            Some((vec![], Some(Type::Named("UiFsRights".to_string()))))
+            Some((vec![], Some(Type::Named("UIFSRights".to_string()))))
         }
         ("core.ui.host", "fs_grant") => Some((
             vec![
                 (read, string.clone()),
-                (read, Type::Named("UiFsRights".to_string())),
+                (read, Type::Named("UIFSRights".to_string())),
             ],
-            Some(ui_result(Type::Named("UiFsGrant".to_string()))),
+            Some(ui_result(Type::Named("UIFSGrant".to_string()))),
         )),
         ("core.ui.host", "open_request" | "save_request") => Some((
-            vec![(read, Type::Named("UiFsGrant".to_string()))],
-            Some(Type::Named("UiFileDialogRequest".to_string())),
+            vec![(read, Type::Named("UIFSGrant".to_string()))],
+            Some(Type::Named("UIFileDialogRequest".to_string())),
         )),
         ("core.ui.host", "open_file" | "save_file") => Some((
-            vec![(read, Type::Named("UiFileDialogRequest".to_string()))],
-            Some(ui_result(Type::Named("UiFileDialogSelection".to_string()))),
+            vec![(read, Type::Named("UIFileDialogRequest".to_string()))],
+            Some(ui_result(Type::Named("UIFileDialogSelection".to_string()))),
         )),
         ("core.ui.host", "shortcut") => Some((
             vec![
                 (read, string.clone()),
-                (read, Type::Named("UiShortcutModifiers".to_string())),
+                (read, Type::Named("UIShortcutModifiers".to_string())),
             ],
-            Some(ui_result(Type::Named("UiShortcut".to_string()))),
+            Some(ui_result(Type::Named("UIShortcut".to_string()))),
         )),
         ("core.ui.host", "accessibility") => Some((
             vec![(read, string.clone()), (read, string.clone())],
-            Some(ui_result(Type::Named("UiAccessibility".to_string()))),
+            Some(ui_result(Type::Named("UIAccessibility".to_string()))),
         )),
         ("core.ui.host.clipboard", "read_text") => Some((
             vec![],
-            Some(ui_result(Type::Named("UiClipboardText".to_string()))),
+            Some(ui_result(Type::Named("UIClipboardText".to_string()))),
         )),
         ("core.ui.host.clipboard", "write_text") => Some((
             vec![(read, string.clone())],
-            Some(ui_result(Type::Named("UiClipboardWrite".to_string()))),
+            Some(ui_result(Type::Named("UIClipboardWrite".to_string()))),
         )),
         ("core.ui.host.ime", "poll") => Some((
             vec![],
             Some(ui_result(Type::Option(Box::new(Type::Named(
-                "UiImeEvent".to_string(),
+                "UIIMEEvent".to_string(),
             ))))),
         )),
         ("core.ui.host.drag_drop", "poll") => Some((
             vec![],
             Some(ui_result(Type::Option(Box::new(Type::Named(
-                "UiDragEvent".to_string(),
+                "UIDragEvent".to_string(),
             ))))),
         )),
         ("core.ui.host.shortcuts", "binding") => Some((
             vec![
-                (read, Type::Named("UiShortcut".to_string())),
+                (read, Type::Named("UIShortcut".to_string())),
                 (read, string.clone()),
             ],
-            Some(ui_result(Type::Named("UiShortcutBinding".to_string()))),
+            Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
         )),
         ("core.ui.host.shortcuts", "register") => Some((
-            vec![(read, Type::Named("UiShortcutBinding".to_string()))],
-            Some(ui_result(Type::Named("UiShortcutBinding".to_string()))),
+            vec![(read, Type::Named("UIShortcutBinding".to_string()))],
+            Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
         )),
         ("core.ui.host.shortcuts", "dispatch") => Some((
-            vec![(read, Type::Named("UiShortcut".to_string()))],
-            Some(ui_result(Type::Named("UiShortcutDispatch".to_string()))),
+            vec![(read, Type::Named("UIShortcut".to_string()))],
+            Some(ui_result(Type::Named("UIShortcutDispatch".to_string()))),
         )),
         ("core.ui.host.accessibility", "attach") => Some((
             vec![
-                (read, Type::Named("UiNode".to_string())),
-                (read, Type::Named("UiAccessibility".to_string())),
+                (read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UIAccessibility".to_string())),
             ],
             Some(ui_result(unit.clone())),
         )),
         ("core.ui.host.accessibility", "project") => Some((
             vec![
-                (read, Type::Named("UiNode".to_string())),
-                (read, Type::Named("UiNodeId".to_string())),
+                (read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UINodeID".to_string())),
             ],
             Some(ui_result(Type::Option(Box::new(Type::Named(
-                "UiAccessibilityProjection".to_string(),
+                "UIAccessibilityProjection".to_string(),
             ))))),
         )),
         // D-FLAGSHIP-WEBAPI1=A: first-party browser API for web flagship slices.
@@ -6641,6 +6656,13 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             required("zone"),
             optional("disambiguation", CoreDefault::String("compatible")),
         ]),
+        // D-CONFIG-ENV1: labels are part of the runtime config surface, while
+        // the defaults keep `env.decode<T>()` as the beginner one-call form.
+        ("core.sys", "decode") => Some(vec![
+            optional("prefix", CoreDefault::String("")),
+            optional("file", CoreDefault::String(".env")),
+            optional("allow", CoreDefault::EmptyList),
+        ]),
         // D-FOUND-COREAPI1=A: filesystem walks accept one optional, shared
         // ignore-file selector; omitted means no ignore rules.
         ("core.files", "walk" | "walk_parallel" | "walk_files") => Some(vec![
@@ -6818,55 +6840,55 @@ mod tests {
 
     #[test]
     fn ui_host_result_signatures_are_structural_results() {
-        let ui_error = Type::Named("UiHostError".to_string());
+        let ui_error = Type::Named("UIHostError".to_string());
         let expected = [
-            ("core.ui.host", "file_filter", Type::Named("UiFileFilter".to_string())),
-            ("core.ui.host", "fs_grant", Type::Named("UiFsGrant".to_string())),
+            ("core.ui.host", "file_filter", Type::Named("UIFileFilter".to_string())),
+            ("core.ui.host", "fs_grant", Type::Named("UIFSGrant".to_string())),
             (
                 "core.ui.host",
                 "open_file",
-                Type::Named("UiFileDialogSelection".to_string()),
+                Type::Named("UIFileDialogSelection".to_string()),
             ),
-            ("core.ui.host", "shortcut", Type::Named("UiShortcut".to_string())),
+            ("core.ui.host", "shortcut", Type::Named("UIShortcut".to_string())),
             (
                 "core.ui.host",
                 "accessibility",
-                Type::Named("UiAccessibility".to_string()),
+                Type::Named("UIAccessibility".to_string()),
             ),
             (
                 "core.ui.host.clipboard",
                 "read_text",
-                Type::Named("UiClipboardText".to_string()),
+                Type::Named("UIClipboardText".to_string()),
             ),
             (
                 "core.ui.host.clipboard",
                 "write_text",
-                Type::Named("UiClipboardWrite".to_string()),
+                Type::Named("UIClipboardWrite".to_string()),
             ),
             (
                 "core.ui.host.ime",
                 "poll",
-                Type::Option(Box::new(Type::Named("UiImeEvent".to_string()))),
+                Type::Option(Box::new(Type::Named("UIIMEEvent".to_string()))),
             ),
             (
                 "core.ui.host.drag_drop",
                 "poll",
-                Type::Option(Box::new(Type::Named("UiDragEvent".to_string()))),
+                Type::Option(Box::new(Type::Named("UIDragEvent".to_string()))),
             ),
             (
                 "core.ui.host.shortcuts",
                 "binding",
-                Type::Named("UiShortcutBinding".to_string()),
+                Type::Named("UIShortcutBinding".to_string()),
             ),
             (
                 "core.ui.host.shortcuts",
                 "register",
-                Type::Named("UiShortcutBinding".to_string()),
+                Type::Named("UIShortcutBinding".to_string()),
             ),
             (
                 "core.ui.host.shortcuts",
                 "dispatch",
-                Type::Named("UiShortcutDispatch".to_string()),
+                Type::Named("UIShortcutDispatch".to_string()),
             ),
             (
                 "core.ui.host.accessibility",
@@ -6877,7 +6899,7 @@ mod tests {
                 "core.ui.host.accessibility",
                 "project",
                 Type::Option(Box::new(Type::Named(
-                    "UiAccessibilityProjection".to_string(),
+                    "UIAccessibilityProjection".to_string(),
                 ))),
             ),
         ];

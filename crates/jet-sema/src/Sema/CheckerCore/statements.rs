@@ -6,7 +6,7 @@ use crate::Sema::CheckerCoreLib::{
 use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
-    computed_field_not_settable, expr_root_ident, is_cloneable, is_task_type, loop_control_outside,
+    computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
     type_fix_hint, type_requires_owned_iteration, undefined_loop_label,
 };
 use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
@@ -200,6 +200,17 @@ impl<'a> Checker<'a> {
         });
     }
 
+    /// A loop header operand (source, range bound, stride) has no slot type,
+    /// so an enclosing value expectation must not reach it: a Result tail
+    /// expectation would keep a `T Never!` call's carrier instead of
+    /// unwrapping it to the value the loop walks.
+    fn infer_loop_header(&mut self, e: &mut Expr) -> Option<Type> {
+        let saved_expected = self.expected_type.take();
+        let ty = self.infer(e);
+        self.expected_type = saved_expected;
+        ty
+    }
+
     fn pop_loop_value_frame(&mut self) {
         if let Some(frame) = self.loop_value_frames.pop() {
             if frame.kind == LoopValueKind::Result {
@@ -366,6 +377,14 @@ impl<'a> Checker<'a> {
     }
 
     fn compound_owner_field_type(&self, owner: &Type, field: &str) -> Option<Type> {
+        // D-SHAREDGUARD2=A: `guard.value` is a compiler-known place, not a
+        // stored struct field; it has the guarded payload type, exactly as
+        // `field_type` reads it.
+        if let Type::Apply { name, args } = owner {
+            if field == "value" && name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                return Some(args[0].clone());
+            }
+        }
         let (owner_name, args) = match owner {
             Type::Named(name) => (name.as_str(), &[][..]),
             Type::Apply { name, args } => (name.as_str(), args.as_slice()),
@@ -432,33 +451,35 @@ impl<'a> Checker<'a> {
             }))
     }
 
+    /// E0362: a compound update of a nested field whose type dispatches the
+    /// operator through a hook trait. Builtin numerics update natively, so a
+    /// nested numeric field (`guard.value.count += 1`) is never a hook place.
+    fn compound_nested_hook(&self, base: &Expr, field: &str, op: crate::AST::BinOp) -> bool {
+        let trait_name = match op {
+            crate::AST::BinOp::Add => Syntax::TRAIT_ADD,
+            crate::AST::BinOp::Sub => Syntax::TRAIT_SUB,
+            crate::AST::BinOp::Mul => Syntax::TRAIT_MUL,
+            crate::AST::BinOp::Div => Syntax::TRAIT_DIV,
+            _ => return false,
+        };
+        self.compound_field_type(base, field).is_some_and(|ty| {
+            !ty.is_numeric()
+                && self.compound_type_implements(&ty, trait_name)
+                && match base {
+                    Expr::Ident(..) => false,
+                    Expr::Index { .. } => matches!(ty, Type::Named(_) | Type::Apply { .. }),
+                    _ => true,
+                }
+        })
+    }
+
     /// True when compound assign on `target` is rejected (E0164 / E0362), so
     /// L0503 must not recommend it.
     fn compound_assign_rejected(&self, target: &LValue, op: crate::AST::BinOp) -> bool {
         match target {
             LValue::Index { .. } => true,
             LValue::Local { .. } => false,
-            LValue::Field { base, field, .. } => {
-                let trait_name = match op {
-                    crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
-                    crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
-                    crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
-                    crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
-                    _ => None,
-                };
-                trait_name.is_some_and(|trait_name| {
-                    self.compound_field_type(base, field).is_some_and(|ty| {
-                        self.compound_type_implements(&ty, trait_name)
-                            && match base.as_ref() {
-                                Expr::Ident(..) => false,
-                                Expr::Index { .. } => {
-                                    matches!(ty, Type::Named(_) | Type::Apply { .. })
-                                }
-                                _ => true,
-                            }
-                    })
-                })
-            }
+            LValue::Field { base, field, .. } => self.compound_nested_hook(base, field, op),
         }
     }
 
@@ -805,7 +826,10 @@ impl<'a> Checker<'a> {
                             // String-backed `View<str>` values keep `String` as
                             // their semantic type; the view boundary is a
                             // representation contract, not a second carrier.
-                            || (string_view_return && matches!(actual, Type::String)))
+                            || (string_view_return && matches!(actual, Type::String))
+                            // S48: a concrete value meets a single-trait
+                            // success slot (`-> Adapter`) and is boxed.
+                            || self.trait_slot_accepts(ok.as_ref(), actual))
                 } else {
                     false
                 };
@@ -977,7 +1001,7 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
                                      There's no borrow-return in v1 — to share the value without a full \
-                                     copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
+                                     copy, store an owned field, or reach for `Shared<T>`/`ID<T>` \
                                      once a real program needs shared ownership",
                                     Syntax::SIGIL_COPY,
                                     n,
@@ -1209,26 +1233,7 @@ impl<'a> Checker<'a> {
             ..
         } = stmt
         {
-            let trait_name = match op {
-                crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
-                crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
-                crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
-                crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
-                _ => None,
-            };
-            let nested_hook = trait_name.is_some_and(|trait_name| {
-                self.compound_field_type(base, field).is_some_and(|ty| {
-                    self.compound_type_implements(&ty, trait_name)
-                        && match base.as_ref() {
-                            Expr::Ident(..) => false,
-                            Expr::Index { .. } => {
-                                matches!(ty, Type::Named(_) | Type::Apply { .. })
-                            }
-                            _ => true,
-                        }
-                })
-            });
-            if nested_hook {
+            if self.compound_nested_hook(base, field, *op) {
                 self.diags.push(Diagnostic::error(
                     "E0362",
                     "compound assignment can't target a nested operator field".to_string(),
@@ -1636,20 +1641,20 @@ impl<'a> Checker<'a> {
                                 let is_matching_id = matches!(
                                     &idx_ty,
                                     Some(Type::Apply { name, args: id_args })
-                                        if name == "Id" && id_args.first() == pool_args.first()
+                                        if name == "ID" && id_args.first() == pool_args.first()
                                 );
                                 if !is_matching_id {
                                     self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
-                                                "`Pool` indexes need a matching `Id<T>`, not {}",
+                                                "`Pool` indexes need a matching `ID<T>`, not {}",
                                                 idx_ty
                                                     .as_ref()
                                                     .map(|t| t.show())
                                                     .unwrap_or_else(|| "this".to_string())
                                             ),
-                                            "a pool slot is only reached through the `Id<T>` its own `.add()` returned".to_string(),
-                                            "index with the `Id<T>` handle from `.add(...)`".to_string(),
+                                            "a pool slot is only reached through the `ID<T>` its own `.add()` returned".to_string(),
+                                            "index with the `ID<T>` handle from `.add(...)`".to_string(),
                                             Some(index.span()),
                                         ));
                                 }
@@ -2231,9 +2236,14 @@ impl<'a> Checker<'a> {
                         if lost_tail {
                             // D-DISCARD1=A: the last line of a function with
                             // no written return type; its value goes nowhere.
-                            let unit = matches!(&ty, Type::Named(name)
+                            // A unit `Never!` call succeeds with unit only.
+                            let success = match &ty {
+                                Type::Result { ok, err } if err.is_never() => ok.as_ref(),
+                                other => other,
+                            };
+                            let unit = matches!(success, Type::Named(name)
                                 if name == Syntax::INTERNAL_UNIT_TYPE || name == Syntax::TYPE_UNIT)
-                                || ty.is_never();
+                                || success.is_never();
                             let reported = self.diags[discard_diagnostics_start..]
                                 .iter()
                                 .any(|diagnostic| diagnostic.severity == Severity::Error);
@@ -2461,7 +2471,7 @@ impl<'a> Checker<'a> {
                         exclusive,
                     } => {
                         for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
-                            let t = self.infer(e);
+                            let t = self.infer_loop_header(e);
                             if let Some(t) = t {
                                 if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
                                     self.diags.push(Diagnostic::error(
@@ -2541,9 +2551,7 @@ impl<'a> Checker<'a> {
                         let before_auto_direct = self.fx_direct.clone();
                         let before_auto_edges = self.fx_edges.clone();
                         let before_auto_maximal = self.fx_maximal;
-                        for s in body.iter_mut() {
-                            self.check_stmt(s);
-                        }
+                        self.check_stmts_in_scope(body);
                         self.arrow_loop_body = previous_arrow_loop_body;
 
                         // D-RANGE-EXCL1=C: teach when inclusive `….xs.len()` indexes that same xs
@@ -2581,7 +2589,7 @@ impl<'a> Checker<'a> {
                     }
                     ForKind::In { collection, step } => {
                         if let Some(step) = step {
-                            if let Some(ty) = self.infer(step) {
+                            if let Some(ty) = self.infer_loop_header(step) {
                                 if !matches!(&ty, Type::Int | Type::InlineRange { .. }) {
                                     self.diags.push(Diagnostic::error(
                                             "E0123",
@@ -2603,7 +2611,7 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                         }
-                        let coll_ty = self.infer(collection);
+                        let coll_ty = self.infer_loop_header(collection);
                         let bindingless = var == Syntax::KW_IT && var2.is_none();
                         let nested_bindingless =
                             bindingless && self.implicit_loop_subject_depth > 0;
@@ -2674,7 +2682,7 @@ impl<'a> Checker<'a> {
                                     );
                                     self.diags.push(self.with_ownership_copy_edit(
                                         diagnostic,
-                                        collection.span(),
+                                        crate::Sema::CheckerOwnership::copy_edit_anchor(&*collection),
                                         coll_ty.as_ref(),
                                     ));
                                 }
@@ -2863,9 +2871,11 @@ impl<'a> Checker<'a> {
                                             "use a `List`, `Map`, or `s.chars()`".to_string(),
                                             Some(collection.span()),
                                         ));
+                                    self.declare_invalid_loop_vars(var, *var_span, var2.as_ref());
                                 }
                             }
-                            None => {}
+                            // The source failed to check and already reported.
+                            None => self.declare_invalid_loop_vars(var, *var_span, var2.as_ref()),
                         }
                         if let Some(name) = &lending_var {
                             self.lending_view_loop_vars.insert(name.clone());
@@ -2876,9 +2886,7 @@ impl<'a> Checker<'a> {
                         if bindingless && !nested_bindingless {
                             self.implicit_loop_subject_depth += 1;
                         }
-                        for s in body.iter_mut() {
-                            self.check_stmt(s);
-                        }
+                        self.check_stmts_in_scope(body);
                         if bindingless && !nested_bindingless {
                             self.implicit_loop_subject_depth -= 1;
                         }
@@ -3110,7 +3118,7 @@ impl<'a> Checker<'a> {
                             && read_only
                             && copy_ty
                                 .as_ref()
-                                .is_some_and(|ty| is_cloneable(ty, self.registry))
+                                .is_some_and(|ty| self.is_cloneable_type(ty))
                         {
                             continue;
                         }

@@ -2,7 +2,8 @@ use core.math as math
 
 // Deterministic weighted t-digest.  Centroids stay sorted by (mean, weight)
 // and are compressed in that order, so the result does not depend on hash
-// iteration or provider row order.
+// iteration or provider row order.  `add` updates the digest in place
+// through a write receiver.
 pub struct TDigest {
     pub delta: Float
     pub means: [Float]
@@ -15,32 +16,38 @@ pub struct Centroid {
     pub weight: Float
 }
 
-pub fn new() -> TDigest {
+pub fn new() -> TDigest Never! {
     {delta: Float{100.0}, means: [Float]{}, weights: [Float]{}, total: Float{0.0}}
 }
 
-pub fn add(td: TDigest, x: Float, w: Float) -> TDigest {
-    if !math.is_finite(x) || !math.is_finite(w) || w <= (Float{0.0}) -> return ~td
-
-    base := td
-    if !digest_shape_ok(td) -> base = new()
-    delta := base.delta
-    if !math.is_finite(delta) || delta <= (Float{0.0}) -> delta = Float{100.0}
-    means := copy_floats(base.means)
-    weights := copy_floats(base.weights)
-    &means.push(x)
-    &weights.push(w)
-    insert_sorted(&means, &weights)
-    total := base.total + w
-    if total <= (Float{0.0}) || !math.is_finite(total) -> return base
-    if means.len() > 64 {
-        packed :: compress(^means, ^weights, delta, total)
-        return {delta: delta, means: packed.means, weights: packed.weights, total: total}
+impl TDigest {
+    /// Record one finite sample with a positive weight (1.0 by default).
+    pub fn add(&self, x: Float, w: Float{1.0}) Never! {
+        if !math.is_finite(x) || !math.is_finite(w) || w <= (Float{0.0}) -> return
+        if !digest_shape_ok(self) {
+            self.means = [Float]{}
+            self.weights = [Float]{}
+            self.total = Float{0.0}
+        }
+        if !math.is_finite(self.delta) || self.delta <= (Float{0.0}) -> self.delta = Float{100.0}
+        total :: self.total + w
+        if !math.is_finite(total) -> return
+        &self.means.push(x)
+        &self.weights.push(w)
+        insert_sorted(&self.means, &self.weights)
+        self.total = total
+        if self.means.len() > 64 {
+            packed :: compress(self.means, self.weights, self.delta, total)
+            self.means = packed.means
+            self.weights = packed.weights
+        }
     }
-    {delta: delta, means: means, weights: weights, total: total}
+
+    /// The interpolated value at quantile `q` in `0.0..=1.0`.
+    pub fn quantile(self, q: Float) -> Float Never! { digest_quantile(self, q) }
 }
 
-pub fn quantile(td: TDigest, q: Float) -> Float {
+fn digest_quantile(td: TDigest, q: Float) -> Float Never! {
     if !digest_shape_ok(td) || td.total <= (Float{0.0}) -> return Float{0.0}
     if !math.is_finite(q) -> return Float{0.0}
     if q <= (Float{0.0}) -> return td.means[0]
@@ -71,9 +78,9 @@ pub struct Packed {
     pub weights: [Float]
 }
 
-fn compress(means: ^[Float], weights: ^[Float], delta: Float, total: Float) -> Packed {
+fn compress(means: [Float], weights: [Float], delta: Float, total: Float) -> Packed {
     if means.len() == 0 -> return Packed{means: [Float]{}, weights: [Float]{}}
-    if delta <= (Float{0.0}) || total <= (Float{0.0}) -> return Packed{means: means, weights: weights}
+    if delta <= (Float{0.0}) || total <= (Float{0.0}) -> return Packed{means: copy_floats(means), weights: copy_floats(weights)}
     om := [Float]{means[0]}
     ow := [Float]{weights[0]}
     cumulative := weights[0]

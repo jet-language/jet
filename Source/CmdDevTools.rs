@@ -8773,8 +8773,8 @@ fn collect_architecture_inspection(file: &str) -> ArchitectureInspection {
         }
     };
     let check = crate::CmdInspect::check_result_value(&projection.check);
-    let calls = architecture_calls(&projection.index);
-    let mut rows = architecture_advice_rows(&projection.index, &calls);
+    let calls = architecture_calls(projection.index());
+    let mut rows = architecture_advice_rows(projection.index(), &calls);
     rows.sort_by(|left, right| {
         left.subject
             .cmp(&right.subject)

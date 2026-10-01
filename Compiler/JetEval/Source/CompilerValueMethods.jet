@@ -1,9 +1,19 @@
 // Source-owned projections for compiler query values.
 // These methods consume immutable TComptimeValue packets produced by the
 // compiler service; they never re-run a checker or call native Builtins.
+use jet_foundation.[
+    MIRCallFallibility,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRPreludeFamily,
+    Span,
+    TComptimeField,
+    TComptimeValue,
+    mir_symbol_name,
+]
 
 fn jet_eval_compiler_value_method_owner(member: String) -> [String]? {
-    parts := member.split(".")
+    parts := member.split(".").to_list()
     if parts.len() != 2 -> return None
     if parts[0] == "" || parts[1] == "" -> return None
     Val(parts)
@@ -105,8 +115,8 @@ fn jet_eval_compiler_value_method_projection(value: TComptimeValue, owner: Strin
     Val(JetEvalRuntimeValue.Data{value: projected})
 }
 
-pub fn jet_eval_route_compiler_value_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
-    if row.family != MirPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
+pub fn jet_eval_route_compiler_value_host(row: MIRPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    if row.family != MIRPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
         jet_eval_compiler_fail(&machine, span, "invalid compiler value Prelude route")
         return None
     }
@@ -125,7 +135,7 @@ pub fn jet_eval_route_compiler_value_host(row: MirPreludeCall, args: [TComptimeV
         return None
     }
     expected_arity := args.len()
-    if row.abi != MirPreludeAbi.Value || row.fallibility != MirCallFallibility.Infallible || row.signature.arity != expected_arity || row.signature.max_arity != expected_arity || row.signature.borrow_mask != jet_eval_compiler_value_method_borrow_mask(expected_arity) {
+    if row.abi != MIRPreludeABI.Value || row.fallibility != MIRCallFallibility.Infallible || row.signature.arity != expected_arity || row.signature.max_arity != expected_arity || row.signature.borrow_mask != jet_eval_compiler_value_method_borrow_mask(expected_arity) {
         jet_eval_compiler_fail(&machine, span, "compiler value Prelude route has an invalid ABI")
         return None
     }

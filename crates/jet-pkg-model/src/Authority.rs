@@ -11,11 +11,13 @@ use crate::Syntax;
 use jet_foundation::Authority::{
     covers, Authority as CanonicalAuthority, HostImportFact, Holds, TightenError, Verdict,
 };
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
-use std::time::UNIX_EPOCH;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const KIND_FILE: &str = "regular file";
 const HARDLINK_DETAIL: &str = "authority file must have exactly one hard link";
@@ -1118,21 +1120,18 @@ impl AuthorityResolver {
         }
 
         let mut budget = WalkBudget::default();
-        let entries = self.read_sorted_entries(&self.root, &mut budget)?;
+        let listing = source_listing(&self.root, |error| AuthorityError::Io {
+            path: self.root.clone(),
+            operation: "read",
+            detail: error.to_string(),
+        })?;
+        budget.note_entries(&self.root, listing.entries)?;
 
         let mut canonical = None;
         let mut authorities = Vec::new();
         let mut malformed_canonical = false;
-        for entry in entries {
-            let name = entry.file_name();
-            if Path::new(&name)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                != Some(crate::Syntax::FILE_EXT)
-            {
-                continue;
-            }
-            let relative = PathBuf::from(&name);
+        for name in &listing.sources {
+            let relative = PathBuf::from(name);
             let file = self.checked_file(&relative)?;
             budget.record_file(&file.path, file.bytes.len())?;
             let source = file.text()?;
@@ -1533,6 +1532,20 @@ impl WalkBudget {
         Ok(())
     }
 
+    fn note_entries(&mut self, path: &Path, count: usize) -> Result<(), AuthorityError> {
+        if self.entries.saturating_add(count) > crate::SHA256::MAX_TREE_FILES {
+            return Err(authority_limit_error(
+                path,
+                format!(
+                    "authority directory walk exceeds the {}-entry bound",
+                    crate::SHA256::MAX_TREE_FILES
+                ),
+            ));
+        }
+        self.entries += count;
+        Ok(())
+    }
+
     fn ensure_file(&self, path: &Path, length: u64) -> Result<(), AuthorityError> {
         if length > crate::SHA256::MAX_TREE_FILE_BYTES {
             return Err(authority_limit_error(
@@ -1577,28 +1590,120 @@ impl WalkBudget {
     }
 }
 
-fn has_authority_candidate(root: &Path) -> Result<bool, AuthorityError> {
-    let entries =
-        fs::read_dir(root).map_err(|error| AuthorityResolver::map_io(root, error, true))?;
-    for entry in entries {
+/// One directory's authority-relevant names, read once: the sorted `*.jet`
+/// names, whether a stale manifest name is present, and the total entry
+/// count the walk budget charges for reading it.
+struct SourceListing {
+    entries: usize,
+    sources: Vec<OsString>,
+    stale_manifest: bool,
+}
+
+/// How long after its last change a directory's listing may be memoized.
+/// Past its filesystem's timestamp granularity, any later entry change
+/// records a later mtime. Nanosecond filesystems stamp from the kernel's
+/// coarse clock (one tick, at most 10 ms); a whole-second mtime marks a
+/// coarse filesystem (FAT, HFS+), which needs up to two seconds.
+const LISTING_SETTLE_FINE_NS: u128 = 50_000_000;
+const LISTING_SETTLE_COARSE_NS: u128 = 2_000_000_000;
+
+/// Memoized listings by directory object (device, inode) and mtime.
+static SOURCE_LISTINGS: LazyLock<Mutex<HashMap<(u64, u64), (u128, Arc<SourceListing>)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Device, inode and mtime of a directory, where the platform has them.
+fn listing_stamp(dir: &Path) -> Option<(u64, u64, u128)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = fs::metadata(dir).ok()?;
+        let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+        Some((metadata.dev(), metadata.ino(), modified.as_nanos()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        None
+    }
+}
+
+/// The authority-relevant listing of `dir`, read at most once per process
+/// while the directory is unchanged.
+///
+/// Upward discovery visits the same ancestors from several resolvers per
+/// command, and an ancestor can be huge (a home, download or scratch
+/// directory with 100k entries). The listing is memoized per directory
+/// object and mtime: creating, removing or renaming an entry moves the mtime
+/// and relists. A listing is memoized only when the mtime was unchanged
+/// across the read and already older than its filesystem's granularity, so
+/// no later change can share the recorded mtime. File contents are never
+/// memoized: callers still open and read every listed source. `map_read`
+/// shapes the error for a directory that cannot be opened.
+fn source_listing(
+    dir: &Path,
+    map_read: impl FnOnce(io::Error) -> AuthorityError,
+) -> Result<Arc<SourceListing>, AuthorityError> {
+    let before = listing_stamp(dir);
+    if let Some((device, inode, modified)) = before {
+        let memoized = SOURCE_LISTINGS.lock().ok().and_then(|memo| {
+            memo.get(&(device, inode))
+                .filter(|(stamp, _)| *stamp == modified)
+                .map(|(_, listing)| Arc::clone(listing))
+        });
+        if let Some(listing) = memoized {
+            return Ok(listing);
+        }
+    }
+    let read_dir = fs::read_dir(dir).map_err(map_read)?;
+    let mut entries = 0;
+    let mut sources = Vec::new();
+    let mut stale_manifest = false;
+    for entry in read_dir {
         let entry = entry.map_err(|error| AuthorityError::Io {
-            path: root.to_path_buf(),
+            path: dir.to_path_buf(),
             operation: "inspect",
             detail: error.to_string(),
         })?;
+        entries += 1;
         let name = entry.file_name();
-        let is_source = Path::new(&name)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            == Some(Syntax::FILE_EXT);
-        let is_stale_manifest = Syntax::STALE_MANIFEST_NAMES
+        if Path::new(&name).extension().and_then(|extension| extension.to_str())
+            == Some(Syntax::FILE_EXT)
+        {
+            sources.push(name);
+        } else if Syntax::STALE_MANIFEST_NAMES
             .iter()
-            .any(|candidate| name.to_str() == Some(*candidate));
-        if is_source || is_stale_manifest {
-            return Ok(true);
+            .any(|candidate| name.to_str() == Some(*candidate))
+        {
+            stale_manifest = true;
         }
     }
-    Ok(false)
+    sources.sort();
+    let listing = Arc::new(SourceListing {
+        entries,
+        sources,
+        stale_manifest,
+    });
+    if let (Some((device, inode, modified)), Some(after)) = (before, listing_stamp(dir)) {
+        let settle = if modified % 1_000_000_000 == 0 {
+            LISTING_SETTLE_COARSE_NS
+        } else {
+            LISTING_SETTLE_FINE_NS
+        };
+        let settled = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .is_ok_and(|now| now.as_nanos().saturating_sub(modified) > settle);
+        if after == (device, inode, modified) && settled {
+            if let Ok(mut memo) = SOURCE_LISTINGS.lock() {
+                memo.insert((device, inode), (modified, Arc::clone(&listing)));
+            }
+        }
+    }
+    Ok(listing)
+}
+
+fn has_authority_candidate(root: &Path) -> Result<bool, AuthorityError> {
+    let listing = source_listing(root, |error| AuthorityResolver::map_io(root, error, true))?;
+    Ok(!listing.sources.is_empty() || listing.stale_manifest)
 }
 
 fn is_shared_directory_path(path: &Path) -> bool {
@@ -1855,6 +1960,35 @@ mod authority_walk_tests {
         );
 
         fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn memoized_listing_sees_entries_created_after_it() {
+        let root = temp_root("listing-memo");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("notes.txt"), "not a source\n").unwrap();
+        // Past the fine-grained settle window, so this listing is memoized.
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        assert!(AuthorityResolver::open_for_authority_walk(&root)
+            .unwrap()
+            .is_none());
+        assert!(AuthorityResolver::open_for_authority_walk(&root)
+            .unwrap()
+            .is_none());
+
+        fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+        assert!(
+            AuthorityResolver::open_for_authority_walk(&root)
+                .unwrap()
+                .is_some(),
+            "a source created after the memoized listing must be seen"
+        );
+        fs::remove_file(root.join("run.jet")).unwrap();
+        assert!(AuthorityResolver::open_for_authority_walk(&root)
+            .unwrap()
+            .is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

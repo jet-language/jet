@@ -1,0 +1,360 @@
+// D-SHAPE-PLACE1=A: a range write window has a fixed length, so it may fill a
+// list write parameter only when the callee keeps that list's length.
+//
+// sema_fixed_length_write_params returns a key `function#parameter` for every
+// list write parameter proven length-preserving: the body never resizes or
+// reassigns it and passes it onward only to parameters that are proven
+// themselves. Unknown, method, and function-value callees count as resizing.
+// This is a greatest fixed point, so recursion that never resizes stays proven.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Expr,
+    Func,
+    Item,
+    PlaceAccess,
+    Stmt,
+]
+
+struct SemaWindowEdge {
+    callee: String
+    index: Int
+}
+
+struct SemaWindowScan {
+    resizes: Bool
+    marks: Int
+    accounted: Int
+    onward: [SemaWindowEdge]
+}
+
+struct SemaWindowCandidate {
+    key: String
+    onward: [String]
+}
+
+// The proven-set key of the callee parameter an onward pass reaches. Calls
+// name a function by its plain name, optionally module-qualified; a name
+// declared more than once in the bundle is ambiguous and is never proven.
+fn sema_window_edge_key(functions: [Func], edge: SemaWindowEdge) -> String Never! {
+    name :: sema_window_plain_name(edge.callee)
+    loop func in functions {
+        if func.name == name && edge.index < func.params.len() -> return sema_window_param_key(func.name, func.params[edge.index].name)
+    }
+    "#unknown"
+}
+
+fn sema_window_param_key(function: String, param: String) -> String Never! {
+    "{function}#{param}"
+}
+
+// The plain function name a possibly module-qualified callee spelling names.
+fn sema_window_plain_name(callee: String) -> String Never! {
+    parts :: callee.split(".").to_list()
+    if parts.len() > 0 -> parts[parts.len() - 1] else -> callee
+}
+
+// The proven-set key a call site checks for parameter `param` of `callee`.
+pub fn sema_window_callee_key(callee: String, param: String) -> String Never! {
+    sema_window_param_key(sema_window_plain_name(callee), param)
+}
+
+fn sema_window_collect_functions(items: [Item], functions: &[Func]) {
+    loop item in items {
+        if item == {
+            .Func(func) -> &functions.push(func)
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) -> sema_window_collect_functions(body, &functions)
+            }
+            else -> {}
+        }
+    }
+}
+
+fn sema_window_declared_count(functions: [Func], name: String) -> Int Never! {
+    count := 0
+    loop func in functions {
+        if func.name == name -> count += 1
+    }
+    count
+}
+
+// `items` holds every module of the bundle, so the fact covers calls into
+// other modules, inline or file, exactly like the Rust bundle-wide fact.
+pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
+    functions := [Func]{}
+    sema_window_collect_functions(items, &functions)
+    candidates := [SemaWindowCandidate]{}
+    loop func in functions {
+        if sema_window_declared_count(functions, func.name) > 1 -> next
+        loop param in func.params {
+            if param.convention != AccessConvention.Write -> next
+            is_list := if param.ty == { .List(_) -> true else -> false }
+            if !is_list -> next
+            scan := SemaWindowScan{resizes: false, marks: 0, accounted: 0, onward: [SemaWindowEdge]{}}
+            sema_window_scan_body(func.body, param.name, &scan)
+            if scan.resizes || scan.marks != scan.accounted -> next
+            onward :: loop edge in scan.onward -> sema_window_edge_key(functions, edge)
+            &candidates.push(SemaWindowCandidate{key: sema_window_param_key(func.name, param.name), onward: onward})
+        }
+    }
+    proven := [String]{}
+    loop candidate in candidates -> &proven.push(candidate.key)
+    changed := true
+    loop changed {
+        changed = false
+        next_proven := [String]{}
+        loop candidate in candidates {
+            if !sema_window_contains(proven, candidate.key) -> next
+            all_proven := true
+            loop target in candidate.onward {
+                if !sema_window_contains(proven, target) -> all_proven = false
+            }
+            if all_proven {
+                &next_proven.push(candidate.key)
+            } else {
+                changed = true
+            }
+        }
+        proven = next_proven
+    }
+    proven
+}
+
+pub fn sema_window_contains(keys: [String], key: String) -> Bool Never! {
+    loop candidate in keys {
+        if candidate == key -> return true
+    }
+    false
+}
+
+// Length-preserving list methods edit elements in place and keep the length.
+fn sema_window_length_preserving_method(method: String) -> Bool Never! {
+    method == "sort" || method == "sort_desc" || method == "sort_by" || method == "sort_by_key" || method == "reverse" || method == "swap" || method == "fill" || method == "shuffle" || method == "rotate_left" || method == "rotate_right"
+}
+
+fn sema_window_is_param(expr: Expr, param: String) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _) -> return sema_window_is_param(inner, param)
+        .Ident(name, _) -> return name == param
+        else -> return false
+    }
+}
+
+fn sema_window_scan_args(args: [CallArg], param: String, scan: &SemaWindowScan) {
+    loop arg in args -> sema_window_scan_expr(arg.expr, param, &scan)
+}
+
+// A write pass of the whole parameter to a callee the fact cannot name.
+fn sema_window_args_write_param(args: [CallArg], param: String) -> Bool Never! {
+    loop arg in args {
+        if arg.convention == AccessConvention.Write && sema_window_is_param(arg.expr, param) -> return true
+    }
+    false
+}
+
+fn sema_window_scan_optional(expr: Expr?, param: String, scan: &SemaWindowScan) {
+    if expr == .Val(value) -> sema_window_scan_expr(value, param, &scan)
+}
+
+fn sema_window_scan_body(body: [Stmt], param: String, scan: &SemaWindowScan) {
+    loop statement in body -> sema_window_scan_statement(statement, param, &scan)
+}
+
+fn sema_window_scan_statement(statement: Stmt, param: String, scan: &SemaWindowScan) {
+    if statement == {
+        .Expr(expr) | .BreakValue(expr, _) | .Yield(expr, _) | .DeferClose(expr, _) -> sema_window_scan_expr(expr, param, &scan)
+        .Val(binding) -> sema_window_scan_expr(binding.init, param, &scan)
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Local(name, _) -> {
+                    if name == param -> scan.resizes = true
+                }
+                .Index(base, index, _, _) -> {
+                    sema_window_scan_expr(base, param, &scan)
+                    sema_window_scan_expr(index, param, &scan)
+                }
+                .Field(base, _, _) -> sema_window_scan_expr(base, param, &scan)
+            }
+            sema_window_scan_expr(value, param, &scan)
+        }
+        .Return(value, _) -> sema_window_scan_optional(value, param, &scan)
+        .BreakLabelValue(_, _, value, _) -> sema_window_scan_expr(value, param, &scan)
+        .While(cond, body, _, _, _) -> {
+            sema_window_scan_expr(cond, param, &scan)
+            sema_window_scan_body(body, param, &scan)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    sema_window_scan_expr(start, param, &scan)
+                    sema_window_scan_expr(end, param, &scan)
+                    sema_window_scan_optional(step, param, &scan)
+                }
+                .In(collection, step) -> {
+                    sema_window_scan_expr(collection, param, &scan)
+                    sema_window_scan_optional(step, param, &scan)
+                }
+            }
+            sema_window_scan_body(body, param, &scan)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            sema_window_scan_expr(subject, param, &scan)
+            loop arm in arms {
+                sema_window_scan_expr(arm.cond, param, &scan)
+                sema_window_scan_body(arm.body, param, &scan)
+            }
+            if else_body == .Val(body) -> sema_window_scan_body(body, param, &scan)
+        }
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Live(body, _) -> sema_window_scan_body(body, param, &scan)
+        .Switched(_, body, _) | .Policy(_, body, _) | .ContextBlock(_, body, _) -> sema_window_scan_body(body, param, &scan)
+        .Region(_, _, body, _) | .Layout(_, _, body, _) -> sema_window_scan_body(body, param, &scan)
+        .ComptimeBlock(body, _, _) -> sema_window_scan_body(body, param, &scan)
+        .Transact(_, _, body, _, _) -> sema_window_scan_body(body, param, &scan)
+        .AuthorityScope(_, _, _, body, _) -> sema_window_scan_body(body, param, &scan)
+        .CountedLoop(init, cond, step, body, _, _, _) -> {
+            sema_window_scan_expr(init.init, param, &scan)
+            sema_window_scan_expr(cond, param, &scan)
+            if step == .Val(inner) -> sema_window_scan_statement(inner, param, &scan)
+            sema_window_scan_body(body, param, &scan)
+        }
+        .Unsafe(_, audit, body, _) | .Impure(_, audit, body, _) -> {
+            sema_window_scan_optional(audit, param, &scan)
+            sema_window_scan_body(body, param, &scan)
+        }
+        .TaskGroup(_, _, limit, body, _) -> {
+            sema_window_scan_optional(limit, param, &scan)
+            sema_window_scan_body(body, param, &scan)
+        }
+        .AssumeDet(_, reason, body, _) -> {
+            sema_window_scan_expr(reason, param, &scan)
+            sema_window_scan_body(body, param, &scan)
+        }
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            sema_window_scan_expr(cond, param, &scan)
+            sema_window_scan_body(then_body, param, &scan)
+            if else_body == .Val(body) -> sema_window_scan_body(body, param, &scan)
+        }
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
+            loop arg in args -> sema_window_scan_expr(arg, param, &scan)
+            sema_window_scan_body(body, param, &scan)
+        }
+        else -> {}
+    }
+}
+
+fn sema_window_scan_expr(expr: Expr, param: String, scan: &SemaWindowScan) {
+    if expr == {
+        .Place(inner, access, _) -> {
+            if access == PlaceAccess.Write && sema_window_is_param(inner, param) -> scan.marks += 1
+            sema_window_scan_expr(inner, param, &scan)
+        }
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
+            if receiver == .Place(inner, access, _) {
+                if access == PlaceAccess.Write && sema_window_is_param(inner, param) {
+                    scan.accounted += 1
+                    if !sema_window_length_preserving_method(method) -> scan.resizes = true
+                }
+            }
+            if sema_window_args_write_param(args, param) -> scan.resizes = true
+            sema_window_scan_expr(receiver, param, &scan)
+            sema_window_scan_args(args, param, &scan)
+        }
+        .OptMethodCall(receiver, _, _, _, args, _) -> {
+            if sema_window_args_write_param(args, param) -> scan.resizes = true
+            sema_window_scan_expr(receiver, param, &scan)
+            sema_window_scan_args(args, param, &scan)
+        }
+        .Call(call) -> {
+            loop index in 0..<call.args.len() {
+                arg :: call.args[index]
+                if arg.convention == AccessConvention.Write && sema_window_is_param(arg.expr, param) -> &scan.onward.push(SemaWindowEdge{callee: call.name, index: index})
+            }
+            sema_window_scan_args(call.args, param, &scan)
+        }
+        .CallValue(callee, args, _) -> {
+            if sema_window_args_write_param(args, param) -> scan.resizes = true
+            sema_window_scan_expr(callee, param, &scan)
+            sema_window_scan_args(args, param, &scan)
+        }
+        .Str(parts, _) -> loop part in parts {
+            if part == .Interp(value, _) -> sema_window_scan_expr(value, param, &scan)
+        }
+        .ListLit(elements, _) -> loop element in elements -> sema_window_scan_expr(element, param, &scan)
+        .CompareChain(operands, _, _, _) -> loop operand in operands -> sema_window_scan_expr(operand, param, &scan)
+        .MapLit(entries, _) -> loop entry in entries {
+            sema_window_scan_expr(entry.key, param, &scan)
+            sema_window_scan_expr(entry.value, param, &scan)
+        }
+        .MemberSpread(base, _, _) | .Spread(base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) -> sema_window_scan_expr(base, param, &scan)
+        .Field(base, _, _) | .OptField(base, _, _, _, _) | .Tainted(base, _, _) | .Present(base, _) -> sema_window_scan_expr(base, param, &scan)
+        .Ok(base, _) | .Err(base, _) | .Paren(base, _) | .Unary(_, base, _) -> sema_window_scan_expr(base, param, &scan)
+        .PatternTest(subject, _, _) -> sema_window_scan_expr(subject, param, &scan)
+        .PtrFromAddr(_, _, _, addr, _) -> sema_window_scan_expr(addr, param, &scan)
+        .Index(base, index, _, _) -> {
+            sema_window_scan_expr(base, param, &scan)
+            sema_window_scan_expr(index, param, &scan)
+        }
+        .Slice(base, start, end, range, _) -> {
+            sema_window_scan_expr(base, param, &scan)
+            sema_window_scan_expr(start, param, &scan)
+            sema_window_scan_expr(end, param, &scan)
+            sema_window_scan_optional(range, param, &scan)
+        }
+        .Range(start, end, _, _) | .Binary(_, start, end, _) -> {
+            sema_window_scan_expr(start, param, &scan)
+            sema_window_scan_expr(end, param, &scan)
+        }
+        .Try(value, _, _, context) -> {
+            sema_window_scan_expr(value, param, &scan)
+            sema_window_scan_optional(context, param, &scan)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            sema_window_scan_expr(value, param, &scan)
+            if fallback == {
+                .Value(inner) -> sema_window_scan_expr(inner, param, &scan)
+                .Block(body, inner, _) -> {
+                    sema_window_scan_body(body, param, &scan)
+                    sema_window_scan_optional(inner, param, &scan)
+                }
+                .Return(inner, _) -> sema_window_scan_optional(inner, param, &scan)
+                .Panic(_, args) -> sema_window_scan_args(args, param, &scan)
+                else -> {}
+            }
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            sema_window_scan_expr(cond, param, &scan)
+            sema_window_scan_body(then_body, param, &scan)
+            sema_window_scan_expr(then_value, param, &scan)
+            sema_window_scan_body(else_body, param, &scan)
+            sema_window_scan_expr(else_value, param, &scan)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_window_scan_expr(field.value, param, &scan)
+        .TupleLit(fields, _, _) -> loop field in fields -> sema_window_scan_expr(field.value, param, &scan)
+        .EnumLit(_, _, _, args, _, _) -> loop arg in args {
+            if arg == {
+                .Positional(value) -> sema_window_scan_expr(value, param, &scan)
+                .Named(_, value) -> sema_window_scan_expr(value, param, &scan)
+            }
+        }
+        .Lambda(lambda) -> {
+            if lambda.body == {
+                .Expr(value) -> sema_window_scan_expr(value, param, &scan)
+                .Block(body) -> sema_window_scan_body(body, param, &scan)
+            }
+        }
+        .TypedLit(_, body, _) -> {
+            if body == {
+                .Fields(fields) -> loop field in fields -> sema_window_scan_expr(field.value, param, &scan)
+                .Elements(elements) -> loop element in elements -> sema_window_scan_expr(element, param, &scan)
+                .Entries(entries) -> loop entry in entries {
+                    sema_window_scan_expr(entry.key, param, &scan)
+                    sema_window_scan_expr(entry.value, param, &scan)
+                }
+                .Value(value) -> sema_window_scan_expr(value, param, &scan)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+}

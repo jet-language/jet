@@ -28,9 +28,21 @@ fn twice(n: Int) -> Int {
     n * 2
 }
 
+// Quiet: a last line calling a unit `Never!` function succeeds with unit.
+fn leave(counter: &Counter) Never! {
+    if counter.hits > 0 -> counter.hits -= 1
+}
+
+fn leave_twice(counter: &Counter) {
+    leave(&counter)
+    leave(&counter)
+}
+
 fn run() {
     total(1, 2)
     Counter{hits: 3}.doubled()
     report(twice(4))
     warm(5)
+    counter := Counter{hits: 2}
+    leave_twice(&counter)
 }

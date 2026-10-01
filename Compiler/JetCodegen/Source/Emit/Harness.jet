@@ -1,0 +1,626 @@
+// Test, fuzz and coverage harness assembly. Ports MIRRust emit_harness,
+// emit_fuzz_harness and the coverage instrumentation rows: one wrapper per
+// selected test, output checks, coverage branch registration, the harness
+// runner and the harness-owned fn main.
+use jet_foundation.[
+    MIRAccess,
+    MIRArtifactBuildMode,
+    MIRArtifactKind,
+    MIRArtifactPlan,
+    MIRBlockID,
+    MIRCoreCallID,
+    MIRFunction,
+    MIRFunctionForm,
+    MIRFunctionKind,
+    MIRHarnessKind,
+    MIRHarnessPlan,
+    MIROutputCheck,
+    MIRParam,
+    MIRSwitchArm,
+    MIRTerminator,
+    MIRTestCase,
+    MIRTestID,
+    MIRTestKind,
+    MIRType,
+    MIRTypeKind,
+    mir_type_is_scalar,
+]
+
+// `core.testing.histories` needs MIRRust's generated history strategies,
+// capture encoders and callable adapters (emit_history_strategies and the
+// history_* helpers), which have no Jet emission port. Emission fails closed
+// with a typed failure instead of producing an artifact without them.
+fn jet_rust_emit_is_history_call(ctx: &JetRustEmitContext, id: MIRCoreCallID) -> Bool Never! {
+    loop row in ctx.program.core_calls {
+        if row.id == id -> return row.module_name == "core.testing" && row.member == "histories"
+    }
+    false
+}
+
+fn jet_rust_emit_reject_history_strategies(ctx: &JetRustEmitContext) Never! {
+    loop function in ctx.program.functions {
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                history := false
+                if instruction.operation == {
+                    .CoreCall(call, _, _, _, _, _) -> history = jet_rust_emit_is_history_call(&ctx, call)
+                    .Call(callee, _, _) -> {
+                        if callee == {
+                            .Core(call) -> history = jet_rust_emit_is_history_call(&ctx, call)
+                            else -> {}
+                        }
+                    }
+                    else -> {}
+                }
+                if history {
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedTarget, "E0003", "the Jet Rust emitter does not generate core.testing history strategies", "history strategies, capture encoders and history callable adapters (MIRRust emit_history_strategies) have no Jet emission port yet", Val(instruction.span))
+                    return
+                }
+            }
+        }
+    }
+}
+
+fn jet_rust_emit_coverage_enabled(ctx: &JetRustEmitContext) -> Bool Never! {
+    artifact :: jet_rust_emit_selected_artifact(&ctx) ?? return false
+    artifact.mode == MIRArtifactBuildMode.Coverage
+}
+
+// Coverage instruments ordinary Jet functions only; test bodies are the probes.
+fn jet_rust_emit_coverage_for(ctx: &JetRustEmitContext, function: MIRFunction) -> Bool Never! {
+    if function.kind != MIRFunctionKind.Jet || !jet_rust_emit_coverage_enabled(&ctx) -> return false
+    loop test in ctx.program.tests {
+        if test.function == function.id -> return false
+    }
+    true
+}
+
+fn jet_rust_emit_terminator_branch_count(terminator: MIRTerminator) -> Int Never! {
+    if terminator == {
+        .Branch(_, _, _) -> 1
+        .Switch(_, arms, _) -> arms.len()
+        else -> 0
+    }
+}
+
+// Branch ordinals count Branch terminators once and Switch arms once each, in
+// block order, so every arm has one stable `<function key>#branchN` identity.
+fn jet_rust_emit_coverage_branch_id(function: MIRFunction, block_id: MIRBlockID, arm: Int) -> String Never! {
+    ordinal := 0
+    loop block in function.blocks {
+        count :: jet_rust_emit_terminator_branch_count(block.terminator)
+        if block.id == block_id && arm < count -> return "{function.key}#branch{ordinal + arm + 1}"
+        ordinal = ordinal + count
+    }
+    "{function.key}#branch0"
+}
+
+fn jet_rust_emit_coverage_branch_line(ctx: &JetRustEmitContext, function: MIRFunction, block_id: MIRBlockID, arm: Int, taken: Bool) -> String Never! {
+    id :: jet_rust_emit_coverage_branch_id(function, block_id, arm)
+    "{ctx.config.root_prefix}jet_cov_branch({jet_rust_emit_quote(id)}, {jet_rust_emit_quote(function.name)}, {jet_rust_emit_bool_text(taken)});"
+}
+
+// 1-based source line of the function's first byte.
+fn jet_rust_emit_coverage_function_line(ctx: &JetRustEmitContext, function: MIRFunction) -> Int Never! {
+    loop source in ctx.program.source_files {
+        if source.id != function.source_file -> next
+        return jet_codegen_line_of(jet_rust_emit_source_line_starts(ctx, source.path), function.span.start)
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR function source file has no row", "coverage probes report the checked source line of each function", Val(function.span))
+    0
+}
+
+// Coverage switch: a nested if/else chain so each arm records both outcomes.
+fn jet_rust_emit_switch_coverage(ctx: &JetRustEmitContext, function: MIRFunction, block_id: MIRBlockID, arms: [MIRSwitchArm], otherwise: MIRBlockID, arm: Int, indent: String, lines: &[String]) Never! {
+    if arm >= arms.len() {
+        &lines.push("{indent}{jet_rust_emit_target_assignment(otherwise)}")
+        return
+    }
+    &lines.push("{indent}if {jet_rust_emit_value_read(arms[arm].condition)} {{")
+    &lines.push("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, arm, true)}")
+    &lines.push("{indent}    {jet_rust_emit_target_assignment(arms[arm].target)}")
+    &lines.push("{indent}}} else {{")
+    &lines.push("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, arm, false)}")
+    jet_rust_emit_switch_coverage(&ctx, function, block_id, arms, otherwise, arm + 1, "{indent}    ", &lines)
+    &lines.push("{indent}}}")
+}
+
+fn jet_rust_emit_find_test(ctx: &JetRustEmitContext, id: MIRTestID) -> MIRTestCase? {
+    loop test in ctx.program.tests {
+        if test.id == id -> return Val(test)
+    }
+    None
+}
+
+fn jet_rust_emit_test_order_before(ctx: &JetRustEmitContext, left: MIRTestCase, right: MIRTestCase) -> Bool Never! {
+    left_function :: jet_rust_emit_find_function(&ctx, left.function) ?? return false
+    right_function :: jet_rust_emit_find_function(&ctx, right.function) ?? return false
+    if left_function.module_name != right_function.module_name -> return left_function.module_name < right_function.module_name
+    if left.span.start != right.span.start -> return left.span.start < right.span.start
+    left.name < right.name
+}
+
+// Selected tests in (module, source position, name) order.
+fn jet_rust_emit_selected_tests(ctx: &JetRustEmitContext, harness: MIRHarnessPlan) -> [MIRTestCase] Never! {
+    ordered := [MIRTestCase]{}
+    loop test_id in harness.tests {
+        if harness.selected_test == .Val(selected) && selected != test_id -> next
+        test :: jet_rust_emit_find_test(&ctx, test_id) ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR test identity has no row", "every harness test names one checked test row", None)
+            return ordered
+        }
+        next_order := [MIRTestCase]{}
+        placed := false
+        loop existing in ordered {
+            if !placed && jet_rust_emit_test_order_before(&ctx, test, existing) {
+                &next_order.push(test)
+                placed = true
+            }
+            &next_order.push(existing)
+        }
+        if !placed -> &next_order.push(test)
+        ordered = next_order
+    }
+    ordered
+}
+
+fn jet_rust_emit_is_scalar(ctx: &JetRustEmitContext, ty: MIRType) -> Bool Never! {
+    if jet_rust_emit_is_core_layer(&ctx) && ty.kind == MIRTypeKind.String -> return true
+    if ty.kind == MIRTypeKind.Int -> return false
+    mir_type_is_scalar(ty)
+}
+
+fn jet_rust_emit_property_generator_supported(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) -> jet_rust_emit_property_generator_supported(inner)
+        else -> false
+    }
+}
+
+// The one E0613 reason surfaced for a property case whose inputs cannot be
+// generated, instead of a runner that guesses at them.
+fn jet_rust_emit_property_generation_unavailable(ctx: &JetRustEmitContext, function: MIRFunction) -> String? {
+    if function.effects.direct.len() > 0 || function.effects.solved.len() > 0 || function.effects.call_edges.len() > 0 {
+        return Val("E0613: property test `{function.name}` requires an effect-free callable; generated inputs are unavailable for effectful code")
+    }
+    loop parameter in function.params {
+        if !jet_rust_emit_property_generator_supported(parameter.ty) -> return Val("E0613: property test `{function.name}` parameter `{parameter.name}` has no built-in generator for `{jet_rust_emit_type(&ctx, parameter.ty)}`")
+    }
+    None
+}
+
+fn jet_rust_emit_test_kind_debug(kind: MIRTestKind) -> String Never! {
+    if kind == {
+        .Unit -> "Unit"
+        .Property -> "Property"
+    }
+}
+
+fn jet_rust_emit_harness_kind_debug(kind: MIRHarnessKind) -> String Never! {
+    if kind == {
+        .Test -> "Test"
+        .Fuzz -> "Fuzz"
+        .Coverage -> "Coverage"
+    }
+}
+
+fn jet_rust_emit_string_list_debug(values: [String]) -> String Never! {
+    rendered := [String]{}
+    loop value in values -> &rendered.push(jet_rust_emit_quote(value))
+    "[{rendered.join(", ")}]"
+}
+
+// Call body shared by unit and property runners: a failure carrier becomes the
+// runner's Err(String).
+fn jet_rust_emit_test_body(function: MIRFunction, call: String) -> String Never! {
+    if function.failure == {
+        .Diverges(_) -> "{call}; Ok(())"
+        .Infallible -> "let _ = {call}; Ok(())"
+        else -> "match {call} {{ Ok(_) => Ok(()), Err(__e) => Err(format!(\"{{:?}}\", __e)) }}"
+    }
+}
+
+fn jet_rust_emit_unavailable_test_wrapper(wrapper: String, name: String, expected_failure: Bool, reason: String) -> String Never! {
+    "fn {wrapper}() -> JetTestOutcome {{ JetTestOutcome {{ name: {jet_rust_emit_quote(name)}.to_string(), ok: false, expected_failure: {jet_rust_emit_bool_text(expected_failure)}, skipped: false, stdout: String::new(), stderr: {jet_rust_emit_quote(reason)}.to_string(), property_cases: Some(0) }} }}"
+}
+
+// Rendered property input: one parameter shows `name = value`, several show
+// `a=value, b=value`. `prefix` selects the tuple or argument spelling.
+fn jet_rust_emit_property_input(function: MIRFunction, types: [String], prefix: String, labeled_single: Bool) -> String Never! {
+    parts := [String]{}
+    loop (index, ty) in types -> &parts.push("<{ty} as JetGen>::render(&{prefix}{index})")
+    if parts.len() == 1 {
+        if !labeled_single -> return parts[0]
+        label :: jet_rust_emit_quote("{function.params[0].name} = {{}}")
+        return "format!({label}, {parts[0]})"
+    }
+    labels := [String]{}
+    loop parameter in function.params -> &labels.push("{parameter.name}={{}}")
+    "format!({jet_rust_emit_quote(labels.join(", "))}, {parts.join(", ")})"
+}
+
+fn jet_rust_emit_property_shrink_blocks(types: [String], first_indent: String, fuzz: Bool) -> String Never! {
+    blocks := [String]{}
+    loop (index, ty) in types {
+        failed :: if fuzz -> "if __jet_run(&__jet_try).is_err() {{" else -> "let (__jet_try_result, _) = __jet_run(&__jet_try);\nif __jet_try_result.is_err() {{"
+        &blocks.push("{first_indent}let __jet_candidates_{index} = <{ty} as JetGen>::shrink(&__jet_minimized.{index});\nfor __jet_candidate in __jet_candidates_{index} {{\nlet mut __jet_try = __jet_minimized.clone();\n__jet_try.{index} = __jet_candidate;\n{failed}\n__jet_minimized = __jet_try;\n__jet_changed = true;\nbreak;\n}}\n}}")
+    }
+    blocks.join("\n")
+}
+
+fn jet_rust_emit_argument_for_access(ctx: &JetRustEmitContext, parameter: MIRParam, name: String) -> String Never! {
+    if parameter.access == {
+        .Write -> "&mut {name}"
+        .Read -> if jet_rust_emit_is_scalar(&ctx, parameter.ty) -> name else -> "&{name}"
+        .Move -> name
+    }
+}
+
+// Contract-generated rows classify each input with the eligibility predicate
+// synthesized from the candidate's own `#Pre` conditions before running it.
+fn jet_rust_emit_property_test_runner(ctx: &JetRustEmitContext, test: MIRTestCase, function: MIRFunction, arg_names: [String], body: String) -> String Never! {
+    expected :: jet_rust_emit_bool_text(test.expected_failure)
+    if !test.contract_generated -> return "jet_test_run_property({expected}, || {{ {body} }})"
+    predicate_id :: test.eligibility ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR contract test has no eligibility predicate", "contract-generated property rows carry their synthesized eligibility predicate", Val(test.span))
+        return "unreachable!(\"MIR contract eligibility\")"
+    }
+    predicate :: jet_rust_emit_find_function(&ctx, predicate_id) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR contract eligibility predicate has no function row", "eligibility predicates are checked functions", Val(test.span))
+        return "unreachable!(\"MIR contract eligibility\")"
+    }
+    if !jet_rust_emit_function_target_enabled(ctx.config, predicate) || predicate.params.len() != function.params.len() {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR contract eligibility predicate is unselected or has the wrong arity", "eligibility predicates are selected and take the candidate's parameters", Val(test.span))
+        return "unreachable!(\"MIR contract eligibility\")"
+    }
+    predicate_args := [String]{}
+    loop (index, parameter) in predicate.params {
+        if parameter.access != MIRAccess.Read {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR contract eligibility predicate must borrow its parameters", "eligibility predicates read generated inputs without taking or writing them", Val(test.span))
+            return "unreachable!(\"MIR contract eligibility\")"
+        }
+        &predicate_args.push(jet_rust_emit_argument_for_access(&ctx, parameter, arg_names[index]))
+    }
+    "{{ let __jet_eligible = jet_test_contract_eligibility(|| {jet_rust_emit_function_name(&ctx, predicate.id)}({predicate_args.join(", ")})); match __jet_eligible {{ Ok(false) => Ok(JetPropertyCaseResult::Rejected), Ok(true) => jet_test_run_property({expected}, || {{ {body} }}), Err(__jet_pre_error) => Err(__jet_pre_error) }} }}"
+}
+
+fn jet_rust_emit_property_wrapper(ctx: &JetRustEmitContext, harness: MIRHarnessPlan, test: MIRTestCase, function: MIRFunction, wrapper: String, lines: &[String]) Never! {
+    expected :: jet_rust_emit_bool_text(test.expected_failure)
+    types := [String]{}
+    arg_names := [String]{}
+    loop (index, parameter) in function.params {
+        &types.push(jet_rust_emit_type(&ctx, parameter.ty))
+        &arg_names.push("__jet_arg{index}")
+    }
+    declarations := [String]{}
+    runner_declarations := [String]{}
+    call_args := [String]{}
+    tuple_values := [String]{}
+    loop (index, parameter) in function.params {
+        &declarations.push("        let {arg_names[index]}: {types[index]} = <{types[index]} as JetGen>::generate(&mut __jet_rng);")
+        mutability :: if parameter.access == MIRAccess.Write -> "mut " else -> ""
+        &runner_declarations.push("        let {mutability}__jet_arg{index}: {types[index]} = __jet_input.{index}.clone();")
+        &call_args.push(jet_rust_emit_argument_for_access(&ctx, parameter, arg_names[index]))
+        &tuple_values.push("{arg_names[index]}.clone()")
+    }
+    input :: jet_rust_emit_property_input(function, types, "__jet_arg", false)
+    tuple_type :: "({types.join(", ")},)"
+    input_tuple :: "({tuple_values.join(", ")},)"
+    body :: jet_rust_emit_test_body(function, "{jet_rust_emit_function_name(&ctx, function.id)}({call_args.join(", ")})")
+    test_runner :: jet_rust_emit_property_test_runner(&ctx, test, function, arg_names, body)
+    if harness.kind == MIRHarnessKind.Fuzz {
+        params := [String]{}
+        loop (index, parameter) in function.params {
+            mutability :: if parameter.access == MIRAccess.Write -> "mut " else -> ""
+            &params.push("{mutability}{arg_names[index]}: {types[index]}")
+        }
+        &lines.push("fn __jet_fuzz_case_{test.id.value}({params.join(", ")}) -> Result<(), String> {{")
+        &lines.push("    let __jet_result = {test_runner};")
+        &lines.push("    let _ = jet_test_take_output();")
+        &lines.push("    match __jet_result {{ Ok(JetPropertyCaseResult::Accepted) | Ok(JetPropertyCaseResult::Rejected) => Ok(()), Err(__jet_error) => Err(__jet_error) }}")
+        &lines.push("}}")
+        return
+    }
+    name :: jet_rust_emit_quote(test.name)
+    minimized_input :: jet_rust_emit_property_input(function, types, "__jet_minimized.", true)
+    shrink_blocks :: jet_rust_emit_property_shrink_blocks(types, "                                ", false)
+    property_ok :: if test.contract_generated -> "{jet_rust_emit_bool_text(!test.expected_failure)} && __jet_accepted_cases > 0" else -> jet_rust_emit_bool_text(!test.expected_failure)
+    property_stderr :: if test.contract_generated -> "if __jet_accepted_cases == 0 {{ \"E0613: no accepted contract examples\".to_string() }} else {{ String::new() }}" else -> "String::new()"
+    replay_declarations := [String]{}
+    loop declaration in declarations -> &replay_declarations.push(declaration.replace("__jet_rng", "__jet_replay_rng"))
+    failure_return :: "return JetTestOutcome {{ name: {name}.to_string(), ok: {expected}, expected_failure: {expected}, skipped: false, stdout: __jet_stdout, stderr: format!(\"seed {{}} case {{}}: {{}} (input {{}})\", "
+    source := [String]{}
+    &source.push("fn {wrapper}() -> JetTestOutcome {{")
+    &source.push("let __jet_seed = jet_prop_seed();")
+    &source.push("let __jet_replay_seed = jet_prop_replay_seed();")
+    &source.push("let __jet_replay_case = jet_prop_replay_case();")
+    &source.push("let mut __jet_stdout = String::new();")
+    &source.push("let mut __jet_accepted_cases: u64 = 0;")
+    &source.push("    let __jet_run = |__jet_input: &{tuple_type}| -> (Result<JetPropertyCaseResult, String>, String) {{")
+    &source.push(runner_declarations.join("\n"))
+    &source.push("let __jet_result = {test_runner};")
+    &source.push("let __jet_case_stdout = jet_test_take_output();")
+    &source.push("(__jet_result, __jet_case_stdout)")
+    &source.push("}};")
+    &source.push("if let (Some(__jet_replay_seed), Some(__jet_replay_case)) = (__jet_replay_seed, __jet_replay_case) {{")
+    &source.push("if __jet_replay_seed == __jet_seed && __jet_replay_case < jet_prop_cases() {{")
+    &source.push("let mut __jet_replay_driver_rng = JetRng::new(__jet_replay_seed);")
+    &source.push("for __jet_replay_index in 0..=__jet_replay_case {{")
+    &source.push("let __jet_case_seed = __jet_replay_driver_rng.next_u64();")
+    &source.push("let mut __jet_replay_rng = JetRng::new(__jet_case_seed);")
+    &source.push(replay_declarations.join("\n"))
+    &source.push("if __jet_replay_index != __jet_replay_case {{ continue; }}")
+    &source.push("let __jet_input = {input_tuple};")
+    &source.push("jet_prop_trace_sample(\"jet_test\", __jet_replay_index, __jet_case_seed, &{input});")
+    &source.push("let (__jet_result, __jet_case_stdout) = __jet_run(&__jet_input);")
+    &source.push("__jet_stdout.push_str(&__jet_case_stdout);")
+    &source.push("match __jet_result {{")
+    &source.push("Ok(JetPropertyCaseResult::Accepted) => {{")
+    &source.push("__jet_accepted_cases += 1;")
+    &source.push("}}")
+    &source.push("Ok(JetPropertyCaseResult::Rejected) => {{}},")
+    &source.push("Err(__jet_error) => {{")
+    &source.push("__jet_accepted_cases += 1;")
+    &source.push("let mut __jet_minimized = __jet_input.clone();")
+    &source.push("for _ in 0..2000 {{")
+    &source.push("let mut __jet_changed = false;")
+    &source.push(shrink_blocks)
+    &source.push("if !__jet_changed {{ break; }}")
+    &source.push("}}")
+    &source.push("let __jet_minimized_display = {minimized_input};")
+    &source.push("{failure_return}__jet_replay_seed, __jet_replay_case, __jet_error, __jet_minimized_display), property_cases: Some(__jet_accepted_cases) }};")
+    &source.push("}}")
+    &source.push("}}")
+    &source.push("}}")
+    &source.push("}}")
+    &source.push("}}")
+    &source.push("let mut __jet_driver_rng = JetRng::new(__jet_seed);")
+    &source.push("for __jet_case_index in 0..jet_prop_cases() {{")
+    &source.push("let __jet_case_seed = __jet_driver_rng.next_u64();")
+    &source.push("let mut __jet_rng = JetRng::new(__jet_case_seed);")
+    &source.push("if __jet_replay_seed == Some(__jet_seed) && __jet_replay_case == Some(__jet_case_index) {{ continue; }}")
+    &source.push(declarations.join("\n"))
+    &source.push("let __jet_input = {input_tuple};")
+    &source.push("jet_prop_trace_sample(\"jet_test\", __jet_case_index, __jet_case_seed, &{input});")
+    &source.push("let (__jet_result, __jet_case_stdout) = __jet_run(&__jet_input);")
+    &source.push("__jet_stdout.push_str(&__jet_case_stdout);")
+    &source.push("match __jet_result {{")
+    &source.push("Ok(JetPropertyCaseResult::Accepted) => {{ __jet_accepted_cases += 1; }}")
+    &source.push("Ok(JetPropertyCaseResult::Rejected) => {{}},")
+    &source.push("Err(__jet_error) => {{")
+    &source.push("__jet_accepted_cases += 1;")
+    &source.push("let mut __jet_minimized = __jet_input.clone();")
+    &source.push("for _ in 0..2000 {{")
+    &source.push("let mut __jet_changed = false;")
+    &source.push(shrink_blocks)
+    &source.push("if !__jet_changed {{ break; }}")
+    &source.push("}}")
+    &source.push("let __jet_minimized_display = {minimized_input};")
+    &source.push("{failure_return}__jet_seed, __jet_case_index, __jet_error, __jet_minimized_display), property_cases: Some(__jet_accepted_cases) }};")
+    &source.push("}}")
+    &source.push("}}")
+    &source.push("}}")
+    &source.push("JetTestOutcome {{ name: {name}.to_string(), ok: {property_ok}, expected_failure: {expected}, skipped: false, stdout: __jet_stdout, stderr: {property_stderr}, property_cases: Some(__jet_accepted_cases) }}")
+    &source.push("}}")
+    &lines.push(source.join("\n"))
+}
+
+fn jet_rust_emit_unit_wrapper(ctx: &JetRustEmitContext, test: MIRTestCase, function: MIRFunction, wrapper: String, lines: &[String]) Never! {
+    expected :: jet_rust_emit_bool_text(test.expected_failure)
+    body :: jet_rust_emit_test_body(function, "{jet_rust_emit_function_name(&ctx, function.id)}()")
+    &lines.push("fn {wrapper}() -> JetTestOutcome {{")
+    &lines.push("let __jet_result = jet_test_run({expected}, || {{ {body} }});")
+    &lines.push("let __jet_stdout = jet_test_take_output();")
+    &lines.push("let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};")
+    &lines.push("let __jet_skipped = jet_test_take_whole_skip();")
+    &lines.push("JetTestOutcome {{ name: {jet_rust_emit_quote(test.name)}.to_string(), ok: __jet_skipped || (__jet_failed == {expected}), expected_failure: {expected}, skipped: __jet_skipped, stdout: __jet_stdout, stderr: __jet_stderr, property_cases: None }}")
+    &lines.push("}}")
+}
+
+fn jet_rust_emit_test_wrapper(ctx: &JetRustEmitContext, harness: MIRHarnessPlan, test: MIRTestCase, lines: &[String]) Never! {
+    function :: jet_rust_emit_find_function(&ctx, test.function) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR test function has no row", "every test row names one checked function", Val(test.span))
+        return
+    }
+    if !jet_rust_emit_function_target_enabled(ctx.config, function) || function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR test is not a selected top-level callable", "tests call selected capture-free top-level functions", Val(test.span))
+        return
+    }
+    property :: test.kind == MIRTestKind.Property
+    if !property && function.params.len() > 0 {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR unit test has checked parameters", "unit tests take no parameters", Val(test.span))
+        return
+    }
+    if property && test.generation_unavailable_reason == None && (function.params.len() == 0 || function.params.len() != test.parameters.len()) {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR property test has inconsistent checked parameters", "property tests take the generated parameters their row declares", Val(test.span))
+        return
+    }
+    wrapper :: "__jet_test_{test.id.value}"
+    &lines.push("// jet-mir-test: id={test.id.value} name={test.name} kind={jet_rust_emit_test_kind_debug(test.kind)} expected_failure={jet_rust_emit_bool_text(test.expected_failure)} faults={jet_rust_emit_string_list_debug(test.faults)}")
+    if !property {
+        jet_rust_emit_unit_wrapper(&ctx, test, function, wrapper, &lines)
+        return
+    }
+    if test.generation_unavailable_reason == .Val(reason) {
+        &lines.push(jet_rust_emit_unavailable_test_wrapper(wrapper, test.name, test.expected_failure, "E0613: {reason}"))
+        return
+    }
+    if jet_rust_emit_property_generation_unavailable(&ctx, function) == .Val(reason) {
+        &lines.push(jet_rust_emit_unavailable_test_wrapper(wrapper, test.name, test.expected_failure, reason))
+        return
+    }
+    jet_rust_emit_property_wrapper(&ctx, harness, test, function, wrapper, &lines)
+}
+
+fn jet_rust_emit_output_check(ctx: &JetRustEmitContext, check: MIROutputCheck, lines: &[String]) Never! {
+    function :: jet_rust_emit_find_function(&ctx, check.function) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR output check function has no row", "every output check names one checked function", None)
+        return
+    }
+    if !jet_rust_emit_function_target_enabled(ctx.config, function) || function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 || function.params.len() > 0 {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR output check has no checked zero-argument invocation", "output checks call selected zero-argument top-level functions", Val(function.span))
+        return
+    }
+    name :: jet_rust_emit_function_name(&ctx, check.function)
+    &lines.push("// jet-mir-output-check: id={check.id.value} name={check.name} function={name}")
+    // Sema admits only `()`/`() ?` Check entries; the Bool arm mirrors MIRRust.
+    if function.return_type.kind == MIRTypeKind.Bool {
+        &lines.push("fn __jet_output_check_{check.id.value}() {{ assert!({name}(), \"MIR output check {jet_rust_emit_quote(check.name)}\"); }}")
+    } else {
+        &lines.push("fn __jet_output_check_{check.id.value}() {{ let _ = {name}(); }}")
+    }
+}
+
+fn jet_rust_emit_harness_main(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, run: String, dispatch_jobs: Bool, lines: &[String]) Never! {
+    if artifact.entry != None || artifact.kind == MIRArtifactKind.NativeLibrary || artifact.kind == MIRArtifactKind.SandboxPlugin -> return
+    root :: ~ctx.config.root_prefix
+    &lines.push("fn main() {{")
+    &lines.push("    {root}jet_std_env_init();")
+    &lines.push("    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());")
+    if dispatch_jobs && artifact.jobs.len() > 0 {
+        &lines.push("    let __argv = {root}jet_std_io_args();")
+        &lines.push("    if __jet_job_dispatch(&__argv, false) {{ return; }}")
+    }
+    &lines.push("    {root}jet_runtime_boundary(|| {{ {run} }});")
+    &lines.push("}}")
+    &lines.push("")
+}
+
+fn jet_rust_emit_fuzz_harness(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, tests: [MIRTestCase], lines: &[String]) Never! {
+    if tests.len() == 0 {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR fuzz harness has no selected property test", "fuzz artifacts select exactly one property test", None)
+        return
+    }
+    test :: tests[0]
+    if test.kind != MIRTestKind.Property {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR fuzz test is not a property test", "fuzz artifacts drive generated property inputs", Val(test.span))
+        return
+    }
+    function :: jet_rust_emit_find_function(&ctx, test.function) ?? return
+    unavailable := jet_rust_emit_property_generation_unavailable(&ctx, function)
+    if test.generation_unavailable_reason == .Val(reason) -> unavailable = Val("E0613: {reason}")
+    if unavailable == .Val(message) {
+        &lines.push("fn __jet_fuzz_run() {{ eprintln!({jet_rust_emit_quote(message)}); std::process::exit(1); }}")
+    } else {
+        types := [String]{}
+        generated := [String]{}
+        run_args := [String]{}
+        loop (index, parameter) in function.params {
+            ty :: jet_rust_emit_type(&ctx, parameter.ty)
+            &types.push(ty)
+            &generated.push("<{ty} as JetGen>::generate(&mut __jet_rng)")
+            &run_args.push("__jet_input.{index}.clone()")
+        }
+        tuple_type :: "({types.join(", ")},)"
+        generated_fields :: generated.join(", ")
+        rendered_input :: jet_rust_emit_property_input(function, types, "__jet_input.", true)
+        trace_input :: jet_rust_emit_property_input(function, types, "__jet_input.", false)
+        minimized_input :: jet_rust_emit_property_input(function, types, "__jet_minimized.", true)
+        shrink_blocks :: jet_rust_emit_property_shrink_blocks(types, "        ", true)
+        &lines.push("fn __jet_fuzz_sanitize_name(name: &str) -> String {{\nlet mut safe = String::new();\nfor ch in name.chars() {{\nsafe.push(if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {{ ch }} else {{ '_' }});\n}}\nif safe.is_empty() {{ \"case\".to_string() }} else {{ safe }}\n}}")
+        &lines.push("fn __jet_fuzz_run() {{")
+        &lines.push("    jet_test_install_panic_hook();")
+        &lines.push("    jet_test_trace_tier();")
+        &lines.push("    let __jet_name = {jet_rust_emit_quote(test.name)};\nlet __jet_corpus = std::env::var(\"JET_FUZZ_CORPUS\")\n.unwrap_or_else(|_| format!(\".jet/fuzz/{{}}\", __jet_fuzz_sanitize_name(__jet_name)));\nlet _ = std::fs::create_dir_all(&__jet_corpus);\nlet __jet_iterations = std::env::var(\"JET_FUZZ_ITERATIONS\")\n.ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(1000);\nlet __jet_time_ms = std::env::var(\"JET_FUZZ_TIME_MS\")\n.ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);\nlet __jet_seed = std::env::var(\"JET_FUZZ_SEED\")\n.ok().and_then(|value| value.parse::<u64>().ok())\n.unwrap_or(0x5EED_1234_ABCD_0001u64);")
+        &lines.push("    let __jet_generate = |__jet_base_seed: u64, __jet_case_index: u64| -> (u64, {tuple_type}) {{")
+        &lines.push("        let mut __jet_driver_rng = JetRng::new(__jet_base_seed);\nlet mut __jet_case_seed = 0u64;\nfor _ in 0..=__jet_case_index {{ __jet_case_seed = __jet_driver_rng.next_u64(); }}\nlet mut __jet_rng = JetRng::new(__jet_case_seed);\nlet __jet_input = ({generated_fields},);\n(__jet_case_seed, __jet_input)\n}};")
+        &lines.push("    let __jet_run = |__jet_input: &{tuple_type}| -> Result<(), String> {{\n__jet_fuzz_case_{test.id.value}({run_args.join(", ")})\n}};")
+        &lines.push("    let mut __jet_corpus_cases: Vec<(u64, u64)> = Vec::new();")
+        &lines.push("    if let Ok(__jet_entries) = std::fs::read_dir(&__jet_corpus) {{\nlet mut __jet_paths = __jet_entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect::<Vec<_>>();\n__jet_paths.sort();\nfor __jet_path in __jet_paths {{\nif !__jet_path.is_file() {{ continue; }}\nlet Ok(__jet_text) = std::fs::read_to_string(&__jet_path) else {{ continue; }};\nlet __jet_values = __jet_text.split_whitespace().filter_map(|value| value.parse::<u64>().ok()).collect::<Vec<_>>();\nlet Some(__jet_base_seed) = __jet_values.first().copied() else {{ continue; }};\n__jet_corpus_cases.push((__jet_base_seed, __jet_values.get(1).copied().unwrap_or(0)));\n}}\n}}")
+        &lines.push("    let __jet_corpus_count = __jet_corpus_cases.len();")
+        &lines.push("    for (__jet_base_seed, __jet_case_index) in __jet_corpus_cases.iter().copied() {{\nlet (__jet_case_seed, __jet_input) = __jet_generate(__jet_base_seed, __jet_case_index);\nlet __jet_display = {rendered_input};\nlet __jet_trace_input = {trace_input};\njet_prop_trace_sample(\"jet_fuzz\", __jet_case_index, __jet_case_seed, &__jet_trace_input);\nif let Err(__jet_error) = __jet_run(&__jet_input) {{\nprintln!(\"{{}}: FAIL (corpus replay, seed={{}})\", __jet_name, __jet_case_seed);\neprintln!(\"  input: {{}}\", __jet_display);\neprintln!(\"  error: {{}}\", __jet_error);\nstd::process::exit(1);\n}}\n}}\nprintln!(\"corpus: {{}} case(s) replayed clean\", __jet_corpus_count);")
+        &lines.push("    let __jet_started = std::time::Instant::now();\nlet mut __jet_driver_rng = JetRng::new(__jet_seed);\nfor __jet_case_index in 0..__jet_iterations {{\nif __jet_time_ms > 0 && __jet_started.elapsed() >= std::time::Duration::from_millis(__jet_time_ms) {{ break; }}\nlet __jet_case_seed = __jet_driver_rng.next_u64();\nlet mut __jet_rng = JetRng::new(__jet_case_seed);\nlet __jet_input = ({generated_fields},);\nlet __jet_display = {rendered_input};\nlet __jet_trace_input = {trace_input};\njet_prop_trace_sample(\"jet_fuzz\", __jet_case_index, __jet_case_seed, &__jet_trace_input);\nif let Err(__jet_error) = __jet_run(&__jet_input) {{\nlet mut __jet_minimized = __jet_input.clone();\nfor _ in 0..2000 {{\nlet mut __jet_changed = false;\n{shrink_blocks}\nif !__jet_changed {{ break; }}\n}}\nlet __jet_minimized_display = {minimized_input};\nlet __jet_saved = std::path::Path::new(&__jet_corpus).join(format!(\"seed_{{}}.txt\", __jet_case_seed));\nlet _ = std::fs::write(&__jet_saved, format!(\"{{}} {{}}\\n\", __jet_seed, __jet_case_index));\nprintln!(\"{{}}: FAIL (after {{}} iteration(s))\", __jet_name, __jet_case_index + 1);\nprintln!(\"  minimized input: {{}}\", __jet_minimized_display);\nprintln!(\"  seed: {{}}\", __jet_case_seed);\nprintln!(\"  saved: {{}}\", __jet_saved.display());\neprintln!(\"  error: {{}}\", __jet_error);\nprintln!(\"repro: JET_PROP_SEED={{}} JET_PROP_REPLAY_CASE={{}} jet test --grade=generated\", __jet_seed, __jet_case_index);\nstd::process::exit(1);\n}}\n}}\nprintln!(\"{{}}: {{}} iteration(s), no failure found\", __jet_name, __jet_iterations);")
+        &lines.push("}}")
+        &lines.push("")
+    }
+    jet_rust_emit_harness_main(&ctx, artifact, "__jet_fuzz_run();", false, &lines)
+}
+
+// MIRRust emit_harness: wrappers, output checks, coverage points, the runner,
+// the harness-owned main, then jobs. Without a harness only jobs are emitted.
+fn jet_rust_emit_harness(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
+    harness_id :: artifact.harness ?? {
+        if artifact.jobs.len() > 0 -> jet_rust_emit_jobs(&ctx, artifact, &lines)
+        return
+    }
+    found := MIRHarnessPlan?{None}
+    loop candidate in ctx.program.harnesses {
+        if candidate.id == harness_id -> found = Val(candidate)
+    }
+    harness :: found ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR harness identity has no row", "a harness artifact names one checked harness plan", None)
+        return
+    }
+    root :: ~ctx.config.root_prefix
+    selected :: if harness.selected_test == .Val(test_id) -> "Some(MirTestId({test_id.value}))" else -> "None"
+    &lines.push("// jet-mir-harness: id={harness.id.value} kind={jet_rust_emit_harness_kind_debug(harness.kind)} selected_test={selected} command_override={jet_rust_emit_bool_text(harness.command_override)}")
+    tests :: jet_rust_emit_selected_tests(&ctx, harness)
+    loop test in tests -> jet_rust_emit_test_wrapper(&ctx, harness, test, &lines)
+    if ctx.failure != None -> return
+    if harness.kind == MIRHarnessKind.Fuzz {
+        jet_rust_emit_fuzz_harness(&ctx, artifact, tests, &lines)
+        return
+    }
+    if tests.len() == 0 && harness.output_checks.len() == 0 {
+        if artifact.jobs.len() > 0 -> jet_rust_emit_jobs(&ctx, artifact, &lines)
+        return
+    }
+    loop check in harness.output_checks -> jet_rust_emit_output_check(&ctx, check, &lines)
+    loop point in harness.coverage_points {
+        function :: jet_rust_emit_find_function(&ctx, point.function) ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR coverage point function has no row", "coverage points name checked functions", Val(point.span))
+            return
+        }
+        if !jet_rust_emit_function_target_enabled(ctx.config, function) {
+            if ctx.config.target == "web" -> next
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR coverage point targets an unselected function", "coverage points name functions selected for the artifact", Val(point.span))
+            return
+        }
+        &lines.push("// jet-mir-coverage-point: id={point.id.value} function={jet_rust_emit_function_name(&ctx, point.function)} block={point.block.value} span={point.span.start}..{point.span.end}")
+    }
+    coverage :: jet_rust_emit_coverage_enabled(&ctx)
+    &lines.push("fn __jet_harness_run() -> bool {{")
+    &lines.push("    jet_test_install_panic_hook();")
+    &lines.push("    jet_test_trace_tier();")
+    if coverage {
+        loop function in ctx.program.functions {
+            if !jet_rust_emit_coverage_for(&ctx, function) || !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
+            ordinal := 0
+            loop block in function.blocks {
+                loop _ in 0..<jet_rust_emit_terminator_branch_count(block.terminator) {
+                    ordinal = ordinal + 1
+                    branch_id :: jet_rust_emit_quote("{function.key}#branch{ordinal}")
+                    &lines.push("    {root}jet_cov_register_branch({branch_id}, {jet_rust_emit_quote(function.name)});")
+                }
+            }
+        }
+    }
+    &lines.push("    let mut __jet_cases: Vec<(&'static str, fn() -> JetTestOutcome)> = vec![")
+    loop test in tests -> &lines.push("        ({jet_rust_emit_quote(test.name)}, || jet_evidence_with_expectation({jet_rust_emit_bool_text(test.expected_failure)}, __jet_test_{test.id.value})),")
+    &lines.push("    ];")
+    &lines.push("    if let Some(__jet_filter) = jet_test_filter() {{ __jet_cases.retain(|(__jet_name, _)| __jet_name.contains(&__jet_filter)); }}")
+    &lines.push("    let mut __jet_order: Vec<usize> = (0..__jet_cases.len()).collect();")
+    &lines.push("    if let Some(__jet_seed) = jet_test_shuffle_seed() {{ __jet_order = jet_test_shuffle_order(__jet_cases.len(), __jet_seed); }}")
+    &lines.push("    let __jet_serial = jet_test_serial();")
+    &lines.push("    let mut __jet_results = Vec::with_capacity(__jet_order.len());")
+    &lines.push("    if __jet_serial {{")
+    &lines.push("        for __jet_index in __jet_order {{ __jet_results.push((__jet_cases[__jet_index].1)()); }}")
+    &lines.push("    }} else {{")
+    &lines.push("        std::thread::scope(|__jet_scope| {{")
+    &lines.push("            let mut __jet_handles = Vec::new();")
+    &lines.push("            for __jet_index in __jet_order {{")
+    &lines.push("                let __jet_run = __jet_cases[__jet_index].1;")
+    &lines.push("                __jet_handles.push(__jet_scope.spawn(move || __jet_run()));")
+    &lines.push("            }}")
+    &lines.push("            for __jet_handle in __jet_handles {{ __jet_results.push(__jet_handle.join().unwrap()); }}")
+    &lines.push("        }});")
+    &lines.push("    }}")
+    loop check in harness.output_checks -> &lines.push("    __jet_output_check_{check.id.value}();")
+    if coverage -> &lines.push("    {root}jet_cov_flush();")
+    &lines.push("    jet_test_finish(__jet_results)")
+    &lines.push("}}")
+    &lines.push("")
+    jet_rust_emit_harness_main(&ctx, artifact, "if !__jet_harness_run() {{ std::process::exit(1); }}", true, &lines)
+    if artifact.jobs.len() > 0 -> jet_rust_emit_jobs(&ctx, artifact, &lines)
+}

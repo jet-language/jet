@@ -95,7 +95,7 @@ pub fn is_hashable_type(ty: &Type) -> bool {
             .iter()
             .all(|(_, field)| is_hashable_type(field)),
         Type::Union(members) => members.iter().all(is_hashable_type),
-        Type::Apply { name, .. } if name == "Id" => true,
+        Type::Apply { name, .. } if name == "ID" => true,
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
@@ -313,7 +313,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "para_partition parse partial partition peek peek_back peek_front pick plan plugin poll pop publish ",
     "pop_back pop_first pop_front position probe product public_key push push_back push_front queued queued_count ",
     "random reaches_panic read read_byte read_bytes read_f32_be read_f32_le read_f64_be read_f64_le read_i8 read_i16_be read_i16_le read_i32_be read_i32_le read_i64_be read_i64_le read_string receive reduce remove remove_prefix remove_suffix repeat ",
-    "replace require reverse rewind right rsplit run running_count sample scan second seek store ",
+    "replace require reverse rewind right rsplit run running_count same sample scan second seek store ",
     "semantic_index send set shuffle shutdown signing skip skip_while slice sort sort_desc sort_by sort_by_desc source ",
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
@@ -521,7 +521,6 @@ pub fn builtin_method_return(
             }
             _ => None,
         },
-        Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
         Type::Named(n) if n == "TestSuite" => {
             (method == "run" && arg_count == 0).then_some(Some(Type::Int))
         }
@@ -533,7 +532,7 @@ pub fn builtin_method_return(
         // time/randomness THROUGH the handle is reproducible (caller seeded it).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => clock_method_return(method, arg_count),
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => rng_method_return(method, arg_count),
-        Type::Named(n) if n == "HistoryRng" => history_rng_method_return(method, arg_count),
+        Type::Named(n) if n == "HistoryRNG" => history_rng_method_return(method, arg_count),
         Type::Named(n) if n == crate::Syntax::DETERMINISTIC_WORLD_TYPE => {
             deterministic_world_method_return(method, arg_count)
         }
@@ -1993,13 +1992,6 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
-fn stopwatch_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("elapsed_millis", 0) => Some(Some(Type::Int)),
-        _ => None,
-    }
-}
-
 /// D-DET1: methods on the deterministic injected `Clock` capability.
 /// `clock.now()` reads the clock's current value (ms); `clock.tick(ms)` advances
 /// it by a relative span and returns the new value. Reproducible — the clock
@@ -2178,12 +2170,12 @@ fn pool_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
     let t = args.first().cloned().unwrap_or(Type::Int);
     match (method, nargs) {
         ("add", 1) => Some(Some(Type::Apply {
-            name: "Id".to_string(),
+            name: "ID".to_string(),
             args: vec![t],
         })),
         ("remove", 1) => Some(Some(Type::Option(Box::new(t)))),
         ("ids", 0) => Some(Some(Type::List(Box::new(Type::Apply {
-            name: "Id".to_string(),
+            name: "ID".to_string(),
             args: vec![t],
         })))),
         _ => None,
@@ -2221,6 +2213,8 @@ fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
             args: vec![inner.clone()],
         })),
         ("strong_count", 0) => Some(Some(Type::Int)),
+        // Identity only, like `Rc::ptr_eq`: `==` on `Shared<T>` stays an error.
+        ("same", 1) => Some(Some(Type::Bool)),
         _ => None,
     }
 }
@@ -2875,7 +2869,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                     | "shuffle"
             )
         }
-        Type::Named(n) if n == "HistoryRng" => matches!(method, "next_u64" | "below"),
+        Type::Named(n) if n == "HistoryRNG" => matches!(method, "next_u64" | "below"),
         Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
             matches!(method, "name" | "email" | "host" | "address")
         }
@@ -3841,7 +3835,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "bytes" => Some(vec![Type::Int]),
             _ => Some(vec![]),
         },
-        Type::Named(n) if n == "HistoryRng" => match method {
+        Type::Named(n) if n == "HistoryRNG" => match method {
             "below" => Some(vec![Type::IntN {
                 signed: false,
                 bits: 64,
@@ -3909,7 +3903,7 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
             Type::Named(name)
                 if name == Syntax::CLOCK_TYPE
                     || name == Syntax::RNG_TYPE
-                    || name == "HistoryRng"
+                    || name == "HistoryRNG"
                     || name == Syntax::FAKE_TYPE
                     || name == Syntax::SOLVER_TYPE
         )

@@ -16,7 +16,7 @@ struct BoardDescription {
     dma_base: Int
 }
 
-#Layout(c) struct GpioRegisters {
+#Layout(c) struct GPIORegisters {
     mode: U32
     output: U32
     input: U32
@@ -28,12 +28,12 @@ struct BoardDescription {
     status: U32
 }
 
-#Layout(c) struct UartRegisters {
+#Layout(c) struct UARTRegisters {
     status: U32
     data: U32
 }
 
-#Layout(c) struct DmaRegisters {
+#Layout(c) struct DMARegisters {
     source: U32
     destination: U32
     length: U32
@@ -41,10 +41,10 @@ struct BoardDescription {
 }
 
 struct RegisterBlock {
-    gpio: GpioRegisters
+    gpio: GPIORegisters
     timer: TimerRegisters
-    uart: UartRegisters
-    dma: DmaRegisters
+    uart: UARTRegisters
+    dma: DMARegisters
     mmio_echo: Int
 }
 
@@ -56,7 +56,7 @@ struct InterruptQueue {
     dropped: Int
 }
 
-struct UartRing {
+struct UARTRing {
     bytes: [U8#8]
     head: Int
     tail: Int
@@ -64,7 +64,7 @@ struct UartRing {
     dropped: Int
 }
 
-struct DmaBuffer {
+struct DMABuffer {
     words: [Int#4]
     owner: Int
     submitted: Bool
@@ -180,7 +180,7 @@ fn task_handoff(queue: &InterruptQueue) -> Int {
     return event
 }
 
-fn uart_push(ring: &UartRing, byte: U8) {
+fn uart_push(ring: &UARTRing, byte: U8) {
     if ring.count == ring.bytes.len() {
         ring.dropped += 1
         return
@@ -190,7 +190,7 @@ fn uart_push(ring: &UartRing, byte: U8) {
     ring.count += 1
 }
 
-fn uart_pop(ring: &UartRing) -> U8 {
+fn uart_pop(ring: &UARTRing) -> U8 {
     if ring.count == 0 -> return U8{0}
     byte :: ring.bytes[ring.head]
     ring.head = (ring.head + 1) % ring.bytes.len()
@@ -200,11 +200,11 @@ fn uart_pop(ring: &UartRing) -> U8 {
 
 // Pinning is a real address-stability guarantee, but owner transfer to a DMA
 // device is not a language/runtime operation. This function only replays it.
-fn dma_checksum(buffer: &DmaBuffer) -> Int {
+fn dma_checksum(buffer: &DMABuffer) -> Int {
     pinned :: mem.pin(&buffer)
     return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
 }
-fn dma_replay(buffer: &DmaBuffer, registers: &RegisterBlock) -> Int {
+fn dma_replay(buffer: &DMABuffer, registers: &RegisterBlock) -> Int {
     checksum :: dma_checksum(buffer)
     registers.dma.source = U32{1}
     registers.dma.destination = U32{2}
@@ -247,10 +247,10 @@ fn stage_and_boot(slots: &FlashSlots, image_digest: Int, signature_ok: Bool) {
 fn run() {
     board :: board()
     registers := RegisterBlock{
-        gpio: GpioRegisters{mode: U32{0}, output: U32{0}, input: U32{0}},
+        gpio: GPIORegisters{mode: U32{0}, output: U32{0}, input: U32{0}},
         timer: TimerRegisters{counter: U32{0}, compare: U32{0}, status: U32{0}},
-        uart: UartRegisters{status: U32{0}, data: U32{0}},
-        dma: DmaRegisters{source: U32{0}, destination: U32{0}, length: U32{0}, status: U32{0}},
+        uart: UARTRegisters{status: U32{0}, data: U32{0}},
+        dma: DMARegisters{source: U32{0}, destination: U32{0}, length: U32{0}, status: U32{0}},
         mmio_echo: 0,
     }
     gpio_init(&registers)
@@ -259,8 +259,8 @@ fn run() {
     dma_init(&registers)
 
     queue := InterruptQueue{slots: [Int#4]{0, 0, 0, 0}, head: 0, tail: 0, count: 0, dropped: 0}
-    uart := UartRing{bytes: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0}, head: 0, tail: 0, count: 0, dropped: 0}
-    dma := DmaBuffer{words: [Int#4]{10, 20, 30, 40}, owner: 0, submitted: false, completed: false}
+    uart := UARTRing{bytes: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0}, head: 0, tail: 0, count: 0, dropped: 0}
+    dma := DMABuffer{words: [Int#4]{10, 20, 30, 40}, owner: 0, submitted: false, completed: false}
     state := ControlState{integrator: 0, actuator: 0, ticks: 0, deadline_misses: 0, wcet_estimate_us: 12, deadline_us: 100}
     slots := FlashSlots{active: 1, trial: SlotState.Empty, rollback_count: 0}
 

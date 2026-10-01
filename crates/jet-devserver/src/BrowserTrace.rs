@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use jet_foundation::DataTree::DataTree;
+pub(crate) use jet_foundation::Hex::encode as hex;
 use jet_foundation::JSON::{json_int, json_str, json_u32, parse};
 use jet_foundation::Report::{StatusEnvelope, StatusFields, STATUS_SCHEMA};
 
@@ -655,10 +656,6 @@ fn process_state(pid: u32) -> ProcessState {
         let _ = pid;
         ProcessState::Unknown
     }
-}
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn unhex(text: &str) -> Result<String, String> {

@@ -104,6 +104,101 @@ pub struct TraitInfo {
     pub span: Span,
 }
 
+/// How a field type's nominal spelling resolves during the bundle
+/// auto-derive pass.
+enum DeriveNominal<'n> {
+    /// An answer that no declaration's derive decides.
+    Fixed(bool),
+    /// The declaration `leaf` of module `owner`.
+    Declared(usize, &'n str),
+}
+
+/// Per-module name facts the bundle auto-derive pass resolves field types
+/// through: import targets, selective imports and package member files.
+struct BundleNominals<'b> {
+    name_ledger: &'b crate::Names::NameLedger,
+    core_imports: Vec<HashMap<String, String>>,
+    imports: Vec<HashMap<String, usize>>,
+    selective_imports: Vec<HashMap<String, Option<(usize, String)>>>,
+    /// Every member file of each module's package, the module included.
+    namespace_members: Vec<&'b [usize]>,
+}
+
+impl BundleNominals<'_> {
+    /// The declaration `name` names from `module`. `None` leaves the name to
+    /// the module's own registry: a local declaration, or a spelling with
+    /// no loaded owner.
+    fn resolve<'n>(
+        &'n self,
+        registries: &[TraitRegistry],
+        module: usize,
+        name: &'n str,
+        trait_name: &str,
+    ) -> Option<DeriveNominal<'n>> {
+        if let Some((_, leaf)) = name.rsplit_once("::") {
+            return self
+                .name_ledger
+                .nominal_module(name)
+                .map(|owner| DeriveNominal::Declared(owner, leaf));
+        }
+        if let Some(selected) = self.selective_imports[module].get(name) {
+            return selected
+                .as_ref()
+                .map(|(owner, leaf)| DeriveNominal::Declared(*owner, leaf.as_str()));
+        }
+        // D-MOD-CYCLE1=A: a package is one namespace, so a bare name may
+        // declare in another member file, and an imported package's member
+        // files all answer for its alias.
+        let member_owner = |module: usize, leaf: &str| {
+            self.namespace_members[module]
+                .iter()
+                .copied()
+                .find(|&member| registries[member].local_types.contains(leaf))
+        };
+        let Some((alias, leaf)) = name.rsplit_once('.') else {
+            if registries[module].local_types.contains(name) {
+                return None;
+            }
+            return member_owner(module, name).map(|owner| DeriveNominal::Declared(owner, name));
+        };
+        // D-CONFIG-ENV1: the crypto bridge supplies a redacted JetDebug
+        // implementation for Secret. It is not a Rust-Debug value, but
+        // records may safely derive the Jet debug protocol around it.
+        // Qualified core imports can remain source-shaped until this pass.
+        let crypto_secret_debug = trait_name == DEBUG && leaf == "Secret";
+        if crypto_secret_debug
+            && self.core_imports[module]
+                .get(alias)
+                .is_some_and(|core| core == "core.crypto")
+        {
+            return Some(DeriveNominal::Fixed(true));
+        }
+        let target = *self.imports[module].get(alias)?;
+        if crypto_secret_debug && self.name_ledger.module_alias(target) == Some("core.crypto") {
+            return Some(DeriveNominal::Fixed(true));
+        }
+        let owner = if registries[target].local_types.contains(leaf) {
+            target
+        } else {
+            member_owner(target, leaf).unwrap_or(target)
+        };
+        Some(DeriveNominal::Declared(owner, leaf))
+    }
+}
+
+/// Mark every node that relied on a failed node as failed, transitively.
+fn fail_dependents(failed: &mut [bool], dependents: &[Vec<usize>]) {
+    let mut pending: Vec<usize> = (0..failed.len()).filter(|&node| failed[node]).collect();
+    while let Some(node) = pending.pop() {
+        for &dependent in &dependents[node] {
+            if !failed[dependent] {
+                failed[dependent] = true;
+                pending.push(dependent);
+            }
+        }
+    }
+}
+
 impl TraitRegistry {
     /// Return one exact operator hook for a left type, trait, and right type.
     pub fn operator_impl_for(
@@ -117,20 +212,6 @@ impl TraitRegistry {
             implementation.left == left_name
                 && implementation.trait_name == trait_name
                 && implementation.rhs == *rhs
-        })
-    }
-
-    /// Return all operator hooks for a left type and trait. The caller can
-    /// inspect `rhs`, `result`, and `explicit_rhs` without reconstructing AST.
-    pub fn operator_impls_for(
-        &self,
-        left: &Type,
-        trait_name: &str,
-    ) -> impl Iterator<Item = &OperatorImpl> {
-        let left_name = left.name();
-        let trait_name = trait_name.to_string();
-        self.operator_impls.iter().filter(move |implementation| {
-            implementation.left == left_name && implementation.trait_name == trait_name
         })
     }
 
@@ -156,6 +237,46 @@ impl TraitRegistry {
             .iter()
             .map(|module| Self::auto_derives_for_items(&module.items))
             .collect();
+        let mut namespace_members: HashMap<&str, Vec<usize>> = HashMap::new();
+        for module_idx in 0..bundle.modules.len() {
+            if let Some(root) = name_ledger.module_namespace(module_idx) {
+                namespace_members.entry(root).or_default().push(module_idx);
+            }
+        }
+        let members: Vec<&[usize]> = (0..bundle.modules.len())
+            .map(|module_idx| {
+                name_ledger
+                    .module_namespace(module_idx)
+                    .and_then(|root| namespace_members.get(root))
+                    .map_or(&[][..], Vec::as_slice)
+            })
+            .collect();
+        let imports: Vec<HashMap<String, usize>> = bundle
+            .modules
+            .iter()
+            .enumerate()
+            .map(|(module_idx, module)| {
+                module
+                    .imports
+                    .iter()
+                    .filter_map(|import| {
+                        name_ledger
+                            .import_target(module_idx, import.span)
+                            .map(|target| (import.import_alias(), target))
+                    })
+                    .collect()
+            })
+            .collect();
+        // The member of `target`'s package that declares `leaf`.
+        let declaring_member = |target: usize, leaf: &str| {
+            if registries[target].local_types.contains(leaf) {
+                return Some(target);
+            }
+            members[target]
+                .iter()
+                .copied()
+                .find(|&member| registries[member].local_types.contains(leaf))
+        };
         let selective_imports: Vec<HashMap<String, Option<(usize, String)>>> = bundle
             .modules
             .iter()
@@ -169,14 +290,19 @@ impl TraitRegistry {
                         };
                         let local = binding.local;
                         let leaf = original.rsplit('.').next().unwrap_or(original);
-                        let candidate = name_ledger
-                            .alias(module_idx, &local)
-                            .and_then(|alias| alias.target_module)
-                            .filter(|target| {
+                        // Registration runs this pass before sema records the
+                        // member aliases; the loader's import target of the
+                        // list prefix names the same declaration then.
+                        let candidate = match name_ledger.alias(module_idx, &local) {
+                            Some(alias) => alias.target_module.filter(|target| {
                                 registries[*target].local_types.contains(leaf)
                                     && name_ledger.visible(module_idx, *target, leaf)
-                            })
-                            .map(|target| (target, leaf.to_string()));
+                            }),
+                            None => imports[module_idx]
+                                .get(binding.module_alias)
+                                .and_then(|&target| declaring_member(target, leaf)),
+                        }
+                        .map(|target| (target, leaf.to_string()));
                         match selected.entry(local) {
                             std::collections::hash_map::Entry::Vacant(entry) => {
                                 entry.insert(candidate);
@@ -192,66 +318,19 @@ impl TraitRegistry {
                 selected
             })
             .collect();
-        loop {
-            let snapshot = registries.clone();
-            let mut changed = false;
-            for (module_idx, module) in bundle.modules.iter().enumerate() {
-                let (core_imports, _) = crate::AST::core_import_maps(&module.imports);
-                let imports: HashMap<String, usize> = module
-                    .imports
-                    .iter()
-                    .filter_map(|import| {
-                        name_ledger
-                            .import_target(module_idx, import.span)
-                            .map(|target| (import.import_alias(), target))
-                    })
-                    .collect();
-                changed |= registries[module_idx].compute_auto_derives_with(
-                    &module.items,
-                    |name, trait_name| {
-                        // D-CONFIG-ENV1: qualified core imports can remain
-                        // source-shaped until the bundle derives pass. Keep
-                        // Secret's redacted Debug bridge visible here without
-                        // treating an unrelated foreign `Secret` as supported.
-                        if trait_name == DEBUG
-                            && name.rsplit_once('.').is_some_and(|(alias, leaf)| {
-                                leaf == "Secret"
-                                    && core_imports
-                                        .get(alias)
-                                        .is_some_and(|module| module == "core.crypto")
-                            })
-                        {
-                            return Some(true);
-                        }
-                        let (target, leaf) = if let Some((namespace, leaf)) = name.rsplit_once("::")
-                        {
-                            let identity = format!("{namespace}::{leaf}");
-                            (name_ledger.nominal_module(&identity)?, leaf)
-                        } else if let Some(Some((target, leaf))) =
-                            selective_imports[module_idx].get(name)
-                        {
-                            return Some(snapshot[*target].implements_trait(leaf, trait_name));
-                        } else {
-                            let (alias, leaf) = name.rsplit_once('.')?;
-                            (*imports.get(alias)?, leaf)
-                        };
-                        // D-CONFIG-ENV1: the crypto bridge supplies a redacted
-                        // JetDebug implementation for Secret. It is not a
-                        // Rust-Debug value, but records may safely derive the
-                        // Jet debug protocol around it.
-                        if name_ledger.module_alias(target) == Some("core.crypto")
-                            && leaf == "Secret"
-                            && trait_name == DEBUG
-                        {
-                            return Some(true);
-                        }
-                        Some(snapshot[target].implements_trait(leaf, trait_name))
-                    },
-                );
-            }
-            if !changed {
-                break;
-            }
+        let nominals = BundleNominals {
+            name_ledger,
+            core_imports: bundle
+                .modules
+                .iter()
+                .map(|module| crate::AST::core_import_maps(&module.imports).0)
+                .collect(),
+            imports,
+            selective_imports,
+            namespace_members: members,
+        };
+        for &trait_name in Syntax::STRUCTURAL_AUTO_DERIVE_TRAITS {
+            Self::compute_bundle_auto_derive(&mut registries, bundle, trait_name, &nominals);
         }
         // Auto-derive facts belong to the declaration, not to the import that
         // happens to name it: a Core error enum reaches a caller through a
@@ -491,10 +570,17 @@ impl TraitRegistry {
                 Syntax::TRAIT_SUB,
                 Syntax::TRAIT_MUL,
                 Syntax::TRAIT_DIV,
+                // D-TRAIT-OVERLOAD1=A: `#Numeric` implements the Numeric trait
+                // from its base, including the ordering it already exposes.
+                Syntax::TRAIT_NUMERIC,
             ] {
                 self.trait_impls
                     .insert((d.name.clone(), trait_name.to_string()));
             }
+            self.derives
+                .entry(d.name.clone())
+                .or_default()
+                .insert(COMPARABLE.to_string());
         }
         if d.derives.iter().any(|(name, _)| name == ENCODE)
             && d.derives.iter().any(|(name, _)| name == DECODE)
@@ -1532,19 +1618,37 @@ impl TraitRegistry {
     }
 
     fn compute_auto_derives(&mut self, items: &[Item]) {
-        self.compute_auto_derives_with(items, |_, _| None);
+        for &trait_name in Syntax::STRUCTURAL_AUTO_DERIVE_TRAITS {
+            self.compute_auto_derive(items, trait_name);
+        }
     }
 
-    fn compute_auto_derives_with(
-        &mut self,
-        items: &[Item],
-        foreign_supports: impl Fn(&str, &str) -> Option<bool>,
-    ) -> bool {
-        let mut any_changed = false;
-        for &trait_name in Syntax::STRUCTURAL_AUTO_DERIVE_TRAITS {
-            any_changed |= self.compute_auto_derive(items, trait_name, &foreign_supports);
-        }
-        any_changed
+    /// The name of `item` when it requests the automatic `trait_name` and
+    /// does not hold it yet.
+    fn auto_derive_candidate<'i>(&self, item: &'i Item, trait_name: &str) -> Option<&'i str> {
+        let (name, markers, default, qualifies) = match item {
+            Item::Struct(s) => (
+                &s.name,
+                &s.type_markers,
+                s.auto_derive_default,
+                struct_auto_derive_ok(s),
+            ),
+            Item::Enum(e) => (
+                &e.name,
+                &e.type_markers,
+                e.auto_derive_default,
+                enum_auto_derive_ok(e),
+            ),
+            _ => return None,
+        };
+        let derived = self.auto_derive_set(trait_name)?;
+        (qualifies
+            && auto_derive_requested(markers, trait_name, default)
+            && !derived.contains(name)
+            && !self
+                .trait_impls
+                .contains(&(name.clone(), trait_name.to_string())))
+        .then_some(name.as_str())
     }
 
     /// Select every declaration in `items` whose automatic `trait_name` holds.
@@ -1559,48 +1663,19 @@ impl TraitRegistry {
     /// consistent set: a whole strongly connected component derives together
     /// unless something in or below it fails. Each field type and each
     /// dependency edge is visited once, so shared graphs stay linear.
-    fn compute_auto_derive(
-        &mut self,
-        items: &[Item],
-        trait_name: &str,
-        foreign_supports: &impl Fn(&str, &str) -> Option<bool>,
-    ) -> bool {
-        let Some(derived) = self.auto_derive_set(trait_name) else {
-            return false;
-        };
+    fn compute_auto_derive(&mut self, items: &[Item], trait_name: &str) {
         let mut nodes: HashMap<&str, usize> = HashMap::new();
         let mut candidates: Vec<(usize, &Item)> = Vec::new();
         for item in items {
-            let (name, markers, default, qualifies) = match item {
-                Item::Struct(s) => (
-                    &s.name,
-                    &s.type_markers,
-                    s.auto_derive_default,
-                    struct_auto_derive_ok(s),
-                ),
-                Item::Enum(e) => (
-                    &e.name,
-                    &e.type_markers,
-                    e.auto_derive_default,
-                    enum_auto_derive_ok(e),
-                ),
-                _ => continue,
-            };
-            if !qualifies
-                || !auto_derive_requested(markers, trait_name, default)
-                || derived.contains(name)
-                || self
-                    .trait_impls
-                    .contains(&(name.clone(), trait_name.to_string()))
-            {
+            let Some(name) = self.auto_derive_candidate(item, trait_name) else {
                 continue;
-            }
+            };
             let next = nodes.len();
-            let node = *nodes.entry(name.as_str()).or_insert(next);
+            let node = *nodes.entry(name).or_insert(next);
             candidates.push((node, item));
         }
         if nodes.is_empty() {
-            return false;
+            return;
         }
         let mut failed = vec![false; nodes.len()];
         let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
@@ -1612,7 +1687,7 @@ impl TraitRegistry {
                     return Some(true);
                 }
             }
-            foreign_supports(name, checked_trait)
+            None
         };
         for &(node, item) in &candidates {
             relied_on.borrow_mut().clear();
@@ -1626,28 +1701,85 @@ impl TraitRegistry {
                 failed[node] = true;
             }
         }
-        let mut pending: Vec<usize> = (0..failed.len()).filter(|&node| failed[node]).collect();
-        while let Some(node) = pending.pop() {
-            for &dependent in &dependents[node] {
-                if !failed[dependent] {
-                    failed[dependent] = true;
-                    pending.push(dependent);
-                }
-            }
-        }
+        fail_dependents(&mut failed, &dependents);
         let selected: Vec<String> = nodes
             .into_iter()
             .filter(|&(_, node)| !failed[node])
             .map(|(name, _)| name.to_string())
             .collect();
-        let Some(derived) = self.auto_derive_set_mut(trait_name) else {
-            return false;
-        };
-        let mut changed = false;
-        for name in selected {
-            changed |= derived.insert(name);
+        if let Some(derived) = self.auto_derive_set_mut(trait_name) {
+            derived.extend(selected);
         }
-        changed
+    }
+
+    /// `compute_auto_derive` over a whole bundle. D-MOD-CYCLE1=A: a package
+    /// is one namespace, so a field may name a declaration of another member
+    /// file, and a derive cycle may run through several files (`Type` holds
+    /// a sibling file's `Row`, which holds a `Type`). Every requesting
+    /// declaration of the bundle is a node of one coinductive selection, so
+    /// such a cycle derives exactly as it would inside one file. Facts of
+    /// declarations that do not request the derive are fixed by then.
+    fn compute_bundle_auto_derive(
+        registries: &mut [TraitRegistry],
+        bundle: &ProgramBundle,
+        trait_name: &str,
+        nominals: &BundleNominals<'_>,
+    ) {
+        let mut nodes: HashMap<(usize, &str), usize> = HashMap::new();
+        let mut candidates: Vec<(usize, usize, &Item)> = Vec::new();
+        for (module_idx, module) in bundle.modules.iter().enumerate() {
+            for item in &module.items {
+                let Some(name) = registries[module_idx].auto_derive_candidate(item, trait_name)
+                else {
+                    continue;
+                };
+                let next = nodes.len();
+                let node = *nodes.entry((module_idx, name)).or_insert(next);
+                candidates.push((node, module_idx, item));
+            }
+        }
+        if nodes.is_empty() {
+            return;
+        }
+        let mut failed = vec![false; nodes.len()];
+        let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+        let relied_on = std::cell::RefCell::new(Vec::new());
+        let checked: &[TraitRegistry] = registries;
+        for &(node, module_idx, item) in &candidates {
+            let assumed = |name: &str, checked_trait: &str| {
+                let (owner, leaf) = match nominals.resolve(checked, module_idx, name, checked_trait) {
+                    Some(DeriveNominal::Fixed(answer)) => return Some(answer),
+                    Some(DeriveNominal::Declared(owner, leaf)) => (owner, leaf),
+                    None => (module_idx, name),
+                };
+                if checked_trait == trait_name {
+                    if let Some(&dependency) = nodes.get(&(owner, leaf)) {
+                        relied_on.borrow_mut().push(dependency);
+                        return Some(true);
+                    }
+                }
+                (owner != module_idx).then(|| checked[owner].implements_trait(leaf, checked_trait))
+            };
+            relied_on.borrow_mut().clear();
+            if checked[module_idx].auto_derive_fields_ready(item, trait_name, &assumed) {
+                for dependency in relied_on.borrow_mut().drain(..) {
+                    if dependency != node {
+                        dependents[dependency].push(node);
+                    }
+                }
+            } else {
+                failed[node] = true;
+            }
+        }
+        fail_dependents(&mut failed, &dependents);
+        for ((module_idx, name), node) in nodes {
+            if failed[node] {
+                continue;
+            }
+            if let Some(derived) = registries[module_idx].auto_derive_set_mut(trait_name) {
+                derived.insert(name.to_string());
+            }
+        }
     }
 
     fn auto_derive_set(&self, trait_name: &str) -> Option<&HashSet<String>> {
@@ -1886,8 +2018,10 @@ impl TraitRegistry {
         ) && Generics::is_builtin_trait(trait_name)
             && !matches!(trait_name, CLOSE | Generics::CHECKED_TEXT)
         {
-            if trait_name == Syntax::TRAIT_COMPARABLE && type_name == Syntax::TYPE_FLOAT {
-                return false;
+            // D-TRAIT-OVERLOAD1=A: Float implements Numeric, which builds on
+            // Comparable, so a `T: Comparable` bound admits it with IEEE `<`/`>`.
+            if trait_name == Generics::NUMERIC {
+                return matches!(type_name, Syntax::TYPE_INT | Syntax::TYPE_FLOAT);
             }
             if matches!(
                 trait_name,
@@ -1896,6 +2030,14 @@ impl TraitRegistry {
             {
                 return false;
             }
+            return true;
+        }
+        // D-TRAIT-OVERLOAD1=A: the exact Core numbers implement Numeric and
+        // the traits it builds on.
+        if matches!(type_name, Syntax::TYPE_DECIMAL | Syntax::TYPE_FRACTION)
+            && (trait_name == Generics::NUMERIC
+                || Syntax::NUMERIC_SUPERTRAITS.contains(&trait_name))
+        {
             return true;
         }
         if self
@@ -1948,7 +2090,7 @@ impl TraitRegistry {
             }
             Type::Float32 => {
                 Generics::is_builtin_trait(trait_name)
-                    && !matches!(trait_name, CLOSE | COMPARABLE | Generics::CHECKED_TEXT)
+                    && !matches!(trait_name, CLOSE | Generics::CHECKED_TEXT)
             }
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
                 if trait_name == EQUATABLE =>
@@ -2436,7 +2578,7 @@ impl TraitRegistry {
             "Decimal",
             "FieldError",
             "DirEntry",
-            "DNSSrv",
+            "DNSSRV",
             "Duration",
             "EncodingError",
             "EmailError",
@@ -2465,7 +2607,7 @@ impl TraitRegistry {
             "HTTPStatus",
             "HTTPVersion",
             "HyperLogLog",
-            "Id",
+            "ID",
             "Instant",
             "IOError",
             "IPAddr",
@@ -2498,7 +2640,7 @@ impl TraitRegistry {
             "RegexFlags",
             "RegexMatch",
             "ReservoirSampler",
-            "Rng",
+            "RNG",
             "Fake",
             "Size",
             "SocketAddr",
@@ -2551,7 +2693,7 @@ impl TraitRegistry {
             "Duration",
             "GameImage",
             "GameSound",
-            "Id",
+            "ID",
             "IOError",
             "Instant",
             "LocalDate",
@@ -2730,7 +2872,7 @@ impl TraitRegistry {
         // D-POOLID-API1=A: Id<T> compares only its index and generation.
         // Its phantom T does not take part in equality.
         self.trait_impls
-            .insert(("Id".to_string(), Syntax::TRAIT_EQUATABLE.to_string()));
+            .insert(("ID".to_string(), Syntax::TRAIT_EQUATABLE.to_string()));
     }
 
     /// D-DBDRIVER1=A / D-TYPEDSQL-SINK1=A: one nominal typed-SQL driver

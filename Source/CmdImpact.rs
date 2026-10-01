@@ -1,11 +1,13 @@
 //! D-IMPACT1: `jet inspect impact` — blast-radius queries over the semantic index.
 
-use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet::ExitCodes;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_impact::ImpactReport;
+
+use crate::absolutize;
+
 pub(crate) fn run_impact(args: &[String], json: bool) {
     let mut depth = 3usize;
     let mut positional: Vec<&str> = Vec::new();
@@ -37,7 +39,7 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     let checked = crate::CmdInspect::check_projection(&abs).unwrap_or_else(|diagnostics| {
         crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
     });
-    let report = ImpactReport::analyze(&checked.index, symbol, depth);
+    let report = ImpactReport::analyze(checked.index(), symbol, depth);
     if json {
         let impact = impact_value(&report, &checked.check);
         println!(
@@ -113,15 +115,4 @@ fn impact_value(report: &ImpactReport, check: &crate::CmdInspect::CheckResult) -
             )
             .with("check", crate::CmdInspect::check_result_value(check)),
     )
-}
-
-fn absolutize(path: &str) -> PathBuf {
-    let p = Path::new(path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(p)
-    }
 }

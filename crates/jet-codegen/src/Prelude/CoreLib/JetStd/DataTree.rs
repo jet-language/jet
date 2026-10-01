@@ -85,6 +85,31 @@ pub(crate) fn jet_datatree_encode_u64(value: u64) -> DataTree {
     }
 }
 
+/// Jet's `DataTree.Int` holds an exact `Int`. The native carrier keeps a value
+/// that does not fit the inline slot as its decimal `Number` lexeme (the rule
+/// `jet_encode` uses), and these three functions are the one crossing of the
+/// Jet variant over that carrier: construct, test, and read the payload.
+pub fn jet_datatree_int(value: jet_foundation::Numeric::JetInt) -> DataTree {
+    value
+        .to_i64()
+        .map(jet_datatree_encode_i64)
+        .unwrap_or_else(|| DataTree::Number(value.to_string_rep()))
+}
+
+pub fn jet_datatree_is_int(tree: &DataTree) -> bool {
+    jet_datatree_int_payload(tree).is_some()
+}
+
+pub fn jet_datatree_int_payload(tree: &DataTree) -> Option<jet_foundation::Numeric::JetInt> {
+    match tree {
+        DataTree::Int(value) => Some(jet_foundation::Numeric::JetInt::from(*value)),
+        DataTree::Number(text) => jet_foundation::Numeric::CtBigInt::from_str(text)
+            .map(jet_foundation::Numeric::JetInt::from_big)
+            .ok(),
+        _ => None,
+    }
+}
+
 // D-MIGRATE3=A / D-MIGRATE4=A: migration is transparent inside the one
 // canonical `__jet_Decode::jet_decode` operation. The generated decoder
 // tries the current shape first, then walks a matching historical shape
@@ -143,47 +168,6 @@ pub fn jet_datatree_project(
             .collect::<Result<Vec<_>, _>>()
             .map(DataTree::Array),
         _ => Err(FieldError::one("shape projection needs object values")),
-    }
-}
-/// Reverse a resolved shape projection before typed decoding. Projected names
-/// must be known and unique; arrays of records retain their order.
-pub fn jet_datatree_unproject(
-    tree: &DataTree,
-    projection: &ShapeProjection,
-) -> Result<DataTree, Vec<FieldError>> {
-    let unproject_object = |value: &DataTree| {
-        let DataTree::Object(entries) = value else {
-            return Err(FieldError::one("shape unprojection needs object values"));
-        };
-        let mut restored = Vec::with_capacity(entries.len());
-        let mut seen = std::collections::BTreeSet::new();
-        for (name, child) in entries {
-            let Some(field) = projection.fields.iter().find(|field| field.name == *name)
-            else {
-                return Err(FieldError::at(
-                    name,
-                    format!("field `{name}` is not part of the shape projection"),
-                ));
-            };
-            if !seen.insert(field.decode_name.clone()) {
-                return Err(FieldError::at(
-                    name,
-                    format!("duplicate projected field `{name}`"),
-                ));
-            }
-            restored.push((field.decode_name.clone(), child.clone()));
-        }
-        Ok(DataTree::Object(restored))
-    };
-
-    match tree {
-        DataTree::Object(_) => unproject_object(tree),
-        DataTree::Array(values) => values
-            .iter()
-            .map(unproject_object)
-            .collect::<Result<Vec<_>, _>>()
-            .map(DataTree::Array),
-        _ => Err(FieldError::one("shape unprojection needs object values")),
     }
 }
 
@@ -598,27 +582,6 @@ macro_rules! jet_datatree_decode_helpers {
                 Ok(value as f32)
             } else {
                 Err(FieldError::one("expected F32, found out-of-range Float"))
-            }
-        }
-
-        pub fn check_int_range(
-            value: Result<i64, Vec<FieldError>>,
-            lo: i64,
-            hi: i64,
-            type_name: &str,
-        ) -> Result<i64, Vec<FieldError>> {
-            let packed = value?;
-            let Some(value) = jet_int_to_i64(packed) else {
-                return Err(FieldError::one(format!(
-                    "expected {type_name}, found out-of-range Int"
-                )));
-            };
-            if (lo..=hi).contains(&value) {
-                Ok(value)
-            } else {
-                Err(FieldError::one(format!(
-                    "expected {type_name}, found out-of-range Int"
-                )))
             }
         }
 

@@ -11,7 +11,7 @@ pub(crate) fn jet_seeded_rng_next(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
-const JET_SEEDED_RNG_INT_RANGE_ERROR: &str = "Rng.int requires low <= high";
+const JET_SEEDED_RNG_INT_RANGE_ERROR: &str = "RNG.int requires low <= high";
 
 fn jet_seeded_rng_bounded(state: &mut u64, bound: u64) -> u64 {
     if bound == 0 {

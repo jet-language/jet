@@ -6,6 +6,9 @@ pub use jet_codegen::{
     Comptime, Diagnostics, Generics, Lexer, Parser, Sema, Syntax, TargetMachine, Traits, AST,
     SHA256,
 };
+// The embedded Core module bodies; the self-hosted compiler's host passes them
+// to the Jet loader exactly as `Loader.rs` loads them.
+pub use jet_sema::CoreSources;
 
 /// Install the canonical MIR evaluator into comptime/REPL/dev entry points.
 #[inline]

@@ -17,6 +17,7 @@ The request defines scope and permissions. A full audit covers its declared corp
 | Workload friction, useful defaults, and expert override | `pragmatism-audit` |
 | Types versus markers, tags, or control constructs | `type-unification-audit` |
 | First-principles rethink of a named domain | `first-principles-audit` |
+| Elegance: shrink surface area, find unifying laws and cross-layer rhymes | `elegance-audit` |
 | Run the competitive corpus or change its matrix/entries | `gauntlet` |
 | Learnability findings from a newcomer lens | `rli5` |
 | Research a named language/API gap | `surface-research` |

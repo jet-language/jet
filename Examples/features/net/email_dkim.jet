@@ -4,7 +4,7 @@ use core.email as email
 fn run() EmailError! {
     key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
     password :: crypto.Secret.from_text("example-only")
-    dkim :: email.DkimConfig{
+    dkim :: email.DKIMConfig{
         domain: "example.com",
         selector: "login-2026",
         private_key: key,
@@ -13,7 +13,7 @@ fn run() EmailError! {
     config :: email.SMTPConfig{
         host: "smtp.example.com",
         port: 587,
-        security: .StartTls,
+        security: .StartTLS,
         auth: .Password{username: "mailer", password: password},
         recipient_policy: .RequireAll,
         trust: .System,

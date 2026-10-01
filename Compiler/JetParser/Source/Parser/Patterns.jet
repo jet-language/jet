@@ -1,4 +1,48 @@
 // Pattern grammar maps directly to the shared Jet AST.
+use jet_foundation.[
+    BinEndian,
+    BinMatchPart,
+    BinSpec,
+    Diagnostic,
+    Expr,
+    PatSlot,
+    Pattern,
+    Span,
+    StrMatchPart,
+    StructPatField,
+    Type,
+]
+use jet_lexer.[
+    STRING_PART_BYTE,
+    STRING_PART_INTERPOLATION,
+    STRING_PART_TEXT,
+    StringPart,
+    TOKEN_BANG,
+    TOKEN_COLON,
+    TOKEN_COLON_COLON,
+    TOKEN_COMMA,
+    TOKEN_DOT,
+    TOKEN_DOT_DOT,
+    TOKEN_DOT_DOT_DOT,
+    TOKEN_DOT_DOT_LT,
+    TOKEN_EOF,
+    TOKEN_IDENT,
+    TOKEN_INT,
+    TOKEN_LBRACE,
+    TOKEN_LBRACKET,
+    TOKEN_LPAREN,
+    TOKEN_NULL,
+    TOKEN_PIPE,
+    TOKEN_QUESTION,
+    TOKEN_RAW_STRING,
+    TOKEN_RBRACE,
+    TOKEN_RBRACKET,
+    TOKEN_RPAREN,
+    TOKEN_SELF,
+    TOKEN_SEMI,
+    TOKEN_STRING,
+    TOKEN_UNIFIED_ARROW,
+]
 
 pub struct ParsedPattern {
     pub pattern: Pattern
@@ -33,7 +77,7 @@ fn parser_is_byte_type(ty: Type) -> Bool Never! {
     }
 }
 
-fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ParsedTakePatternBody? Err! {
+fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ParsedTakePatternBody? {
     first :: parser_current(&state)
     if first.kind != TOKEN_LBRACKET && !(first.kind == TOKEN_IDENT && first.payload.decoded == "String") -> return None
     saved_position := state.position

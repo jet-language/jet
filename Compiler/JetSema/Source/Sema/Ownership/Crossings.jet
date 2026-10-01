@@ -1,12 +1,23 @@
 // One recursive ownership proof for values crossing tasks, channels, and
 // worker boundaries. A missing nominal is not evidence of thread safety.
+use jet_foundation.[
+    Diagnostic,
+    Expr,
+    Span,
+    TCapture,
+    TDeclarationOwnership,
+    TGenericParam,
+    TLambda,
+    Type,
+    type_name,
+]
 
 pub enum SemaSendCrossing {
     TaskCapture
     TaskResult
     ChannelSend
     ParallelWorker
-    HttpHandler
+    HTTPHandler
     Kernel
     InterruptCallback
     SharedStorage
@@ -54,14 +65,14 @@ struct SemaCrossingWalk {
 }
 
 fn sema_ownership_crossing_walk_key(identity: String, type_args: [Type]) -> String Never! {
-    if type_args.len() == 0 -> return identity
+    if type_args.len() == 0 -> return ~identity
     names := (loop arg in type_args -> type_name(arg))
     joined := names.join(", ")
     "{identity}<{joined}>"
 }
 
 fn sema_ownership_crossing_strict_callable(crossing: SemaSendCrossing) -> Bool Never! {
-    crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.Kernel || crossing == SemaSendCrossing.HttpHandler
+    crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.Kernel || crossing == SemaSendCrossing.HTTPHandler
 }
 
 fn sema_ownership_crossing_stored_types(types: [Type], crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
@@ -75,9 +86,9 @@ fn sema_ownership_crossing_stored_types(types: [Type], crossing: SemaSendCrossin
 fn sema_ownership_crossing_type_leaf(name: String) -> String Never! {
     parts := name.split("::").to_list()
     if parts.len() > 1 -> return parts[parts.len() - 1]
-    parts = name.split(".")
+    parts = name.split(".").to_list()
     if parts.len() > 1 -> return parts[parts.len() - 1]
-    name
+    ~name
 }
 
 fn sema_ownership_crossing_core_builtin(ty: Type, name: String, environment: SemaScopeEnvironment) -> Bool Never! {
@@ -86,14 +97,16 @@ fn sema_ownership_crossing_core_builtin(ty: Type, name: String, environment: Sem
         else -> ""
     }
     if actual_name != name -> return false
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     if sema_type_resolve_nominal(graph, ty, environment.module_identity) != None -> return false
     owner :: sema_registration_core_builtin_owner(graph, name) ?? return false
     owner.ownership == TDeclarationOwnership.Owned
 }
 
 fn sema_ownership_crossing_intrinsic_apply(ty: Type, name: String, environment: SemaScopeEnvironment, allow_without_nominal: Bool) -> Bool Never! {
-    graph :: environment.registration_graph ?? return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
     nominal := sema_type_resolve_nominal(graph, ty, environment.module_identity)
     if nominal == .Val(value) {
         return value.symbol.name == name && (value.compiler_owned || value.symbol.module_name.starts_with("core."))
@@ -129,7 +142,7 @@ fn sema_ownership_crossing_named(ty: Type, nominal: SemaRegistrationNominal, cro
                 if !facts.send -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: nominal.symbol.name}))
                 return None
             }
-            .SourceAst(_) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
+            .SourceAST(_) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
         }
     }
     type_args :: if ty == {.Apply(_, args) -> args else -> [Type]{}}
@@ -138,7 +151,7 @@ fn sema_ownership_crossing_named(ty: Type, nominal: SemaRegistrationNominal, cro
     &walk.active.push(nominal.identity_key)
     found :: sema_ownership_crossing_members(nominal, type_args, crossing, strict_callable, cell_only, environment, context, &walk)
     _ := &walk.active.pop()
-    walk.finished.add(key, true)
+    walk.finished[key] = true
     found
 }
 
@@ -148,9 +161,9 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
     if nominal.generic_params.len() != type_args.len() -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
     bindings :: sema_inference_bindings_for_type_args(params, type_args)
     if nominal.kind == SemaRegistrationNominalKind.TypeAlias || nominal.kind == SemaRegistrationNominalKind.Distinct {
-        underlying := None
+        underlying := Type?{None}
         if nominal.source == {
-            .SourceAst(item) -> {
+            .SourceAST(item) -> {
                 if item == {
                     .TypeAlias(definition) -> underlying = Val(definition.target)
                     .Distinct(definition) -> underlying = Val(definition.base)
@@ -192,7 +205,8 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
 
 fn sema_ownership_crossing_named_type(ty: Type, name: String, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     if sema_type_name_is_generic(context.generic_params, name) -> return None
-    graph :: environment.registration_graph ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
     nominal := sema_type_resolve_nominal(graph, ty, environment.module_identity)
     if nominal == .Val(value) -> return sema_ownership_crossing_named(ty, value, crossing, strict_callable, cell_only, environment, context, &walk)
     resolved := sema_type_graph_resolve_named(graph, name, environment.module_identity)
@@ -253,7 +267,8 @@ fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, clos
             shared_guard := sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, true) && leaf == "SharedGuard"
             if shared_guard && cell_only -> return None
             if shared_guard -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: leaf}))
-            graph :: environment.registration_graph ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
+            graph_option :: environment.registration_graph
+            graph :: graph_option ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
             nominal :: sema_type_resolve_nominal(graph, ty, environment.module_identity) ?? {
                 return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
             }
@@ -300,7 +315,7 @@ pub fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing
         loop fact in state.views {
             if fact.active && sema_ownership_view_fact_matches_expr(fact, expr, scopes) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
         }
-        if (crossing == SemaSendCrossing.TaskCapture || crossing == SemaSendCrossing.ChannelSend || crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.HttpHandler) && sema_function_reactive_is_local(context, binding.symbol.id.key) && sema_function_reactive_handle_type(ty) {
+        if (crossing == SemaSendCrossing.TaskCapture || crossing == SemaSendCrossing.ChannelSend || crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.HTTPHandler) && sema_function_reactive_is_local(context, binding.symbol.id.key) && sema_function_reactive_handle_type(ty) {
             return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.LocalReactive{name: type_name(ty)}))
         }
     }
@@ -364,13 +379,13 @@ pub fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: Sema
         crossing == SemaSendCrossing.TaskResult && problem.kind == SemaSendProblemKind.ViewBorrow -> "this task returns a view that cannot be shared — it does not live long enough to cross into a task"
         crossing == SemaSendCrossing.ChannelSend && problem.kind == SemaSendProblemKind.ViewBorrow -> "{value_text} cannot be shared across channels — it is a view that does not live long enough"
         crossing == SemaSendCrossing.TaskCapture && local_reactive -> "{value_text} is pinned `#Local` and can't cross into a task"
-        crossing == SemaSendCrossing.HttpHandler && problem.kind == SemaSendProblemKind.ViewBorrow -> "{value_text} cannot be captured by an HTTP handler — it is a view that does not live long enough"
-        crossing == SemaSendCrossing.HttpHandler && local_reactive -> "{value_text} is pinned `#Local` and can't be captured by an HTTP handler"
+        crossing == SemaSendCrossing.HTTPHandler && problem.kind == SemaSendProblemKind.ViewBorrow -> "{value_text} cannot be captured by an HTTP handler — it is a view that does not live long enough"
+        crossing == SemaSendCrossing.HTTPHandler && local_reactive -> "{value_text} is pinned `#Local` and can't be captured by an HTTP handler"
         crossing == SemaSendCrossing.ChannelSend && local_reactive -> "{value_text} is pinned `#Local` and can't be sent on a channel"
         crossing == SemaSendCrossing.TaskCapture -> "{value_text} can't cross into a task because `{type_name_value}` isn't sendable"
         crossing == SemaSendCrossing.TaskResult -> "this task returns `{type_name_value}`, which isn't sendable"
         crossing == SemaSendCrossing.ChannelSend -> "{value_text} can't be sent because `{type_name_value}` isn't sendable"
-        crossing == SemaSendCrossing.HttpHandler -> "{value_text} can't be captured by an HTTP handler because `{type_name_value}` isn't sendable"
+        crossing == SemaSendCrossing.HTTPHandler -> "{value_text} can't be captured by an HTTP handler because `{type_name_value}` isn't sendable"
         crossing == SemaSendCrossing.ParallelWorker && problem.kind == SemaSendProblemKind.ViewBorrow -> "{value_text} cannot cross a parallel worker boundary — it is a view that does not live long enough"
         crossing == SemaSendCrossing.ParallelWorker && local_reactive -> "{value_text} is pinned `#Local` and can't cross into a parallel worker"
         crossing == SemaSendCrossing.ParallelWorker -> "{value_text} can't cross a parallel worker boundary because `{type_name_value}` isn't sendable"
@@ -380,7 +395,7 @@ pub fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: Sema
     }
     why := if {
         local_reactive -> description
-        crossing == SemaSendCrossing.HttpHandler -> "HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe"
+        crossing == SemaSendCrossing.HTTPHandler -> "HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe"
         crossing == SemaSendCrossing.InterruptCallback -> "core.sys.on_interrupt retains callbacks until signal delivery, so the callback and its captured state must be owned and thread-safe"
         crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.Kernel -> "{description}; this concurrent boundary moves owned values between workers"
         crossing == SemaSendCrossing.SharedStorage -> "shared storage can be accessed from multiple threads, so its contents must be safe to share"
@@ -394,11 +409,11 @@ pub fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: Sema
         local_reactive && crossing == SemaSendCrossing.TaskResult -> "remove `#Local`, or return an owned value from the task"
         local_reactive && crossing == SemaSendCrossing.Kernel -> "remove `#Local`, or keep the reactive graph outside the kernel"
         local_reactive && crossing == SemaSendCrossing.InterruptCallback -> "remove `#Local`, or keep the callback on its creating thread"
-        local_reactive && crossing == SemaSendCrossing.HttpHandler -> "remove `#Local`, or keep the handler on its creating thread"
+        local_reactive && crossing == SemaSendCrossing.HTTPHandler -> "remove `#Local`, or keep the handler on its creating thread"
         local_cell && crossing == SemaSendCrossing.ChannelSend -> "send the owned value instead, or use `Shared<T>` for synchronized state"
         local_cell && (crossing == SemaSendCrossing.TaskCapture || crossing == SemaSendCrossing.TaskResult) -> "create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state"
         local_cell && crossing == SemaSendCrossing.ParallelWorker -> "create the `Cell<T>` inside each worker, or use `Shared<T>` for synchronized state"
-        local_cell && crossing == SemaSendCrossing.HttpHandler -> "capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state"
+        local_cell && crossing == SemaSendCrossing.HTTPHandler -> "capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state"
         local_cell && crossing == SemaSendCrossing.Kernel -> "pass an owned sendable value to the kernel, or keep the local cell outside the kernel"
         local_cell && crossing == SemaSendCrossing.InterruptCallback -> "pass a named function, or capture only owned sendable values in the callback"
         crossing == SemaSendCrossing.ChannelSend -> "send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`"
@@ -406,7 +421,7 @@ pub fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: Sema
         crossing == SemaSendCrossing.ParallelWorker -> "copy plain owned data into the worker, or keep this operation sequential"
         crossing == SemaSendCrossing.Kernel -> "use a read-only effect-free kernel over checked Core compute values"
         crossing == SemaSendCrossing.InterruptCallback -> "pass a named function, or capture only owned sendable values in the callback"
-        crossing == SemaSendCrossing.HttpHandler -> "capture only plain owned data in the HTTP handler, or keep this operation sequential"
+        crossing == SemaSendCrossing.HTTPHandler -> "capture only plain owned data in the HTTP handler, or keep this operation sequential"
         else -> "store only owned values that are safe to share between threads"
     }
     sema_error("E1102", span, what, why, fix)

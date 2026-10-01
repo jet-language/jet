@@ -25,7 +25,7 @@ pub enum BrowserPrivacy {
 }
 
 pub enum BrowserProtocol {
-    Cdp
+    CDP
     WebDriver
 }
 
@@ -129,7 +129,7 @@ pub fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
 }
 
 
-pub fn make_profile(name: String) -> BrowserProfile {
+pub fn make_profile(name: String) -> BrowserProfile Never! {
     BrowserProfile{name: name, privacy: BrowserPrivacy.Isolated, headless: true}
 }
 
@@ -150,16 +150,16 @@ pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Bro
 
 
 
-pub fn selected(page: BrowserPage, selector: String) -> BrowserLocator {
+pub fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
     BrowserLocator{selector: selector, page_id: page.id}
 }
 pub fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
     core.web.browser.begin_named(config, test, engine, attempt, source_path, line, column)
 }
 
-pub fn fixture_context(browser: Browser) -> BrowserContext { BrowserContext{id: browser.id, browser: browser.id} }
+pub fn fixture_context(browser: Browser) -> BrowserContext Never! { BrowserContext{id: browser.id, browser: browser.id} }
 
-pub fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage {
+pub fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage Never! {
     BrowserPage{id: ctx.id, url: url, title: ""}
 }
 
@@ -181,16 +181,16 @@ pub fn generate_source(name: String, body: String, base_url: String) -> String B
     Ok(out)
 }
 
-pub fn report_new(title: String) -> BrowserReport { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
+pub fn report_new(title: String) -> BrowserReport Never! { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
 
-pub fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport {
+pub fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport Never! {
     cases := [BrowserTestCase]{}
     loop c in report.cases -> &cases.push(c)
     &cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
     BrowserReport{title: report.title, cases: cases}
 }
 
-pub fn report_html(report: BrowserReport) -> String {
+pub fn report_html(report: BrowserReport) -> String Never! {
     out := "<!doctype html><html><head><title>{esc(report.title)}</title></head><body><h1>{esc(report.title)}</h1><ol>"
     loop c in report.cases {
         cls := "pass"
@@ -201,7 +201,7 @@ pub fn report_html(report: BrowserReport) -> String {
     out
 }
 
-pub fn report_json(report: BrowserReport) -> String {
+pub fn report_json(report: BrowserReport) -> String Never! {
     out := "{{\"title\":\"{esc_json(report.title)}\",\"passed\":{passed(report)},\"failed\":{failed(report)},\"cases\":["
     loop i in 0..<report.cases.len() {
         c :: report.cases[i]
@@ -224,7 +224,7 @@ pub fn report_text(report: BrowserReport) -> String Never! {
     out
 }
 
-pub fn report_exit_code(report: BrowserReport) -> Int {
+pub fn report_exit_code(report: BrowserReport) -> Int Never! {
     if failed(report) > 0 -> return 1
     0
 }
@@ -245,16 +245,16 @@ pub fn watch_changed(path: String) -[FS, Net]> Bool BrowserError! {
     core.web.browser.watch_changed(path, -1)
 }
 
-pub fn server_stop(server: BrowserServer) -> BrowserServer {
+pub fn server_stop(server: BrowserServer) -> BrowserServer Never! {
     if server.native == None -> return BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
     native :: server.native ?? return BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
     _ :: core.web.browser.server_stop(native)
     BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
 }
 
-pub fn server_url(server: BrowserServer) -> String { server.url }
+pub fn server_url(server: BrowserServer) -> String Never! { server.url }
 
-pub fn server_logs(server: BrowserServer) -> String { server.logs }
+pub fn server_logs(server: BrowserServer) -> String Never! { server.logs }
 
 
 

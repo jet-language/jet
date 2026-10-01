@@ -4,9 +4,9 @@
 //!
 //! `Examples/features/packages/outputs_build/` has no `main.jet`/`run.jet`
 //! convention file. Its `package.jet` uses a *dotted* entry —
-//! `outputs: { demo: .Executable{ entry: service.run } }` — which follows
-//! `entry.jet`'s `use "service/module" as service` file import into
-//! `service/module.jet`. That's
+//! `outputs: { demo: .Executable{ entry: service.run } }` — which names the
+//! nested package member `service/service.jet` by its file stem
+//! (D-MOD-CYCLE1=A: a package is one namespace without file imports). That's
 //! deliberate: a single-segment `entry: run` resolves through the existing
 //! root-level source lookup, so it can never prove `outputs:` is doing
 //! anything.
@@ -46,13 +46,12 @@ fn nested_example_dir() -> PathBuf {
 #[test]
 fn outputs_build_example_has_no_convention_entry_filename() {
     // The whole point of this fixture: no `main.jet`/`run.jet` file exists,
-    // and the entry function lives behind an import the migration-era
-    // fallback cannot follow.
+    // and the entry function lives in a nested member file the
+    // migration-era fallback cannot reach.
     let dir = example_dir();
     assert!(!dir.join("main.jet").is_file());
     assert!(!dir.join("run.jet").is_file());
-    assert!(dir.join("entry.jet").is_file());
-    assert!(dir.join("service/module.jet").is_file());
+    assert!(dir.join("service/service.jet").is_file());
     let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(manifest.contains("outputs:"), "{manifest}");
     assert!(manifest.contains("entry: service.run"), "{manifest}");
@@ -97,14 +96,13 @@ fn outputs_block_drives_jet_build_aot() {
     );
 
     // `jet build` names the binary after the entry file it resolved
-    // (`module`, from `service/module.jet`) — proof the AOT lens took the
+    // (`service`, from `service/service.jet`) — proof the AOT lens took the
     // same `outputs:` path as the JIT lens above, not a `main`/`run`
-    // fallback (which would never find a file two directories away from a
-    // bare filename convention).
-    let binary = build_dir.join("module");
+    // fallback (which never scans below the package root).
+    let binary = build_dir.join("service");
     assert!(
         binary.is_file(),
-        "jet build did not produce .jet/build/module (resolved via outputs:); found: {:?}",
+        "jet build did not produce .jet/build/service (resolved via outputs:); found: {:?}",
         fs::read_dir(&build_dir)
             .map(|entries| entries.flatten().map(|e| e.path()).collect::<Vec<_>>())
             .unwrap_or_default()
@@ -275,13 +273,11 @@ fn package_output_selects_non_run_callable_for_run_dev_and_effects() {
 
 #[test]
 fn entry_wrapper_uses_the_full_nested_import_qualification_chain() {
+    // Loose files (no package.jet) import files by path, so a swapped entry
+    // reaches its callable through the full import chain.
     let scratch = common::Scratch::new("nested-entry-wrapper");
+    fs::remove_file(scratch.join("package.jet")).unwrap();
     let entry = scratch.join("entry.jet");
-    fs::write(
-        scratch.join("package.jet"),
-        "name: \"nested_entry_wrapper\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: app.leaf } }\n",
-    )
-    .unwrap();
     fs::write(&entry, "use \"runner\" as runner\n").unwrap();
     fs::write(scratch.join("runner.jet"), "use \"bridge\" as bridge\n").unwrap();
     fs::write(scratch.join("bridge.jet"), "use \"leaf\" as app\n").unwrap();
@@ -384,63 +380,11 @@ fn package_default_output_alias_invokes_nested_leaf_from_path_and_cwd() {
     }
 }
 
-#[test]
-fn nested_output_failures_keep_the_package_diagnostic() {
-    fn run_case(tag: &str, entry: &str, extra: &[(&str, &str)]) {
-        let dir = std::env::temp_dir().join(format!(
-            "jet-outputs-nested-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(
-            dir.join("package.jet"),
-            "name: \"nested_output_negative\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: app.cli_run } }\n",
-        )
-        .unwrap();
-        fs::write(dir.join("entry.jet"), entry).unwrap();
-        for &(relative, source) in extra {
-            let path = dir.join(relative);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, source).unwrap();
-        }
-
-        let out = Command::new(jet_bin())
-            .arg("run")
-            .current_dir(&dir)
-            .output()
-            .expect("nested output rejection should execute");
-        assert!(
-            !out.status.success(),
-            "nested output unexpectedly succeeded"
-        );
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("Error [E2105]"), "missing E2105:\n{stderr}");
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    run_case("missing", "use \"src/cli/missing\" as app\n", &[]);
-    run_case(
-        "ambiguous",
-        "use \"src/cli/main\" as app\n",
-        &[
-            ("src/cli/main.jet", "pub fn cli_run() {}\n"),
-            ("src/cli/main/module.jet", "pub fn cli_run() {}\n"),
-        ],
-    );
-    run_case("escaping", "use \"../../outside/main\" as app\n", &[]);
-}
-
-/// The negative half of the proof: copy the fixture's service module but drop
-/// `outputs:` from `package.jet` and do not copy its `entry.jet` carrier.
-/// There is no canonical `run.jet`, so entry resolution must fail. If this
-/// ever starts resolving without `outputs:`, the fixture above would stop
-/// proving anything.
+/// The negative half of the proof: copy the fixture's service member but drop
+/// `outputs:` from `package.jet` and rename its `fn run`. With no `run.jet`
+/// and no member declaring `fn run`, the package is a library (D-MOD-CYCLE1=A),
+/// so `jet run` must fail with E0101. If this ever starts resolving without
+/// `outputs:`, the fixture above would stop proving anything.
 #[test]
 fn entry_resolution_requires_the_outputs_block() {
     let dir = std::env::temp_dir().join(format!(
@@ -458,10 +402,10 @@ fn entry_resolution_requires_the_outputs_block() {
         "name: \"outputs_build_demo\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
     )
     .unwrap();
-    let module = fs::read_to_string(example_dir().join("service/module.jet"))
+    let service = fs::read_to_string(example_dir().join("service/service.jet"))
         .unwrap()
         .replace("pub fn run()", "pub fn service_run()");
-    fs::write(dir.join("service/module.jet"), module).unwrap();
+    fs::write(dir.join("service/service.jet"), service).unwrap();
 
     let out = Command::new(jet_bin())
         .arg("run")
@@ -474,15 +418,16 @@ fn entry_resolution_requires_the_outputs_block() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("run.jet"),
-        "expected a missing-entry error naming run.jet, got:\n{stderr}"
+        stderr.contains("Error [E0101]"),
+        "expected the missing `fn run` error E0101, got:\n{stderr}"
     );
 
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// Card #2352: a nested file named `main.jet` is an ordinary import target.
-/// Only a root-level `main.jet` is the retired convention entry.
+/// Card #2352: a nested file named `main.jet` is an ordinary package member;
+/// `entry: main.cli_run` names it by its stem. Only a root-level `main.jet`
+/// is the retired convention entry.
 #[test]
 fn manifest_output_resolves_nested_main_file_across_run_and_build() {
     let scratch = common::Scratch::new("package-output-nested-main");
@@ -492,14 +437,12 @@ fn manifest_output_resolves_nested_main_file_across_run_and_build() {
         concat!(
             "name: \"nested_main_output\"\n",
             "version: \"0.1.0\"\n",
-            "outputs: { app: .Executable{ entry: cli.cli_run } }\n",
+            "outputs: { app: .Executable{ entry: main.cli_run } }\n",
             "defaults: { run: app }\n",
             "authority: { holds: { allow: [IO] } }\n",
         ),
     )
     .expect("write package manifest");
-    fs::write(scratch.join("entry.jet"), "use \"src/cli/main\" as cli\n")
-        .expect("write package import root");
     fs::write(
         scratch.join("src/cli/main.jet"),
         "pub fn cli_run() {\n    print(\"nested-main\")\n}\n",
@@ -544,45 +487,36 @@ fn manifest_output_resolves_nested_main_file_across_run_and_build() {
     assert_eq!(built.stdout, b"nested-main\n");
 }
 
-/// Card #2352: unsafe or non-unique nested selectors fail at the Package
-/// boundary instead of reaching sema or rustc with a guessed entry.
+/// Card #2352: a member-file selector that names no file, or a stem two
+/// member files share, fails at the Package boundary instead of reaching sema
+/// or rustc with a guessed entry.
 #[test]
-fn manifest_output_rejects_missing_ambiguous_and_escaping_nested_entries() {
-    for (tag, imports, sources) in [
-        (
-            "missing",
-            "use \"src/missing\" as cli\n",
-            Vec::<(&str, &str)>::new(),
-        ),
+fn manifest_output_rejects_missing_and_ambiguous_member_entries() {
+    for (tag, sources) in [
+        ("missing", vec![("src/other.jet", "fn cli_run() {}\n")]),
         (
             "ambiguous",
-            "use \"src/one\" as cli\nuse \"src/two\" as cli\n",
             vec![
-                ("src/one.jet", "pub fn cli_run() {}\n"),
-                ("src/two.jet", "pub fn cli_run() {}\n"),
+                ("src/one/main.jet", "fn cli_run() {}\n"),
+                ("src/two/main.jet", "fn helper() {}\n"),
             ],
         ),
-        (
-            "escaping",
-            "use \"../outside\" as cli\n",
-            Vec::<(&str, &str)>::new(),
-        ),
     ] {
-        let scratch = common::Scratch::new(&format!("package-output-nested-{tag}"));
-        fs::create_dir_all(scratch.join("src")).expect("create nested source directory");
+        let scratch = common::Scratch::new(&format!("package-output-member-{tag}"));
         fs::write(
             scratch.join("package.jet"),
             concat!(
-                "name: \"invalid_nested_output\"\n",
+                "name: \"invalid_member_output\"\n",
                 "version: \"0.1.0\"\n",
-                "outputs: { app: .Executable{ entry: cli.cli_run } }\n",
+                "outputs: { app: .Executable{ entry: main.cli_run } }\n",
                 "defaults: { run: app }\n",
             ),
         )
         .expect("write package manifest");
-        fs::write(scratch.join("entry.jet"), imports).expect("write package import root");
         for (path, source) in sources {
-            fs::write(scratch.join(path), source).expect("write candidate entry source");
+            let path = scratch.join(path);
+            fs::create_dir_all(path.parent().unwrap()).expect("create member directory");
+            fs::write(path, source).expect("write candidate entry source");
         }
 
         let out = Command::new(jet_bin())

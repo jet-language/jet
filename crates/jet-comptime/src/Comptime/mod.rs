@@ -108,17 +108,6 @@ pub fn decode_typed_builtin_value_for_mir(
     TypedDecode::typed_decode_builtin_value(ty, tree)
 }
 
-/// MIR typed Encode bridge for the closed scalar/container subset.  Keep the
-/// representation policy in `TypedDecode`; execution adapters only translate
-/// the checked type and value carriers.
-#[doc(hidden)]
-pub fn encode_typed_builtin_value_for_mir(
-    ty: &Type,
-    value: &CtValue,
-) -> Option<Result<CtValue, String>> {
-    TypedDecode::encode_typed_builtin_value(ty, value)
-}
-
 /// MIR typed Encode bridge that keeps container traversal in the canonical
 /// typed codec walker and delegates nominal leaves to checked MIR methods.
 #[doc(hidden)]
@@ -149,116 +138,6 @@ pub use Interpreter::{
     runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest,
     REPL_FUEL_BUDGET,
 };
-/// Maximum serialized weight of a speculative immutable binding fold.
-///
-/// Optional folding is an optimization, not a second way to force a large
-/// value through every generated tier.  Keep the cap structural so it applies
-/// equally to lists, maps, records, enums, and nested outcome values.
-pub const IMPLICIT_FOLD_OUTPUT_BUDGET: usize = 256 * 1024;
-
-/// Return whether a speculative fold is small enough to inline into generated
-/// code.  Explicit compile-time evaluation keeps the evaluator's normal fuel
-/// and diagnostics; this bound only declines the optional optimization.
-pub fn implicit_fold_value_within_budget(value: &CtValue) -> bool {
-    fn add(cost: &mut usize, amount: usize) {
-        *cost = cost.saturating_add(amount);
-    }
-
-    fn visit(value: &CtValue, cost: &mut usize) {
-        if *cost > IMPLICIT_FOLD_OUTPUT_BUDGET {
-            return;
-        }
-        match value {
-            CtValue::Int(..)
-            | CtValue::Float(..)
-            | CtValue::Bool(..)
-            | CtValue::Char(..)
-            | CtValue::BigInt(..)
-            | CtValue::Unit => add(cost, 16),
-            CtValue::Str(text) => add(cost, 16usize.saturating_add(text.len())),
-            CtValue::Bytes(bytes) => add(cost, 16usize.saturating_add(bytes.len())),
-            CtValue::List(values) => {
-                add(cost, 16usize.saturating_add(values.len().saturating_mul(8)));
-                for value in values {
-                    visit(value, cost);
-                }
-            }
-            CtValue::Map(values) => {
-                add(cost, 32usize.saturating_add(values.len().saturating_mul(16)));
-                for (key, value) in values {
-                    add(cost, 16);
-                    visit_map_key(key, cost);
-                    visit(value, cost);
-                }
-            }
-            CtValue::Struct { type_name, fields } => {
-                add(
-                    cost,
-                    32usize
-                        .saturating_add(type_name.len())
-                        .saturating_add(fields.len().saturating_mul(16)),
-                );
-                for (name, value) in fields {
-                    add(cost, name.len());
-                    visit(value, cost);
-                }
-            }
-            CtValue::Enum {
-                type_name,
-                variant,
-                args,
-            } => {
-                add(
-                    cost,
-                    32usize
-                        .saturating_add(type_name.len())
-                        .saturating_add(variant.len())
-                        .saturating_add(args.len().saturating_mul(16)),
-                );
-                for (name, value) in args {
-                    if let Some(name) = name {
-                        add(cost, name.len());
-                    }
-                    visit(value, cost);
-                }
-            }
-            CtValue::Present(value) => {
-                add(cost, 16);
-                visit(value, cost);
-            }
-            CtValue::Failed(crate::AST::CtReport::Clean(..)) => add(cost, 16),
-            CtValue::Failed(crate::AST::CtReport::Told(value)) => {
-                add(cost, 16);
-                visit(value, cost);
-            }
-            // A closure has no stable literal representation and is rejected
-            // by `ct_value_fits_binding`; count it as over-budget here too.
-            CtValue::Closure(..) => add(cost, IMPLICIT_FOLD_OUTPUT_BUDGET + 1),
-        }
-    }
-
-    fn visit_map_key(key: &crate::AST::CtKey, cost: &mut usize) {
-        match key {
-            crate::AST::CtKey::Int(..)
-            | crate::AST::CtKey::Bool(..)
-            | crate::AST::CtKey::Char(..)
-            | crate::AST::CtKey::Enum { .. } => add(cost, 16),
-            crate::AST::CtKey::Str(text) => add(cost, 16usize.saturating_add(text.len())),
-            crate::AST::CtKey::Tuple(fields) | crate::AST::CtKey::Struct { fields, .. } => {
-                add(cost, 16usize.saturating_add(fields.len().saturating_mul(8)));
-                for (name, value) in fields {
-                    add(cost, name.len());
-                    visit_map_key(value, cost);
-                }
-            }
-        }
-    }
-
-    let mut cost = 0;
-    visit(value, &mut cost);
-    cost <= IMPLICIT_FOLD_OUTPUT_BUDGET
-}
-
 pub use Methods::{
     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
     apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,
@@ -570,34 +449,8 @@ pub struct ProgramBuildEvaluation {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Run selected root `fn build` through same interpreter used by comptime and
-/// dev. Sema has already checked whole bundle; this stage constructs graph
-/// values only, never type-checks by execution.
-pub fn run_build_entry(
-    build: &Func,
-    funcs: &HashMap<String, &Func>,
-    base_dir: &Path,
-    program: &ProgramInfo,
-    program_value: CtValue,
-    package: &str,
-    gates: jet_foundation::Policy::GateSet,
-) -> Result<ProgramBuildEvaluation, Diagnostic> {
-    run_build_entry_with_policy(
-        build,
-        funcs,
-        &[],
-        base_dir,
-        program,
-        program_value,
-        package,
-        gates,
-        Build::BuildPolicy::local_default(),
-    )
-}
-
-/// Build entry with an explicit policy snapshot. The legacy wrapper above is
-/// kept for direct Rust consumers; the production driver uses this seam so
-/// policy cannot be bypassed by the comptime bridge.
+/// Build entry with an explicit policy snapshot. The production driver uses
+/// this seam so policy cannot be bypassed by the comptime bridge.
 pub fn run_build_entry_with_policy(
     build: &Func,
     funcs: &HashMap<String, &Func>,
@@ -722,17 +575,6 @@ fn empty_method_traits() -> &'static HashMap<(String, String), String> {
     EMPTY_METHOD_TRAITS.get_or_init(HashMap::new)
 }
 
-/// TIR/JIT bridge for whole-value CBOR encoding. Keep the wire encoder in the
-/// same comptime-reachable Prelude implementation used by interpreter calls.
-pub fn cbor_encode_for_tir(value: &CtValue, canonical: bool) -> Result<Vec<u8>, CtValue> {
-    if canonical {
-        EncodingLite::cbor_encode_canonical(value)
-    } else {
-        EncodingLite::cbor_encode(value)
-    }
-    .map_err(EncodingLite::cbor_encoding_error_value)
-}
-
 pub fn render_datatree_for_tir(value: &CtValue) -> String {
     JSONInterp::render_ordered_datatree(value, false, 0)
 }
@@ -761,77 +603,11 @@ pub fn yaml_parse_for_tir(text: &str) -> Result<CtValue, CtValue> {
     EncodingLite::yaml_parse(text)
 }
 
-/// TIR/JIT bridge for the canonical whole-value CBOR parser.
-///
-/// Keep options validation, limits, deterministic-form checks, and error
-/// construction in the same implementation used by comptime evaluation.
-pub fn cbor_parse_for_tir(
-    bytes: &[u8],
-    options: Option<&CtValue>,
-    allow_bytes: bool,
-) -> Result<CtValue, CtValue> {
-    let options =
-        EncodingLite::cbor_options(options).map_err(EncodingLite::cbor_encoding_error_value)?;
-    EncodingLite::cbor_decode(bytes, &options, allow_bytes)
-        .map_err(EncodingLite::cbor_encoding_error_value)
-}
-
 /// TIR/JIT bridge for the text codecs' parse-failure wording. `codec` is the
 /// name as the Prelude writes it — `JSON`, `TOML`, `YAML` — so a typed decode
 /// reports `invalid JSON (line 3): …` on every tier from one implementation.
 pub fn codec_parse_error_for_tir(codec: &str, error: CtValue) -> CtValue {
     TypedDecode::json_parse_err_to_decode(codec, error)
-}
-
-/// Convert a parser failure to the typed decoder's shared `[FieldError]`
-/// contract. CBOR's parser keeps byte offsets and `$` paths; typed decode
-/// exposes those details in the field-error reason and uses source paths.
-pub fn cbor_decode_source_error_for_tir(error: CtValue) -> CtValue {
-    let CtValue::Struct { fields, .. } = &error else {
-        return TypedDecode::decode_error(error.jet_show());
-    };
-    let text = |name: &str| {
-        fields.iter().find_map(|(field, value)| {
-            (field == name)
-                .then_some(value)
-                .and_then(|value| match value {
-                    CtValue::Str(value) => Some(value.as_str()),
-                    _ => None,
-                })
-        })
-    };
-    let kind = fields
-        .iter()
-        .find_map(|(field, value)| {
-            (field == "kind")
-                .then_some(value)
-                .and_then(|value| match value {
-                    CtValue::Enum { variant, .. } => Some(variant.as_str()),
-                    _ => None,
-                })
-        })
-        .unwrap_or("Unsupported");
-    let offset = fields
-        .iter()
-        .find_map(|(field, value)| {
-            (field == "byte_offset")
-                .then_some(value)
-                .and_then(|value| match value {
-                    CtValue::Int(offset) => Some(*offset),
-                    _ => None,
-                })
-        })
-        .unwrap_or(0);
-    let raw_path = text("path").unwrap_or("$");
-    let path = if raw_path == "$" {
-        String::new()
-    } else if let Some(path) = raw_path.strip_prefix("$.") {
-        path.to_string()
-    } else {
-        raw_path.strip_prefix('$').unwrap_or(raw_path).to_string()
-    };
-    let reason = text("reason").unwrap_or("CBOR decode failed");
-    TypedDecode::decode_error_at(path, format!("CBOR {kind} at byte {offset}: {reason}"))
 }
 
 /// TIR static-call bridge for shared EncodingLimits / XML safe constructors.
@@ -849,10 +625,6 @@ pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
     }
 }
 
-/// TIR static-call bridge for the shared Email limits constructor.
-pub fn email_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
-    (method == "safe" && path == "jet_email::Limits").then(EmailAdapter::limits_safe_value)
-}
 static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
     std::sync::OnceLock::new();
 fn empty_computed() -> &'static HashMap<(String, String), &'static Expr> {
@@ -976,9 +748,9 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
 
 /// Evaluate a closed value against the caller's already-registered semantic
 /// facts. Sema uses this variant so nested state rows are never reconstructed
-/// from a parallel source-side lookup. `checked_core` carries the loaded Core
-/// source signatures and bodies, so a fragment calls Core functions exactly as
-/// runtime code does.
+/// from a parallel source-side lookup. `checked_nominals` carries the module's
+/// imported nominals and the loaded Core and user source modules, so a
+/// fragment calls another module's functions exactly as runtime code does.
 pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
     init: &crate::AST::Expr,
     funcs: &HashMap<String, &'a Func>,
@@ -997,10 +769,13 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
     fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     fact_registry: &jet_foundation::Facts::FactRegistry,
-    checked_core: Option<&MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&MirBridge::MirFragmentNominalFacts>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let closed = fold_build_facts(init, fact_items, build_facts, fact_registry);
-    let mut nominal_facts = MirBridge::MirFragmentNominalFacts::default();
+    // The checked projection carries every imported nominal, import alias and
+    // loaded source module; the evaluated module's own enum rows come from
+    // its items.
+    let mut nominal_facts = checked_nominals.cloned().unwrap_or_default();
     for item in fact_items {
         if let crate::AST::Item::Enum(definition) = item {
             let mut row = definition.clone();
@@ -1009,10 +784,6 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
             row.derives.clear();
             nominal_facts.enums.insert(row.name.clone(), row);
         }
-    }
-    if let Some(checked) = checked_core {
-        nominal_facts.core_source_sigs = checked.core_source_sigs.clone();
-        nominal_facts.core_source_bodies = checked.core_source_bodies.clone();
     }
     evaluate_with_imports_opts_collecting_structs_and_methods(
         &closed,
@@ -1026,12 +797,50 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
         initial_impure_depth,
         structs,
         methods,
+        &item_method_traits(fact_items),
         distinct_ranges,
         distinct_bases,
         unit_families,
         Some(nominal_facts),
         mutated,
     )
+}
+
+/// The trait each item method implements, keyed like the evaluator's method
+/// table. A fragment lowers a trait method under its trait identity, so a
+/// checked `a == b` (sema's `Comparable.compare` operator hook) finds the same
+/// target it calls at runtime.
+fn item_method_traits(items: &[crate::AST::Item]) -> HashMap<(String, String), String> {
+    let mut traits = HashMap::new();
+    let mut insert = |owner: &str, trait_name: &str, methods: &[Func]| {
+        for method in methods {
+            traits.insert(
+                (owner.to_string(), method.name.clone()),
+                trait_name.to_string(),
+            );
+        }
+    };
+    for item in items {
+        match item {
+            crate::AST::Item::Impl(implementation) => {
+                if let Some(trait_name) = implementation.trait_name.as_deref() {
+                    insert(&implementation.type_name, trait_name, &implementation.methods);
+                }
+            }
+            crate::AST::Item::Struct(definition) => {
+                for block in &definition.trait_impls {
+                    insert(&definition.name, &block.trait_name, &block.methods);
+                }
+            }
+            crate::AST::Item::Enum(definition) => {
+                for block in &definition.trait_impls {
+                    insert(&definition.name, &block.trait_name, &block.methods);
+                }
+            }
+            _ => {}
+        }
+    }
+    traits
 }
 
 fn fold_build_facts(
@@ -1263,6 +1072,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         initial_impure_depth,
         structs,
         empty_methods(),
+        empty_method_traits(),
         &HashMap::new(),
         &HashMap::new(),
         &[],
@@ -1282,6 +1092,7 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
     initial_impure_depth: usize,
     structs: &HashMap<String, &'a StructDef>,
     methods: &HashMap<(String, String), &'a Func>,
+    method_traits: &HashMap<(String, String), String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
     unit_families: &[crate::AST::UnitFamilyDef],
@@ -1300,7 +1111,7 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
             funcs,
             binding_types,
             error_conversions: &[],
-            method_traits: empty_method_traits(),
+            method_traits,
             methods,
             extern_names,
             base_dir,
@@ -1483,53 +1294,6 @@ pub fn run_main_debug(
         | Interpreter::Flow::ContinueLabel(_) => {}
     }
     Ok(())
-}
-
-/// `jet eval` variant: runs `main()` and returns its return value as a
-/// `CtValue` instead of buffering stdout into the result. Print calls are
-/// captured into the caller's `sink`, which the caller owns and reads (#2068
-/// — it used to be a local that was dropped, so the output vanished).
-pub fn run_main_value(
-    main: &Func,
-    funcs: &HashMap<String, &Func>,
-    base_dir: &Path,
-    sink: &mut DevSink,
-) -> Result<CtValue, Diagnostic> {
-    let mut interp = Interp {
-        funcs,
-        error_conversions: &[],
-        base_dir,
-        fuel: DEV_FUEL_BUDGET,
-        sink: Some(sink),
-        checked_nominals: None,
-        core_imports: empty_imports(),
-        debugger: None,
-        runtime_execution: false,
-        depth: 0,
-        cur_func: "main".to_string(),
-        impure_depth: 0,
-        gates: jet_foundation::Policy::GateSet::default(),
-        repl_mode: false,
-        repl_grants: Vec::new(),
-        repl_authorizer: None,
-        repl_interruptible: false,
-        embed_inputs: Vec::new(),
-        binding_types: HashMap::new(),
-        globals: empty_globals(),
-        methods: empty_methods(),
-        structs: empty_structs(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        migrations: empty_migrations(),
-        list_write_windows: HashMap::new(),
-        data_pipeline: DataPipeline::DataPipelineState::default(),
-    };
-    let mut scope = HashMap::new();
-    match interp.exec_block(&main.body, &mut scope)? {
-        Interpreter::Flow::Return(v) => Ok(v),
-        _ => Ok(CtValue::Unit),
-    }
 }
 
 /// REPL variant of `run_main`: uses a caller-supplied fuel cap so the REPL
@@ -2152,6 +1916,7 @@ pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
         initial_impure_depth,
         &structs,
         &methods,
+        &item_method_traits(items),
         empty_distinct(),
         empty_distinct_bases(),
         &[],
@@ -2732,27 +2497,12 @@ fn expand_template_stmt_into(
             span,
             ..
         } => {
-            expand_template_expr(&mut cond, interp, scope)?;
-            let value = interp.eval(&cond, scope)?;
-            let crate::AST::CtValue::Bool(selected) = value else {
-                return Err(Diagnostic::error(
-                    "E0989",
-                    format!(
-                        "a `prep if` condition must be {}, not another type",
-                        crate::AST::Type::Bool.show()
-                    ),
-                    "the condition selects a branch at compile time — it must be true or false"
-                        .to_string(),
-                    "write a Bool known-time expression, like `prep if flag { … }`".to_string(),
-                    Some(cond_span),
-                ));
-            };
-            let _ = span;
-            let mut chosen = if selected {
+            let mut chosen = if template_if_selected(&mut cond, cond_span, interp, scope)? {
                 then_body
             } else {
                 else_body.unwrap_or_default()
             };
+            let _ = span;
             expand_template_stmts(&mut chosen, interp, scope)?;
             out.extend(chosen);
             Ok(())
@@ -2769,6 +2519,62 @@ fn expand_template_stmt_into(
             Ok(())
         }
     }
+}
+
+/// Expand one statement of a template that is reused across iterations. A
+/// `prep if` selects its branch before anything is copied; every other
+/// statement is copied and expanded as usual.
+fn expand_template_stmt_ref_into(
+    stmt: &crate::AST::Stmt,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+    out: &mut Vec<crate::AST::Stmt>,
+) -> Result<(), Diagnostic> {
+    let crate::AST::Stmt::ComptimeIf {
+        cond,
+        cond_span,
+        then_body,
+        else_body,
+        ..
+    } = stmt
+    else {
+        return expand_template_stmt_into(stmt.clone(), interp, scope, out);
+    };
+    let mut cond = cond.clone();
+    let chosen = if template_if_selected(&mut cond, *cond_span, interp, scope)? {
+        then_body.as_slice()
+    } else {
+        else_body.as_deref().unwrap_or_default()
+    };
+    for stmt in chosen {
+        expand_template_stmt_ref_into(stmt, interp, scope, out)?;
+    }
+    Ok(())
+}
+
+/// Evaluate a `prep if` condition to the branch it selects.
+fn template_if_selected(
+    cond: &mut crate::AST::Expr,
+    cond_span: crate::Diagnostics::Span,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<bool, Diagnostic> {
+    expand_template_expr(cond, interp, scope)?;
+    let value = interp.eval(cond, scope)?;
+    let crate::AST::CtValue::Bool(selected) = value else {
+        return Err(Diagnostic::error(
+            "E0989",
+            format!(
+                "a `prep if` condition must be {}, not another type",
+                crate::AST::Type::Bool.show()
+            ),
+            "the condition selects a branch at compile time — it must be true or false"
+                .to_string(),
+            "write a Bool known-time expression, like `prep if flag { … }`".to_string(),
+            Some(cond_span),
+        ));
+    };
+    Ok(selected)
 }
 
 fn expand_template_loop_block(
@@ -2805,9 +2611,12 @@ fn expand_template_loop_block(
     let previous = scope.get(&var).cloned();
     for value in values {
         scope.insert(var.clone(), value);
-        let mut iter_body = loop_body.clone();
-        expand_template_stmts(&mut iter_body, interp, scope)?;
-        out.extend(iter_body);
+        // Each iteration expands the shared template in place of a whole copy,
+        // so a `prep if` that is not taken never clones its branch (derives
+        // over an enum pair every variant with every other one).
+        for stmt in &loop_body {
+            expand_template_stmt_ref_into(stmt, interp, scope, out)?;
+        }
     }
     if let Some(previous) = previous {
         scope.insert(var, previous);
@@ -3099,6 +2908,9 @@ fn cartesian_payload_owner(side: &str, variant: &str, scope: &HashMap<String, Ct
         "right" => match (left, right) {
             (Some(left), Some(right)) => format!("right_{left}_{right}"),
             (_, Some(right)) => format!("right_{right}"),
+            // `if rhs == { .$left -> … }` matches `rhs` against the arm's own
+            // variant; `derive_payload_owner` names its fields the same way.
+            (Some(left), None) if variant == "left" => format!("right_{left}"),
             _ => format!("right_{variant}"),
         },
         _ => payload_binding_owner(variant, scope),
@@ -3189,10 +3001,13 @@ fn derive_payload_owner(binding: Option<&str>, scope: &HashMap<String, CtValue>)
     let left = scope_value(scope, "left").and_then(reflected_variant_name)?;
     Some(match side {
         "left" => format!("left_{left}"),
-        "right" => {
-            let right = scope_value(scope, "right").and_then(reflected_variant_name)?;
-            format!("right_{left}_{right}")
-        }
+        // A template that matches `rhs` against the arm's own variant
+        // (`if rhs == { .$left -> … }`) has no `right` loop; the pattern
+        // bound `right_{left}_*` through `cartesian_payload_owner`.
+        "right" => match scope_value(scope, "right").and_then(reflected_variant_name) {
+            Some(right) => format!("right_{left}_{right}"),
+            None => format!("right_{left}"),
+        },
         _ => return None,
     })
 }
@@ -3630,6 +3445,7 @@ pub fn evaluate_checked_text_check<'a>(
         0,
         structs,
         methods,
+        empty_method_traits(),
         &HashMap::new(),
         distinct_bases,
         &[],
@@ -3695,6 +3511,7 @@ pub fn evaluate_checked_text_hole<'a>(
         0,
         structs,
         methods,
+        empty_method_traits(),
         &HashMap::new(),
         distinct_bases,
         &[],

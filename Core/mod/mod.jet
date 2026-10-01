@@ -9,14 +9,32 @@ package {
     }
 }
 use core as core
+use core.text.parse as parse
 
 // core.mod — a compiled Jet unit loaded under an explicit read grant.
 //
 // The provider owns artifact validation, staging, ABI checks, and handle
 // lifetime.  The returned `Mod` is opaque; dropping it releases the native
 // module, so source cannot manufacture a detached or already-unloaded handle.
-pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod Err! {
-    core.mod.load(path, grant: grant)
+
+/// D-MOD-ERR1=A: each case asks the caller for a different action. `Denied`:
+/// the grant refuses the path or an effect the library declares. `NotFound`:
+/// nothing is at the path. `Invalid`: the file is damaged or is not a
+/// library. `Unsupported`: another Jet version, ABI or platform built it, or
+/// loading is not available here. Each case holds the provider's reason.
+#Error
+pub enum ModError {
+    Denied(String)
+    NotFound(String)
+    Invalid(String)
+    Unsupported(String)
+}
+
+pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
+    if core.mod.load(path, grant: grant) == {
+        .Ok(loaded) -> Ok(loaded)
+        .Err(reason) -> Err(mod_error(reason))
+    }
 }
 pub struct CompiledModule {
     pub path: String
@@ -26,15 +44,25 @@ pub struct CompiledModule {
 // The provider exposes no `jet_mod_unload` operation.  `Mod` owns its native
 // handle and unloads on drop; a legacy value cannot truthfully be turned into
 // a detached carrier, so preserve the export as a typed refusal.
-pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule Err! {
-    Err("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop")
+pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
+    Err(ModError.Unsupported("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop"))
 }
 
-pub fn is_loaded(compiled: CompiledModule) -> Bool {
+// The provider reports a refusal as `<Case>: <reason>` (Top/Mod.rs
+// `JetModFailure`); an untagged reason is a malformed request, so `Invalid`.
+fn mod_error(reason: String) -> ModError Never! {
+    if reason.starts_with("Denied: ") -> return ModError.Denied(parse.strip_prefix(reason, "Denied: "))
+    if reason.starts_with("NotFound: ") -> return ModError.NotFound(parse.strip_prefix(reason, "NotFound: "))
+    if reason.starts_with("Invalid: ") -> return ModError.Invalid(parse.strip_prefix(reason, "Invalid: "))
+    if reason.starts_with("Unsupported: ") -> return ModError.Unsupported(parse.strip_prefix(reason, "Unsupported: "))
+    ModError.Invalid(reason)
+}
+
+pub fn is_loaded(compiled: CompiledModule) -> Bool Never! {
     compiled.handle > 0
 }
 
-pub fn path(compiled: CompiledModule) -> String {
+pub fn path(compiled: CompiledModule) -> String Never! {
     compiled.path
 }
 

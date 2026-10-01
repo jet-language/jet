@@ -1,0 +1,11 @@
+// A compound update of a nested numeric field is native arithmetic, not an
+// operator hook, so it needs no stable operator place (no E0362).
+struct Inner { count: Int }
+struct Outer { inner: Inner }
+
+fn run() {
+    outer := Outer{inner: Inner{count: 1}}
+    outer.inner.count += 2
+    outer.inner.count -= 1
+    print(outer.inner.count)
+}

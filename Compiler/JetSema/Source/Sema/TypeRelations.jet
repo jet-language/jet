@@ -1,9 +1,31 @@
 // Pure type judgments shared by declaration, expression, and call checking.
 // Registry-dependent nominal and trait relations are layered on these rules.
+use jet_foundation.[
+    CallContractRow,
+    EffectRowEntry,
+    FunctionCallMetadata,
+    FunctionObligations,
+    InternalTag,
+    ParamZone,
+    Symbol,
+    SymbolKind,
+    TGenericParam,
+    TagMarker,
+    Type,
+    TypeTupleField,
+    ViewProvenance,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    type_identity_equal,
+    type_is_unit_callable_return,
+    type_with_effective_fn_returns,
+]
 
 pub fn sema_type_is_core_view_generic(ty: Type) -> Bool Never! {
     if ty == {
-        .Apply(name, _) -> name == "View" | "ViewMut" | "Pin" | "ViewIter"
+        .Apply(name, _) -> name == "View" || name == "ViewMut" || name == "Pin" || name == "ViewIter"
         else -> false
     }
 }
@@ -213,7 +235,7 @@ fn sema_function_obligations_satisfy(offered: FunctionObligations, required: Fun
 
 fn sema_type_function_obligations_parts(effect_bound: [EffectRowEntry]?, param_contract: [CallContractRow]?, call_metadata: FunctionCallMetadata?, return_view_provenance: ViewProvenanceMap?) -> FunctionObligations? {
     effect_names :: effect_bound.map((row) -> loop entry in row -> entry.name)
-    variadic := None
+    variadic := [Bool]?{None}
     if call_metadata == .Val(metadata) {
         has_variadic :: loop flag in metadata.variadic {
             if flag -> break true
@@ -256,31 +278,32 @@ fn sema_type_obligations_nested(required: Type, offered: Type) -> Bool Never! {
                         }
                     }
                 }
+                else -> {}
             }
             return true
         }
-        .List(required_inner) -> if offered == {.List(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)}
-        .Option(required_inner) -> if offered == {.Option(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)}
-        .Shared(required_inner) -> if offered == {.Shared(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)}
-        .Result(required_ok, required_err) -> if offered == {.Result(offered_ok, offered_err) -> return sema_type_obligations_nested(required_ok, offered_ok) && sema_type_obligations_nested(required_err, offered_err)}
-        .Map(required_key, _, required_value) -> if offered == {.Map(offered_key, _, offered_value) -> return sema_type_obligations_nested(required_key, offered_key) && sema_type_obligations_nested(required_value, offered_value)}
-        .Tuple(required_fields) -> if offered == {.Tuple(offered_fields) -> {
+        .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
+        .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
+        .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
+        .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) -> return sema_type_obligations_nested(required_ok, offered_ok) && sema_type_obligations_nested(required_err, offered_err)
+        .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) -> return sema_type_obligations_nested(required_key, offered_key) && sema_type_obligations_nested(required_value, offered_value)
+        .Tuple(required_fields) -> if offered == .Tuple(offered_fields) {
             if required_fields.len() != offered_fields.len() -> return false
             loop (index, required_field) in required_fields {
                 offered_field :: offered_fields[index]
                 if required_field.name != offered_field.name || !sema_type_obligations_nested(required_field.ty, offered_field.ty) -> return false
             }
             return true
-        }}
-        .FixedList(required_elem, _) -> if offered == {.FixedList(offered_elem, _) -> return sema_type_obligations_nested(required_elem, offered_elem)}
-        .Quantity(required_base, _) -> if offered == {.Quantity(offered_base, _) -> return sema_type_obligations_nested(required_base, offered_base)}
-        .Union(required_members) -> if offered == {.Union(offered_members) -> {
+        }
+        .FixedList(required_elem, _) -> if offered == .FixedList(offered_elem, _) -> return sema_type_obligations_nested(required_elem, offered_elem)
+        .Quantity(required_base, _) -> if offered == .Quantity(offered_base, _) -> return sema_type_obligations_nested(required_base, offered_base)
+        .Union(required_members) -> if offered == .Union(offered_members) {
             if required_members.len() != offered_members.len() -> return false
             loop (index, required_member) in required_members {
                 if !sema_type_obligations_nested(required_member, offered_members[index]) -> return false
             }
             return true
-        }}
+        }
         .Tagged(marker, inner) -> return marker == TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal} || sema_type_obligations_nested(inner, offered)
         else -> {}
     }
@@ -296,17 +319,19 @@ pub fn sema_type_obligations_satisfy(required: Type, offered: Type) -> Bool Neve
 
 fn sema_type_carrier_compatible(required: Type, offered: Type) -> Bool Never! {
     if required == {
-        .List(required_inner) -> if offered == {.List(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)}
-        .Option(required_inner) -> if offered == {.Option(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)}
-        .Result(required_ok, required_err) -> if offered == {.Result(offered_ok, offered_err) -> return sema_type_carrier_compatible(required_ok, offered_ok) && sema_type_carrier_compatible(required_err, offered_err)}
-        .Apply(required_name, required_args) -> if offered == {.Apply(offered_name, offered_args) -> {
+        .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
+        .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
+        .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) -> return sema_type_carrier_compatible(required_ok, offered_ok) && sema_type_carrier_compatible(required_err, offered_err)
+        .Apply(required_name, required_args) -> if offered == .Apply(offered_name, offered_args) {
             if required_name != offered_name || required_args.len() != offered_args.len() -> return false
             loop (index, required_arg) in required_args {
                 if !sema_type_carrier_compatible(required_arg, offered_args[index]) -> return false
             }
             return true
-        }}
-        .Fn(_, _, _, _, _, _) -> if offered == {.Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered)}
+        }
+        .Fn(_, _, _, _, _, _) -> {
+            if offered == .Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered)
+        }
         else -> {}
     }
     type_identity_equal(required, offered)
@@ -325,7 +350,7 @@ pub fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Nev
                     }
                     return_compatible :: if required_ret == {
                         .Val(required_value) -> if offered_ret == {
-                            .Val(offered_value) -> sema_type_carrier_compatible(required_value, offered_value)
+                            .Val(offered_value) -> sema_type_carrier_compatible(required_value, offered_value) || sema_never_failing_return_fits(required_value, offered_value)
                             .None -> type_is_unit_callable_return(required_value)
                         }
                         .None -> if offered_ret == {
@@ -335,8 +360,19 @@ pub fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Nev
                     }
                     return return_compatible && sema_effect_bound_compatible(required_effects, offered_effects)
                 }
+                else -> {}
             }
         }
+        else -> {}
+    }
+    false
+}
+
+// A callable that cannot fail (`Never!`) fits any failure slot of the same
+// success type; the fn-value adapter supplies the slot's carrier.
+fn sema_never_failing_return_fits(required: Type, offered: Type) -> Bool Never! {
+    if required == .Result(required_ok, _) {
+        if offered == .Result(offered_ok, offered_err) -> return offered_err == (Type.Named{name: "Never"}) && sema_type_carrier_compatible(required_ok, offered_ok)
     }
     false
 }
@@ -346,8 +382,8 @@ pub fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Nev
 pub fn sema_type_assignable(required: Type, offered: Type) -> Bool Never! {
     if type_identity_equal(required, offered) -> return sema_type_obligations_satisfy(required, offered)
     if required == {
-        .Fn(_, _, _, _, _, _) -> if offered == {.Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered) && sema_type_obligations_satisfy(required, offered)}
-        .List(required_element) -> if offered == {.FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)}
+        .Fn(_, _, _, _, _, _) -> if offered == .Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered) && sema_type_obligations_satisfy(required, offered)
+        .List(required_element) -> if offered == .FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)
         .Union(members) -> loop member in members {
             if type_identity_equal(member, offered) -> return true
         }
@@ -553,7 +589,7 @@ fn sema_type_generic_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
         else -> None
     }
     name :: actual_name ?? return None
-    parameter := None
+    parameter := TGenericParam?{None}
     index := generic_params.len()
     loop index > 0 {
         index -= 1
@@ -600,7 +636,7 @@ pub fn sema_type_associated(graph: SemaRegistrationGraph, actual: Type, trait_na
     actual_resolved :: sema_type_resolve_declared(graph, actual, caller_module_identity)
     nominal :: sema_type_resolve_nominal(graph, actual_resolved, caller_module_identity) ?? return None
     trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, trait_name) ?? return None
-    resolved_type := None
+    resolved_type := Type?{None}
     loop graph_module in graph.modules {
         loop implementation in graph_module.impls {
             trait_matches :: sema_type_graph_impl_matches_trait(graph, implementation, trait_symbol) ?? next

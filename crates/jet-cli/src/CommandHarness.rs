@@ -85,21 +85,6 @@ impl CommandDiagnostic {
             fix: fix.into(),
         }
     }
-    /// Convert a foundation diagnostic without losing its stable report fields.
-    pub fn from_foundation(diagnostic: &jet_foundation::Diagnostics::Diagnostic) -> Self {
-        let severity = match diagnostic.severity {
-            jet_foundation::Diagnostics::Severity::Error => DiagnosticSeverity::Error,
-            jet_foundation::Diagnostics::Severity::Lint => DiagnosticSeverity::Warning,
-        };
-        Self::new(
-            diagnostic.code.clone(),
-            severity,
-            diagnostic.what.clone(),
-            diagnostic.why.clone(),
-            diagnostic.fix.clone(),
-        )
-    }
-
 
     /// Encode this diagnostic as canonical JSON.
     pub fn to_json(&self) -> CanonicalJson {
@@ -236,11 +221,6 @@ impl CommandCapture {
     /// Append one structured diagnostic.
     pub fn diagnostic(&mut self, diagnostic: CommandDiagnostic) {
         self.diagnostics.push(diagnostic);
-    }
-
-    /// Return the currently captured stdout.
-    pub fn stdout_text(&self) -> &str {
-        &self.stdout
     }
 
     /// Return the currently captured stderr.

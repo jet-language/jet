@@ -1,5 +1,13 @@
 // Sema emits the shared Lexer Diagnostic value; it does not define a second
 // diagnostic payload or rebase the aggregate UTF-8 byte spans.
+use jet_foundation.[
+    Diagnostic,
+    Span,
+    Type,
+    diagnostic_from_registry,
+    diagnostic_with_source_mapping,
+    type_name,
+]
 
 pub enum SemaSourceOrigin { Snapshot CompilerGenerated }
 
@@ -117,7 +125,7 @@ pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> Int? {
             low := 0
             high := segment.line_starts.len()
             loop low < high {
-                middle :: (low + high) / 2
+                middle :: (low + high) /% 2
                 if {
                     segment.line_starts[middle] <= local_offset -> {
                         low = middle + 1
@@ -130,6 +138,17 @@ pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> Int? {
             if low == 0 -> return None
             return Val(low)
         }
+    }
+    None
+}
+
+// The 1-based column of `site` in its source line (Rust `span_line_col`).
+// Segments carry line starts, not text, so this counts bytes; Rust counts
+// characters, which agree on ASCII lines.
+pub fn sema_source_column_at(segments: [SemaSourceSegment], site: Span) -> Int? {
+    line :: sema_source_line_at(segments, site) ?? return None
+    loop segment in segments {
+        if site.start >= segment.generated.start && site.start < segment.generated.end -> return Val(site.start - segment.generated.start - segment.line_starts[line - 1] + 1)
     }
     None
 }

@@ -2,23 +2,23 @@
 // `Name :: distinct Base` creates a named type that never implicitly coerces
 // to/from its base. Convert with `Name.from_kind(expr)`, unwrap with `.raw()`.
 // `#Numeric` enables same-type arithmetic.
-UserId :: distinct Int
+UserID :: distinct Int
 
 #Numeric
 Meters :: distinct Float
 
-fn greet(id: UserId) { print("user {(id.raw())}") }
+fn greet(id: UserID) { print("user {(id.raw())}") }
 
 fn run() {
-    uid :: UserId.from_int(42)
+    uid :: UserID.from_int(42)
     greet(uid)
     a :: Meters.from_float(3.0)
     b :: Meters.from_float(1.5)
     c :: a + b
     print("{(c.raw())} m")
     // equality on same distinct type works
-    x :: UserId.from_int(7)
-    y :: UserId.from_int(7)
+    x :: UserID.from_int(7)
+    y :: UserID.from_int(7)
     print("{(x == y)}")
 }
 // --- expected output --------------------------------------------------

@@ -1,4 +1,29 @@
 // Checked field, place, borrow, dereference, and mutation expressions.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    IndexKind,
+    PlaceAccess,
+    Span,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TExpr,
+    TExprKind,
+    TFieldRef,
+    TIndexKind,
+    TextEdit,
+    Type,
+    diagnostic_with_edit,
+    expr_optional_method_call_as_call,
+    expr_span,
+    symbol_id,
+    tir_symbol_local,
+    type_name,
+]
+
 fn sema_expression_index_kind(kind: IndexKind, base: Type) -> TIndexKind Never! {
     if kind == {
         .Unknown -> if base == .Map(_, _, _) -> TIndexKind.Map else -> TIndexKind.List
@@ -25,7 +50,7 @@ fn sema_expression_integer_index(value: TExpr, span: Span, diagnostics: &[Diagno
     false
 }
 
-fn sema_expression_field_ref(symbol: Symbol, owner: SymbolId?, fallback_ty: Type) -> TFieldRef Never! {
+fn sema_expression_field_ref(symbol: Symbol, owner: SymbolID?, fallback_ty: Type) -> TFieldRef Never! {
     field_ty :: symbol.ty ?? fallback_ty
     TFieldRef{owner: owner, field: symbol.id, name: symbol.name, ty: field_ty, boxed: false}
 }
@@ -38,7 +63,7 @@ fn sema_expression_tuple_field_ref(owner: Type, name: String, ty: Type) -> TFiel
 
 fn sema_expression_is_place(expr: Expr) -> Bool Never! {
     if expr == {
-        .Ident(_, _) | .Field(_, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _, _) | .Deref(_, _) | .Place(_, _, _) -> true
+        .Ident(_, _) | .Field(_, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _) | .Deref(_, _) | .Place(_, _, _) -> true
         else -> false
     }
 }
@@ -81,8 +106,8 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
     result_ty :: if checked.kind == {
         .Slice(_, _, _, _, _) -> {
             element :: if checked.ty == {
-                .List(value) -> value
-                .FixedList(value, _) -> value
+                .List(item) -> item
+                .FixedList(item, _) -> item
                 else -> Type.Named{name: "Unit"}
             }
             Type.Apply{name: if convention == AccessConvention.Write -> "ViewMut" else -> "View", args: [element]}
@@ -179,11 +204,24 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         &diagnostics.push(sema_error("E0310", span, "`.{member}` needs a `{type_name(inner)}`, but this value is `{type_name(base.ty)}` and might be missing", "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it (D-OUTCOME-SHAPE1=A)", "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"))
         return None
     }
+    // D-FACT-READ1=A: a compiler-owned reflection record (`RANGE.start`,
+    // `EXACTNESS.kind`) exists only as a compile-time value; its rows are typed
+    // for prepared-constant paths, which codegen folds to their values.
+    reflection :: sema_fact_reflection_field(base, member, span)
+    if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, &diagnostics)
     &diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
     None
 }
 
 fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // D-BUILD-FACT3=A: `$package.*` / `$build.*` fold from the build snapshot.
+    build_fact :: sema_fact_build_read(base, member, span, expected, environment, &diagnostics)
+    if build_fact.handled -> return build_fact.value
+    // D-FACT-READ1=A / D-META-ROOT3=A: `subject.$fact` reads a compiler-held plane.
+    if member.starts_with("$") {
+        fact :: sema_fact_read_check(base, member, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if fact.handled -> return fact.value
+    }
     probe_scopes := sema_scope_snapshot(scopes)
     probe_context := sema_check_context_snapshot(context)
     probe_state := sema_ownership_state_snapshot(state)
@@ -207,7 +245,8 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
 // `core.crypto.expert` exposure functions.
 fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) -> return true
-    graph :: environment.registration_graph ?? return true
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return true
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return true
     caller_name :: graph.modules[caller_index].module_name
     if caller_name == "core" || caller_name.starts_with("core.") -> return true
@@ -225,7 +264,7 @@ fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span,
 // S71 (D-SG6): the chain yields `T?`; an already-optional member flattens, so
 // `user?.address?.city` stays one optional layer deep.
 fn sema_expression_optional_field(base: Expr, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     inner_ty :: if checked_base.ty == {
         .Option(value) -> value
         else -> {

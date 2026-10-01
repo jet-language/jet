@@ -793,7 +793,7 @@ A failure conversion is one declared rail:
 ```jet
 impl DiskError -> StoreError {
     fn convert(error: DiskError) -> StoreError {
-        StoreError.Io
+        StoreError.IO
     }
 }
 ```
@@ -1005,7 +1005,7 @@ fn describe(source: String, kind: String) {
 }
 ```
 
-Use `Shared<T>` or `Pool<T>`/`Id<T>` when many owners need one value. A plain
+Use `Shared<T>` or `Pool<T>`/`ID<T>` when many owners need one value. A plain
 owned `String` is not a borrowed window. A read-only view entering an owning
 slot is materialized as an owned copy, as though `~` had been written. This
 covers bindings, returns, fields, collection elements, enum payloads, fallback
@@ -1177,8 +1177,8 @@ lambda. `Cell`, `CellReadGuard`, and `CellEditGuard` cannot cross a task,
 channel, `Shared`, task-group, or parallel-adapter boundary; use `Shared<T>` for
 synchronized cross-boundary state (D-LOCALCELL1=A).
 
-`Pool<T>` is a generational arena and `Id<T>` is copyable index-plus-generation
-data. The pool owns each `T`; an `Id<T>` never accesses `T` by itself. `add`
+`Pool<T>` is a generational arena and `ID<T>` is copyable index-plus-generation
+data. The pool owns each `T`; an `ID<T>` never accesses `T` by itself. `add`
 returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
 entries. Removing an entry bumps its generation and returns `?T`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
@@ -1189,7 +1189,7 @@ struct Player {
     name: String
     hp: Int
     attack: Int
-    target: Id<Player>?
+    target: ID<Player>?
 
 fn run() {
     world := Pool<Player>.new()
@@ -1382,7 +1382,7 @@ are retained when the operation supplies them.
 A call to an opaque `extern rust` or C function contributes the maximal effect
 set because the checker cannot inspect its body. This keeps inference sound
 without attempting to read foreign code. Deterministic constructors such as a
-seeded `Clock` or `Rng` carry no ambient effect; reading ambient time or
+seeded `Clock` or `RNG` carry no ambient effect; reading ambient time or
 randomness still does.
 
 For example, interpolated `print` in
@@ -1601,9 +1601,9 @@ CI or an administrator supplies the floor through
 `JET_ORG_UNSAFE_POLICY=<path>`. Its package-policy shape is
 `policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }`.
 The path is retained as provenance, and an unreadable or malformed configured
-file fails closed. `jet inspect unsafe FILE` reports each gate, operation,
-discharge state, and effective policy; `--json` retains byte spans plus
-1-based line and column objects. Assertions erase in sema before the shared AOT
+file fails closed. `jet inspect gates --kind unsafe FILE` reports each gate,
+operation, discharge state, and effective policy. Assertions erase in sema
+before the shared AOT
 or development TIR boundary. See
 [`Examples/features/lowlevel/unsafe_obligations.jet`](../../Examples/features/lowlevel/unsafe_obligations.jet). (D-UNSAFE-OBLIG1)
 
@@ -1700,6 +1700,23 @@ dependency's directory (**E1206**) unless the root package declares the same
 directory itself, which lets sibling packages such as `Compiler/JetLexer` and
 `Compiler/JetFoundation` share a dependency (D-MOD-CYCLE1). The UI fixture is
 `tests/ui/dependency_package_errors/`.
+
+A package is one namespace (D-MOD-CYCLE1=A). A package is a directory with a
+`package.jet`, holding every `.jet` file below it except the files of nested
+packages, or a single file that begins with a `package { }` header. Its
+files see each other's top-level names, private ones included, without any
+import; a file of a package that imports another file by path is **E0623**,
+and a top-level name declared in two files of one package is **E0624**.
+Only loose files, which have no header and no `package.jet` above them,
+import files by relative path. Files of one package may refer to each other
+in a cycle; packages themselves are acyclic, and one package uses another
+with `use package.[names]`, which reaches the dependency's `pub` names in
+any of its files. An executable package has one `fn run`, except that each
+file an `outputs:` entry names keeps its own `fn run` (owner ruling B); a
+library package has none (**E0625**). An `outputs:` entry `file.callable`
+names the member file whose stem is `file`, at any depth, and a callable it
+declares. The UI fixtures are `tests/ui/package_file_import/`,
+`package_duplicate_name/`, and `library_package_run/`.
 
 Cross-file access is qualified:
 
@@ -3306,7 +3323,7 @@ root descriptor opened at session start. Later components open descriptor-
 relative without following symlinks; a platform that cannot enforce this
 confinement fails closed.
 
-Ambient random draws require `Rand`; an explicitly seeded `Rng` is input data.
+Ambient random draws require `Rand`; an explicitly seeded `RNG` is input data.
 REPL-owned `print` and `eprint` capture does not need an `IO` grant. Process
 execution opens the canonical executable before authorization and launches that
 exact descriptor. Stdin is closed unless a separately authorized stream

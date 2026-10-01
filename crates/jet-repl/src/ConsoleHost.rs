@@ -51,14 +51,6 @@ impl ConsoleHostAdapters {
         self.data_backend = Some(backend);
     }
 
-    pub fn has_router(&self) -> bool {
-        self.router.is_some()
-    }
-
-    pub fn has_data_backend(&self) -> bool {
-        self.data_backend.is_some()
-    }
-
     fn attach(self, session: &mut ConsoleSession) {
         if let Some(router) = self.router {
             session.set_router(router);

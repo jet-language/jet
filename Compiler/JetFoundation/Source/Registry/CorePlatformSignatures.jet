@@ -30,7 +30,7 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
     db_error :: core_sig_named("DBError")
     db_value :: core_sig_named("DBValue")
     db_row :: Type.Map{key: Type.String, key_span: None, value: db_value}
-    ui_error :: core_sig_named("UiHostError")
+    ui_error :: core_sig_named("UIHostError")
 
     if module_name == "core.crypto" {
         if member == "sha256" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_named("Digest256"))))
@@ -159,10 +159,10 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
         if member == "dns_ptr" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(list_string, net_error))))
         if member == "getservbyname" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(integer, net_error))))
         if member == "getservbyport" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(core_sig_result(string, net_error))))
-        if member == "dns_srv" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List{element: core_sig_named("DNSSrv")}, net_error))))
-        if member == "dns_srv_at" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List{element: core_sig_named("DNSSrv")}, net_error))))
-        if member == "dns_srv_target" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DNSSrv"), read)}, Val(string)))
-        if core_sig_one_of(member, [String]{"dns_srv_port", "dns_srv_priority", "dns_srv_weight"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DNSSrv"), read)}, Val(integer)))
+        if member == "dns_srv" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List{element: core_sig_named("DNSSRV")}, net_error))))
+        if member == "dns_srv_at" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(Type.List{element: core_sig_named("DNSSRV")}, net_error))))
+        if member == "dns_srv_target" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DNSSRV"), read)}, Val(string)))
+        if core_sig_one_of(member, [String]{"dns_srv_port", "dns_srv_priority", "dns_srv_weight"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DNSSRV"), read)}, Val(integer)))
         if member == "tls_connect" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tcp_stream, moved), core_sig_positional(string, read)}, Val(core_sig_result(tls_stream, net_error))))
         if member == "tls_read" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write)}, Val(core_sig_result(string, io_error))))
         if member == "tls_write" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tls_stream, write), core_sig_positional(string, read)}, Val(core_sig_result(unit, io_error))))
@@ -193,7 +193,7 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
         server_parameters := [CoreCallTypedParameter]{
             core_sig_positional(string, read),
             core_sig_positional(core_sig_named("HTTPMux"), read),
-            core_sig_positional(Type.Option{inner: core_sig_named("HTTPServerTls")}, read),
+            core_sig_positional(Type.Option{inner: core_sig_named("HTTPServerTLS")}, read),
             core_sig_positional(Type.Option{inner: core_sig_named("Duration")}, read),
         }
         if member == "bind" -> return Val(core_sig(module_name, member, server_parameters, Val(core_sig_result(core_sig_named("HTTPServer"), core_sig_named("HTTPError")))))
@@ -340,11 +340,11 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
         return None
     }
     if module_name == "core.ui" {
-        ui_node :: core_sig_named("UiNode")
-        if core_sig_one_of(member, [String]{"phone", "tablet", "desktop"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiPreviewViewport"))))
-        if core_sig_one_of(member, [String]{"preview", "playground"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_result(core_sig_named("UiPreviewViewport"), core_sig_named("Absent")), read), core_sig_positional(core_sig_fn([Type]{}, ui_node), read)}, Val(core_sig_named("UiPreview"))))
+        ui_node :: core_sig_named("UINode")
+        if core_sig_one_of(member, [String]{"phone", "tablet", "desktop"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UIPreviewViewport"))))
+        if core_sig_one_of(member, [String]{"preview", "playground"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_result(core_sig_named("UIPreviewViewport"), core_sig_named("Absent")), read), core_sig_positional(core_sig_fn([Type]{}, ui_node), read)}, Val(core_sig_named("UIPreview"))))
         if member == "null_backend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("NullBackend"))))
-        if member == "tui_backend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiBackend"))))
+        if member == "tui_backend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TUIBackend"))))
         if member == "gtk_backend" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("GtkBackend"))))
         if core_sig_one_of(member, [String]{"point", "size"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(if member == "point" -> core_sig_named("Point") else -> core_sig_named("Size"))))
         if member == "rect" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(core_sig_named("Rect"))))
@@ -354,12 +354,12 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
         if member == "box" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: ui_node}, read)}, Val(ui_node)))
         if member == "key_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_named("InputEvent"))))
         if member == "resize_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(core_sig_named("InputEvent"))))
-        if member == "node_role" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(core_sig_named("UiAriaRole"), read)}, Val(ui_node)))
+        if member == "node_role" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(core_sig_named("UIAriaRole"), read)}, Val(ui_node)))
         if member == "node_color" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(string, read)}, Val(ui_node)))
-        if core_sig_one_of(member, [String]{"aria_role_button", "aria_role_text_input", "aria_role_label", "aria_role_container"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiAriaRole"))))
-        if member == "node_accessibility" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ui_node, read), core_sig_positional(core_sig_named("UiAccessibility"), read)}, Val(ui_node)))
-        if member == "node_shortcut" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ui_node, read), core_sig_positional(core_sig_named("UiShortcut"), read)}, Val(ui_node)))
-        if member == "text_input" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UiImeMode"), read)}, Val(ui_node)))
+        if core_sig_one_of(member, [String]{"aria_role_button", "aria_role_text_input", "aria_role_label", "aria_role_container"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UIAriaRole"))))
+        if member == "node_accessibility" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ui_node, read), core_sig_positional(core_sig_named("UIAccessibility"), read)}, Val(ui_node)))
+        if member == "node_shortcut" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(ui_node, read), core_sig_positional(core_sig_named("UIShortcut"), read)}, Val(ui_node)))
+        if member == "text_input" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UIIMEMode"), read)}, Val(ui_node)))
         return None
     }
     if module_name == "core.font" {
@@ -368,9 +368,9 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
         return None
     }
     if module_name == "core.tui" {
-        tui_event :: core_sig_named("TuiEvent")
-        tui_style :: core_sig_named("TuiStyle")
-        if member == "capabilities" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiCapabilities"))))
+        tui_event :: core_sig_named("TUIEvent")
+        tui_style :: core_sig_named("TUIStyle")
+        if member == "capabilities" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TUICapabilities"))))
         if member == "key_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(tui_event)))
         if member == "key_event_modifiers" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(tui_event)))
         if member == "resize_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read)}, Val(tui_event)))
@@ -378,52 +378,52 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
         if member == "io_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(bytes, moved)}, Val(tui_event)))
         if member == "focus_event" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(boolean, read)}, Val(tui_event)))
         if core_sig_one_of(member, [String]{"interrupt_event", "close_event"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(tui_event)))
-        if core_sig_one_of(member, [String]{"color_ansi16", "color_ansi256"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(core_sig_named("TuiColor"))))
-        if member == "color_rgb" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(core_sig_named("TuiColor"))))
+        if core_sig_one_of(member, [String]{"color_ansi16", "color_ansi256"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(core_sig_named("TUIColor"))))
+        if member == "color_rgb" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(core_sig_named("TUIColor"))))
         if member == "style" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(tui_style)))
-        if core_sig_one_of(member, [String]{"style_foreground", "style_background"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tui_style, moved), core_sig_positional(core_sig_named("TuiColor"), read)}, Val(tui_style)))
+        if core_sig_one_of(member, [String]{"style_foreground", "style_background"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tui_style, moved), core_sig_positional(core_sig_named("TUIColor"), read)}, Val(tui_style)))
         if core_sig_one_of(member, [String]{"style_bold", "style_dim", "style_underline"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tui_style, moved), core_sig_positional(boolean, read)}, Val(tui_style)))
-        if member == "style_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(tui_style, read), core_sig_positional(core_sig_named("TuiCapabilities"), read)}, Val(string)))
+        if member == "style_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(tui_style, read), core_sig_positional(core_sig_named("TUICapabilities"), read)}, Val(string)))
         if member == "ascii" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(string)))
         if member == "display_width" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(integer)))
-        if core_sig_one_of(member, [String]{"length", "min", "max", "percent", "fill"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(core_sig_named("TuiConstraint"))))
-        if core_sig_one_of(member, [String]{"horizontal", "vertical"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiDirection"))))
-        if member == "layout" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Rect"), read), core_sig_positional(core_sig_named("TuiDirection"), read), core_sig_positional(Type.List{element: core_sig_named("TuiConstraint")}, moved)}, Val(Type.List{element: core_sig_named("Rect")})))
-        if member == "list" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: string}, moved)}, Val(core_sig_named("UiNode"))))
-        if member == "table" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: string}, moved), core_sig_positional(Type.List{element: Type.List{element: string}}, moved)}, Val(core_sig_named("UiNode"))))
-        if member == "list_state" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TuiListState"))))
-        if core_sig_one_of(member, [String]{"list_state_select", "list_state_offset"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("TuiListState"), moved), core_sig_positional(integer, read)}, Val(core_sig_named("TuiListState"))))
-        if member == "list_state_selected" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("TuiListState"), read)}, Val(integer)))
+        if core_sig_one_of(member, [String]{"length", "min", "max", "percent", "fill"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(core_sig_named("TUIConstraint"))))
+        if core_sig_one_of(member, [String]{"horizontal", "vertical"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TUIDirection"))))
+        if member == "layout" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Rect"), read), core_sig_positional(core_sig_named("TUIDirection"), read), core_sig_positional(Type.List{element: core_sig_named("TUIConstraint")}, moved)}, Val(Type.List{element: core_sig_named("Rect")})))
+        if member == "list" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: string}, moved)}, Val(core_sig_named("UINode"))))
+        if member == "table" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: string}, moved), core_sig_positional(Type.List{element: Type.List{element: string}}, moved)}, Val(core_sig_named("UINode"))))
+        if member == "list_state" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("TUIListState"))))
+        if core_sig_one_of(member, [String]{"list_state_select", "list_state_offset"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("TUIListState"), moved), core_sig_positional(integer, read)}, Val(core_sig_named("TUIListState"))))
+        if member == "list_state_selected" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("TUIListState"), read)}, Val(integer)))
         return None
     }
     if module_name == "core.ui.host" {
-        if member == "capabilities" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiCapabilityFacts"))))
-        if member == "file_filter" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(Type.List{element: string}, read), core_sig_positional(Type.List{element: string}, read)}, Val(core_sig_result(core_sig_named("UiFileFilter"), ui_error))))
-        if member == "file_filter_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiFileFilter"))))
-        if core_sig_one_of(member, [String]{"fs_rights_read", "fs_rights_write", "fs_rights_read_write"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UiFsRights"))))
-        if member == "fs_grant" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UiFsRights"), read)}, Val(core_sig_result(core_sig_named("UiFsGrant"), ui_error))))
-        if core_sig_one_of(member, [String]{"open_request", "save_request"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiFsGrant"), read)}, Val(core_sig_named("UiFileDialogRequest"))))
-        if core_sig_one_of(member, [String]{"open_file", "save_file"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiFileDialogRequest"), read)}, Val(core_sig_result(core_sig_named("UiFileDialogSelection"), ui_error))))
-        if member == "shortcut" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UiShortcutModifiers"), read)}, Val(core_sig_result(core_sig_named("UiShortcut"), ui_error))))
-        if member == "accessibility" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UiAccessibility"), ui_error))))
+        if member == "capabilities" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UICapabilityFacts"))))
+        if member == "file_filter" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(Type.List{element: string}, read), core_sig_positional(Type.List{element: string}, read)}, Val(core_sig_result(core_sig_named("UIFileFilter"), ui_error))))
+        if member == "file_filter_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UIFileFilter"))))
+        if core_sig_one_of(member, [String]{"fs_rights_read", "fs_rights_write", "fs_rights_read_write"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("UIFSRights"))))
+        if member == "fs_grant" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UIFSRights"), read)}, Val(core_sig_result(core_sig_named("UIFSGrant"), ui_error))))
+        if core_sig_one_of(member, [String]{"open_request", "save_request"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UIFSGrant"), read)}, Val(core_sig_named("UIFileDialogRequest"))))
+        if core_sig_one_of(member, [String]{"open_file", "save_file"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UIFileDialogRequest"), read)}, Val(core_sig_result(core_sig_named("UIFileDialogSelection"), ui_error))))
+        if member == "shortcut" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(core_sig_named("UIShortcutModifiers"), read)}, Val(core_sig_result(core_sig_named("UIShortcut"), ui_error))))
+        if member == "accessibility" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UIAccessibility"), ui_error))))
         return None
     }
     if module_name == "core.ui.host.clipboard" {
-        if member == "read_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(core_sig_named("UiClipboardText"), ui_error))))
-        if member == "write_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UiClipboardWrite"), ui_error))))
+        if member == "read_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(core_sig_named("UIClipboardText"), ui_error))))
+        if member == "write_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UIClipboardWrite"), ui_error))))
         return None
     }
-    if module_name == "core.ui.host.ime" && member == "poll" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(Type.Option{inner: core_sig_named("UiImeEvent")}, ui_error))))
-    if module_name == "core.ui.host.drag_drop" && member == "poll" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(Type.Option{inner: core_sig_named("UiDragEvent")}, ui_error))))
+    if module_name == "core.ui.host.ime" && member == "poll" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(Type.Option{inner: core_sig_named("UIIMEEvent")}, ui_error))))
+    if module_name == "core.ui.host.drag_drop" && member == "poll" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(Type.Option{inner: core_sig_named("UIDragEvent")}, ui_error))))
     if module_name == "core.ui.host.shortcuts" {
-        if member == "binding" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiShortcut"), read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UiShortcutBinding"), ui_error))))
-        if member == "register" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiShortcutBinding"), read)}, Val(core_sig_result(core_sig_named("UiShortcutBinding"), ui_error))))
-        if member == "dispatch" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiShortcut"), read)}, Val(core_sig_result(core_sig_named("UiShortcutDispatch"), ui_error))))
+        if member == "binding" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UIShortcut"), read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("UIShortcutBinding"), ui_error))))
+        if member == "register" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UIShortcutBinding"), read)}, Val(core_sig_result(core_sig_named("UIShortcutBinding"), ui_error))))
+        if member == "dispatch" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UIShortcut"), read)}, Val(core_sig_result(core_sig_named("UIShortcutDispatch"), ui_error))))
         return None
     }
     if module_name == "core.ui.host.accessibility" {
-        if member == "attach" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiNode"), read), core_sig_positional(core_sig_named("UiAccessibility"), read)}, Val(core_sig_result(unit, ui_error))))
-        if member == "project" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UiNode"), read), core_sig_positional(core_sig_named("UiNodeId"), read)}, Val(core_sig_result(Type.Option{inner: core_sig_named("UiAccessibilityProjection")}, ui_error))))
+        if member == "attach" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UINode"), read), core_sig_positional(core_sig_named("UIAccessibility"), read)}, Val(core_sig_result(unit, ui_error))))
+        if member == "project" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("UINode"), read), core_sig_positional(core_sig_named("UINodeID"), read)}, Val(core_sig_result(Type.Option{inner: core_sig_named("UIAccessibilityProjection")}, ui_error))))
         return None
     }
     if module_name == "core.web" {

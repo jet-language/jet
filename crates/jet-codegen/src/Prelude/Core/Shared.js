@@ -394,6 +394,10 @@ function jet_shared_strong_count(shared) {
   return 1n;
 }
 
+function jet_shared_same(shared, other) {
+  return jet_shared_state(shared) === jet_shared_state(other);
+}
+
 function jet_shared_downgrade(shared) {
   const checked = jet_shared_state(shared);
   if (typeof WeakRef !== "function") throw new Error("Web runtime lacks WeakRef");

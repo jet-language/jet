@@ -1,13 +1,66 @@
 // Public Source Web adapter.  Host policy/assets enter through the typed
 // config; this module owns artifact assembly and never calls Native MIRWeb.
+use jet_foundation.[
+    JetReleaseDevtoolsAuthentication,
+    JetReleaseDevtoolsAuthority,
+    JetReleaseDevtoolsEndpoint,
+    JetReleaseDevtoolsPolicy,
+    JetReleaseDevtoolsPublication,
+    JetReleaseInspect,
+    MIRArtifactBuildMode,
+    MIRArtifactKind,
+    MIRArtifactPlan,
+    MIRArtifactTarget,
+    MIRBasicBlock,
+    MIRBlockID,
+    MIRCaptureParam,
+    MIRDropAction,
+    MIREffectFacts,
+    MIREntryKind,
+    MIREntryOutput,
+    MIREntrySpec,
+    MIRExport,
+    MIRFailureCarrier,
+    MIRForeignABI,
+    MIRFunction,
+    MIRFunctionForm,
+    MIRFunctionID,
+    MIRFunctionKind,
+    MIRGenericParam,
+    MIRJobID,
+    MIRLinkUnitID,
+    MIRLocal,
+    MIRModule,
+    MIRModuleID,
+    MIRNamedSpan,
+    MIRParam,
+    MIRPlace,
+    MIRProgram,
+    MIRRuntimePartID,
+    MIRScope,
+    MIRSourceFileID,
+    MIRTargetApplicability,
+    MIRType,
+    MIRTypeKind,
+    MIRValueFact,
+    MIRVisibility,
+    MIRWebBucket,
+    MIRWebParamReconstruction,
+    Span,
+    mir_empty_optimization_facts,
+    mir_program_digest,
+    mir_sha256_hex,
+    mir_type_display_name,
+    mir_type_layout,
+]
 
-fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String Never! {
+fn jet_web_runtime_part_name(part: MIRRuntimePartID) -> String Never! {
     if part == {
-        .Gc -> "Gc"
+        .GC -> "GC"
         .Event -> "Event"
         .Realtime -> "Realtime"
         .EmbeddedHardware -> "EmbeddedHardware"
-        .Ui -> "Ui"
+        .UI -> "UI"
         .Devtools -> "Devtools"
         .Gtk -> "Gtk"
         .Apps -> "Apps"
@@ -15,7 +68,7 @@ fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String Never! {
         .Game -> "Game"
         .Files -> "Files"
         .Interrupt -> "Interrupt"
-        .FsRuntime -> "FsRuntime"
+        .FSRuntime -> "FsRuntime"
         .Process -> "Process"
         .Crypto -> "Crypto"
         .Math -> "Math"
@@ -24,7 +77,7 @@ fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String Never! {
         .Fmt -> "Fmt"
         .DataFmt -> "DataFmt"
         .Compute -> "Compute"
-        .Http -> "Http"
+        .HTTP -> "Http"
         .WebSocket -> "WebSocket"
         .Browser -> "Browser"
         .Args -> "Args"
@@ -37,7 +90,7 @@ fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String Never! {
     }
 }
 
-fn jet_web_entry_kind_name(kind: MirEntryKind) -> String Never! {
+fn jet_web_entry_kind_name(kind: MIREntryKind) -> String Never! {
     if kind == {
         .Library -> "Library"
         .Command -> "Command"
@@ -47,7 +100,7 @@ fn jet_web_entry_kind_name(kind: MirEntryKind) -> String Never! {
     }
 }
 
-fn jet_web_entry_output_name(output: MirEntryOutput) -> String Never! {
+fn jet_web_entry_output_name(output: MIREntryOutput) -> String Never! {
     if output == {
         .NoOutput -> "NoOutput"
         .ReturnValue -> "ReturnValue"
@@ -56,7 +109,7 @@ fn jet_web_entry_output_name(output: MirEntryOutput) -> String Never! {
     }
 }
 
-fn jet_web_abi_name(abi: MirForeignAbi) -> String Never! {
+fn jet_web_abi_name(abi: MIRForeignABI) -> String Never! {
     if abi == {
         .C -> "C"
         .CUnwind -> "C-unwind"
@@ -104,17 +157,17 @@ fn jet_web_source_map(assets: JetWebAssets) -> String Never! {
     "{{ version: 3, sources: [{names.join(", ")}], sourcesContent: [{contents.join(", ")}], names: [], mappings: \"\" }}"
 }
 
-fn jet_web_optional_function_id(value: MirFunctionId?) -> String Never! {
+fn jet_web_optional_function_id(value: MIRFunctionID?) -> String Never! {
     id :: value ?? return "null"
     "{id.value}"
 }
 
-fn jet_web_module_ids_json(values: [MirModuleId]) -> String Never! {
+fn jet_web_module_ids_json(values: [MIRModuleID]) -> String Never! {
     rendered :: loop value in values -> "{value.value}"
     rendered.join(", ")
 }
 
-fn jet_web_function_json(function: MirFunction) -> String {
+fn jet_web_function_json(function: MIRFunction) -> String {
     params :: loop parameter in function.params -> {
         access :: if parameter.access == {
             .Read -> "Read"
@@ -140,7 +193,7 @@ fn jet_web_function_json(function: MirFunction) -> String {
     "{{ id: {function.id.value}, key: {jet_web_json_quote(function.key)}, module_id: {function.module_id.value}, module: {jet_web_json_quote(function.module_name)}, name: {jet_web_json_quote(function.name)}, source_file: {function.source_file.value}, bucket: {jet_web_bucket_json(function.web_bucket)}, marker: {jet_web_marker_json(function.web_marker)}, visibility: {jet_web_json_quote(visibility)}, parameters: [{params_text}], parameter_reconstructions: [{reconstructions_text}], return_type: {jet_web_json_quote(mir_type_display_name(function.return_type))}, generator: {jet_web_bool_json(function.generator != None)}, effects: [{effects_text}] }}"
 }
 
-fn jet_web_module_json(module_row: MirModule) -> String Never! {
+fn jet_web_module_json(module_row: MIRModule) -> String Never! {
     imports :: loop import_id in module_row.imports -> "{import_id.value}"
     "{{ id: {module_row.id.value}, key: {jet_web_json_quote(module_row.key)}, name: {jet_web_json_quote(module_row.name)}, path: {jet_web_json_quote(module_row.path)}, source_file: {module_row.source_file.value}, imports: [{imports.join(", ")}] }}"
 }
@@ -153,7 +206,7 @@ fn jet_web_manifest_json(ctx: &JetWebEmitContext, source_map: String) -> String 
     }
     exports :: loop export in ctx.artifact.exports -> "{{ symbol: {jet_web_json_quote(export.symbol)}, function: {export.function.value}, abi: {jet_web_json_quote(jet_web_abi_name(export.abi))} }}"
     runtime_parts :: loop part in ctx.artifact.runtime_parts -> jet_web_json_quote(jet_web_runtime_part_name(part))
-    entry :: ctx.artifact.entry ?? MirEntrySpec{kind: MirEntryKind.App, function: Val(ctx.entry.id), cli: None, output: MirEntryOutput.ReturnValue, initialize_environment: true, initialize_gc: true, serves_until_stopped: false, package_version: ""}
+    entry :: ctx.artifact.entry ?? MIREntrySpec{kind: MIREntryKind.App, function: Val(ctx.entry.id), cli: None, output: MIREntryOutput.ReturnValue, initialize_environment: true, initialize_gc: true, serves_until_stopped: false, package_version: ""}
     entry_function :: entry.function
     artifact_modules_json :: jet_web_module_ids_json(ctx.artifact.modules)
     entry_function_json :: jet_web_optional_function_id(entry_function)
@@ -165,7 +218,7 @@ fn jet_web_manifest_json(ctx: &JetWebEmitContext, source_map: String) -> String 
 }
 
 fn jet_web_command_record(ctx: &JetWebEmitContext) -> String Never! {
-    entry :: ctx.artifact.entry ?? MirEntrySpec{kind: MirEntryKind.App, function: Val(ctx.entry.id), cli: None, output: MirEntryOutput.ReturnValue, initialize_environment: true, initialize_gc: true, serves_until_stopped: false, package_version: ""}
+    entry :: ctx.artifact.entry ?? MIREntrySpec{kind: MIREntryKind.App, function: Val(ctx.entry.id), cli: None, output: MIREntryOutput.ReturnValue, initialize_environment: true, initialize_gc: true, serves_until_stopped: false, package_version: ""}
     "{{ schema_version: {ctx.program.schema_version}, package_identity: {jet_web_json_quote(ctx.program.package_identity)}, artifact: {ctx.artifact.id.value}, artifact_identity: {jet_web_json_quote(ctx.artifact_identity)}, entry_function: {jet_web_optional_function_id(entry.function)}, output: {jet_web_json_quote(jet_web_entry_output_name(entry.output))}, semantic_digest: {jet_web_json_quote(ctx.config.semantic_digest)} }}"
 }
 
@@ -176,15 +229,15 @@ fn jet_web_rustc_identity(ctx: &JetWebEmitContext) -> String Never! {
     "jet-web-rustc-v2:{mir_sha256_hex(seed)}"
 }
 
-fn jet_web_context(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitContext {
+fn jet_web_context(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitContext {
     artifact :: jet_web_find_artifact(program, config.artifact)
-    artifact_row :: artifact ?? MirArtifactPlan{id: config.artifact, kind: MirArtifactKind.WebApplication, name: "", target: MirArtifactTarget.Web, mode: MirArtifactBuildMode.Dev, modules: [MirModuleId]{}, links: [MirLinkUnitId]{}, jobs: [MirJobId]{}, runtime_parts: [MirRuntimePartId]{}, exports: [MirExport]{}, provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None}
+    artifact_row :: artifact ?? MIRArtifactPlan{id: config.artifact, kind: MIRArtifactKind.WebApplication, name: "", target: MIRArtifactTarget.Web, mode: MIRArtifactBuildMode.Dev, modules: [MIRModuleID]{}, links: [MIRLinkUnitID]{}, jobs: [MIRJobID]{}, runtime_parts: [MIRRuntimePartID]{}, exports: [MIRExport]{}, provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None}
     entry_spec :: artifact_row.entry
     entry_id :: if entry_spec == .Val(spec) -> spec.function else -> None
     entry_function :: if entry_id == .Val(id) -> jet_web_find_function(program, id) else -> None
-    entry_row :: entry_function ?? MirFunction{id: MirFunctionId{value: 0}, module_id: MirModuleId{value: 0}, source_file: MirSourceFileId{value: 0}, key: "", module_name: "", name: "", span: Span{start: 0, end: 0}, kind: MirFunctionKind.Jet, form: MirFunctionForm.TopLevel, visibility: MirVisibility.Private, target_applicability: MirTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: false}, web_bucket: None, web_marker: None, generic_params: [MirGenericParam]{}, capture_params: [MirCaptureParam]{}, params: [MirParam]{}, declared_return: None, return_type: MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}, failure: MirFailureCarrier.Infallible, effects: MirEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MirNamedSpan]{}}, captures: None, generator: None, optimization: mir_empty_optimization_facts(), is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [String]{}, is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false, return_view_provenance: None, web_param_reconstructions: [MirWebParamReconstruction]{}, blocks: [MirBasicBlock]{}, entry: MirBlockId{value: 0}, locals: [MirLocal]{}, values: [MirValueFact]{}, places: [MirPlace]{}, scopes: [MirScope]{}, drops: [MirDropAction]{}, foreign_language: None}
-    context := JetWebEmitContext{program: program, config: config, artifact: artifact_row, functions: [MirFunction]{}, entry: entry_row, artifact_identity: artifact_row.artifact_identity, history_source: "jet", history_tool: "jet-source-web", history_target: config.layout.triple, failure: None}
-    if artifact == None -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidMir, "E0003", "selected MIR artifact is missing", "Web emission requires the checked WebApplication artifact plan", None)
+    entry_row :: entry_function ?? MIRFunction{id: MIRFunctionID{value: 0}, module_id: MIRModuleID{value: 0}, source_file: MIRSourceFileID{value: 0}, key: "", module_name: "", name: "", span: Span{start: 0, end: 0}, kind: MIRFunctionKind.Jet, form: MIRFunctionForm.TopLevel, visibility: MIRVisibility.Private, target_applicability: MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: false}, web_bucket: None, web_marker: None, generic_params: [MIRGenericParam]{}, capture_params: [MIRCaptureParam]{}, params: [MIRParam]{}, declared_return: None, return_type: MIRType{kind: MIRTypeKind.Int, identity: None, layout: mir_type_layout(MIRTypeKind.Int)}, failure: MIRFailureCarrier.Infallible, effects: MIREffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MIRNamedSpan]{}}, captures: None, generator: None, optimization: mir_empty_optimization_facts(), is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [String]{}, is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false, return_view_provenance: None, web_param_reconstructions: [MIRWebParamReconstruction]{}, blocks: [MIRBasicBlock]{}, entry: MIRBlockID{value: 0}, locals: [MIRLocal]{}, values: [MIRValueFact]{}, places: [MIRPlace]{}, scopes: [MIRScope]{}, drops: [MIRDropAction]{}, foreign_language: None}
+    context := JetWebEmitContext{program: program, config: config, artifact: artifact_row, functions: [MIRFunction]{}, entry: entry_row, artifact_identity: artifact_row.artifact_identity, history_source: "jet", history_tool: "jet-source-web", history_target: config.layout.triple, failure: None}
+    if artifact == None -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidMIR, "E0003", "selected MIR artifact is missing", "Web emission requires the checked WebApplication artifact plan", None)
     canonical_digest :: mir_program_digest(program)
     if config.semantic_digest == "" || config.semantic_digest != canonical_digest -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidProvenance, "E0003", "Web semantic digest is not the canonical MIR digest", "Web provenance must equal mir_program_digest(program)", None)
     if config.layout.triple == "" || config.layout.pointer_size <= 0 || config.layout.pointer_alignment <= 0 -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidLayout, "E0003", "Web target layout is incomplete", "the Web target must carry checked triple and non-zero pointer facts", None)
@@ -202,24 +255,22 @@ fn jet_web_context(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitC
     context
 }
 
-pub fn jet_web_emit(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitResult {
+pub fn jet_web_emit(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitResult {
     context := jet_web_context(program, config)
-    if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web context construction failed", "the checked Web context did not retain a failure row", None)}
-    rust_config :: JetRustEmitConfig{target: "web", root_prefix: config.root_prefix, emit_types: true, emit_foreign: true, emit_metadata: true, web_bucket: Val(MirWebBucket.Wasm)}
+    if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMIR, "E0003", "Web context construction failed", "the checked Web context did not retain a failure row", None)}
+    rust_config :: JetRustEmitConfig{target: "web", root_prefix: config.root_prefix, emit_types: true, emit_foreign: true, emit_metadata: true, web_bucket: Val(MIRWebBucket.Wasm)}
     rust :: jet_rust_emit_program(context.program, rust_config)
     wasm :: if rust == {
         .Complete(source, manifest) -> source
         .Incomplete(failure) -> {
-            jet_web_fail(&context, JetWebEmitFailureKind.InvalidMir, failure.code, failure.message, failure.detail, failure.span)
-            return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm Rust emission failed", "Rust emission returned no failure row", None)}
+            jet_web_fail(&context, JetWebEmitFailureKind.InvalidMIR, failure.code, failure.message, failure.detail, failure.span)
+            return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMIR, "E0003", "Web Wasm Rust emission failed", "Rust emission returned no failure row", None)}
         }
     }
     js :: jet_web_emit_js_app(&context)
-    if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web JavaScript emission failed", "JavaScript emission returned no failure row", None)}
+    if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMIR, "E0003", "Web JavaScript emission failed", "JavaScript emission returned no failure row", None)}
     source_map :: jet_web_source_map(context.config.assets)
     manifest :: jet_web_manifest_json(&context, source_map)
     command :: jet_web_command_record(&context)
-    model_js :: if context.program.facts.model_outputs.len() != 0 -> context.config.assets.onnx_runtime_js else -> ""
-    model_worker :: if context.program.facts.model_outputs.len() != 0 -> context.config.assets.onnx_runtime_worker_js else -> ""
-    JetWebEmitResult.Complete{value: JetWebArtifacts{manifest_json: manifest, wasm_rust: wasm, rustc_incremental_identity: jet_web_rustc_identity(&context), js_app: js, js_source_map: source_map, source_names: context.config.assets.source_names, source_contents: context.config.assets.source_contents, dom_runtime: context.config.assets.dom_runtime, onnx_runtime_js: model_js, onnx_runtime_worker_js: model_worker, index_html: context.config.assets.index_html, explicit_html_path: context.config.assets.explicit_html_path, command_record: command.bytes()}}
+    JetWebEmitResult.Complete{value: JetWebArtifacts{manifest_json: manifest, wasm_rust: wasm, rustc_incremental_identity: jet_web_rustc_identity(&context), js_app: js, js_source_map: source_map, source_names: context.config.assets.source_names, source_contents: context.config.assets.source_contents, dom_runtime: context.config.assets.dom_runtime, index_html: context.config.assets.index_html, explicit_html_path: context.config.assets.explicit_html_path, command_record: command.bytes()}}
 }

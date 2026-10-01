@@ -137,31 +137,6 @@ impl TargetDossier {
         }
     }
 
-    pub fn with_linker_identity(mut self, identity: impl Into<String>) -> Self {
-        self.linker_identity = identity.into();
-        self
-    }
-
-    pub fn with_tier_identity(mut self, identity: impl Into<String>) -> Self {
-        self.tier_identity = identity.into();
-        self
-    }
-
-    pub fn with_compiler_identity(mut self, identity: impl Into<String>) -> Self {
-        self.compiler_identity = identity.into();
-        self
-    }
-
-    pub fn with_environment_identity(mut self, identity: impl Into<String>) -> Self {
-        self.environment_identity = identity.into();
-        self
-    }
-
-    pub fn with_dependency_identity(mut self, identity: impl Into<String>) -> Self {
-        self.dependency_identity = identity.into();
-        self
-    }
-
     /// Append canonical bytes for the target dossier portion of an artifact
     /// key.
     ///

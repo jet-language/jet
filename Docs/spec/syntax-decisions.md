@@ -101,11 +101,15 @@ is bound as `name :: prep { value }`. See D-PREP-SURFACE2=A.
 **S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1; applied by
 D-ACRO-CASE1=A + D-ACRO-LEX1=A)*: initials-formed names stay all-caps inside
 PascalCase — `JSON`, `TOML`, `YAML`, `CSV`, `HTTP`, `CLI`, `SQL`, `IOError`,
-`UTF8Error`, `U8`, `MacOS`, and the closed lexicon in
-`Syntax::ACRONYM_RESPILLS`. Glued compounds (`HTTPHeader`); underscore only
-between touching capital runs (`HTTP_API`). Coined contractions stay words:
-`Wasm`, `WasmExport`, `Bindgen`. No PascalCase aliases; retired spellings get
-one teaching fix (E0358 / E0927).
+`UTF8Error`, `U8`, `MacOS`, and the closed lexicon in `Syntax::ACRONYMS`
+(mirrored by `SEMA_CASING_ACRONYMS` in the Jet compiler). Owner rule
+(2026-09-30): the rule covers every word of every type-like name, not only a
+leading word — `MIRType`, `TIRExpr`, `SourceAST`, `TaskID`, `UINode`.
+Glued compounds (`HTTPHeader`); underscore only between touching capital runs
+(`HTTP_API`). Coined contractions stay words: `Wasm`, `WasmExport`,
+`Bindgen`. No PascalCase aliases; a word-cased acronym in a type-like
+declaration or type position gets E0358 with a `jet fix` edit (markers:
+E0927).
 
 **S84 — Hyphens in package/module/system/image/env names**: kebab-case allowed
 in these *name* positions (`image.halcyon-iso`, `module web-app`). Grammar:
@@ -3088,7 +3092,7 @@ never the required reason. `.PerSite` is also available: each gate selects
 `obligations: .Track` or `.Skip`, and organization policy may reject `.Skip`.
 Every mode still requires a lexical `#Unsafe` block or function for every
 low-level operation; none permits generated Rust `unsafe` outside I1's audited
-regions. `jet inspect unsafe` reports the effective mode, its policy source,
+regions. `jet inspect gates --kind unsafe` reports the effective mode, its policy source,
 each gate, and tracked operation state.
 
 D-HARDENED1 adds runtime assertions for the same sentry facts on each reached
@@ -5199,6 +5203,33 @@ $ jet build hello.jet  # optimized: -O + thin-LTO  ~450 ms (illustrative)
 $ jet build --profile=debug hello.jet   # fast build of a build artifact
 $ jet run   --release       hello.jet   # optimized one-off run
 ```
+
+*Owner ruling 2026-09-30 (card #3953):* every non-release native `jet build`
+(the default, `fast` and `debug` profiles) takes the Cranelift backend;
+`--release`, `hardened`, `ci`, `small`, no-OS and named profiles keep
+rustc/LLVM. The dev executable is a copy of the prebuilt `jet-aot-rt` runner
+with the program's Cranelift image appended (the same lowering and warm-module
+format `jet run` uses), so no rustc, C compiler or linker runs. The runner
+verifies the image's checksum and runtime build identity before running it and
+maps code writable, then read+execute, never both. A program the image cannot
+carry (native FFI, C links, CLI-decoded entries, interpreter-tier functions,
+compile-time state beyond strings, the checked type registry and closure
+targets, or code whose function numbering a reload cannot reproduce) builds
+with rustc and prints `[build] note: building with rustc because <cause>`,
+naming the one rule the program broke. The backend is part of the native
+cache key. A Cranelift build generates no Rust (`.jet/build/<stem>.rs` is
+written only when rustc runs), probes no rustc or linker for its key, and
+caches only the image: a cache hit appends the stored image to a copy of the
+runner, and an unchanged rebuild recognizes the existing executable by its
+length and image trailer (the image's SHA-256) instead of hashing it. The
+rustc executable built after a refusal is cached under the Cranelift key
+extended with the rustc and linker identity. Once lowered, functions compile
+to machine code on all host threads (`jet run` too) and are defined in
+lowering order, so the image is byte-identical to a one-thread compile. Each
+compiled function is also stored by its Cranelift incremental-cache key (the
+function's IR with callee names abstracted, the target and its flags) and the
+`jet` build identity; a later build of any program reuses it for a function
+with the same key, so an edit recompiles only the functions whose IR changed.
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.
@@ -7642,6 +7673,22 @@ with a machine-applicable fix, never an alias. Effect denials
 (`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
+
+**2026-09-30 — D-CALLBACK-ERR1=A shipped** *(card #3708; owner ruling that
+Core declares its failures)*: a type parameter may be a failure domain, so a
+function that calls a callback passes the callback's own failure type to its
+caller: `fn sort<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E!`. A
+call binds `E` from the callback argument: a named function's contract, the
+failure a lambda body really has, or `Never` for a callback that cannot fail
+(which makes the whole call unable to fail). A raw `fn(T) -> U` value binds
+the default `Err`. A callback that cannot fail (`Never!`) fits any failure slot
+of the same success type. A callback stored in a value (a table column's
+`project`) has no call site to bind `E`, so it is written `Never!`. Core's 13
+callback combinators (core.testing.compare, core.web.forms/query/store/table)
+use this form. Companion rulings the same day: D-PERF-ERR1=A
+(`PerfError { OutOfRange(Float) }`) and D-MOD-ERR1=A
+(`ModError { Denied, NotFound, Invalid, Unsupported }`, each case holding the
+provider's reason).
 
 **2026-09-30 — D-OUTCOME-SHAPE1=A shipped** *(card #3838; parent #3742;
 ratified 2026-09-29)*: a `T? E!` value has exactly three states and patterns

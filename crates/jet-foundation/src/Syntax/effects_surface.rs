@@ -252,6 +252,14 @@ pub const TRAIT_DIV: &str = "Div";
 pub const TRAIT_EQUATABLE: &str = "Equatable";
 pub const TRAIT_COMPARABLE: &str = "Comparable";
 pub const TYPE_ORDERING: &str = "Ordering";
+/// D-TRAIT-OVERLOAD1=A: the prelude `Numeric` trait. It builds on the
+/// operator hooks with the right side fixed to `Self` plus ordering, and adds
+/// two static members. `/` and unary minus are deliberately outside it.
+/// Built-in numbers (Int, Float, F32, sized integers, Decimal, Fraction) and
+/// every `#Numeric` distinct type implement it; structs may `impl T.Numeric`.
+pub const TRAIT_NUMERIC: &str = "Numeric";
+pub const NUMERIC_SUPERTRAITS: &[&str] = &[TRAIT_ADD, TRAIT_SUB, TRAIT_MUL, TRAIT_COMPARABLE];
+pub const NUMERIC_STATIC_MEMBERS: &[&str] = &["zero", "one"];
 /// Variant order is the shared scalar carrier order for the built-in enum.
 pub const ORDERING_VARIANTS: &[&str] = &["Less", "Equal", "Greater"];
 /// D-NETIO-CONTRACT2=B: nominal byte-stream read contract in `core.term`.

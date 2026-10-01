@@ -148,7 +148,7 @@ uses the current return-arrow form:
 fn build(b: BuildContext) -> BuildPlan {
     loop info in b.program.types() {
         if {
-            info.name == "CustomerId" -> {
+            info.name == "CustomerID" -> {
                 if {
                     info.has_marker("Comparable") -> { next }
                     else -> {

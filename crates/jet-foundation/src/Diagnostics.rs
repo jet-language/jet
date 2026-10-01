@@ -1029,7 +1029,7 @@ impl Diagnostic {
             loc
         };
         out.push_str(&format!("  {}\n", theme.dim(&loc)));
-        let raw_line_text = src.lines().nth(line - 1).unwrap_or("");
+        let raw_line_text = line_text_at(src, span.start);
         let line_text = escape_terminal_text(raw_line_text);
         out.push_str("    |\n");
         out.push_str(&format!("{:>3} | {}\n", line, line_text));
@@ -1433,20 +1433,81 @@ pub fn span_line_col(src: &str, offset: usize) -> (usize, usize) {
 }
 
 fn line_col(src: &str, offset: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut col = 1;
-    for (i, ch) in src.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
+    let before = &src.as_bytes()[..offset.min(src.len())];
+    let start = line_start(before);
+    let line = 1 + before.iter().filter(|&&byte| byte == b'\n').count();
+    // A column counts every character that starts before `offset`.
+    let col = 1 + before[start..]
+        .iter()
+        .filter(|&&byte| byte & 0xC0 != 0x80)
+        .count();
+    (line, col)
+}
+
+/// Byte offset just past the last newline in `before` (0 on the first line).
+fn line_start(before: &[u8]) -> usize {
+    before
+        .iter()
+        .rposition(|&byte| byte == b'\n')
+        .map_or(0, |newline| newline + 1)
+}
+
+/// The text of the line containing `offset`, as `str::lines` yields it.
+fn line_text_at(src: &str, offset: usize) -> &str {
+    let rest = &src[line_start(&src.as_bytes()[..offset.min(src.len())])..];
+    match rest.find('\n') {
+        Some(end) => rest[..end].strip_suffix('\r').unwrap_or(&rest[..end]),
+        None => rest,
+    }
+}
+
+/// Byte offset of every line start in one source text, built once so repeated
+/// position queries binary-search instead of rescanning the text from byte 0
+/// (quadratic on large units). Every query takes the same `src` the index was
+/// built from; answers match [`span_line_col`] and `str::lines`.
+#[derive(Debug, Clone)]
+pub struct LineIndex {
+    starts: Vec<usize>,
+}
+
+impl LineIndex {
+    pub fn new(src: &str) -> Self {
+        let starts = std::iter::once(0)
+            .chain(
+                src.bytes()
+                    .enumerate()
+                    .filter(|&(_, byte)| byte == b'\n')
+                    .map(|(index, _)| index + 1),
+            )
+            .collect();
+        Self { starts }
+    }
+
+    /// 1-based (line, column) of `offset`; the same answer as [`span_line_col`].
+    pub fn line_col(&self, src: &str, offset: usize) -> (usize, usize) {
+        let offset = offset.min(src.len());
+        let line = self.starts.partition_point(|&start| start <= offset);
+        let start = self.starts[line - 1];
+        // A column counts every character that starts before `offset`.
+        let col = 1 + src.as_bytes()[start..offset]
+            .iter()
+            .filter(|&&byte| byte & 0xC0 != 0x80)
+            .count();
+        (line, col)
+    }
+
+    /// Text of 1-based `line` as `str::lines().nth(line - 1)` yields it, with
+    /// line 0 read as line 1 and lines past the end read as "".
+    pub fn line_text<'s>(&self, src: &'s str, line: usize) -> &'s str {
+        let Some(&start) = self.starts.get(line.saturating_sub(1)) else {
+            return "";
+        };
+        let rest = &src[start..];
+        match rest.find('\n') {
+            Some(end) => rest[..end].strip_suffix('\r').unwrap_or(&rest[..end]),
+            None => rest,
         }
     }
-    (line, col)
 }
 
 fn unicode_range_value(table: &[(u32, u32, u8)], cp: u32) -> u8 {
@@ -1480,13 +1541,13 @@ fn unicode_range_contains(table: &[(u32, u32)], cp: u32) -> bool {
 
 fn unicode_general_category(cp: u32) -> u8 {
     unicode_range_value(
-        crate::generated::UnicodeTables::UNICODE_GENERAL_CATEGORY,
+        jet_unicode::UNICODE_GENERAL_CATEGORY,
         cp,
     )
 }
 
 fn unicode_grapheme_class(cp: u32) -> u8 {
-    unicode_range_value(crate::generated::UnicodeTables::UNICODE_GRAPHEME_BREAK, cp)
+    unicode_range_value(jet_unicode::UNICODE_GRAPHEME_BREAK, cp)
 }
 
 fn unicode_grapheme_break(previous: u8, current: u8) -> bool {
@@ -1535,11 +1596,11 @@ fn diagnostic_graphemes(s: &str) -> Vec<&str> {
     };
     let is_pictographic = |cp| {
         unicode_range_contains(
-            crate::generated::UnicodeTables::UNICODE_EXTENDED_PICTOGRAPHIC,
+            jet_unicode::UNICODE_EXTENDED_PICTOGRAPHIC,
             cp,
         )
     };
-    let incb = |cp| unicode_range_value(crate::generated::UnicodeTables::UNICODE_INCB, cp);
+    let incb = |cp| unicode_range_value(jet_unicode::UNICODE_INCB, cp);
     let mut starts = vec![0];
     let mut ri_run = usize::from(unicode_grapheme_class(first as u32) == RI);
     let mut saw_pictographic = is_pictographic(first as u32);
@@ -1606,15 +1667,15 @@ fn diagnostic_cluster_width(cluster: &str) -> usize {
         && unicode_grapheme_class(codepoints[1] as u32) == 6;
     let emoji_style = cluster.contains('\u{FE0F}')
         && codepoints.iter().any(|c| {
-            unicode_range_contains(crate::generated::UnicodeTables::UNICODE_EMOJI, *c as u32)
+            unicode_range_contains(jet_unicode::UNICODE_EMOJI, *c as u32)
         });
     let wide = codepoints.iter().any(|c| {
         unicode_range_value(
-            crate::generated::UnicodeTables::UNICODE_EAST_ASIAN_WIDTH,
+            jet_unicode::UNICODE_EAST_ASIAN_WIDTH,
             *c as u32,
         ) == 2
             || unicode_range_contains(
-                crate::generated::UnicodeTables::UNICODE_EMOJI_PRESENTATION,
+                jet_unicode::UNICODE_EMOJI_PRESENTATION,
                 *c as u32,
             )
     });
@@ -1624,7 +1685,7 @@ fn diagnostic_cluster_width(cluster: &str) -> usize {
     if codepoints.iter().all(|c| {
         matches!(unicode_general_category(*c as u32), 2 | 3)
             || unicode_range_contains(
-                crate::generated::UnicodeTables::UNICODE_DEFAULT_IGNORABLE,
+                jet_unicode::UNICODE_DEFAULT_IGNORABLE,
                 *c as u32,
             )
     }) {
@@ -1648,18 +1709,18 @@ pub fn display_char_width(c: char) -> usize {
     if unicode_general_category(cp) == 0
         || matches!(unicode_general_category(cp), 2 | 3)
         || unicode_range_contains(
-            crate::generated::UnicodeTables::UNICODE_DEFAULT_IGNORABLE,
+            jet_unicode::UNICODE_DEFAULT_IGNORABLE,
             cp,
         )
     {
         return 0;
     }
     if unicode_range_value(
-        crate::generated::UnicodeTables::UNICODE_EAST_ASIAN_WIDTH,
+        jet_unicode::UNICODE_EAST_ASIAN_WIDTH,
         cp,
     ) == 2
         || unicode_range_contains(
-            crate::generated::UnicodeTables::UNICODE_EMOJI_PRESENTATION,
+            jet_unicode::UNICODE_EMOJI_PRESENTATION,
             cp,
         )
     {

@@ -2,6 +2,11 @@
 // cache-line-aligned fixed array and two safe atomic cursors. The channel
 // below keeps the task-boundary smoke deterministic; the ring protocol then
 // demonstrates producer publish and consumer observe without #Unsafe.
+package {
+    name: "bounded_spsc_atomic"
+    authority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }
+}
+
 use core.mem
 
 derive T.LayoutFacts {
@@ -13,7 +18,7 @@ derive T.LayoutFacts {
 }
 
 #[Layout(c, align(64)), LayoutFacts]
-struct SpscState {
+struct SPSCState {
     slots: [I32#1024]
     head: Atomic<Int>
     tail: Atomic<Int>
@@ -1066,7 +1071,7 @@ fn run() {
         0,
         0,
     }
-    state := SpscState{
+    state := SPSCState{
         slots: slots,
         head: 0,
         tail: 4611686018427387904,

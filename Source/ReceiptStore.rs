@@ -195,15 +195,6 @@ impl Receipt {
     pub fn diff_sections_json(&self, before: &Receipt) -> Result<CanonicalJson, String> {
         Ok(receipt_section_diff_projection(&self.diff_sections(before)?))
     }
-
-    pub fn consumed_links(&self) -> &[RecordLink] {
-        &self.consumed
-    }
-
-
-    pub fn produced_links(&self) -> &[RecordLink] {
-        &self.produced
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

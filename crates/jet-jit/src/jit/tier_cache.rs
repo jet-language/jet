@@ -38,19 +38,34 @@ use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
 const FORMAT: u32 = 11;
 
 thread_local! {
-    static CAPTURE: RefCell<Option<Capture>> = const { RefCell::new(None) };
+    static CAPTURE: RefCell<CaptureState> = const { RefCell::new(CaptureState::Idle) };
+}
+
+/// The capture of the compile in progress on this thread.
+///
+/// `Refused` keeps the first reason lowering gave for code that cannot be
+/// replayed, so a refusal names the rule it broke instead of a generic
+/// "cannot be replayed".
+enum CaptureState {
+    Idle,
+    Active(Capture),
+    Refused(&'static str),
 }
 
 /// One in-progress capture: the functions defined so far, and the `FuncId` each
 /// one held, in the same order.
 ///
-/// The ids are capture-time bookkeeping for `capture_is_replayable`, never
+/// The ids are capture-time bookkeeping for `capture_replay_refusal`, never
 /// artifact content, so they stay out of `CapturedFn` and are read by zipping the
 /// two — no positional lookup into either.
 #[derive(Default)]
 struct Capture {
     func_ids: Vec<u32>,
     fns: Vec<CapturedFn>,
+    /// Lowering baked a checked runtime type id into the code. The id resolves
+    /// only against the checked type registry, which a warm run artifact does
+    /// not restore and a dev-build image does.
+    reads_type_registry: bool,
 }
 
 #[derive(Clone)]
@@ -87,8 +102,9 @@ enum StoredTarget {
 ///
 /// The rail is projected once from the checked MIR failure type. Warm artifacts
 /// can reproduce default Err/packed IOError reporting and !Never entries without a
-/// schema registry. Descriptor-dependent entries are not cacheable until that
-/// registry is part of the artifact; they continue to execute native cold code.
+/// schema registry. A descriptor-dependent entry needs the checked type
+/// registry, so only a dev-build image, which restores it, carries one; the
+/// warm run cache keeps such entries on native cold code.
 struct EntryRail {
     entry_symbol: String,
     returns_result: bool,
@@ -103,11 +119,13 @@ struct EntryRail {
 /// `None` means there is no resident module to read, and then there is no
 /// artifact either: an artifact that cannot say whether the entry is fallible is
 /// worse than a cold recompile.
-fn capture_rail() -> Option<EntryRail> {
+fn capture_rail(restores_runtime_tables: bool) -> Option<EntryRail> {
     RESIDENT_MODULE.with(|slot| {
         let resident = slot.borrow();
         let resident = resident.as_ref()?;
-        if matches!(resident.main_error_type, Some(EntryErrorType::Descriptor(_))) {
+        if !restores_runtime_tables
+            && matches!(resident.main_error_type, Some(EntryErrorType::Descriptor(_)))
+        {
             return None;
         }
         let default_error_type = RESIDENT_RUNTIME.with(|slot| {
@@ -130,29 +148,68 @@ fn capture_rail() -> Option<EntryRail> {
 }
 
 pub(crate) fn begin_capture() {
-    CAPTURE.with(|slot| *slot.borrow_mut() = Some(Capture::default()));
+    CAPTURE.with(|slot| *slot.borrow_mut() = CaptureState::Active(Capture::default()));
 }
 
+/// Discard the capture: the compile failed, or its result is not published.
 pub(crate) fn abort_capture() {
-    CAPTURE.with(|slot| *slot.borrow_mut() = None);
+    CAPTURE.with(|slot| *slot.borrow_mut() = CaptureState::Idle);
 }
 
-pub(crate) fn take_capture() -> Option<Vec<CapturedFn>> {
-    let capture = CAPTURE.with(|slot| slot.borrow_mut().take())?;
-    let entry_id = RESIDENT_MODULE.with(|slot| {
-        slot.borrow().as_ref().map(|resident| resident.main_id.as_u32())
-    })?;
+/// Lowering baked state into the code that no image restores. The first
+/// reason wins; without an active capture this is a no-op.
+pub(crate) fn refuse_capture(reason: &'static str) {
+    CAPTURE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        if matches!(*state, CaptureState::Active(_)) {
+            *state = CaptureState::Refused(reason);
+        }
+    });
+}
+
+/// Lowering baked a checked runtime type id into the code.
+pub(crate) fn note_type_registry_read() {
+    CAPTURE.with(|slot| {
+        if let CaptureState::Active(capture) = &mut *slot.borrow_mut() {
+            capture.reads_type_registry = true;
+        }
+    });
+}
+
+/// Take the finished capture, or the reason its code cannot be replayed.
+/// `restores_runtime_tables` says whether the replay restores the checked type
+/// registry and closure targets (a dev-build image does, a warm run artifact
+/// does not).
+fn take_capture(restores_runtime_tables: bool) -> Result<Vec<CapturedFn>, &'static str> {
+    let state = CAPTURE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), CaptureState::Idle));
+    let capture = match state {
+        CaptureState::Active(capture) => capture,
+        CaptureState::Refused(reason) => return Err(reason),
+        CaptureState::Idle => return Err("no compiled code was captured for the image"),
+    };
+    if capture.reads_type_registry && !restores_runtime_tables {
+        return Err("the compiled code reads the checked type registry");
+    }
+    let entry_id = RESIDENT_MODULE
+        .with(|slot| slot.borrow().as_ref().map(|resident| resident.main_id.as_u32()))
+        .ok_or("no compiled module holds the entry")?;
     if !capture.func_ids.contains(&entry_id) {
-        return None;
+        return Err("the captured code has no entry function");
     }
-    if !capture_is_replayable(&capture) {
-        return None;
+    // Definition order is not declaration order: closure and generator bodies
+    // are defined before the functions that declared them. A reload declares
+    // the captured functions in list order, so list them in id order.
+    let mut rows = capture.func_ids.into_iter().zip(capture.fns).collect::<Vec<_>>();
+    rows.sort_unstable_by_key(|(func_id, _)| *func_id);
+    match capture_replay_refusal(&rows) {
+        Some(reason) => Err(reason),
+        None => Ok(rows.into_iter().map(|(_, f)| f).collect()),
     }
-    Some(capture.fns)
 }
 
 /// Can `run_cached_module` reproduce the `FuncId` numbering this capture was
-/// compiled against?
+/// compiled against? `rows` are the captured functions in id order. `None`
+/// when it can, else the rule the capture breaks.
 ///
 /// A reload declares the host functions first (`new_jit_module`, deterministic
 /// and identical every time), then the captured functions in list order. So the
@@ -162,38 +219,41 @@ pub(crate) fn take_capture() -> Option<Vec<CapturedFn>> {
 /// * every relocation names a function (namespace 0) that is either a host
 ///   (`index < first`) or one of the captured ones (`index < first + len`).
 ///
-/// Missing definitions or definitions emitted out of declaration order cannot
-/// reproduce that table. Generator bodies, for example, are defined before
-/// their previously-declared wrappers. Reject such captures rather than replay
-/// a relocation against a different function id.
+/// A declared function without a captured definition leaves a gap that cannot
+/// reproduce that table. Reject such captures rather than replay a relocation
+/// against a different function id.
 ///
 /// Refusing the artifact keeps such a program on the cold path: correct, only
 /// slower. Per I2 the guard belongs here, where an inconsistent artifact would
 /// otherwise be written, and never as a clamp at replay — a clamp would turn a
 /// wrong relocation into a wrong call.
-fn capture_is_replayable(capture: &Capture) -> bool {
-    let Some(&first) = capture.func_ids.first() else {
-        return false;
+fn capture_replay_refusal(rows: &[(u32, CapturedFn)]) -> Option<&'static str> {
+    let Some(&(first, _)) = rows.first() else {
+        return Some("the captured code has no functions");
     };
     let first = u64::from(first);
-    let limit = first + capture.fns.len() as u64;
+    let limit = first + rows.len() as u64;
     let mut expected = first;
-    for (&func_id, f) in capture.func_ids.iter().zip(&capture.fns) {
-        if u64::from(func_id) != expected {
-            return false;
+    for (func_id, f) in rows {
+        if u64::from(*func_id) != expected {
+            return Some("a declared function has no captured definition");
         }
         expected += 1;
-        let replayable = f.relocs.iter().all(|reloc| match &reloc.target {
-            // Namespace 1 is a data object, and a reload declares no data
-            // objects at all, so a data relocation is equally unreplayable.
-            StoredTarget::User { namespace, index } => *namespace == 0 && u64::from(*index) < limit,
-            StoredTarget::FuncOffset(_) => true,
-        });
-        if !replayable {
-            return false;
+        for reloc in &f.relocs {
+            match &reloc.target {
+                // Namespace 1 is a data object, and a reload declares no data
+                // objects at all, so a data relocation is equally unreplayable.
+                StoredTarget::User { namespace, .. } if *namespace != 0 => {
+                    return Some("the compiled code references a data object");
+                }
+                StoredTarget::User { index, .. } if u64::from(*index) >= limit => {
+                    return Some("the compiled code calls a function defined outside the image");
+                }
+                StoredTarget::User { .. } | StoredTarget::FuncOffset(_) => {}
+            }
         }
     }
-    true
+    None
 }
 
 thread_local! {
@@ -209,13 +269,26 @@ thread_local! {
 /// function is tier-1 native with no reason — exactly the rows the cold run
 /// printed under `--trace-tiers`.
 pub(crate) fn publish_capture(native_fns: &[(MirFunctionId, &str)], artifact: MirArtifactId) {
+    let bytes = encode_capture(native_fns, artifact, false).ok();
+    LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = bytes);
+}
+
+/// Encode the finished capture as a warm module, or say why the compiled
+/// program cannot be replayed from one. The warm run cache and the Cranelift
+/// dev-build image (#3953) share this one admission rule; only the dev-build
+/// image restores the checked type registry and closure targets
+/// (`restores_runtime_tables`).
+pub(super) fn encode_capture(
+    native_fns: &[(MirFunctionId, &str)],
+    artifact: MirArtifactId,
+    restores_runtime_tables: bool,
+) -> Result<Vec<u8>, &'static str> {
     // FFI entries point into a process-local cdylib. A disk artifact cannot
     // recreate that bridge on a warm run, so force the bundle through the cold
     // entry that binds its FFI table before execution.
     if crate::Ffi::has_bound_ffi() {
         abort_capture();
-        LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = None);
-        return;
+        return Err("the program binds a native FFI bridge");
     }
     // Cell schema/projection/layout handles are iconst-baked at compile time.
     // A cache hit rebuilds a fresh CellState and would leave those handles dangling.
@@ -226,10 +299,19 @@ pub(crate) fn publish_capture(native_fns: &[(MirFunctionId, &str)], artifact: Mi
     });
     if cell_handles {
         abort_capture();
-        LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = None);
-        return;
+        return Err("the compiled code holds Cell schema handles");
     }
-    let fns = take_capture();
+    // Closure targets are registered by finalized address after the compile.
+    let closure_targets = RESIDENT_RUNTIME.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|rt| !rt.jit_closure_targets.is_empty())
+    });
+    if closure_targets && !restores_runtime_tables {
+        abort_capture();
+        return Err("the compiled code registers closure targets");
+    }
+    let fns = take_capture(restores_runtime_tables)?;
     let strings = RESIDENT_RUNTIME.with(|slot| {
         slot.borrow()
             .as_ref()
@@ -244,12 +326,9 @@ pub(crate) fn publish_capture(native_fns: &[(MirFunctionId, &str)], artifact: Mi
     });
     // No rail, no artifact. A stored module that has forgotten whether its entry
     // is fallible replays as a success on the next run.
-    if let (Some(fns), Some(rail)) = (fns, capture_rail()) {
-        let bytes = encode_module(artifact, &rail, native_fns, &fns, &strings);
-        LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = Some(bytes));
-    } else {
-        LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = None);
-    }
+    let rail = capture_rail(restores_runtime_tables)
+        .ok_or("the entry's error type needs the checked type registry")?;
+    Ok(encode_module(artifact, &rail, native_fns, &fns, &strings))
 }
 
 /// Take the artifact produced by the most recent successful native compile, if any.
@@ -266,7 +345,7 @@ pub(crate) fn publish_last_tier_artifact(artifact: Option<Vec<u8>>) {
 pub(crate) fn note_defined(export_name: &str, func_id: FuncId, ctx: &Context) {
     CAPTURE.with(|slot| {
         let mut guard = slot.borrow_mut();
-        let Some(capture) = guard.as_mut() else {
+        let CaptureState::Active(capture) = &mut *guard else {
             return;
         };
         let Some(cc) = ctx.compiled_code() else {
@@ -277,13 +356,13 @@ pub(crate) fn note_defined(export_name: &str, func_id: FuncId, ctx: &Context) {
         let mut relocs = Vec::new();
         for reloc in cc.buffer.relocs() {
             let Some(stored) = store_reloc(reloc, &ctx.func) else {
-                *guard = None;
+                *guard = CaptureState::Refused("the compiled code uses a relocation the image cannot store");
                 return;
             };
             relocs.push(stored);
         }
         let Some(sig) = try_encode_sig(&ctx.func.signature) else {
-            *guard = None;
+            *guard = CaptureState::Refused("a compiled function signature uses a type the image cannot store");
             return;
         };
         capture.func_ids.push(func_id.as_u32());
@@ -460,7 +539,7 @@ fn encode_module(
     out
 }
 
-fn write_str(out: &mut Vec<u8>, s: &str) {
+pub(super) fn write_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&(s.len() as u32).to_le_bytes());
     out.extend_from_slice(s.as_bytes());
 }
@@ -476,10 +555,12 @@ fn write_rail(out: &mut Vec<u8>, rail: &EntryRail) {
         Some(EntryErrorType::Io) => 2,
         Some(EntryErrorType::Uninhabited) => 3,
         Some(EntryErrorType::FieldErrors) => 4,
-        Some(EntryErrorType::Descriptor(_)) => {
-            unreachable!("capture_rail excludes entries requiring an absent schema registry")
-        }
+        // Only a dev-build image, which restores the type registry, carries it.
+        Some(EntryErrorType::Descriptor(_)) => 5,
     });
+    if let Some(EntryErrorType::Descriptor(identity)) = rail.error_type {
+        out.extend_from_slice(&identity.to_le_bytes());
+    }
     out.push(u8::from(rail.default_error_type.is_some()));
     if let Some(identity) = rail.default_error_type {
         out.extend_from_slice(&identity.to_le_bytes());
@@ -493,7 +574,7 @@ fn write_u16_slice(out: &mut Vec<u8>, v: &[u16]) {
     }
 }
 
-fn read_bool(data: &[u8], i: &mut usize) -> Option<bool> {
+pub(super) fn read_bool(data: &[u8], i: &mut usize) -> Option<bool> {
     let byte = *data.get(*i)?;
     *i += 1;
     match byte {
@@ -516,6 +597,7 @@ fn read_rail(data: &[u8], i: &mut usize) -> Option<EntryRail> {
         2 => Some(EntryErrorType::Io),
         3 => Some(EntryErrorType::Uninhabited),
         4 => Some(EntryErrorType::FieldErrors),
+        5 => Some(EntryErrorType::Descriptor(read_u64(data, i)?)),
         _ => return None,
     };
     let default_error_type = if read_bool(data, i)? {
@@ -539,25 +621,25 @@ fn read_rail(data: &[u8], i: &mut usize) -> Option<EntryRail> {
     })
 }
 
-fn read_u32(data: &[u8], i: &mut usize) -> Option<u32> {
+pub(super) fn read_u32(data: &[u8], i: &mut usize) -> Option<u32> {
     let slice = data.get(*i..*i + 4)?;
     *i += 4;
     Some(u32::from_le_bytes(slice.try_into().ok()?))
 }
 
-fn read_u64(data: &[u8], i: &mut usize) -> Option<u64> {
+pub(super) fn read_u64(data: &[u8], i: &mut usize) -> Option<u64> {
     let slice = data.get(*i..*i + 8)?;
     *i += 8;
     Some(u64::from_le_bytes(slice.try_into().ok()?))
 }
 
-fn read_i64(data: &[u8], i: &mut usize) -> Option<i64> {
+pub(super) fn read_i64(data: &[u8], i: &mut usize) -> Option<i64> {
     let slice = data.get(*i..*i + 8)?;
     *i += 8;
     Some(i64::from_le_bytes(slice.try_into().ok()?))
 }
 
-fn read_str(data: &[u8], i: &mut usize) -> Option<String> {
+pub(super) fn read_str(data: &[u8], i: &mut usize) -> Option<String> {
     let len = read_u32(data, i)? as usize;
     let slice = data.get(*i..*i + len)?;
     *i += len;
@@ -577,7 +659,7 @@ fn read_u16_slice(data: &[u8], i: &mut usize) -> Option<Vec<u16>> {
 
 /// One decoded artifact: everything a warm run needs that a TIR program would
 /// otherwise have answered.
-struct WarmModule {
+pub(super) struct WarmModule {
     rail: EntryRail,
     /// Tier roster: the functions the cold run reported as tier-1 native.
     native_fns: Vec<(MirFunctionId, String)>,
@@ -590,7 +672,7 @@ struct WarmModule {
 /// The version gate is load-bearing, not hygiene. A FORMAT 3 artifact carries no
 /// entry error rail, so reading one as if it had a rail forgets that the entry is
 /// fallible: the error still renders and the process exits 0. Refusing returns
-fn decode_module(data: &[u8], artifact: MirArtifactId) -> Result<WarmModule, String> {
+pub(super) fn decode_module(data: &[u8], artifact: MirArtifactId) -> Result<WarmModule, String> {
     let mut i = 0usize;
     match read_u32(data, &mut i) {
         Some(FORMAT) => {}
@@ -714,20 +796,58 @@ pub fn run_cached_module(
         return Err("cranelift host unsupported".into());
     }
     let reload = Instant::now();
+    let warm = decode_module(bytes, artifact)?;
+    jet_rt::__gc::initialize_trace().map_err(|e| e.to_string())?;
+    let native_fns = install_warm_module(
+        warm,
+        fresh_runtime(release_devtools_policy.clone()),
+        |_, _, _| Ok(()),
+    )?;
+    // The reload is this run's whole tier cost — there is no plan and no
+    // compile — so it is what the rows time, and the reason says so rather than
+    // letting a 0.05ms row read as a suspiciously fast Cranelift compile.
+    let reload_ms = reload.elapsed().as_secs_f64() * 1000.0;
+    let outcome = resident_invoke();
+    if outcome.is_ok() {
+        let observed_rows = native_fns
+            .into_iter()
+            .map(|(function, function_name)| TierRow {
+                function,
+                function_name,
+                tier: Tier::Native,
+                reason: "warm tier-1 module".to_string(),
+                millis: reload_ms,
+            })
+            .collect::<Vec<_>>();
+        record_trace(observed_rows.clone());
+    }
+    outcome
+}
+
+/// Install a decoded warm module as the resident module and `runtime` as the
+/// resident runtime, ready for `resident_invoke`. The caller initializes GC
+/// tracing before creating `runtime`. `restore` runs after the code
+/// is finalized (read+execute, never writable) and receives each captured
+/// function's id by export name, for state that needs finalized addresses.
+/// Returns the module's tier roster.
+pub(super) fn install_warm_module(
+    warm: WarmModule,
+    mut runtime: super::runtime_host::JitRuntime,
+    restore: impl FnOnce(
+        &JITModule,
+        &HashMap<String, FuncId>,
+        &mut super::runtime_host::JitRuntime,
+    ) -> Result<(), String>,
+) -> Result<Vec<(MirFunctionId, String)>, String> {
     let WarmModule {
         rail,
         native_fns,
         strings,
         fns,
-    } = decode_module(bytes, artifact)?;
-    jet_rt::__gc::initialize_trace().map_err(|e| e.to_string())?;
-    RESIDENT_RUNTIME.with(|slot| {
-        let mut rt = fresh_runtime(release_devtools_policy.clone());
-        rt.heap.install_string_slots(&strings);
-        rt.compile_strings = strings.clone();
-        rt.default_error_type = rail.default_error_type;
-        *slot.borrow_mut() = Some(rt);
-    });
+    } = warm;
+    runtime.heap.install_string_slots(&strings);
+    runtime.compile_strings = strings;
+    runtime.default_error_type = rail.default_error_type;
 
     let (mut module, host) = new_jit_module()?;
     let mut ids: HashMap<String, FuncId> = HashMap::new();
@@ -776,6 +896,8 @@ pub fn run_cached_module(
     let main_id = *ids
         .get(&rail.entry_symbol)
         .ok_or("tier-cache: missing checked entry symbol")?;
+    restore(&module, &ids, &mut runtime)?;
+    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
     RESIDENT_MODULE.with(|slot| {
         *slot.borrow_mut() = Some(ResidentModule {
             module,
@@ -793,23 +915,5 @@ pub fn run_cached_module(
             main_error_type: rail.error_type,
         });
     });
-    // The reload is this run's whole tier cost — there is no plan and no
-    // compile — so it is what the rows time, and the reason says so rather than
-    // letting a 0.05ms row read as a suspiciously fast Cranelift compile.
-    let reload_ms = reload.elapsed().as_secs_f64() * 1000.0;
-    let outcome = resident_invoke();
-    if outcome.is_ok() {
-        let observed_rows = native_fns
-            .into_iter()
-            .map(|(function, function_name)| TierRow {
-                function,
-                function_name,
-                tier: Tier::Native,
-                reason: "warm tier-1 module".to_string(),
-                millis: reload_ms,
-            })
-            .collect::<Vec<_>>();
-        record_trace(observed_rows.clone());
-    }
-    outcome
+    Ok(native_fns)
 }

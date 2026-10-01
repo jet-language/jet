@@ -28,15 +28,15 @@ pub fn decode(text: String) -> DataTree EncodingError! { parse_toml(text) }
 pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
 pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
 
-pub fn to_string(value: DataTree) -> String { render_toml(value) }
+pub fn to_string(value: DataTree) -> String Never! { render_toml(value) }
 
 fn parse_toml(text: String) -> DataTree EncodingError! {
-    p := TomlParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [String:DataTree]{}}
+    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [String:DataTree]{}}
     _ :: &p.document() ?? return Err(p.fail("TOML document could not be parsed"))
     Ok(DataTree.Object(p.root))
 }
 
-struct TomlParser {
+struct TOMLParser {
     bytes: [U8]
     index: Int
     line: Int
@@ -44,7 +44,7 @@ struct TomlParser {
     root: [String:DataTree]
 }
 
-impl TomlParser {
+impl TOMLParser {
     fn eof(self) -> Bool Never! { self.index >= self.bytes.len() }
 
     fn peek(self) -> U8? {

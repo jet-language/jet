@@ -790,9 +790,24 @@ fn lower_import(
             if let Some(path) = core_import_module_path(module_alias, items) {
                 TirImportKind::Module { path }
             } else {
+                // A member list names its module by the alias of a file or
+                // module import in the same file (D-MOD-CYCLE1=A package
+                // siblings bind this way), so resolve it through that edge.
                 let target_module = bundle
                     .name_ledger
                     .import_target(module_index, import.span)
+                    .or_else(|| {
+                        bundle.modules[module_index]
+                            .imports
+                            .iter()
+                            .filter(|candidate| {
+                                !matches!(candidate.kind, ImportKind::Unqualified { .. })
+                                    && candidate.import_alias() == *module_alias
+                            })
+                            .find_map(|candidate| {
+                                bundle.name_ledger.import_target(module_index, candidate.span)
+                            })
+                    })
                     .map(|target| module_identity(bundle, target))
                     .unwrap_or_else(|| module_alias.clone());
                 let imported = items

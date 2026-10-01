@@ -525,15 +525,6 @@ impl shared_protocol::JetConditionWaiter for JitConditionWaiter {
         jet_codegen::scheduler::jet_scheduler_wait_point_interrupted()
     }
 }
-pub(crate) fn shared_condition_wait_once(
-    permit: &Arc<shared_protocol::JetSharedPermit>,
-    condition: &Arc<shared_protocol::JetConditionProtocol>,
-) -> Result<(), ()> {
-    let waiter: Arc<dyn shared_protocol::JetConditionWaiter> =
-        Arc::new(JitConditionWaiter::new());
-    shared_protocol::jet_shared_condition_wait_once(permit.as_ref(), condition, waiter)
-}
-
 
 pub(crate) struct ExpiringState {
     value: i64,
@@ -2705,11 +2696,9 @@ fn jet_jit_pool_ids(handle: i64) -> i64 {
 
 fn jet_jit_shared_new(value: i64, type_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let Ok(type_id) = u64::try_from(type_id) else {
-            rt.set_host_fault("Shared constructor received an invalid checked type ID");
-            return 0;
-        };
-        match shared_alloc_for_persist(rt, value, type_id) {
+        // Checked type IDs are u64 stable hashes carried bit-for-bit in an
+        // i64 word; a set high bit is a valid identity, not a negative value.
+        match shared_alloc_for_persist(rt, value, type_id as u64) {
             Ok(handle) => handle,
             Err(error) => {
                 rt.set_host_fault(&error);
@@ -2992,9 +2981,7 @@ fn jet_jit_shared_edit(handle: i64, callback: i64) -> i64 {
 
 
 fn jet_jit_shared_capture(handle: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.capture received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
     }) else {
@@ -3057,9 +3044,7 @@ fn shared_projected_capture_staged(
 }
 
 fn jet_jit_shared_capture_with(handle: i64, callback: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.capture received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
     }) else {
@@ -3099,9 +3084,7 @@ fn shared_transaction_register_snapshot(
 }
 
 fn jet_jit_shared_capture_txn_plain(handle: i64, _stm: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.capture_txn received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
     }) else {
@@ -3161,9 +3144,7 @@ fn jet_jit_shared_capture_txn_plain(handle: i64, _stm: i64, type_id: i64) -> i64
 }
 
 fn jet_jit_shared_capture_txn(handle: i64, _stm: i64, callback: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.capture_txn received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
     }) else {
@@ -3232,9 +3213,7 @@ fn jet_jit_shared_try_replace(
     value: i64,
     type_id: i64,
 ) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.try_replace received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     let Some(shared) = Concurrency::with_runtime_mut(|rt| {
         shared(rt, handle).filter(|state| shared_state_type_id(state) == Some(type_id))
     }) else {
@@ -3351,18 +3330,14 @@ fn jet_jit_shared_try_replace(
 }
 
 fn jet_jit_shared_snapshot_value(snapshot_handle: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("SharedSnapshot.value received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     match Concurrency::with_runtime_string(|rt| shared_snapshot_load(rt, snapshot_handle, type_id)) {
         Ok(snapshot) => snapshot.value,
         Err(error) => shared_callback_fault(&error),
     }
 }
 fn jet_jit_shared_snapshot_clone(ticket: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("SharedSnapshot.clone received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     match shared_snapshot_clone_ticket(ticket, type_id) {
         Ok(ticket) => ticket,
         Err(error) => shared_callback_fault(&error),
@@ -3370,10 +3345,7 @@ fn jet_jit_shared_snapshot_clone(ticket: i64, type_id: i64) -> i64 {
 }
 
 fn jet_jit_shared_snapshot_release(ticket: i64, type_id: i64) {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        shared_callback_fault("SharedSnapshot.release received an invalid checked type ID");
-        return;
-    };
+    let type_id = type_id as u64;
     if let Err(error) = shared_snapshot_release_ticket(ticket, type_id) {
         shared_callback_fault(&error);
     }
@@ -3449,9 +3421,7 @@ fn jet_jit_shared_end_write(handle: i64, value: i64) {
 }
 
 fn jet_jit_shared_retain(handle: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.retain received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     match crate::runtime_host::native_shared_alias_retain(handle, type_id) {
         Ok(handle) => handle,
         Err(error) => shared_callback_fault(&error),
@@ -3459,19 +3429,14 @@ fn jet_jit_shared_retain(handle: i64, type_id: i64) -> i64 {
 }
 
 fn jet_jit_shared_release(handle: i64, type_id: i64) {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        shared_callback_fault("Shared.release received an invalid checked type ID");
-        return;
-    };
+    let type_id = type_id as u64;
     if let Err(error) = crate::runtime_host::native_shared_alias_release(handle, type_id) {
         shared_callback_fault(&error);
     }
 }
 
 fn jet_jit_shared_downgrade(handle: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.downgrade received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     let owner = match crate::runtime_host::native_shared_owner_downgrade(handle, type_id) {
         Ok(owner) => owner,
         Err(error) => return shared_callback_fault(&error),
@@ -3483,9 +3448,7 @@ fn jet_jit_shared_downgrade(handle: i64, type_id: i64) -> i64 {
 }
 
 fn jet_jit_shared_strong_count(handle: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared.strong_count received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     match crate::runtime_host::native_shared_owner_strong_count(handle, type_id) {
         Ok(count) => i64::try_from(count)
             .unwrap_or_else(|_| shared_callback_fault("Shared strong count overflow")),
@@ -3493,10 +3456,21 @@ fn jet_jit_shared_strong_count(handle: i64, type_id: i64) -> i64 {
     }
 }
 
-fn jet_jit_shared_weak_clone(ticket: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared weak clone received an invalid checked type ID");
+/// Identity only, like `Rc::ptr_eq`: both handles name one physical cell.
+fn jet_jit_shared_same(handle: i64, other: i64, type_id: i64) -> i64 {
+    let type_id = type_id as u64;
+    let identity = |handle| {
+        crate::runtime_host::native_shared_interop_for_type(handle, type_id)
+            .map(|interop| interop.identity())
     };
+    match (identity(handle), identity(other)) {
+        (Ok(left), Ok(right)) => i64::from(left == right),
+        (Err(error), _) | (_, Err(error)) => shared_callback_fault(&error),
+    }
+}
+
+fn jet_jit_shared_weak_clone(ticket: i64, type_id: i64) -> i64 {
+    let type_id = type_id as u64;
     match shared_weak_clone_ticket(ticket, type_id) {
         Ok(ticket) => ticket,
         Err(error) => shared_callback_fault(&error),
@@ -3504,19 +3478,14 @@ fn jet_jit_shared_weak_clone(ticket: i64, type_id: i64) -> i64 {
 }
 
 fn jet_jit_shared_weak_release(ticket: i64, type_id: i64) {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        shared_callback_fault("Shared weak release received an invalid checked type ID");
-        return;
-    };
+    let type_id = type_id as u64;
     if let Err(error) = shared_weak_release_ticket(ticket, type_id) {
         shared_callback_fault(&error);
     }
 }
 
 fn jet_jit_shared_weak_upgrade(ticket: i64, type_id: i64) -> i64 {
-    let Ok(type_id) = u64::try_from(type_id) else {
-        return shared_callback_fault("Shared weak upgrade received an invalid checked type ID");
-    };
+    let type_id = type_id as u64;
     let owner = match Concurrency::with_runtime_string(|rt| {
         shared_weak_owner_load(rt, ticket, type_id)
     }) {
@@ -4700,6 +4669,7 @@ host_fns! {
     gc_edit_edge_slot: "jet_gc_edit_edge_slot" => jet_jit_gc_edit_edge_slot: quaternary;
     expiring_secret_with: "jet_expiring_secret_with" => jet_jit_expiring_secret_with: binary;
     expiring_secret_with_jit: "jet_jit_expiring_secret_with" => jet_jit_expiring_secret_with: binary;
+    pool_new: "jet_std::JetPool::new" => jet_jit_pool_new: noarg_i64;
     pool_add: "jet_std::JetPool::add" => jet_jit_pool_add: binary;
     pool_get: "jet_jit_pool_get" => jet_jit_pool_get: quaternary;
 
@@ -4731,6 +4701,7 @@ host_fns! {
     shared_end_write: "jet_jit_shared_end_write" => jet_jit_shared_end_write: binary_void;
     shared_downgrade: "jet_jit_shared_downgrade" => jet_jit_shared_downgrade: binary;
     shared_strong_count: "jet_jit_shared_strong_count" => jet_jit_shared_strong_count: binary;
+    shared_same: "jet_jit_shared_same" => jet_jit_shared_same: ternary;
     shared_weak_clone: "jet_jit_shared_weak_clone" => jet_jit_shared_weak_clone: binary;
     shared_weak_upgrade: "jet_jit_shared_weak_upgrade" => jet_jit_shared_weak_upgrade: binary;
     shared_weak_release: "jet_jit_shared_weak_release" => jet_jit_shared_weak_release: binary_void;

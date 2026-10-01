@@ -33,25 +33,6 @@ fn jet_view_set_f64_checked(view: &mut [f64], index: i64, value: f64) -> Result<
     jet_view_set_checked(view, index, value)
 }
 
-fn jet_view_get<T: Clone>(view: &[T], index: i64, file: &str, line: u32) -> T {
-    match jet_view_get_checked(view, index) {
-        Ok(value) => value,
-        Err(error) => jet_panic(file, line, &error),
-    }
-}
-
-fn jet_view_set<T>(view: &mut [T], index: i64, value: T, file: &str, line: u32) {
-    if let Err(error) = jet_view_set_checked(view, index, value) {
-        jet_panic(file, line, &error);
-    }
-}
-
-fn jet_view_set_f64(view: &mut [f64], index: i64, value: f64, file: &str, line: u32) {
-    if let Err(error) = jet_view_set_f64_checked(view, index, value) {
-        jet_panic(file, line, &error);
-    }
-}
-
 /// One shared setter seam for borrowed float storage and Tensor storage.
 /// Compute.rs supplies the Tensor implementation; this always-present part
 /// supplies the ordinary float-view implementation so the symbol remains

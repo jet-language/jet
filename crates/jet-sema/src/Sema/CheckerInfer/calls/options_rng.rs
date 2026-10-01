@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
                                 "cannot draw from `{}` — it does not have the write-access marker `&`; required before calling `.{}()`",
                                 root, method
                             ),
-                            "every `Rng` draw advances the stream, so the receiver needs the write-access marker `&`".to_string(),
+                            "every `RNG` draw advances the stream, so the receiver needs the write-access marker `&`".to_string(),
                             format!("declare `{} {} ...`, or pass the rng with the write-access marker `&`: `&{}`", root, Syntax::SIGIL_BIND_MUT, root),
                             Some(receiver.span()),
                         ));
@@ -215,7 +215,7 @@ impl<'a> Checker<'a> {
                     expected,
                     args.len()
                 ),
-                "this `Rng` draw operates on a list and optional draw parameter".to_string(),
+                "this `RNG` draw operates on a list and optional draw parameter".to_string(),
                 if method == "weighted_pick" {
                     "call `rng.weighted_pick(items, weights)`".to_string()
                 } else if method == "sample" {

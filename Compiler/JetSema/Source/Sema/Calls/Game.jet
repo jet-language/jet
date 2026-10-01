@@ -2,6 +2,25 @@
 //
 // These calls use their exact registered Core namespace / handle identities;
 // ordinary Core module calls remain in Core.jet.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    DerivationRef,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FrameSchedule,
+    FunctionDefaultRef,
+    Span,
+    SymbolKind,
+    TExpr,
+    TExprKind,
+    THandleOp,
+    TStrPart,
+    Type,
+    expr_span,
+    type_name,
+]
 
 pub struct SemaGameCoreStaticTarget {
     pub type_name: String
@@ -172,8 +191,8 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
         callback_type := Type.Fn{params: [Type]{Type.Named{name: "GameFrame"}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         callback :: sema_expression_lambda_host_callback_stored(args[0].expr, Val(callback_type), true, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
-        schedule := None
-        derivation := None
+        schedule := FrameSchedule?{None}
+        derivation := DerivationRef?{None}
         if callback.kind == {
             .Lambda(lambda) -> {
                 schedule = lambda.frame_schedule

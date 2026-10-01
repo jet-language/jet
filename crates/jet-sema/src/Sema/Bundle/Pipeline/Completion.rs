@@ -274,9 +274,38 @@ pub(super) fn complete_bundle_check(
         &name_ledger,
         &mut diags,
     );
+    // #2517 S2: a `jet check` inside a package-record session seals every
+    // dependency package whose check key has a record. The inferred failure
+    // contracts above are part of each interface digest, so the keys are
+    // computed only now.
+    let mut seal = if mode == CompileMode::Check {
+        super::super::PackageSeal::SealPlan::begin(bundle, &name_ledger, plugin_interfaces.digest())
+    } else {
+        None
+    };
     let states: &[ModuleState] = &*states_mut;
     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
+    let mut sealed_nodes: Vec<(String, Vec<(String, EffectSummary)>)> = Vec::new();
+    let mut sealed_inferred: HashMap<usize, HashSet<String>> = HashMap::new();
+    let mut devtools_publications = Vec::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        let module_alias = name_ledger
+            .module_alias(idx)
+            .unwrap_or(&module.alias)
+            .to_string();
+        if let Some(sealed) = seal.as_mut().and_then(|plan| plan.modules.get_mut(&idx)) {
+            // A sealed module is not body-checked: its recorded item
+            // summaries and module facts stand in for the checked bodies.
+            global_addr_taken.extend(sealed.address_taken.iter().cloned());
+            if sealed.exact_int {
+                states[idx].exact_int_reachable.set(true);
+            }
+            sealed_inferred.insert(idx, std::mem::take(&mut sealed.inferred_infallible));
+            sealed_nodes.push((module_alias.clone(), std::mem::take(&mut sealed.summaries)));
+            module_pending_diagnostics.push(Vec::new());
+            module_effect_summaries.push((module_alias, HashMap::new()));
+            continue;
+        }
         let origin = std::sync::Arc::new(
             jet_foundation::Diagnostics::DiagnosticOrigin::new(
                 module.display.clone(),
@@ -284,8 +313,7 @@ pub(super) fn complete_bundle_check(
                 module.source.clone(),
             ),
         );
-        let mut local_summaries = HashMap::new();
-        let mut local_pending_diagnostics = Vec::new();
+        let mut products = BodyProducts::default();
         let mut module_diags = check_module_bodies(
             module,
             idx,
@@ -296,13 +324,30 @@ pub(super) fn complete_bundle_check(
             mode,
             no_os,
             gates,
-            &mut local_summaries,
-            &mut embed_inputs,
-            &mut global_addr_taken,
             &mut name_ledger,
-            &mut local_pending_diagnostics,
+            &mut products,
             incremental.as_deref_mut(),
         );
+        let BodyProducts {
+            summaries: mut local_summaries,
+            embed_inputs: module_inputs,
+            addr_taken: local_addr_taken,
+            pending_diagnostics: mut local_pending_diagnostics,
+            devtools_publications: module_publications,
+            ..
+        } = products;
+        global_addr_taken.extend(local_addr_taken.iter().cloned());
+        devtools_publications.extend(module_publications);
+        if let Some(plan) = seal.as_mut() {
+            plan.outputs.insert(
+                idx,
+                super::super::PackageSeal::ModuleOutputs {
+                    address_taken: local_addr_taken,
+                    discovered_inputs: !module_inputs.is_empty(),
+                },
+            );
+        }
+        embed_inputs.extend(module_inputs);
         dedupe_unknown_names(&mut module_diags);
         super::super::prune_conversion_cascades(&mut module_diags);
         dedupe_soft_public_lints(&mut module_diags);
@@ -335,47 +380,38 @@ pub(super) fn complete_bundle_check(
         seed_trait_dispatch_effects(&module.items, &mut local_summaries);
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
         effect_summaries.extend(local_summaries.clone());
-        module_effect_summaries.push((
-            name_ledger
-                .module_alias(idx)
-                .unwrap_or(&module.alias)
-                .to_string(),
-            local_summaries,
-        ));
+        module_effect_summaries.push((module_alias, local_summaries));
     }
     // #3708: every body is checked; infer the empty failure sets and settle
     // the E2404 obligations recorded against unannotated callees. The
     // module-qualified result lets E0433 treat a dropped call to an
     // inferred-infallible callee as pure (D-DISCARD1=A).
-    let inferred_infallible: HashSet<String> = super::super::super::solve_inferred_failure(
+    let inferred_sets = super::super::super::solve_inferred_failure(
         bundle,
         &module_effect_summaries,
         &global_addr_taken,
+        &sealed_inferred,
+        &name_ledger,
         &mut diags,
-    )
-    .into_iter()
-    .zip(&module_effect_summaries)
-    .flat_map(|(names, (alias, _))| {
-        names
-            .into_iter()
-            .map(move |name| format!("{alias}::{name}"))
-    })
-    .collect();
+    );
+    let inferred_infallible: HashSet<String> = inferred_sets
+        .iter()
+        .zip(&module_effect_summaries)
+        .flat_map(|(names, (alias, _))| names.iter().map(move |name| format!("{alias}::{name}")))
+        .collect();
     // D-DX-PLUGIN1=D: body inference owns publication typing. Project the
-    // facts stored in each module's existing TypeRegistry into the one shared
+    // facts the body checks produced, in source order, into the one shared
     // panel registry before checking field liveness.
-    for state in states {
-        for publication in state.registry.devtools_publications() {
-            if devtools_registry
-                .publications()
-                .iter()
-                .any(|existing| existing.span == publication.span)
-            {
-                continue;
-            }
-            if let Err(error) = devtools_registry.register_publication(publication) {
-                diags.push(registry_error(error));
-            }
+    for publication in devtools_publications {
+        if devtools_registry
+            .publications()
+            .iter()
+            .any(|existing| existing.span == publication.span)
+        {
+            continue;
+        }
+        if let Err(error) = devtools_registry.register_publication(publication) {
+            diags.push(registry_error(error));
         }
     }
     check_unfed_state_fields(devtools_registry, &mut diags);
@@ -427,7 +463,7 @@ pub(super) fn complete_bundle_check(
         );
     }
     let (public_summaries, public_reachability) =
-        qualified_effect_facts(&module_effect_summaries, &taint_returns);
+        qualified_effect_facts(&module_effect_summaries, &sealed_nodes, &taint_returns);
     let mut public_solved: HashMap<String, EffectSet> = public_summaries
         .keys()
         .filter_map(|key| {
@@ -725,7 +761,7 @@ pub(super) fn complete_bundle_check(
             || m.source.contains("shared ")
             || m.source.contains("Cell<")
             || m.source.contains("Cell.new(")
-            || m.source.contains("Id<")
+            || m.source.contains("ID<")
     }) {
         used_core.insert("core.mem::pool_shared".to_string());
     }
@@ -788,6 +824,30 @@ pub(super) fn complete_bundle_check(
         &public_summaries,
         &mut public_solved,
     );
+    // #2517 S2: publish the clean dependency packages this run checked, then
+    // drop the reports on sealed modules. A package is recorded only when
+    // its check reported nothing that reaches the importer, so a sealed
+    // module's reports (from phases that saw its erased bodies) are dropped.
+    if let Some(plan) = seal {
+        let sealed_paths = plan.sealed_paths(bundle);
+        let exact_int = states
+            .iter()
+            .map(|state| state.exact_int_reachable.get())
+            .collect::<Vec<_>>();
+        plan.finish(
+            bundle,
+            &name_ledger,
+            &public_summaries,
+            &inferred_sets,
+            &exact_int,
+            &diags,
+        );
+        diags.retain(|diagnostic| {
+            !diagnostic
+                .origin()
+                .is_some_and(|origin| sealed_paths.contains(&origin.path))
+        });
+    }
 
     // Core modules are checked in the same bundle so their errors keep the
     // program honest, but Core is library source: its lints are not the

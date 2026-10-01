@@ -2,7 +2,7 @@ use core as core
 use core.net.url as url
 #Error
 pub enum WsError {
-    InvalidUrl
+    InvalidURL
     InvalidHandshake
     Protocol
     Timeout
@@ -16,13 +16,13 @@ pub enum WsError {
 // The provider owns socket I/O, entropy, and frame codec. Jet validates the
 // URL and handshake shape before crossing the typed boundary.
 pub fn connect(url_text: String) -[Net]> WsConn WsError! {
-    parsed :: url.parse(url_text) ?? return Err(WsError.InvalidUrl)
+    parsed :: url.parse(url_text) ?? return Err(WsError.InvalidURL)
     if parsed.scheme != "ws" -> return Err(WsError.UnsupportedTarget)
-    if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 {
-        return Err(WsError.InvalidUrl)
+    if parsed.host.bytes().len() == 0 || parsed.userinfo().bytes().len() > 0 {
+        return Err(WsError.InvalidURL)
     }
     fragment := parsed.fragment
-    if fragment.bytes().len() > 0 -> return Err(WsError.InvalidUrl)
+    if fragment.bytes().len() > 0 -> return Err(WsError.InvalidURL)
     core.net.ws.connect(url.unparse(parsed))
 }
 

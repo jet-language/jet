@@ -40,6 +40,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-SHAPE-PLACE1=A (E0202): a range write window fills a list write
+    /// parameter only when the callee is proven never to resize that list.
+    /// `callee` is the name the bundle-wide fact keys the function under.
+    fn check_range_window_argument(
+        &mut self,
+        callee: &str,
+        index: usize,
+        arg: &crate::AST::CallArg,
+    ) {
+        if arg.convention == AccessConvention::Write
+            && matches!(arg.expr, Expr::Slice { .. })
+            && !self
+                .fixed_length_write_params
+                .contains(&(callee.to_string(), index))
+        {
+            self.diags
+                .push(crate::Sema::Diagnostics::write_range_window_argument(arg.span));
+        }
+    }
+
     /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
     /// The function was registered as `__jet_{alias}__{method}` in `self.funcs`.
     pub(crate) fn infer_code_module_call(
@@ -254,7 +274,10 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in type_params.iter().zip(type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    self.check_declared_type(&actual, span);
+                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
+                    if !actual.is_never() {
+                        self.check_declared_type(&actual, span);
+                    }
                     for bound in &param.bounds {
                         if !self.type_satisfies_bound(&actual, bound) {
                             self.diags.push(crate::Generics::e0905(
@@ -269,44 +292,29 @@ impl<'a> Checker<'a> {
                 }
             }
         } else if !type_params.is_empty() {
-            for (index, arg) in args.iter_mut().enumerate() {
-                pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
-                    if let Some((param_conv, param_ty)) = sig.params.get(index) {
-                        checker.check_call_argument_access(arg, *param_conv, param_ty, true);
-                    }
-                    let inferred = checker.infer(&mut arg.expr);
-                    checker.check_call_argument_captures(&arg.expr);
-                    inferred
-                }));
-            }
-            let arg_types = pre_inferred
-                .iter()
-                .filter_map(Clone::clone)
-                .collect::<Vec<_>>();
-            if arg_types.len() == args.len() {
-                match self.trait_reg.infer_fn_subst_without_bounds(
-                    &sig,
-                    &arg_types,
-                    &type_params,
-                    self.expected_type.as_ref(),
-                ) {
-                    Ok(inferred) => {
-                        if let Some((ty, bound)) = type_params.iter().find_map(|param| {
-                            let ty = inferred.get(&param.name)?;
-                            param
-                                .bounds
-                                .iter()
-                                .find(|bound| !self.type_satisfies_bound(ty, bound))
-                                .map(|bound| (ty, bound))
-                        }) {
-                            self.diags
-                                .push(crate::Generics::e0905(&ty.name(), bound, span, false));
-                        }
-                        subst = inferred;
-                    }
-                    Err(param) => self.diags.push(crate::Generics::e0904(span, &param)),
+            let inference = self.infer_generic_call_args(
+                &sig,
+                &type_params,
+                args.as_mut_slice(),
+                &mut call_access,
+                span,
+                true,
+            );
+            if inference.complete {
+                if let Some((ty, bound)) = type_params.iter().find_map(|param| {
+                    let ty = inference.subst.get(&param.name)?;
+                    param
+                        .bounds
+                        .iter()
+                        .find(|bound| !self.type_satisfies_bound(ty, bound))
+                        .map(|bound| (ty, bound))
+                }) {
+                    self.diags
+                        .push(crate::Generics::e0905(&ty.name(), bound, span, false));
                 }
             }
+            pre_inferred = inference.pre_inferred;
+            subst = inference.subst;
         }
         let effective_params: Vec<(AccessConvention, Type)> = sig
             .params
@@ -315,6 +323,7 @@ impl<'a> Checker<'a> {
             .collect();
         for (index, (arg, (pconv, pty))) in args.iter_mut().zip(effective_params.iter()).enumerate()
         {
+            self.check_range_window_argument(mangled, index, arg);
             if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                 self.borrow_ctx = true;
             }
@@ -355,6 +364,15 @@ impl<'a> Checker<'a> {
         });
         let (resolved_ret, ret) = self.checked_return_types(declared, sig.is_extern);
         *resolved_ret_out = Some(resolved_ret);
+        // Always overwrite: a nested argument call may have left its own.
+        self.inferred_call_type_args = if type_args.is_empty() && !type_params.is_empty() {
+            type_params
+                .iter()
+                .map(|param| subst.get(&param.name).cloned())
+                .collect()
+        } else {
+            None
+        };
         Some(ret)
     }
 
@@ -440,7 +458,8 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(soft_public_use(name, span));
             }
-            let sig = target.funcs.get(&semantic_name).unwrap().clone();
+            let mut sig = target.funcs.get(&semantic_name).unwrap().clone();
+            self.qualify_builtin_shadowing_sig(mod_idx, &mut sig);
             if let Some(dep) = sig.deprecation.as_ref() {
                 self.check_deprecation(name, dep, span);
             }
@@ -529,7 +548,10 @@ impl<'a> Checker<'a> {
                 } else {
                     for (param, actual) in type_params.iter().zip(type_args) {
                         let actual = self.resolve_type(actual.clone());
-                        self.check_declared_type(&actual, span);
+                        // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
+                        if !actual.is_never() {
+                            self.check_declared_type(&actual, span);
+                        }
                         for bound in &param.bounds {
                             if !self.type_satisfies_bound(&actual, bound) {
                                 self.diags.push(crate::Generics::e0905(
@@ -544,53 +566,33 @@ impl<'a> Checker<'a> {
                     }
                 }
             } else if !type_params.is_empty() {
-                for (index, arg) in args.iter_mut().enumerate() {
-                    pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
-                        if let Some((param_conv, param_ty)) = sig.params.get(index) {
-                            checker.check_call_argument_access(
-                                arg,
-                                *param_conv,
-                                param_ty,
-                                !sig.is_extern,
-                            );
-                        }
-                        let inferred = checker.infer(&mut arg.expr);
-                        checker.check_call_argument_captures(&arg.expr);
-                        inferred
-                    }));
-                }
-                let arg_types = pre_inferred
-                    .iter()
-                    .filter_map(|ty| ty.clone())
-                    .collect::<Vec<_>>();
-                if arg_types.len() == args.len() {
-                    match target.trait_reg.infer_fn_subst_without_bounds(
-                        &sig,
-                        &arg_types,
-                        &type_params,
-                        self.expected_type.as_ref(),
-                    ) {
-                        Ok(inferred) => {
-                            if let Some((ty, bound)) = type_params.iter().find_map(|param| {
-                                let ty = inferred.get(&param.name)?;
-                                param
-                                    .bounds
-                                    .iter()
-                                    .find(|bound| !self.type_satisfies_bound(ty, bound))
-                                    .map(|bound| (ty, bound))
-                            }) {
-                                self.diags.push(crate::Generics::e0905(
-                                    &ty.name(),
-                                    bound,
-                                    span,
-                                    false,
-                                ));
-                            }
-                            subst = inferred;
-                        }
-                        Err(param) => self.diags.push(crate::Generics::e0904(span, &param)),
+                let inference = self.infer_generic_call_args(
+                    &sig,
+                    &type_params,
+                    args.as_mut_slice(),
+                    &mut call_access,
+                    span,
+                    !sig.is_extern,
+                );
+                if inference.complete {
+                    if let Some((ty, bound)) = type_params.iter().find_map(|param| {
+                        let ty = inference.subst.get(&param.name)?;
+                        param
+                            .bounds
+                            .iter()
+                            .find(|bound| !self.type_satisfies_bound(ty, bound))
+                            .map(|bound| (ty, bound))
+                    }) {
+                        self.diags.push(crate::Generics::e0905(
+                            &ty.name(),
+                            bound,
+                            span,
+                            false,
+                        ));
                     }
                 }
+                pre_inferred = inference.pre_inferred;
+                subst = inference.subst;
             }
             // The target spells Core types through its own import aliases
             // (`time.Duration` under `use core.time as time`). The caller has
@@ -680,6 +682,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                self.check_range_window_argument(name, index, arg);
                 // D-SG9: a fixed-width literal argument adopts the parameter's width.
                 let saved = self.expected_type.clone();
                 self.expected_type = Some(pty.clone());
@@ -846,6 +849,16 @@ impl<'a> Checker<'a> {
             } else {
                 effective_ret
             };
+            // Always overwrite: a nested argument call may have left its own.
+            self.inferred_call_type_args =
+                if type_args.is_empty() && !type_params.is_empty() {
+                    type_params
+                        .iter()
+                        .map(|param| subst.get(&param.name).cloned())
+                        .collect()
+                } else {
+                    None
+                };
             return Some(qualify_unit(ret));
         }
         if target.registry.contains(&semantic_name) {

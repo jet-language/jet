@@ -21,21 +21,21 @@ struct State {
 
 fn state_summary(state: State) -> String { "{state.selected}/{state.event_count}" }
 
-fn panel_lines(state: State) -> [UiNode] {
-    return [UiNode]{
+fn panel_lines(state: State) -> [UINode] {
+    return [UINode]{
         ui.text("Jet Devtools"),
         ui.text("Selected: {state.selected}"),
         ui.text("Events: {state.event_count}"),
     }
 }
 
-#DevPanel pub fn panel(state: State) -> UiNode { return ui.box(panel_lines(state)) }
+#DevPanel pub fn panel(state: State) -> UINode { return ui.box(panel_lines(state)) }
 
 fn publish_selection(selected_value: String) {
     devtools.publish(field: .selected, value: selected_value)
 }
 
-fn render_panel(tree: UiNode) {
+fn render_panel(tree: UINode) {
     backend := ui.null_backend()
     // The host-facing panel is always mounted inside this deterministic
     // viewport; no environment probe or alternate renderer is involved.

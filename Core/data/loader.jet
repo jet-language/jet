@@ -53,15 +53,15 @@ pub fn bind_text<T>(loader: &DataLoader<T>, text: String) DataError! {
     bind<T>(&loader, text.bytes())
 }
 
-pub fn authority<T>(loader: DataLoader<T>) -> DataAuthority { ~loader.authority }
+pub fn authority<T>(loader: DataLoader<T>) -> DataAuthority Never! { ~loader.authority }
 
-pub fn status<T>(loader: DataLoader<T>) -> DataLoaderStatus { ~loader.status }
+pub fn status<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { ~loader.status }
 
-pub fn ready<T>(loader: DataLoader<T>) -> Bool {
+pub fn ready<T>(loader: DataLoader<T>) -> Bool Never! {
     !loader.cancelled && !loader.status.backpressure
 }
 
-pub fn needs_refresh<T>(loader: DataLoader<T>) -> Bool {
+pub fn needs_refresh<T>(loader: DataLoader<T>) -> Bool Never! {
     if loader.status.freshness == DataFreshness.Fresh
         || loader.status.freshness == DataFreshness.Offline
         || loader.status.freshness == DataFreshness.Cancelled {
@@ -70,7 +70,7 @@ pub fn needs_refresh<T>(loader: DataLoader<T>) -> Bool {
     true
 }
 
-pub fn snapshot_reusable(previous: DataSnapshotIdentity, current: DataSnapshotIdentity) -> Bool {
+pub fn snapshot_reusable(previous: DataSnapshotIdentity, current: DataSnapshotIdentity) -> Bool Never! {
     previous.id == current.id
         && previous.source == current.source
         && previous.content == current.content
@@ -78,9 +78,9 @@ pub fn snapshot_reusable(previous: DataSnapshotIdentity, current: DataSnapshotId
         && previous.format == current.format
 }
 
-pub fn source_identity<T>(loader: DataLoader<T>) -> DataSourceIdentity { ~loader.source }
+pub fn source_identity<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { ~loader.source }
 
-pub fn cancel<T>(loader: &DataLoader<T>) {
+pub fn cancel<T>(loader: &DataLoader<T>) Never! {
     loader.cancelled = true
     if loader.source.kind != DataLoaderKind.Value -> loader.payload = None
     loader.status.freshness = DataFreshness.Cancelled
@@ -91,7 +91,7 @@ pub fn cancel<T>(loader: &DataLoader<T>) {
     loader.status.last_good = loader.last_good != None
 }
 
-pub fn offline<T>(loader: &DataLoader<T>, enabled: Bool) {
+pub fn offline<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
     loader.offline = enabled
     if enabled {
         if loader.payload == None && loader.last_good != None {
@@ -111,7 +111,7 @@ pub fn offline<T>(loader: &DataLoader<T>, enabled: Bool) {
     }
 }
 
-pub fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) {
+pub fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
     loader.status.invalidated_by = ~cause
     loader.status.freshness = DataFreshness.Stale
     loader.status.error = ""

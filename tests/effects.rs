@@ -85,7 +85,7 @@ fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
         r#"
 use core.files as fs
 
-#Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
+#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
     fs.write("fault-loop.txt", "x") ?? return
     values := List.try_with_capacity(1) ?? return
     &values.try_push(1) ?? return

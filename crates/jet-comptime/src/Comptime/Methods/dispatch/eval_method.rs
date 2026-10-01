@@ -2333,7 +2333,7 @@ impl<'a> Interp<'a> {
                 | "bytes" | "split" | "pick" | "weighted_pick" | "sample" | "shuffle"),
             ) if type_name == crate::Syntax::RNG_TYPE => {
                 if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-                    return Err(unsupported("Rng method on a temporary value", span));
+                    return Err(unsupported("RNG method on a temporary value", span));
                 }
                 if method == "shuffle"
                     && !matches!(
@@ -2341,7 +2341,7 @@ impl<'a> Interp<'a> {
                         Some(Expr::Ident(..) | Expr::Field(..))
                     )
                 {
-                    return Err(unsupported("Rng.shuffle with a temporary list", span));
+                    return Err(unsupported("RNG.shuffle with a temporary list", span));
                 }
                 let mut state = fields
                     .iter()

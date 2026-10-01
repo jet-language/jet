@@ -4,7 +4,7 @@ use core.regex as re
 use core.text as text
 use core.time as time
 
-struct BpeModel {
+struct BPEModel {
     merges: [String]
     words: Int
     tokens: Int
@@ -45,7 +45,7 @@ fn merge_sequence(sequence: [String], key: String) -> [String] {
     return result
 }
 
-fn train_bpe(corpus: String) -> BpeModel {
+fn train_bpe(corpus: String) -> BPEModel {
     words :: text.words(corpus)
     sequences := [[String]]{}
     loop word in words -> &sequences.push(text.graphemes(word))
@@ -78,10 +78,10 @@ fn train_bpe(corpus: String) -> BpeModel {
     }
     token_count := 0
     loop sequence in sequences -> token_count += sequence.len()
-    return BpeModel{merges: merges, words: words.len(), tokens: token_count}
+    return BPEModel{merges: merges, words: words.len(), tokens: token_count}
 }
 
-fn encode_text(source: String, model: BpeModel) -> [String] {
+fn encode_text(source: String, model: BPEModel) -> [String] {
     encoded := [String]{}
     loop word in text.words(source) {
         sequence := text.graphemes(word)

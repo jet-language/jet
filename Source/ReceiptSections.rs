@@ -135,16 +135,6 @@ impl ReceiptSection {
         Self::new(name, type_name, bytes)
     }
 
-    /// Construct a section from canonical JSON bytes and schema identity.
-    pub fn from_bytes_with_schema_digest(
-        name: impl Into<String>,
-        type_name: impl Into<String>,
-        schema_digest: impl Into<String>,
-        bytes: impl AsRef<[u8]>,
-    ) -> Result<Self, String> {
-        Self::new_with_schema_digest(name, type_name, schema_digest, bytes)
-    }
-
     /// Construct a section from a canonical JSON value.
     pub fn from_json(
         name: impl Into<String>,
@@ -152,16 +142,6 @@ impl ReceiptSection {
         value: impl std::borrow::Borrow<CanonicalJson>,
     ) -> Result<Self, String> {
         Self::new(name, type_name, value.borrow().bytes())
-    }
-
-    /// Construct a section from a canonical JSON value and schema identity.
-    pub fn from_json_with_schema_digest(
-        name: impl Into<String>,
-        type_name: impl Into<String>,
-        schema_digest: impl Into<String>,
-        value: impl std::borrow::Borrow<CanonicalJson>,
-    ) -> Result<Self, String> {
-        Self::new_with_schema_digest(name, type_name, schema_digest, value.borrow().bytes())
     }
 
     /// Decode the typed value after validating its canonical JSON envelope.

@@ -790,15 +790,6 @@ fn two_builds_from_two_paths_are_byte_identical() {
         );
     }
 
-    let left_rust = fs::read(left.join(".jet/build/main.rs")).unwrap();
-    let right_rust = fs::read(right.join(".jet/build/main.rs")).unwrap();
-    assert_eq!(
-        jet::SHA256::sha256_hex(&left_rust),
-        jet::SHA256::sha256_hex(&right_rust),
-        "generated Rust SHA-256 changed with checkout path"
-    );
-    assert_eq!(left_rust, right_rust, "generated Rust changed with checkout path");
-
     let left_binary = fs::read(left.join(".jet/build/main")).unwrap();
     let right_binary = fs::read(right.join(".jet/build/main")).unwrap();
     assert_eq!(
@@ -815,6 +806,94 @@ fn two_builds_from_two_paths_are_byte_identical() {
         left_log, right_log,
         "build store logs differ beyond checkout paths"
     );
+}
+
+/// #3953: a Cranelift dev build caches only its image. An unchanged rebuild
+/// after the executable was deleted restores the same bytes from the cached
+/// image and this `jet`'s runner, and the restored executable runs.
+#[test]
+fn dev_build_restores_a_deleted_executable_from_its_cached_image() {
+    let scratch = Scratch::new("dev-image-restore");
+    write(
+        &scratch.join("main.jet"),
+        "fn run() { print(\"image-restore\") }\n",
+    );
+    let build = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["build", "main.jet"])
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run jet build");
+        assert!(
+            output.status.success(),
+            "build failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let executable = scratch.join(".jet/build/main");
+    build();
+    let built = fs::read(&executable).expect("read built executable");
+    fs::remove_file(&executable).expect("delete built executable");
+    build();
+    assert_eq!(
+        fs::read(&executable).expect("read restored executable"),
+        built,
+        "the restored executable differs from the built one"
+    );
+    let run = Command::new(&executable).output().expect("run restored executable");
+    assert!(run.status.success(), "restored executable failed: {run:?}");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "image-restore\n");
+}
+
+/// #3953: a Cranelift dev build stores every compiled function, and a later
+/// build reuses them. A build whose functions all come from the store must
+/// write the same executable as the build that compiled them. `twice` and
+/// `double` lower to the same IR, so the first build already reuses one for
+/// the other.
+#[test]
+fn dev_build_from_stored_functions_is_byte_identical() {
+    let scratch = Scratch::new("dev-function-cache");
+    write(
+        &scratch.join("main.jet"),
+        "fn twice(x: Int) -> Int { x * 2 }\nfn double(x: Int) -> Int { x * 2 }\nfn run() { print(twice(3) + double(4)) }\n",
+    );
+    let store = scratch.join("store");
+    let build = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["build", "main.jet"])
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", &store)
+            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run jet build");
+        assert!(
+            output.status.success(),
+            "build failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let executable = scratch.join(".jet/build/main");
+    build();
+    let compiled = fs::read(&executable).expect("read built executable");
+    // Drop the executable and every blob, the cached image among them; the
+    // compiled functions are action records and stay.
+    fs::remove_file(&executable).expect("delete built executable");
+    fs::remove_dir_all(store.join("cas")).expect("delete store blobs");
+    build();
+    assert_eq!(
+        fs::read(&executable).expect("read rebuilt executable"),
+        compiled,
+        "the executable built from stored functions differs"
+    );
+    let run = Command::new(&executable).output().expect("run rebuilt executable");
+    assert!(run.status.success(), "rebuilt executable failed: {run:?}");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "14\n");
 }
 
 /// D-BUILD-NOCHANGE1=A (#2517): a second identical `jet build` re-renders the
@@ -1092,6 +1171,166 @@ fn explain_build_reports_package_reuse_reasons() {
             .any(|line| line.starts_with("package\t") && line.contains("red:dependency:")),
         "{text}"
     );
+}
+
+/// #2517 S2: `jet check` of a library package seals a dependency package
+/// whose check key has a record. After a body edit in the root, the
+/// dependency is reused, not checked, and the root's effect diagnostic that
+/// reads the dependency's summary is identical to a check against an empty
+/// store.
+#[test]
+fn body_edit_in_root_reuses_dependency_package_record() {
+    let root = project("sealed-dependency");
+    let dep = root.join("deps/util");
+    fs::create_dir_all(&dep).unwrap();
+    write(
+        &root.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { util: ./deps/util }\n",
+    );
+    write(&dep.join("package.jet"), "name: \"util\"\nversion: \"0.1.0\"\n");
+    write(
+        &dep.join("util.jet"),
+        "pub fn shout(text: String) -> String {\n    print(text)\n    return \"{text}!\"\n}\n\npub fn twice(n: Int) -> Int { return helper(n) + helper(n) }\n\nfn helper(n: Int) -> Int { return n * 2 }\n",
+    );
+    let lib = root.join("lib.jet");
+    let source = |extra: &str| {
+        format!(
+            "use util\n\npub fn quiet(text: String) -[]> String {{\n    return util.shout(text)\n}}\n\npub fn sum(n: Int) -> Int {{ return util.twice(n) + {extra} }}\n"
+        )
+    };
+    let check = |store: &Path| {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["check", "lib.jet"])
+            .current_dir(&root)
+            .env("JET_STORE_DIR", store)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run jet check");
+        let rows = normalized_build_log(&root, store, "lib.jet")
+            .into_iter()
+            .filter(|(kind, ..)| kind == "package")
+            .map(|(_, _, subject, why_ran)| (subject, why_ran))
+            .collect::<Vec<_>>();
+        (String::from_utf8_lossy(&output.stderr).into_owned(), rows)
+    };
+    let reason = |rows: &[(String, String)], needle: &str| {
+        rows.iter()
+            .find(|(subject, _)| subject.contains(needle))
+            .map(|(_, why)| why.clone())
+            .unwrap_or_else(|| panic!("no package row for {needle}: {rows:?}"))
+    };
+    let store = root.join("store");
+
+    write(&lib, &source("1"));
+    let (cold, first) = check(&store);
+    assert!(cold.contains("E3401"), "{cold}");
+    assert!(reason(&first, "util").starts_with("checked+published"), "{first:?}");
+
+    write(&lib, &source("2"));
+    let (warm, second) = check(&store);
+    assert!(reason(&second, "util").starts_with("reused"), "{second:?}");
+    let (fresh, _) = check(&root.join("fresh-store"));
+    assert_eq!(warm, fresh, "a sealed dependency must not change the root's diagnostics");
+}
+
+/// #2517 S3R: a one-line body edit in a checked package rechecks only the
+/// edited item. Every other function body installs its stored checked body
+/// and replays its outputs, and the diagnostics are byte-identical to a
+/// check against an empty store.
+#[test]
+fn body_edit_rechecks_only_the_edited_item() {
+    let root = project("item-reuse");
+    write(&root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n");
+    let lib = root.join("lib.jet");
+    write(
+        &lib,
+        "use shapes\n\npub fn total(n: Int) -> Int {\n    shapes.area(n) + shapes.edge(n)\n}\n\nfn unused_helper(n: Int) -> Int {\n    n\n}\n",
+    );
+    let shapes = root.join("shapes.jet");
+    let source = |factor: &str| {
+        format!(
+            "pub fn area(n: Int) -> Int {{\n    n * n{factor}\n}}\n\npub fn edge(n: Int) -> Int {{\n    helper(n) + 4\n}}\n\nfn helper(n: Int) -> Int {{\n    n - 1\n}}\n\npub fn perimeter(n: Int) -> Int {{\n    doubled :: n + n\n    doubled + doubled\n}}\n"
+        )
+    };
+    let check = |store: &Path| {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["check", "lib.jet"])
+            .current_dir(&root)
+            .env("JET_STORE_DIR", store)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run jet check");
+        let rows = normalized_build_log(&root, store, "lib.jet")
+            .into_iter()
+            .filter(|(kind, ..)| kind == "package")
+            .map(|(_, _, subject, why_ran)| (subject, why_ran))
+            .collect::<Vec<_>>();
+        (String::from_utf8_lossy(&output.stderr).into_owned(), rows)
+    };
+    // One row per checked module: `...; items: N reused, M checked [names], ...`.
+    let items = |rows: &[(String, String)], module: &str| {
+        rows.iter()
+            .find(|(subject, _)| subject.ends_with(module))
+            .and_then(|(_, why)| why.split_once("items: ").map(|(_, items)| items.to_string()))
+            .unwrap_or_else(|| panic!("no item row for {module}: {rows:?}"))
+    };
+    let store = root.join("store");
+
+    write(&shapes, &source(""));
+    let (_, first) = check(&store);
+    assert!(items(&first, "shapes.jet").starts_with("0 reused, 4 checked"), "{first:?}");
+    assert!(items(&first, "lib.jet").starts_with("0 reused, 2 checked"), "{first:?}");
+
+    write(&shapes, &source(" * 3"));
+    let (warm, second) = check(&store);
+    assert!(
+        items(&second, "shapes.jet").starts_with("3 reused, 1 checked [fn:area]"),
+        "{second:?}"
+    );
+    assert!(items(&second, "lib.jet").starts_with("2 reused, 0 checked"), "{second:?}");
+    let (fresh, _) = check(&root.join("fresh-store"));
+    assert!(warm.contains("L0104"), "{warm}");
+    assert_eq!(warm, fresh, "reused items must not change the diagnostics");
+}
+
+/// #2517: a stored compile-time constant is reused only while everything its
+/// evaluation reads is unchanged. Editing the body of a function the
+/// constant calls evaluates it again, and a later constant that reads it
+/// sees the new value: the warm check reports the same failed build-time
+/// assertion as a check against an empty store.
+#[test]
+fn body_edit_reevaluates_the_constants_that_read_it() {
+    let root = project("comptime-reuse");
+    write(&root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n");
+    let lib = root.join("lib.jet");
+    let source = |size: &str| {
+        format!(
+            "pub fn size() -> Int {{\n    {size}\n}}\n\npub fn check_size(n: Int) -> Bool {{\n    assert((n == 4), \"size must stay 4\")\n    true\n}}\n\npub SIZE :: prep {{ size() }}\n\npub OK :: prep {{ check_size(SIZE) }}\n"
+        )
+    };
+    let check = |store: &Path| {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["check", "lib.jet"])
+            .current_dir(&root)
+            .env("JET_STORE_DIR", store)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run jet check");
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    let store = root.join("store");
+
+    write(&lib, &source("4"));
+    let first = check(&store);
+    assert!(!first.contains("size must stay 4"), "{first}");
+    // Unchanged: both constants come from the store.
+    assert_eq!(check(&store), first);
+
+    write(&lib, &source("5"));
+    let warm = check(&store);
+    assert!(warm.contains("size must stay 4"), "{warm}");
+    let fresh = check(&root.join("fresh-store"));
+    assert_eq!(warm, fresh, "a stored constant must not outlive its inputs");
 }
 
 

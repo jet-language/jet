@@ -17,18 +17,6 @@ fn jet_std_b64_decode_opts(
     }
 }
 
-fn jet_std_b64_encodebytes(bytes: &Vec<u8>) -> String {
-    let encoded = jet_std_b64_encode(bytes);
-    let mut out = String::with_capacity(encoded.len() + encoded.len() / 76 + 1);
-    for chunk in encoded.as_bytes().chunks(76) {
-        for &byte in chunk {
-            out.push(byte as char);
-        }
-        out.push('\n');
-    }
-    out
-}
-
 fn jet_std_b64_decodebytes(text: &String) -> Result<Vec<u8>, String> {
     jet_std_b64_decode_opts(text, true, false)
 }
@@ -235,17 +223,6 @@ fn jet_std_xml_to_bytes(
         jet_xml_lexical_policy(&options.lexical),
     )
     .map_err(jet_xml_error)
-}
-
-fn jet_enc_xml_to_string_shape<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-) -> Result<String, Vec<jet_std::FieldError>> {
-    if projection.kind != ShapeProjectionKind::Xml {
-        return Err(jet_std::FieldError::one("XML needs an XML shape projection"));
-    }
-    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
-    jet_std_xml_render(&projected).map_err(jet_xml_field_error)
 }
 
 fn jet_std_xml_canonical(
@@ -520,35 +497,6 @@ fn jet_enc_cbor_to_bytes<T: __jet_Encode>(
     let tree = value.jet_encode();
     let value = jet_cbor_value(&tree)?;
     crate::jet_cbor_kernel::encode(&value, false).map_err(jet_cbor_error)
-}
-
-fn jet_enc_cbor_to_bytes_shape<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-) -> Result<Vec<u8>, Vec<jet_std::FieldError>> {
-    jet_enc_cbor_to_bytes_shape_with(value, projection, false)
-}
-
-fn jet_enc_cbor_to_bytes_shape_canonical<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-) -> Result<Vec<u8>, Vec<jet_std::FieldError>> {
-    jet_enc_cbor_to_bytes_shape_with(value, projection, true)
-}
-
-fn jet_enc_cbor_to_bytes_shape_with<T: __jet_Encode>(
-    value: &T,
-    projection: &ShapeProjection,
-    canonical: bool,
-) -> Result<Vec<u8>, Vec<jet_std::FieldError>> {
-    if projection.kind != ShapeProjectionKind::Cbor {
-        return Err(jet_std::FieldError::one("CBOR needs a CBOR shape projection"));
-    }
-    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
-    let value = jet_cbor_value(&projected).map_err(jet_cbor_field_error)?;
-    crate::jet_cbor_kernel::encode(&value, canonical)
-        .map_err(jet_cbor_error)
-        .map_err(jet_cbor_field_error)
 }
 
 fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(

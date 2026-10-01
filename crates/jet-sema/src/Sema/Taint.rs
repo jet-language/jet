@@ -577,17 +577,7 @@ impl<'a> TaintCtx<'a> {
                 value, fallback, ..
             } => {
                 self.check_expr(value);
-                match fallback {
-                    OrFallback::Value(e) => self.check_expr(e),
-                    OrFallback::Block { body, value, .. } => {
-                        self.check_block(body);
-                        if let Some(value) = value {
-                            self.check_expr(value);
-                        }
-                    }
-                    OrFallback::Return(Some(e), _) => self.check_expr(e),
-                    _ => {}
-                }
+                self.check_fallback(fallback);
             }
             Expr::PatternTest { subject, .. } => self.check_expr(subject),
             Expr::If {
@@ -641,6 +631,20 @@ impl<'a> TaintCtx<'a> {
         }
     }
 
+    fn check_fallback(&mut self, fallback: &OrFallback) {
+        match fallback {
+            OrFallback::Value(e) => self.check_expr(e),
+            OrFallback::Block { body, value, .. } => {
+                self.check_block(body);
+                if let Some(value) = value {
+                    self.check_expr(value);
+                }
+            }
+            OrFallback::Return(Some(e), _) => self.check_expr(e),
+            _ => {}
+        }
+    }
+
     fn check_block(&mut self, stmts: &[Stmt]) {
         for s in stmts {
             self.check_stmt(s);
@@ -655,6 +659,10 @@ impl<'a> TaintCtx<'a> {
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => self.check_expr(e),
             Stmt::Val(b) => {
                 self.check_expr(&b.init);
+                // A refutable binding's miss route runs before its captures exist.
+                if let Some(crate::AST::BindPattern::Refutable { fallback, .. }) = &b.pattern {
+                    self.check_fallback(fallback);
+                }
                 let mut tags = self.tags_of(&b.init);
                 if let Some(ty) = &b.ty {
                     tags.extend(type_tags(ty));

@@ -5,7 +5,7 @@
 // the positional form keeps working.
 #Error
 enum FetchError {
-    BadUrl(String)
+    BadURL(String)
     Timeout(seconds: Int, retries: Int)
 }
 
@@ -21,7 +21,7 @@ enum Shape {
 }
 
 fn fetch(raw: String) -> String AppError! {
-    if raw == "ftp://b" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.BadUrl("ftp is not supported")})
+    if raw == "ftp://b" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.BadURL("ftp is not supported")})
     if raw == "slow" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.Timeout{seconds: 30, retries: 2}})
     if raw == "" -> return Err(.Offline)
     Ok("page at {raw}")
@@ -33,7 +33,7 @@ fn fetch(raw: String) -> String AppError! {
 fn report(raw: String) -> String {
     if fetch(raw) == {
         .Ok(page) -> page
-        .Err(.FailedToFetch{url, cause: .BadUrl(why)}) -> "could not fetch {url}: {why}"
+        .Err(.FailedToFetch{url, cause: .BadURL(why)}) -> "could not fetch {url}: {why}"
         .Err(.FailedToFetch{cause: .Timeout{seconds, ..}, url}) -> "timed out after {seconds}s: {url}"
         .Err(.Offline) -> "offline"
     }

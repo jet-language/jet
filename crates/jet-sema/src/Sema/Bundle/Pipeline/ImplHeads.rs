@@ -136,13 +136,16 @@ pub(super) fn normalize_qualified_impl_heads(
             }
         }
         // The rewritten head no longer spells the alias, so record the use
-        // here; otherwise the import reads as unused (L0103).
+        // here; otherwise the import reads as unused (L0103). Sema has not
+        // rebuilt the alias table yet, so key the use by the import's alias
+        // span, the same loader-owned key the import-edge liveness reads.
         for alias in used_aliases {
-            if let Some(span) = bundle
-                .name_ledger
-                .effective_alias(idx, &alias)
-                .map(|alias| alias.span)
-            {
+            let span = bundle.modules[idx]
+                .imports
+                .iter()
+                .find(|import| import.import_alias() == alias)
+                .map(|import| import.alias_span);
+            if let Some(span) = span {
                 bundle.name_ledger.record_loader_alias_use(idx, span);
             }
         }

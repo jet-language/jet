@@ -637,10 +637,6 @@ impl JetTaskControl {
         }
     }
 
-    pub fn observe_id_slot(&self) -> &AtomicUsize {
-        &self.observe_id
-    }
-
     pub fn pause(&self) {
         self.pause_with_mode(0);
     }
@@ -1055,11 +1051,6 @@ pub fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
         _ => "deterministic world has no controlled external-effect provider",
     };
     jet_scheduler_fatal(message);
-}
-
-/// Whether the current thread is running one of the world's counted tasks.
-pub fn jet_scheduler_world_task_active() -> bool {
-    JET_WORLD_TASK_ACTIVE.with(|active| active.get())
 }
 
 pub fn jet_scheduler_world_rng_next() -> Option<u64> {
@@ -1619,18 +1610,6 @@ pub fn jet_scheduler_owner_deadline_cancel(task_id: u64) {
             .entries
             .retain(|entry| entry.task_id != task_id);
     });
-}
-
-/// Return the earliest queued absolute deadline without removing its task.
-pub fn jet_scheduler_owner_deadline_next() -> Option<i64> {
-    JET_OWNER_DEADLINE_QUEUE.with(|queue| {
-        queue
-            .borrow()
-            .entries
-            .iter()
-            .min_by_key(|entry| (entry.deadline_ns, entry.task_id))
-            .map(|entry| entry.deadline_ns)
-    })
 }
 
 /// Remove and return the earliest task whose deadline is due.

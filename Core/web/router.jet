@@ -78,7 +78,7 @@ pub struct WebRouter {
     pub cache_status: [WebRouterCacheStatus]
 }
 
-pub fn new() -> WebRouter {
+pub fn new() -> WebRouter Never! {
     WebRouter{routes: [WebRoute]{}, current: "/", status: WebNavigationStatus.Idle, cache: [String]{}, cache_status: [WebRouterCacheStatus]{}}
 }
 
@@ -120,25 +120,25 @@ pub fn preload(router: &WebRouter, path: String) -> WebNavigation WebRouterError
     Ok(nav)
 }
 
-pub fn abort(router: &WebRouter) -> Bool {
+pub fn abort(router: &WebRouter) -> Bool Never! {
     if router.status != WebNavigationStatus.Preloading && router.status != WebNavigationStatus.Pending -> return false
     router.status = WebNavigationStatus.Aborted
     true
 }
 
-pub fn stale(router: WebRouter, path: String) -> Int {
+pub fn stale(router: WebRouter, path: String) -> Int Never! {
     if cache_state(router, path) == WebRouterCacheStatus.Stale -> return 1
     0
 }
 
-pub fn invalidate(router: &WebRouter, path: String) -> Int {
+pub fn invalidate(router: &WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
     _ :: cache_path(router, path, WebRouterCacheStatus.Invalidated)
     1
 }
 
-pub fn collect(router: &WebRouter, path: String) -> Int {
+pub fn collect(router: &WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
     _ :: cache_path(router, path, WebRouterCacheStatus.Collected)
@@ -146,7 +146,7 @@ pub fn collect(router: &WebRouter, path: String) -> Int {
 }
 
 
-pub fn current(router: WebRouter) -> WebNavigationState {
+pub fn current(router: WebRouter) -> WebNavigationState Never! {
     WebNavigationState{path: router.current, status: router.status}
 }
 
@@ -171,7 +171,7 @@ pub fn link(router: WebRouter, name: String, params: [String:String], search: [S
     Err(WebRouterError.NotFound)
 }
 
-pub fn cache_show(router: WebRouter) -> String {
+pub fn cache_show(router: WebRouter) -> String Never! {
     out := ""
     loop i in 0..<router.cache.len() {
         if i > 0 -> out = "{out},"
@@ -180,7 +180,7 @@ pub fn cache_show(router: WebRouter) -> String {
     out
 }
 
-pub fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus {
+pub fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 || idx >= router.cache_status.len() -> return WebRouterCacheStatus.Collected
     router.cache_status[idx]

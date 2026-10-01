@@ -125,65 +125,130 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Bindings the fold changed under it. A binding that advances a
-    /// receiver — `magic :: reader.read_u32_le()?` — only folds correctly
-    /// if the emitted runtime copy of that receiver advances too, and a
-    /// baked literal never does. The implicit fold path drops both the
-    /// answer and the receiver instead (D-VERDICT-1308-1: silent decline).
-    pub(crate) fn ct_mutated_names(
-        before: &HashMap<String, crate::Comptime::CtValue>,
-        after: &HashMap<String, crate::Comptime::CtValue>,
-    ) -> Vec<String> {
-        before
-            .iter()
-            .filter(|(name, value)| after.get(*name).is_some_and(|now| now != *value))
-            .map(|(name, _)| name.clone())
-            .collect()
-    }
-
-    /// Take names back out of the comptime world so later folds read them
-    /// as unknown rather than stale.
-    pub(crate) fn forget_ct_bindings(&mut self, names: &[String]) {
-        for scope in &mut self.ct_scopes {
-            for name in names {
-                scope.remove(name);
-            }
-        }
-    }
-
-    /// Check optional fold reads against the live compile-time frame. Stateful folds invalidate
-    /// `ct_scopes` entries, so later folds cannot reuse pre-fold values.
-    pub(crate) fn optional_comptime_fold_is_eligible(
+    /// Whether `expr` is an explicit constant, so a diagnostic may evaluate
+    /// it. Compile time is always explicit, so only literal forms qualify:
+    /// literals (including unit literals and their elaborated constructor),
+    /// type-, enum- or module-qualified members such as `Method.Get` or
+    /// `math.PI`, negation and arithmetic over those, module constants with
+    /// a known value (a `prep` constant or a literal initializer), and local
+    /// `prep` bindings whose value is live in the compile-time frame. An
+    /// ordinary binding or a function call never counts as a constant here.
+    pub(crate) fn is_explicit_constant(
         &self,
-        expr: &crate::AST::Expr,
+        expr: &Expr,
         values: &HashMap<String, crate::Comptime::CtValue>,
     ) -> bool {
-        let (reads, calls) = crate::Sema::expr_free_reads_and_calls(expr);
-        for name in reads.iter().chain(calls.iter()) {
-            if self.lookup(name).is_none() {
-                // Imported module qualifiers and module-level callables are
-                // resolved by the fragment context, not the lexical frame.
-                continue;
+        let constant = |inner: &Expr| self.is_explicit_constant(inner, values);
+        match expr {
+            Expr::Int(..)
+            | Expr::Float(..)
+            | Expr::Bool(..)
+            | Expr::Char(..)
+            | Expr::Unit(_)
+            | Expr::Absent(_)
+            | Expr::UnitLit { .. }
+            | Expr::ComptimeName { .. } => true,
+            Expr::Str(parts, _) => parts.iter().all(|part| match part {
+                crate::AST::StrPart::Lit(_) => true,
+                crate::AST::StrPart::Interp(inner, _) => constant(inner),
+            }),
+            Expr::Paren(inner, _) | Expr::Unary(_, inner, _) | Expr::Present(inner, _) => {
+                constant(inner)
             }
-            let Some(depth) = self.flow.bindings.depth_of(name) else {
-                return false;
-            };
-            // Flow depth counts open scopes, so the function scope is depth 1
-            // while its compile-time frame is `ct_scopes[0]`.
-            let Some(local_value) = depth
-                .checked_sub(1)
-                .and_then(|index| self.ct_scopes.get(index))
-                .and_then(|scope| scope.get(name))
-            else {
-                // This lexical local shadows any same-named outer value, but
-                // no live compile-time value belongs to this binding.
-                return false;
-            };
-            if values.get(name) != Some(local_value) {
-                return false;
+            Expr::Binary(_, left, right, _) => constant(left) && constant(right),
+            Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
+                operands.iter().all(constant)
             }
+            Expr::TupleLit(fields, ..) => fields.iter().all(|(_, value)| constant(value)),
+            Expr::MapLit(entries, _) => entries
+                .iter()
+                .all(|(key, value)| constant(key) && constant(value)),
+            Expr::EnumLit { args, .. } => args.iter().all(|arg| match arg {
+                crate::AST::EnumLitArg::Positional(value)
+                | crate::AST::EnumLitArg::Named { expr: value, .. } => constant(value),
+            }),
+            Expr::Ident(name, _) => self.names_explicit_constant(name, values),
+            Expr::Field(base, ..) => self.qualifies_explicit_constant(base, values),
+            // Sema elaborates a unit literal in place: `5s` becomes
+            // `Duration.nanoseconds(5 * scale) ?? panic(…)`, `2.5px` becomes
+            // `Px.float(2.5)` and `4i` becomes `Complex(0.0, 4.0)`.
+            Expr::OrFallback {
+                value,
+                fallback: crate::AST::OrFallback::Panic { .. },
+                ..
+            } => self.is_elaborated_unit_literal(value) && constant(value),
+            Expr::MethodCall { args, .. } => {
+                self.is_elaborated_unit_literal(expr) && args.iter().all(|arg| constant(&arg.expr))
+            }
+            Expr::Call(call) if call.name == crate::Syntax::TYPE_COMPLEX => {
+                call.args.iter().all(|arg| constant(&arg.expr))
+            }
+            _ => false,
         }
-        true
+    }
+
+    /// The constructor call sema writes in place of a unit literal.
+    fn is_elaborated_unit_literal(&self, expr: &Expr) -> bool {
+        let Expr::MethodCall {
+            receiver, method, ..
+        } = expr
+        else {
+            return false;
+        };
+        let Expr::Ident(owner, _) = receiver.as_ref() else {
+            return false;
+        };
+        if self.lookup(owner).is_some() {
+            return false;
+        }
+        (owner == crate::Syntax::DURATION_TYPE && method == "nanoseconds")
+            || (self.registry.is_distinct(owner)
+                && crate::Syntax::numeric_conversion_method("Float") == Some(method.as_str()))
+    }
+
+    /// The base of a member read `base.member` that keeps it constant: a
+    /// type, enum or module name (`Method.Get`, `math.PI`), or a value that
+    /// is itself an explicit constant.
+    fn qualifies_explicit_constant(
+        &self,
+        base: &Expr,
+        values: &HashMap<String, crate::Comptime::CtValue>,
+    ) -> bool {
+        match base {
+            Expr::Field(inner, ..) => self.qualifies_explicit_constant(inner, values),
+            Expr::Ident(name, _) if self.lookup(name).is_none() && !self.consts.contains_key(name) => {
+                true
+            }
+            _ => self.is_explicit_constant(base, values),
+        }
+    }
+
+    /// A name read is constant when it is a module constant with a known
+    /// value or a local `prep` binding whose value is live.
+    fn names_explicit_constant(
+        &self,
+        name: &str,
+        values: &HashMap<String, crate::Comptime::CtValue>,
+    ) -> bool {
+        if self.lookup(name).is_none() {
+            // A module-level name: only a constant with a known value.
+            return values.contains_key(name);
+        }
+        let Some(depth) = self.flow.bindings.depth_of(name) else {
+            return false;
+        };
+        // Flow depth counts open scopes, so the function scope is depth 1
+        // while its compile-time frame is `ct_scopes[0]`.
+        let Some(local_value) = depth
+            .checked_sub(1)
+            .and_then(|index| self.ct_scopes.get(index))
+            .and_then(|scope| scope.get(name))
+        else {
+            // This lexical local shadows any same-named outer value, but no
+            // live compile-time value belongs to this binding.
+            return false;
+        };
+        values.get(name) == Some(local_value)
     }
 
     pub(crate) fn evaluate_constant(
@@ -194,14 +259,14 @@ impl<'a> Checker<'a> {
             return None;
         }
         let globals = self.current_ct_globals().into_owned();
-        if !self.optional_comptime_fold_is_eligible(expr, &globals) {
+        if !self.is_explicit_constant(expr, &globals) {
             return None;
         }
         let binding_types = self.current_ct_binding_types(&globals);
         let checked_nominals = self.checked_comptime_nominals();
         crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
             expr,
-            self.ct_checked_funcs,
+            self.ct_checked_funcs_for_evaluation(),
             self.ct_externs,
             self.ct_base_dir,
             &globals,
@@ -386,6 +451,9 @@ impl<'a> Checker<'a> {
         } else {
             let depth = self.flow.depth;
             self.note_unused_binding(&name, name_span, false);
+            // A fresh loop binding is a new value: a move of an earlier
+            // binding with the same name (an earlier loop's variable) is gone.
+            self.clear_moved_binding(&name);
             self.flow.bindings.set_at(
                 &name,
                 depth,
@@ -409,6 +477,44 @@ impl<'a> Checker<'a> {
                 &name,
                 depth,
                 crate::Sema::FlowFacts::OriginFact::untracked(),
+            );
+        }
+    }
+
+    /// Error recovery for a loop whose source failed to check: its item type
+    /// is unknown, so bind each loop variable as invalid. A use then stays
+    /// silent (the source already reported) instead of cascading into E0107
+    /// "nothing named `row`" reports that suggest an unrelated similar name.
+    pub(crate) fn declare_invalid_loop_vars(
+        &mut self,
+        var: &str,
+        var_span: Span,
+        var2: Option<&(String, Span)>,
+    ) {
+        let names = std::iter::once((var, var_span))
+            .chain(var2.map(|(name, span)| (name.as_str(), *span)));
+        for (name, name_span) in names {
+            if name == "_" || self.lookup(name).is_some() {
+                continue;
+            }
+            let depth = self.flow.depth;
+            self.clear_moved_binding(name);
+            self.flow.bindings.set_at(
+                name,
+                depth,
+                LocalInfo {
+                    def_span: name_span,
+                    binding_sigil_span: None,
+                    ty: Type::Named(String::new()),
+                    mutable: false,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                    interrupt_sendable: false,
+                    reactive_local: false,
+                    reactive_shared: false,
+                    single_use_span: None,
+                    invalid: true,
+                },
             );
         }
     }

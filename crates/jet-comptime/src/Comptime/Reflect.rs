@@ -1258,11 +1258,6 @@ fn format_method_sig(method: &Func) -> String {
     )
 }
 
-/// One reflected struct field (D-METAREFLECT1).
-pub fn build_field_info(field: &Field) -> CtValue {
-    build_reflection_field_info(&ReflectionField::from_field(field), None)
-}
-
 fn build_reflection_field_info(
     field: &ReflectionField,
     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,

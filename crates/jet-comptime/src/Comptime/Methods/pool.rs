@@ -133,7 +133,7 @@ fn list_field(fields: &[(String, CtValue)], wanted: &str) -> Vec<CtValue> {
 
 fn id(index: usize, generation: u32) -> CtValue {
     CtValue::Struct {
-        type_name: "Id".to_string(),
+        type_name: "ID".to_string(),
         fields: vec![
             ("index".to_string(), CtValue::Int(index as i64)),
             (
@@ -148,7 +148,7 @@ fn id_parts(value: &CtValue) -> Option<(usize, u32)> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
-    if type_name != "Id" {
+    if type_name != "ID" {
         return None;
     }
     let int_field = |wanted: &str| {

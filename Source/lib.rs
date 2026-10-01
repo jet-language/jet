@@ -437,46 +437,6 @@ pub fn compile_no_os(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     )
 }
 
-pub fn compile_no_os_with_gates(
-    file: &str,
-    gates: Policy::GateSet,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, gates, false, None)
-}
-
-pub fn compile_no_os_with_gates_and_settings(
-    file: &str,
-    gates: Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_with_settings(
-        file,
-        Sema::CompileMode::Run,
-        true,
-        gates,
-        false,
-        None,
-        setting_overrides,
-    )
-}
-pub fn compile_no_os_with_profile_and_gates_and_settings(
-    file: &str,
-    gates: Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_with_profile_and_settings(
-        file,
-        Sema::CompileMode::Run,
-        true,
-        gates,
-        false,
-        None,
-        profile,
-        setting_overrides,
-    )
-}
-
 /// Compile with the selected audited-gate invocation permissions.
 pub fn compile_with_gates(
     file: &str,
@@ -485,38 +445,6 @@ pub fn compile_with_gates(
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, false, None)
 }
 
-pub fn compile_with_gates_and_settings(
-    file: &str,
-    gates: Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_with_settings(
-        file,
-        Sema::CompileMode::Run,
-        false,
-        gates,
-        false,
-        None,
-        setting_overrides,
-    )
-}
-pub fn compile_with_gates_and_profile_and_settings(
-    file: &str,
-    gates: Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_with_profile_and_settings(
-        file,
-        Sema::CompileMode::Run,
-        false,
-        gates,
-        false,
-        None,
-        profile,
-        setting_overrides,
-    )
-}
 
 /// D-BUILDENTRY1: native `jet build` path. No root `fn build` keeps existing
 /// zero-config pipeline; selected root entry evaluates and executes first.
@@ -1083,8 +1011,7 @@ pub fn prepare_programmable_build_front_end_scoped_with_entry(
     };
     with_compiler_stack(move || {
         let mut prepared = Driver::prepare_build_front_end(inputs)?;
-        let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
-        prepared.set_program_value(program);
+        attach_build_program_value(&mut prepared);
         Ok(prepared)
     })
 }
@@ -1122,8 +1049,7 @@ pub fn prepare_programmable_build_front_end_scoped_with_entry_with_overlay(
     with_compiler_stack(|| {
         let mut prepared =
             Driver::prepare_build_front_end_with_overlay(inputs, source_path, source)?;
-        let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
-        prepared.set_program_value(program);
+        attach_build_program_value(&mut prepared);
         Ok(prepared)
     })
 }
@@ -1160,10 +1086,19 @@ pub fn prepare_programmable_build_front_end_scoped_with_entry_with_source_closur
     with_compiler_stack(|| {
         let mut prepared =
             Driver::prepare_build_front_end_with_source_closure(inputs, source_closure)?;
-        let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
-        prepared.set_program_value(program);
+        attach_build_program_value(&mut prepared);
         Ok(prepared)
     })
+}
+
+/// Attach the compiler-owned program snapshot a selected `fn build` reads.
+/// Building it walks the whole semantic index, so a build without a `fn build`
+/// entry skips it.
+fn attach_build_program_value(prepared: &mut Driver::PreparedBuildFrontEnd) {
+    if prepared.selects_build_entry() {
+        let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
+        prepared.set_program_value(program);
+    }
 }
 
 fn file_selects_programmable_build(file: &str) -> bool {
@@ -1320,54 +1255,6 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
         None,
         application_authority,
         artifact_build,
-    )
-}
-/// Compile a programmable build from an authority-selected source snapshot.
-/// The source overlay is retained through build evaluation and runtime
-/// compilation; the entry pathname is never reopened.
-pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_with_overlay(
-    file: &str,
-    grants: &[String],
-    no_os: bool,
-    gates: Policy::GateSet,
-    locked: bool,
-    web_target: bool,
-    plugin_target: bool,
-    cross_target: Option<&str>,
-    emit_generated: bool,
-    remote_builder: Option<&str>,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-    prepared: Option<Driver::PreparedBuildFrontEnd>,
-    package_scope: bool,
-    build_override: bool,
-    entry_fn: Option<&str>,
-    without_codegen: bool,
-    source_path: &std::path::Path,
-    source: &str,
-) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
-    compile_programmable_build_opts_inner(
-        file,
-        grants,
-        no_os,
-        gates,
-        locked,
-        web_target,
-        plugin_target,
-        cross_target,
-        emit_generated,
-        remote_builder,
-        profile,
-        setting_overrides,
-        prepared,
-        package_scope,
-        build_override,
-        entry_fn,
-        without_codegen,
-        false,
-        Some((source_path, source)),
-        None,
-        false,
     )
 }
 
@@ -2577,32 +2464,6 @@ pub fn compile_plugin_with_gates(
     })
 }
 
-pub fn compile_plugin_with_gates_and_settings(
-    file: &str,
-    gates: Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_plugin_with_gates_and_profile_and_settings(file, gates, "dev", setting_overrides)
-}
-
-pub fn compile_plugin_with_gates_and_profile_and_settings(
-    file: &str,
-    gates: Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
-    with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts_plugin_with_gates_and_profile_and_settings(
-            file,
-            Sema::CompileMode::Check,
-            gates,
-            Some(Syntax::TARGET_SANDBOX),
-            profile,
-            setting_overrides,
-        )
-    })
-}
-
 /// Like `compile_with_path` but for `jet build --target=sandbox` (D-PLUGIN1=B /
 /// D-DEP-WASM1=A, c81). `CompileMode::Check` — a sandbox package has no single
 /// `fn run` entry point (D-ILE1: it's a library-shaped export surface, not an
@@ -2719,11 +2580,6 @@ pub fn compile_with_entry_and_settings(
             setting_overrides,
         )
     })
-}
-
-/// Compile one explicitly addressed runnable Output.
-pub fn compile_with_output(file: &str, output: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    with_compiler_stack(|| Driver::compile_bundle_path_output(file, output))
 }
 
 pub fn compile_output_with_options(

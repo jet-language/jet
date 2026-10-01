@@ -1,0 +1,43 @@
+// A read parameter's optional payload is a read view in both spellings:
+// `g :: env.graph ?? fallback` in one line or split through a binding, and
+// `if param == .Val(x)` like `if param.field == .Val(x)`. The payload holds a
+// function value, so it cannot be copied; nothing here copies it.
+struct Graph {
+    name: String
+    scale: fn(Int) -> Int
+}
+
+struct Env {
+    graph: Graph?
+}
+
+fn triple(n: Int) -> Int { n * 3 }
+
+fn one_line(env: Env) -> Int {
+    g :: env.graph ?? return 0
+    g.scale(2)
+}
+
+fn split(env: Env) -> Int {
+    o :: env.graph
+    g :: o ?? return 0
+    g.scale(3)
+}
+
+fn whole(graph: Graph?) -> String {
+    if graph == .Val(found) -> return "whole {found.name}"
+    "whole none"
+}
+
+fn field(env: Env) -> String {
+    if env.graph == .Val(found) -> return "field {found.name}"
+    "field none"
+}
+
+fn run() {
+    env :: Env{graph: Val(Graph{name: "g", scale: triple})}
+    print(one_line(env))
+    print(split(env))
+    print(whole(env.graph))
+    print(field(env))
+}

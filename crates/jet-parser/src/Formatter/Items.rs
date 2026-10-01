@@ -877,6 +877,19 @@ impl<'a> Fmt<'a> {
         self.fmt_pub_qualifier(t.is_pub, t.is_package_pub);
         self.write("trait ");
         self.write(&t.name);
+        // D-TRAIT-OVERLOAD1=A: one supertrait stays bare, several use the list.
+        match t.supertraits.as_slice() {
+            [] => {}
+            [single] => {
+                self.write(": ");
+                self.write(single);
+            }
+            many => {
+                self.write(": [");
+                self.write(&many.join(", "));
+                self.write("]");
+            }
+        }
         self.write(" ");
         self.write(Syntax::BLOCK_OPEN);
         self.newline();

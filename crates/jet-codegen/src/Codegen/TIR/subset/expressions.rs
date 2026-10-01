@@ -18,7 +18,6 @@ use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_lit_constructible;
 use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_json_type_name;
-use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle_generated;
 use crate::Syntax;
@@ -94,19 +93,17 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         } if pattern.has_nested_pattern() => expr_in_subset(subject, cx, locals),
         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
-        // Bool `matches!` (`TExprKind::PatternMatches`). Only user enums whose
-        // owner resolves via `cx.variant_owner` — payload-binding tests stay the
-        // if-let condition shape, JSON/Key keep their existing routes.
+        // Bool `matches!` (`TExprKind::PatternMatches`). Admission needs a known
+        // variant name; lowering resolves the owner from the checked subject type,
+        // so a user enum variant spelled like a builtin (`Int`, `Char`) and a
+        // `DataTree`/`Key` subject with the same name each keep their own owner.
         Expr::PatternTest {
             subject,
             pattern: Pattern::Variant {
                 variant, bindings, ..
             },
             ..
-        } if bindings.is_empty()
-            && !is_json_variant(variant)
-            && !is_key_variant(variant)
-            && cx.variant_owner.contains_key(variant) =>
+        } if bindings.is_empty() && cx.variant_owner.contains_key(variant) =>
         {
             expr_in_subset(subject, cx, locals)
         }
@@ -433,7 +430,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 cx.any_core_import_module(alias) == Some(crate::Syntax::CORE_EMAIL_MODULE)
                     && matches!(
                         type_name.as_str(),
-                        "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig"
+                        "RecipientReport" | "SendReport" | "Limits" | "DKIMConfig" | "SMTPConfig"
                     )
             });
             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
@@ -593,7 +590,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     .unwrap_or(enum_name.as_str());
                 if !locals.contains(enum_name)
                     && ((resolved_enum == "SMTPSecurity"
-                        && matches!(member.as_str(), "StartTls" | "TLS"))
+                        && matches!(member.as_str(), "StartTLS" | "TLS"))
                         || (resolved_enum == "RecipientPolicy"
                             && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
                         || (resolved_enum == "SMTPAuth" && member == "None")
@@ -725,7 +722,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             let resolved_type = cx
                 .core_qualified_rust_type_name(type_name)
                 .unwrap_or(type_name.as_str());
-            if (resolved_type == "SMTPSecurity" && matches!(variant.as_str(), "StartTls" | "TLS"))
+            if (resolved_type == "SMTPSecurity" && matches!(variant.as_str(), "StartTLS" | "TLS"))
                 || (resolved_type == "RecipientPolicy"
                     && matches!(variant.as_str(), "RequireAll" | "DeliverAccepted"))
             {
@@ -741,7 +738,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 });
             }
             if resolved_type == "TLSVersion" {
-                return args.is_empty() && matches!(variant.as_str(), "Tls12" | "Tls13");
+                return args.is_empty() && matches!(variant.as_str(), "TLS12" | "TLS13");
             }
             if resolved_type == "TLSClientTrust"
                 && matches!(variant.as_str(), "System" | "SystemPlus" | "CustomOnly")
@@ -752,7 +749,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 });
             }
             if resolved_type == "HTTPProxy"
-                && matches!(variant.as_str(), "FromEnvironment" | "None" | "Url")
+                && matches!(variant.as_str(), "FromEnvironment" | "None" | "URL")
             {
                 return args.iter().all(|arg| match arg {
                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),

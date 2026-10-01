@@ -1,3 +1,35 @@
+use jet_foundation.[
+    AppliedRuleApplication,
+    Diagnostic,
+    Expr,
+    Func,
+    Item,
+    Marker,
+    MarkerDecl,
+    MarkerDeclParam,
+    Program,
+    RuleSite,
+    Span,
+    Symbol,
+    SymbolKind,
+    TAppliedRule,
+    TAppliedRuleArgKind,
+    TAppliedRuleArgumentMenu,
+    TAppliedRuleCatalog,
+    TAppliedRuleCompanionSite,
+    TAppliedRuleParameter,
+    TAppliedRuleSignature,
+    TAppliedRuleStatus,
+    TComptimeValue,
+    TExpr,
+    TextEdit,
+    Type,
+    diagnostic_from_registry,
+    diagnostic_with_edit,
+    expr_span,
+    type_name,
+]
+
 pub struct SemaMarkerRuleArgumentObservation {
     pub ty: Type?
     pub constant: TComptimeValue?
@@ -221,15 +253,20 @@ fn sema_marker_rules_metadata_names(declaration: MarkerDecl, name: String, sites
 }
 
 
-fn sema_marker_rules_companion(declaration: MarkerDecl) -> TAppliedRuleCompanionSite? {
-    value :: sema_marker_rules_metadata_expr(declaration, "$companion") ?? return Val(None)
+// A declared `$companion` site; `site` is None when the rule declares none.
+struct SemaMarkerRulesCompanion {
+    site: TAppliedRuleCompanionSite?
+}
+
+fn sema_marker_rules_companion(declaration: MarkerDecl) -> SemaMarkerRulesCompanion? {
+    value :: sema_marker_rules_metadata_expr(declaration, "$companion") ?? return Val(SemaMarkerRulesCompanion{site: None})
     if value == .ListLit(values, _) {
         if values.len() != 2 {
             return None
         }
         companion_name :: sema_marker_rules_expr_name(values[0]) ?? return None
         site :: sema_marker_rules_site_value(values[1]) ?? return None
-        return Val(Val(TAppliedRuleCompanionSite{rule: companion_name, site: site}))
+        return Val(SemaMarkerRulesCompanion{site: Val(TAppliedRuleCompanionSite{rule: companion_name, site: site})})
     }
     None
 }
@@ -251,12 +288,13 @@ fn sema_marker_rules_source_slice(source: String, span: Span) -> String? {
     if span.end > bytes.len() {
         return None
     }
-    String.from_bytes(bytes[span.start..span.end])
+    text :: String.from_bytes(bytes[span.start..span.end]) ?? return None
+    Val(text)
 }
 
 fn sema_marker_rules_applied_parameter(parameter: MarkerDeclParam, source: String) -> TAppliedRuleParameter? {
     ty :: parameter.ty ?? return None
-    default_source := None
+    default_source := String?{None}
     if parameter.value != None {
         default_expr :: parameter.value ?? return None
         default_source = Val(sema_marker_rules_source_slice(source, expr_span(default_expr)) ?? return None)
@@ -285,8 +323,8 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
         status = TAppliedRuleStatus.Retired{replacement: replacement}
     }
     params := [TAppliedRuleParameter]{}
-    variadic := None
-    variadic_source_type := None
+    variadic := TAppliedRuleArgKind?{None}
+    variadic_source_type := String?{None}
     loop parameter in declaration.params {
         if parameter.name.starts_with("$") {
             next
@@ -310,7 +348,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
         sites: sites,
         repeatable: repeatable,
         owns_menu: owns_menu,
-        companion_site: companion,
+        companion_site: companion.site,
         status: status,
         inherits: inherits,
         resolution: resolution,
@@ -454,7 +492,7 @@ fn sema_marker_rules_marker_signature_bindings(marker: Marker, signature: TAppli
         if all_named {
             loop source_index in 0..<marker.args.len() {
                 label :: sema_marker_rules_label(marker, source_index) ?? return None
-                selected := None
+                selected := Int?{None}
                 loop (index, parameter) in signature.params {
                     if parameter.name == label {
                         selected = Val(index)
@@ -490,12 +528,12 @@ fn sema_marker_rules_marker_signature_bindings(marker: Marker, signature: TAppli
                 label = Val(name)
             }
         }
-        parameter_index := None
+        parameter_index := Int?{None}
         if {
             label != None -> {
                 name :: label ?? return None
                 saw_named = true
-                selected := None
+                selected := Int?{None}
                 loop (index, parameter) in signature.params {
                     if parameter.name == name {
                         selected = Val(index)
@@ -608,7 +646,8 @@ fn sema_marker_rules_constant_for_reference(symbol: Symbol, references: [SemaNam
             return Val(value.value)
         }
     }
-    graph :: environment.registration_graph ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
     loop graph_module in graph.modules {
         if graph_module.module_identity != symbol.module_name {
             next
@@ -646,7 +685,8 @@ fn sema_marker_rules_constant_value(checked: TExpr, marker: Marker, source_index
 }
 
 fn sema_marker_rules_comptime_source(marker: Marker, source_index: Int, expression: Expr, expected_type: Type?, environment: SemaScopeEnvironment, values: [SemaComptimeItemValue]) -> SemaComptimeItemSource? {
-    graph :: environment.registration_graph ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
     destination_key := "{marker.name}::marker::{marker.name_span.start}::arg::{source_index}"
     source := SemaComptimeItemSource{
         module_identity: environment.module_identity,
@@ -679,10 +719,10 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
     reference_start := probe_context.name_references.len()
     request_start := probe_context.comptime_requests.len()
     checked := sema_check_expression(argument, checked_expected, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &diagnostics)
-    checked_value := None
-    constant := None
-    staged_source := None
-    observed_type := None
+    checked_value := TExpr?{None}
+    constant := TComptimeValue?{None}
+    staged_source := SemaComptimeItemSource?{None}
+    observed_type := Type?{None}
     if checked == .Val(value) {
         required := checked_expected
         if required != None {
@@ -706,7 +746,7 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
             observed_type = Val(value.ty)
             if capture_constant {
                 constant = sema_marker_rules_constant_value(value, marker, source_index, reference_start, &probe_context, environment, values)
-                if constant == None {
+                if constant == None && sema_marker_rules_explicit_constant(argument, probe_scopes) {
                     staged_source = sema_marker_rules_comptime_source(marker, source_index, argument, checked_expected, environment, values)
                 }
             }
@@ -723,6 +763,77 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
         comptime_requests: requests,
         comptime_source: staged_source,
         diagnostics: diagnostics,
+    }
+}
+
+// Compile time is always explicit, so a rule argument is evaluated only when
+// it is written as a constant: literals (including unit and enum literals),
+// type-, enum- or module-qualified members, module constants, prepared
+// values, and negation or arithmetic over those. A local binding or a
+// function call never counts as a constant here.
+fn sema_marker_rules_explicit_constant(expression: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expression == {
+        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Unit(_) | .Char(_, _) | .Absent(_) -> return true
+        .UnitLit(_, _, _, _, _, _) | .ComptimeName(_, _, _) -> return true
+        .Str(parts, _) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) {
+                    if !sema_marker_rules_explicit_constant(inner, scopes) -> return false
+                }
+            }
+            return true
+        }
+        .Paren(inner, _) | .Unary(_, inner, _) | .Present(inner, _) -> return sema_marker_rules_explicit_constant(inner, scopes)
+        .Binary(_, left, right, _) -> return sema_marker_rules_explicit_constant(left, scopes) && sema_marker_rules_explicit_constant(right, scopes)
+        .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> {
+            loop operand in operands {
+                if !sema_marker_rules_explicit_constant(operand, scopes) -> return false
+            }
+            return true
+        }
+        .TupleLit(fields, _, _) -> {
+            loop field in fields {
+                if !sema_marker_rules_explicit_constant(field.value, scopes) -> return false
+            }
+            return true
+        }
+        .MapLit(entries, _) -> {
+            loop entry in entries {
+                if !sema_marker_rules_explicit_constant(entry.key, scopes) || !sema_marker_rules_explicit_constant(entry.value, scopes) -> return false
+            }
+            return true
+        }
+        .EnumLit(_, _, _, args, _, _) -> {
+            loop arg in args {
+                value :: if arg == {
+                    .Positional(inner) -> inner
+                    .Named(_, inner) -> inner
+                }
+                if !sema_marker_rules_explicit_constant(value, scopes) -> return false
+            }
+            return true
+        }
+        .Ident(name, _) -> {
+            index :: sema_scope_resolve_index(scopes, name) ?? return false
+            return scopes.bindings[index].symbol.kind == SymbolKind.Constant
+        }
+        .Field(base, _, _) -> return sema_marker_rules_constant_qualifier(base, scopes)
+        else -> return false
+    }
+}
+
+// The base of a member read `base.member` that keeps it constant: a type,
+// enum, module or constant name (`Method.Get`, `math.PI`), or a value that
+// is itself an explicit constant.
+fn sema_marker_rules_constant_qualifier(base: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if base == {
+        .Field(inner, _, _) -> return sema_marker_rules_constant_qualifier(inner, scopes)
+        .Ident(name, _) -> {
+            index :: sema_scope_resolve_index(scopes, name) ?? return true
+            kind :: scopes.bindings[index].symbol.kind
+            return kind != SymbolKind.Local && kind != SymbolKind.Parameter
+        }
+        else -> return sema_marker_rules_explicit_constant(base, scopes)
     }
 }
 
@@ -807,7 +918,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
                 }
             }
         }
-        expected_type := None
+        expected_type := Type?{None}
         if binding.parameter_index == {
             .Val(index) -> {
                 if index < expected_types.len() {
@@ -815,7 +926,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
                 }
             }
             else -> {
-                expected_type = variadic_expected_type
+                expected_type = ~variadic_expected_type
             }
         }
         observation := SemaMarkerRuleArgumentObservation{
@@ -895,9 +1006,9 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
 fn sema_marker_rules_declared_signature(rule: SemaScopeMembersMarkerRule) -> (signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?) Never! {
     params := [TAppliedRuleParameter]{}
     expected_types := [Type?]{}
-    variadic := None
-    variadic_source_type := None
-    variadic_expected_type := None
+    variadic := TAppliedRuleArgKind?{None}
+    variadic_source_type := String?{None}
+    variadic_expected_type := Type?{None}
     loop parameter in rule.params {
         if parameter.name.starts_with("$") {
             next
@@ -927,7 +1038,7 @@ fn sema_marker_rules_declared_site_error(marker: Marker, rule: SemaScopeMembersM
 fn sema_marker_rules_applied_site_error(marker: Marker, rule: TAppliedRule, site: RuleSite) -> Diagnostic {
     legal := (loop allowed_site in rule.sites -> "`{allowed_site}`")
     if rule.companion_site == .Val(companion) {
-        &legal.push("{sema_marker_rules_site_name(companion.site)} with companion `#{companion.rule}`")
+        &legal.push("{companion.site} with companion `#{companion.rule}`")
     }
     allowed := if legal.len() == 0 -> "no active attachment sites" else -> legal.join(", ")
     fix := if rule.companion_site == None && rule.sites.len() == 1 && rule.sites[0] == "Constant" -> "write `#{marker.name} NAME :: prep {{ value }}` — a storage marker precedes a module constant" else -> "move `#{marker.name}` to one of its registered sites"
@@ -940,7 +1051,7 @@ fn sema_marker_rules_fact_allows(rule: TAppliedRule, application: AppliedRuleApp
         return true
     }
     companion :: rule.companion_site ?? return false
-    if companion.site != site || application.target == None {
+    if companion.site != sema_marker_rules_site_name(site) || application.target == None {
         return false
     }
     target :: application.target ?? return false
@@ -1315,7 +1426,7 @@ fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry
             if rule.status == .Retired(_) {
                 next
             }
-            expected_types := (loop _ in rule.signature.params -> None)
+            expected_types :: (loop _ in rule.signature.params -> Type?{None})
             sema_marker_rules_validate_argument_signature(marker, rule.signature, expected_types, None, false, rule.owns_menu, registry, environment, &scopes, &state, &tail_store, &context, values, &result.argument_facts, &result.comptime_sources, &result.comptime_requests, &result.diagnostics)
         }
         user_index := sema_marker_rules_user_rule_index(registry, marker.name)
@@ -1408,7 +1519,8 @@ pub fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembers
     if builtin != None {
         return SemaMarkerRulesDeclaredTypeCheck{resolved_type: builtin, diagnostics: [Diagnostic]{}, complete: true}
     }
-    graph :: environment.registration_graph ?? return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
     if sema_type_name_is_generic(environment.generic_params, argument.name) {
         return SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(argument.ty), diagnostics: [Diagnostic]{}, complete: true}
     }

@@ -102,7 +102,7 @@ use the same names.
 
 | Declaration | Kind | Purpose |
 | --- | --- | --- |
-| `ABI`, `FfiLanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
+| `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
 | `ArithmeticMode`, `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound` | enum | Arithmetic, inlining, publication scope, parallel-kernel, representation, and memoization choices |
 | `Effect`, `Maturity`, `NamingCase`, `ObligationMode`, `PolicySetting`, `Site`, `TaintKind` | enum | Effect roots, maturity, field naming, proof obligations, policy, marker sites, and taint values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
@@ -188,10 +188,11 @@ handle. The source-facing `CompiledModule` inspection helpers are:
 
 | API | Result | Description |
 | --- | --- | --- |
-| `load(path, grant)` | `-[FS, Exec]> Mod !Err` | Load one granted compiled library. |
+| `load(path, grant)` | `-[FS, Exec]> Mod ModError!` | Load one granted compiled library. |
 | `is_loaded(compiled)` | `Bool` | Inspect a `CompiledModule` carrier. |
 | `path(compiled)` | `String` | Return the carrier's recorded path. |
-| `unload(compiled)` | `-[FS]> CompiledModule !Err` | Return the typed refusal; provider-owned `Mod` handles unload on drop. |
+| `unload(compiled)` | `-[FS]> CompiledModule ModError!` | Return `ModError.Unsupported`; provider-owned `Mod` handles unload on drop. |
+| `ModError` | `#Error` enum | D-MOD-ERR1=A. `Denied(reason)`: the grant refuses the path, or the library declares an effect the load site does not grant (E1339). `NotFound(reason)`: nothing is at the path. `Invalid(reason)`: the file is damaged or is not a library. `Unsupported(reason)`: another Jet version, ABI or platform built it (E1338, E1341), or loading is unavailable on this target. |
 
 ## Errors and optional values
 
@@ -758,8 +759,9 @@ existing-path containment.
 
 `core.net.url` parses, constructs, joins, normalizes, and renders the `URL`
 carrier. Jet owns scheme, authority, dot-segment, query, fragment, and percent
-codec behavior; the parser follows RFC 3986-style rules and does not claim
-WHATWG IDNA or automatic punycode processing.
+codec behavior; the parser follows RFC 3986-style rules. Non-ASCII host labels
+are lowercased byte-wise and Punycode-encoded (`xn--`, RFC 3492); no WHATWG
+IDNA mapping is applied.
 
 ```jet
 use core.net.url as url
@@ -781,6 +783,8 @@ fn run() {
 | `u.scheme` / `u.host` / `u.port` / `u.path` / `u.query` / `u.fragment` | component values | Read the parsed URL fields; `port` uses the default-port convention. |
 | `u.path_segments()` / `u.query_pairs()` | `[String]` / `[[String]]` | Read decoded path and repeated query pairs. |
 | `u.normalize()` / `u.join(relative)` | `URL` / `URL !URLError` | Return a normalized URL or resolve a relative reference. |
+| `u.to_string()` / `u.default_port()` | `String` / `?Int` | Render the URL, keeping an explicitly written port, or read the scheme's registered default port. |
+| `u.username()` / `u.password()` / `u.userinfo()` / `u.authority()` | `String` | Read decoded credentials, `user:password`, or `userinfo@host:port`. |
 | `urljoin(base, relative)` | `String` | Join textual URL references. |
 | `parse_qsl(text)` / `parse_qs(text)` | query rows | Parse repeated query values into list or grouped forms. |
 | `split_fragment(text)` | `(String, String)` | Separate a textual URL from its fragment. |
@@ -862,7 +866,7 @@ lines, and deterministic content-derived multipart boundaries.
 | --- | --- | --- |
 | `limits()` | `Limits` | Return the checked reply, capability, recipient, message, and challenge limits. |
 | `smtp_auth(user, password)` | `SMTPAuth` | Build password authentication from a nominal `Secret`. |
-| `dkim(domain, selector, key, signed_headers)` | `DkimConfig` | Configure one signing identity and its signed-header list. |
+| `dkim(domain, selector, key, signed_headers)` | `DKIMConfig` | Configure one signing identity and its signed-header list. |
 | `address(text)` | `Address !EmailError` | Parse and validate a mailbox or display-name address. |
 | `attachment(name, mime, bytes)` | `Attachment !EmailError` | Validate an attachment name/type/size and normalize its MIME spelling. |
 | `message(from, to, bcc, subject, text, html, attachments)` | `Message !EmailError` | Validate fields, create the default envelope, and compute a wire bound. |
@@ -942,7 +946,7 @@ one.
 | `session_auth` / `session_proxy` | `Session` | Set credentials or an explicit proxy URL. |
 | `session_request(session, method, url, body)` | `HTTPResponse !HTTPError` | Apply session headers, retries, redirect checks, and transport. |
 | `Client.new()` | `HTTPClient` | Construct the typed client policy carrier; unset policies use the safe defaults. |
-| `Client.new().proxy(policy)` | `HTTPClient` | Select `.FromEnvironment` (default), `.None`, or `.Url(proxy)`. |
+| `Client.new().proxy(policy)` | `HTTPClient` | Select `.FromEnvironment` (default), `.None`, or `.URL(proxy)`. |
 | `Client.new().tls(config)` | `HTTPClient` | Apply a `core.net.tls.ClientConfig`; custom roots, mTLS identity, and TLS 1.2/1.3 bounds are enforced on HTTPS sends. |
 | `Client.new().cookies(.Memory)` | `HTTPClient` | Enable one clone-shared, bounded RFC6265bis memory cookie jar; one-shot shortcuts remain stateless. |
 | `Client.new().redirects(.Follow{ max:, same_origin_credentials: })` | `HTTPClient` | Follow at most the bounded limit, strip credentials across origins, and preserve same-origin credentials only when requested. |
@@ -959,7 +963,7 @@ explicit bounded byte/text read.
 ### `core.http.server` — HTTP serving
 
 `core.http.server` builds a typed multiplexer and serves HTTP/1.1. `bind` and
-`serve` accept optional `HTTPServerTls` and optional deadlines; `serve_once`
+`serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
 and `serve_once_listener` provide testable one-request entry points.
 
 | API | Result | Description |
@@ -972,7 +976,7 @@ and `serve_once_listener` provide testable one-request entry points.
 | `json(status, body)` | `HTTPResponse` | Encode an `Encode` value as JSON response data. |
 | `static_file(path, content_type)` / `static_file_range(request, path, content_type)` | `HTTPResponse !HTTPError` | Serve a file, with a range-aware form for a request. |
 | `static_files(mux, prefix, root)` | unit | Mount a directory below a route prefix. |
-| `tls(cert, key)` | `HTTPServerTls` | Build explicit server TLS material. |
+| `tls(cert, key)` | `HTTPServerTLS` | Build explicit server TLS material. |
 | `sse(body)` | `HTTPResponse` | Build a server-sent-events response. |
 | `cors_policy(origins)` / `cors(mux, policy)` | policy/unit | Validate a CORS origin policy and install it. |
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
@@ -1287,9 +1291,9 @@ handling a closed event enum. See
 ### `core.term` — terminal input and output
 
 `core.term` owns UTF-8 stdio, prompts, raw-key input, terminal size, and ANSI
-style. Terminal stream operations follow the [bounded buffering law](../spec.md#bounded-buffering-law). The
-qualified `term.print` takes one `String`; the prelude `print` remains the
-convenient general printing form.
+style. Terminal stream operations follow the [bounded buffering law](../spec.md#bounded-buffering-law).
+`term.print` and `term.eprint` are variadic like the prelude `print`: each
+argument writes on its own line to stdout or stderr (D-VERDICT-1321-1).
 
 ```jet
 use core.term as term
@@ -1499,9 +1503,10 @@ region:
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `!IOError -[Env]>` | Change credentials, groups, or process-group membership. |
 | `pipe()` / `close_fd(fd)` | `[Int] !IOError -[FS, Env]>` / `Unit -[FS, Env]>` | Create or close raw process descriptors. |
 | `mkfifo(path, mode)` | `!IOError -[FS, Env]>` | Create a named pipe. |
+| `atexit(handler)` | `Unit` | Register a `fn()` handler that runs at the explicit process boundary after scope cleanup (D-FAIL-EXIT1). |
 
-The `core.sys` module exports neither `on_interrupt` nor `atexit`; use the
-process cleanup and task APIs for the contracts that they provide.
+The `core.sys` module does not export `on_interrupt`; use the process signal
+and task APIs for interrupt handling.
 ---
 
 ### `core.process` — process execution
@@ -1809,13 +1814,13 @@ fn run() {
 
 `core.math.random` is a deterministic pseudorandom generator, not a
 cryptographic random source. Ambient draws use the `Rand` effect; explicit
-`Rng` values make a stream visible and reproducible. Use `core.crypto.random`
+`RNG` values make a stream visible and reproducible. Use `core.crypto.random`
 for security-sensitive bytes or secrets (D-DET1).
 
 ```jet
 use core.math.random as random
 
-fn roll_at(rng: &Rng) -> String {
+fn roll_at(rng: &RNG) -> String {
     value := rng.int(1, 6)
     return "roll=" + value.to_string()
 }
@@ -1829,8 +1834,8 @@ fn run() {
 | Function or method | Returns | Description |
 | --- | --- | --- |
 | `random.seed(value)` | `Unit -[Rand]>` | Seed the ambient deterministic stream. |
-| `random.rng(seed)` | `Rng` | Create an explicit deterministic stream. |
-| `random.split(seed)` | `Rng -[Rand]>` | Derive a stream from the ambient stream and a seed. |
+| `random.rng(seed)` | `RNG` | Create an explicit deterministic stream. |
+| `random.split(seed)` | `RNG -[Rand]>` | Derive a stream from the ambient stream and a seed. |
 | `random.int(lo, hi)` / `rng.int(lo, hi)` | `Int` | Draw an inclusive integer; reversed bounds return `lo` without a draw. |
 | `random.float()` / `rng.float()` | `Float` | Draw from `[0, 1)`. |
 | `random.float_range(lo, hi)` / `rng.float_range(lo, hi)` | `Float` | Draw from `[lo, hi)`; invalid or reversed bounds return `lo` without a draw. |
@@ -1842,9 +1847,9 @@ fn run() {
 | `random.sample(values, n)` / `rng.sample(values, n)` | `[Int]` | Return a sample of the requested size. |
 | `random.normal(mean, stddev)` / `rng.normal(mean, stddev)` | `Float` | Draw a normal value; invalid mean returns `0`, and a nonpositive or nonfinite standard deviation returns the mean. |
 | `random.exponential(rate)` / `rng.exponential(rate)` | `Float` | Draw an exponential value; invalid parameters return `0`. |
-| `rng.split()` | `Rng` | Derive a child stream without sharing mutable stream state. |
+| `rng.split()` | `RNG` | Derive a child stream without sharing mutable stream state. |
 | `random.randint`, `uniform`, `normalvariate`, `gauss`, `expovariate`, `randbytes`, `getrandbits`, `randrange`, `choice`, `choices`, `triangular`, `gammavariate`, `betavariate`, `lognormvariate`, `paretovariate`, `weibullvariate`, `vonmisesvariate`, `binomialvariate` | varies | Compatibility aliases and distributions exposed by the random module. |
-An explicit `Rng` is a seeded capability: its draw methods advance that
+An explicit `RNG` is a seeded capability: its draw methods advance that
 capability without requiring the ambient `Rand` effect (D-DET-CAPAPI).
 
 ### `core.compute.solve` — dense linear solves
@@ -1937,12 +1942,13 @@ the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 | --- | --- | --- |
 | `perf.fidelity()` | `Float -[Env]>` | Read the selected fidelity. |
 | `perf.default_fidelity()` | `Float` | Return `1.0`. |
-| `perf.override_fidelity(value)` | `Unit !String -[Env]>` | Set fidelity in the inclusive range `[0, 1]`; reject NaN and out-of-range values. |
-| `perf.reset_fidelity()` | `Unit -[Env]>` | Restore the default selection. |
+| `perf.override_fidelity(value)` | `PerfError! -[Env]>` | Set fidelity in the inclusive range `[0, 1]`; NaN and out-of-range values fail with `PerfError.OutOfRange(value)`. |
+| `perf.reset_fidelity()` | `Never! -[Env]>` | Restore the default selection. |
 | `perf.of(value)` | `Perf` | Construct a bounded fidelity value; NaN becomes `1`. |
 | `perf.is_full(value)` / `perf.is_low(value)` | `Bool` | Test full fidelity or fidelity below `0.25`. |
 | `perf.scale(value, work)` | `Int` | Scale nonnegative work by fidelity. |
 | `Perf` | type | A bounded fidelity value consumed by scaling operations. |
+| `PerfError` | `#Error` enum | D-PERF-ERR1=A. `OutOfRange(Float)` holds the rejected value. |
 
 ### `core.text` — UTF-8 text operations
 
@@ -2635,14 +2641,14 @@ or golden file. The public source is
 | Signature | Result | Description |
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
-| `compare(cases: [DataTree], reference: fn(DataTree) -> DataTree, candidate: fn(DataTree) -> DataTree, relation: String) -> TestComparison` | comparison | Compare reference and candidate outputs over explicit cases. |
+| `compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
 | `snap(name: String, value: String) -[FS]> Bool` | Boolean | Check a named snapshot. |
 | `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |
 | `corpus(glob: String) -[FS]> [String]` | paths | Select files matching a corpus glob. |
 | `fake_clock(unix_ms: Int) -> Clock` | clock | Create a deterministic clock at a Unix-millisecond value. |
-| `fake_rng(seed: Int) -> Rng` | RNG | Create deterministic random state. |
+| `fake_rng(seed: Int) -> RNG` | RNG | Create deterministic random state. |
 | `fake_data(seed: Int) -> Fake` | fake | Create a deterministic fake-data carrier. |
 | `test_suite() -> TestSuite` | suite | Create the default suite record. |
 | `world(body: fn(DeterministicWorld))` | — | Run a body with deterministic world services. |
@@ -2705,22 +2711,22 @@ rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet
 | `size(width: Float, height: Float) -> Size` | size | Construct a size. |
 | `rect(x: Float, y: Float, width: Float, height: Float) -> Rect` | rectangle | Construct a rectangle. |
 | `constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint` | constraint | Describe allowed layout size. |
-| `node(label: String, width: Float, height: Float) -> UiNode` | node | Construct a sized node. |
-| `box(children: [UiNode]) -> UiNode` | node | Group child nodes. |
-| `text(value: String) -> UiNode` | node | Construct a text node. |
-| `preview(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview` | preview | Describe a named preview. |
-| `playground(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview` | preview | Describe a named interactive playground. |
-| `desktop() -> UiPreviewViewport`, `phone() -> UiPreviewViewport`, `tablet() -> UiPreviewViewport` | viewport | Select standard preview dimensions. |
+| `node(label: String, width: Float, height: Float) -> UINode` | node | Construct a sized node. |
+| `box(children: [UINode]) -> UINode` | node | Group child nodes. |
+| `text(value: String) -> UINode` | node | Construct a text node. |
+| `preview(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named preview. |
+| `playground(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named interactive playground. |
+| `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions. |
 | `key_event(code: String) -> InputEvent` | event | Create a key event. |
 | `resize_event(width: Float, height: Float) -> InputEvent` | event | Create a resize event. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
-| `gtk_backend() -> GtkBackend`, `tui_backend() -> TuiBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
-| `aria_role_button() -> UiAriaRole`, `aria_role_container() -> UiAriaRole` | role | Construct standard accessibility roles. |
-| `aria_role_label() -> UiAriaRole`, `aria_role_text_input() -> UiAriaRole` | role | Construct label or text-input roles. |
-| `node_accessibility(n: UiNode, metadata: UiAccessibility) -> UiNode` | node | Attach accessibility metadata. |
-| `node_color(label: String, width: Float, height: Float, color: String) -> UiNode` | node | Construct a colored node. |
-| `node_role(label: String, width: Float, height: Float, role: UiAriaRole) -> UiNode` | node | Construct a node with a role. |
-| `node_shortcut(n: UiNode, shortcut: UiShortcut) -> UiNode` | node | Attach a shortcut descriptor. |
+| `gtk_backend() -> GtkBackend`, `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
+| `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |
+| `aria_role_label() -> UIAriaRole`, `aria_role_text_input() -> UIAriaRole` | role | Construct label or text-input roles. |
+| `node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode` | node | Attach accessibility metadata. |
+| `node_color(label: String, width: Float, height: Float, color: String) -> UINode` | node | Construct a colored node. |
+| `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
+| `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
 
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,
@@ -3137,9 +3143,9 @@ turn a missing transport into a successful no-op. The implementation is
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
-| `dns_txt_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_srv_at(server, name, ms) -[Net, Time.Wait]> [DNSSrv] !NetError` | records | Resolve TXT or SRV records through an explicit server. |
-| `dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [DNSSrv] !NetError` | records | Resolve SRV records. |
-| `dns_srv_target(record: DNSSrv) -> String` / `dns_srv_port(record) -> Int` / `dns_srv_priority(record) -> Int` / `dns_srv_weight(record) -> Int` | fields | Inspect an SRV record. |
+| `dns_txt_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_srv_at(server, name, ms) -[Net, Time.Wait]> [DNSSRV] !NetError` | records | Resolve TXT or SRV records through an explicit server. |
+| `dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [DNSSRV] !NetError` | records | Resolve SRV records. |
+| `dns_srv_target(record: DNSSRV) -> String` / `dns_srv_port(record) -> Int` / `dns_srv_priority(record) -> Int` / `dns_srv_weight(record) -> Int` | fields | Inspect an SRV record. |
 | `gethostbyname(name: String) -[Net, Time.Wait]> String !NetError` / `gethostbyaddr(addr) -[Net, Time.Wait]> String !NetError` | hosts | Read one host name/address result. |
 | `getservbyname(name: String) -[Net, Time.Wait]> Int !NetError` / `getservbyport(port: Int) -[Net, Time.Wait]> String !NetError` | service | Resolve a service name or port. |
 | `error_operation(err: NetError) -> String` / `error_message(err) -> String` / `error_address(err) -> ?String` / `error_name(err) -> ?String` / `error_os_code(err) -> ?Int` | diagnostics | Inspect structured network-error details. |
@@ -3165,7 +3171,7 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 | `ClientIdentity.from_pem(cert_chain: bytes, private_key: bytes)` | `ClientIdentity !IOError` | Validate a PEM certificate chain and matching private key. |
 | `ClientConfig.default().with_trust(policy)` | `ClientConfig !IOError` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` trust. |
 | `ClientConfig.default().with_client_identity(identity)` | `ClientConfig !IOError` | Add a validated mTLS client identity to an immutable configuration. |
-| `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.Tls12` / `.Tls13` bounds; reversed bounds fail before network use. |
+| `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(^tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
 | `read(stream: TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
@@ -3246,7 +3252,7 @@ This is one ranked Tensor operation family with an explicit placement contract (
 | `sum_axis(tensor, axis: Int) -> Tensor !ComputeError` | tensor | Reduce one axis. |
 | `mse_loss(pred, target) -> Tensor !ComputeError` | tensor | Compute a one-element mean-squared-error tensor. |
 | `sgd_step(weights, grad, lr: Float) -> Tensor !ComputeError` | tensor | Apply a value-based SGD step. |
-| `value_and_gradient(pred, target) -> VjpRun !ComputeError`, `vjp(pred, target) -> VjpRun !ComputeError` | result | Evaluate the fixed MSE value and gradient. |
+| `value_and_gradient(pred, target) -> VJPRun !ComputeError`, `vjp(pred, target) -> VJPRun !ComputeError` | result | Evaluate the fixed MSE value and gradient. |
 | `gradient(pred, target) -> Tensor !ComputeError`, `jvp(pred, target, tangent) -> Tensor !ComputeError` | tensor | Return gradient or tangent result for that contract. |
 | `det(tensor) -> Float !ComputeError`, `inv(tensor) -> Tensor !ComputeError`, `solve(a, b) -> Tensor !ComputeError` | linear algebra | Perform checked square-matrix operations. |
 | `fft(tensor: Tensor) -> Tensor !ComputeError` | tensor | Return a rank-one interleaved real/imaginary spectrum. |
@@ -3403,7 +3409,6 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 
 - `app`
 - `core`
-- `core.models`
 - `core.devtools`
 - `core.archive`
 - `core.archive.gzip`

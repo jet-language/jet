@@ -533,16 +533,17 @@ mod tests {
         assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
         let rendered = crate::Formatter::format_synthetic_program(&program);
         assert!(
-            rendered.contains("left_Num_value != right_Num_Num_value"),
+            rendered.contains("left_Num_value != right_Num_value"),
             "Int payload should compare with !=, got:\n{rendered}"
         );
         assert!(
-            rendered.contains("left_Wrap_value.equal(right_Wrap_Wrap_value)"),
+            rendered.contains("left_Wrap_value.equal(right_Wrap_value)"),
             "recursive payload should call equal, got:\n{rendered}"
         );
         assert!(
-            !rendered.contains("right_Num_Wrap"),
-            "a `Num` arm must not match `rhs` against other variants, got:\n{rendered}"
+            !rendered.contains("left_Num_value != right_Wrap")
+                && !rendered.contains("left_Wrap_value.equal(right_Num"),
+            "an arm must compare `self` only with the same `rhs` variant, got:\n{rendered}"
         );
         assert!(
             !rendered.contains("left_Num_value.equal"),
@@ -586,7 +587,6 @@ mod tests {
             computed_fields: std::collections::HashMap::new(),
             field_defaults: std::collections::HashMap::new(),
             receipt_sections: std::collections::HashMap::new(),
-            devtools_publications: std::cell::RefCell::new(Vec::new()),
             nominal_memo: Default::default(),
         };
         let mut diags = Vec::new();
@@ -627,7 +627,6 @@ mod tests {
             computed_fields: std::collections::HashMap::new(),
             field_defaults: std::collections::HashMap::new(),
             receipt_sections: std::collections::HashMap::new(),
-            devtools_publications: std::cell::RefCell::new(Vec::new()),
             nominal_memo: Default::default(),
         };
         for item in &program.items {

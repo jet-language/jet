@@ -1,0 +1,68 @@
+// D-FAILURE-FOUNDATION1=A: a `T Never!` call cannot fail, so every ordinary
+// value position unwraps it to plain `T`. A loop source or a plain call
+// argument inside a value-if arm gets the plain value even under the
+// function's own result expectation, and a value-if passed as a statement's
+// argument yields its arms' success values.
+enum Shape {
+    Pair(left: Int, right: Int)
+    Single(value: Int)
+}
+
+fn children(n: Int) -> [Int] Never! {
+    [Int]{n, n + 1}
+}
+
+fn upper(text: String) -> String Never! { text.to_upper() }
+
+fn lower(text: String) -> String Never! { text.to_lower() }
+
+fn label_width(label: String) -> Int { label.len() }
+
+fn width(shape: Shape) -> Int {
+    if shape == {
+        .Pair(left, _) -> {
+            size := label_width(upper("pair{left}"))
+            size
+        }
+        .Single(value) -> value
+    }
+}
+
+fn touches(shape: Shape) -> Bool {
+    if shape == {
+        .Pair(left, _) -> {
+            loop child in children(left) {
+                if child > 3 -> return true
+            }
+            false
+        }
+        .Single(value) -> value > 3
+    }
+}
+
+fn total(flag: Bool) -> Int Never! {
+    if flag -> {
+        sum := 0
+        loop child in children(1) {
+            sum += child
+        }
+        sum
+    } else -> 0
+}
+
+fn render(flag: Bool, words: [String]) -> [String] {
+    out := [String]{}
+    loop word in words {
+        &out.push(if flag -> upper(word) else -> lower(word))
+    }
+    out
+}
+
+fn run() {
+    print(touches(Shape.Pair{left: 3, right: 1}))
+    print(touches(Shape.Single{value: 2}))
+    print(total(true))
+    print(if true -> upper("mixed") else -> lower("mixed"))
+    print(render(false, [String]{"A", "b"}).join(","))
+    print(width(Shape.Pair{left: 7, right: 0}))
+}

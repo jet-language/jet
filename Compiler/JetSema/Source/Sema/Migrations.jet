@@ -1,3 +1,20 @@
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Expr,
+    Func,
+    MigrationDecl,
+    MigrationOp,
+    Param,
+    ParamZone,
+    Span,
+    Stmt,
+    StructDef,
+    Type,
+    ast_empty_call_arg_flags,
+    ast_func,
+]
+
 pub struct SemaMigrationFieldName {
     pub field: String
     pub json_key: String
@@ -14,7 +31,7 @@ fn sema_migration_insert_sorted(values: [String], value: String) -> [String] Nev
     result := [String]{}
     inserted := false
     loop current in values {
-        if current == value -> return values
+        if current == value -> return ~values
         if !inserted && current > value {
             &result.push(value)
             inserted = true

@@ -2,6 +2,7 @@
 
 use super::document::{export_ipynb, export_jet, import_ipynb, CellKind, JetNotebook};
 use super::kernel::{ClientKind, Kernel, KernelIdentity, RerunDecision};
+use jet_foundation::JSON::quote as json_str;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
@@ -121,23 +122,6 @@ impl ProtocolReply {
             json_str(payload)
         )
     }
-}
-
-fn json_str(s: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolReply {

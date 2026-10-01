@@ -174,14 +174,6 @@ pub struct BuildMount {
 }
 
 impl BuildMount {
-    pub fn read_only(source: impl Into<String>, destination: impl Into<String>) -> Self {
-        BuildMount {
-            source: source.into(),
-            destination: destination.into(),
-            identity: String::new(),
-        }
-    }
-
     pub fn read_only_with_identity(
         source: impl Into<String>,
         destination: impl Into<String>,
@@ -272,17 +264,6 @@ impl ToolchainSpec {
     /// the only mode allowed for a hermetic provisioned compiler.
     pub fn declared_only(mut self) -> Self {
         self.resolution = ToolchainResolution::DeclaredOnly;
-        self
-    }
-
-    /// Make one immutable directory available to actions using this
-    /// toolchain. The sandbox validates and mounts it read-only at launch.
-    pub fn with_read_only_mount(
-        mut self,
-        source: impl Into<String>,
-        destination: impl Into<String>,
-    ) -> Self {
-        self.mounts.push(BuildMount::read_only(source, destination));
         self
     }
 

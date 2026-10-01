@@ -29,7 +29,8 @@ pub fn package_scope_for(path: &Path, project_root: &Path) -> String {
     scope.to_string_lossy().into_owned()
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
+/// Lexically fold `.` and `..` components without touching the filesystem.
+pub fn normalize_path(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
@@ -695,6 +696,16 @@ impl NameLedger {
 
     pub fn alias_used(&self, module: usize, alias: &NameAlias) -> bool {
         self.alias_uses.contains(&(module, alias.span))
+    }
+
+    /// Import-alias uses recorded so far, loader-owned ones included.
+    pub fn alias_uses(&self) -> &HashSet<(usize, Span)> {
+        &self.alias_uses
+    }
+
+    /// True when the loader recorded this alias use before any body check.
+    pub fn loader_alias_use(&self, module: usize, span: Span) -> bool {
+        self.tables.loader_alias_uses.contains(&(module, span))
     }
 
     /// Stable identity for one import binding. The defining span is part of

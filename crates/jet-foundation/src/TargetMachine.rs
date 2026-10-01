@@ -3,6 +3,7 @@
 use crate::Layout::LayoutCapabilityFacts;
 use crate::RingLayer::{classify_prelude_closure, RuntimeLayer};
 use crate::Report::{StatusFields, StatusValue};
+use crate::JSON::quote as json_str;
 use std::fmt::Write;
 use crate::Effects::EffectSet;
 use crate::Facts::TargetDossier;
@@ -523,13 +524,6 @@ pub struct TargetHardwareFacts {
 }
 
 impl TargetHardwareFacts {
-    pub fn from_svd(source: impl Into<String>, sha256: impl Into<String>) -> Self {
-        Self {
-            svd: Some(SvdProvenance::new(source, sha256)),
-            ..Self::default()
-        }
-    }
-
     pub fn register_block(&self, name: &str) -> Option<&TargetRegisterBlockFact> {
         self.register_blocks
             .iter()
@@ -923,12 +917,6 @@ impl TargetMachine {
             audit: AuditPolicy::default(),
         }
     }
-    /// Override layout support with a complete compiler-owned target profile.
-    pub fn with_layout_facts(mut self, facts: LayoutCapabilityFacts) -> Self {
-        self.layout = facts;
-        self
-    }
-
 
     /// Override the generated startup facts as one typed contract.
     pub fn with_startup_facts(
@@ -4598,25 +4586,6 @@ fn optional_contract_json(contract: Option<&ProviderContract>) -> String {
 }
 fn optional_u64_json(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |value| value.to_string())
-}
-
-fn json_str(value: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 #[cfg(test)]

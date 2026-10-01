@@ -306,13 +306,36 @@ fn parser_source(root: &Path) -> (String, usize) {
             source.push_str("// [selfhost parser parity source: ");
             source.push_str(path);
             source.push_str("]\n");
-            source.push_str(&fs::read_to_string(root.join(path)).expect("canonical parser source"));
+            let text = fs::read_to_string(root.join(path)).expect("canonical parser source");
+            source.push_str(&without_package_imports(&text));
             source.push('\n');
         }
     }
     source.push_str(PROBE_SOURCE);
     source.push_str(&tier_run_source());
     (source, source_file_count)
+}
+
+/// D-MOD-CYCLE1=A: Compiler/ files import their dependency packages with
+/// `use jet_<package>.[names]`; the concatenated parity source is one
+/// namespace, so those import blocks are dropped.
+fn without_package_imports(text: &str) -> String {
+    let mut kept = String::with_capacity(text.len());
+    let mut in_import = false;
+    for line in text.split_inclusive('\n') {
+        if !in_import
+            && (line.starts_with("use jet_") || line.starts_with("use compiler_bootstrap"))
+            && line.contains(".[")
+        {
+            in_import = true;
+        }
+        if in_import {
+            in_import = !line.contains(']');
+            continue;
+        }
+        kept.push_str(line);
+    }
+    kept
 }
 
 struct Pass {

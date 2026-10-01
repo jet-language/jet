@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7fe1a788b6f6309e47cbd8290a023000223f00714dd7bcdadb8b08dcce5e58d5
+// Source SHA-256: e628f7d846899239ad0518f37449b1d00773b5aa16a3861b954bf4f381e08df0
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
@@ -29,7 +29,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.collections.set", &["core.collections"]),
     ("core.compute", &["core.math", "core.text.fmt"]),
     ("core.compute.solve", &["core.compute", "core.math"]),
-    ("core.crypto", &["core", "core.files", "core.files.path"]),
+    ("core.crypto", &["core", "core.files"]),
     ("core.crypto.expert", &["core.crypto"]),
     ("core.crypto.random", &["core.crypto"]),
     ("core.crypto.uuid", &["core.crypto"]),
@@ -204,11 +204,6 @@ pub fn prelude_source_fact(name: &str) -> Option<PreludeSourceFact> {
         .iter()
         .copied()
         .find(|fact| fact.name == name)
-}
-
-/// Return the admitted layer for one registered source.
-pub fn prelude_source_layer(name: &str) -> Option<RuntimeLayer> {
-    prelude_source_fact(name).map(|fact| fact.layer)
 }
 
 /// Classify a compiler-known core module path to its minimum runtime layer.

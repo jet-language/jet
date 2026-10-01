@@ -1092,6 +1092,7 @@ impl<'a> Parser<'a> {
                         block_depth: 0,
                         callable_tail_block_depth: None,
                         callable_tail_expects_value: false,
+                        lambda_tail_block_depth: None,
                         module_arg_expr_depth: None,
                         allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
                         allow_environment_reads: self.allow_environment_reads,
@@ -1102,6 +1103,8 @@ impl<'a> Parser<'a> {
                         applied_rules: Vec::new(),
                         rule_facts: Vec::new(),
                         block_spans: Vec::new(),
+                        prep_value_block: None,
+                        prep_value_escape: None,
                     };
                     // D-FMT-INTERP2=A: trailing `=` prints expression source, then " = ", then the value.
                     // Reject empty `{=}` before attempting to parse an expression.

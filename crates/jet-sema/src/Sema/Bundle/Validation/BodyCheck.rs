@@ -66,6 +66,7 @@ pub(crate) fn checker_for_module<'a>(
     Checker {
         funcs: &st.funcs,
         diverging_functions: &st.diverging_functions,
+        fixed_length_write_params: &st.fixed_length_write_params,
         plugin_interfaces,
         registry: &st.registry,
         devtools_registry,
@@ -82,7 +83,6 @@ pub(crate) fn checker_for_module<'a>(
         unqualified: &st.unqualified,
         unqualified_file: &st.unqualified_file,
         core_item_imports: &st.core_item_imports,
-        model_outputs: &st.model_outputs,
         inline_unqualified: &st.inline_unqualified,
         inline_unqualified_file: &st.inline_unqualified_file,
         inline_module: None,
@@ -165,6 +165,7 @@ pub(crate) fn checker_for_module<'a>(
         failure_auto_root_suppression: 0,
         failure_auto_depth: 0,
         fallback_is_shape_miss: false,
+        inferred_call_type_args: None,
         invalid_binding_reads: 0,
         in_comptime,
         compiler_api_allowed,
@@ -204,7 +205,6 @@ pub(crate) fn checker_for_module<'a>(
         failure_union_probe: None,
         failure_carrier_inference: false,
         failure_carrier: None,
-        ordinary_binding_root_depth: None,
         statement_expr_inference: false,
         http_handler_depth: 0,
         interrupt_callback_depth: 0,
@@ -239,251 +239,91 @@ pub(crate) fn checker_for_module<'a>(
         taskgroup_stack: Vec::new(),
         in_taskgroup_spawn: false,
         inline_addr_taken: HashSet::new(),
+        devtools_publications: Vec::new(),
+        ct_evaluator_ran: std::cell::Cell::new(false),
     }
 }
 
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn check_func_body_bundle_with_usage_checked(
-    f: &mut Func,
-    module_idx: usize,
-    states: &[ModuleState],
-    plugin_interfaces: &PluginInterfaceRegistry,
-    devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
-    effect_facts: &jet_foundation::Facts::FactRegistry,
-    owner_type: Option<&str>,
-    raw_protocol_return: bool,
-    ct_funcs: &HashMap<String, Func>,
-    ct_checked_funcs: &HashMap<String, Func>,
-    ct_items: &[crate::AST::Item],
-    ct_externs: &HashSet<String>,
-    ct_base_dir: &std::path::Path,
-    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
-    no_os: bool,
-    gates: crate::Policy::GateSet,
-    summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
-    global_addr_taken: &mut HashSet<String>,
-    no_prelude: bool,
-    name_ledger: &mut jet_foundation::Names::NameLedger,
-    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
-) -> (Vec<Diagnostic>, bool) {
-    check_func_body_bundle_scoped_with_mode(
-        f,
-        module_idx,
-        states,
-        plugin_interfaces,
-        devtools_registry,
-        effect_facts,
-        owner_type,
-        raw_protocol_return,
-        ct_funcs,
-        ct_checked_funcs,
-        ct_items,
-        false,
-        ct_externs,
-        ct_base_dir,
-        ct_globals,
-        no_os,
-        gates,
-        summaries,
-        embed_inputs_out,
-        global_addr_taken,
-        no_prelude,
-        name_ledger,
-        pending_diagnostics_out,
-        None,
-    )
+impl<'a> Checker<'a> {
+    /// The checked compile-time functions, handed to one evaluation. Every
+    /// evaluator entry reads them through here, so the body records that its
+    /// result depends on which bodies were checked before it.
+    pub(crate) fn ct_checked_funcs_for_evaluation(&self) -> &'a HashMap<String, Func> {
+        self.ct_evaluator_ran.set(true);
+        self.ct_checked_funcs
+    }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn check_func_body_bundle_deferred(
-    f: &mut Func,
-    module_idx: usize,
-    states: &[ModuleState],
-    plugin_interfaces: &PluginInterfaceRegistry,
-    devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
-    effect_facts: &jet_foundation::Facts::FactRegistry,
-    owner_type: Option<&str>,
-    raw_protocol_return: bool,
-    ct_funcs: &HashMap<String, Func>,
-    ct_externs: &HashSet<String>,
-    ct_base_dir: &std::path::Path,
-    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
-    no_os: bool,
-    gates: crate::Policy::GateSet,
-    summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
-    global_addr_taken: &mut HashSet<String>,
-    no_prelude: bool,
-    name_ledger: &mut jet_foundation::Names::NameLedger,
-    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
-) -> (Vec<Diagnostic>, bool) {
-    let ct_checked_funcs = HashMap::new();
-    let ct_items = states[module_idx].items.as_slice();
-    check_func_body_bundle_scoped_with_mode(
-        f,
-        module_idx,
-        states,
-        plugin_interfaces,
-        devtools_registry,
-        effect_facts,
-        owner_type,
-        raw_protocol_return,
-        ct_funcs,
-        &ct_checked_funcs,
-        ct_items,
-        true,
-        ct_externs,
-        ct_base_dir,
-        ct_globals,
-        no_os,
-        gates,
-        summaries,
-        embed_inputs_out,
-        global_addr_taken,
-        no_prelude,
-        name_ledger,
-        pending_diagnostics_out,
-        None,
-    )
+/// The read-only surroundings every body check of one module shares: final
+/// registration tables and the module's compile-time context. It holds only
+/// shared references, so parallel body checkers each hold a copy.
+#[derive(Clone, Copy)]
+pub(super) struct BodyContext<'a> {
+    pub(super) module_idx: usize,
+    pub(super) states: &'a [ModuleState],
+    pub(super) plugin_interfaces: &'a PluginInterfaceRegistry,
+    pub(super) devtools_registry: &'a jet_foundation::AST::DevtoolsRegistry,
+    pub(super) effect_facts: &'a jet_foundation::Facts::FactRegistry,
+    pub(super) ct_funcs: &'a HashMap<String, Func>,
+    pub(super) ct_externs: &'a HashSet<String>,
+    pub(super) ct_base_dir: &'a std::path::Path,
+    pub(super) ct_globals: &'a HashMap<String, crate::Comptime::CtValue>,
+    pub(super) no_os: bool,
+    pub(super) gates: crate::Policy::GateSet,
+    pub(super) no_prelude: bool,
 }
 
+/// Everything one body check produces besides the checked function and its
+/// diagnostics. Each body fills its own products; `check_module_bodies`
+/// merges them in source order, so the merged result does not depend on
+/// which worker checked which body.
+#[derive(Default)]
+pub(crate) struct BodyProducts {
+    pub(crate) summaries: HashMap<String, EffectSummary>,
+    pub(crate) embed_inputs: Vec<crate::AST::ComptimeInput>,
+    pub(crate) addr_taken: HashSet<String>,
+    pub(crate) pending_diagnostics: Vec<PendingFunctionDiagnostic>,
+    pub(crate) devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
+    /// D-INTBIG1: the body reaches the exact `Int` runtime.
+    pub(crate) uses_exact_int: bool,
+    /// The body ran the compile-time evaluator (`ct_evaluator_ran`).
+    pub(crate) ran_ct_evaluator: bool,
+}
 
+impl BodyProducts {
+    /// Append `other` after this body's products, exactly as if `other`'s
+    /// body had written into the same sinks after this one.
+    pub(super) fn absorb(&mut self, other: BodyProducts) {
+        self.summaries.extend(other.summaries);
+        self.embed_inputs.extend(other.embed_inputs);
+        self.addr_taken.extend(other.addr_taken);
+        self.pending_diagnostics.extend(other.pending_diagnostics);
+        self.devtools_publications.extend(other.devtools_publications);
+        self.uses_exact_int |= other.uses_exact_int;
+        self.ran_ct_evaluator |= other.ran_ct_evaluator;
+    }
+}
+
+/// Check one function body. `ct_checked_funcs` is the table compile-time
+/// evaluation may run; `None` checks without running any compile-time
+/// expression (the staged comptime pass). `inline_module` overlays that
+/// inline module's imports on the file's maps.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn check_func_body_bundle_checked(
+pub(super) fn check_func_body(
+    cx: &BodyContext<'_>,
     f: &mut Func,
-    module_idx: usize,
-    states: &[ModuleState],
-    plugin_interfaces: &PluginInterfaceRegistry,
-    devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
-    effect_facts: &jet_foundation::Facts::FactRegistry,
     owner_type: Option<&str>,
     raw_protocol_return: bool,
-    ct_funcs: &HashMap<String, Func>,
-    ct_checked_funcs: &HashMap<String, Func>,
-    ct_items: &[crate::AST::Item],
-    ct_externs: &HashSet<String>,
-    ct_base_dir: &std::path::Path,
-    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
-    no_os: bool,
-    gates: crate::Policy::GateSet,
-    summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
-    global_addr_taken: &mut HashSet<String>,
-    no_prelude: bool,
+    inline_module: Option<&str>,
+    ct_checked_funcs: Option<&HashMap<String, Func>>,
     name_ledger: &mut jet_foundation::Names::NameLedger,
-    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
+    products: &mut BodyProducts,
 ) -> Vec<Diagnostic> {
-    check_func_body_bundle_with_usage_checked(
-        f,
-        module_idx,
-        states,
-        plugin_interfaces,
-        devtools_registry,
-        effect_facts,
-        owner_type,
-        raw_protocol_return,
-        ct_funcs,
-        ct_checked_funcs,
-        ct_items,
-        ct_externs,
-        ct_base_dir,
-        ct_globals,
-        no_os,
-        gates,
-        summaries,
-        embed_inputs_out,
-        global_addr_taken,
-        no_prelude,
-        name_ledger,
-        pending_diagnostics_out,
-    )
-    .0
-}
-
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn check_func_body_bundle_scoped_checked(
-    f: &mut Func,
-    module_idx: usize,
-    states: &[ModuleState],
-    plugin_interfaces: &PluginInterfaceRegistry,
-    devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
-    effect_facts: &jet_foundation::Facts::FactRegistry,
-    owner_type: Option<&str>,
-    raw_protocol_return: bool,
-    ct_funcs: &HashMap<String, Func>,
-    ct_checked_funcs: &HashMap<String, Func>,
-    ct_items: &[crate::AST::Item],
-    ct_externs: &HashSet<String>,
-    ct_base_dir: &std::path::Path,
-    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
-    no_os: bool,
-    gates: crate::Policy::GateSet,
-    summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
-    global_addr_taken: &mut HashSet<String>,
-    no_prelude: bool,
-    name_ledger: &mut jet_foundation::Names::NameLedger,
-    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
-    inline_module: Option<&str>,
-) -> (Vec<Diagnostic>, bool) {
-    check_func_body_bundle_scoped_with_mode(
-        f,
-        module_idx,
-        states,
-        plugin_interfaces,
-        devtools_registry,
-        effect_facts,
-        owner_type,
-        raw_protocol_return,
-        ct_funcs,
-        ct_checked_funcs,
-        ct_items,
-        false,
-        ct_externs,
-        ct_base_dir,
-        ct_globals,
-        no_os,
-        gates,
-        summaries,
-        embed_inputs_out,
-        global_addr_taken,
-        no_prelude,
-        name_ledger,
-        pending_diagnostics_out,
-        inline_module,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn check_func_body_bundle_scoped_with_mode(
-    f: &mut Func,
-    module_idx: usize,
-    states: &[ModuleState],
-    plugin_interfaces: &PluginInterfaceRegistry,
-    devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
-    effect_facts: &jet_foundation::Facts::FactRegistry,
-    owner_type: Option<&str>,
-    raw_protocol_return: bool,
-    ct_funcs: &HashMap<String, Func>,
-    ct_checked_funcs: &HashMap<String, Func>,
-    ct_items: &[crate::AST::Item],
-    defer_ct_evaluation: bool,
-    ct_externs: &HashSet<String>,
-    ct_base_dir: &std::path::Path,
-    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
-    no_os: bool,
-    gates: crate::Policy::GateSet,
-    summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
-    global_addr_taken: &mut HashSet<String>,
-    no_prelude: bool,
-    name_ledger: &mut jet_foundation::Names::NameLedger,
-    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
-    inline_module: Option<&str>,
-) -> (Vec<Diagnostic>, bool) {
+    let deferred_table = HashMap::new();
+    let defer_ct_evaluation = ct_checked_funcs.is_none();
+    let ct_checked_funcs = ct_checked_funcs.unwrap_or(&deferred_table);
+    let module_idx = cx.module_idx;
+    let states = cx.states;
     let st = &states[module_idx];
     // D-NAME-WALK1=A: an inline-module body overlays its own imports on the
     // file's maps. A top-level body reads the file's maps directly; copying
@@ -524,18 +364,18 @@ fn check_func_body_bundle_scoped_with_mode(
     let mut ck = checker_for_module(
         module_idx,
         states,
-        plugin_interfaces,
-        devtools_registry,
-        effect_facts,
-        ct_funcs,
+        cx.plugin_interfaces,
+        cx.devtools_registry,
+        cx.effect_facts,
+        cx.ct_funcs,
         ct_checked_funcs,
-        ct_items,
-        ct_externs,
-        ct_base_dir,
-        ct_globals,
-        no_os,
-        gates,
-        no_prelude,
+        st.items.as_slice(),
+        cx.ct_externs,
+        cx.ct_base_dir,
+        cx.ct_globals,
+        cx.no_os,
+        cx.gates,
+        cx.no_prelude,
         name_ledger,
         Some(f),
         raw_protocol_return,
@@ -762,11 +602,15 @@ fn check_func_body_bundle_scoped_with_mode(
     }
     // D-SCHEDULE1 (card #505): a bad `#Every(…)` value is E0926.
     ck.diags.extend(check_every_marker(f, &st.registry));
-    global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
+    products
+        .addr_taken
+        .extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
     // into the whole-bundle accumulator for `jet inspect expand --facts refs`.
     // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
-    embed_inputs_out.extend(std::mem::take(&mut ck.ct_embed_inputs));
+    products
+        .embed_inputs
+        .extend(std::mem::take(&mut ck.ct_embed_inputs));
     // D-EFFECT-OMIT1/D-EFF3: an explicit row is an upper bound, not an effect
     // declaration. Static calls propagate the implementation's inferred body
     // row; dynamic trait calls use the trait method bound separately.
@@ -805,7 +649,7 @@ fn check_func_body_bundle_scoped_with_mode(
         .iter()
         .any(|diagnostic| matches!(diagnostic.severity, crate::Diagnostics::Severity::Error))
     {
-        pending_diagnostics_out.extend(
+        products.pending_diagnostics.extend(
             std::mem::take(&mut ck.fx_pending_diagnostics)
                 .into_iter()
                 .map(|diagnostic| PendingFunctionDiagnostic {
@@ -815,7 +659,7 @@ fn check_func_body_bundle_scoped_with_mode(
                 }),
         );
     }
-    summaries.insert(
+    products.summaries.insert(
         effect_key(owner_type, &f.name),
         EffectSummary {
             direct,
@@ -842,11 +686,12 @@ fn check_func_body_bundle_scoped_with_mode(
             failure_direct: ck.failure_direct_source,
         },
     );
-    let uses_exact_int = ck.uses_exact_int;
-    if uses_exact_int {
-        st.exact_int_reachable.set(true);
-    }
-    (ck.diags, uses_exact_int)
+    products.uses_exact_int |= ck.uses_exact_int;
+    products.ran_ct_evaluator |= ck.ct_evaluator_ran.get();
+    products
+        .devtools_publications
+        .extend(std::mem::take(&mut ck.devtools_publications));
+    ck.diags
 }
 
 /// D-DATARACE1=C: mark reactive bindings that crossed a concurrency boundary so
@@ -1057,7 +902,16 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
     }
     let return_compatible = match (wr, gr) {
         (None, None) => true,
-        (Some(a), Some(b)) => carrier_compatible(a, b),
+        // A callable that cannot fail (`Never!`) fits any failure slot of the
+        // same success type; the fn-value adapter supplies the slot's carrier.
+        (Some(a), Some(b)) => {
+            carrier_compatible(a, b)
+                || matches!(
+                    (a.as_ref(), b.as_ref()),
+                    (Type::Result { ok: want_ok, .. }, Type::Result { ok: got_ok, err: got_err })
+                        if got_err.is_never() && carrier_compatible(want_ok, got_ok)
+                )
+        }
         (None, Some(b)) | (Some(b), None) => crate::AST::is_unit_callable_return(b),
     };
     return_compatible && effect_bound_compatible(we.as_ref(), ge.as_ref())
@@ -1268,6 +1122,230 @@ pub(crate) fn collect_diverging_functions(
             return diverging;
         }
     }
+}
+
+/// D-SHAPE-PLACE1=A: a range write window has a fixed length, so it may fill a
+/// list write parameter only when the callee keeps that list's length. This
+/// bundle-wide greatest fixed point returns every `(function, parameter index)`
+/// whose list write parameter is proven length-preserving: the body never
+/// resizes or reassigns it and passes it onward only to parameters that are
+/// proven themselves. Unknown, extern, method, and function-value callees count
+/// as resizing, so recursion that never resizes stays proven.
+pub(crate) fn collect_fixed_length_write_params(
+    states: &[ModuleState],
+) -> std::collections::HashSet<(String, usize)> {
+    let mut functions: Vec<(String, &Func)> = Vec::new();
+    for state in states {
+        for item in &state.items {
+            match item {
+                Item::Func(function) => functions.push((function.name.clone(), function)),
+                Item::CodeModule(module) => {
+                    for inner in module.body.iter().flatten() {
+                        if let Item::Func(function) = inner {
+                            functions.push((
+                                jet_foundation::Names::member_name(&module.name, &function.name),
+                                function,
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // Calls name functions by their plain name, so a plain name declared more
+    // than once in the bundle (in any module) is ambiguous: never prove it.
+    let mut declared = std::collections::HashMap::<&str, usize>::new();
+    for (_, function) in &functions {
+        *declared.entry(function.name.as_str()).or_default() += 1;
+    }
+    let mut proven = std::collections::HashSet::new();
+    let mut onward_uses = Vec::new();
+    for (name, function) in &functions {
+        if declared.get(function.name.as_str()).copied().unwrap_or_default() > 1 {
+            continue;
+        }
+        for (index, param) in function.params.iter().enumerate() {
+            if param.convention != crate::AST::AccessConvention::Write
+                || !matches!(param.ty, Type::List(_))
+            {
+                continue;
+            }
+            if let Some(onward) = write_list_param_onward_uses(&function.body, &param.name) {
+                let key = (name.clone(), index);
+                proven.insert(key.clone());
+                onward_uses.push((key, onward));
+            }
+        }
+    }
+    loop {
+        let before = proven.len();
+        onward_uses.retain(|(key, onward)| {
+            if onward.iter().all(|target| proven.contains(target)) {
+                true
+            } else {
+                proven.remove(key);
+                false
+            }
+        });
+        if proven.len() == before {
+            return proven;
+        }
+    }
+}
+
+/// Length-preserving list methods: a `&param.method()` call with one of these
+/// names edits elements in place and never changes the list's length.
+const LENGTH_PRESERVING_LIST_METHODS: &[&str] = &[
+    "sort",
+    "sort_desc",
+    "sort_by",
+    "sort_by_key",
+    "reverse",
+    "swap",
+    "fill",
+    "shuffle",
+    "rotate_left",
+    "rotate_right",
+];
+
+/// The onward `(callee, parameter index)` uses of list write parameter `param`
+/// in `body`, or `None` when the body may resize it: a write-marked method
+/// that is not length-preserving, a reassignment of the whole list, a write
+/// pass to a method or function value, or any other whole-list write mark
+/// (such as binding `w := &param`) whose later use the fact cannot follow.
+fn write_list_param_onward_uses(body: &[Stmt], param: &str) -> Option<Vec<(String, usize)>> {
+    fn is_param(expr: &Expr, param: &str) -> bool {
+        match expr {
+            Expr::Paren(inner, _) => is_param(inner, param),
+            Expr::Ident(name, _) => name == param,
+            _ => false,
+        }
+    }
+    let mut resizes = assigns_whole_local(body, param);
+    let mut marks = 0usize;
+    let mut accounted = 0usize;
+    let mut onward = Vec::new();
+    for stmt in body {
+        stmt.for_each_expr(|expr| match expr {
+            Expr::Place(inner, crate::AST::PlaceAccess::Write, _) if is_param(inner, param) => {
+                marks += 1;
+            }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = receiver.as_ref() {
+                    if is_param(inner, param) {
+                        accounted += 1;
+                        if !LENGTH_PRESERVING_LIST_METHODS.contains(&method.as_str()) {
+                            resizes = true;
+                        }
+                    }
+                }
+                if args.iter().any(|arg| {
+                    arg.convention == crate::AST::AccessConvention::Write
+                        && is_param(&arg.expr, param)
+                }) {
+                    resizes = true;
+                }
+            }
+            Expr::Call(call) => {
+                for (index, arg) in call.args.iter().enumerate() {
+                    if arg.convention == crate::AST::AccessConvention::Write
+                        && is_param(&arg.expr, param)
+                    {
+                        onward.push((call.name.clone(), index));
+                    }
+                }
+            }
+            Expr::CallValue { args, .. } => {
+                if args.iter().any(|arg| {
+                    arg.convention == crate::AST::AccessConvention::Write
+                        && is_param(&arg.expr, param)
+                }) {
+                    resizes = true;
+                }
+            }
+            _ => {}
+        });
+    }
+    (!resizes && marks == accounted).then_some(onward)
+}
+
+/// True when `body` assigns a whole new value to local `name` (`name = ...`)
+/// at any depth, including statement bodies nested in `if` and block lambdas.
+fn assigns_whole_local(body: &[Stmt], name: &str) -> bool {
+    body.iter().any(|stmt| {
+        let nested = match stmt {
+            Stmt::Assign {
+                target: crate::AST::LValue::Local { name: target, .. },
+                ..
+            } if target == name => return true,
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CountedLoop { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Switched { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::AuthorityScope { body, .. }
+            | Stmt::ComptimeBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::ScopeMember { body, .. } => assigns_whole_local(body, name),
+            Stmt::Switch {
+                arms, else_body, ..
+            }
+            | Stmt::ComptimeSwitch {
+                arms, else_body, ..
+            } => {
+                arms.iter().any(|arm| assigns_whole_local(&arm.body, name))
+                    || else_body
+                        .as_ref()
+                        .is_some_and(|body| assigns_whole_local(body, name))
+            }
+            Stmt::ComptimeIf {
+                then_body,
+                else_body,
+                ..
+            } => {
+                assigns_whole_local(then_body, name)
+                    || else_body
+                        .as_ref()
+                        .is_some_and(|body| assigns_whole_local(body, name))
+            }
+            _ => false,
+        };
+        let mut in_expr = false;
+        stmt.for_each_expr(|expr| match expr {
+            Expr::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                in_expr |= assigns_whole_local(then_body, name)
+                    || assigns_whole_local(else_body, name);
+            }
+            Expr::Lambda(lambda) => {
+                if let crate::AST::LambdaBody::Block(body) = &lambda.body {
+                    in_expr |= assigns_whole_local(body, name);
+                }
+            }
+            _ => {}
+        });
+        nested || in_expr
+    })
 }
 /// Publish the fixed-point result on bundle functions for downstream lowering.
 ///

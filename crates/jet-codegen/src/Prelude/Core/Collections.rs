@@ -226,35 +226,6 @@ fn jet_list_fold_add_fixed_f32<I: IntoIterator<Item = f32>>(xs: I, init: f32) ->
 fn jet_list_fold_add_fixed_f64<I: IntoIterator<Item = f64>>(xs: I, init: f64) -> f64 {
     jet_simd_reduce_fixed_iter(xs, init)
 }
-/// D-FRED1=A masked collection reductions share the same lane assignment and
-/// adjacent tree as ordinary Float sums.  A malformed resident mask is
-/// rejected instead of truncating the input.
-#[inline(always)]
-fn jet_list_masked_sum_fixed_f32(
-    values: &[f32],
-    mask: &[bool],
-    seed: f32,
-) -> Option<f32> {
-    jet_simd_masked_reduce_slice(values, mask, seed)
-}
-
-#[inline(always)]
-fn jet_list_masked_sum_fixed_f64(
-    values: &[f64],
-    mask: &[bool],
-    seed: f64,
-) -> Option<f64> {
-    jet_simd_masked_reduce_slice(values, mask, seed)
-}
-
-#[inline(always)]
-fn jet_list_first_match<T: JetSimdComparable>(
-    values: &[T],
-    needle: &T,
-    op: JetSimdCompareOp,
-) -> Option<usize> {
-    jet_simd_first_match_slice(values, needle, op)
-}
 
 /// Apply one selected D-ACCEL1 column-copy pass over bounded cache blocks.
 /// Callers that already ran a serial probe can prepend that probe's typed
@@ -284,66 +255,7 @@ where
     result
 }
 
-/// D-ACCEL1 column copy keeps one private cache-block projection at a time.
-/// Rejected or single-pass paths call the original range operation unchanged.
-#[inline(always)]
-fn jet_list_accel_column_range_map<U, R, P, C, F>(
-    range: std::ops::Range<usize>,
-    nested_reuse: bool,
-    single_pass: bool,
-    proof_proven: bool,
-    pin_active: bool,
-    gate_selected: bool,
-    project: P,
-    copied_kernel: C,
-    original_kernel: F,
-) -> Vec<R>
-where
-    P: Fn(usize) -> U,
-    C: Fn(&[U], std::ops::Range<usize>) -> Vec<R>,
-    F: FnOnce(std::ops::Range<usize>) -> Vec<R>,
-{
-    let start = range.start;
-    let end = range.end;
-    if !gate_selected || pin_active || !proof_proven || !nested_reuse || single_pass {
-        return original_kernel(start..end);
-    }
-    jet_list_accel_column_copy_range_map(start..end, project, copied_kernel)
-}
-
 const JET_LIST_ACCEL_CACHE_BLOCK_BYTES: usize = 64 * 1024;
-
-/// Slice convenience wrapper over the range kernel; it does not materialize
-/// source indices while constructing transient columns.
-#[inline(always)]
-fn jet_list_accel_column_map<T, U, R, P, C, F>(
-    source: &[T],
-    nested_reuse: bool,
-    single_pass: bool,
-    proof_proven: bool,
-    pin_active: bool,
-    gate_selected: bool,
-    project: P,
-    copied_kernel: C,
-    original_kernel: F,
-) -> Vec<R>
-where
-    P: Fn(&T) -> U,
-    C: Fn(&[U], std::ops::Range<usize>) -> Vec<R>,
-    F: FnOnce(&[T]) -> Vec<R>,
-{
-    jet_list_accel_column_range_map(
-        0..source.len(),
-        nested_reuse,
-        single_pass,
-        proof_proven,
-        pin_active,
-        gate_selected,
-        |index| project(&source[index]),
-        copied_kernel,
-        |range| original_kernel(&source[range]),
-    )
-}
 
 fn jet_list_product<T, I>(xs: I) -> T
 where
@@ -356,7 +268,7 @@ fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
     xs.to_vec()
 }
 
-fn jet_list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, mut f: F)
+fn jet_list_sort_by<T, K: Ord, F>(xs: &mut [T], mut f: F)
 where
     F: FnMut(&T) -> K,
 {
@@ -368,7 +280,7 @@ where
     .unwrap_or_else(|never| match never {});
 }
 
-fn jet_list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
+fn jet_list_sort_desc<T: Ord>(xs: &mut [T]) {
     xs.sort_by(|left, right| right.cmp(left));
 }
 
@@ -442,12 +354,12 @@ fn jet_list_extend<T>(xs: &mut Vec<T>, other: Vec<T>) {
 }
 
 #[inline(always)]
-fn jet_list_reverse<T>(xs: &mut Vec<T>) {
+fn jet_list_reverse<T>(xs: &mut [T]) {
     xs.reverse();
 }
 
 #[inline(always)]
-fn jet_list_sort<T: Ord>(xs: &mut Vec<T>) {
+fn jet_list_sort<T: Ord>(xs: &mut [T]) {
     xs.sort();
 }
 
@@ -474,7 +386,7 @@ fn jet_list_clear<C: JetCollectionClear>(collection: &mut C) {
     collection.jet_clear();
 }
 
-fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, mut f: F)
+fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut [T], mut f: F)
 where
     F: FnMut(&T) -> K,
 {
@@ -486,14 +398,14 @@ where
     .unwrap_or_else(|never| match never {});
 }
 
-fn jet_list_try_sort_by<T, K: Ord, E, F>(xs: &mut Vec<T>, f: F) -> Result<(), E>
+fn jet_list_try_sort_by<T, K: Ord, E, F>(xs: &mut [T], f: F) -> Result<(), E>
 where
     F: FnMut(&T) -> Result<K, E>,
 {
     jet_list_try_sort_by_key_kernel(xs, f, Ord::cmp)
 }
 
-fn jet_list_try_sort_by_desc<T, K: Ord, E, F>(xs: &mut Vec<T>, f: F) -> Result<(), E>
+fn jet_list_try_sort_by_desc<T, K: Ord, E, F>(xs: &mut [T], f: F) -> Result<(), E>
 where
     F: FnMut(&T) -> Result<K, E>,
 {
@@ -1449,10 +1361,6 @@ fn jet_iter_is_empty<T: 'static>(it: JetIter<T>) -> bool {
     it.is_empty()
 }
 
-fn jet_iter_last<T: 'static>(it: JetIter<T>) -> JetOutcome<T, JetAbsent> {
-    jet_outcome_of(it.into_iter().last())
-}
-
 
 // D-TIER-ONEIR1=A: one target-neutral loop cursor protocol. The MIR adapter
 // only marshals values into these calls; source-kind identity and iteration
@@ -2011,10 +1919,11 @@ impl JetLoopSource for JetRange {
                 } else {
                     self.end.saturating_add(1)
                 };
-                Box::new(
-                    (self.start..end)
-                        .map(|value| Box::new(value) as JetLoopAny),
-                )
+                // A `Range` item is a Jet `Int`, so the cursor yields the
+                // `JetInt` carrier that `jet_loop_iter_value::<JetInt>` reads.
+                Box::new((self.start..end).map(|value| {
+                    Box::new(jet_foundation::Numeric::JetInt::from_i64(value)) as JetLoopAny
+                }))
             }
             JetLoopSourceKind::Chars
             | JetLoopSourceKind::LinesFile
@@ -2147,20 +2056,6 @@ fn jet_iter_string_split(s: &str, sep: &str) -> JetIter<String> {
         phase: 0,
         done: false,
     }))
-}
-
-/// Run a synchronous consumer over `String.split` pieces. This is the direct
-/// Prelude seam for AOT loops whose body does not escape the loop callback:
-/// it keeps the source string borrowed, avoids a boxed `JetIter`, and preserves
-/// the exact `str::split` piece order and empty-separator behavior.
-#[inline(always)]
-fn jet_string_split_for_each<F>(s: &String, sep: &str, mut f: F)
-where
-    F: FnMut(String),
-{
-    for part in s.split(sep) {
-        f(part.to_string());
-    }
 }
 
 /// Scan ASCII whitespace-delimited byte tokens without materialising each
@@ -2586,31 +2481,6 @@ fn jet_list_step_by<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     }
     xs.into_iter().step_by(jet_sequence_count(n)).collect()
 }
-fn jet_list_dedup<T: Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
-    let mut out: Vec<T> = Vec::new();
-    for x in xs {
-        if out.last().map(|last| last != &x).unwrap_or(true) {
-            out.push(x);
-        }
-    }
-    out
-}
-fn jet_list_chunks<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
-    if let Some(message) = jet_sequence_argument_message("chunks", n) {
-        jet_panic("<core.collections>", 0, message);
-    }
-    xs.chunks(n as usize).map(|c| c.to_vec()).collect()
-}
-fn jet_list_windows<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
-    if let Some(message) = jet_sequence_argument_message("windows", n) {
-        jet_panic("<core.collections>", 0, message);
-    }
-    let n = n as usize;
-    if n > xs.len() {
-        return Vec::new();
-    }
-    xs.windows(n).map(|w| w.to_vec()).collect()
-}
 fn jet_list_take_while<T, F>(xs: Vec<T>, mut f: F) -> Vec<T>
 where
     F: FnMut(&T) -> bool,
@@ -2965,9 +2835,6 @@ where
     jet_iter_from_vec(chunks)
 }
 
-fn jet_iter_to_set<T: Eq + std::hash::Hash>(it: JetIter<T>) -> std::collections::HashSet<T> {
-    it.into_iter().collect()
-}
 fn jet_set_from<T: Eq + std::hash::Hash>(values: Vec<T>) -> std::collections::HashSet<T> {
     values.into_iter().collect()
 }

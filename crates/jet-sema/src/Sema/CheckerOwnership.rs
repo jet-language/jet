@@ -3,7 +3,7 @@ use super::NominalWalk::{NominalQuery, NominalWalk};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, Span, TextEdit};
 use crate::Generics::{is_type_var_name, substitute_type};
-use crate::Sema::Diagnostics::{is_cloneable, type_is_copy, type_requires_owned_iteration};
+use crate::Sema::Diagnostics::{type_is_copy, type_requires_owned_iteration};
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, Expr, ForKind, LValue, Lambda, LambdaBody, Pattern, Stmt, Type, UnOp,
@@ -27,6 +27,21 @@ pub(crate) fn invalidate_view_owner(
             }
         }
     }
+}
+
+/// Where a `~` copy edit for this expression goes. A field or index node's
+/// span covers only its selector (`.name`, `[i]`), so the edit starts at the
+/// root of the place: `~result.session`, never `result.~session`.
+pub(crate) fn copy_edit_anchor(expr: &Expr) -> Span {
+    let mut root = expr;
+    while let Expr::Field(base, ..)
+    | Expr::Index { base, .. }
+    | Expr::OptField { base, .. }
+    | Expr::Paren(base, _) = root
+    {
+        root = base;
+    }
+    Span::new(root.span().start.min(expr.span().start), expr.span().end)
 }
 
 #[derive(Clone)]
@@ -3356,6 +3371,28 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn record_pattern_view_bindings(&mut self, subject: &Expr, pattern: &Pattern) {
+        // D-OPT-WRITE1 (#3974): each payload binding under a `&place` subject
+        // is a live write window into that place. Distinct bindings get
+        // disjoint slots; any other view of or write to the place overlaps.
+        if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = subject.without_parens() {
+            let Some(base) = self.place_from_expr(inner) else {
+                return;
+            };
+            let mut names = HashSet::new();
+            crate::Sema::CheckerCore::collect_window_names(pattern, &mut names);
+            let mut names = names.into_iter().collect::<Vec<_>>();
+            names.sort();
+            for name in names {
+                let Some(binding_span) = self.lookup(&name).map(|info| info.def_span) else {
+                    continue;
+                };
+                let mut place = base.clone();
+                place.projections.push(ViewProjection::Field(format!("{{{name}}}")));
+                let kind = self.view_kind_for_place(&place);
+                self.record_view(&name, Vec::new(), place, kind, ViewAccess::Write, binding_span);
+            }
+            return;
+        }
         let sources = self.view_call_sources(subject);
         let transfer_from = sources
             .iter()
@@ -4604,7 +4641,7 @@ impl<'a> Checker<'a> {
         info.single_use_span.is_none()
             && !type_param
             && !type_is_copy(ty)
-            && is_cloneable(ty, self.registry)
+            && self.is_cloneable_type(ty)
             && !self.is_resource_type(ty)
             && !is_one_pass_source(ty)
             && !is_task_type(ty)
@@ -4849,7 +4886,10 @@ impl<'a> Checker<'a> {
             info.param_conv,
             Some(AccessConvention::Read) | Some(AccessConvention::Write)
         ) {
-            let diagnostic = Diagnostic::error(
+            // E0201's row has no source-edit channel (its fix is a design
+            // choice between copying and taking ownership), so the raise site
+            // carries the fix as text only.
+            self.diags.push(Diagnostic::error(
                 "E0201",
                 format!("`{root}` cannot be moved from borrowed storage"),
                 "read and write parameters and named windows keep ownership with their source"
@@ -4860,14 +4900,6 @@ impl<'a> Checker<'a> {
                     Syntax::SIGIL_MOVE
                 ),
                 Some(sigil_span),
-            );
-            self.diags.push(diagnostic.with_edit_grade(
-                TextEdit {
-                    span: sigil_span,
-                    new_text: Syntax::SIGIL_COPY.to_string(),
-                },
-                FixApplicability::Suggested,
-                FixSafety::NeedsReview,
             ));
             return;
         }
@@ -4889,49 +4921,27 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Attach the canonical `~` copy edit to an ownership diagnostic. A copy
-    /// is safe only when the checker has proved a cloneable, non-resource type;
-    /// all other cases remain a reviewable suggestion.
+    /// Attach the canonical `~` copy edit to an ownership diagnostic. The
+    /// edit is offered only when the checker has proved a cloneable,
+    /// non-resource type: `~` on anything else is itself an error (E0211).
+    /// `anchor` must start at the whole place (see [`copy_edit_anchor`]).
     pub(crate) fn with_ownership_copy_edit(
         &self,
         diagnostic: Diagnostic,
         anchor: Span,
         ty: Option<&Type>,
     ) -> Diagnostic {
-        let safe =
-            ty.is_some_and(|ty| !self.is_resource_type(ty) && is_cloneable(ty, self.registry));
-        let (applicability, safety) = if safe {
-            (FixApplicability::Safe, FixSafety::BehaviorPreserving)
-        } else {
-            (FixApplicability::Suggested, FixSafety::NeedsReview)
-        };
+        if !ty.is_some_and(|ty| !self.is_resource_type(ty) && self.is_cloneable_type(ty)) {
+            return diagnostic;
+        }
         diagnostic.with_edit_grade(
             TextEdit {
                 span: Span::new(anchor.start, anchor.start),
                 new_text: Syntax::SIGIL_COPY.to_string(),
             },
-            applicability,
-            safety,
+            FixApplicability::Safe,
+            FixSafety::BehaviorPreserving,
         )
-    }
-
-    pub(crate) fn non_name_write_argument_fix(&self, expr: &Expr) -> String {
-        let indexes_list = matches!(expr, Expr::Index { .. })
-            && expr_root_ident(expr)
-                .and_then(|name| self.lookup(name))
-                .is_some_and(|info| matches!(&info.ty, Type::List(_) | Type::FixedList { .. }));
-        if indexes_list {
-            format!(
-                "change the helper to accept a list window, then pass a range write window with the write-access marker `&`, such as `{}xs[a..b]`",
-                Syntax::SIGIL_WRITE,
-            )
-        } else {
-            format!(
-                "bind the value first: `x {} ...` then pass `{}x` with the write-access marker `&`",
-                Syntax::SIGIL_BIND_MUT,
-                Syntax::SIGIL_WRITE,
-            )
-        }
     }
 
     fn reject_expiring_secret_loan_change(&mut self, name: &str, action: &str, span: Span) -> bool {
@@ -5067,7 +5077,7 @@ impl<'a> Checker<'a> {
             let Some((cap_ty, cap_sendable)) = cap else {
                 continue;
             };
-            let moves_capture = take_set.contains(name) || !is_cloneable(&cap_ty, self.registry);
+            let moves_capture = take_set.contains(name) || !self.is_cloneable_type(&cap_ty);
             if !cap_sendable || self.sendability_problem(&cap_ty, moves_capture).is_some() {
                 return false;
             }
@@ -6181,7 +6191,7 @@ impl<'a> Checker<'a> {
                 );
                 self.diags.push(self.with_ownership_copy_edit(
                     diagnostic,
-                    collection.span(),
+                    copy_edit_anchor(collection),
                     coll_ty.as_ref(),
                 ));
             }
@@ -6403,7 +6413,7 @@ impl<'a> Checker<'a> {
                         // Copy values cross an owning parameter by bits.
                     } else if !crate::Sema::Diagnostics::is_secret_bearing_crypto_type(param_ty)
                         && !self.is_resource_type(param_ty)
-                        && is_cloneable(param_ty, self.registry)
+                        && self.is_cloneable_type(param_ty)
                     {
                         arg.flags.implicit_clone = true;
                         // D-MEM1/S2 (was D-L0201 lint): passing a named binding to
@@ -6467,15 +6477,12 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _)) {
-            self.diags.push(Diagnostic::error(
-                "E0202",
-                "the write-access marker `&` needs a plain named binding after it".to_string(),
-                "write access from the write-access marker `&` can only be granted to a named binding, not an expression"
-                    .to_string(),
-                self.non_name_write_argument_fix(&arg.expr),
-                Some(arg.span),
-            ));
+        if arg.convention == AccessConvention::Write && expr_root_ident(&arg.expr).is_none() {
+            self.diags
+                .push(crate::Sema::Diagnostics::write_place_required(arg.span));
+        } else if arg.convention == AccessConvention::Write && matches!(arg.expr, Expr::Slice { .. }) {
+            self.diags
+                .push(crate::Sema::Diagnostics::write_range_window_argument(arg.span));
         }
 
         match (param_conv, arg.convention) {
@@ -6484,7 +6491,7 @@ impl<'a> Checker<'a> {
                     if type_is_copy(param_ty) {
                         // Copy values cross an owning parameter by bits.
                     } else if !self.is_resource_type(param_ty)
-                        && is_cloneable(param_ty, self.registry)
+                        && self.is_cloneable_type(param_ty)
                     {
                         arg.flags.implicit_clone = true;
                         let diagnostic = self.e0209_implicit_clone(
@@ -6539,7 +6546,15 @@ impl<'a> Checker<'a> {
                 }
             }
             (AccessConvention::Write, AccessConvention::Write) => {
-                if let Expr::Ident(name, span) = &arg.expr {
+                // `&x` / `&x.field[i]`: the root binding must be changeable.
+                let root = expr_root_ident(&arg.expr).map(|name| {
+                    let span = match &arg.expr {
+                        Expr::Ident(_, span) => *span,
+                        _ => arg.span,
+                    };
+                    (name.to_string(), span)
+                });
+                if let Some((name, span)) = root.as_ref() {
                     if let Some(info) = self.lookup(name) {
                         if !info.mutable {
                             let mut diagnostic = Diagnostic::error(
@@ -6705,7 +6720,7 @@ impl<'a> Checker<'a> {
         };
         match args.len() {
             0 => {
-                if !is_cloneable(inner, self.registry) {
+                if !self.is_cloneable_type(inner) {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!("`Shared<{}>.capture()` cannot copy its value", inner.show()),
@@ -6728,7 +6743,7 @@ impl<'a> Checker<'a> {
                     false,
                     None,
                 )?;
-                if !is_cloneable(&projected, self.registry) {
+                if !self.is_cloneable_type(&projected) {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
@@ -6833,8 +6848,37 @@ impl<'a> Checker<'a> {
         Some(result())
     }
 
+    /// `a.same(b)` asks whether two `Shared<T>` handles name one cell.
+    /// Identity only, like `Rc::ptr_eq`; `==` on `Shared<T>` stays an error.
+    /// The argument is only read, so neither handle is moved.
+    pub(crate) fn finish_shared_same(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`same` expects 1 argument, got {}", args.len()),
+                "`same` compares this Shared handle with one other handle".to_string(),
+                "call `.same(other)`".to_string(),
+                Some(span),
+            ));
+            for arg in args {
+                self.infer(&mut arg.expr);
+            }
+            return Some(Type::Bool);
+        }
+        let expected = Type::Shared(Box::new(inner.clone()));
+        if let Some(got) = self.infer_with_expected(&mut args[0].expr, &expected) {
+            self.check_type_assignable(&expected, &got, args[0].expr.span());
+        }
+        Some(Type::Bool)
+    }
+
     pub(crate) fn finish_cell_get(&mut self, inner: &Type, span: Span) -> Option<Type> {
-        if !is_cloneable(inner, self.registry) {
+        if !self.is_cloneable_type(inner) {
             self.diags.push(Diagnostic::error(
                 "E0112",
                 format!("`Cell<{}>.get()` cannot copy its value", inner.show()),
@@ -6939,7 +6983,7 @@ impl<'a> Checker<'a> {
         self.infer(&mut args[0].expr);
         self.lambda_escapes = saved_escapes;
         self.expected_type = saved_expected;
-        if !is_cloneable(value, self.registry) {
+        if !self.is_cloneable_type(value) {
             self.diags.push(Diagnostic::error(
                 "E0112",
                 format!(
@@ -7388,7 +7432,7 @@ impl<'a> Checker<'a> {
         }
         let Some(arg) = args.get_mut(0) else {
             return Some(Type::Apply {
-                name: "Id".to_string(),
+                name: "ID".to_string(),
                 args: vec![elem_ty],
             });
         };
@@ -7418,7 +7462,7 @@ impl<'a> Checker<'a> {
         }
         self.check_take_arg_ownership("add", 0, &elem_ty, arg);
         Some(Type::Apply {
-            name: "Id".to_string(),
+            name: "ID".to_string(),
             args: vec![elem_ty],
         })
     }
@@ -7443,15 +7487,15 @@ impl<'a> Checker<'a> {
             _ => Type::Int,
         };
         let id_ty = Type::Apply {
-            name: "Id".to_string(),
+            name: "ID".to_string(),
             args: vec![elem_ty.clone()],
         };
         if args.len() != 1 {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!("`remove` expects 1 argument, got {}", args.len()),
-                "removing from a pool needs exactly one `Id<T>`".to_string(),
-                "call `.remove(id)` with the `Id<T>` to remove".to_string(),
+                "removing from a pool needs exactly one `ID<T>`".to_string(),
+                "call `.remove(id)` with the `ID<T>` to remove".to_string(),
                 Some(span),
             ));
         }
@@ -7472,7 +7516,7 @@ impl<'a> Checker<'a> {
                         id_ty.show(),
                         got.show()
                     ),
-                    "a pool is only removed from by the `Id<T>` its own `.add()` returned"
+                    "a pool is only removed from by the `ID<T>` its own `.add()` returned"
                         .to_string(),
                     type_fix_hint(&id_ty, &got),
                     Some(arg.expr.span()),

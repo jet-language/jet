@@ -3,15 +3,20 @@
 // Host/Driver supplies immutable fragments and data; this module alone decides
 // which checked runtime parts are selected and composes them in the same order
 // as the Web ABI.  No native emitter or preselected Prelude is consulted.
+use jet_foundation.[
+    MIRCoreCallID,
+    MIRRuntimePartID,
+    mir_sha256_hex_bytes,
+]
 
-fn jet_web_has_runtime_part(ctx: &JetWebEmitContext, wanted: MirRuntimePartId) -> Bool Never! {
+fn jet_web_has_runtime_part(ctx: &JetWebEmitContext, wanted: MIRRuntimePartID) -> Bool Never! {
     loop part in ctx.artifact.runtime_parts {
         if part == wanted -> return true
     }
     false
 }
 
-fn jet_web_core_is_font_shape(ctx: &JetWebEmitContext, id: MirCoreCallId) -> Bool Never! {
+fn jet_web_core_is_font_shape(ctx: &JetWebEmitContext, id: MIRCoreCallID) -> Bool Never! {
     call :: jet_web_find_core(ctx.program, id) ?? return false
     call.module_name == "core.font" && call.member == "shape"
 }
@@ -59,20 +64,20 @@ fn jet_web_harfbuzz_fragment(ctx: &JetWebEmitContext) -> String Never! {
 
 fn jet_web_compose_prelude(ctx: &JetWebEmitContext) -> String Never! {
     parts := [String]{ctx.config.assets.execution_prelude}
-    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Event) -> &parts.push(ctx.config.assets.event_prelude)
-    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Realtime) -> &parts.push(ctx.config.assets.realtime_prelude)
-    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Data) -> &parts.push(ctx.config.assets.data_prelude)
+    if jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Event) -> &parts.push(ctx.config.assets.event_prelude)
+    if jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Realtime) -> &parts.push(ctx.config.assets.realtime_prelude)
+    if jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Data) -> &parts.push(ctx.config.assets.data_prelude)
     // The Wasm prelude always exports the history ABI, even for programs with
     // no authored history call, so instantiation never loses its imports.
     &parts.push(ctx.config.assets.history_prelude)
-    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Compute) -> &parts.push(ctx.config.assets.compute_prelude)
-    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Game) {
+    if jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Compute) -> &parts.push(ctx.config.assets.compute_prelude)
+    if jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Game) {
         &parts.push(ctx.config.assets.raylib_prelude)
         &parts.push(ctx.config.assets.game_prelude)
         &parts.push("\nconst JET_GAME_DEFAULT_FRAME_BUDGET = {ctx.config.assets.game_default_frame_budget};\nconst JET_GAME_FRAME_BUDGET_ERROR = {jet_web_js_quote(ctx.config.assets.game_frame_budget_error)};")
     }
-    if jet_web_needs_font_shaping(ctx) -> &parts.push(jet_web_harfbuzz_fragment(ctx))
-    if jet_web_has_runtime_part(ctx, MirRuntimePartId.Math) -> &parts.push(jet_web_timezone_fragment(ctx))
+    if jet_web_needs_font_shaping(&ctx) -> &parts.push(jet_web_harfbuzz_fragment(&ctx))
+    if jet_web_has_runtime_part(&ctx, MIRRuntimePartID.Math) -> &parts.push(jet_web_timezone_fragment(&ctx))
     &parts.push(ctx.config.assets.task_group_prelude)
     &parts.push(ctx.config.assets.runtime_stop_metadata)
     parts.join("\n")
