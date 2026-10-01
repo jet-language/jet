@@ -7,6 +7,7 @@
 // Jet name is read; foreign bindings stay outside for the same reason.
 use jet_foundation.[
     Diagnostic,
+    Func,
     Program,
     Span,
     TextEdit,
@@ -56,4 +57,144 @@ fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: 
     if program.used_import_names.contains(name) || foreign_aliases.contains(name) -> return
     diagnostic :: sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
     &diagnostics.push(diagnostic_with_edit(diagnostic, edit))
+}
+
+// ---------------------------------------------------------------------------
+// D-STRUCT-LIVE1=A (Rust `Bundle/Liveness.rs`): L0104 reports a private
+// top-level function that no reference reaches from outside its own body (a
+// namespace package's sibling files count as callers); L0105 reports a
+// `pub(package)` function or constant, or a `pub(package)` re-export, that no
+// other module of its package consumes. Roots (the entry `run`, the build
+// entry, jobs, wasm exports) are never reported. Only snapshot (user) modules
+// are judged; every module's references count.
+
+pub struct SemaLivenessCandidate {
+    pub module_index: Int
+    pub body: Span
+    pub package_identity: String
+    pub private: Bool
+}
+
+fn sema_liveness_ignored(name: String) -> Bool Never! {
+    name == "" || name.starts_with("_") || name.starts_with("__jet_")
+}
+
+fn sema_liveness_is_root(function: Func, is_entry: Bool) -> Bool Never! {
+    if function.name == "build" && function.params.len() == 1 {
+        if function.params[0].ty == .Named(name) {
+            if name == "BuildContext" -> return true
+        }
+    }
+    if function.is_job || function.web_marker == .Val(.WasmExport) -> return true
+    is_entry && function.name == "run"
+}
+
+// Rust `removable_private_function`: only a bodiless, unmarked function is
+// deleted by the fix; anything else is renamed to `_name`.
+fn sema_liveness_removable(function: Func) -> Bool Never! {
+    function.body.len() == 0 && function.meta == None && function.markers.len() == 0 && function.external_type == None && function.inline_foreign == None && function.undo == None && function.web_marker == None && function.pre.len() == 0 && function.post.len() == 0 && !function.compiler_generated && !function.is_unsafe && !function.is_pure && !function.is_reactive && !function.is_replayable && !function.is_job && function.every == None && !function.is_must_use && function.kernel == None
+}
+
+fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: &[String:Bool], graph: SemaRegistrationGraph, source_index: Int, key: String, site: Span) Never! {
+    candidate :: candidates.get(key) ?? return
+    if source_index == candidate.module_index {
+        // A private function's own body never keeps it alive.
+        if candidate.private && site.start >= candidate.body.start && site.end <= candidate.body.end -> return
+        if candidate.private -> reached[key] = true
+        return
+    }
+    if graph.modules[source_index].package_identity != candidate.package_identity -> return
+    if !candidate.private || sema_registration_package_is_namespace(candidate.package_identity) -> reached[key] = true
+}
+
+pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+    diagnostics := [Diagnostic]{}
+    if modules.len() != graph.modules.len() -> return diagnostics
+    candidates := [String:SemaLivenessCandidate]{}
+    loop (module_index, module_row) in graph.modules {
+        if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
+        is_entry :: module_row.module_identity == graph.entry_module_identity
+        loop function in module_row.functions {
+            symbol :: function.symbol
+            if symbol.visibility > 1 || sema_liveness_ignored(symbol.name) || symbol.span.start >= symbol.span.end -> next
+            if sema_liveness_is_root(function.declaration, is_entry) -> next
+            candidates[symbol.id.key] = SemaLivenessCandidate{module_index: module_index, body: function.declaration.span, package_identity: module_row.package_identity, private: symbol.visibility == 0}
+        }
+        loop constant in module_row.constants {
+            symbol :: constant.symbol
+            if symbol.visibility != 1 || sema_liveness_ignored(symbol.name) || symbol.span.start >= symbol.span.end -> next
+            candidates[symbol.id.key] = SemaLivenessCandidate{module_index: module_index, body: symbol.span, package_identity: module_row.package_identity, private: false}
+        }
+    }
+    reached := [String:Bool]{}
+    loop (source_index, checked) in modules {
+        loop reference in checked.name_references -> sema_liveness_note_site(candidates, &reached, graph, source_index, reference.symbol.id.key, reference.span)
+        loop call in checked.call_facts {
+            callee :: call.callee ?? next
+            sema_liveness_note_site(candidates, &reached, graph, source_index, callee.key, call.span)
+        }
+    }
+    loop (module_index, module_row) in graph.modules {
+        if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
+        start :: diagnostics.len()
+        loop function in module_row.functions {
+            symbol :: function.symbol
+            candidate :: candidates.get(symbol.id.key) ?? next
+            if candidate.module_index != module_index || reached.get(symbol.id.key) != None -> next
+            if candidate.private {
+                edit :: if sema_liveness_removable(function.declaration) -> TextEdit{span: function.declaration.span, new_text: ""} else -> TextEdit{span: symbol.span, new_text: "_{symbol.name}"}
+                diagnostic :: sema_lint("L0104", symbol.span, "Private function `{symbol.name}` is never called or used as a value.", "A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.", "Remove the function, or rename `{symbol.name}` to `_{symbol.name}` when it is intentional.")
+                &diagnostics.push(diagnostic_with_edit(diagnostic, edit))
+            } else {
+                sema_liveness_unreachable_export(symbol.name, symbol.span, &diagnostics)
+            }
+        }
+        loop constant in module_row.constants {
+            symbol :: constant.symbol
+            candidate :: candidates.get(symbol.id.key) ?? next
+            if candidate.module_index != module_index || reached.get(symbol.id.key) != None -> next
+            sema_liveness_unreachable_export(symbol.name, symbol.span, &diagnostics)
+        }
+        sema_liveness_unreachable_reexports(graph, module_index, &diagnostics)
+        sema_attach_diagnostic_source_locations(&diagnostics, start, module_row.source_segments)
+    }
+    diagnostics
+}
+
+fn sema_liveness_unreachable_export(name: String, span: Span, diagnostics: &[Diagnostic]) {
+    diagnostic :: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; library `pub` remains open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
+    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "_{name}"}))
+}
+
+// `pub(package) use m.[name]` is reached when another module of the package
+// imports `name` through this module.
+fn sema_liveness_unreachable_reexports(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) {
+    module_row :: graph.modules[module_index]
+    loop import in module_row.imports {
+        if !import.declaration.is_package_pub -> next
+        if import.declaration.kind == .Unqualified(_, _, items, _, _) {
+            loop (index, item) in items {
+                local :: sema_registration_import_local(item)
+                if sema_liveness_ignored(local) -> next
+                span := Span{start: 0, end: 0}
+                if {
+                    index < import.declaration.local_spans.len() -> span = import.declaration.local_spans[index]
+                    index < import.declaration.item_spans.len() -> span = import.declaration.item_spans[index]
+                }
+                if span.start >= span.end -> next
+                consumed :: loop (consumer_index, consumer) in graph.modules {
+                    if consumer_index == module_index || consumer.package_identity != module_row.package_identity -> next
+                    found :: loop candidate in consumer.imports {
+                        if candidate.target_module_identity != module_row.module_identity -> next
+                        hit :: loop binding in candidate.bindings {
+                            if binding.original == local -> break true
+                        } ?? false
+                        if hit -> break true
+                    } ?? false
+                    if found -> break true
+                } ?? false
+                if !consumed -> sema_liveness_unreachable_export(local, span, &diagnostics)
+            }
+        }
+    }
 }

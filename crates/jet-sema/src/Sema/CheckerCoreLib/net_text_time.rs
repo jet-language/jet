@@ -1082,7 +1082,9 @@ pub fn http_type_method_return(
     }
 }
 
-/// D-URL1=A: method return types for typed URL and MIME values.
+/// D-URL1=A: method return types for typed MIME values. `URL` is the
+/// `core.net.url` source record; its documented fields and methods resolve
+/// through the declaration, with no handle twins.
 pub fn url_mime_method_return(
     ty: &Type,
     method: &str,
@@ -1090,27 +1092,6 @@ pub fn url_mime_method_return(
 ) -> Option<Option<Type>> {
     let argc = args.len();
     match ty {
-        Type::Named(n) if n == "URL" => match method {
-            "scheme" | "path" | "query" | "to_string" | "username" | "password" | "userinfo"
-            | "authority"
-                if argc == 0 =>
-            {
-                Some(Some(Type::String))
-            }
-            "host" | "fragment" if argc == 0 => Some(Some(Type::Option(Box::new(Type::String)))),
-            "port" | "default_port" if argc == 0 => Some(Some(Type::Option(Box::new(Type::Int)))),
-            "path_segments" if argc == 0 => Some(Some(Type::List(Box::new(Type::String)))),
-            "query_pairs" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
-                Type::String,
-            )))))),
-            "normalize" if argc == 0 => Some(Some(Type::Named("URL".to_string()))),
-            "join" if argc == 1 => Some(Some(result_ty(
-                Type::Named("URL".to_string()),
-                Type::String,
-            ))),
-            "set_query" | "add_query" if argc == 2 => Some(Some(Type::Named("URL".to_string()))),
-            _ => None,
-        },
         Type::Named(n) if n == "MIME" => match method {
             "media_type" | "subtype" | "essence" | "to_string" if argc == 0 => {
                 Some(Some(Type::String))

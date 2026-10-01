@@ -6,6 +6,8 @@ use jet_foundation.[
     Type,
     diagnostic_from_registry,
     diagnostic_with_source_mapping,
+    dimension_display_name,
+    measure_expression,
     type_name,
 ]
 
@@ -203,4 +205,109 @@ pub fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnost
         "the value here does not have the type required by this declaration",
         "use a value of the required type or convert it explicitly",
     )
+}
+
+// The plain-words type name diagnostics print (the Rust reference's
+// `Type::show`): scalars carry a gloss and nominal names are quoted.
+pub fn sema_type_show(ty: Type) -> String Never! {
+    if ty == {
+        .Int -> "Int (a whole number)"
+        .Float -> "Float (an approximate binary number)"
+        .Bool -> "Bool (true or false)"
+        .String -> "String (text)"
+        .Char -> "Char (one character)"
+        .Named(name) -> if name == "Decimal" -> "Decimal (an exact base-10 number)" else -> "`{name}`"
+        .Measure(measure) -> "{measure_expression(measure)} (a compile-time measure)"
+        .Apply(name, args) -> {
+            if name == "Ptr" && args.len() == 1 -> return "`*{type_name(args[0])}`"
+            names :: loop arg in args -> type_name(arg)
+            "`{name}`<{names.join(", ")}>"
+        }
+        .Quantity(_, dimension) -> "{dimension_display_name(dimension)} (a physical quantity)"
+        .TraitObject(bounds) -> "`{bounds.join(" + ")}` (a trait value)"
+        .IntN(signed, bits) -> {
+            spelling :: if signed -> "I{bits}" else -> "U{bits}"
+            article :: if bits == 8 -> "an" else -> "a"
+            "{spelling} ({article} {bits}-bit whole number, {sema_type_int_range_text(signed, bits)})"
+        }
+        .InlineRange(base, lo, hi) -> "{type_name(base)} (a whole number from {lo} to {hi})"
+        .Float32 -> "F32 (a 32-bit approximate binary number)"
+        .Tagged(marker, inner) -> if marker == {
+            .User(name) -> "#{name} {sema_type_show(inner)}"
+            .Internal(_) -> sema_type_show(inner)
+        }
+        else -> type_name(ty)
+    }
+}
+
+fn sema_type_int_range_text(signed: Bool, bits: Int) -> String Never! {
+    if bits == 64 && signed -> return "-9223372036854775808 to 9223372036854775807"
+    if bits == 64 -> return "0 to 18446744073709551615"
+    if bits == 128 && signed -> return "-170141183460469231731687303715884105728 to 170141183460469231731687303715884105727"
+    if bits == 128 -> return "0 to 340282366920938463463374607431768211455"
+    span := 1
+    loop _ in 0..<bits -> span = span * 2
+    if signed -> return "{0 - span / 2} to {span / 2 - 1}"
+    "0 to {span - 1}"
+}
+
+// The last path segment of a nominal type, or "" for any other type.
+fn sema_type_nominal_leaf(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) -> {
+            parts := name.split("::").to_list()
+            if parts.len() < 2 -> parts = name.split(".").to_list()
+            parts[parts.len() - 1]
+        }
+        else -> ""
+    }
+}
+
+// The repair for a value of type `got` where `want` is required (the Rust
+// reference's `type_fix_hint`). A fix never prescribes what was written.
+pub fn sema_type_fix_hint(want: Type, got: Type) -> String Never! {
+    want_show :: sema_type_show(want)
+    if want_show == sema_type_show(got) -> return "these are two different declarations that both print as {want_show}; make both sides name the same one (import it once and use that name)"
+    want_leaf :: sema_type_nominal_leaf(want)
+    if want_leaf != "" && want_leaf == sema_type_nominal_leaf(got) -> return "these names may refer to one declaration; make both sides use one spelling for `{want_leaf}`"
+    if want == {
+        .Float -> {
+            if got == Type.Int -> return "write the number with a decimal part, like `2.0`"
+            if sema_type_nominal_leaf(got) == "Decimal" -> return "write the literal as Float{{3.4}}, or keep Decimal on both sides"
+        }
+        .Int -> {
+            if got == Type.Float -> return "drop the decimal part, like `2`"
+            if got == .IntN(signed, bits) {
+                prefix :: if signed -> "i" else -> "u"
+                return "widen it explicitly with `Int.from_{prefix}{bits}(value)`"
+            }
+        }
+        .String -> return "put the value in text with interpolation: \"{{x}}\""
+        .Named(name) -> {
+            if name.ends_with(".RNG") -> return "use RNG here"
+        }
+        else -> {}
+    }
+    "use {want_show} here"
+}
+
+// D-DISCARD1=A (owner ruling): with a written return type, a mismatched value
+// is taught as a fault in the value itself (its conversion or wrap), never as
+// a prompt to change the declared return type.
+fn sema_return_value_fix(want: Type, got: Type) -> String Never! {
+    if want == Type.Int && got == (Type.Named{name: "Fraction"}) -> return "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
+    if want == .List(item) && item == got -> return "wrap the value in a list: `[value]`"
+    if got == .List(item) && item == want -> return "this is a whole list; hand back one element, or combine the elements into one value"
+    if got == .Option(item) && item == want -> return "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`"
+    if type_name(want) == "String" -> return "put the value in text with interpolation: \"{{value}}\""
+    hint :: sema_type_fix_hint(want, got)
+    if hint.starts_with("use ") && hint.ends_with(" here") -> return "hand back a {type_name(want)} value: convert this value to {type_name(want)}, or return the value you meant"
+    hint
+}
+
+// E0113: a value handed back by `function` does not match its written
+// return type `want`.
+pub fn sema_return_value_mismatch(function: String, want: Type, got: Type, span: Span) -> Diagnostic {
+    want_name :: type_name(want)
+    sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{function}` returns {want_name}", "`{function}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(want, got))
 }

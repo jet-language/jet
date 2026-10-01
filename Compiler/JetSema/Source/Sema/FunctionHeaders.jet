@@ -3,12 +3,15 @@
 // registering or type-checking ordinary function bodies.
 use jet_foundation.[
     AccessConvention,
+    CallArg,
     Diagnostic,
+    Expr,
     Func,
     ImplDef,
     Item,
     NamedType,
     Span,
+    Stmt,
     Type,
 ]
 
@@ -59,6 +62,77 @@ pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, d
         }
     }
     valid
+}
+
+// D-NARG-D2 (E0126): a default expression may name only parameters written
+// before its own; defaults fill left to right. `self` is not a parameter here.
+pub fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
+    names := [String]{}
+    loop parameter in function.params {
+        if parameter.name != "self" -> &names.push(parameter.name)
+    }
+    valid := true
+    index := 0
+    loop parameter in function.params {
+        if parameter.name == "self" -> next
+        if parameter.default == .Val(default) {
+            references := [Expr]{}
+            sema_function_header_default_idents(default, &references)
+            loop reference in references {
+                if reference == .Ident(name, span) {
+                    later := false
+                    loop (position, candidate) in names {
+                        if candidate == name {
+                            later = position >= index
+                            break
+                        }
+                    }
+                    if later {
+                        &diagnostics.push(sema_error("E0126", span, "default for `{parameter.name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{parameter.name}`, or use a constant default"))
+                        valid = false
+                    }
+                }
+            }
+        }
+        index += 1
+    }
+    valid
+}
+
+// The identifier nodes a default expression reads, in source order.
+fn sema_function_header_default_idents(value: Expr, found: &[Expr]) {
+    if value == {
+        .Ident(_, _) -> &found.push(value)
+        .Binary(_, left, right, _) -> {
+            sema_function_header_default_idents(left, &found)
+            sema_function_header_default_idents(right, &found)
+        }
+        .Unary(_, inner, _) | .Paren(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) | .Spread(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Present(inner, _) | .Tainted(inner, _, _) -> sema_function_header_default_idents(inner, &found)
+        .Index(base, index, _, _) -> {
+            sema_function_header_default_idents(base, &found)
+            sema_function_header_default_idents(index, &found)
+        }
+        .Call(call) -> loop argument in call.args -> sema_function_header_default_idents(argument.expr, &found)
+        .CallValue(callee, args, _) -> {
+            sema_function_header_default_idents(callee, &found)
+            loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
+        }
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
+            sema_function_header_default_idents(receiver, &found)
+            loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
+        }
+        .ListLit(items, _) -> loop item in items -> sema_function_header_default_idents(item, &found)
+        .TupleLit(fields, _, _) -> loop field in fields -> sema_function_header_default_idents(field.value, &found)
+        .Str(parts, _) -> loop part in parts {
+            if part == .Interp(inner, _) -> sema_function_header_default_idents(inner, &found)
+        }
+        .If(cond, _, then_value, _, else_value, _) -> {
+            sema_function_header_default_idents(cond, &found)
+            sema_function_header_default_idents(then_value, &found)
+            sema_function_header_default_idents(else_value, &found)
+        }
+        else -> {}
+    }
 }
 
 pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
@@ -153,4 +227,174 @@ pub fn sema_function_header_check_inline_foreign(function: Func, module_row: Sem
         return false
     }
     !asm && unsafe_gate_valid
+}
+
+// D-ANY-JAI1 (Rust `check_variadic_bound_body_shape`, E1314): a
+// trait-bounded variadic parameter (`...Trait` / `...[A, B]`) has no single
+// Rust type, so its only supported use is the collection of one top-level
+// `loop x in name { … }` loop. Every other reference is reported.
+pub fn sema_function_header_check_variadic_bound_shape(function: Func, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    if function.params.len() == 0 -> return true
+    last :: function.params[function.params.len() - 1]
+    if !last.variadic -> return true
+    bounded := false
+    if last.variadic_bound_list == .Val(list) {
+        bounded = list.len() > 0
+    } else {
+        graph_option :: environment.registration_graph
+        if last.ty == .Named(trait_name) && trait_name != "" && graph_option == .Val(graph) {
+            bounded = sema_expr_expected_trait_symbol(graph, trait_name, environment.module_identity) != None
+        }
+    }
+    if !bounded -> return true
+    loops := 0
+    uses := [Span]{}
+    loop statement in function.body -> sema_function_header_variadic_statement(statement, last.name, true, &loops, &uses)
+    if loops > 1 -> &uses.push(last.name_span)
+    loop span in uses {
+        &diagnostics.push(sema_error("E1314", span, "`{last.name}` can only be used in a direct `loop x in {last.name} {{ … }}` loop here", "`{last.name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can have different concrete types, so there's no single Rust type to give `{last.name}` outside a loop that visits each argument once", "iterate it with `loop x in {last.name} {{ … }}` — that's the only supported use"))
+    }
+    uses.len() == 0
+}
+
+fn sema_function_header_variadic_body(body: [Stmt], name: String, loops: &Int, uses: &[Span]) Never! {
+    loop statement in body -> sema_function_header_variadic_statement(statement, name, false, &loops, &uses)
+}
+
+fn sema_function_header_variadic_statement(statement: Stmt, name: String, top_level: Bool, loops: &Int, uses: &[Span]) Never! {
+    if statement == {
+        .Expr(value) | .DeferClose(value, _) -> sema_function_header_variadic_expr(value, name, &uses)
+        .Return(value, _) -> {
+            if value == .Val(returned) -> sema_function_header_variadic_expr(returned, name, &uses)
+        }
+        .Val(binding) -> sema_function_header_variadic_expr(binding.init, name, &uses)
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Index(base, index, _, _) -> {
+                    sema_function_header_variadic_expr(base, name, &uses)
+                    sema_function_header_variadic_expr(index, name, &uses)
+                }
+                .Field(base, _, _) -> sema_function_header_variadic_expr(base, name, &uses)
+                .Local(local, local_span) -> {
+                    if local == name -> &uses.push(local_span)
+                }
+                else -> {}
+            }
+            sema_function_header_variadic_expr(value, name, &uses)
+        }
+        .While(cond, body, _, _, _) -> {
+            sema_function_header_variadic_expr(cond, name, &uses)
+            sema_function_header_variadic_body(body, name, &loops, &uses)
+        }
+        .For(_, _, second, kind, body, span, _, label, _) -> {
+            direct := false
+            if top_level && second == None && label == None && kind == .In(direct_collection, direct_step) && direct_step == None && direct_collection == .Ident(direct_name, _) && direct_name == name -> direct = true
+            if direct {
+                loops += 1
+            } else {
+                if kind == {
+                    .Range(start, end, step, _) -> {
+                        sema_function_header_variadic_expr(start, name, &uses)
+                        sema_function_header_variadic_expr(end, name, &uses)
+                        if step == .Val(step_value) -> sema_function_header_variadic_expr(step_value, name, &uses)
+                    }
+                    .In(collection, step) -> {
+                        if collection == .Ident(collection_name, _) && collection_name == name {
+                            &uses.push(span)
+                        } else {
+                            sema_function_header_variadic_expr(collection, name, &uses)
+                        }
+                        if step == .Val(step_value) -> sema_function_header_variadic_expr(step_value, name, &uses)
+                    }
+                }
+            }
+            sema_function_header_variadic_body(body, name, &loops, &uses)
+        }
+        .Switch(subject, arms, else_body, _) -> {
+            sema_function_header_variadic_expr(subject, name, &uses)
+            loop arm in arms {
+                sema_function_header_variadic_expr(arm.cond, name, &uses)
+                sema_function_header_variadic_body(arm.body, name, &loops, &uses)
+            }
+            if else_body == .Val(body) -> sema_function_header_variadic_body(body, name, &loops, &uses)
+        }
+        .Loop(body, _, _, _) -> sema_function_header_variadic_body(body, name, &loops, &uses)
+        .CountedLoop(init, cond, step, body, _, _, _) -> {
+            sema_function_header_variadic_expr(init.init, name, &uses)
+            sema_function_header_variadic_expr(cond, name, &uses)
+            if step == .Val(inner) -> sema_function_header_variadic_statement(inner, name, false, &loops, &uses)
+            sema_function_header_variadic_body(body, name, &loops, &uses)
+        }
+        // Scope wrappers (`#Unsafe { }`, regions, groups, …) stay out of the
+        // v1 scan, as in the Rust walk.
+        else -> {}
+    }
+}
+
+fn sema_function_header_variadic_args(args: [CallArg], name: String, uses: &[Span]) Never! {
+    loop arg in args -> sema_function_header_variadic_expr(arg.expr, name, &uses)
+}
+
+fn sema_function_header_variadic_expr(expr: Expr, name: String, uses: &[Span]) Never! {
+    if expr == {
+        .Ident(found, span) -> {
+            if found == name -> &uses.push(span)
+        }
+        .Call(call) -> sema_function_header_variadic_args(call.args, name, &uses)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .CallValue(receiver, args, _) -> {
+            sema_function_header_variadic_expr(receiver, name, &uses)
+            sema_function_header_variadic_args(args, name, &uses)
+        }
+        .Binary(_, left, right, _) -> {
+            sema_function_header_variadic_expr(left, name, &uses)
+            sema_function_header_variadic_expr(right, name, &uses)
+        }
+        .Unary(_, inner, _) | .Field(inner, _, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .OptField(inner, _, _, _, _) -> sema_function_header_variadic_expr(inner, name, &uses)
+        .Try(inner, _, _, note) -> {
+            sema_function_header_variadic_expr(inner, name, &uses)
+            if note == .Val(note_value) -> sema_function_header_variadic_expr(note_value, name, &uses)
+        }
+        .Index(base, index, _, _) -> {
+            sema_function_header_variadic_expr(base, name, &uses)
+            sema_function_header_variadic_expr(index, name, &uses)
+        }
+        .Slice(base, start, end, range, _) -> {
+            sema_function_header_variadic_expr(base, name, &uses)
+            if range == .Val(range_value) {
+                sema_function_header_variadic_expr(range_value, name, &uses)
+            } else {
+                sema_function_header_variadic_expr(start, name, &uses)
+                sema_function_header_variadic_expr(end, name, &uses)
+            }
+        }
+        .ListLit(elements, _) -> loop element in elements -> sema_function_header_variadic_expr(element, name, &uses)
+        .MapLit(entries, _) -> loop entry in entries {
+            sema_function_header_variadic_expr(entry.key, name, &uses)
+            sema_function_header_variadic_expr(entry.value, name, &uses)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
+        .TypedLit(_, body, _) -> {
+            if body == {
+                .Fields(fields) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
+                .Elements(elements) -> loop element in elements -> sema_function_header_variadic_expr(element, name, &uses)
+                .Entries(entries) -> loop entry in entries {
+                    sema_function_header_variadic_expr(entry.key, name, &uses)
+                    sema_function_header_variadic_expr(entry.value, name, &uses)
+                }
+                .Value(value) -> sema_function_header_variadic_expr(value, name, &uses)
+                else -> {}
+            }
+        }
+        .TupleLit(fields, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
+        .EnumLit(_, _, _, args, _, _) -> loop arg in args {
+            if arg == {
+                .Positional(value) -> sema_function_header_variadic_expr(value, name, &uses)
+                .Named(_, value) -> sema_function_header_variadic_expr(value, name, &uses)
+            }
+        }
+        .Str(parts, _) -> loop part in parts {
+            if part == .Interp(value, _) -> sema_function_header_variadic_expr(value, name, &uses)
+        }
+        else -> {}
+    }
 }

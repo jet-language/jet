@@ -48,7 +48,7 @@ JET_CORE_ERROR_FAMILY :: prep { [String]{
 // D-FAILURE-FOUNDATION1=A: every Core type that may be named as the error side
 // of an explicit `!` contract (the Rust reference's `is_core_error_type`).
 JET_CORE_ERROR_TYPES :: prep { [String]{
-    "AllocError", "AuthError", "BuildError", "BrowserError", "CBORError", "Closed", "CompilerError", "ComputeError",
+    "AllocError", "AuthError", "BuildError", "BrowserError", "CBORError", "Closed", "CompilerError", "CompilerPackageError", "ComputeError",
     "CryptoError", "DBError", "DataError", "EmailError", "EncodingError", "EnvError", "EventConfigError", "Expired",
     "FileCryptoError", "HTTPError", "IOError", "UIHostError", "KeyWrapError", "NetError", "RangeError", "ServiceError",
     "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
@@ -408,7 +408,10 @@ fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScope
 // admits `Never` as a callable's success slot.
 pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     if ty == {
-        .Named(name) -> if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
+        .Named(name) -> {
+            if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
+        }
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, &diagnostics)
         .Map(key, _, value) -> {
             sema_check_failure_contract_type(key, span, false, generic_names, environment, &diagnostics)
@@ -433,7 +436,15 @@ pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, g
             loop param in params -> sema_check_failure_contract_type(param, span, false, generic_names, environment, &diagnostics)
             if ret == .Val(value) -> sema_check_failure_contract_type(value, span, true, generic_names, environment, &diagnostics)
         }
-        .Apply(_, args) | .Union(args) -> loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, &diagnostics)
+        .Apply(name, args) -> {
+            if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, &diagnostics)
+        }
+        // D-UNIONTYPE1=A (E0363): only concrete closed member types.
+        .Union(members) -> loop member in members {
+            if sema_union_member_open(member, generic_names) -> &diagnostics.push(sema_error("E0363", span, "`{type_name(member)}` can't be a union member", "anonymous unions hold concrete closed types — not type parameters, trait objects, or function types", "use a named enum when a member needs an open shape"))
+            sema_check_failure_contract_type(member, span, false, generic_names, environment, &diagnostics)
+        }
         .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, &diagnostics)
         else -> {}
     }
@@ -443,6 +454,35 @@ pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, g
 // the same E0119 from its declared-type walk.
 fn sema_type_hole(span: Span) -> Diagnostic {
     sema_error("E0119", span, "`_` isn't a type", "a signature names every type; `_` is only a pattern wildcard", "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`")
+}
+
+fn sema_no_any_type(span: Span) -> Diagnostic {
+    sema_error("E0350", span, "Jet does not have an `Any` type", "a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `DataTree` for parsed dynamic data", "replace `Any` with the specific mechanism for this value")
+}
+
+// Rust `union_member_has_open_shape`, or a member that mentions one of the
+// signature's type parameters.
+fn sema_union_member_open(ty: Type, generic_names: [String]) -> Bool Never! {
+    if ty == {
+        .TraitObject(_) | .Fn(_, _, _, _, _, _) -> true
+        .Named(name) -> generic_names.contains(name)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> sema_union_member_open(inner, generic_names)
+        .Map(key, _, value) -> sema_union_member_open(key, generic_names) || sema_union_member_open(value, generic_names)
+        .Result(ok, error) -> sema_union_member_open(ok, generic_names) || sema_union_member_open(error, generic_names)
+        .Apply(_, args) | .Union(args) -> {
+            loop arg in args {
+                if sema_union_member_open(arg, generic_names) -> return true
+            }
+            false
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_union_member_open(field.ty, generic_names) -> return true
+            }
+            false
+        }
+        else -> false
+    }
 }
 
 // Checks one named callable's declared signature (E2417/E2422).

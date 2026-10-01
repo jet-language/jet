@@ -2323,17 +2323,18 @@ fn canonical_codec_owner(ty: &Type, cx: &Cx) -> Type {
 
 /// Return the nominal identity used by the checked method target rows. Entry
 /// locals keep their source leaf; imported and canonical receivers use the
-/// NameLedger identity already shared by field/type lowering.
+/// NameLedger identity already shared by field/type lowering. An imported
+/// nominal also has a leaf row in `local_type_identities`, so only a leaf the
+/// entry itself declares maps back: Core `URL`'s canonical receiver must keep
+/// its identity, or the call names a bare `URL::method` no module declares.
 fn canonical_method_target_owner(cx: &Cx, name: &str) -> String {
     if cx.jit_local_call_prefix.is_none() {
         if cx.local_type_names.contains(name) {
             return name.to_string();
         }
-        if let Some((leaf, _)) = cx
-            .local_type_identities
-            .iter()
-            .find(|(_, identity)| identity.as_str() == name)
-        {
+        if let Some((leaf, _)) = cx.local_type_identities.iter().find(|(leaf, identity)| {
+            identity.as_str() == name && cx.local_type_names.contains(leaf.as_str())
+        }) {
             return leaf.clone();
         }
     }
@@ -7208,6 +7209,22 @@ fn lower_method_call_impl(
                 // JIT never see a raw `HashSet` where they expect a `Vec`.
                 let recv_t = if matches!(op, TBuiltinOp::Min { .. }) {
                     crate::Codegen::TIR::wrap_set_receiver_as_list(recv_t, method_span)
+                } else if matches!(op, TBuiltinOp::SetFrom) {
+                    // #4009: `Set.from` collects a list. An `Iter<T>` receiver
+                    // (`xs.lazy().to_set()`) drains through the same `.to_list()`
+                    // a user would write, so no tier reads the iterator handle
+                    // as a list.
+                    match crate::Collections::iter_elem(recv_t.ty.without_user_tags()).cloned() {
+                        Some(elem) => TExpr {
+                            ty: Type::List(Box::new(elem)),
+                            kind: TExprKind::BuiltinMethod {
+                                recv: Box::new(recv_t),
+                                op: TBuiltinOp::IterToList,
+                                args: Vec::new(),
+                            },
+                        },
+                        None => recv_t,
+                    }
                 } else {
                     recv_t
                 };
@@ -7275,8 +7292,21 @@ fn lower_method_call_impl(
                 // emission normally owns.
                 let expected_arg_types =
                     crate::Collections::builtin_method_arg_types(&recv_t.ty, method);
+                // D-LISTREMOVE1/F: a `.Val`/`.Slot` selector is already fixed
+                // in the op's mode, so the route takes the item alone. Only the
+                // dynamic form keeps the selector as a run-time value.
+                let value_arg_count = match &op {
+                    TBuiltinOp::RemoveList { mode, .. }
+                    | TBuiltinOp::PriorityQueueRemove { mode, .. }
+                        if *mode != crate::Codegen::TIR::ListRemoveMode::Dynamic =>
+                    {
+                        1
+                    }
+                    _ => args.len(),
+                };
                 let mut targs: Vec<TExpr> = args
                     .iter()
+                    .take(value_arg_count)
                     .enumerate()
                     .map(|(i, a)| {
                         let expected = expected_arg_types.as_ref().and_then(|types| types.get(i));
@@ -8978,11 +9008,11 @@ fn lower_method_call_impl(
         }
         if is_shared && method == "capture" && args.len() <= 1 {
             return in_own_frame(|| {
-                let inner = match &recv_peek {
-                    Some(Type::Shared(inner)) => (**inner).clone(),
+                let recv_t = lower_expr(receiver, cx, env);
+                let inner = match recv_peek.as_ref().unwrap_or(&recv_t.ty) {
+                    Type::Shared(inner) => (**inner).clone(),
                     _ => Type::Int,
                 };
-                let recv_t = lower_expr(receiver, cx, env);
                 let (targs, projection_ty) = if let Some(arg) = args.first() {
                     let Expr::Lambda(lam) = &arg.expr else {
                         unreachable!("sema's finish_shared_capture requires a lambda argument");
@@ -9050,11 +9080,14 @@ fn lower_method_call_impl(
         }
         if is_shared && matches!(method, "read" | "edit") && args.len() == 1 {
             return in_own_frame(|| {
-                let inner = match &recv_peek {
-                    Some(Type::Shared(inner)) => (**inner).clone(),
+                let recv_t = lower_expr(receiver, cx, env);
+                // A field receiver (`graph.hooks.read(...)`, also the sema
+                // rewrite of `graph.hooks.name`) has no env slot type to peek;
+                // its lowered type carries the checked `Shared<T>`.
+                let inner = match recv_peek.as_ref().unwrap_or(&recv_t.ty) {
+                    Type::Shared(inner) => (**inner).clone(),
                     _ => Type::Int,
                 };
-                let recv_t = lower_expr(receiver, cx, env);
                 let Expr::Lambda(lam) = &args[0].expr else {
                     unreachable!(
                         "sema's finish_shared_read/finish_shared_edit require a lambda arg"

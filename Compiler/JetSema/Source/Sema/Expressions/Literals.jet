@@ -459,7 +459,7 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
     checked :: sema_expression_list_elements(elements, expected_element, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if result_ty == None {
         if checked.parts.len() == 0 {
-            &diagnostics.push(sema_error("E0119", span, "an empty list needs an expected element type", "there is no element from which to infer `[]`", "annotate the list as `[T]` or bind it to a typed value"))
+            &diagnostics.push(sema_error("E0501", span, "an empty list needs a type", "write `[]` only where the list type is already known from around it", "name the element type on the literal, such as `[Int]{{}}`"))
             return None
         }
         result_ty = Val(Type.List{element: checked.element_types[0]})
@@ -491,17 +491,18 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
     if expected == .Val(expected_ty) {
         normalized :: sema_expr_unwrap_tag(expected_ty)
         if normalized == {
-            .Map(key, _, value) -> {
+            .Map(key, key_span, value) -> {
                 expected_key = Val(key)
                 expected_value = Val(value)
                 result_ty = Val(normalized)
+                if entries.len() == 0 && !sema_type_map_key_eligible(environment, key) -> &diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type (D-MAP-KEY1)", key_span ?? span))
             }
             else -> {}
         }
     }
     if entries.len() == 0 {
         if result_ty == None {
-            &diagnostics.push(sema_error("E0119", span, "an empty map needs an expected key and value type", "there is no entry from which to infer `[:]`", "annotate the map before constructing it"))
+            &diagnostics.push(sema_error("E0501", span, "an empty map needs a type", "write `[]` only where the map type is already known from around it", "name the key and value types on the literal: `[String:Int].{{}}`"))
             return None
         }
         ty :: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}
@@ -515,6 +516,7 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
         value :: if expected_value != None -> sema_check_expression(entry.value, expected_value, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(entry.value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         checked_key :: key ?? return None
         checked_value :: value ?? return None
+        if !sema_type_map_key_eligible(environment, checked_key.ty) -> &diagnostics.push(sema_map_key_error("`{type_name(checked_key.ty)}` can't be a map key (D-MAP-KEY1)", expr_span(entry.key)))
         if expected_key == .Val(key_ty) {
             compatible_key :: sema_expr_expected_assignable(key_ty, checked_key.ty, environment) ?? return None
             if !compatible_key -> return None
@@ -542,6 +544,12 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
     if result_ty == None -> result_ty = Val(Type.Map{key: inferred_key ?? Type.Int, key_span: Val(expr_span(entries[0].key)), value: inferred_value ?? Type.Int})
     ty :: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}
     sema_expr_expected(sema_tir_expr(ty, TExprKind.Map{entries: lowered}, span), expected, environment, &diagnostics)
+}
+
+// D-MAP-KEY1 (E0502): one why/fix for every rejected map key, as the Rust
+// reference's declared-type and map-literal sites print it.
+pub fn sema_map_key_error(what: String, span: Span) -> Diagnostic {
+    sema_error("E0502", span, what, "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible", "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately")
 }
 
 fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -740,6 +748,10 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span:
     }
     if result_ty == None {
         &diagnostics.push(sema_error("E0505", span, "only lists and strings can be sliced, not {type_name(checked_base.ty)}", "a Range projects a window from indexed storage", "slice a List or String value"))
+        return None
+    }
+    if sema_columnar_list_element(environment, checked_base.ty) == .Val(element) {
+        &diagnostics.push(sema_error("E1108", span, "slicing isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(checked_base.ty))}` yet", "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration", "drop `#Layout(columnar)` from `{element}` to slice, or index the elements you need in a loop"))
         return None
     }
     zero_start :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)

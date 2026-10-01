@@ -20,6 +20,7 @@ use jet_lexer.[
     TOKEN_COMMA,
     TOKEN_DOT_DOT_DOT,
     TOKEN_EOF,
+    TOKEN_EQ,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_ENUM,
@@ -51,89 +52,147 @@ fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
     if label == { .Val(value) -> value.name else -> "" }
 }
 
+// D-META-NAME1=A / D-MARKER-SITES1=B: a canonical `marker Name(…)`, or the
+// retired checked-text `marker Name on …` so the parser can teach it.
 fn parser_marker_decl_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT
+    if !(parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT) -> return false
+    third :: parser_lookahead(&state, 2)
+    third.kind == TOKEN_LPAREN || (third.kind == TOKEN_IDENT && third.payload.decoded == "on")
 }
 
 fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT
+    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN
 }
 
+// D-META-FORM1=A / D-META-USER1=A / D-MARKER-SITES1=B: the one canonical
+// `marker Name(params…)` declaration. The retired checked-text form and the
+// rejected trailers (an `on` clause, a second parameter list) teach E0381.
 fn parser_parse_marker_decl(state: &JetParserState) -> Item {
     start :: parser_bump(&state)
-    name :: parser_expect_name(&state, "for a marker declaration name")
+    name :: parser_expect_name(&state, "the marker name in `marker Name(params…)`")
+    on :: parser_current(&state)
+    if on.kind == TOKEN_IDENT && on.payload.decoded == "on" {
+        parser_skip_marker_trailer(&state)
+        parser_add_fatal_code(&state, "E0381", on.span, "the checked-text marker declaration is retired", "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form", "write `marker {name.payload.decoded}($sites: [.Text])` for a plain rule, or use a built-in typed text head")
+        return Item.MarkerDecl{value: MarkerDecl{name: name.payload.decoded, name_span: name.span, params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, on.span)}}
+    }
     params :: parser_marker_decl_params(&state)
     body := [DeriveBodyItem]?{None}
     end := parser_lookahead(&state, -1).span
-    if parser_current_kind(&state) == TOKEN_LBRACE {
-        body = Val(parser_marker_body(&state))
-        end = parser_lookahead(&state, -1).span
+    trailer :: parser_current(&state)
+    if {
+        trailer.kind == TOKEN_LBRACE -> {
+            body = Val(parser_marker_body(&state))
+            end = parser_lookahead(&state, -1).span
+        }
+        trailer.kind == TOKEN_IDENT && trailer.payload.decoded == "on" -> {
+            parser_skip_marker_trailer(&state)
+            parser_add_error_code(&state, "E0381", trailer.span, "a trailing `on` clause isn't how a marker states a fact", "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `$` names are fixed metadata values — not a clause after the list", "move the sites into the parameter list as `$sites: [.Function, …]`")
+            end = parser_lookahead(&state, -1).span
+        }
+        trailer.kind == TOKEN_LPAREN -> {
+            parser_skip_marker_trailer(&state)
+            parser_add_error_code(&state, "E0381", trailer.span, "a second parameter list isn't how a marker states a fact", "D-MARKER-SITES1=B: the rule's own typed arguments and fixed metadata share one named-parameter list, told apart by the compiler-fact `$` sigil — not two parameter lists", "fold the second list's facts into the first as `$sites: […]`, `$repeatable: true`")
+            end = parser_lookahead(&state, -1).span
+        }
+        else -> {}
     }
-    if parser_current_kind(&state) == TOKEN_SEMI -> end = parser_bump(&state).span
+    if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     Item.MarkerDecl{value: MarkerDecl{name: name.payload.decoded, name_span: name.span, params: params, body: body, span: parser_cover(start.span, end)}}
+}
+
+// Consume a rejected marker-declaration trailer (the `on` word and its
+// bracketed list, or a second parameter list) so parsing resumes after the
+// one teaching diagnostic; an enclosing closer is never eaten.
+fn parser_skip_marker_trailer(state: &JetParserState) Never! {
+    depth := 0
+    opened := false
+    loop {
+        kind :: parser_current_kind(&state)
+        if kind == TOKEN_EOF -> return
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET {
+            depth += 1
+            opened = true
+            parser_bump(&state)
+            next
+        }
+        if parser_is_closer(kind) {
+            if depth == 0 -> return
+            parser_bump(&state)
+            depth -= 1
+            if depth == 0 && parser_current_kind(&state) != TOKEN_LBRACE -> return
+            next
+        }
+        if kind == TOKEN_SEMI && depth == 0 {
+            parser_bump(&state)
+            return
+        }
+        if depth == 0 && opened -> return
+        parser_bump(&state)
+    }
 }
 
 fn parser_parse_fact_decl(state: &JetParserState) -> Item {
     start :: parser_bump(&state)
-    name :: parser_expect_name(&state, "for a fact declaration name")
+    name :: parser_expect_name(&state, "the fact name in `fact Name(params…)`")
     params :: parser_marker_decl_params(&state)
     end := parser_lookahead(&state, -1).span
-    if parser_current_kind(&state) == TOKEN_SEMI -> end = parser_bump(&state).span
+    if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     Item.FactDecl{value: FactDecl{name: name.payload.decoded, name_span: name.span, params: params, span: parser_cover(start.span, end)}}
 }
 
+// D-META-FORM1=A / D-DEFAULT-SHAPE1=B: rule arguments read `name: Type{default}`;
+// a fixed fact about the rule reads `$name: value`. A parameter may be named
+// by any written word, including a keyword (D-VERDICT-1455-1).
 fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
-    parser_expect(&state, TOKEN_LPAREN, "`(` before marker declaration parameters")
+    parser_expect(&state, TOKEN_LPAREN, "`(` to open the marker's parameter list")
     params := [MarkerDeclParam]{}
-    loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
-        marked := false
-        name_span := parser_current(&state).span
-        name := ""
-        // D-DECL-META1=A: compiler metadata carries the fact sigil
-        // (`$sites: [.Type]`); plain names are what a use site supplies.
-        if {
-            parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded.starts_with("$") -> {
-                name_token :: parser_bump(&state)
-                name = name_token.payload.decoded
-                name_span = name_token.span
-                marked = true
+    if parser_current_kind(&state) != TOKEN_RPAREN {
+        loop !parser_aborting(&state) {
+            token :: parser_current(&state)
+            marked :: token.kind == TOKEN_IDENT && token.payload.decoded.starts_with("$")
+            name_token :: if {
+                token.kind != TOKEN_IDENT && parser_is_keyword_token(token) -> parser_bump(&state)
+                marked -> parser_expect_name(&state, "a marker fact name")
+                else -> parser_expect_name(&state, "a marker parameter name")
             }
-            else -> {
-                name_token :: parser_expect_name(&state, "for a marker declaration parameter")
-                name = name_token.payload.decoded
-                name_span = name_token.span
-            }
-        }
-        parser_expect(&state, TOKEN_COLON, "between a marker parameter name and its type or value")
-        if {
-            marked -> {
-                value :: parser_parse_expression(&state, 1, 0)
-                &params.push(MarkerDeclParam{name: name, name_span: name_span, ty: None, value: Val(value.expr), variadic: false})
-            }
-            else -> {
-                variadic := false
-                if parser_current_kind(&state) == TOKEN_DOT_DOT_DOT {
-                    parser_bump(&state)
-                    variadic = true
+            name :: if token.kind == TOKEN_IDENT -> name_token.payload.decoded else -> name_token.payload.text
+            parser_expect(&state, TOKEN_COLON, "`:` between the parameter name and its type or value")
+            if {
+                marked -> {
+                    value :: parser_parse_expression_no_struct_lit(&state, 1)
+                    &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: None, value: Val(value.expr), variadic: false})
                 }
-                parsed :: parser_parse_type(&state, 0)
-                default := Expr?{None}
-                if parser_current_kind(&state) == TOKEN_LBRACE {
-                    parser_bump(&state)
-                    default = Val(parser_parse_expression(&state, 1, 0).expr)
-                    parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker parameter default")
+                else -> {
+                    variadic := false
+                    if parser_current_kind(&state) == TOKEN_DOT_DOT_DOT {
+                        parser_bump(&state)
+                        variadic = true
+                    }
+                    parsed :: parser_parse_type(&state, 0)
+                    default := Expr?{None}
+                    if {
+                        parser_current_kind(&state) == TOKEN_LBRACE -> {
+                            parser_bump(&state)
+                            default = Val(parser_parse_expression_no_struct_lit(&state, 1).expr)
+                            parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker parameter default")
+                        }
+                        parser_current_kind(&state) == TOKEN_EQ -> {
+                            eq :: parser_bump(&state)
+                            parser_add_error_code(&state, "E0385", eq.span, "This declaration uses the retired `name: Type = value` default spelling.", "Declaration defaults ride the type as `name: Type{{value}}`; `=` remains for reassignment and extern slot fill.", "Write `name: Type{{value}}` for a declaration default, or keep `=` for reassignment and extern slot fill.")
+                            default = Val(parser_parse_expression_no_struct_lit(&state, 1).expr)
+                        }
+                        else -> {}
+                    }
+                    &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: default, variadic: variadic})
                 }
-                &params.push(MarkerDeclParam{name: name, name_span: name_span, ty: Val(parsed.ty), value: default, variadic: variadic})
             }
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            parser_expect(&state, TOKEN_COMMA, "`,` between marker parameters")
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
         }
-        if parser_current_kind(&state) == TOKEN_RPAREN -> break
-        if parser_current_kind(&state) != TOKEN_COMMA {
-            parser_add_error_here(&state, "expected `,` between marker declaration parameters", "marker parameters are comma-separated", "add a comma or close the parameter list")
-            break
-        }
-        parser_bump(&state)
     }
-    parser_expect(&state, TOKEN_RPAREN, "`)` after marker declaration parameters")
+    parser_expect(&state, TOKEN_RPAREN, "`)` to close the marker's parameter list")
     params
 }
 
@@ -148,7 +207,7 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
             next
         }
         if parser_current_kind(&state) == TOKEN_KW_PUB || parser_current_kind(&state) == TOKEN_KW_PRIV {
-            modifiers :: parser_parse_item_modifiers(&state)
+            modifiers :: parser_parse_item_modifiers(&state, true)
             &body.push(DeriveBodyItem.Item{value: parser_marker_body_item(&state, modifiers)})
             next
         }
@@ -168,7 +227,7 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
 fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
     if parser_current_kind(&state) == {
         TOKEN_KW_FN -> {
-            parsed :: parser_parse_function(&state, modifiers)
+            parsed :: parser_parse_function(&state, modifiers, true)
             Item.Func{value: parsed.value}
         }
         TOKEN_KW_STRUCT -> Item.Struct{value: parser_parse_struct(&state, modifiers)}

@@ -1,0 +1,32 @@
+// A text view bound to a local (`key :: line.before(":")`) compares with a
+// String on either side, for equality and for order, exactly like the String
+// it reads. The view stays a zero-copy borrow of `line`; only the comparison
+// reads its text.
+fn key_is(line: String, wanted: String) -> Bool {
+    key :: line.before(":")
+    key == wanted
+}
+
+fn wanted_is_trimmed(text: String, wanted: String) -> Bool {
+    trimmed :: text.trim()
+    wanted == trimmed
+}
+
+fn differs(text: String, other: String) -> Bool {
+    trimmed :: text.trim()
+    trimmed != other
+}
+
+fn sorts_before(text: String, other: String) -> Bool {
+    trimmed :: text.trim()
+    trimmed < other
+}
+
+fn run() {
+    print("key_is name: {key_is("name:jet", "name")}")
+    print("key_is age: {key_is("name:jet", "age")}")
+    print("wanted_is_trimmed: {wanted_is_trimmed("  jet  ", "jet")}")
+    print("differs: {differs(" a ", "b")}")
+    print("sorts_before: {sorts_before(" apple ", "banana")}")
+    print("sorts_before reversed: {sorts_before(" pear ", "banana")}")
+}

@@ -1347,6 +1347,15 @@ struct RustEmitter<'a> {
     types: BTreeMap<MirTypeId, String>,
     type_instances: BTreeMap<MirTypeId, &'a MirType>,
     types_by_name: BTreeMap<String, String>,
+    /// First `program.types` row (program order) for each type ID, key and
+    /// name, so type-definition lookups keep first-match order without a
+    /// linear scan per query.
+    type_def_by_id: BTreeMap<MirTypeId, usize>,
+    type_def_by_key: BTreeMap<&'a str, usize>,
+    type_def_by_name: BTreeMap<&'a str, usize>,
+    /// Source-written (not compiler-generated) trait impls by trait name, in
+    /// program order.
+    user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>>,
     traits: BTreeMap<MirTraitId, String>,
     traits_by_name: BTreeMap<String, String>,
     fields: BTreeMap<MirFieldId, String>,
@@ -1355,6 +1364,12 @@ struct RustEmitter<'a> {
     history_callable_modes: std::cell::RefCell<BTreeSet<(usize, String)>>,
     generic_scopes: std::cell::RefCell<Vec<&'a [MirGenericParam]>>,
     history_current_function: std::cell::Cell<Option<MirFunctionId>>,
+    /// Memoized `type_derive_capability` answers for closed (non-generic,
+    /// unbound) type rows, per trait name.
+    derive_capability_cache: std::cell::RefCell<BTreeMap<String, BTreeMap<MirTypeId, bool>>>,
+    /// Lowest `visiting` index a cycle assumption reached in the current
+    /// `type_derive_capability` frame (`usize::MAX` when none).
+    derive_capability_cycle_floor: std::cell::Cell<usize>,
     history_callback_lifetime: std::cell::Cell<&'static str>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
@@ -1404,7 +1419,13 @@ impl<'a> RustEmitter<'a> {
         let mut types_by_name = BTreeMap::new();
         let mut fields = BTreeMap::new();
         let mut method_owners = BTreeMap::new();
-        for def in &program.types {
+        let mut type_def_by_id = BTreeMap::new();
+        let mut type_def_by_key = BTreeMap::new();
+        let mut type_def_by_name = BTreeMap::new();
+        for (index, def) in program.types.iter().enumerate() {
+            type_def_by_id.entry(def.id).or_insert(index);
+            type_def_by_key.entry(def.key.as_str()).or_insert(index);
+            type_def_by_name.entry(def.name.as_str()).or_insert(index);
             let symbol = mangle_path(&def.key);
             types.insert(def.id, symbol.clone());
             types_by_name.insert(def.key.clone(), symbol.clone());
@@ -1442,7 +1463,18 @@ impl<'a> RustEmitter<'a> {
                     .or_insert_with(|| symbol.clone());
             }
         }
+        let mut user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>> = BTreeMap::new();
         for implementation in &program.impls {
+            if let Some(trait_ref) = implementation
+                .trait_ref
+                .as_ref()
+                .filter(|_| !implementation.compiler_generated)
+            {
+                user_impls_by_trait
+                    .entry(trait_ref.name.as_str())
+                    .or_default()
+                    .push(implementation);
+            }
             let owner =
                 Self::type_identity_from_instances(&type_instances, &implementation.self_type);
             for function in &implementation.methods {
@@ -1485,6 +1517,10 @@ impl<'a> RustEmitter<'a> {
             types,
             type_instances,
             types_by_name,
+            type_def_by_id,
+            type_def_by_key,
+            type_def_by_name,
+            user_impls_by_trait,
             traits,
             traits_by_name,
             fields,
@@ -1493,6 +1529,8 @@ impl<'a> RustEmitter<'a> {
             history_callable_modes: std::cell::RefCell::new(BTreeSet::new()),
             generic_scopes: std::cell::RefCell::new(Vec::new()),
             history_current_function: std::cell::Cell::new(None),
+            derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
+            derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
             history_callback_lifetime: std::cell::Cell::new("'static"),
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
@@ -2764,18 +2802,31 @@ impl<'a> RustEmitter<'a> {
             Some(MirTypeKind::Apply { name, .. }) => (name.id, Some(name.name.as_str())),
             _ => (id, None),
         };
-        self.program
-            .types
-            .iter()
-            .find(|def| def.id == id)
-            .or_else(|| {
-                nominal_name.and_then(|name| {
-                    self.program
-                        .types
-                        .iter()
-                        .find(|def| def.key == name || def.name == name)
-                })
+        self.first_type_def_matching([Some(id), None], None)
+            .or_else(|| nominal_name.and_then(|name| self.first_type_def_matching([None, None], Some(name))))
+    }
+
+    /// The first `program.types` row (program order) whose ID is one of
+    /// `ids`, or whose key or name is `label`.
+    fn first_type_def_matching(
+        &self,
+        ids: [Option<MirTypeId>; 2],
+        label: Option<&str>,
+    ) -> Option<&'a MirTypeDef> {
+        let by_id = ids
+            .into_iter()
+            .flatten()
+            .filter_map(|id| self.type_def_by_id.get(&id).copied());
+        let by_label = label
+            .into_iter()
+            .flat_map(|label| {
+                [
+                    self.type_def_by_key.get(label).copied(),
+                    self.type_def_by_name.get(label).copied(),
+                ]
             })
+            .flatten();
+        self.program.types.get(by_id.chain(by_label).min()?)
     }
     fn rust_decl_type(&self, definition: &MirTypeDef, edge: &str, ty: &MirType) -> String {
         let rendered = self.rust_type(ty);
@@ -3107,8 +3158,14 @@ impl<'a> RustEmitter<'a> {
     fn validate_prelude_count(&self, row: &MirPreludeCall, count: usize) {
         if count < row.signature.arity || count > row.signature.max_arity {
             panic!(
-                "MIR Prelude call {:?} has {} arguments, expected {}..={}",
-                row.id, count, row.signature.arity, row.signature.max_arity
+                "MIR Prelude call {:?} ({}.{} -> {}) has {} arguments, expected {}..={}",
+                row.id,
+                row.module,
+                row.member,
+                row.symbol.name(),
+                count,
+                row.signature.arity,
+                row.signature.max_arity
             );
         }
         if row.signature.borrow_mask.len() != count {
@@ -5693,9 +5750,30 @@ impl<'a> RustEmitter<'a> {
                 {
                     return false;
                 }
-                if visiting.contains(&def.id) {
+                if let Some(position) = visiting.iter().position(|id| *id == def.id) {
+                    self.derive_capability_cycle_floor
+                        .set(self.derive_capability_cycle_floor.get().min(position));
                     return true;
                 }
+                // A closed row's answer depends on the row alone: `false` means
+                // an incapable leaf is reachable, and `true` is final once no
+                // cycle assumption above this frame was used.
+                let cacheable = args.is_empty()
+                    && def.generic_params.is_empty()
+                    && bindings.is_empty()
+                    && generic_params.is_empty();
+                if cacheable {
+                    if let Some(cached) = self
+                        .derive_capability_cache
+                        .borrow()
+                        .get(trait_name)
+                        .and_then(|rows| rows.get(&def.id))
+                    {
+                        return *cached;
+                    }
+                }
+                let depth = visiting.len();
+                let outer_floor = self.derive_capability_cycle_floor.replace(usize::MAX);
                 let mut next_bindings = bindings.clone();
                 let mut next_generic_params = generic_params.clone();
                 next_generic_params.extend(
@@ -5765,27 +5843,35 @@ impl<'a> RustEmitter<'a> {
                     MirTypeDefKind::UnitFamily { .. } => true,
                 };
                 visiting.pop();
+                let floor = self.derive_capability_cycle_floor.get();
+                self.derive_capability_cycle_floor.set(outer_floor.min(floor));
+                if cacheable && (!result || floor >= depth) {
+                    self.derive_capability_cache
+                        .borrow_mut()
+                        .entry(trait_name.to_string())
+                        .or_default()
+                        .insert(def.id, result);
+                }
                 result
             }
         }
     }
 
     fn selected_user_capability_impl(&self, ty: &MirType, trait_name: &str) -> bool {
-        self.program.impls.iter().any(|implementation| {
-            !implementation.compiler_generated
-                && implementation
-                    .trait_ref
-                    .as_ref()
-                    .is_some_and(|trait_ref| trait_ref.name == trait_name)
-                && self.module_selected(implementation.module)
-                && self.impl_selected_for_target(implementation)
-                && (implementation.self_type.same_checked_type(ty)
-                    || implementation
-                        .self_type
-                        .nominal_name()
-                        .zip(ty.nominal_name())
-                        .is_some_and(|(left, right)| left == right))
-        })
+        self.user_impls_by_trait
+            .get(trait_name)
+            .is_some_and(|implementations| {
+                implementations.iter().any(|implementation| {
+                    self.module_selected(implementation.module)
+                        && self.impl_selected_for_target(implementation)
+                        && (implementation.self_type.same_checked_type(ty)
+                            || implementation
+                                .self_type
+                                .nominal_name()
+                                .zip(ty.nominal_name())
+                                .is_some_and(|(left, right)| left == right))
+                })
+            })
     }
 
     /// D-DISPLAYDBG1: a plain enum (every case a unit case) is admitted by bare
@@ -16301,23 +16387,11 @@ impl<'a> RustEmitter<'a> {
     fn structural_type_def_for(&self, ty: &MirType) -> Option<&'a MirTypeDef> {
         match ty.kind() {
             MirTypeKind::Apply { name, .. } => self
-                .program
-                .types
-                .iter()
-                .find(|definition| {
-                    Some(definition.id) == ty.identity
-                        || definition.id == name.id
-                        || definition.key == name.name
-                        || definition.name == name.name
-                })
+                .first_type_def_matching([ty.identity, Some(name.id)], Some(name.name.as_str()))
                 .or_else(|| self.anonymous_union_definition(&name.name)),
             MirTypeKind::Union(members) => {
                 if let Some(identity) = ty.identity {
-                    return self
-                        .program
-                        .types
-                        .iter()
-                        .find(|definition| definition.id == identity);
+                    return self.first_type_def_matching([Some(identity), None], None);
                 }
                 if let Some(identity) = self
                     .type_instances
@@ -16325,11 +16399,7 @@ impl<'a> RustEmitter<'a> {
                     .find(|(_, instance)| instance.same_checked_type(ty))
                     .map(|(id, _)| *id)
                 {
-                    return self
-                        .program
-                        .types
-                        .iter()
-                        .find(|definition| definition.id == identity);
+                    return self.first_type_def_matching([Some(identity), None], None);
                 }
                 self.program.types.iter().find(|definition| {
                     if !definition.name.starts_with("__JetUnion_") {
@@ -16758,6 +16828,32 @@ impl<'a> RustEmitter<'a> {
                         } else {
                             format!("!({equal})")
                         };
+                    }
+                }
+                if matches!(
+                    op,
+                    MirBinaryOp::Lt
+                        | MirBinaryOp::Gt
+                        | MirBinaryOp::Le
+                        | MirBinaryOp::Ge
+                        | MirBinaryOp::Compare
+                ) {
+                    let left_ty = self.value_type(function, left);
+                    let right_ty = self.value_type(function, right);
+                    let left_view = is_string_view_type(left_ty);
+                    let right_view = is_string_view_type(right_ty);
+                    if (left_view && matches!(right_ty.kind(), MirTypeKind::String))
+                        || (right_view && matches!(left_ty.kind(), MirTypeKind::String))
+                    {
+                        // A text view against a String: Rust orders `str`
+                        // with `str` only, so both sides read as `&str`.
+                        let text = |value| {
+                            format!(
+                                "::std::convert::AsRef::<str>::as_ref(&({}))",
+                                self.value_slot_reference(value, false)
+                            )
+                        };
+                        return self.binary(op, text(left), text(right));
                     }
                 }
                 self.exact_int_binary(function, op, left, right, location)
@@ -20747,17 +20843,21 @@ impl<'a> RustEmitter<'a> {
 
     fn enum_variant_payload(&self, owner: MirTypeId, variant: &str) -> &MirVariantPayload {
         let def = self
-            .program
-            .types
-            .iter()
-            .find(|def| def.id == owner)
+            .type_def_by_id
+            .get(&owner)
+            .map(|index| &self.program.types[*index])
             .unwrap_or_else(|| panic!("MIR enum owner type {:?} has no row", owner));
         match &def.kind {
             MirTypeDefKind::Enum { variants, .. } => {
                 &variants
                     .iter()
                     .find(|candidate| candidate.name == variant)
-                    .unwrap_or_else(|| panic!("MIR enum variant {variant:?} has no row"))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "MIR enum variant {variant:?} has no row in `{}` {:?}",
+                            def.key, owner
+                        )
+                    })
                     .payload
             }
             MirTypeDefKind::Struct { .. }
@@ -25957,6 +26057,25 @@ impl<'a> RustEmitter<'a> {
         self.value_slot_reference(value, true)
     }
 
+    /// The declaration a typed constant builds: the nominal's identity, then
+    /// its exact key; a bare display name only when one declaration carries
+    /// it, so a user `FontStyle` never renders as Core's (#4003).
+    fn typed_constant_definition(&self, nominal: &MirNominalRef) -> Option<&MirTypeDef> {
+        let types = &self.program.types;
+        if let Some(definition) = types
+            .iter()
+            .find(|definition| definition.id == nominal.id)
+            .or_else(|| types.iter().find(|definition| definition.key == nominal.name))
+        {
+            return Some(definition);
+        }
+        let mut named = types
+            .iter()
+            .filter(|definition| definition.name == nominal.name);
+        let definition = named.next()?;
+        named.next().is_none().then_some(definition)
+    }
+
     fn typed_struct_constant(
         &self,
         nominal: &MirNominalRef,
@@ -25964,11 +26083,7 @@ impl<'a> RustEmitter<'a> {
         type_name: &str,
         fields: &[(String, MirConstant)],
     ) -> Option<String> {
-        let definition = self.program.types.iter().find(|definition| {
-            definition.id == nominal.id
-                || definition.key == nominal.name
-                || definition.name == nominal.name
-        })?;
+        let definition = self.typed_constant_definition(nominal)?;
         if type_name != nominal.name.as_str()
             && type_name != definition.key.as_str()
             && type_name != definition.name.as_str()
@@ -26018,11 +26133,7 @@ impl<'a> RustEmitter<'a> {
         variant: &str,
         values: &[(Option<String>, MirConstant)],
     ) -> Option<String> {
-        let definition = self.program.types.iter().find(|definition| {
-            definition.id == nominal.id
-                || definition.key == nominal.name
-                || definition.name == nominal.name
-        })?;
+        let definition = self.typed_constant_definition(nominal)?;
         if type_name != nominal.name.as_str()
             && type_name != definition.key.as_str()
             && type_name != definition.name.as_str()
@@ -26056,7 +26167,18 @@ impl<'a> RustEmitter<'a> {
         let owner_name = self
             .anonymous_union_definition(&definition.key)
             .map(|canonical| mangle_path(&canonical.key))
-            .unwrap_or_else(|| self.nominal_name(type_name));
+            .unwrap_or_else(|| {
+                // A display name several declarations share renders through
+                // the resolved declaration's key, never the last same-named row.
+                let shared = self
+                    .program
+                    .types
+                    .iter()
+                    .filter(|candidate| candidate.name == definition.name)
+                    .nth(1)
+                    .is_some();
+                self.nominal_name(if shared { definition.key.as_str() } else { type_name })
+            });
         let variant_path = format!("{owner_name}::{variant_name}");
         match &declared_variant.payload {
             MirVariantPayload::Unit => {

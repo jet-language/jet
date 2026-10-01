@@ -402,6 +402,17 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // D-CORE-USELIST1=A: a grouped Core item import
+                // (`use core.web.forms.[WebFormError]`) names that module's
+                // public source record.
+                if let Some(leaf) = self.core_item_imports.get(n.as_str()) {
+                    if self
+                        .struct_owner_module(n, None)
+                        .is_some_and(|owner| self.type_is_pub_in(owner, leaf))
+                    {
+                        return;
+                    }
+                }
                 // Check imported file-module registries for pub types.
                 if let Some(mods) = self.modules {
                     let found = self

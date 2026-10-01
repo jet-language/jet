@@ -117,6 +117,10 @@ fn jet_eval_route_core(machine: &JetEvalMachine, call: MIRCoreCallID, route: MIR
         output :: jet_eval_host_row_with_moves(&machine, route_row, args, result_ty, move_permissions, span) ?? return None
         return Val(jet_eval_route_success(output, fallibility))
     }
+    if row.interpreter_route == CoreCallInterpreterRoute.TypedIntrinsic && jet_eval_route_core_encoding_module(row.module_name) {
+        data :: jet_eval_route_args(args, &machine, span) ?? return None
+        return jet_eval_route_core_encoding(row, data, fallibility, &machine, span)
+    }
     if row.pure_route == CoreCallPureRoute.NoPureRoute -> return jet_eval_route_not_supported(&machine, span, "a non-pure Core route")
     if row.interpreter_route != (CoreCallInterpreterRoute.Pure{route: row.pure_route}) -> return jet_eval_route_not_supported(&machine, span, "a Core route without the canonical pure interpreter descriptor")
     data :: jet_eval_route_args(args, &machine, span) ?? return None

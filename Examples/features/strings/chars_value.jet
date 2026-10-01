@@ -1,0 +1,27 @@
+// `text.chars()` used as a value is a `[Char]` of the string's characters,
+// one per Unicode scalar value, not per byte.
+enum Literal {
+    Text(String)
+    Number(Int)
+}
+
+fn char_count(text: String) -> Int {
+    text.chars().len()
+}
+
+fn literal_width(literal: Literal) -> Int? {
+    if literal == {
+        .Text(value) -> Val(value.chars().len())
+        else -> Int?{None}
+    }
+}
+
+fn run() {
+    word := "héllo"
+    letters := word.chars()
+    print("count={char_count(word)} bytes={word.count_bytes()}")
+    print("first={letters[0]} second={letters[1]} last={letters[letters.len() - 1]}")
+    print("text-width={literal_width(Literal.Text("añb")) ?? -1}")
+    print("number-width={literal_width(Literal.Number(7)) ?? -1}")
+    print("empty={char_count("")}")
+}

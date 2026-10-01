@@ -515,6 +515,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CompilerReference" | "CompilerDefinitionAnchor" | "CompilerCall"
         | "CompilerEffect" | "CompilerEffectProvenance" | "CompilerOutput"
         | "CompilerOutputEntry" | "CompilerStructuralNode" | "CompilerArithmeticOperation"
+        | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
         | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget"

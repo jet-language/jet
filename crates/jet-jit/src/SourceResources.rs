@@ -6615,7 +6615,10 @@ mod tests {
                 provider_identity: String::new(),
                 closure_identity: String::new(),
                 artifact_identity: String::new(),
-                program_identity: MirProgramIdentity::unavailable(String::new(), Vec::new()),
+                program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
+                    String::new(),
+                    Vec::new(),
+                )),
             },
         };
         let bindings = crate::SourceInterfaces::NativeInterfaceBindings::new();
@@ -7629,7 +7632,10 @@ mod tests {
                 provider_identity: String::new(),
                 closure_identity: String::new(),
                 artifact_identity: String::new(),
-                program_identity: MirProgramIdentity::unavailable(String::new(), Vec::new()),
+                program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
+                    String::new(),
+                    Vec::new(),
+                )),
             },
         };
         let session = SourceResourceSession::new_with_finalizer(

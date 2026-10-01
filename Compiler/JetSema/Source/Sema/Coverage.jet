@@ -268,6 +268,27 @@ fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [S
 // for an else-less table whose checked pattern conditions leave a case open.
 pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     table :: sema_coverage_table(conditions) ?? return
+    // D-PARSESTR1 / D-BINPAT1 (Rust `report_refutable_pattern_without_else`):
+    // a text or byte arm can always fail to match, so the table needs `else`.
+    if !multi_head {
+        has_text := false
+        has_binary := false
+        loop shape in table.shapes {
+            if shape == {
+                .Text(_, _) -> has_text = true
+                .Binary(_, _) -> has_binary = true
+                else -> {}
+            }
+        }
+        if has_binary && !has_text {
+            &diagnostics.push(sema_error("E0148", span, "this `if` matches bytes but has no `else` arm", "a binary pattern can always fail to match — the fixed bytes might differ, or the subject might be too short", "add `else -> {{ ... }}` to handle bytes that don't match"))
+            return
+        }
+        if has_text {
+            &diagnostics.push(sema_error("E0148", span, "this `if` matches text but has no `else` arm", "a text pattern can always fail to match — the fixed text might differ, or a typed hole might not read as that type", "add `else -> {{ ... }}` to handle text that doesn't match"))
+            return
+        }
+    }
     subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)
     ranges := [SemaIntegerRange]{}
     keys :: sema_coverage_keys(subject_ty, table.shapes, environment, &ranges)

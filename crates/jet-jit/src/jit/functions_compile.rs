@@ -111,6 +111,112 @@ fn constant_field_slot(declared: Option<&[String]>, position: usize, name: &str)
         .and_then(|declared| declared.iter().position(|field| field == name))
         .unwrap_or(position)
 }
+/// One folded enum variant resolved through its checked declaration.
+struct ConstantEnumVariant {
+    discriminant: i64,
+    /// The Prelude `Ordering` word carrier.
+    ordering: bool,
+    /// A one-word `payload << 8 | discriminant` carrier.
+    packed: bool,
+    payload: Option<jet_foundation::MIR::MirVariantPayload>,
+}
+/// Peel transparent tags so a folded constant sees its structural type.
+fn constant_structural_type(ty: &MirType) -> &MirType {
+    match ty.kind() {
+        MirTypeKind::Tagged { inner, .. } => constant_structural_type(inner),
+        _ => ty,
+    }
+}
+/// The checked types a folded nominal constant may build under `ty`: the type
+/// itself and the members of the optional, result and union carriers around it.
+fn constant_nominal_candidates<'t>(ty: &'t MirType, candidates: &mut Vec<&'t MirType>) {
+    candidates.push(ty);
+    match ty.kind() {
+        MirTypeKind::Tagged { inner, .. } | MirTypeKind::Option(inner) => {
+            constant_nominal_candidates(inner, candidates);
+        }
+        MirTypeKind::Result { ok, err } => {
+            constant_nominal_candidates(ok, candidates);
+            constant_nominal_candidates(err, candidates);
+        }
+        MirTypeKind::Union(members) => {
+            for member in members {
+                constant_nominal_candidates(member, candidates);
+            }
+        }
+        _ => {}
+    }
+}
+fn constant_struct_fields(
+    definition: Option<&jet_foundation::MIR::MirTypeDef>,
+) -> Option<&[jet_foundation::MIR::MirField]> {
+    match &definition?.kind {
+        MirTypeDefKind::Struct { fields, .. } => Some(fields.as_slice()),
+        _ => None,
+    }
+}
+fn constant_field_type<'f>(
+    declared: Option<&'f [jet_foundation::MIR::MirField]>,
+    name: &str,
+) -> Option<&'f MirType> {
+    declared?
+        .iter()
+        .find(|field| field.name == name)
+        .map(|field| &field.ty)
+}
+/// The declaration slot order of a folded literal, when its declaration
+/// declares every field the literal names.
+fn constant_declared_slots<'n>(
+    declared: Option<&[jet_foundation::MIR::MirField]>,
+    mut names: impl Iterator<Item = &'n String>,
+) -> Option<Vec<String>> {
+    let declared = declared?;
+    names
+        .all(|name| declared.iter().any(|field| field.name == *name))
+        .then(|| declared.iter().map(|field| field.name.clone()).collect())
+}
+/// The checked type of one folded enum payload argument.
+fn constant_payload_type<'p>(
+    payload: Option<&'p jet_foundation::MIR::MirVariantPayload>,
+    arity: usize,
+    position: usize,
+    name: Option<&str>,
+) -> Option<&'p MirType> {
+    match payload? {
+        jet_foundation::MIR::MirVariantPayload::Named(fields) => {
+            let field = match name {
+                Some(name) => fields.iter().find(|field| field.name == name),
+                None => fields.get(position),
+            };
+            field.map(|field| &field.ty)
+        }
+        jet_foundation::MIR::MirVariantPayload::Single(ty) if arity == 1 => Some(ty),
+        _ => None,
+    }
+}
+/// The checked declaration a nominal reference names: its identity first,
+/// then its exact key. A bare display name resolves only when exactly one
+/// declaration carries it, so a user type never binds to a same-named Core
+/// declaration, or the reverse (#4003).
+pub(crate) fn nominal_ref_definition<'p>(
+    program: &'p MirProgram,
+    name: &jet_foundation::MIR::MirNominalRef,
+) -> Option<&'p jet_foundation::MIR::MirTypeDef> {
+    if let Some(definition) = program
+        .types
+        .iter()
+        .find(|definition| definition.id == name.id)
+        .or_else(|| program.types.iter().find(|definition| definition.key == name.name))
+    {
+        return Some(definition);
+    }
+    let mut named = program
+        .types
+        .iter()
+        .filter(|definition| definition.name == name.name);
+    let definition = named.next()?;
+    named.next().is_none().then_some(definition)
+}
 fn nominal_leaf(name: &str) -> &str {
     let leaf = name
         .rsplit_once("::")
@@ -433,6 +539,13 @@ fn is_duration_type(ty: &MirType) -> bool {
 }
 
 
+
+/// `View<str>` / `ViewMut<str>`: a borrowed window over String text.
+fn is_text_view_type(ty: &MirType) -> bool {
+    jet_foundation::MIR::mir_view_element_type(ty).is_some_and(|element| {
+        matches!(element.kind(), MirTypeKind::Apply { name, args } if args.is_empty() && name.name == "str")
+    })
+}
 
 fn comparison_element_kind(ty: &MirType) -> Option<ComparisonElementKind> {
     if is_ordering_type(ty) {
@@ -4713,7 +4826,41 @@ fn lower_generator_wrapper(
     Ok(())
 }
 
+/// Lower one MIR function. A refusal names the function that carries the
+/// unsupported operation: the caller reports the gap against the artifact
+/// entry, which is usually not where the operation lives.
 fn lower_function(
+    module: &mut dyn Module,
+    host: &HostFns,
+    program: &MirProgram,
+    function: &MirFunction,
+    runtime: &mut JitRuntime,
+    function_ids: &HashMap<MirFunctionId, FuncId>,
+    view_thunks: &HashMap<ViewThunkKey, FuncId>,
+    app_thunks: &HashMap<AppThunkKey, AppThunk>,
+    csv_thunks: &HashMap<CsvDecodeThunkKey, FuncId>,
+    json_thunks: &HashMap<JsonDecodeThunkKey, FuncId>,
+    function_id: FuncId,
+    generator_body: bool,
+) -> Result<(), String> {
+    lower_function_body(
+        module,
+        host,
+        program,
+        function,
+        runtime,
+        function_ids,
+        view_thunks,
+        app_thunks,
+        csv_thunks,
+        json_thunks,
+        function_id,
+        generator_body,
+    )
+    .map_err(|error| format!("{error} (in MIR function `{}`)", function.key))
+}
+
+fn lower_function_body(
     module: &mut dyn Module,
     host: &HostFns,
     program: &MirProgram,
@@ -5318,9 +5465,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .as_ref()
                     .and_then(list_word_cells)
                     .or_else(|| constant_list_word_cells(values));
-                Some(self.constant_list(builder, values, words)?)
+                let element = instruction.ty.as_ref().and_then(MirType::list_element);
+                Some(self.constant_list(builder, values, words, element)?)
             }
-            MirOperation::Constant(constant) => Some(self.constant(builder, constant, expected)?),
+            MirOperation::Constant(constant) => Some(self.constant(
+                builder,
+                constant,
+                expected,
+                instruction.ty.as_ref(),
+            )?),
             MirOperation::Unary { op, value } => {
                 let operand_ty = self.mir_value_type(*value)?;
                 let default_int = Self::default_int_type(&operand_ty);
@@ -5698,14 +5851,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 } else if name == "stm" {
                     let _ = self.call_host(builder, self.host.memory.shared_txn_begin, &[])?;
                     Some(builder.ins().iconst(types::I64, 0))
-                } else if let Some(constant) = self
+                } else if let Some((constant, ty)) = self
                     .program
                     .constants
                     .iter()
                     .find(|constant| constant.key.as_str() == name.as_str())
-                    .map(|constant| constant.value.clone())
+                    .map(|constant| (constant.value.clone(), constant.ty.clone()))
                 {
-                    Some(self.constant(builder, &constant, expected)?)
+                    // The read's checked type was resolved in the reading
+                    // function's module; the row type is the fallback.
+                    let ty = instruction.ty.as_ref().unwrap_or(&ty);
+                    Some(self.constant(builder, &constant, expected, Some(ty))?)
                 } else {
                     return Err(format!(
                         "MIR global `{name}` is not provided by the resident run"
@@ -7271,13 +7427,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         expected.map_or(Ok(result), |ty| self.cast(builder, result, ty))
     }
 
-    fn nominal_definition(
-        &self,
-        ty: &MirType,
-    ) -> Option<&jet_foundation::MIR::MirTypeDef> {
+    fn nominal_definition(&self, ty: &MirType) -> Option<&'a jet_foundation::MIR::MirTypeDef> {
+        let program: &'a MirProgram = self.program;
         let identity = ty.nominal_id()?;
-        if let Some(definition) = self
-            .program
+        if let Some(definition) = program
             .types
             .iter()
             .find(|definition| definition.id == identity)
@@ -7287,11 +7440,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let MirTypeKind::Apply { name, .. } = ty.kind() else {
             return None;
         };
-        self.program.types.iter().find(|definition| {
-            definition.id == name.id
-                || definition.key == name.name
-                || definition.name == name.name
-        })
+        nominal_ref_definition(program, name)
     }
     fn is_transparent_nominal(&self, ty: &MirType) -> bool {
         self.nominal_definition(ty).is_some_and(|definition| {
@@ -10879,12 +11028,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         self.cast(builder, value, types::I64)
     }
 
+    /// Lower one folded constant. `ty` is the checked MIR type the constant
+    /// flows into; nominal parts resolve their declaration through it, never
+    /// through the bare source spelling the constant carries (#4003).
     fn constant(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         constant: &MirConstant,
         expected: Option<types::Type>,
+        ty: Option<&MirType>,
     ) -> Result<Value, String> {
+        let ty = ty.map(constant_structural_type);
         let value = match constant {
             MirConstant::Int { value, width, .. } => {
                 let value = if width.is_some() {
@@ -10924,26 +11078,39 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .map_err(|error| format!("MIR BigInt constant is invalid: {error}"))?;
                 builder.ins().iconst(types::I64, value)
             }
-            MirConstant::List(values) => {
-                self.constant_list(builder, values, constant_list_word_cells(values))?
-            }
-            MirConstant::Map(values) => self.constant_map(builder, values)?,
+            MirConstant::List(values) => self.constant_list(
+                builder,
+                values,
+                constant_list_word_cells(values),
+                ty.and_then(MirType::list_element),
+            )?,
+            MirConstant::Map(values) => self.constant_map(builder, values, ty)?,
             MirConstant::Struct { type_name, fields } => {
-                self.constant_struct(builder, type_name, fields)?
+                self.constant_struct(builder, type_name, fields, ty)?
             }
             MirConstant::Enum {
                 type_name,
                 variant,
                 args,
-            } => self.constant_enum(builder, type_name, variant, args)?,
+            } => self.constant_enum(builder, type_name, variant, args, ty)?,
             MirConstant::Present(value) => {
-                let value = self.constant(builder, value, None)?;
+                let present = ty.and_then(|ty| match ty.kind() {
+                    MirTypeKind::Option(inner) | MirTypeKind::Result { ok: inner, .. } => {
+                        Some(inner.as_ref())
+                    }
+                    _ => None,
+                });
+                let value = self.constant(builder, value, None, present)?;
                 self.result_value(builder, true, value, expected)?
             }
             MirConstant::Failed(report) => match report {
                 MirConstReport::Clean(_) => self.result_absent(builder)?,
                 MirConstReport::Told(value) => {
-                    let value = self.constant(builder, value, None)?;
+                    let told = ty.and_then(|ty| match ty.kind() {
+                        MirTypeKind::Result { err, .. } => Some(err.as_ref()),
+                        _ => None,
+                    });
+                    let value = self.constant(builder, value, None, told)?;
                     self.result_value(builder, false, value, expected)?
                 }
             },
@@ -10956,10 +11123,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         builder: &mut FunctionBuilder<'_>,
         values: &[MirConstant],
         words: Option<bool>,
+        element: Option<&MirType>,
     ) -> Result<Value, String> {
         let list = self.new_list(builder, words)?;
         for value in values {
-            let value = self.constant(builder, value, None)?;
+            let value = self.constant(builder, value, None, element)?;
             let value_type = self.value_type(builder, value);
             let (host, value) = if value_type == types::F64 {
                 (self.host.coll.list_push_f64, value)
@@ -10983,15 +11151,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         values: &std::collections::BTreeMap<MirConstKey, MirConstant>,
+        ty: Option<&MirType>,
     ) -> Result<Value, String> {
+        let (key_ty, value_ty) = ty.and_then(MirType::map_parts).unzip();
         let map = self
             .call_host(builder, self.host.coll.map_new, &[])?
             .first()
             .copied()
             .ok_or_else(|| "MIR constant map host returned no map".to_string())?;
         for (key, value) in values {
-            let (kind, key) = self.constant_key(builder, key)?;
-            let value = self.constant(builder, value, None)?;
+            let (kind, key) = self.constant_key(builder, key, key_ty)?;
+            let value = self.constant(builder, value, None, value_ty)?;
             let value = self.cast(builder, value, types::I64)?;
             let host = match kind {
                 MapKeyKind::String => self.host.coll.map_insert,
@@ -11007,7 +11177,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         key: &MirConstKey,
+        ty: Option<&MirType>,
     ) -> Result<(MapKeyKind, Value), String> {
+        let ty = ty.map(constant_structural_type);
         match key {
             MirConstKey::Int(value) => Ok((
                 MapKeyKind::Int,
@@ -11030,21 +11202,33 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 builder.ins().iconst(types::I64, i64::from(*value as u32)),
             )),
             MirConstKey::Tuple(values) => {
-                let record =
-                    self.constant_key_record(builder, values.iter().map(|(_, key)| key))?;
+                let elements: &[(String, MirType)] = match ty.map(MirType::kind) {
+                    Some(MirTypeKind::Tuple(elements)) => elements,
+                    _ => &[],
+                };
+                let keys = values
+                    .iter()
+                    .enumerate()
+                    .map(|(position, (_, key))| (key, elements.get(position).map(|(_, ty)| ty)))
+                    .collect::<Vec<_>>();
+                let record = self.constant_key_record(builder, &keys)?;
                 Ok((MapKeyKind::Composite, record))
             }
-            MirConstKey::Struct { fields, .. } => {
-                let record =
-                    self.constant_key_record(builder, fields.iter().map(|(_, key)| key))?;
+            MirConstKey::Struct { type_name, fields } => {
+                let declared = constant_struct_fields(self.constant_definition(type_name, ty)?);
+                let keys = fields
+                    .iter()
+                    .map(|(name, key)| (key, constant_field_type(declared, name)))
+                    .collect::<Vec<_>>();
+                let record = self.constant_key_record(builder, &keys)?;
                 Ok((MapKeyKind::Composite, record))
             }
             MirConstKey::Enum { type_name, variant } => {
-                if is_ordering_name(type_name) {
-                    let discriminant = self.enum_discriminant(type_name, variant)?;
+                let resolved = self.constant_enum_variant(type_name, variant, ty)?;
+                if resolved.ordering {
                     return Ok((
                         MapKeyKind::Int,
-                        builder.ins().iconst(types::I64, discriminant),
+                        builder.ins().iconst(types::I64, resolved.discriminant),
                     ));
                 }
                 let one = builder.ins().iconst(types::I64, 1);
@@ -11053,9 +11237,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .first()
                     .copied()
                     .ok_or_else(|| "MIR enum map key host returned no record".to_string())?;
-                let discriminant = self.enum_discriminant(type_name, variant)?;
                 let index = builder.ins().iconst(types::I64, 0);
-                let value = builder.ins().iconst(types::I64, discriminant);
+                let value = builder.ins().iconst(types::I64, resolved.discriminant);
                 let _ =
                     self.call_host(builder, self.host.struct_set_i64, &[record, index, value])?;
                 Ok((MapKeyKind::Composite, record))
@@ -11063,23 +11246,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
     }
 
-    fn constant_key_record<'k, I>(
+    fn constant_key_record(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
-        keys: I,
-    ) -> Result<Value, String>
-    where
-        I: IntoIterator<Item = &'k MirConstKey>,
-    {
-        let keys = keys.into_iter().collect::<Vec<&MirConstKey>>();
+        keys: &[(&MirConstKey, Option<&MirType>)],
+    ) -> Result<Value, String> {
         let count = builder.ins().iconst(types::I64, keys.len() as i64);
         let record = self
             .call_host(builder, self.host.struct_new, &[count])?
             .first()
             .copied()
             .ok_or_else(|| "MIR composite map key host returned no record".to_string())?;
-        for (index, key) in keys.into_iter().enumerate() {
-            let (kind, value) = self.constant_key(builder, key)?;
+        for (index, (key, ty)) in keys.iter().enumerate() {
+            let (kind, value) = self.constant_key(builder, key, *ty)?;
             let index = builder.ins().iconst(types::I64, index as i64);
             let _ = match kind {
                 MapKeyKind::String => {
@@ -11098,16 +11277,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         Ok(record)
     }
 
+    /// A folded literal keeps its source field order, while the record stores
+    /// each field in the declaration slot that every field load reads. Without
+    /// a declared layout covering every field, source order is the layout.
     fn constant_struct(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         type_name: &str,
         fields: &[(String, MirConstant)],
+        ty: Option<&MirType>,
     ) -> Result<Value, String> {
-        let declared = self
-            .declared_constant_fields(type_name, None)
-            .filter(|declared| fields.iter().all(|(name, _)| declared.contains(name)));
-        let count = declared.as_ref().map_or(fields.len(), Vec::len);
+        let declared = constant_struct_fields(self.constant_definition(type_name, ty)?);
+        let slots = constant_declared_slots(declared, fields.iter().map(|(name, _)| name));
+        let count = slots.as_ref().map_or(fields.len(), Vec::len);
         let count = builder.ins().iconst(types::I64, count as i64);
         let record = self
             .call_host(builder, self.host.struct_new, &[count])?
@@ -11115,45 +11297,111 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .copied()
             .ok_or_else(|| "MIR struct constant host returned no record".to_string())?;
         for (position, (name, constant)) in fields.iter().enumerate() {
-            let index = constant_field_slot(declared.as_deref(), position, name);
-            let value = self.constant(builder, constant, None)?;
+            let index = constant_field_slot(slots.as_deref(), position, name);
+            let field_ty = constant_field_type(declared, name);
+            let value = self.constant(builder, constant, None, field_ty)?;
             self.set_constant_field(builder, record, index, constant, value)?;
         }
         Ok(record)
     }
 
-    /// A folded literal keeps its source field order, while the record stores
-    /// each field in the declaration slot that every field load reads. `None`
-    /// means the carrier has no declared nominal layout, so source order is
-    /// the layout.
-    fn declared_constant_fields(
+    /// The checked declaration a folded `Struct`/`Enum` constant builds. The
+    /// constant spells only its source type name, so the declaration comes
+    /// from the checked MIR type it flows into: a user `enum Effect` never
+    /// takes a same-named Core declaration's slots or discriminants (#4003).
+    /// Without a checked type only a spelling that names exactly one
+    /// declaration resolves; an ambiguous spelling is refused, never guessed.
+    fn constant_definition(
         &self,
         type_name: &str,
-        variant: Option<&str>,
-    ) -> Option<Vec<String>> {
-        let definition = self
-            .program
+        ty: Option<&MirType>,
+    ) -> Result<Option<&'a jet_foundation::MIR::MirTypeDef>, String> {
+        let program: &'a MirProgram = self.program;
+        let spelled = |definition: &jet_foundation::MIR::MirTypeDef| {
+            definition.key == type_name
+                || definition.name == type_name
+                || definition.name == nominal_leaf(type_name)
+        };
+        if let Some(ty) = ty {
+            let mut candidates = Vec::new();
+            constant_nominal_candidates(ty, &mut candidates);
+            if let Some(definition) = candidates
+                .into_iter()
+                .filter_map(|candidate| self.nominal_definition(candidate))
+                .find(|definition| spelled(*definition))
+            {
+                return Ok(Some(definition));
+            }
+        }
+        let exact = program
             .types
             .iter()
-            .find(|definition| definition.key == type_name)
-            .or_else(|| {
-                self.program
-                    .types
-                    .iter()
-                    .find(|definition| definition.name == type_name)
-            })?;
-        let fields = match (&definition.kind, variant) {
-            (MirTypeDefKind::Struct { fields, .. }, None) => fields,
-            (MirTypeDefKind::Enum { variants, .. }, Some(variant)) => {
-                match &variants.iter().find(|candidate| candidate.name == variant)?.payload {
-                    jet_foundation::MIR::MirVariantPayload::Named(fields) => fields,
-                    jet_foundation::MIR::MirVariantPayload::Unit
-                    | jet_foundation::MIR::MirVariantPayload::Single(_) => return None,
-                }
-            }
-            _ => return None,
-        };
-        Some(fields.iter().map(|field| field.name.clone()).collect())
+            .filter(|definition| definition.key == type_name)
+            .collect::<Vec<_>>();
+        if let [definition] = exact.as_slice() {
+            return Ok(Some(*definition));
+        }
+        let named = program
+            .types
+            .iter()
+            .filter(|definition| spelled(*definition))
+            .collect::<Vec<_>>();
+        match named.as_slice() {
+            [] => Ok(None),
+            [definition] => Ok(Some(*definition)),
+            _ => Err(format!(
+                "MIR constant type `{type_name}` names {} declarations and carries no checked type to select one",
+                named.len()
+            )),
+        }
+    }
+
+    /// The discriminant, carrier shape and payload of one folded enum variant,
+    /// resolved through the checked declaration exactly as `enum_value`
+    /// builds the same variant at runtime.
+    fn constant_enum_variant(
+        &self,
+        type_name: &str,
+        variant: &str,
+        ty: Option<&MirType>,
+    ) -> Result<ConstantEnumVariant, String> {
+        // `Ordering` is a reserved Prelude name with a fixed word carrier.
+        if is_ordering_name(type_name) {
+            let discriminant =
+                prelude_enum_variant_index(jet_foundation::Syntax::TYPE_ORDERING, variant)
+                    .ok_or_else(|| {
+                        format!("Prelude Ordering variant `{type_name}::{variant}` is missing metadata")
+                    })?;
+            return Ok(ConstantEnumVariant {
+                discriminant,
+                ordering: true,
+                packed: false,
+                payload: None,
+            });
+        }
+        if let Some(definition) = self.constant_definition(type_name, ty)? {
+            let (discriminant, payload) = self.enum_variant(definition.id, variant)?;
+            return Ok(ConstantEnumVariant {
+                discriminant,
+                ordering: false,
+                packed: self.is_packed_enum(definition.id),
+                payload: Some(payload),
+            });
+        }
+        // The Prelude `HTTPError` carrier may have no declaration row; any
+        // other spelling must name a declaration.
+        if !is_http_error_name(type_name) {
+            return Err(format!("MIR enum type `{type_name}` is missing"));
+        }
+        let discriminant = prelude_enum_variant_index("HTTPError", variant).ok_or_else(|| {
+            format!("Prelude HTTPError variant `{type_name}::{variant}` is missing metadata")
+        })?;
+        Ok(ConstantEnumVariant {
+            discriminant,
+            ordering: false,
+            packed: true,
+            payload: None,
+        })
     }
 
     fn constant_enum(
@@ -11162,24 +11410,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         type_name: &str,
         variant: &str,
         args: &[(Option<String>, MirConstant)],
+        ty: Option<&MirType>,
     ) -> Result<Value, String> {
-        if is_ordering_name(type_name) {
+        let resolved = self.constant_enum_variant(type_name, variant, ty)?;
+        if resolved.ordering {
             if !args.is_empty() {
                 return Err(format!(
                     "MIR enum constant `{type_name}::{variant}` expects no arguments, got {}",
                     args.len()
                 ));
             }
-            let discriminant = self.enum_discriminant(type_name, variant)?;
-            return Ok(builder.ins().iconst(types::I64, discriminant));
+            return Ok(builder.ins().iconst(types::I64, resolved.discriminant));
         }
-        if is_key_name(type_name)
-            || is_http_error_name(type_name)
-            || is_packed_service_enum_name(type_name)
-        {
-            let discriminant = self.enum_discriminant(type_name, variant)?;
+        if resolved.packed {
             if args.is_empty() {
-                return Ok(builder.ins().iconst(types::I64, discriminant));
+                return Ok(builder.ins().iconst(types::I64, resolved.discriminant));
             }
             if args.len() != 1 {
                 return Err(format!(
@@ -11187,10 +11432,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     args.len()
                 ));
             }
-            let payload = self.constant(builder, &args[0].1, None)?;
+            let payload_ty =
+                constant_payload_type(resolved.payload.as_ref(), 1, 0, args[0].0.as_deref());
+            let payload = self.constant(builder, &args[0].1, None, payload_ty)?;
             let payload = self.cast(builder, payload, types::I64)?;
             let payload = builder.ins().ishl_imm(payload, 8);
-            let discriminant = builder.ins().iconst(types::I64, discriminant);
+            let discriminant = builder.ins().iconst(types::I64, resolved.discriminant);
             return Ok(builder.ins().bor(payload, discriminant));
         }
         let has_named = args.iter().any(|(field, _)| field.is_some());
@@ -11205,28 +11452,33 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .copied()
             .ok_or_else(|| "MIR enum constant host returned no record".to_string())?;
         let zero = builder.ins().iconst(types::I64, 0);
-        let discriminant = builder
-            .ins()
-            .iconst(types::I64, self.enum_discriminant(type_name, variant)?);
+        let discriminant = builder.ins().iconst(types::I64, resolved.discriminant);
         let _ = self.call_host(
             builder,
             self.host.struct_set_i64,
             &[record, zero, discriminant],
         )?;
-        let declared = self
-            .declared_constant_fields(type_name, Some(variant))
-            .filter(|declared| {
-                has_named
-                    && args
-                        .iter()
-                        .all(|(name, _)| name.as_ref().is_some_and(|name| declared.contains(name)))
-            });
+        let named_payload = match &resolved.payload {
+            Some(jet_foundation::MIR::MirVariantPayload::Named(fields)) => Some(fields.as_slice()),
+            _ => None,
+        };
+        let slots = if has_named {
+            constant_declared_slots(named_payload, args.iter().filter_map(|(name, _)| name.as_ref()))
+        } else {
+            None
+        };
         for (position, (name, constant)) in args.iter().enumerate() {
             let index = match name {
-                Some(name) => constant_field_slot(declared.as_deref(), position, name),
+                Some(name) => constant_field_slot(slots.as_deref(), position, name),
                 None => position,
             };
-            let value = self.constant(builder, constant, None)?;
+            let payload_ty = constant_payload_type(
+                resolved.payload.as_ref(),
+                args.len(),
+                position,
+                name.as_deref(),
+            );
+            let value = self.constant(builder, constant, None, payload_ty)?;
             self.set_constant_field(builder, record, index + 1, constant, value)?;
         }
         Ok(record)
@@ -11274,35 +11526,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let value = self.cast(builder, value, target)?;
         self.call_host(builder, host, &[record, index, value])
             .map(|_| ())
-    }
-
-    fn enum_discriminant(&self, type_name: &str, variant: &str) -> Result<i64, String> {
-        if is_ordering_name(type_name) {
-            return prelude_enum_variant_index(jet_foundation::Syntax::TYPE_ORDERING, variant)
-                .ok_or_else(|| {
-                    format!("Prelude Ordering variant `{type_name}::{variant}` is missing metadata")
-                });
-        }
-        if is_http_error_name(type_name) {
-            return prelude_enum_variant_index("HTTPError", variant).ok_or_else(|| {
-                format!("Prelude HTTPError variant `{type_name}::{variant}` is missing metadata")
-            });
-        }
-        let definition = self
-            .program
-            .types
-            .iter()
-            .find(|definition| definition.name == type_name || definition.key == type_name)
-            .ok_or_else(|| format!("MIR enum type `{type_name}` is missing"))?;
-        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-            return Err(format!("MIR type `{type_name}` is not an enum"));
-        };
-        variants
-            .iter()
-            .enumerate()
-            .find(|(_, candidate)| candidate.name == variant)
-            .map(|(index, candidate)| candidate.discriminant.unwrap_or(index as i64))
-            .ok_or_else(|| format!("MIR enum variant `{type_name}::{variant}` is missing"))
     }
 
     fn unary(
@@ -11362,6 +11585,20 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let ty = self.value_type(builder, left);
         if op.is_comparison() || matches!(op, MirBinaryOp::Compare) {
             if !left_ty.same_checked_type(right_ty) {
+                // Checked text comparison of a `String` with a `View<str>`
+                // (a borrowed window bound to a local, `view :: s.trim()`):
+                // read the view's text and compare two Strings.
+                let is_string = |ty: &MirType| {
+                    comparison_element_kind(ty) == Some(ComparisonElementKind::String)
+                };
+                let left_view = is_text_view_type(left_ty);
+                let right_view = is_text_view_type(right_ty);
+                if (left_view && is_string(right_ty)) || (is_string(left_ty) && right_view) {
+                    let string_ty = if left_view { right_ty } else { left_ty };
+                    let left = if left_view { self.text_view_string(builder, left)? } else { left };
+                    let right = if right_view { self.text_view_string(builder, right)? } else { right };
+                    return self.binary(builder, op, string_ty, string_ty, left, right, location);
+                }
                 return Err(format!(
                     "MIR primitive comparison has mismatched checked operands `{}` and `{}`",
                     left_ty.display_name(),
@@ -12656,6 +12893,20 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             _ => None,
         }
+    }
+
+    /// The text of a `View<str>` value as a String handle (the same kernel
+    /// `materialize_view_value` uses for a String view copy).
+    fn text_view_string(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        view: Value,
+    ) -> Result<Value, String> {
+        let view = self.cast(builder, view, types::I64)?;
+        self.call_host(builder, self.host.memory.view_string, &[view])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR string view text host returned no value".to_string())
     }
 
     fn materialize_view_value(
@@ -15958,12 +16209,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
         let default = method.default;
         if targets.is_empty() {
-            let function = default.ok_or_else(|| {
-                format!(
-                    "MIR trait method `{}` has no selected implementation",
-                    method.name
-                )
-            })?;
+            // No type in the program implements the trait, so no receiver
+            // value can exist and the call is unreachable: trap like the
+            // dispatch fallback below instead of refusing the function.
+            let Some(function) = default else {
+                let result = self.trap(builder)?;
+                return self.cast(builder, result, expected.unwrap_or(types::I64));
+            };
             return self.call_user(builder, function, args, result_type, expected);
         }
         let first = args
@@ -17785,15 +18037,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 (host, vec![receiver, value])
             }
             "list_remove_slot" => {
-                if !(1..=2).contains(&args.len()) {
-                    return Err(
-                        "MIR List.remove(slot) expects an index and optional RemoveBy selector"
-                            .to_string(),
-                    );
+                if args.len() != 1 {
+                    return Err("MIR List.remove(slot) expects one index argument".to_string());
                 }
-                // TIR retains the compile-time `RemoveBy.Slot` selector in
-                // the value list; the canonical resident ABI consumes only
-                // the receiver and index.
                 let receiver = receiver_value!()?;
                 let index = integer_value!(args[0])?;
                 (

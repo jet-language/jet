@@ -1,0 +1,26 @@
+// Map, Set, List, View and Iter receiver methods from the canonical collection
+// table. `replace` writes its map or set, so the receiver carries `&`.
+fn run() {
+    scores := ["ada": 3, "bo": 5]
+    print(scores.len())
+    print(scores.is_empty())
+    print(scores.keys().to_list().len())
+    print(scores.values().to_list().len())
+    print(scores.max() ?? 0)
+    print(scores.min() ?? 0)
+    print(scores.to_list().len())
+    print(scores.items().len())
+    numbers :: [4, 8, 15]
+    print(numbers.last() ?? 0)
+    print(numbers.lazy().to_set().len())
+    print(numbers.lazy().map((n) -> n % 2).to_set().len())
+    old :: &scores.replace("ada", 9)
+    print(old ?? 0)
+    print(scores.get("ada") ?? 0)
+    seen := Set.from([1, 2])
+    displaced :: &seen.replace(2)
+    print(displaced ?? 0)
+    print(seen.len())
+    window :: numbers[1..2]
+    print(window.index_of(15) ?? -1)
+}

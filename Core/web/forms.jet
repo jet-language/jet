@@ -182,7 +182,7 @@ pub fn blur(form: &WebForm, name: String) WebFormError! {
     loop field in form.fields {
         if field.name == name {
             found = true
-            valid = validate_field_form(form, ~name)
+            valid = validate_field_form(&form, ~name)
             break
         }
     }
@@ -194,7 +194,7 @@ pub fn blur(form: &WebForm, name: String) WebFormError! {
 }
 
 pub fn validate(form: &WebForm) WebFormError! {
-    if !apply_validation(form) -> return Err(WebFormError.Validation)
+    if !apply_validation(&form) -> return Err(WebFormError.Validation)
     return Ok()
 }
 
@@ -205,7 +205,7 @@ pub fn validate_async(form: WebForm) -> WebForm Never! {
 }
 
 pub fn submit(form: &WebForm) -> String WebFormError! {
-    if !apply_validation(form) -> return Err(WebFormError.Validation)
+    if !apply_validation(&form) -> return Err(WebFormError.Validation)
     form.status = WebFormStatus.Submitted
     html(~form)
 }
@@ -220,8 +220,7 @@ pub fn input(name: String, fields: [WebFormFieldSpec]) -> WebFormInput WebFormEr
     wires := [String]{}
     loop field in fields {
         if !valid_name(field.name) || !valid_name(field.wire_name) -> return Err(WebFormError.Invalid)
-        if field.default != None {
-            default :: field.default
+        if field.default == .Val(default) {
             if default.len() > C_MAX_FORM_TEXT || has_control_text(~default) -> return Err(WebFormError.Invalid)
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return Err(WebFormError.Invalid)
@@ -324,12 +323,12 @@ pub fn action_field_error(error: WebFormActionError, field: String, message: Str
     out := ~error
     existing :: out.field_errors.get(field)
     if existing == None {
-        _ :: out.field_errors.add(~field, [String]{~message})
+        _ :: &out.field_errors.add(~field, [String]{~message})
     } else {
         errors := ~existing
         if errors.len() >= C_MAX_FORM_FIELDS -> return out
         &errors.push(~message)
-        _ :: out.field_errors.add(~field, errors)
+        _ :: &out.field_errors.add(~field, errors)
     }
     out
 }
@@ -749,8 +748,7 @@ fn fields_valid(fields: [WebFormFieldSpec]) -> Bool Never! {
     loop field in fields {
         if !valid_name(field.name) || !valid_name(field.wire_name) -> return false
         if field.label.len() > C_MAX_FORM_TEXT -> return false
-        if field.default != None {
-            default :: field.default
+        if field.default == .Val(default) {
             if default.len() > C_MAX_FORM_TEXT || has_control_text(~default) -> return false
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return false

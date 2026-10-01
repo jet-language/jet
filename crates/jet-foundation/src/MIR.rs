@@ -6373,7 +6373,10 @@ pub struct MirArtifactIdentity {
     pub provider_identity: String,
     pub closure_identity: String,
     pub artifact_identity: String,
-    pub program_identity: MirProgramIdentity,
+    /// Shared: every frame schema and closure target of a JIT image carries
+    /// the execution identity, and this part grows with the program, so a
+    /// per-row copy would make those tables quadratic in the function count.
+    pub program_identity: Arc<MirProgramIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7551,7 +7554,7 @@ impl MirProgram {
             provider_identity: artifact.provider_identity.clone(),
             closure_identity: artifact.closure_identity.clone(),
             artifact_identity: artifact.artifact_identity.clone(),
-            program_identity,
+            program_identity: Arc::new(program_identity),
         })
     }
 

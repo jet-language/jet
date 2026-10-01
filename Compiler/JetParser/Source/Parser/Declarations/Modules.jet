@@ -44,6 +44,7 @@ use jet_foundation.[
     expr_span,
 ]
 use jet_lexer.[
+    TOKEN_AT,
     TOKEN_COLON,
     TOKEN_COLON_COLON,
     TOKEN_COMMA,
@@ -78,7 +79,7 @@ fn parser_module_dashed_name(state: &JetParserState, context: String) -> NamedSp
 }
 
 fn parser_module_namespace(name: String) -> Namespace? {
-    normalized :: if name.starts_with("_") && name.len() > 1 -> name.slice(1, name.len()) else -> name
+    normalized :: if name.starts_with("_") && name.len() > 1 -> name.slice(1, name.len() - 1) else -> name
     if normalized == {
         "env" -> Val(Namespace.Env)
         "system" -> Val(Namespace.System)
@@ -321,6 +322,8 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
                 if declaration.item == .Val(value) -> &body.push(value)
             }
         }
+        if !declaration.handled -> parser_report_module_member(&state)
+        parser_recover_aborted_item(&state, before)
         if state.position == before {
             parser_add_error_here(&state, "the module body parser could not advance", "one malformed module member must not trap the enclosing parser", "complete the module member or remove it")
             parser_bump(&state)
@@ -328,6 +331,18 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
     Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(body), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+}
+
+// A code-module body holds top-level items only; a leading `@` is a
+// misspelled applied rule (E0063, D-VERDICT-732-1 / D-ONCE-AT1=D).
+fn parser_report_module_member(state: &JetParserState) {
+    token :: parser_current(&state)
+    if token.kind == TOKEN_AT {
+        parser_bump(&state)
+        parser_add_fatal_code(&state, "E0063", token.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)", "replace the leading `@` with `#`")
+        return
+    }
+    parser_add_error(&state, token.span, "expected a function, struct, enum, or other item inside a module, found {parser_describe_token(token)}", "an inline code module body may only contain top-level items", "example: `pub fn double(n: Int) -> Int {{ return n * 2 }}`")
 }
 
 fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
@@ -388,6 +403,8 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
             .Val(value) -> &imports.push(value)
             .None -> { if declaration.item == .Val(value) -> &body.push(value) }
         }
+        if !declaration.handled -> parser_report_module_member(&state)
+        parser_recover_aborted_item(&state, before)
         if state.position == before -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after the generic module body")

@@ -1,0 +1,49 @@
+// S31: outside an `if` condition a pattern test is a Bool value, and a name
+// in its pattern is a fresh binding that nothing can read. It never compares
+// against an outer binding of the same name: `root == .Val(name)` is true for
+// any present value. Compare with a value by writing it as an expression,
+// `root == (Val(name))`.
+enum Shape {
+    Circle(Int)
+    Pair(left: Int, right: Int)
+}
+
+fn even_successor(n: Int) -> Int Err! {
+    if n % 2 != 0 -> return Err("odd")
+    Ok(n + 1)
+}
+
+fn same_label_pattern(label: String?, root: String?) -> Bool {
+    if label == .Val(name) -> return name != "" && root == .Val(name)
+    false
+}
+
+fn same_label_value(label: String?, root: String?) -> Bool {
+    if label == .Val(name) -> return root == (Val(name))
+    false
+}
+
+fn is_present(value: Int?) -> Bool {
+    value == .Val(found)
+}
+
+fn is_pair(shape: Shape) -> Bool {
+    shape == .Pair(left, right)
+}
+
+fn is_even(n: Int) -> Bool {
+    even_successor(n) == .Ok(value)
+}
+
+fn run() {
+    print(same_label_pattern(Val("outer"), Val("inner")))
+    print(same_label_pattern(Val("outer"), None))
+    print(same_label_value(Val("outer"), Val("inner")))
+    print(same_label_value(Val("outer"), Val("outer")))
+    print(is_present(Val(3)))
+    print(is_present(None))
+    print(is_pair(Shape.Pair{left: 1, right: 2}))
+    print(is_pair(Shape.Circle(1)))
+    print(is_even(4))
+    print(is_even(3))
+}

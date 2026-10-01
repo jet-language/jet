@@ -94,8 +94,9 @@ pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, sc
     visible_symbol := scopes.bindings[visible_index].symbol
     module_row := graph.modules[module_index]
     loop import in module_row.imports {
-        if import.target_module_identity != target.module_identity -> next
         loop binding in import.bindings {
+            // A Core submodule member (`use core.mem`) names its own target.
+            if import.target_module_identity != target.module_identity && binding.target_module_identity != target.module_identity -> next
             if binding.local != target.alias -> next
             skip_binding := if target.item == {
                 .Val(item) -> binding.original != item
@@ -532,6 +533,7 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 }
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
     canonical_record :: sema_call_core_record(record.module_name, record.member, args.len(), span, &diagnostics) ?? return None
     if !core_call_coverage_contains(canonical_record.coverage, CORE_CALL_COVERAGE_SEMA) {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no source semantic call contract", "only SEMA-authorized Core records enter fixed-call checking", "use a SEMA-covered Core call"))

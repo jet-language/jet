@@ -1678,6 +1678,7 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
             | "CBORError"
             | "Closed"
             | "CompilerError"
+            | "CompilerPackageError"
             | "ComputeError"
             | "CryptoError"
             | "DBError"

@@ -1,0 +1,458 @@
+// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: the failure union of functions that
+// write no failure contract, and the #3708 plain-return projection. The Rust
+// reference is crates/jet-sema/src/Sema/Bundle/Pipeline/FailureUnion.rs and
+// `solve_inferred_failure` (Sema/mod.rs).
+//
+// Every body check records what reaches the function's default `Err` route
+// (`SemaCheckContext.failure_union_*`). After the first check of the bundle,
+// the rows of the unannotated top-level functions are joined over their call
+// edges (least fixed point). Function-owned cases (`Err(.NotFound(n))`) are
+// minted into a closed `#Error enum` named after the function (`find` gives
+// `FindError`), and every function whose set holds a typed member is projected
+// onto `T (A | B)!` with no written span. Functions the #3708 solve proved
+// infallible are projected onto `T Never!`. The bundle is then checked again,
+// so the real check, every caller and lowering read the one projected contract.
+use jet_foundation.[
+    Call,
+    CallLabel,
+    Diagnostic,
+    EnumDef,
+    EnumGroup,
+    Expr,
+    Func,
+    Item,
+    Marker,
+    MarkerCallArg,
+    NamedSpan,
+    Span,
+    TraitImplBlock,
+    Type,
+    TypeParam,
+    Variant,
+    VariantField,
+    VariantPayload,
+    type_identity_equal,
+    type_name,
+]
+
+// Rounds of the call-graph join before a still-growing row widens to the
+// general `Err` (D-FAIL-INFER-UNION1 rule 5).
+JET_FAILURE_UNION_JOIN_ROUND_CAP :: 64
+
+pub struct SemaFailureCaseField {
+    pub label: String?
+    pub ty: Type
+}
+
+// D-ERR-CASES1=A: one `Err(.Case(payload))` written where the default `Err`
+// route is expected. The payload types come from the checked arguments.
+pub struct SemaFailureCase {
+    pub name: String
+    pub payload: [SemaFailureCaseField]
+    pub span: Span
+}
+
+struct SemaFailureUnionRow {
+    key: String
+    name: String
+    module_index: Int
+    members: [Type]
+    general: Bool
+    edges: [String]
+    cases: [SemaFailureCase]
+    declaration: Func
+}
+
+// A typed failure a caller could match: not the general `Err`, a message,
+// `Never`, or a Core error family that converts into `Err`.
+fn sema_failure_union_typed(ty: Type) -> Bool Never! {
+    if ty == {
+        .Union(members) -> {
+            loop member in members {
+                if sema_failure_union_typed(member) -> return true
+            }
+            false
+        }
+        .Named(name) -> name != "Err" && name != "Never" && !sema_core_error_family_member(name)
+        .Apply(name, _) -> name != "Err" && name != "Never" && !sema_core_error_family_member(name)
+        .String -> false
+        else -> true
+    }
+}
+
+// One failure reaching the default route: a message or the general `Err`
+// marks the row general, `Never` adds nothing, a union adds each member.
+pub fn sema_failure_union_add_member(context: &SemaCheckContext, ty: Type) Never! {
+    if ty == {
+        .Union(members) -> {
+            loop member in members -> sema_failure_union_add_member(&context, member)
+            return
+        }
+        .String -> {
+            context.failure_union_general = true
+            return
+        }
+        .Named(name) -> {
+            if name == "Err" {
+                context.failure_union_general = true
+                return
+            }
+            if name == "Never" -> return
+        }
+        else -> {}
+    }
+    loop existing in context.failure_union_members {
+        if type_identity_equal(existing, ty) -> return
+    }
+    &context.failure_union_members.push(ty)
+}
+
+fn sema_failure_union_unparen(value: Expr) -> Expr Never! {
+    if value == {
+        .Paren(inner, _) -> sema_failure_union_unparen(inner)
+        else -> value
+    }
+}
+
+// The type a value has on its own, checked on snapshots so the ordinary
+// check that follows sees the body unchanged.
+fn sema_failure_union_probe_type(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext) -> Type? {
+    probe_scopes := sema_scope_snapshot(scopes)
+    probe_context := sema_check_context_snapshot(context)
+    probe_state := sema_ownership_state_snapshot(state)
+    probe_diagnostics := [Diagnostic]{}
+    checked :: sema_check_expression(value, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics) ?? return None
+    Val(checked.ty)
+}
+
+// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: record the value an `Err(...)`
+// sends down the default route. A leading-dot case with no type
+// (`Err(.NotFound(n))`) becomes a case of the function's own error type with
+// the payload types of its arguments; any other value is a member, and a
+// message is the general `Err`.
+pub fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
+    if call.args.len() != 1 || call.args[0].label != None {
+        context.failure_union_general = true
+        return
+    }
+    value :: sema_failure_union_unparen(call.args[0].expr)
+    if value == .EnumLit(owner, variant, _, args, _, span) {
+        if owner == "" {
+            payload := [SemaFailureCaseField]{}
+            loop argument in args {
+                if argument == {
+                    .Positional(inner) -> &payload.push(SemaFailureCaseField{label: None, ty: sema_failure_union_probe_type(inner, environment, scopes, state, &tail_store, context) ?? Type.Named{name: "_"}})
+                    .Named(label, inner) -> &payload.push(SemaFailureCaseField{label: Val(label), ty: sema_failure_union_probe_type(inner, environment, scopes, state, &tail_store, context) ?? Type.Named{name: "_"}})
+                }
+            }
+            &context.failure_union_cases.push(SemaFailureCase{name: variant, payload: payload, span: span})
+            return
+        }
+    }
+    if value == .Str(_, _) {
+        context.failure_union_general = true
+        return
+    }
+    ty :: sema_failure_union_probe_type(value, environment, scopes, state, &tail_store, context) ?? {
+        context.failure_union_general = true
+        return
+    }
+    sema_failure_union_add_member(&context, ty)
+}
+
+// `find` gives `FindError`; `parse_age` gives `ParseAgeError`; known
+// acronyms keep their capitals (`read_http` gives `ReadHTTPError`).
+fn sema_failure_union_type_name(function: String) -> String Never! {
+    "{sema_casing_acronym_name(sema_casing_pascal_words(function))}Error"
+}
+
+fn sema_failure_union_case_payload(case_row: SemaFailureCase) -> VariantPayload Never! {
+    if case_row.payload.len() == 0 -> return VariantPayload.Unit
+    if case_row.payload.len() == 1 && case_row.payload[0].label == None -> return VariantPayload.Single{ty: case_row.payload[0].ty, span: case_row.span}
+    fields := [VariantField]{}
+    loop (index, field) in case_row.payload {
+        &fields.push(VariantField{name: field.label ?? "value{index + 1}", name_span: case_row.span, ty: field.ty, ty_span: case_row.span})
+    }
+    VariantPayload.Named{fields: fields}
+}
+
+fn sema_failure_union_same_payload(left: VariantPayload, right: VariantPayload) -> Bool Never! {
+    if left == {
+        .Unit -> right == .Unit
+        .Single(left_ty, _) -> if right == {
+            .Single(right_ty, _) -> type_identity_equal(left_ty, right_ty)
+            else -> false
+        }
+        .Named(left_fields) -> if right == {
+            .Named(right_fields) -> {
+                if left_fields.len() != right_fields.len() -> return false
+                loop index in 0..<left_fields.len() {
+                    if left_fields[index].name != right_fields[index].name || !type_identity_equal(left_fields[index].ty, right_fields[index].ty) -> return false
+                }
+                true
+            }
+            else -> false
+        }
+    }
+}
+
+fn sema_failure_union_enum(type_name_text: String, function: Func, variants: [Variant]) -> EnumDef Never! {
+    marker :: Marker{name: "Error", negated: false, name_span: function.name_span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: function.name_span, ct: None}
+    EnumDef{
+        span: function.span,
+        is_pub: function.is_pub,
+        is_package_pub: function.is_package_pub,
+        name: type_name_text,
+        name_span: function.name_span,
+        type_params: [TypeParam]{},
+        variants: variants,
+        methods: [Func]{},
+        trait_impls: [TraitImplBlock]{},
+        derives: [NamedSpan]{},
+        auto_derive_default: false,
+        is_single_use: false,
+        single_use_span: None,
+        is_must_use: false,
+        must_use_span: None,
+        serde_markers: [Marker]{},
+        type_markers: [Marker]{marker},
+        groups: [EnumGroup]{},
+    }
+}
+
+// D-ERR-CASES1=A: mint the function's own closed `#Error enum` from the cases
+// its body creates, register it in the owning module and add it to the
+// module's items so every tier emits it. Returns the minted type.
+fn sema_failure_union_mint(graph: &SemaRegistrationGraph, row: SemaFailureUnionRow, diagnostics: &[Diagnostic]) -> Type? {
+    if row.cases.len() == 0 -> return None
+    name :: row.name
+    owned :: sema_failure_union_type_name(name)
+    segments := graph.modules[row.module_index].source_segments
+    clash := sema_registration_module_has_name(graph.modules[row.module_index], owned) || sema_registration_module_has_import_name(graph.modules[row.module_index], owned)
+    start :: diagnostics.len()
+    if clash {
+        &diagnostics.push(sema_error("E0105", row.cases[0].span, "`{name}` creates error cases, but the type `{owned}` already exists", "cases written as `Err(.Case(…))` in `{name}` form its own error type, named `{owned}` after the function", "write the failure contract of `{name}` (for example `-> T {owned}!`), or rename the declared `{owned}`"))
+        sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
+        return None
+    }
+    variants := [Variant]{}
+    loop case_row in row.cases {
+        payload :: sema_failure_union_case_payload(case_row)
+        existing_index := -1
+        loop (index, variant) in variants {
+            if variant.name == case_row.name -> existing_index = index
+        }
+        if existing_index >= 0 {
+            if !sema_failure_union_same_payload(variants[existing_index].payload, payload) {
+                &diagnostics.push(sema_error("E0105", case_row.span, "case `.{case_row.name}` of `{owned}` is created with two different payloads", "every `Err(.{case_row.name}(…))` in `{name}` adds to the one type `{owned}`, so each case has one payload", "give the two failures different case names, or pass the same payload types to `.{case_row.name}`"))
+            }
+            next
+        }
+        &variants.push(Variant{name: case_row.name, name_span: case_row.span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+    }
+    definition :: sema_failure_union_enum(owned, row.declaration, variants)
+    item :: Item.Enum{value: definition}
+    registered := graph.modules[row.module_index]
+    source_file :: ~registered.source_file
+    source_origin :: ~registered.source_origin
+    register_diagnostics := [Diagnostic]{}
+    if !sema_registration_add_root(&registered, item, source_file, source_origin, segments, &register_diagnostics) || register_diagnostics.len() > 0 {
+        loop diagnostic in register_diagnostics -> &diagnostics.push(diagnostic)
+        sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
+        return None
+    }
+    &registered.program.items.push(~item)
+    symbol :: ~registered.symbols[registered.symbols.len() - 1]
+    module_identity :: ~registered.module_identity
+    if symbol.visibility > 0 -> &registered.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
+    graph.modules[row.module_index] = registered
+    sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
+    Val(Type.Named{name: owned})
+}
+
+fn sema_failure_union_flatten(ty: Type, flat: &[Type]) Never! {
+    if ty == .Union(members) {
+        loop member in members -> sema_failure_union_flatten(member, &flat)
+        return
+    }
+    loop existing in flat {
+        if type_identity_equal(existing, ty) -> return
+    }
+    &flat.push(ty)
+}
+
+// D-UNIONTYPE1=A: flatten nested unions, drop exact duplicates, sort by the
+// canonical spelling; one surviving member is that member.
+fn sema_failure_union_canonical(members: [Type]) -> Type Never! {
+    flat := [Type]{}
+    loop member in members -> sema_failure_union_flatten(member, &flat)
+    index := 1
+    loop index < flat.len() {
+        current := flat[index]
+        insertion := index - 1
+        loop insertion >= 0 && type_name(flat[insertion]) > type_name(current) {
+            flat[insertion + 1] = flat[insertion]
+            insertion -= 1
+        }
+        flat[insertion + 1] = current
+        index += 1
+    }
+    if flat.len() == 0 -> return Type.Named{name: "Unit"}
+    if flat.len() == 1 -> return flat[0]
+    Type.Union{members: flat}
+}
+
+// The success side of an unwritten contract.
+fn sema_failure_union_success(function: Func) -> Type Never! {
+    if function.return_type == .Val(written) -> return written
+    Type.Named{name: "Unit"}
+}
+
+// Project a contract onto the declaration, its registry row and symbol, the
+// module items and every import binding of it: the written-span-less return
+// type every later check and lowering read.
+fn sema_failure_project_return(graph: &SemaRegistrationGraph, module_index: Int, function_key: String, return_type: Type) -> Bool {
+    module_row := graph.modules[module_index]
+    row_index := -1
+    loop (index, function) in module_row.functions {
+        if function.symbol.id.key == function_key -> row_index = index
+    }
+    if row_index < 0 -> return false
+    updated := module_row.functions[row_index].declaration
+    updated.return_type = Val(return_type)
+    updated.return_type_span = None
+    unused_diagnostics := [Diagnostic]{}
+    row :: sema_registration_function(updated, module_row.module_identity, None, module_row.source_file, module_row.source_origin, module_row.source_segments, &unused_diagnostics)
+    module_row.functions[row_index] = ~row
+    function_name :: ~updated.name
+    item :: Item.Func{value: updated}
+    loop index in 0..<module_row.symbols.len() {
+        if module_row.symbols[index].id.key == function_key -> module_row.symbols[index] = ~row.symbol
+    }
+    loop index in 0..<module_row.declarations.len() {
+        if module_row.declarations[index] == .Func(declared) && declared.name == function_name -> module_row.declarations[index] = ~item
+    }
+    loop index in 0..<module_row.program.items.len() {
+        if module_row.program.items[index] == .Func(declared) && declared.name == function_name -> module_row.program.items[index] = ~item
+    }
+    loop index in 0..<module_row.exports.len() {
+        if module_row.exports[index].symbol.id.key == function_key {
+            module_row.exports[index].symbol = ~row.symbol
+            module_row.exports[index].declaration = Val(~item)
+        }
+    }
+    graph.modules[module_index] = module_row
+    loop importer_index in 0..<graph.modules.len() {
+        importer := graph.modules[importer_index]
+        changed := false
+        loop import_index in 0..<importer.imports.len() {
+            loop binding_index in 0..<importer.imports[import_index].bindings.len() {
+                if importer.imports[import_index].bindings[binding_index].symbol.id.key != function_key -> next
+                importer.imports[import_index].bindings[binding_index].symbol = ~row.symbol
+                importer.imports[import_index].bindings[binding_index].declaration = Val(~item)
+                changed = true
+            }
+        }
+        if changed -> graph.modules[importer_index] = importer
+    }
+    true
+}
+
+fn sema_failure_union_contains(keys: [String], key: String) -> Bool Never! {
+    loop value in keys {
+        if value == key -> return true
+    }
+    false
+}
+
+// D-FAIL-INFER-UNION1=A: join the default-route rows of the unannotated
+// top-level functions, mint their own cases and project every set that holds
+// a typed member. Returns whether any contract was projected.
+pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool {
+    rows := [SemaFailureUnionRow]{}
+    loop module_result in modules {
+        module_index :: sema_name_module_index(graph, module_result.module_identity) ?? next
+        loop facts in module_result.failure_facts {
+            declaration :: sema_failure_registered_declaration(graph.modules[module_index], facts.function_key) ?? next
+            if !sema_failure_inference_candidate(declaration) -> next
+            &rows.push(SemaFailureUnionRow{key: ~facts.function_key, name: ~declaration.name, module_index: module_index, members: ~facts.union_members, general: facts.union_general, edges: ~facts.union_edges, cases: ~facts.union_cases, declaration: declaration})
+        }
+    }
+    if rows.len() == 0 -> return false
+    loop row_index in 0..<rows.len() {
+        minted :: sema_failure_union_mint(&graph, rows[row_index], &diagnostics) ?? next
+        &rows[row_index].members.push(minted)
+    }
+    settled := false
+    round := 0
+    loop round < JET_FAILURE_UNION_JOIN_ROUND_CAP {
+        changed := false
+        loop row_index in 0..<rows.len() {
+            edges := ~rows[row_index].edges
+            key :: ~rows[row_index].key
+            loop edge in edges {
+                if edge == key -> next
+                incoming := [Type]{}
+                incoming_general := true
+                loop other in rows {
+                    if other.key == edge {
+                        incoming = ~other.members
+                        incoming_general = other.general
+                    }
+                }
+                loop member in incoming {
+                    known := false
+                    loop existing in rows[row_index].members {
+                        if type_identity_equal(existing, member) -> known = true
+                    }
+                    if !known {
+                        &rows[row_index].members.push(member)
+                        changed = true
+                    }
+                }
+                if incoming_general && !rows[row_index].general {
+                    rows[row_index].general = true
+                    changed = true
+                }
+            }
+        }
+        if !changed {
+            settled = true
+            break
+        }
+        round += 1
+    }
+    projected := false
+    loop row in rows {
+        typed :: loop member in row.members {
+            if sema_failure_union_typed(member) -> break true
+        } ?? false
+        if !typed -> next
+        members := ~row.members
+        if row.general || !settled -> &members.push(Type.Named{name: "Err"})
+        contract :: Type.Result{ok: sema_failure_union_success(row.declaration), err: sema_failure_union_canonical(members)}
+        if sema_failure_project_return(&graph, row.module_index, row.key, contract) -> projected = true
+    }
+    projected
+}
+
+// #3708 (card item T1): every function the failure solve proved infallible is
+// projected onto the `T Never!` carrier with no written span, which every
+// tier lowers as a plain return. A function a compile-time evaluation already
+// checked keeps its carrier, so its cached callers stay consistent.
+pub fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], comptime_functions: [SemaComptimeFunctionResult]) -> Bool {
+    projected := false
+    loop key in solved {
+        comptime_reached := false
+        loop result in comptime_functions {
+            if result.function_key == key || sema_failure_union_contains(result.reachable_function_keys, key) -> comptime_reached = true
+        }
+        if comptime_reached -> next
+        loop module_index in 0..<graph.modules.len() {
+            declaration :: sema_failure_registered_declaration(graph.modules[module_index], key) ?? next
+            contract :: Type.Result{ok: sema_failure_union_success(declaration), err: Type.Named{name: "Never"}}
+            if sema_failure_project_return(&graph, module_index, key, contract) -> projected = true
+        }
+    }
+    projected
+}

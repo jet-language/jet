@@ -39,15 +39,22 @@ pub fn jet_mime_essence(top: &str, sub: &str) -> String {
     format!("{top}/{sub}")
 }
 
-pub fn jet_mime_param<'a>(params: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub fn jet_mime_param<'a>(
+    params: impl IntoIterator<Item = (&'a str, &'a str)>,
+    name: &str,
+) -> Option<&'a str> {
     let name = name.to_ascii_lowercase();
     params
-        .iter()
-        .find(|(key, _)| key == &name)
-        .map(|(_, value)| value.as_str())
+        .into_iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value)
 }
 
-pub fn jet_mime_to_string(top: &str, sub: &str, params: &[(String, String)]) -> String {
+pub fn jet_mime_to_string<'a>(
+    top: &str,
+    sub: &str,
+    params: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> String {
     let mut output = jet_mime_essence(top, sub);
     for (key, value) in params {
         output.push_str("; ");

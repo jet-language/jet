@@ -104,8 +104,8 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
     Val(SemaExpressionResolvedType{ty: ty, owner: owner})
 }
 
-fn sema_expression_struct_literal(type_name: String, type_args: [Type], fields: [ExprField], inferred: Bool, as_trait: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    resolved :: sema_expression_struct_type(type_name, type_args, expected, span, &scopes, &diagnostics) ?? return None
+fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields: [ExprField], inferred: Bool, as_trait: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    resolved :: sema_expression_struct_type(struct_name, type_args, expected, span, &scopes, &diagnostics) ?? return None
     owner := resolved.owner
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
     result_ty := resolved.ty
@@ -122,7 +122,7 @@ fn sema_expression_struct_literal(type_name: String, type_args: [Type], fields: 
     }
     names :: loop parameter in struct_def.type_params -> parameter.name
     args := type_args
-    if type_name == "" || type_args.len() == 0 {
+    if struct_name == "" || type_args.len() == 0 {
         if result_ty == .Apply(_, rows) {
             args = rows
         }
@@ -168,12 +168,16 @@ fn sema_expression_struct_literal(type_name: String, type_args: [Type], fields: 
             &diagnostics.push(sema_error("E0108", span, "field `{field.name}` needs a value", "a struct literal must initialize every field without a default", "supply `{field.name}: ...` or declare a field default"))
             return None
         }
-        checked :: sema_check_expression_with_lambda_escapes(value_expr ?? Expr.Unit{span: field.name_span}, Val(field_ty), environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return None
+        field_value :: value_expr ?? Expr.Unit{span: field.name_span}
+        if !sema_stmt_string_view_type(field_ty) -> sema_copy_site_check_field(field_value, environment, scopes, &tail_store, &context, &diagnostics)
+        checked_value := if sema_stmt_string_view_type(field_ty) -> sema_string_view_check_field(field_value, field_ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(field_ty), environment, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
+        checked :: checked_value ?? return None
         compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment) ?? return None
         if !compatible {
             &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(value_expr ?? Expr.Unit{span: field.name_span})))
             return None
         }
+        if !sema_stmt_string_view_type(field_ty) && !sema_copy_site_record_move(field_value, scopes, &state, &tail_store, &context, &diagnostics) -> return None
         field_id :: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, field.name)
         symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner.module_name, owner: Val(owner.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
         &context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: symbol, kind: "field"})
@@ -288,6 +292,16 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         }
     }
     selected_variant :: selected ?? {
+        // D-TAG1 (E0332): a group name in value position; a value is always a leaf.
+        loop group in enum_def.groups {
+            if group.path != variant -> next
+            leaves := [String]{}
+            loop candidate in enum_def.variants {
+                if candidate.name.starts_with("{variant}.") -> &leaves.push("`{resolved_name}.{candidate.name}`")
+            }
+            &diagnostics.push(sema_error("E0332", variant_span ?? span, "`{variant}` is a group, not a value", "a group names its whole subtree in patterns; an actual value is always a leaf variant (D-TAG1)", "pick a leaf: {leaves.join(", ")}"))
+            return None
+        }
         &diagnostics.push(sema_error("E0302", variant_span ?? span, "`{resolved_name}` has no variant `{variant}`", "enum constructors must name a declared variant", "use one of the declared variants"))
         return None
     }
@@ -327,12 +341,14 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 }
             }
             payload_ty :: sema_inference_substitute_type(ty, generic_names, generic_args)
+            sema_copy_site_check_field(payload_expr, environment, scopes, &tail_store, &context, &diagnostics)
             checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment) ?? return None
             if !compatible {
                 &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(payload_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(payload_expr)))
                 return None
             }
+            if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
             &payload_values.push(TEnumArg{value: checked, clone: false, move: false})
         }
         .Named(fields) -> {
@@ -370,12 +386,14 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 }
                 supplied[found] = true
                 field_ty :: sema_inference_substitute_type(fields[found].ty, generic_names, generic_args)
+                sema_copy_site_check_field(payload_expr, environment, scopes, &tail_store, &context, &diagnostics)
                 checked :: sema_check_expression(payload_expr, Val(field_ty), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment) ?? return None
                 if !compatible {
                     &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field_ty, environment), sema_expr_expected_type(checked.ty, environment), expr_span(payload_expr)))
                     return None
                 }
+                if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
                 named_values[found] = Val(checked)
             }
             loop (index, was_supplied) in supplied {

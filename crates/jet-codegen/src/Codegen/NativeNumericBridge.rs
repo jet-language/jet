@@ -1556,6 +1556,12 @@ pub(super) fn dispatch(
 ) -> Option<Result<AmbientMirPreludeResult, Diagnostic>> {
     let symbol = route.symbol;
     if let Some(member) = exact_integer_member(symbol) {
+        // `x.div_euclid(y)` / `x.rem_euclid(y)` method rows are the two-operand
+        // form without `(file, line)`; the evaluator's exact-Int path owns
+        // their stop, which reports the calling file like the JIT does.
+        if route.arity == 2 && matches!(member, "div_euclid" | "rem_euclid") {
+            return None;
+        }
         return Some(
             if route.module != "core.numeric" || route.member != member {
                 Err(bridge_error(span, "native exact integer route has non-canonical identity"))

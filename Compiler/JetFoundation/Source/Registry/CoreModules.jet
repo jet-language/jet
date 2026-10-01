@@ -30,6 +30,70 @@ pub fn core_module_export(module_name: String) -> CoreModuleExportNames? {
     None
 }
 
+// A removed Core namespace and its canonical home (Rust `Syntax::RETIREMENTS`
+// semantic rows with code E1001).
+pub struct CoreModuleRetirement {
+    pub retired: String
+    pub canonical: String
+    pub decision: String
+}
+
+fn core_module_retirement_row(retired: String, canonical: String) -> CoreModuleRetirement Never! {
+    CoreModuleRetirement{retired: retired, canonical: canonical, decision: "D-CORE-TREE1=A"}
+}
+
+pub fn core_module_retirements() -> [CoreModuleRetirement] Never! {
+    [CoreModuleRetirement]{
+        CoreModuleRetirement{retired: "core.path.join/parent/extension/normalize", canonical: "Path.from(value).join(part), .parent(), .extension(), .normalize()", decision: "D-CORE-PATH1"},
+        core_module_retirement_row("core.io", "core.term, core.process, or the prelude"),
+        core_module_retirement_row("core.path", "core.files"),
+        core_module_retirement_row("core.time.date", "core.time"),
+        core_module_retirement_row("core.time.datetime", "core.time"),
+        core_module_retirement_row("core.text.unicode", "core.text"),
+        core_module_retirement_row("core.fmt", "core.text.fmt"),
+        core_module_retirement_row("core.random", "core.math.random"),
+        core_module_retirement_row("core.env", "core.sys"),
+        core_module_retirement_row("core.os", "core.sys"),
+        core_module_retirement_row("core.tls", "core.net.tls"),
+        core_module_retirement_row("core.ws", "core.net.ws"),
+        core_module_retirement_row("core.url", "core.net.url"),
+        core_module_retirement_row("core.mime", "core.net.mime"),
+        core_module_retirement_row("core.uuid", "core.crypto.uuid"),
+        core_module_retirement_row("core.vault", "core.crypto.vault"),
+        core_module_retirement_row("core.raylib", "core.game.raylib"),
+        core_module_retirement_row("core.browser", "core.web.browser"),
+        core_module_retirement_row("core.solve", "core.compute.solve"),
+        core_module_retirement_row("core.sketch", "core.data.sketch.*"),
+        core_module_retirement_row("core.sketch.hll", "core.data.sketch.hll"),
+        core_module_retirement_row("core.sketch.tdigest", "core.data.sketch.tdigest"),
+        core_module_retirement_row("core.sketch.reservoir", "core.data.sketch.reservoir"),
+        core_module_retirement_row("core.sketch.cms", "core.data.sketch.cms"),
+        core_module_retirement_row("core.compress", "core.archive.gzip or core.archive.zstd"),
+        core_module_retirement_row("core.compress.gzip", "core.archive.gzip"),
+        core_module_retirement_row("core.compress.zstd", "core.archive.zstd"),
+        core_module_retirement_row("core.science.measurement", "core.units"),
+        core_module_retirement_row("core.mem.alloc", "core.mem"),
+        core_module_retirement_row("core.scope", "core.mem.scope"),
+        core_module_retirement_row("core.lang", "core.compiler.lang"),
+        core_module_retirement_row("core.binary", "core.encoding and core.term.Reader"),
+    }
+}
+
+// Rust `retired_core_module`: the longest retired namespace that is `name`
+// itself or a dotted prefix of it.
+pub fn core_module_retirement(name: String) -> CoreModuleRetirement? {
+    found := CoreModuleRetirement?{None}
+    best := -1
+    loop row in core_module_retirements() {
+        if row.retired != name && !name.starts_with("{row.retired}.") -> next
+        if row.retired.len() >= best {
+            best = row.retired.len()
+            found = Val(row)
+        }
+    }
+    found
+}
+
 pub fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
     loop item in names {
         if item == name -> return true

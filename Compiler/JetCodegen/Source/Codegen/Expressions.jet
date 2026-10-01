@@ -383,6 +383,16 @@ fn jet_codegen_is_move_kind(kind: TExprKind) -> Bool Never! {
     }
 }
 
+// Whether `expression` reads an element (or a field path below an element) of
+// a list, map, or pool. Such a place is never moved out of its container.
+fn jet_codegen_reads_container_element(expression: TExpr) -> Bool Never! {
+    if expression.kind == {
+        .Index(_, _, _, _, _, _) | .PoolSlot(_, _, _, _, _, _) -> true
+        .Field(receiver, _) -> jet_codegen_reads_container_element(receiver)
+        else -> false
+    }
+}
+
 fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> Bool Never! {
     jet_codegen_resolve_trait_ref(modules, name, preferred_module_identity) != None
 }
@@ -4743,6 +4753,9 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> MIR
                 }
                 else -> {
                     lowered := jet_codegen_lower_expr(&builder, value)
+                    // A container element stays in its slot (no index move),
+                    // so the consumer receives its own copy of the element.
+                    if jet_codegen_reads_container_element(value) -> return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Copy{value: lowered, materialize_view: false})
                     jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Move{value: lowered})
                 }
             }

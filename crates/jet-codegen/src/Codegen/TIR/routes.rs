@@ -5730,6 +5730,15 @@ impl TBuiltinOp {
                 None,
                 carrier,
             ),
+            Chars => b(
+                "string_chars",
+                "jet_string_chars",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             ParseInt => b(
                 "int_parse",
                 "jet_std::jet_int_parse",
@@ -6654,7 +6663,6 @@ impl TBuiltinOp {
             | JoinSep
             | Product { .. }
             | Unzip { .. }
-            | Chars
             | EndsWith
             | Replace
             | ToString

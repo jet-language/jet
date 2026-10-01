@@ -9,7 +9,6 @@ use jet_foundation.[
     ElseArmSpan,
     Expr,
     Lambda,
-    LambdaBody,
     LambdaParam,
     NamedSpan,
     Span,
@@ -32,6 +31,7 @@ use jet_lexer.[
     TOKEN_KW_IN,
     TOKEN_KW_IT,
     TOKEN_KW_LOOP,
+    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LE,
@@ -121,15 +121,20 @@ fn parser_expression_form_loop_ahead(state: &JetParserState) -> Bool Never! {
     }
 }
 
-pub fn parser_expression_form_ahead(state: &JetParserState) -> Bool Never! {
+// `allow_bare_lambda` is false inside a control header, where a trailing
+// `->` introduces the body (`if ready -> stmt`), so `name ->` is no lambda.
+pub fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
     if parser_expression_form_if_ahead(&state) -> return true
     if parser_expression_form_loop_ahead(&state) -> return true
-    parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW
+    allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW)
 }
 
 pub fn parser_parse_expression_form(state: &JetParserState, depth: Int) -> ParsedExpr {
     if parser_current_kind(&state) == {
-        TOKEN_KW_IF -> parser_expression_form_parse_if(&state, depth + 1)
+        TOKEN_KW_IF -> {
+            parts := [ParserBranchPart]{}
+            parser_expression_form_parse_if(&state, depth + 1, true, &parts)
+        }
         TOKEN_KW_LOOP -> parser_expression_form_parse_loop(&state, depth + 1)
         else -> parser_expression_form_parse_bare_lambda(&state, depth + 1)
     }
@@ -346,7 +351,7 @@ fn parser_expression_form_parse_guard_table(state: &JetParserState, start: Span,
         kind :: parser_current_kind(&state)
         if kind == TOKEN_KW_ELSE {
             parser_bump(&state)
-            parser_expect(&state, TOKEN_UNIFIED_ARROW, "after `else` in a value guard")
+            parser_expect_unified_arrow(&state, "after `else` in a value guard")
             branch :: parser_expression_form_selected_value(&state, depth + 1)
             else_body = branch.body
             else_value = branch.value
@@ -367,10 +372,10 @@ fn parser_expression_form_parse_guard_table(state: &JetParserState, start: Span,
             parser_expression_form_error(&state, "E0003", token.span, "expected a final `else` arm and `}}` for this value guard", "a value guard must produce a value on every path", "add `else -> value` and a closing `}}`")
             break
         }
-        condition :: parser_parse_expression(&state, 1, depth + 1)
-        parser_expect(&state, TOKEN_UNIFIED_ARROW, "after a value guard condition")
+        condition :: parser_parse_subjectless_arm_head(&state)
+        parser_expect_unified_arrow(&state, "after a value guard condition")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
-        &arms.push(ParserExpressionFormArm{cond: condition.expr, body: branch.body, value: branch.value})
+        &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
     }
     if arms.len() == 0 {
         parser_expression_form_error(&state, "E0003", start, "a value guard needs at least one condition", "`else` is a fallback, not a condition", "add a condition before `else`")
@@ -389,7 +394,7 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
         kind :: parser_current_kind(&state)
         if kind == TOKEN_KW_ELSE {
             else_token :: parser_bump(&state)
-            parser_expect(&state, TOKEN_UNIFIED_ARROW, "after `else` in a value dispatch")
+            parser_expect_unified_arrow(&state, "after `else` in a value dispatch")
             branch :: parser_expression_form_selected_value(&state, depth + 1)
             else_body = branch.body
             else_value = branch.value
@@ -419,9 +424,8 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
             parser_expression_form_error(&state, "E0003", token.span, "expected a final `else` arm and `}}` for this value dispatch", "a value dispatch must produce a value on every path", "add `else -> value` and a closing `}}`")
             break
         }
-        parser_expression_form_redundant_dispatch(&state, subject, op)
-        condition :: parser_expression_form_dispatch_condition(&state, subject, op, depth + 1)
-        parser_expect(&state, TOKEN_UNIFIED_ARROW, "after a value dispatch arm head")
+        condition :: parser_parse_if_arm_head(&state, subject, subject, op)
+        parser_expect_unified_arrow(&state, "after a value dispatch arm head")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
         &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
         last_arm_end = branch.span.end
@@ -432,7 +436,11 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
     parser_expression_form_nest_arms(arms, else_body, else_value, start, end)
 }
 
-fn parser_expression_form_parse_if(state: &JetParserState, depth: Int) -> ParsedExpr {
+// `lint_style` marks the root of a value `if` chain, which reports L0507 when
+// it is chained or spans several lines; `parts` collects each condition and
+// branch value so the root can rebuild the chain as one arm table.
+fn parser_expression_form_parse_if(state: &JetParserState, depth: Int, lint_style: Bool, parts: &[ParserBranchPart]) -> ParsedExpr {
+    branch_start :: state.position
     start :: parser_bump(&state)
     if parser_current_kind(&state) == TOKEN_LBRACE {
         parser_bump(&state)
@@ -449,9 +457,13 @@ fn parser_expression_form_parse_if(state: &JetParserState, depth: Int) -> Parsed
     }
     state.position = saved_position
     loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
-    condition :: parser_parse_expression(&state, 1, depth + 1)
-    parser_expect(&state, TOKEN_UNIFIED_ARROW, "after the condition of a value-producing `if`")
+    cond_start :: parser_current(&state).span.start
+    condition :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+    cond_span :: Span{start: cond_start, end: parser_prev_token_end(state)}
+    parser_expect_unified_arrow(&state, "after the condition of a value-producing `if`")
+    then_start :: parser_current(&state).span.start
     then_branch :: parser_expression_form_selected_value(&state, depth + 1)
+    &parts.push(ParserBranchPart{is_else: false, cond: cond_span, body: Span{start: then_start, end: parser_prev_token_end(state)}})
     else_body := [Stmt]{}
     else_value := Expr.NoElse{span: then_branch.span}
     end := then_branch.span
@@ -460,59 +472,42 @@ fn parser_expression_form_parse_if(state: &JetParserState, depth: Int) -> Parsed
         return ParsedExpr{expr: Expr.If{cond: condition.expr, then_body: then_branch.body, then_value: then_branch.value, else_body: else_body, else_value: else_value, span: parser_cover(start.span, end)}, span: parser_cover(start.span, end)}
     }
     parser_bump(&state)
+    chained :: parser_current_kind(&state) == TOKEN_KW_IF
     if {
-        parser_current_kind(&state) == TOKEN_KW_IF -> {
-            nested :: parser_expression_form_parse_if(&state, depth + 1)
+        chained -> {
+            nested :: parser_expression_form_parse_if(&state, depth + 1, false, &parts)
             else_value = nested.expr
             end = nested.span
         }
         else -> {
-            parser_expect(&state, TOKEN_UNIFIED_ARROW, "after `else` in a value-producing `if`")
+            parser_expect_unified_arrow(&state, "after `else` in a value-producing `if`")
+            else_start :: parser_current(&state).span.start
             else_branch :: parser_expression_form_selected_value(&state, depth + 1)
+            &parts.push(ParserBranchPart{is_else: true, cond: Span{start: else_start, end: else_start}, body: Span{start: else_start, end: parser_prev_token_end(state)}})
             else_body = else_branch.body
             else_value = else_branch.value
             end = else_branch.span
         }
     }
     span :: parser_cover(start.span, end)
+    if lint_style && (chained || parser_authored_line_break(state, branch_start, state.position)) -> parser_prefer_arm_table(&state, start.span, parts, saved_diagnostics)
     ParsedExpr{expr: Expr.If{cond: condition.expr, then_body: then_branch.body, then_value: then_branch.value, else_body: else_body, else_value: else_value, span: span}, span: span}
 }
 
+// D-LAMBDA-INFER1: a bare single-parameter lambda `m -> m.hp > 0`; its
+// parameter type comes from the expected callable type.
 fn parser_expression_form_parse_bare_lambda(state: &JetParserState, depth: Int) -> ParsedExpr {
     name :: parser_expect_name(&state, "as a lambda parameter")
-    parser_expect(&state, TOKEN_UNIFIED_ARROW, "after a bare lambda parameter")
-    end := name.span
-    body :: if {
-        parser_current_kind(&state) == TOKEN_LBRACE -> {
-            block :: parser_parse_block(&state)
-            end = block.span
-            LambdaBody.Block{body: block.statements}
-        }
-        else -> {
-            value :: parser_parse_expression(&state, 1, depth + 1)
-            if {
-                parser_is_assignment_operator(parser_current_kind(&state)) -> {
-                    operator :: parser_bump(&state)
-                    right :: parser_parse_expression(&state, 1, depth + 1)
-                    target :: parser_expression_lvalue(&state, value.expr, value.span)
-                    end = right.span
-                    LambdaBody.Block{body: [Stmt]{Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr}}}
-                }
-                else -> {
-                    end = value.span
-                    LambdaBody.Expr{value: value.expr}
-                }
-            }
-        }
-    }
-    span :: parser_cover(name.span, end)
+    parser_expect_unified_arrow(&state, "after a bare lambda parameter")
+    body :: parser_parse_lambda_arrow_body(&state, depth, name.span.end)
+    span :: Span{start: name.span.start, end: body.end}
     lambda :: Lambda{
         take_names: [NamedSpan]{},
         params: [LambdaParam]{LambdaParam{name: name.payload.decoded, name_span: name.span, ty: None, ty_span: None}},
         result_type: None,
         error_type: None,
         effects: None,
-        body: body,
+        body: body.body,
         span: span,
         meta: ast_empty_lambda_meta(),
     }

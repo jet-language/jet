@@ -7284,6 +7284,7 @@ fn tower_1754_collection_parity_focus() {
         for stem in [
             "collections/iter_adapters",
             "collections/iter_tools_audit",
+            "collections/list_remove_selector",
             "collections/list_surface",
             "effects/taint",
         ] {

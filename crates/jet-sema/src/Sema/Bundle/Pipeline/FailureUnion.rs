@@ -155,6 +155,14 @@ fn select_probed_functions(bundle: &mut ProgramBundle) -> BTreeMap<usize, BTreeS
                     Expr::Err(inner, _) => {
                         seeded |= !matches!(inner.without_parens(), Expr::Str(..));
                     }
+                    // The parser writes `Err(value)` as a call; the checker
+                    // turns it into `Expr::Err` only while inferring it.
+                    Expr::Call(call) if call.name == Syntax::LIT_ERR => {
+                        seeded |= !matches!(
+                            call.args.as_slice(),
+                            [arg] if matches!(arg.expr.without_parens(), Expr::Str(..))
+                        );
+                    }
                     Expr::Call(call) => {
                         calls.insert(last_segment(&call.name).to_string());
                     }

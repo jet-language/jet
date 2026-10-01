@@ -851,14 +851,14 @@ fn read_execution(data: &[u8], i: &mut usize) -> Option<MirExecutionIdentity> {
             provider_identity,
             closure_identity,
             artifact_identity,
-            program_identity: MirProgramIdentity {
+            program_identity: Arc::new(MirProgramIdentity {
                 semantic_hash,
                 optimized_hash,
                 function_ids,
                 core_ids,
                 target_facts,
                 source_map,
-            },
+            }),
         },
     })
 }

@@ -947,12 +947,23 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
                 borrow :: if mutable -> "&mut" else -> "&"
                 expression = "*(match {borrow} ({expression}) {{ {jet_rust_emit_payload_pattern(&ctx, kind)} => payload, _ => unreachable!(\"MIR payload variant mismatch\") }})"
             }
-            .Index(kind, index, call, _, location, _, _) -> {
-                index_expression := jet_rust_emit_value_read(index)
-                if kind == MIRIndexKind.Map -> index_expression = "&({index_expression})"
-                symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
+            .Index(kind, index, call, _, location, context, _) -> {
+                // MIRRust place projection: the fixed ref/mut index helpers
+                // borrow the projected place; the route row supplies the ABI.
+                index_expression :: if {
+                    kind == MIRIndexKind.Map && !mutable -> "&({jet_rust_emit_value_read(index)})"
+                    kind == MIRIndexKind.Map -> jet_rust_emit_value_read(index)
+                    else -> jet_rust_emit_index_operand(&ctx, function, index, location)
+                }
+                symbol :: if kind == {
+                    .List | .FixedListProof -> if mutable -> "jet_index_vec_mut" else -> "jet_index_vec_ref"
+                    .Map -> if mutable -> "jet_index_map_mut" else -> "jet_index_map_ref"
+                    .Pool -> if mutable -> "jet_std::jet_pool_get_mut" else -> "jet_std::jet_pool_get_ref"
+                    .Lane -> if mutable -> "jet_std::jet_native_lane_mut" else -> "jet_std::jet_native_lane_ref"
+                }
                 borrow :: if mutable -> "&mut" else -> "&"
-                expression = "*{symbol}({borrow}({expression}), {index_expression}, {jet_rust_emit_source_path(&ctx, location.file)}, {location.line}u32)"
+                args :: jet_rust_emit_index_arguments(&ctx, function, call, "{borrow} ({expression})", index_expression, location, context)
+                expression = "*{ctx.config.root_prefix}{symbol}({args.join(", ")})"
             }
             .Range(range, location, _) -> {
                 symbol :: if mutable -> "jet_view_mut_new_range" else -> "jet_view_new_range"

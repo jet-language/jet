@@ -1,0 +1,44 @@
+// D-EFF1 / D-ABILITY-NAME2: `#FX(Net, DB) { … }` restricts the effects a
+// block may use; a named head `#FX(grant: FS, Net) { … }` also binds a scoped
+// `Authority` handle (Rust `at_fx_stmt`). Effect names are dotted paths; sema
+// validates them against the effect vocabulary.
+use jet_foundation.[
+    CallArg,
+    Expr,
+    Marker,
+    NamedSpan,
+    Span,
+    Stmt,
+    expr_span,
+]
+
+fn parser_authority_effect_path(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _) -> Val(name)
+        .Field(base, member, _) -> {
+            prefix :: parser_authority_effect_path(base) ?? return None
+            Val("{prefix}.{member}")
+        }
+        else -> None
+    }
+}
+
+fn parser_authority_scope_stmt(state: &JetParserState, marker: Marker, args: [CallArg], body: [Stmt], span: Span) -> Stmt? {
+    caps := [NamedSpan]{}
+    loop argument in args {
+        written :: parser_authority_effect_path(argument.expr) ?? {
+            parser_marker_shape_error(&state, marker)
+            return None
+        }
+        name := written
+        if name.starts_with("Effect.") -> name = name.slice(7, name.len())
+        &caps.push(NamedSpan{name: name, span: expr_span(argument.expr)})
+    }
+    binding := NamedSpan?{None}
+    caps_span := Span{start: marker.name_span.end, end: marker.span.end}
+    if args.len() > 0 && args[0].label == .Val(label) {
+        binding = Val(NamedSpan{name: label.name, span: label.span})
+        if caps.len() > 0 -> caps_span = Span{start: caps[0].span.start, end: marker.span.end}
+    }
+    Val(Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding, body: body, span: span})
+}

@@ -1233,6 +1233,11 @@ pub fn sema_core_module_input_from_registration(registration_module: SemaRegistr
                 if target == "" -> target = module_alias
                 sema_core_import_add(&imports, SemaCoreImport{alias: module_alias, module_name: target, item: None, span: module_alias_span})
                 loop binding in registration.bindings {
+                    // A Core submodule member (`use core.mem`) binds a namespace.
+                    if binding.declaration == None && binding.symbol.kind == SymbolKind.Import {
+                        sema_core_import_add(&imports, SemaCoreImport{alias: binding.local, module_name: binding.target_module_identity, item: None, span: binding.symbol.span})
+                        next
+                    }
                     sema_core_import_add(&imports, SemaCoreImport{alias: binding.local, module_name: target, item: Val(binding.original), span: binding.symbol.span})
                 }
                 if declaration.alias != "" -> sema_core_import_add(&imports, SemaCoreImport{alias: declaration.alias, module_name: target, item: None, span: span})

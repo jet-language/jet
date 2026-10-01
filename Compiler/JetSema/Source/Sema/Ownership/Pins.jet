@@ -1,0 +1,103 @@
+// D-PIN1=A: `mem.pin(&place) -> Pin<T>` starts a tracked write window that
+// promises the place keeps its address. The pin names that storage location,
+// so its argument must be a write window marked with `&` (E0218).
+use jet_foundation.[
+    AccessConvention,
+    Binding,
+    CallArg,
+    Diagnostic,
+    Expr,
+    PlaceAccess,
+    Stmt,
+    Type,
+    expr_span,
+]
+
+fn sema_pin_write_window(argument: CallArg) -> Bool Never! {
+    if argument.convention == AccessConvention.Write -> return true
+    if argument.expr == .Place(_, access, _) {
+        return access == PlaceAccess.Write
+    }
+    false
+}
+
+// Rust `core_call` arm ("core.mem", "pin"). False when the call is rejected.
+pub fn sema_pin_check_call(module_name: String, member: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
+    if module_name != "core.mem" || member != "pin" || args.len() != 1 -> return true
+    if sema_pin_write_window(args[0]) -> return true
+    &diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a write window made with the write-access marker `&` into the place being pinned", "a pin promises one storage location will not move, so it has to name that location with the write-access marker `&` instead of a copied value", "write `mem.pin(&place)` with the write-access marker `&`"))
+    false
+}
+
+fn sema_pin_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Apply(name, _) -> name == "Pin"
+        else -> false
+    }
+}
+
+// Rust `ViewKind::Pin`: a view fact is a pin when its carrier holds a `Pin<T>`.
+pub fn sema_pin_view_fact(fact: SemaOwnershipViewFact, scopes: SemaScopeTable) -> Bool Never! {
+    loop binding in scopes.bindings {
+        if binding.symbol.id.key == fact.carrier_key {
+            ty :: binding.symbol.ty ?? return false
+            return sema_pin_type(ty)
+        }
+    }
+    false
+}
+
+// Rust matches only `alias.pin(arg)` with a `core.mem` alias; the caller also
+// requires the `Pin<T>` result type.
+fn sema_pin_call_argument(expr: Expr) -> CallArg? {
+    if expr == {
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> if method == "pin" && args.len() == 1 && receiver == .Ident(_, _) -> Val(args[0]) else -> None
+        .Paren(value, _) -> sema_pin_call_argument(value)
+        else -> None
+    }
+}
+
+// Rust `core_call` ("core.mem", "pin") view fact: `pinned :: mem.pin(&place)`
+// keeps an exclusive write window on `place` for as long as `pinned` lives.
+// True when the binding is a pin and its fact was recorded.
+pub fn sema_pin_record_binding(state: &SemaOwnershipState, binding: Binding, init_ty: Type, scopes: SemaScopeTable) -> Bool {
+    if !sema_pin_type(init_ty) -> return false
+    argument :: sema_pin_call_argument(binding.init) ?? return false
+    if !sema_pin_write_window(argument) -> return false
+    target :: if argument.expr == {
+        .Place(value, _, _) -> value
+        else -> argument.expr
+    }
+    places :: sema_ownership_places_from_expr_in_state(target, scopes, &state)
+    if places.len() != 1 -> return false
+    loan_seq :: sema_ownership_matching_loan_seq(&state, places[0], expr_span(argument.expr))
+    sema_ownership_record_view_fact(&state, binding.name, binding.name_span, places[0], [String]{}, AccessConvention.Write, scopes, loan_seq)
+}
+
+// Rust `check_owner_change(name, "be moved")` for the exact move `^place`:
+// moving a pinned place is E0219. Runs before the moved place is read.
+pub fn sema_pin_check_move(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
+        if sema_ownership_conflicting_view_for_expr(&state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {
+            if sema_pin_view_fact(fact, scopes) {
+                &diagnostics.push(sema_ownership_diag_view_change(fact, place, "be moved", expr_span(expr), scopes))
+                return false
+            }
+        }
+    }
+    true
+}
+
+// Rust `view_is_live_now` for pins: a pin stays live while this statement or
+// a later one uses its carrier. A dead pin releases its window, so the owner
+// may be read, moved, or pinned again after the pin's last use.
+pub fn sema_pin_release_dead(state: &SemaOwnershipState, statement: Stmt, scopes: SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
+    loop index in 0..<state.views.len() {
+        fact :: state.views[index]
+        if !fact.active || !sema_pin_view_fact(fact, scopes) -> next
+        if sema_ownership_last_use_statement(statement, fact.carrier) || sema_ownership_name_live_after(fact.carrier, &tail_store, &context) -> next
+        state.views[index].active = false
+        remaining :: loop loan in state.loans if loan.carrier_fact_seq != fact.seq || loan.carrier_key != fact.carrier_key -> loan
+        state.loans = remaining
+    }
+}

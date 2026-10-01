@@ -326,10 +326,17 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
 pub fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     result :: sema_call_default_err_result(expected)
     if result == .Val(result_value) {
+        // #3708: an `Err(...)` that builds a carrier is a failure source of
+        // its own (the Rust reference's checked `Expr::Err`); the empty key
+        // never resolves.
+        &context.failure_edges.push("")
         if result_value == .Result(ok, err) {
             if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None {
                 return sema_call_default_err_contextual_result(call, result_value, ok, err, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             }
+            // D-FAIL-INFER-UNION1=A: record what this `Err` sends down the
+            // default route before the ordinary check below.
+            if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, scopes, state, &tail_store, &context)
         }
     }
     wrap :: result != None

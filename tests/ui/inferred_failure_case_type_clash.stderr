@@ -1,0 +1,17 @@
+Error [E0105]: `find_person` creates error cases, but the type `FindPersonError` already exists
+  --> inferred_failure_case_type_clash.jet:11:9
+    |
+ 11 |     Err(.NotFound(~name))
+    |         ^^^^^^^^^^^^^^^^
+ Why: Cases written as `Err(.Case(…))` in `find_person` form its own error type, named `FindPersonError` after the function
+ Fix: Write the failure contract of `find_person` (for example `-> T FindPersonError!`), or rename the declared `FindPersonError`
+More: jet-lang.dev/e/E0105
+
+Error [E0330]: Can't infer the enum type for `.NotFound`
+  --> inferred_failure_case_type_clash.jet:11:9
+    |
+ 11 |     Err(.NotFound(~name))
+    |         ^^^^^^^^^^^^^^^^
+ Why: A leading-dot variant needs a known enum type from context
+ Fix: Add a type annotation, or write the full form `EnumName.NotFound`
+More: jet-lang.dev/e/E0330

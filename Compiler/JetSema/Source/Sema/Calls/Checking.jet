@@ -17,6 +17,7 @@ use jet_foundation.[
     TExpr,
     Type,
     ast_empty_call_arg_flags,
+    expr_span,
     type_identity_equal,
 ]
 
@@ -193,6 +194,7 @@ pub fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [Call
     facts := [SemaCallReturnViewFact]{}
     loop entry in map.entries {
         places := [SemaOwnershipPlace]{}
+        temporaries := [Span]{}
         loop source_path in entry.value.sources {
             source_expr := Expr?{None}
             if source_path.source == {
@@ -202,6 +204,7 @@ pub fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [Call
             }
             if source_expr == .Val(expression) {
                 source_places :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
+                if source_places.len() == 0 && source_path.source == .Parameter(_) -> &temporaries.push(expr_span(expression))
                 loop source_place in source_places {
                     place :: sema_ownership_append_view_source_projections(source_place, source_path.projections, span)
                     duplicate :: loop existing in places {
@@ -217,6 +220,7 @@ pub fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [Call
             access: access,
             places: places,
             sources: entry.value.sources,
+            temporaries: temporaries,
         })
     }
     facts

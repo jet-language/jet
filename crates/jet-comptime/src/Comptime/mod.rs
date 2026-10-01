@@ -108,6 +108,18 @@ pub fn decode_typed_builtin_value_for_mir(
     TypedDecode::typed_decode_builtin_value(ty, tree)
 }
 
+/// MIR typed Decode bridge: the canonical typed codec walker decodes
+/// containers and scalars, and delegates nominal leaves to checked MIR
+/// Decode methods.
+#[doc(hidden)]
+pub fn decode_typed_value_for_mir(
+    ty: &Type,
+    tree: &CtValue,
+    decode_nominal: &mut dyn FnMut(&Type, &CtValue) -> Option<Result<CtValue, CtValue>>,
+) -> Option<Result<CtValue, CtValue>> {
+    TypedDecode::typed_decode_value_with(ty, tree, decode_nominal)
+}
+
 /// MIR typed Encode bridge that keeps container traversal in the canonical
 /// typed codec walker and delegates nominal leaves to checked MIR methods.
 #[doc(hidden)]

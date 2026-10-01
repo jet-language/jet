@@ -1321,7 +1321,7 @@ pub(crate) fn lower_switch<'a>(
         .any(|arm| crate::Codegen::TIR::arm_has_nested_pattern(&arm.cond))
     {
         if matches!(subject, Expr::Ident(..)) {
-            return lower_guard_switch(arms, else_body, env, Some(subject.clone()));
+            return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
         }
         let name = jet_format!("{jet_prefix}switch_subject_{}", subject.span().start);
         let carrier = arms.iter().any(|arm| {
@@ -1340,7 +1340,7 @@ pub(crate) fn lower_switch<'a>(
         let ty = init.ty.clone();
         env.bind(&name, TLocal::generated(&name), Some(ty.clone()));
         let local_subject = Expr::Ident(name.clone(), subject.span());
-        return lower_guard_switch(arms, else_body, env, Some(local_subject)).map_stmt(
+        return lower_guard_switch(arms, else_body, env, Some((subject, local_subject))).map_stmt(
             move |stmt| {
                 let TStmt::If {
                     cond,
@@ -1400,7 +1400,7 @@ pub(crate) fn lower_switch<'a>(
             })
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some(subject.clone()));
+        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
     }
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
     if else_body.is_some()
@@ -1430,7 +1430,7 @@ pub(crate) fn lower_switch<'a>(
                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some(subject.clone()));
+        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
     }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
@@ -1834,7 +1834,9 @@ fn lower_guard_switch<'a>(
     arms: &'a [SwitchArm],
     else_body: &'a Option<Vec<Stmt>>,
     env: &mut LowerEnv,
-    subject_override: Option<Expr>,
+    // The switch subject as written and the expression each arm's head
+    // pattern test reads instead.
+    subject_override: Option<(&'a Expr, Expr)>,
 ) -> LowerStmtPlan<'a> {
     // The chain is wrapped from the last arm back toward the first, so the deferred
     // bodies run in reverse source order. Prepare each condition immediately before
@@ -1854,7 +1856,9 @@ fn lower_guard_switch<'a>(
             LowerBody::scoped(&arm.body, branch).prepare(move |cx, branch| {
                 let condition = subject_override
                     .as_ref()
-                    .map(|subject| replace_pattern_subject(&arm.cond, subject))
+                    .map(|(subject, replacement)| {
+                        replace_pattern_subject(cx, &arm.cond, subject, replacement)
+                    })
                     .unwrap_or_else(|| arm.cond.clone());
                 // `condition` is a temporary copy: lower it on its own memo so
                 // unconsumed entries keyed by its node addresses cannot replay
@@ -1903,17 +1907,23 @@ fn lower_guard_switch<'a>(
     })
 }
 
-fn replace_pattern_subject(condition: &Expr, subject: &Expr) -> Expr {
+/// Point the arm's own pattern tests at `replacement`. A guard term that tests
+/// another value (`.Init(_) && form == .Iterator`) keeps its subject.
+fn replace_pattern_subject(cx: &Cx, condition: &Expr, subject: &Expr, replacement: &Expr) -> Expr {
     match condition {
-        Expr::PatternTest { pattern, span, .. } => Expr::PatternTest {
-            subject: Box::new(subject.clone()),
+        Expr::PatternTest {
+            subject: tested,
+            pattern,
+            span,
+        } if crate::Codegen::TIR::pattern_subjects_match(cx, tested, subject) => Expr::PatternTest {
+            subject: Box::new(replacement.clone()),
             pattern: pattern.clone(),
             span: *span,
         },
         Expr::Binary(BinOp::And, left, right, span) => Expr::Binary(
             BinOp::And,
-            Box::new(replace_pattern_subject(left, subject)),
-            Box::new(replace_pattern_subject(right, subject)),
+            Box::new(replace_pattern_subject(cx, left, subject, replacement)),
+            Box::new(replace_pattern_subject(cx, right, subject, replacement)),
             *span,
         ),
         _ => condition.clone(),

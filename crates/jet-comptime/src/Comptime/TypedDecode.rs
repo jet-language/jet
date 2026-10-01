@@ -725,11 +725,27 @@ pub(super) fn typed_decode_builtin_value(
     ty: &Type,
     tree: &CtValue,
 ) -> Option<Result<CtValue, CtValue>> {
+    typed_decode_value_with(ty, tree, &mut |_, _| None)
+}
+
+/// Callback used by the checked MIR decoder for nominal leaves (a `#Codable`
+/// struct or enum) that only a generated Decode method can read.
+pub(super) type DecodeNominalCallback<'a> =
+    dyn FnMut(&Type, &CtValue) -> Option<Result<CtValue, CtValue>> + 'a;
+
+/// The typed decode walker: scalar, option, list, fixed-list and string-key
+/// map policy stays here for every tier; unsupported leaves go to the
+/// caller's checked Decode method, as `encode_typed_value_with` does.
+pub(super) fn typed_decode_value_with(
+    ty: &Type,
+    tree: &CtValue,
+    decode_nominal: &mut DecodeNominalCallback<'_>,
+) -> Option<Result<CtValue, CtValue>> {
     match ty {
         Type::Int => Some(decode_int(tree)),
         Type::IntN { signed, bits } => Some(decode_int_n(tree, *signed, *bits, &ty.name())),
         Type::InlineRange { base, lo, hi } => {
-            typed_decode_builtin_value(base, tree).map(|result| {
+            typed_decode_value_with(base, tree, decode_nominal).map(|result| {
                 result.and_then(|value| match value {
                     CtValue::Int(n) => {
                         match inline_range_semantics::jet_inline_range_from_int(n, *lo, *hi) {
@@ -777,7 +793,7 @@ pub(super) fn typed_decode_builtin_value(
         Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL => Some(decode_decimal(tree)),
         Type::Option(inner) => match variant_of(tree) {
             Some(("Null", _)) => Some(Ok(CtValue::absent((**inner).clone()))),
-            _ => typed_decode_builtin_value(inner, tree)
+            _ => typed_decode_value_with(inner, tree, decode_nominal)
                 .map(|result| result.map(|value| CtValue::Present(Box::new(value)))),
         },
         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
@@ -825,7 +841,7 @@ pub(super) fn typed_decode_builtin_value(
             let mut out = Vec::with_capacity(items.len());
             let mut errors = Vec::new();
             for (index, item) in items.iter().enumerate() {
-                match typed_decode_builtin_value(inner, item)? {
+                match typed_decode_value_with(inner, item, decode_nominal)? {
                     Ok(value) => out.push(value),
                     Err(error) => extend_decode_errors(
                         &mut errors,
@@ -849,7 +865,7 @@ pub(super) fn typed_decode_builtin_value(
             let mut out = std::collections::BTreeMap::new();
             let mut errors = Vec::new();
             for (map_key, item) in pairs {
-                match typed_decode_builtin_value(value, &item)? {
+                match typed_decode_value_with(value, &item, decode_nominal)? {
                     Ok(decoded) => {
                         out.insert(CtKey::Str(map_key), decoded);
                     }
@@ -866,7 +882,7 @@ pub(super) fn typed_decode_builtin_value(
             })
         }
         Type::Map { .. } => Some(Err(decode_error("comptime maps require String keys"))),
-        _ => None,
+        _ => decode_nominal(ty, tree),
     }
 }
 

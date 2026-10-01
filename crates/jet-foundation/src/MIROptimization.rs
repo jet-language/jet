@@ -4670,32 +4670,34 @@ fn record_canonical_transition(
     );
 }
 
+/// Optimize `program` in place of a copy: the canonical program is the
+/// largest compile-time structure, so the pipeline consumes its input.
 pub fn optimize_mir_program(
-    program: &MirProgram,
+    program: MirProgram,
     policy: &MirOptimizationPolicy,
 ) -> Result<MirProgram, MirOptimizationError> {
     let _ = policy;
     let pipeline_before_payload = CanonicalPass::enabled()
-        .then(|| crate::MIR::canonical_payload(program));
+        .then(|| crate::MIR::canonical_payload(&program));
     let pipeline_before_identity = CanonicalPass::enabled()
-        .then(|| crate::MIR::canonical_identity(program));
-    verify_mir_legality(program).map_err(|error| MirOptimizationError::Legality {
+        .then(|| crate::MIR::canonical_identity(&program));
+    verify_mir_legality(&program).map_err(|error| MirOptimizationError::Legality {
         pass: MirOptimizationPassId::LegalityVerification,
         error,
     })?;
     record_canonical_check(
         "mir.legality-verification",
         "crates/jet-foundation/src/MIROptimization.rs",
-        program,
+        &program,
     );
     // Only an input that already carries the complete pass order and a seal
     // can skip the pipeline; digest it only then.
     let already_optimized = program.functions.iter().all(|function| {
         function.optimization.pass_ids.as_slice() == MIR_OPTIMIZATION_PASS_ORDER.as_slice()
             && function.optimization.derived_from_digest.is_some()
-    }) && optimized_pass_order_complete(program, &mir_program_digest(program));
+    }) && optimized_pass_order_complete(&program, &mir_program_digest(&program));
     if already_optimized {
-        let mut optimized = program.clone();
+        let mut optimized = program;
         run_canonical_pass(
             "mir.fixed-reduction-normalization",
             "crates/jet-foundation/src/MIROptimization.rs",

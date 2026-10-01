@@ -19,6 +19,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     expr_optional_method_call_as_call,
     expr_span,
+    mir_boundary_head_carrier_module,
     symbol_id,
     tir_symbol_local,
     type_name,
@@ -89,6 +90,7 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
         &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "remove `^` to copy the element"), TextEdit{span: mark_span, new_text: ""}))
         return None
     }
+    if !sema_pin_check_move(&state, value, scopes, &diagnostics) -> return None
     checked :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_ownership_consume_expression(&state, Expr.Place{value: value, access: PlaceAccess.Take, span: span}, scopes, "the move `^{sema_expression_move_mark_text(value)}`", &diagnostics) -> return None
     Val(checked)
@@ -147,6 +149,22 @@ fn sema_expression_tuple_field(base: TExpr, member: String, span: Span, diagnost
     }
 }
 
+// A bare built-in boundary spelling with a Core carrier record (`URL` in
+// `core.net.url`) names that record wherever it is read, so its documented
+// fields resolve through the declaration (Rust `struct_owner_module`).
+fn sema_expression_carrier_type_symbol(environment: SemaScopeEnvironment, name: String) -> Symbol? {
+    carrier :: mir_boundary_head_carrier_module(name) ?? return None
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
+    loop module_row in graph.modules {
+        if module_row.module_name != carrier -> next
+        loop nominal in module_row.nominals {
+            if nominal.symbol.name == name -> return Val(nominal.symbol)
+        }
+    }
+    None
+}
+
 fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if base.ty == .Tuple(_) {
         tuple_field :: sema_expression_tuple_field(base, member, span, &diagnostics) ?? return None
@@ -166,7 +184,8 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         else -> [Type]{}
     }
     if owner_name != "" {
-        owner :: sema_expression_type_symbol(&scopes, owner_name)
+        owner := sema_expression_type_symbol(&scopes, owner_name)
+        if owner == None -> owner = sema_expression_carrier_type_symbol(environment, owner_name)
         if owner == .Val(owner_symbol) {
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
             declaration :: sema_scope_resolve_declaration(environment, owner_symbol.id)
@@ -222,6 +241,9 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
         fact :: sema_fact_read_check(base, member, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if fact.handled -> return fact.value
     }
+    // Rust reports the E0220 owner read at the member name.
+    member_span :: Span{start: span.end - member.len(), end: span.end}
+    if !sema_ownership_check_owner_read(&state, Expr.Field{base: base, member: member, span: member_span}, scopes, &diagnostics) -> return None
     probe_scopes := sema_scope_snapshot(scopes)
     probe_context := sema_check_context_snapshot(context)
     probe_state := sema_ownership_state_snapshot(state)

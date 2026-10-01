@@ -1,0 +1,634 @@
+// D-AUTHORITY-SCOPE1: the `Authority` handle a named `#FX(name: …) { … }`
+// region binds is revoked at the end of its block (RAII), so it may only be
+// used in place: as the receiver of a method call, field access, `?`, deref
+// or index. Returning, storing, passing, capturing or otherwise using it as a
+// value lets revoked rights outlive the scope (E0711). Values derived through
+// `.with(…)`/`.without(…)` stay scoped too. Approved Core authority boundary
+// arguments are delegations, not escapes.
+use jet_foundation.[
+    CallArg,
+    Diagnostic,
+    Expr,
+    ForKind,
+    Func,
+    Item,
+    NamedSpan,
+    Span,
+    Stmt,
+    expr_span,
+]
+
+fn sema_authority_bare(expr: Expr, handle: String) -> Bool Never! {
+    if expr == .Ident(name, _) -> return name == handle
+    false
+}
+
+fn sema_authority_args_escape(args: [CallArg], handle: String, skip_boundary: Bool) -> Span? {
+    loop argument in args {
+        if skip_boundary && argument.flags.authority_boundary -> next
+        found :: sema_authority_expr_escape(argument.expr, handle)
+        if found != None -> return found
+    }
+    None
+}
+
+fn sema_authority_exprs_escape(values: [Expr], handle: String) -> Span? {
+    loop value in values {
+        found :: sema_authority_expr_escape(value, handle)
+        if found != None -> return found
+    }
+    None
+}
+
+// The span of the first escaping use of `handle` in `expr`. A chain rooted at
+// the bare handle is an in-place use, but its arguments and index are still
+// value positions.
+fn sema_authority_expr_escape(expr: Expr, handle: String) -> Span? {
+    if expr == {
+        .Ident(name, span) -> if name == handle -> Val(span) else -> None
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+            if sema_authority_bare(receiver, handle) -> return sema_authority_args_escape(args, handle, false)
+            found :: sema_authority_expr_escape(receiver, handle)
+            if found != None -> return found
+            sema_authority_args_escape(args, handle, true)
+        }
+        .Field(base, _, _) | .OptField(base, _, _, _, _) | .Deref(base, _) -> {
+            if sema_authority_bare(base, handle) -> return None
+            sema_authority_expr_escape(base, handle)
+        }
+        .Try(value, _, _, context) -> {
+            if !sema_authority_bare(value, handle) {
+                found :: sema_authority_expr_escape(value, handle)
+                if found != None -> return found
+            }
+            if context == .Val(note) -> return sema_authority_expr_escape(note, handle)
+            None
+        }
+        .Index(base, index, _, _) -> {
+            if !sema_authority_bare(base, handle) {
+                found :: sema_authority_expr_escape(base, handle)
+                if found != None -> return found
+            }
+            sema_authority_expr_escape(index, handle)
+        }
+        .Unary(_, inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .MemberSpread(inner, _, _) | .Paren(inner, _) | .Spread(inner, _) -> sema_authority_expr_escape(inner, handle)
+        .PatternTest(subject, _, _) -> sema_authority_expr_escape(subject, handle)
+        .PtrFromAddr(_, _, _, addr, _) -> sema_authority_expr_escape(addr, handle)
+        .Binary(_, left, right, _) -> sema_authority_exprs_escape([Expr]{left, right}, handle)
+        .CompareChain(operands, _, _, _) -> sema_authority_exprs_escape(operands, handle)
+        .Call(call) -> sema_authority_args_escape(call.args, handle, true)
+        .CallValue(callee, args, _) -> {
+            found :: sema_authority_expr_escape(callee, handle)
+            if found != None -> return found
+            sema_authority_args_escape(args, handle, true)
+        }
+        .Slice(base, start, end, range, _) -> {
+            found :: sema_authority_expr_escape(base, handle)
+            if found != None -> return found
+            if range == .Val(value) -> return sema_authority_expr_escape(value, handle)
+            sema_authority_exprs_escape([Expr]{start, end}, handle)
+        }
+        .Range(start, end, _, _) -> sema_authority_exprs_escape([Expr]{start, end}, handle)
+        .ListLit(elements, _) -> sema_authority_exprs_escape(elements, handle)
+        .TupleLit(fields, _, _) -> sema_authority_exprs_escape((loop field in fields -> field.value), handle)
+        .MapLit(entries, _) -> {
+            loop entry in entries {
+                found :: sema_authority_exprs_escape([Expr]{entry.key, entry.value}, handle)
+                if found != None -> return found
+            }
+            None
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> sema_authority_exprs_escape((loop field in fields -> field.value), handle)
+        .TypedLit(_, body, _) -> {
+            if body == {
+                .Fields(fields) -> sema_authority_exprs_escape((loop field in fields -> field.value), handle)
+                .Elements(elements) -> sema_authority_exprs_escape(elements, handle)
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        found :: sema_authority_exprs_escape([Expr]{entry.key, entry.value}, handle)
+                        if found != None -> return found
+                    }
+                    None
+                }
+                .Value(value) -> sema_authority_expr_escape(value, handle)
+                else -> None
+            }
+        }
+        .EnumLit(_, _, _, args, _, _) -> {
+            loop argument in args {
+                value :: if argument == {
+                    .Positional(positional) -> positional
+                    .Named(_, named) -> named
+                }
+                found :: sema_authority_expr_escape(value, handle)
+                if found != None -> return found
+            }
+            None
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            found :: sema_authority_expr_escape(value, handle)
+            if found != None -> return found
+            if fallback == {
+                .Value(fallback_value) -> sema_authority_expr_escape(fallback_value, handle)
+                .Block(body, fallback_value, _) -> {
+                    in_body :: sema_authority_block_escape(body, handle)
+                    if in_body != None -> return in_body
+                    if fallback_value == .Val(tail) -> return sema_authority_expr_escape(tail, handle)
+                    None
+                }
+                .Return(fallback_value, _) -> {
+                    if fallback_value == .Val(returned) -> return sema_authority_expr_escape(returned, handle)
+                    None
+                }
+                else -> None
+            }
+        }
+        .Str(parts, _) -> {
+            loop part in parts {
+                if part == .Interp(value, _) {
+                    found :: sema_authority_expr_escape(value, handle)
+                    if found != None -> return found
+                }
+            }
+            None
+        }
+        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+            found :: sema_authority_exprs_escape([Expr]{condition, then_value, else_value}, handle)
+            if found != None -> return found
+            in_then :: sema_authority_block_escape(then_body, handle)
+            if in_then != None -> return in_then
+            sema_authority_block_escape(else_body, handle)
+        }
+        // A lambda that captures the handle can outlive the scope, unless a
+        // parameter or take-name shadows it.
+        .Lambda(lambda) -> {
+            loop parameter in lambda.params {
+                if parameter.name == handle -> return None
+            }
+            loop capture in lambda.take_names {
+                if capture.name == handle -> return None
+            }
+            if sema_ownership_last_use_expr(expr, handle) -> Val(lambda.span) else -> None
+        }
+        else -> None
+    }
+}
+
+fn sema_authority_block_escape(statements: [Stmt], handle: String) -> Span? {
+    loop statement in statements {
+        found :: sema_authority_stmt_escape(statement, handle)
+        if found != None -> return found
+    }
+    None
+}
+
+fn sema_authority_switched_erased(name: String) -> Bool Never! {
+    name == "Off" || name == "DebugOnly"
+}
+
+fn sema_authority_for_header_escape(kind: ForKind, handle: String) -> Span? {
+    step := Expr?{None}
+    if kind == {
+        .Range(start, end, range_step, _) -> {
+            found :: sema_authority_exprs_escape([Expr]{start, end}, handle)
+            if found != None -> return found
+            step = range_step
+        }
+        .In(collection, in_step) -> {
+            found :: sema_authority_expr_escape(collection, handle)
+            if found != None -> return found
+            step = in_step
+        }
+    }
+    if step == .Val(step_value) -> return sema_authority_expr_escape(step_value, handle)
+    None
+}
+
+fn sema_authority_stmt_escape(statement: Stmt, handle: String) -> Span? {
+    if statement == {
+        .Expr(value) | .Yield(value, _) | .DeferClose(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> sema_authority_expr_escape(value, handle)
+        .Val(binding) -> sema_authority_expr_escape(binding.init, handle)
+        .Assign(_, _, _, value) -> sema_authority_expr_escape(value, handle)
+        .Return(value, _) -> {
+            if value == .Val(returned) -> return sema_authority_expr_escape(returned, handle)
+            None
+        }
+        .While(condition, body, _, _, _) -> {
+            found :: sema_authority_expr_escape(condition, handle)
+            if found != None -> return found
+            sema_authority_block_escape(body, handle)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            header :: sema_authority_for_header_escape(kind, handle)
+            if header != None -> return header
+            sema_authority_block_escape(body, handle)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            found :: sema_authority_expr_escape(subject, handle)
+            if found != None -> return found
+            loop arm in arms {
+                in_cond :: sema_authority_expr_escape(arm.cond, handle)
+                if in_cond != None -> return in_cond
+                in_arm :: sema_authority_block_escape(arm.body, handle)
+                if in_arm != None -> return in_arm
+            }
+            if else_body == .Val(body) -> return sema_authority_block_escape(body, handle)
+            None
+        }
+        .CountedLoop(init, condition, step, body, _, _, _) -> {
+            found :: sema_authority_exprs_escape([Expr]{init.init, condition}, handle)
+            if found != None -> return found
+            in_body :: sema_authority_block_escape(body, handle)
+            if in_body != None -> return in_body
+            if step == .Val(step_statement) -> return sema_authority_stmt_escape(step_statement, handle)
+            None
+        }
+        .Switched(marker, body, _) -> if sema_authority_switched_erased(marker.name) -> None else -> sema_authority_block_escape(body, handle)
+        .Loop(body, _, _, _)
+        | .Unsafe(_, _, body, _)
+        | .Impure(_, _, body, _)
+        | .Reactive(body, _)
+        | .Shield(body, _)
+        | .Region(_, _, body, _)
+        | .Policy(_, body, _)
+        | .TaskGroup(_, _, _, body, _)
+        | .Layout(_, _, body, _)
+        | .AuthorityScope(_, _, _, body, _)
+        | .Transact(_, _, body, _, _)
+        | .AssumeDet(_, _, body, _)
+        | .ScopeMember(_, _, _, _, body, _, _, _)
+        | .Live(body, _) -> sema_authority_block_escape(body, handle)
+        .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
+            found :: sema_authority_expr_escape(condition, handle)
+            if found != None -> return found
+            in_then :: sema_authority_block_escape(then_body, handle)
+            if in_then != None -> return in_then
+            if else_body == .Val(body) -> return sema_authority_block_escape(body, handle)
+            None
+        }
+        .ContextBlock(fields, body, _) -> {
+            found :: sema_authority_exprs_escape((loop field in fields -> field.value), handle)
+            if found != None -> return found
+            sema_authority_block_escape(body, handle)
+        }
+        else -> None
+    }
+}
+
+// ── Values derived through `.with(…)` / `.without(…)` ─────────────────────
+
+fn sema_authority_contains(names: [String], name: String) -> Bool Never! {
+    loop candidate in names {
+        if candidate == name -> return true
+    }
+    false
+}
+
+fn sema_authority_chain_rooted(expr: Expr, handle: String, aliases: [String]) -> Bool Never! {
+    if expr == {
+        .Ident(name, _) -> name == handle || sema_authority_contains(aliases, name)
+        .Paren(inner, _) -> sema_authority_chain_rooted(inner, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        else -> false
+    }
+}
+
+fn sema_authority_narrowing_chain(expr: Expr, handle: String, aliases: [String]) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _) -> sema_authority_narrowing_chain(inner, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        else -> false
+    }
+}
+
+// A derived Authority value in any value position, below the approved
+// boundary arguments.
+fn sema_authority_value_escape(expr: Expr, handle: String, aliases: [String]) -> Span? {
+    if expr == .Ident(name, span) && sema_authority_contains(aliases, name) -> return Val(span)
+    if sema_authority_narrowing_chain(expr, handle, aliases) -> return Val(expr_span(expr))
+    if expr == {
+        .Call(call) -> sema_authority_value_args_escape(call.args, handle, aliases)
+        .CallValue(callee, args, _) -> {
+            found :: sema_authority_value_escape(callee, handle, aliases)
+            if found != None -> return found
+            sema_authority_value_args_escape(args, handle, aliases)
+        }
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+            found :: sema_authority_value_escape(receiver, handle, aliases)
+            if found != None -> return found
+            sema_authority_value_args_escape(args, handle, aliases)
+        }
+        .Field(inner, _, _) | .OptField(inner, _, _, _, _) | .Deref(inner, _) | .Unary(_, inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .MemberSpread(inner, _, _) | .Paren(inner, _) | .Spread(inner, _) | .Try(inner, _, _, _) | .PatternTest(inner, _, _) -> sema_authority_value_escape(inner, handle, aliases)
+        .Binary(_, left, right, _) -> sema_authority_values_escape([Expr]{left, right}, handle, aliases)
+        .Index(base, index, _, _) -> sema_authority_values_escape([Expr]{base, index}, handle, aliases)
+        .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> sema_authority_values_escape(operands, handle, aliases)
+        .TupleLit(fields, _, _) -> sema_authority_values_escape((loop field in fields -> field.value), handle, aliases)
+        .StructLit(_, _, _, _, fields, _, _) -> sema_authority_values_escape((loop field in fields -> field.value), handle, aliases)
+        .OrFallback(value, fallback, _, _) -> {
+            found :: sema_authority_value_escape(value, handle, aliases)
+            if found != None -> return found
+            if fallback == .Value(fallback_value) -> return sema_authority_value_escape(fallback_value, handle, aliases)
+            None
+        }
+        .If(condition, _, then_value, _, else_value, _) -> sema_authority_values_escape([Expr]{condition, then_value, else_value}, handle, aliases)
+        .Lambda(lambda) -> {
+            loop alias in aliases {
+                if sema_ownership_last_use_expr(expr, alias) -> return Val(lambda.span)
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+fn sema_authority_values_escape(values: [Expr], handle: String, aliases: [String]) -> Span? {
+    loop value in values {
+        found :: sema_authority_value_escape(value, handle, aliases)
+        if found != None -> return found
+    }
+    None
+}
+
+fn sema_authority_value_args_escape(args: [CallArg], handle: String, aliases: [String]) -> Span? {
+    loop argument in args {
+        if argument.flags.authority_boundary -> next
+        found :: sema_authority_value_escape(argument.expr, handle, aliases)
+        if found != None -> return found
+    }
+    None
+}
+
+// A discarded expression may use a derived Authority in place; its call
+// arguments are still value positions.
+fn sema_authority_call_argument_escape(expr: Expr, handle: String, aliases: [String]) -> Span? {
+    if expr == {
+        .Call(call) -> sema_authority_value_args_escape(call.args, handle, aliases)
+        .CallValue(callee, args, _) -> {
+            found :: sema_authority_call_argument_escape(callee, handle, aliases)
+            if found != None -> return found
+            sema_authority_value_args_escape(args, handle, aliases)
+        }
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+            found :: sema_authority_call_argument_escape(receiver, handle, aliases)
+            if found != None -> return found
+            sema_authority_value_args_escape(args, handle, aliases)
+        }
+        .Paren(inner, _) | .Try(inner, _, _, _) -> sema_authority_call_argument_escape(inner, handle, aliases)
+        else -> None
+    }
+}
+
+fn sema_authority_derived_binding(init: Expr, name: String, handle: String, aliases: &[String]) -> Span? {
+    if sema_authority_narrowing_chain(init, handle, aliases) {
+        if name != "_" -> &aliases.push(name)
+        return None
+    }
+    sema_authority_value_escape(init, handle, aliases)
+}
+
+fn sema_authority_derived_block(statements: [Stmt], handle: String, aliases: [String]) -> Span? {
+    scoped := aliases
+    loop statement in statements {
+        found :: sema_authority_derived_stmt(statement, handle, &scoped)
+        if found != None -> return found
+    }
+    None
+}
+
+fn sema_authority_derived_stmt(statement: Stmt, handle: String, aliases: &[String]) -> Span? {
+    if statement == {
+        .Expr(value) -> sema_authority_call_argument_escape(value, handle, aliases)
+        .Val(binding) -> sema_authority_derived_binding(binding.init, binding.name, handle, &aliases)
+        .Assign(_, _, _, value) | .Yield(value, _) | .DeferClose(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> sema_authority_value_escape(value, handle, aliases)
+        .Return(value, _) -> {
+            if value == .Val(returned) -> return sema_authority_value_escape(returned, handle, aliases)
+            None
+        }
+        .While(condition, body, _, _, _) -> {
+            found :: sema_authority_call_argument_escape(condition, handle, aliases)
+            if found != None -> return found
+            sema_authority_derived_block(body, handle, aliases)
+        }
+        .For(_, _, _, _, body, _, _, _, _) -> sema_authority_derived_block(body, handle, aliases)
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            found :: sema_authority_call_argument_escape(subject, handle, aliases)
+            if found != None -> return found
+            loop arm in arms {
+                in_cond :: sema_authority_call_argument_escape(arm.cond, handle, aliases)
+                if in_cond != None -> return in_cond
+                in_arm :: sema_authority_derived_block(arm.body, handle, aliases)
+                if in_arm != None -> return in_arm
+            }
+            if else_body == .Val(body) -> return sema_authority_derived_block(body, handle, aliases)
+            None
+        }
+        .CountedLoop(init, condition, _, body, _, _, _) -> {
+            scoped := aliases
+            found :: sema_authority_derived_binding(init.init, init.name, handle, &scoped)
+            if found != None -> return found
+            in_cond :: sema_authority_call_argument_escape(condition, handle, scoped)
+            if in_cond != None -> return in_cond
+            sema_authority_derived_block(body, handle, scoped)
+        }
+        .Switched(marker, body, _) -> if sema_authority_switched_erased(marker.name) -> None else -> sema_authority_derived_block(body, handle, aliases)
+        .Loop(body, _, _, _)
+        | .Unsafe(_, _, body, _)
+        | .Impure(_, _, body, _)
+        | .Reactive(body, _)
+        | .Shield(body, _)
+        | .Region(_, _, body, _)
+        | .Policy(_, body, _)
+        | .AuthorityScope(_, _, _, body, _)
+        | .Live(body, _)
+        | .Transact(_, _, body, _, _)
+        | .TaskGroup(_, _, _, body, _)
+        | .Layout(_, _, body, _)
+        | .AssumeDet(_, _, body, _)
+        | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_authority_derived_block(body, handle, aliases)
+        .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
+            found :: sema_authority_call_argument_escape(condition, handle, aliases)
+            if found != None -> return found
+            in_then :: sema_authority_derived_block(then_body, handle, aliases)
+            if in_then != None -> return in_then
+            if else_body == .Val(body) -> return sema_authority_derived_block(body, handle, aliases)
+            None
+        }
+        .ContextBlock(fields, body, _) -> {
+            found :: sema_authority_values_escape((loop field in fields -> field.value), handle, aliases)
+            if found != None -> return found
+            sema_authority_derived_block(body, handle, aliases)
+        }
+        else -> None
+    }
+}
+
+fn sema_authority_handle_escape(body: [Stmt], handle: String) -> Span? {
+    direct :: sema_authority_block_escape(body, handle)
+    if direct != None -> return direct
+    sema_authority_derived_block(body, handle, [String]{})
+}
+
+// The valid caps of one `#FX(…)` head. A cap that does not parse or names the
+// deny-only `Panic` root is invalid; its diagnostic is reported elsewhere.
+fn sema_authority_region_caps(caps: [NamedSpan]) -> [String] Never! {
+    result := [String]{}
+    loop cap in caps {
+        effect_name :: sema_effect_parse_name(cap.name) ?? next
+        if sema_effect_root(effect_name) == "Panic" -> next
+        _ := sema_effect_set_add(&result, effect_name)
+    }
+    result
+}
+
+fn sema_authority_region_caps_valid(caps: [NamedSpan]) -> Bool Never! {
+    loop cap in caps {
+        effect_name :: sema_effect_parse_name(cap.name) ?? return false
+        if sema_effect_root(effect_name) == "Panic" -> return false
+    }
+    true
+}
+
+// D-EFF1: every `#FX(…)` region of one body with a valid cap list. The effect
+// pass checks each lowered region (the `TStmt.Region` with the same span)
+// against its caps (E0712). A region with an invalid cap is skipped, like
+// Rust's `bad` cap set: the cap diagnostic is the real problem to fix.
+pub fn sema_authority_fx_regions(statements: [Stmt]) -> [SemaEffectFxRegion] {
+    regions := [SemaEffectFxRegion]{}
+    sema_authority_collect_fx_regions(statements, &regions)
+    regions
+}
+
+fn sema_authority_collect_fx_regions(statements: [Stmt], regions: &[SemaEffectFxRegion]) {
+    loop statement in statements {
+        if statement == {
+            .AuthorityScope(caps, caps_span, _, body, span) -> {
+                if sema_authority_region_caps_valid(caps) -> &regions.push(SemaEffectFxRegion{caps: sema_authority_region_caps(caps), caps_span: caps_span, span: span})
+                sema_authority_collect_fx_regions(body, &regions)
+            }
+            .Switched(marker, body, _) -> {
+                if !sema_authority_switched_erased(marker.name) -> sema_authority_collect_fx_regions(body, &regions)
+            }
+            .While(_, body, _, _, _)
+            | .For(_, _, _, _, body, _, _, _, _)
+            | .Loop(body, _, _, _)
+            | .CountedLoop(_, _, _, body, _, _, _)
+            | .Unsafe(_, _, body, _)
+            | .Impure(_, _, body, _)
+            | .Reactive(body, _)
+            | .Shield(body, _)
+            | .Region(_, _, body, _)
+            | .Policy(_, body, _)
+            | .TaskGroup(_, _, _, body, _)
+            | .Layout(_, _, body, _)
+            | .ContextBlock(_, body, _)
+            | .Live(body, _)
+            | .AssumeDet(_, _, body, _)
+            | .Transact(_, _, body, _, _)
+            | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_authority_collect_fx_regions(body, &regions)
+            .Switch(_, arms, else_body, _) -> {
+                loop arm in arms -> sema_authority_collect_fx_regions(arm.body, &regions)
+                if else_body == .Val(body) -> sema_authority_collect_fx_regions(body, &regions)
+            }
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+                sema_authority_collect_fx_regions(then_body, &regions)
+                if else_body == .Val(body) -> sema_authority_collect_fx_regions(body, &regions)
+            }
+            else -> {}
+        }
+    }
+}
+
+// `outer` is the cap set of the enclosing `#FX` region, if any.
+fn sema_authority_check_statements(statements: [Stmt], outer: [String]?, diagnostics: &[Diagnostic]) {
+    loop statement in statements {
+        if statement == {
+            .AuthorityScope(caps, caps_span, binding, body, _) -> {
+                loop cap in caps {
+                    effect_name :: sema_effect_parse_name(cap.name) ?? next
+                    if sema_effect_root(effect_name) == "Panic" -> &diagnostics.push(sema_effect_positive_panic(cap.span))
+                }
+                region_caps :: sema_authority_region_caps(caps)
+                // D-AUTHORITY-MODEL1: a nested scope may attenuate the enclosing
+                // grant, but it cannot mint a right the outer scope did not hold.
+                if outer == .Val(outer_caps) {
+                    widening :: sema_effect_uncovered(region_caps, outer_caps)
+                    if widening.len() > 0 -> &diagnostics.push(sema_effect_scope_diagnostic("FX", widening, outer_caps, caps_span))
+                }
+                if binding == .Val(handle) {
+                    escape :: sema_authority_handle_escape(body, handle.name)
+                    if escape == .Val(span) -> &diagnostics.push(sema_error("E0711", span, "the `Authority` handle `{handle.name}` can't escape its `#FX` block", "`#FX(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{handle.name}` would let revoked rights outlive the scope", "use `{handle.name}` only inside the `#FX` block, or perform the work there"))
+                }
+                sema_authority_check_statements(body, Val(region_caps), &diagnostics)
+            }
+            .While(_, body, _, _, _)
+            | .For(_, _, _, _, body, _, _, _, _)
+            | .Loop(body, _, _, _)
+            | .CountedLoop(_, _, _, body, _, _, _)
+            | .Unsafe(_, _, body, _)
+            | .Impure(_, _, body, _)
+            | .Reactive(body, _)
+            | .Shield(body, _)
+            | .Switched(_, body, _)
+            | .Region(_, _, body, _)
+            | .Policy(_, body, _)
+            | .TaskGroup(_, _, _, body, _)
+            | .Layout(_, _, body, _)
+            | .ContextBlock(_, body, _)
+            | .Live(body, _)
+            | .AssumeDet(_, _, body, _)
+            | .Transact(_, _, body, _, _)
+            | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_authority_check_statements(body, outer, &diagnostics)
+            .Switch(_, arms, else_body, _) -> {
+                loop arm in arms -> sema_authority_check_statements(arm.body, outer, &diagnostics)
+                if else_body == .Val(body) -> sema_authority_check_statements(body, outer, &diagnostics)
+            }
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+                sema_authority_check_statements(then_body, outer, &diagnostics)
+                if else_body == .Val(body) -> sema_authority_check_statements(body, outer, &diagnostics)
+            }
+            else -> {}
+        }
+    }
+}
+
+fn sema_authority_check_functions(functions: [Func], diagnostics: &[Diagnostic]) {
+    loop function in functions -> sema_authority_check_statements(function.body, None, &diagnostics)
+}
+
+fn sema_authority_check_items(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == {
+            .Func(function) -> sema_authority_check_statements(function.body, None, &diagnostics)
+            .Struct(definition) -> {
+                sema_authority_check_functions(definition.methods, &diagnostics)
+                loop implementation in definition.trait_impls -> sema_authority_check_functions(implementation.methods, &diagnostics)
+            }
+            .Enum(definition) -> {
+                sema_authority_check_functions(definition.methods, &diagnostics)
+                loop implementation in definition.trait_impls -> sema_authority_check_functions(implementation.methods, &diagnostics)
+            }
+            .Impl(implementation) -> sema_authority_check_functions(implementation.methods, &diagnostics)
+            .Test(test) -> sema_authority_check_statements(test.body, None, &diagnostics)
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) -> sema_authority_check_items(body, &diagnostics)
+            }
+            .GenericModule(generic_module) -> sema_authority_check_items(generic_module.body, &diagnostics)
+            else -> {}
+        }
+    }
+}
+
+// E0711 over every source module. Returns true when a diagnostic was
+// reported.
+pub fn sema_effect_check_authority_handles(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+    found := false
+    loop source_module in graph.modules {
+        start :: diagnostics.len()
+        sema_authority_check_items(source_module.program.items, &diagnostics)
+        if diagnostics.len() > start {
+            sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+            found = true
+        }
+    }
+    found
+}

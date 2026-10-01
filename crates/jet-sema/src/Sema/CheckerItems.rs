@@ -2084,9 +2084,14 @@ impl<'a> Checker<'a> {
 
         // A bare built-in type name (`Path`, `URL`, `DateTime`) that this
         // module neither declares nor imports by name is the built-in. A
-        // loaded module's same-named record keeps its canonical identity.
-        if crate::Syntax::typed_head_kind(type_name).is_some() {
-            return None;
+        // built-in with a Core carrier record (`URL` in `core.net.url`) is that
+        // record, so its documented fields and methods resolve through the
+        // ordinary registry. A loaded module's same-named record that is not
+        // the carrier keeps its canonical identity.
+        if let Some(kind) = crate::Syntax::typed_head_kind(type_name) {
+            return kind
+                .carrier_record_module()
+                .and_then(|module| self.core_source_owner_module(module, type_name));
         }
         // The fallback is the only branch that scans every module. Cache its
         // exact source spelling for this body checker, including misses and

@@ -1,0 +1,1307 @@
+use jet_foundation.[
+    BinOp,
+    CodeModule,
+    Diagnostic,
+    EnumLitArg,
+    Expr,
+    GenericModuleDef,
+    GenericModuleParam,
+    ImportedItem,
+    Item,
+    ModuleAliasDef,
+    ModuleArg,
+    ModuleInstanceApplication,
+    ModuleInstanceIdentity,
+    Program,
+    Span,
+    StrPart,
+    SymbolKind,
+    TestDef,
+    Type,
+    type_identity_key,
+    type_name,
+]
+
+// D-CONF-GENSPELL1=A: generic module instantiation checks (Rust
+// `Bundle/GenericModules`). `module int_cache :: cache<Int>(32)` names a
+// template, passes type and value arguments, and may chain through other
+// aliases. Each alias is resolved in source order of its chain depth exactly
+// like the Rust expansion pre-pass, so the same alias reports the same first
+// problem: cycle (E0855), unsupported value parameter (E0856), alias-chain
+// arguments or arity (E0851), unknown template (E0850), type argument kind or
+// bound (E0852), value argument type (E0853) or a value that is not closed at
+// compile time (E0857). Instantiating a template walks its nested modules and
+// nested templates with the instance's arguments bound, like Rust's
+// `expand_alias`.
+
+enum SemaGenericModuleParam {
+    Type(name: String, bound: String?)
+    Value(name: String, ty: Type)
+    Invalid
+}
+
+enum SemaGenericModuleArg {
+    Type(ty: Type)
+    Value(ty: Type)
+}
+
+struct SemaGenericModuleTemplate {
+    name: String
+    definition: GenericModuleDef
+    params: [SemaGenericModuleParam]
+    // Closed constant values visible at the template's definition site.
+    values: [String:Type]
+}
+
+struct SemaGenericModuleCheck {
+    module_identity: String
+    diagnostics: [Diagnostic]
+    seen: [String:Bool]
+}
+
+struct SemaGenericModuleEdge {
+    target: String
+    span: Span
+}
+
+struct SemaGenericModuleNode {
+    name: String
+    edges: [SemaGenericModuleEdge]
+}
+
+// `inputs` carries each module's program as written: by now every valid
+// alias in `graph` is an expanded instance (`sema_generic_modules_expand`).
+pub fn sema_generic_modules_check(graph: &SemaRegistrationGraph, inputs: [SemaRegistrationModuleInput]) {
+    per_module :: sema_generic_modules_collect(graph, inputs)
+    loop (module_index, diagnostics) in per_module {
+        loop diagnostic in diagnostics {
+            &graph.diagnostics.push(sema_diagnostic_with_source_location(~diagnostic, graph.modules[module_index].source_segments))
+        }
+    }
+}
+
+fn sema_generic_modules_collect(graph: SemaRegistrationGraph, inputs: [SemaRegistrationModuleInput]) -> [[Diagnostic]] {
+    // Template parameters resolve once per defining module, so an invalid
+    // value parameter reports once however often the template is used.
+    templates_by_module := [[SemaGenericModuleTemplate]]{}
+    output := [[Diagnostic]]{}
+    loop module_row in graph.modules {
+        check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
+        written :: sema_genmod_written_items(inputs, module_row)
+        enums :: sema_genmod_enums(written, [GenericModuleDef]{})
+        values :: sema_genmod_const_values(written, [String:Type]{}, enums)
+        templates := [SemaGenericModuleTemplate]{}
+        loop item in written {
+            if item == .GenericModule(definition) {
+                &templates.push(SemaGenericModuleTemplate{name: definition.name, definition: definition, params: sema_genmod_resolve_params(definition, enums, &check), values: values})
+            }
+        }
+        &templates_by_module.push(templates)
+        &output.push(check.diagnostics)
+    }
+    loop (module_index, module_row) in graph.modules {
+        check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: output[module_index], seen: [String:Bool]{}}
+        sema_genmod_check_module(graph, module_row, sema_genmod_written_items(inputs, module_row), templates_by_module, &check)
+        output[module_index] = check.diagnostics
+    }
+    output
+}
+
+// The module's items as written, before generic expansion.
+fn sema_genmod_written_items(inputs: [SemaRegistrationModuleInput], module_row: SemaRegistrationModule) -> [Item] {
+    loop input in inputs {
+        if input.module_identity == module_row.module_identity -> return input.program.items
+    }
+    module_row.program.items
+}
+
+fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, items: [Item], templates_by_module: [[SemaGenericModuleTemplate]], check: &SemaGenericModuleCheck) {
+    if sema_genmod_report_cycles(items, &check) -> return
+    enums :: sema_genmod_enums(items, [GenericModuleDef]{})
+    values :: sema_genmod_const_values(items, [String:Type]{}, enums)
+    templates := [SemaGenericModuleTemplate]{}
+    module_index :: sema_genmod_module_index(graph, module_row.module_identity) ?? return
+    loop template in templates_by_module[module_index] -> &templates.push(template)
+    // `use defs.box` brings a template in under its local name. A private
+    // template was refused by import registration (E0609); its aliases stay
+    // silent rather than also reporting an unknown template.
+    denied := [String:Bool]{}
+    loop import in module_row.imports {
+        if import.declaration.kind == .Unqualified(_, _, imported, _, _) {
+            target_index :: sema_genmod_module_index(graph, import.target_module_identity) ?? next
+            loop entry in imported {
+                source :: sema_genmod_find_template(templates_by_module[target_index], entry.original) ?? next
+                bound_local := String?{None}
+                loop binding in import.bindings {
+                    if binding.original == entry.original -> bound_local = Val(binding.local)
+                }
+                if bound_local == {
+                    .Val(local) -> {
+                        renamed := source
+                        renamed.name = local
+                        &templates.push(renamed)
+                    }
+                    .None -> denied[sema_genmod_import_local(entry)] = true
+                }
+            }
+        }
+    }
+    aliases := [ModuleAliasDef]{}
+    loop item in items {
+        if item == .ModuleAlias(alias) -> &aliases.push(alias)
+    }
+    sema_genmod_check_aliases(graph, aliases, templates, values, enums, denied, true, &check)
+}
+
+fn sema_genmod_import_local(entry: ImportedItem) -> String {
+    if entry.alias == .Val(alias) -> return alias
+    parts :: entry.original.split(".").to_list()
+    parts[parts.len() - 1]
+}
+
+fn sema_genmod_module_index(graph: SemaRegistrationGraph, identity: String) -> Int? {
+    loop (index, module_row) in graph.modules {
+        if module_row.module_identity == identity -> return Val(index)
+    }
+    None
+}
+
+// The last template bound to a name wins, like Rust's template map where an
+// import inserts over a same-named local template.
+fn sema_genmod_find_template(templates: [SemaGenericModuleTemplate], name: String) -> SemaGenericModuleTemplate? {
+    found := SemaGenericModuleTemplate?{None}
+    loop template in templates {
+        if template.name == name -> found = Val(template)
+    }
+    found
+}
+
+fn sema_genmod_find_alias(aliases: [ModuleAliasDef], name: String) -> ModuleAliasDef? {
+    found := ModuleAliasDef?{None}
+    loop alias in aliases {
+        if alias.name == name -> found = Val(alias)
+    }
+    found
+}
+
+fn sema_genmod_push(check: &SemaGenericModuleCheck, diagnostic: Diagnostic) {
+    span :: diagnostic.span ?? Span{start: 0, end: 0}
+    key :: "{diagnostic.code}|{span.start}|{span.end}|{diagnostic.what}"
+    if check.seen.get(key) != None -> return
+    check.seen[key] = true
+    &check.diagnostics.push(diagnostic)
+}
+
+// Enum names declared by these items (and nested template bodies), each
+// marked when every variant is fieldless: only those are Tier-0 values.
+fn sema_genmod_enums(items: [Item], nested: [GenericModuleDef]) -> [String:Bool] {
+    enums := [String:Bool]{}
+    sema_genmod_collect_enums(items, &enums)
+    loop definition in nested -> sema_genmod_collect_enums(definition.body, &enums)
+    enums
+}
+
+fn sema_genmod_collect_enums(items: [Item], enums: &[String:Bool]) {
+    loop item in items {
+        if item == .Enum(definition) {
+            fieldless := true
+            loop variant in definition.variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    else -> fieldless = false
+                }
+            }
+            enums[definition.name] = fieldless
+        }
+    }
+}
+
+// Constants evaluate in declaration order; each closed one is visible to
+// later constants and to module arguments.
+fn sema_genmod_const_values(items: [Item], inherited: [String:Type], enums: [String:Bool]) -> [String:Type] {
+    values := inherited
+    loop item in items {
+        if item == .Const(definition) {
+            value_type :: sema_genmod_value_type(definition.value, values, enums) ?? next
+            values[definition.name] = value_type
+        }
+    }
+    values
+}
+
+fn sema_genmod_resolve_params(definition: GenericModuleDef, enums: [String:Bool], check: &SemaGenericModuleCheck) -> [SemaGenericModuleParam] {
+    params := [SemaGenericModuleParam]{}
+    loop param in definition.params {
+        if param == {
+            .Type(name, _, bound) -> {
+                bound_name := String?{None}
+                if bound == .Val(bound_type) {
+                    if bound_type == .Named(trait_name) -> bound_name = Val(trait_name)
+                }
+                &params.push(SemaGenericModuleParam.Type{name: name, bound: bound_name})
+            }
+            .Value(name, name_span, ty) -> {
+                if sema_genmod_tier0_type(ty, enums) {
+                    &params.push(SemaGenericModuleParam.Value{name: name, ty: ty})
+                } else {
+                    sema_genmod_push(&check, sema_error("E0856", name_span, "generic module value parameter `{name}` uses unsupported type `{sema_genmod_type_text(ty)}`", "value parameters admit only Bool, Int, Char, String, or a fieldless enum", "use a Tier-0 value type, or make this an unannotated type parameter"))
+                    &params.push(SemaGenericModuleParam.Invalid)
+                }
+            }
+        }
+    }
+    params
+}
+
+fn sema_genmod_tier0_type(ty: Type, enums: [String:Bool]) -> Bool {
+    if ty == {
+        .Bool | .Int | .Char | .String -> true
+        .Named(name) -> enums.get(name) ?? false
+        else -> false
+    }
+}
+
+// Rust `type_name`: the bare spelling of the Tier-0 and nominal types, and the
+// structural form of anything else.
+fn sema_genmod_type_text(ty: Type) -> String {
+    if ty == {
+        .Int -> "Int"
+        .Bool -> "Bool"
+        .Char -> "Char"
+        .String -> "String"
+        .Named(name) -> name
+        .Apply(name, _) -> name
+        else -> sema_genmod_type_structure(ty)
+    }
+}
+
+fn sema_genmod_type_structure(ty: Type) -> String {
+    if ty == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .Char -> "Char"
+        .String -> "String"
+        .Named(name) -> "Named(\"{name}\")"
+        .List(element) -> "List({sema_genmod_type_structure(element)})"
+        .Option(inner) -> "Option({sema_genmod_type_structure(inner)})"
+        else -> type_name(ty)
+    }
+}
+
+// The type of a closed compile-time value, or None when the expression is
+// not closed (a runtime call, an unknown name, an interpolated string).
+fn sema_genmod_value_type(expression: Expr, values: [String:Type], enums: [String:Bool]) -> Type? {
+    if expression == {
+        .Int(_, _, _, _) -> Val(Type.Int)
+        .Float(_, _, _, _) -> Val(Type.Float)
+        .Bool(_, _) -> Val(Type.Bool)
+        .Char(_, _) -> Val(Type.Char)
+        .Str(parts, _) -> {
+            loop part in parts {
+                if part == {
+                    .Lit(_) -> {}
+                    else -> return None
+                }
+            }
+            Val(Type.String)
+        }
+        .Paren(value, _) -> sema_genmod_value_type(value, values, enums)
+        .Ident(name, _) -> values.get(name)
+        .Unary(op, operand, _) -> {
+            inner :: sema_genmod_value_type(operand, values, enums) ?? return None
+            if op == {
+                .Neg -> if inner == {
+                    .Int -> Val(Type.Int)
+                    .Float -> Val(Type.Float)
+                    else -> None
+                }
+                .Not -> if inner == {
+                    .Bool -> Val(Type.Bool)
+                    else -> None
+                }
+            }
+        }
+        .Binary(op, left, right, _) -> {
+            left_type :: sema_genmod_value_type(left, values, enums) ?? return None
+            right_type :: sema_genmod_value_type(right, values, enums) ?? return None
+            left_key :: sema_genmod_tier0_key(left_type) ?? return None
+            if left_key != (sema_genmod_tier0_key(right_type) ?? "") -> return None
+            if {
+                left_key == "Int" && (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul) -> Val(Type.Int)
+                left_key == "String" && op == BinOp.Add -> Val(Type.String)
+                else -> None
+            }
+        }
+        .Field(base, _, _) -> {
+            if base == .Ident(enum_name, _) {
+                if enums.get(enum_name) != None -> return Val(Type.Named{name: enum_name})
+            }
+            None
+        }
+        .EnumLit(enum_name, _, _, args, _, _) -> {
+            if args.len() == 0 && enums.get(enum_name) != None -> return Val(Type.Named{name: enum_name})
+            None
+        }
+        else -> None
+    }
+}
+
+fn sema_genmod_tier0_key(ty: Type) -> String? {
+    if ty == {
+        .Bool -> Val("Bool")
+        .Int -> Val("Int")
+        .Char -> Val("Char")
+        .String -> Val("String")
+        .Named(name) -> Val("enum {name}")
+        else -> None
+    }
+}
+
+fn sema_genmod_arg_span(arg: ModuleArg) -> Span {
+    if arg == {
+        .Type(_, span) -> span
+        .Value(_, span) -> span
+    }
+}
+
+// Rust `TraitRegistry::implements_trait` for a module bound. Only a bound
+// that names a declared trait is checked; a type that resolves to no
+// declaration (a primitive, an unknown name) implements no declared trait.
+fn sema_genmod_implements(graph: SemaRegistrationGraph, module_identity: String, ty: Type, bound: String) -> Bool {
+    resolved_bound :: sema_registration_lookup_name(graph, module_identity, bound) ?? return true
+    if resolved_bound.symbol.kind != SymbolKind.Trait -> return true
+    if sema_type_resolve_nominal(graph, ty, module_identity) == None -> return false
+    sema_type_bound_satisfied(graph, ty, bound, module_identity) ?? true
+}
+
+fn sema_genmod_resolve_args(graph: SemaRegistrationGraph, alias: ModuleAliasDef, template: SemaGenericModuleTemplate, values: [String:Type], enums: [String:Bool], check: &SemaGenericModuleCheck) -> [SemaGenericModuleArg]? {
+    resolved := [SemaGenericModuleArg]{}
+    loop (index, param) in template.params {
+        if index >= alias.args.len() -> break
+        arg :: alias.args[index]
+        span :: sema_genmod_arg_span(arg)
+        if param == {
+            .Invalid -> return None
+            .Type(name, bound) -> {
+                ty := Type.Int
+                if arg == {
+                    .Type(value, _) -> ty = value
+                    .Value(expression, _) -> {
+                        if expression == .Ident(type_ident, _) {
+                            ty = Type.Named{name: type_ident}
+                        } else {
+                            sema_genmod_push(&check, sema_error("E0852", span, "type argument for `{name}` does not satisfy its module bound", "this slot resolves to a type parameter, but the argument is a value expression", "pass a type that satisfies the declared bound"))
+                            return None
+                        }
+                    }
+                }
+                if bound == .Val(trait_name) {
+                    if !sema_genmod_implements(graph, check.module_identity, ty, trait_name) {
+                        identity :: sema_genmod_type_text(ty)
+                        sema_genmod_push(&check, sema_error("E0852", span, "type argument `{identity}` does not satisfy `{trait_name}`", "generic module parameter `{name}` requires the `{trait_name}` bound", "pass a type that implements `{trait_name}`"))
+                        return None
+                    }
+                }
+                &resolved.push(SemaGenericModuleArg.Type{ty: ty})
+            }
+            .Value(name, ty) -> {
+                expected :: sema_genmod_type_text(ty)
+                expression := Expr?{None}
+                if arg == {
+                    .Value(value, _) -> expression = Val(value)
+                    .Type(value, type_span) -> {
+                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span})
+                    }
+                }
+                value_expression :: expression ?? {
+                    sema_genmod_push(&check, sema_error("E0853", span, "value argument for `{name}` has the wrong type", "this slot requires an exact `{expected}` Tier-0 value", "pass a compile-time `{expected}` value without conversion"))
+                    return None
+                }
+                actual :: sema_genmod_value_type(value_expression, values, enums) ?? {
+                    sema_genmod_push(&check, sema_error("E0857", span, "value argument for `{name}` is not known at compile time", "generic module instances need one closed, deterministic Tier-0 value", "pass a literal, a `$build.*` fact, or a comptime `{expected}` value"))
+                    return None
+                }
+                actual_key :: sema_genmod_tier0_key(actual)
+                if !sema_genmod_tier0_type(ty, enums) || actual_key == None || actual_key != sema_genmod_tier0_key(ty) {
+                    found :: if actual_key == None -> "non-Tier-0 value" else -> sema_genmod_type_text(actual)
+                    sema_genmod_push(&check, sema_error("E0853", span, "value argument for `{name}` has the wrong type", "expected exact `{expected}`, found `{found}`", "pass a compile-time `{expected}` value without conversion"))
+                    return None
+                }
+                &resolved.push(SemaGenericModuleArg.Value{ty: actual})
+            }
+        }
+    }
+    Val(resolved)
+}
+
+fn sema_genmod_alias_depth(alias: ModuleAliasDef, aliases: [ModuleAliasDef]) -> Int {
+    depth := 0
+    current := alias
+    loop depth <= aliases.len() {
+        next_alias :: sema_genmod_find_alias(aliases, current.target) ?? break
+        depth += 1
+        current = next_alias
+    }
+    depth
+}
+
+fn sema_genmod_chain_contains(alias: ModuleAliasDef, aliases: [ModuleAliasDef], names: [String:Bool]) -> Bool {
+    current := alias
+    steps := 0
+    loop steps <= aliases.len() {
+        next_alias :: sema_genmod_find_alias(aliases, current.target) ?? return false
+        if names.get(next_alias.name) != None -> return true
+        current = next_alias
+        steps += 1
+    }
+    false
+}
+
+// Follow an alias-to-alias chain to the template application at its end. A
+// link that passes arguments to another alias is E0851.
+fn sema_genmod_resolve_local(alias: ModuleAliasDef, aliases: [ModuleAliasDef], check: &SemaGenericModuleCheck) -> ModuleAliasDef? {
+    current := alias
+    steps := 0
+    loop steps <= aliases.len() {
+        next_alias :: sema_genmod_find_alias(aliases, current.target) ?? break
+        if current.args.len() != 0 {
+            sema_genmod_push(&check, sema_error("E0851", current.span, "module alias `{current.name}` passes {current.args.len()} argument(s) but alias `{current.target}` expects 0", "an alias-to-alias link reuses an already-bound module instance", "remove the arguments and write `module {current.name} :: {current.target}`"))
+            return None
+        }
+        current = next_alias
+        steps += 1
+    }
+    resolved := alias
+    resolved.target = current.target
+    resolved.target_span = current.target_span
+    resolved.args = current.args
+    Val(resolved)
+}
+
+fn sema_genmod_by_depth(aliases: [ModuleAliasDef]) -> [ModuleAliasDef] {
+    ordered := aliases
+    depths := [Int]{}
+    loop alias in ordered -> &depths.push(sema_genmod_alias_depth(alias, aliases))
+    loop i in 1..<ordered.len() {
+        alias := ordered[i]
+        depth := depths[i]
+        j := i
+        loop j > 0 && depths[j - 1] > depth {
+            ordered[j] = ordered[j - 1]
+            depths[j] = depths[j - 1]
+            j -= 1
+        }
+        ordered[j] = alias
+        depths[j] = depth
+    }
+    ordered
+}
+
+// The alias loop shared by file scope and nested module bodies. File scope
+// also skips denied templates and leaves forward aliases to the terminal
+// instance they project.
+fn sema_genmod_check_aliases(graph: SemaRegistrationGraph, aliases: [ModuleAliasDef], templates: [SemaGenericModuleTemplate], values: [String:Type], enums: [String:Bool], denied: [String:Bool], file_scope: Bool, check: &SemaGenericModuleCheck) {
+    invalid := [String:Bool]{}
+    loop alias in sema_genmod_by_depth(aliases) {
+        if sema_genmod_chain_contains(alias, aliases, invalid) -> next
+        resolved :: sema_genmod_resolve_local(alias, aliases, &check) ?? {
+            invalid[alias.name] = true
+            next
+        }
+        if denied.get(resolved.target) != None {
+            invalid[alias.name] = true
+            next
+        }
+        if file_scope && sema_genmod_find_alias(aliases, alias.target) != None -> next
+        template :: sema_genmod_find_template(templates, resolved.target) ?? {
+            sema_genmod_push(&check, sema_error("E0850", resolved.target_span, "generic module `{resolved.target}` not found in this scope", "check the module template name and make sure it is defined in the same file", "example: `module {alias.name} :: MyTemplate<String>`"))
+            invalid[alias.name] = true
+            next
+        }
+        args :: sema_genmod_resolve_args(graph, resolved, template, values, enums, &check) ?? {
+            invalid[alias.name] = true
+            next
+        }
+        if !sema_genmod_instantiate(graph, resolved, template, args, enums, &check) -> invalid[alias.name] = true
+    }
+}
+
+fn sema_genmod_substitute_alias(alias: ModuleAliasDef, names: [String], actuals: [Type]) -> ModuleAliasDef {
+    updated := alias
+    args := [ModuleArg]{}
+    loop arg in alias.args {
+        if arg == {
+            .Type(ty, span) -> &args.push(ModuleArg.Type{ty: sema_inference_substitute_type(ty, names, actuals), span: span})
+            .Value(expression, span) -> &args.push(ModuleArg.Value{expr: expression, span: span})
+        }
+    }
+    updated.args = args
+    updated
+}
+
+fn sema_genmod_substitute_template(definition: GenericModuleDef, names: [String], actuals: [Type]) -> GenericModuleDef {
+    updated := definition
+    params := [GenericModuleParam]{}
+    loop param in definition.params {
+        if param == {
+            .Type(name, name_span, bound) -> &params.push(GenericModuleParam.Type{name: name, name_span: name_span, bound: bound})
+            .Value(name, name_span, ty) -> &params.push(GenericModuleParam.Value{name: name, name_span: name_span, ty: sema_inference_substitute_type(ty, names, actuals)})
+        }
+    }
+    updated.params = params
+    updated
+}
+
+// Rust `expand_alias`: the arity check, then the template body under this
+// instance's arguments — its nested modules and nested templates.
+fn sema_genmod_instantiate(graph: SemaRegistrationGraph, alias: ModuleAliasDef, template: SemaGenericModuleTemplate, args: [SemaGenericModuleArg], enums: [String:Bool], check: &SemaGenericModuleCheck) -> Bool {
+    definition :: template.definition
+    if alias.args.len() != definition.params.len() {
+        names := [String]{}
+        loop param in definition.params {
+            if param == {
+                .Type(name, _, _) -> &names.push(name)
+                .Value(name, _, _) -> &names.push(name)
+            }
+        }
+        expected :: definition.params.len()
+        sema_genmod_push(&check, sema_error("E0851", alias.span, "module alias `{alias.name}` passes {alias.args.len()} argument(s) but `{alias.target}` expects {expected}", "the number of type/value arguments must match the template parameter list", "example: `module {alias.name} :: {alias.target}<{names.join(", ")}>` with {expected} arg(s)"))
+        return false
+    }
+    type_names := [String]{}
+    type_actuals := [Type]{}
+    values := template.values
+    loop (index, param) in template.params {
+        if index >= args.len() -> break
+        if param == {
+            .Type(name, _) -> {
+                if args[index] == .Type(ty) {
+                    &type_names.push(name)
+                    &type_actuals.push(ty)
+                }
+            }
+            .Value(name, _) -> {
+                if args[index] == .Value(ty) -> values[name] = ty
+            }
+            .Invalid -> {}
+        }
+    }
+    values = sema_genmod_const_values(definition.body, values, enums)
+    loop item in definition.body {
+        if item == .CodeModule(nested_module) {
+            if nested_module.body == .Val(body) -> sema_genmod_check_code_module(graph, body, type_names, type_actuals, values, &check)
+        }
+    }
+    nested_defs := [GenericModuleDef]{}
+    loop item in definition.body {
+        if item == .GenericModule(nested) -> &nested_defs.push(sema_genmod_substitute_template(nested, type_names, type_actuals))
+    }
+    if nested_defs.len() == 0 -> return true
+    // Nested templates close over the outer instance; their aliases resolve
+    // now, with the outer arguments bound. An unknown nested target is left
+    // to the instance body.
+    nested_enums :: sema_genmod_enums([Item]{}, nested_defs)
+    nested_templates := [SemaGenericModuleTemplate]{}
+    loop nested in nested_defs {
+        &nested_templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested, params: sema_genmod_resolve_params(nested, nested_enums, &check), values: values})
+    }
+    nested_aliases := [ModuleAliasDef]{}
+    loop item in definition.body {
+        if item == .ModuleAlias(nested_alias) -> &nested_aliases.push(sema_genmod_substitute_alias(nested_alias, type_names, type_actuals))
+    }
+    loop nested_alias in sema_genmod_by_depth(nested_aliases) {
+        resolved :: sema_genmod_resolve_local(nested_alias, nested_aliases, &check) ?? next
+        nested_template :: sema_genmod_find_template(nested_templates, resolved.target) ?? next
+        nested_args :: sema_genmod_resolve_args(graph, resolved, nested_template, values, nested_enums, &check) ?? next
+        _ := sema_genmod_instantiate(graph, resolved, nested_template, nested_args, nested_enums, &check)
+    }
+    true
+}
+
+// Rust `expand_nested_generics_in_code_module`: a plain module inside an
+// instance resolves its own templates and aliases with the instance's
+// arguments and constants in scope, after its child modules.
+fn sema_genmod_check_code_module(graph: SemaRegistrationGraph, body: [Item], type_names: [String], type_actuals: [Type], inherited: [String:Type], check: &SemaGenericModuleCheck) {
+    loop item in body {
+        if item == .CodeModule(child) {
+            if child.body == .Val(child_body) -> sema_genmod_check_code_module(graph, child_body, type_names, type_actuals, inherited, &check)
+        }
+    }
+    nested_defs := [GenericModuleDef]{}
+    aliases := [ModuleAliasDef]{}
+    loop item in body {
+        if item == {
+            .GenericModule(nested) -> &nested_defs.push(sema_genmod_substitute_template(nested, type_names, type_actuals))
+            .ModuleAlias(alias) -> &aliases.push(sema_genmod_substitute_alias(alias, type_names, type_actuals))
+            else -> {}
+        }
+    }
+    if nested_defs.len() == 0 && aliases.len() == 0 -> return
+    enums :: sema_genmod_enums(body, nested_defs)
+    values :: sema_genmod_const_values(body, inherited, enums)
+    templates := [SemaGenericModuleTemplate]{}
+    loop nested in nested_defs {
+        &templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested, params: sema_genmod_resolve_params(nested, enums, &check), values: values})
+    }
+    sema_genmod_check_aliases(graph, aliases, templates, values, enums, [String:Bool]{}, false, &check)
+}
+
+// Module aliases and templates form one dependency graph per file; a cycle
+// (E0855) stops every other generic-module check in that file.
+fn sema_genmod_report_cycles(items: [Item], check: &SemaGenericModuleCheck) -> Bool {
+    nodes := [SemaGenericModuleNode]{}
+    loop item in items {
+        if item == {
+            .ModuleAlias(alias) -> {
+                edge :: SemaGenericModuleEdge{target: alias.target, span: alias.target_span}
+                existing :: sema_genmod_node_index(nodes, alias.name)
+                if existing == {
+                    .Val(index) -> &nodes[index].edges.push(edge)
+                    .None -> &nodes.push(SemaGenericModuleNode{name: alias.name, edges: [SemaGenericModuleEdge]{edge}})
+                }
+            }
+            .GenericModule(definition) -> {
+                edges := [SemaGenericModuleEdge]{}
+                sema_genmod_collect_alias_edges(definition.body, &edges)
+                existing :: sema_genmod_node_index(nodes, definition.name)
+                if existing == {
+                    .Val(index) -> nodes[index].edges = edges
+                    .None -> &nodes.push(SemaGenericModuleNode{name: definition.name, edges: edges})
+                }
+            }
+            else -> {}
+        }
+    }
+    if nodes.len() == 0 -> return false
+    loop node_index in 0..<nodes.len() {
+        edges := nodes[node_index].edges
+        loop i in 1..<edges.len() {
+            edge := edges[i]
+            j := i
+            loop j > 0 && edges[j - 1].target > edge.target {
+                edges[j] = edges[j - 1]
+                j -= 1
+            }
+            edges[j] = edge
+        }
+        nodes[node_index].edges = edges
+    }
+    names := [String]{}
+    loop node in nodes -> &names.push(node.name)
+    loop i in 1..<names.len() {
+        name := names[i]
+        j := i
+        loop j > 0 && names[j - 1] > name {
+            names[j] = names[j - 1]
+            j -= 1
+        }
+        names[j] = name
+    }
+    state := [String:Int]{}
+    stack := [String]{}
+    reported := [String]{}
+    loop name in names {
+        if state.get(name) == None -> sema_genmod_visit(name, nodes, &state, &stack, &reported, &check)
+    }
+    reported.len() > 0
+}
+
+fn sema_genmod_collect_alias_edges(items: [Item], edges: &[SemaGenericModuleEdge]) {
+    loop item in items {
+        if item == {
+            .ModuleAlias(alias) -> &edges.push(SemaGenericModuleEdge{target: alias.target, span: alias.target_span})
+            .GenericModule(definition) -> sema_genmod_collect_alias_edges(definition.body, &edges)
+            else -> {}
+        }
+    }
+}
+
+fn sema_genmod_node_index(nodes: [SemaGenericModuleNode], name: String) -> Int? {
+    loop (index, node) in nodes {
+        if node.name == name -> return Val(index)
+    }
+    None
+}
+
+fn sema_genmod_visit(node: String, nodes: [SemaGenericModuleNode], state: &[String:Int], stack: &[String], reported: &[String], check: &SemaGenericModuleCheck) {
+    state[node] = 1
+    &stack.push(node)
+    if sema_genmod_node_index(nodes, node) == .Val(node_index) {
+        loop edge in nodes[node_index].edges {
+            if sema_genmod_node_index(nodes, edge.target) == None -> next
+            visited :: state.get(edge.target) ?? 0
+            if visited == 0 {
+                sema_genmod_visit(edge.target, nodes, &state, &stack, &reported, &check)
+            } else if visited == 1 {
+                start := 0
+                loop (index, name) in stack {
+                    if name == edge.target {
+                        start = index
+                        break
+                    }
+                }
+                chain := [String]{}
+                loop index in start..<stack.len() -> &chain.push(stack[index])
+                &chain.push(edge.target)
+                text :: chain.join(" -> ")
+                if !reported.contains(text) {
+                    &reported.push(text)
+                    sema_genmod_push(&check, sema_error("E0855", edge.span, "generic module instantiation forms a cycle: {text}", "module aliases must form an acyclic dependency graph so specialization reaches one stable result", "break the cycle: {text}"))
+                }
+            }
+        }
+    }
+    _ := &stack.pop()
+    state[node] = 2
+}
+
+// ---------------------------------------------------------------------------
+// Expansion (Rust `expand_generic_module_aliases` / `expand_alias`).
+//
+// `module int_cache :: cache<Int>(32)` becomes an ordinary module instance
+// before registration: the template body with every type parameter, value
+// parameter and template constant substituted, its member types and
+// constants lifted beside it under the instance's member names. Inline-module
+// lowering then gives its functions their member identities like any other
+// module. Expansion reports nothing; `sema_generic_modules_check` reports
+// every problem once imports are bound, and an alias with one stays
+// unexpanded.
+
+// A template an alias can name: a local `module cache<K>` or one imported
+// with `use defs.box`. The key names the defining module, so equal
+// applications of one template share one instance.
+pub struct SemaGenericModuleSource {
+    pub local: String
+    pub key: String
+    pub definition: GenericModuleDef
+    // An imported template's defining-module declarations: each instance
+    // carries them under its own member names.
+    pub source_items: [Item]
+    // Closed constants of the defining module.
+    pub source_values: [String:Expr]
+}
+
+struct SemaGenericModuleBinding {
+    key: String
+    type_names: [String]
+    type_actuals: [Type]
+    value_names: [String]
+    value_actuals: [Expr]
+}
+
+struct SemaGenericModuleExpansion {
+    instance: CodeModule
+    declarations: [Item]
+}
+
+// Templates `module_identity` imports by name, from each loaded import edge.
+// A private template binds nothing; import registration reports it (E0609).
+pub fn sema_generic_modules_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], module_identity: String) -> [SemaGenericModuleSource] {
+    sources := [SemaGenericModuleSource]{}
+    loop edge in edges {
+        if edge.source_module_identity != module_identity -> next
+        if edge.declaration.kind == .Unqualified(_, _, imported, _, _) {
+            loop input in inputs {
+                if input.module_identity != edge.target_module_identity -> next
+                items :: input.program.items
+                has_template := false
+                loop item in items {
+                    if item == .GenericModule(_) -> has_template = true
+                }
+                if !has_template -> next
+                enums :: sema_genmod_enums(items, [GenericModuleDef]{})
+                values :: sema_genmod_folded_consts(items, [String:Expr]{}, enums)
+                loop entry in imported {
+                    loop item in items {
+                        if item == .GenericModule(definition) {
+                            if definition.name == entry.original && (definition.is_pub || definition.is_package_pub) {
+                                &sources.push(SemaGenericModuleSource{local: sema_genmod_import_local(entry), key: "{input.module_identity}:{definition.name}", definition: definition, source_items: sema_genmod_definition_items(items), source_values: values})
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    sources
+}
+
+// Rust `clone_definition_items`.
+fn sema_genmod_definition_items(items: [Item]) -> [Item] {
+    kept := [Item]{}
+    loop item in items {
+        if item == {
+            .Func(_) | .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .ErrorConv(_) | .Test(_) | .Const(_) -> &kept.push(item)
+            else -> {}
+        }
+    }
+    kept
+}
+
+pub fn sema_generic_modules_expand(program: Program, module_identity: String, imported: [SemaGenericModuleSource]) -> Program {
+    items :: program.items
+    aliases := [ModuleAliasDef]{}
+    loop item in items {
+        if item == .ModuleAlias(alias) -> &aliases.push(alias)
+    }
+    if aliases.len() == 0 -> return ~program
+    silent := SemaGenericModuleCheck{module_identity: module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
+    if sema_genmod_report_cycles(items, &silent) -> return ~program
+    enums :: sema_genmod_enums(items, [GenericModuleDef]{})
+    values :: sema_genmod_folded_consts(items, [String:Expr]{}, enums)
+    sources := [SemaGenericModuleSource]{}
+    loop item in items {
+        if item == .GenericModule(definition) -> &sources.push(SemaGenericModuleSource{local: definition.name, key: "{module_identity}:{definition.name}", definition: definition, source_items: [Item]{}, source_values: values})
+    }
+    loop source in imported -> &sources.push(source)
+    invalid := [String:Bool]{}
+    instance_keys := [String:String]{}
+    projections := [String:String]{}
+    projected_names := [String]{}
+    expanded := [String:CodeModule]{}
+    expanded_names := [String]{}
+    nominals := [String:[String]]{}
+    declarations := [Item]{}
+    loop alias in sema_genmod_by_depth(aliases) {
+        if sema_genmod_chain_contains(alias, aliases, invalid) -> next
+        resolved :: sema_genmod_resolve_local(alias, aliases, &silent) ?? {
+            invalid[alias.name] = true
+            next
+        }
+        // A forward alias projects the instance its chain ends at.
+        if sema_genmod_find_alias(aliases, alias.target) != None {
+            projections[alias.name] = alias.target
+            &projected_names.push(alias.name)
+            next
+        }
+        source :: sema_genmod_find_source(sources, resolved.target) ?? {
+            invalid[alias.name] = true
+            next
+        }
+        binding :: sema_genmod_bind(resolved, source, values, enums) ?? {
+            invalid[alias.name] = true
+            next
+        }
+        // An equal application reuses the first instance.
+        if instance_keys.get(binding.key) == .Val(canonical) {
+            projections[alias.name] = canonical
+            &projected_names.push(alias.name)
+            next
+        }
+        expansion :: sema_genmod_expand_alias(resolved, source, binding, enums)
+        instance_keys[binding.key] = alias.name
+        expanded[alias.name] = expansion.instance
+        &expanded_names.push(alias.name)
+        names := [String]{}
+        loop declaration in expansion.declarations {
+            if declaration == {
+                .Struct(definition) -> &names.push(definition.name)
+                .Enum(definition) -> &names.push(definition.name)
+                else -> {}
+            }
+            &declarations.push(declaration)
+        }
+        nominals[alias.name] = names
+    }
+    // Collapse projection chains onto their canonical instance.
+    loop name in projected_names {
+        canonical := projections.get(name) ?? next
+        steps := 0
+        loop steps <= aliases.len() {
+            following :: projections.get(canonical) ?? break
+            canonical = following
+            steps += 1
+        }
+        projections[name] = canonical
+    }
+    // `three_ints.Buffer` and a projected `alias.Type` name the instance's
+    // generated nominal.
+    projection := sema_inline_rewrite_empty()
+    loop name in expanded_names -> sema_genmod_project_types(&projection, name, name, nominals)
+    loop name in projected_names {
+        canonical :: projections.get(name) ?? next
+        sema_genmod_project_types(&projection, name, canonical, nominals)
+    }
+    rewritten := [Item]{}
+    loop item in items {
+        if item == .ModuleAlias(alias) {
+            if expanded.get(alias.name) == .Val(instance) {
+                &rewritten.push(Item.CodeModule{value: instance})
+                next
+            }
+        }
+        if item == .Func(function) {
+            &rewritten.push(Item.Func{value: sema_genmod_project_function(function, projections, projected_names, projection)})
+            next
+        }
+        &rewritten.push(item)
+    }
+    loop declaration in declarations -> &rewritten.push(declaration)
+    updated := program
+    updated.items = rewritten
+    updated
+}
+
+// The last template bound to a name wins, like Rust's template map where an
+// import inserts over a same-named local template.
+fn sema_genmod_find_source(sources: [SemaGenericModuleSource], name: String) -> SemaGenericModuleSource? {
+    found := SemaGenericModuleSource?{None}
+    loop source in sources {
+        if source.local == name -> found = Val(source)
+    }
+    found
+}
+
+fn sema_genmod_project_types(rewrite: &SemaInlineRewrite, alias: String, canonical: String, nominals: [String:[String]]) {
+    prefix :: sema_inline_type_prefix(canonical)
+    generated_names :: nominals.get(canonical) ?? [String]{}
+    loop generated in generated_names {
+        if !generated.starts_with(prefix) -> next
+        suffix :: String.from_bytes(generated.bytes()[prefix.bytes().len()..generated.bytes().len()]) ?? next
+        rewrite.types["{alias}.{suffix}"] = Type.Named{name: generated}
+        rewrite.types[sema_inline_type_name(alias, suffix)] = Type.Named{name: generated}
+    }
+}
+
+// Rust's projection rewrite of each top-level function: a projected alias
+// reads as its canonical instance, then projected member types resolve.
+fn sema_genmod_project_function(function: Func, projections: [String:String], projected_names: [String], projection: SemaInlineRewrite) -> Func {
+    updated := function
+    loop name in projected_names {
+        canonical :: projections.get(name) ?? next
+        calls := sema_inline_rewrite_empty()
+        calls.sibling_module = canonical
+        calls.siblings[name] = true
+        updated = sema_inline_rewrite_func(&calls, updated)
+    }
+    types := projection
+    sema_inline_rewrite_func(&types, updated)
+}
+
+// Rust `resolve_args` over the arguments the checks accept: type arguments as
+// written, value arguments folded to their closed literal of the exact
+// parameter type. The key is the applicative instance identity.
+fn sema_genmod_bind(alias: ModuleAliasDef, source: SemaGenericModuleSource, values: [String:Expr], enums: [String:Bool]) -> SemaGenericModuleBinding? {
+    definition :: source.definition
+    if alias.args.len() != definition.params.len() -> return None
+    binding := SemaGenericModuleBinding{key: source.key, type_names: [String]{}, type_actuals: [Type]{}, value_names: [String]{}, value_actuals: [Expr]{}}
+    loop (index, param) in definition.params {
+        arg :: alias.args[index]
+        if param == {
+            .Type(name, _, _) -> {
+                ty := Type.Int
+                if arg == {
+                    .Type(value, _) -> ty = value
+                    .Value(expression, _) -> {
+                        if expression == .Ident(type_ident, _) {
+                            ty = Type.Named{name: type_ident}
+                        } else {
+                            return None
+                        }
+                    }
+                }
+                &binding.type_names.push(name)
+                &binding.type_actuals.push(ty)
+                binding.key = "{binding.key}|{type_identity_key(ty)}"
+            }
+            .Value(name, _, ty) -> {
+                expression := Expr?{None}
+                if arg == {
+                    .Value(value, _) -> expression = Val(value)
+                    .Type(value, type_span) -> {
+                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span})
+                    }
+                }
+                written :: expression ?? return None
+                folded :: sema_genmod_fold(written, values, enums) ?? return None
+                actual_key :: sema_genmod_literal_key(folded) ?? return None
+                if sema_genmod_tier0_key(ty) != Val(actual_key) -> return None
+                &binding.value_names.push(name)
+                &binding.value_actuals.push(folded)
+                binding.key = "{binding.key}|{sema_genmod_literal_text(folded)}"
+            }
+        }
+    }
+    Val(binding)
+}
+
+fn sema_genmod_nominal_name(item: Item) -> String {
+    if item == {
+        .Struct(definition) -> definition.name
+        .Enum(definition) -> definition.name
+        .Trait(definition) -> definition.name
+        .Tag(definition) -> definition.name
+        else -> ""
+    }
+}
+
+// Rust `module_value_name`.
+fn sema_genmod_value_name(alias: String, name: String) -> String {
+    bytes :: alias.bytes()
+    end := bytes.len()
+    loop end > 0 && Int.from_u8(bytes[end - 1]) == 95 {
+        end -= 1
+    }
+    trimmed :: String.from_bytes(bytes[0..end]) ?? ~alias
+    "{trimmed}_{sema_inline_trim_leading_underscores(name)}"
+}
+
+fn sema_genmod_expand_alias(alias: ModuleAliasDef, source: SemaGenericModuleSource, binding: SemaGenericModuleBinding, enums: [String:Bool]) -> SemaGenericModuleExpansion {
+    template :: source.definition
+    rewrite := sema_inline_rewrite_empty()
+    loop item in source.source_items {
+        name :: sema_genmod_nominal_name(item)
+        if name != "" -> rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+    }
+    loop item in template.body {
+        name :: sema_genmod_nominal_name(item)
+        if name != "" -> rewrite.types[name] = Type.Named{name: sema_inline_type_name(alias.name, name)}
+    }
+    loop (index, name) in binding.type_names -> rewrite.types[name] = binding.type_actuals[index]
+    loop item in template.body {
+        if item == {
+            .CodeModule(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
+            .ModuleAlias(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
+            else -> {}
+        }
+    }
+    rewrite.values = source.source_values
+    loop (index, name) in binding.value_names -> rewrite.values[name] = binding.value_actuals[index]
+    declarations := [Item]{}
+    loop item in source.source_items -> sema_genmod_push_declaration(&rewrite, item, alias.name, &declarations)
+    // Template constants specialize in declaration order; each folded value
+    // is visible to later constants and to every member.
+    loop item in template.body {
+        if item == .Const(definition) {
+            value :: sema_inline_rewrite_expr(&rewrite, definition.value)
+            mapped := definition
+            mapped.name = sema_genmod_value_name(alias.name, definition.name)
+            mapped.value = value
+            mapped.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
+            mapped.ct = None
+            folded :: sema_genmod_fold(value, rewrite.values, enums)
+            if folded == .Val(literal) {
+                rewrite.values[definition.name] = literal
+                mapped.value = literal
+                if mapped.ty == None -> mapped.ty = sema_genmod_literal_type(literal)
+            }
+            &declarations.push(Item.Const{value: mapped})
+        }
+    }
+    loop item in template.body {
+        if item == {
+            .Test(definition) -> &declarations.push(Item.Test{value: sema_genmod_specialize_test(&rewrite, definition, alias.name)})
+            .CodeModule(nested) -> {
+                mapped := nested
+                mapped.name = sema_genmod_value_name(alias.name, nested.name)
+                if nested.body == .Val(nested_body) -> mapped.body = Val(sema_genmod_specialize_nested(&rewrite, nested_body, nested.name))
+                &declarations.push(Item.CodeModule{value: mapped})
+            }
+            else -> sema_genmod_push_declaration(&rewrite, item, alias.name, &declarations)
+        }
+    }
+    body := [Item]{}
+    loop item in source.source_items {
+        if item == .Func(function) -> &body.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+    }
+    loop item in template.body {
+        if item == .Func(function) -> &body.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+    }
+    identity :: ModuleInstanceIdentity{full_key: [U8]{}, fingerprint: binding.key, definition_id: source.key, argument_keys: [[U8]]{}, argument_values: [String]{}, argument_provenance: [[String]]{}, template_span: template.span, applications: [ModuleInstanceApplication]{}}
+    instance :: CodeModule{name: alias.name, name_span: alias.name_span, is_pub: alias.is_pub, is_package_pub: alias.is_package_pub, body: Val(body), imports: template.imports, web_target: None, instance_identity: Val(identity), span: alias.span}
+    SemaGenericModuleExpansion{instance: instance, declarations: declarations}
+}
+
+// Rust `specialize_struct` / `specialize_enum` (renamed to the instance's
+// member name), `specialize_trait`, `specialize_tag`, `specialize_impl` and
+// `specialize_error_conv`.
+fn sema_genmod_push_declaration(rewrite: &SemaInlineRewrite, item: Item, alias: String, declarations: &[Item]) {
+    if item == {
+        .Struct(definition) -> &declarations.push(Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, alias)})
+        .Enum(definition) -> &declarations.push(Item.Enum{value: sema_inline_rewrite_enum(&rewrite, definition, alias)})
+        .Trait(definition) -> &declarations.push(Item.Trait{value: sema_inline_rewrite_trait(&rewrite, definition)})
+        .Tag(definition) -> {
+            mapped := definition
+            mapped.name = sema_inline_mapped_name(rewrite, definition.name)
+            &declarations.push(Item.Tag{value: mapped})
+        }
+        .Impl(definition) -> &declarations.push(Item.Impl{value: sema_inline_rewrite_impl(&rewrite, definition)})
+        .ErrorConv(definition) -> &declarations.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(&rewrite, definition)})
+        else -> {}
+    }
+}
+
+// Rust `specialize_nested_code_module`: the members of a plain module inside
+// a template, under the instance's arguments, keeping their own names.
+fn sema_genmod_specialize_nested(rewrite: &SemaInlineRewrite, body: [Item], module_name: String) -> [Item] {
+    mapped := [Item]{}
+    loop item in body {
+        if item == {
+            .Func(function) -> &mapped.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+            .Struct(definition) -> &mapped.push(Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, "")})
+            .Enum(definition) -> &mapped.push(Item.Enum{value: sema_inline_rewrite_enum(&rewrite, definition, "")})
+            .Const(definition) -> {
+                updated := definition
+                updated.value = sema_inline_rewrite_expr(&rewrite, definition.value)
+                updated.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
+                &mapped.push(Item.Const{value: updated})
+            }
+            .CodeModule(child) -> {
+                updated := child
+                if child.body == .Val(child_body) -> updated.body = Val(sema_genmod_specialize_nested(&rewrite, child_body, child.name))
+                &mapped.push(Item.CodeModule{value: updated})
+            }
+            .Trait(definition) -> &mapped.push(Item.Trait{value: sema_inline_rewrite_trait(&rewrite, definition)})
+            .Tag(definition) -> {
+                updated := definition
+                updated.name = sema_inline_mapped_name(rewrite, definition.name)
+                &mapped.push(Item.Tag{value: updated})
+            }
+            .Impl(definition) -> &mapped.push(Item.Impl{value: sema_inline_rewrite_impl(&rewrite, definition)})
+            .ErrorConv(definition) -> &mapped.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(&rewrite, definition)})
+            .Test(definition) -> &mapped.push(Item.Test{value: sema_genmod_specialize_test(&rewrite, definition, module_name)})
+            else -> {}
+        }
+    }
+    mapped
+}
+
+// Rust `specialize_test`.
+fn sema_genmod_specialize_test(rewrite: &SemaInlineRewrite, definition: TestDef, alias: String) -> TestDef {
+    updated := definition
+    if definition.name_expr == .Val(expression) {
+        updated.name_expr = Val(sema_inline_rewrite_expr(&rewrite, expression))
+        updated.name = None
+        updated.name_prefix = Val(alias)
+    } else if definition.name == .Val(name) {
+        updated.name = Val(sema_genmod_value_name(alias, name))
+    }
+    updated.faults_expr = sema_inline_rewrite_optional_expr(&rewrite, definition.faults_expr)
+    updated.expected_fail_expr = sema_inline_rewrite_optional_expr(&rewrite, definition.expected_fail_expr)
+    updated.expected_fail = false
+    updated.faults = [String]{}
+    saved :: rewrite.locals.len()
+    updated.params = sema_inline_rewrite_params(&rewrite, definition.params)
+    updated.body = sema_inline_rewrite_stmts(&rewrite, definition.body)
+    sema_inline_restore_locals(&rewrite, saved)
+    updated
+}
+
+// Constants fold in declaration order; each closed one is visible to later
+// constants and to module arguments.
+fn sema_genmod_folded_consts(items: [Item], inherited: [String:Expr], enums: [String:Bool]) -> [String:Expr] {
+    values := inherited
+    loop item in items {
+        if item == .Const(definition) {
+            folded :: sema_genmod_fold(definition.value, values, enums) ?? next
+            values[definition.name] = folded
+        }
+    }
+    values
+}
+
+// Rust `evaluate_closed_value` over the closed domain the checks accept
+// (`sema_genmod_value_type`): the literal the expression folds to.
+fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool]) -> Expr? {
+    if expression == {
+        .Int(number, span, _, _) -> Val(Expr.Int{value: number, span: span, width: None, raw: None})
+        .Bool(_, _) | .Char(_, _) -> Val(~expression)
+        .Str(_, span) -> {
+            text :: sema_genmod_text(expression) ?? return None
+            Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span})
+        }
+        .Paren(value, _) -> sema_genmod_fold(value, values, enums)
+        .Ident(name, _) -> values.get(name)
+        .Unary(op, operand, span) -> {
+            inner :: sema_genmod_fold(operand, values, enums) ?? return None
+            if op == {
+                .Neg -> if inner == {
+                    .Int(number, _, _, _) -> Val(Expr.Int{value: 0 - number, span: span, width: None, raw: None})
+                    else -> None
+                }
+                .Not -> if inner == {
+                    .Bool(flag, _) -> Val(Expr.Bool{value: !flag, span: span})
+                    else -> None
+                }
+            }
+        }
+        .Binary(op, left, right, span) -> {
+            lhs :: sema_genmod_fold(left, values, enums) ?? return None
+            rhs :: sema_genmod_fold(right, values, enums) ?? return None
+            if lhs == .Int(left_number, _, _, _) {
+                if rhs == .Int(right_number, _, _, _) {
+                    if op == BinOp.Add -> return Val(Expr.Int{value: left_number + right_number, span: span, width: None, raw: None})
+                    if op == BinOp.Sub -> return Val(Expr.Int{value: left_number - right_number, span: span, width: None, raw: None})
+                    if op == BinOp.Mul -> return Val(Expr.Int{value: left_number * right_number, span: span, width: None, raw: None})
+                }
+                return None
+            }
+            if op != BinOp.Add -> return None
+            left_text :: sema_genmod_text(lhs) ?? return None
+            right_text :: sema_genmod_text(rhs) ?? return None
+            Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{left_text}{right_text}"}}, span: span})
+        }
+        .Field(base, member, span) -> {
+            if base == .Ident(enum_name, _) {
+                fieldless :: enums.get(enum_name) ?? false
+                if fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: member, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span})
+            }
+            None
+        }
+        .EnumLit(enum_name, variant, _, args, _, span) -> {
+            fieldless :: enums.get(enum_name) ?? false
+            if args.len() == 0 && fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span})
+            None
+        }
+        else -> None
+    }
+}
+
+// The text of a literal string with no interpolation.
+fn sema_genmod_text(value: Expr) -> String? {
+    if value == .Str(parts, _) {
+        text := ""
+        loop part in parts {
+            if part == {
+                .Lit(literal) -> text = "{text}{literal}"
+                else -> return None
+            }
+        }
+        return Val(text)
+    }
+    None
+}
+
+fn sema_genmod_literal_key(value: Expr) -> String? {
+    if value == {
+        .Int(_, _, _, _) -> Val("Int")
+        .Bool(_, _) -> Val("Bool")
+        .Char(_, _) -> Val("Char")
+        .Str(_, _) -> Val("String")
+        .EnumLit(type_name, _, _, _, _, _) -> Val("enum {type_name}")
+        else -> None
+    }
+}
+
+fn sema_genmod_literal_text(value: Expr) -> String {
+    if value == {
+        .Int(number, _, _, _) -> "Int:{number}"
+        .Bool(flag, _) -> if flag -> "Bool:true" else -> "Bool:false"
+        .Char(text, _) -> "Char:{text}"
+        .Str(_, _) -> "String:{sema_genmod_text(value) ?? ""}"
+        .EnumLit(type_name, variant, _, _, _, _) -> "{type_name}.{variant}"
+        else -> ""
+    }
+}
+
+fn sema_genmod_literal_type(value: Expr) -> Type? {
+    if value == {
+        .Int(_, _, _, _) -> Val(Type.Int)
+        .Bool(_, _) -> Val(Type.Bool)
+        .Char(_, _) -> Val(Type.Char)
+        .Str(_, _) -> Val(Type.String)
+        .EnumLit(type_name, _, _, _, _, _) -> Val(Type.Named{name: type_name})
+        else -> None
+    }
+}

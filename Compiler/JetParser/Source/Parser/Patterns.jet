@@ -42,6 +42,7 @@ use jet_lexer.[
     TOKEN_SEMI,
     TOKEN_STRING,
     TOKEN_UNIFIED_ARROW,
+    Token,
 ]
 
 pub struct ParsedPattern {
@@ -375,6 +376,9 @@ fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
             next_kind == TOKEN_DOT_DOT || next_kind == TOKEN_DOT_DOT_LT
         }
         TOKEN_STRING -> token.payload.interpolations > 0
+        // D-ENUMDOT1: a bare `Variant(…)` or `Variant | …` is a pattern that
+        // lacks its leading dot (E0367).
+        TOKEN_IDENT -> parser_bare_variant_head(&state)
         TOKEN_RAW_STRING -> token.payload.interpolations > 0
         else -> false
     }
@@ -394,6 +398,11 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int, allow_named: Bool) -
     end := first.span
     loop parser_current_kind(&state) == TOKEN_PIPE {
         parser_bump(&state)
+        // D-PATO: any bare PascalCase alternative lacks its leading dot.
+        alternative :: parser_current(&state)
+        if alternative.kind == TOKEN_IDENT && parser_pascal_name(alternative.payload.decoded) && !parser_constant_name(alternative.payload.decoded) && parser_kind_at(&state, 1) != TOKEN_LPAREN && parser_kind_at(&state, 1) != TOKEN_PIPE && parser_kind_at(&state, 1) != TOKEN_DOT {
+            parser_report_bare_variant(&state, alternative, "")
+        }
         next :: parser_parse_pattern_atom(&state, depth + 1, allow_named)
         &alternatives.push(next.pattern)
         end = next.span
@@ -443,6 +452,10 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
             path_span = name.span
         }
         start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF -> {
+            if start.kind == TOKEN_IDENT && parser_bare_variant_head(&state) {
+                payload :: if parser_kind_at(&state, 1) == TOKEN_LPAREN -> "(…)" else -> ""
+                parser_report_bare_variant(&state, start, payload)
+            }
             parser_bump(&state)
             path = start.payload.decoded
             path_span = start.span
@@ -509,6 +522,25 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
     }
     span :: parser_cover(start.span, end)
     ParsedPattern{pattern: Pattern.Variant{variant: path, bindings: bindings, leading_dot: leading_dot, span: span}, span: span}
+}
+
+fn parser_pascal_name(name: String) -> Bool Never! {
+    if name.len() == 0 -> return false
+    first :: Int.from_u8(name.bytes()[0])
+    first >= 65 && first <= 90
+}
+
+// D-ENUMDOT1: `Variant(…)`, or a non-constant `Variant |`, at the cursor.
+fn parser_bare_variant_head(state: &JetParserState) -> Bool Never! {
+    token :: parser_current(&state)
+    if token.kind != TOKEN_IDENT || !parser_pascal_name(token.payload.decoded) -> return false
+    next :: parser_kind_at(&state, 1)
+    next == TOKEN_LPAREN || (next == TOKEN_PIPE && !parser_constant_name(token.payload.decoded))
+}
+
+fn parser_report_bare_variant(state: &JetParserState, token: Token, payload: String) {
+    name :: token.payload.decoded
+    parser_add_error_code(&state, "E0367", token.span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)", "write `.{name}{payload}`")
 }
 
 fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {

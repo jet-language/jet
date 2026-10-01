@@ -2,8 +2,11 @@
 // spans are returned separately because semantic Type intentionally carries no
 // parser locations.
 use jet_foundation.[
+    CallContractRow,
+    EffectRowEntry,
     Measure,
     MeasureRule,
+    ParamZone,
     Span,
     TextEdit,
     Type,
@@ -23,10 +26,13 @@ use jet_lexer.[
     TOKEN_IDENT,
     TOKEN_INT,
     TOKEN_KW_FN,
+    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
     TOKEN_LT,
+    TOKEN_MINUS,
+    TOKEN_MINUS_MINUS,
     TOKEN_PIPE,
     TOKEN_PLUS,
     TOKEN_QUESTION,
@@ -37,6 +43,7 @@ use jet_lexer.[
     TOKEN_SELF,
     TOKEN_SEMI,
     TOKEN_SHR,
+    TOKEN_SLASH,
     TOKEN_STAR,
     TOKEN_UNIFIED_ARROW,
 ]
@@ -324,16 +331,37 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
             parser_bump(&state)
             name := start.payload.decoded
             end := start.span
+            if name == {
+                "Error" -> {
+                    parser_add_error_code(&state, "E0432", start.span, "`Error` is retired", "the default error type and its constructor now use the same name", "replace `Error` with `Err`")
+                    return ParsedType{ty: Type.Named{name: "Err"}, span: start.span}
+                }
+                "Void" -> {
+                    parser_add_error_code(&state, "E0431", start.span, "`Void` is retired", "Jet uses `()` for a result with no information; non-returning paths are compiler facts under D-NEVER1", "replace `Void` with `()`")
+                    return ParsedType{ty: Type.Named{name: "Unit"}, span: start.span}
+                }
+                else -> {}
+            }
             loop parser_current_kind(&state) == TOKEN_DOT {
                 parser_bump(&state)
                 member :: parser_expect_name(&state, "after `.` in a type path")
                 name = "{name}.{member.payload.decoded}"
                 end = member.span
             }
-            if {
-                parser_current_kind(&state) == TOKEN_LT -> parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
-                else -> ParsedType{ty: parser_named_type(name), span: parser_cover(start.span, end)}
+            // S33: the built-in generic constructors take `<…>`; square
+            // brackets after them are the foreign `Type[Args]` spelling.
+            if parser_current_kind(&state) == TOKEN_LBRACKET && (name == "Shared" || name == "Ptr" || name == "Result") {
+                bracket_span :: parser_current(&state).span
+                parser_add_error_code(&state, "E0034", bracket_span, "`{name}[...]` isn't how Jet writes generic types", "square brackets start collection types like `[Int]` or `[String:Int]`, and collection values like `[1, 2]`", "write angle brackets for generic arguments, or use `[Int]` for a list type")
+                parser_skip_group(&state)
+                return ParsedType{ty: Type.Named{name: "__jet_error"}, span: parser_cover(start.span, end)}
             }
+            if parser_current_kind(&state) == TOKEN_LT {
+                // D-TYPE-SUFFIX1=A: `Result<T, E>` is the retired fallible spelling.
+                if name == "Result" -> parser_add_error_code(&state, "E0406", start.span, "`Result<T, E>` is old Jet error syntax", "fallible Jet types write the error contract after the success type", "write `T? E!`, `T (E1 | E2)!`, or omit the contract for implicit `Err`")
+                return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
+            }
+            ParsedType{ty: parser_named_type(name), span: parser_cover(start.span, end)}
         }
     }
 }
@@ -391,35 +419,173 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
     ParsedType{ty: Type.Tuple{fields: fields}, span: parser_cover(open.span, close.span)}
 }
 
+// A function type `fn(T1, …) -> R`, `fn(T1, …) -[E]> R` or `fn(…) E!`. It
+// reuses the parameter grammar's zone separators (D-APILABEL1=A): public
+// labels and zones are part of callable identity, local names are not.
 fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType {
     start :: parser_bump(&state)
     parser_expect(&state, TOKEN_LPAREN, "`(` after `fn` in a function type")
     params := [Type]{}
+    names := [String]{}
+    zones := [ParamZone]{}
+    zone := ParamZone.Either
+    saw_slash := false
+    saw_star := false
     if parser_current_kind(&state) != TOKEN_RPAREN {
-        loop {
-            &params.push(parser_parse_type(&state, depth + 1).ty)
-            if parser_current_kind(&state) == TOKEN_RPAREN -> break
-            if parser_current_kind(&state) != TOKEN_COMMA {
-                token :: parser_current(&state)
-                parser_add_error(&state, token.span, "expected `,` between function type parameters", "function types list parameter types in order", "add a comma or close the parameter list")
-                break
+        loop !parser_aborting(&state) {
+            token :: parser_current(&state)
+            if {
+                token.kind == TOKEN_SLASH -> {
+                    parser_bump(&state)
+                    if saw_slash || saw_star || params.len() == 0 {
+                        parser_report_fn_type_zone(&state, token.span)
+                    } else {
+                        saw_slash = true
+                        positional := [ParamZone]{}
+                        loop _ in zones -> &positional.push(ParamZone.PositionalOnly)
+                        zones = positional
+                    }
+                }
+                token.kind == TOKEN_STAR -> {
+                    parser_bump(&state)
+                    if saw_star {
+                        parser_report_fn_type_zone(&state, token.span)
+                    } else {
+                        saw_star = true
+                        zone = ParamZone.LabelOnly
+                    }
+                }
+                else -> {
+                    name := ""
+                    if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
+                        parser_bump(&state)
+                        parser_bump(&state)
+                        name = token.payload.decoded
+                    }
+                    &params.push(parser_parse_type(&state, depth + 1).ty)
+                    &names.push(name)
+                    &zones.push(zone)
+                }
             }
-            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            parser_expect(&state, TOKEN_COMMA, "`,` between parameter types in `fn(...)`")
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
         }
     }
-    close :: parser_expect(&state, TOKEN_RPAREN, "`)` after function type parameters")
+    close :: parser_expect(&state, TOKEN_RPAREN, "`)` after parameter types in `fn(...)`")
+    has_label_only := false
+    unlabeled_label_only := false
+    loop index in 0..<zones.len() {
+        if zones[index] == ParamZone.LabelOnly {
+            has_label_only = true
+            if names[index] == "" -> unlabeled_label_only = true
+        }
+    }
+    after_params :: parser_current(&state).span
+    if saw_star && !has_label_only -> parser_report_fn_type_zone(&state, after_params)
+    if unlabeled_label_only {
+        parser_add_error_code(&state, "E0763", after_params, "a parameter after `*` in this function type has no label", "a label-only parameter is reached by writing its label, so it has to have one", "name it, as in `fn(*, force: Bool) Int`")
+    }
+    param_contract := [CallContractRow]?{None}
+    if saw_slash || saw_star {
+        rows := [CallContractRow]{}
+        loop index in 0..<zones.len() {
+            label :: if zones[index] == ParamZone.LabelOnly -> names[index] else -> ""
+            &rows.push(CallContractRow{label: label, zone: zones[index]})
+        }
+        param_contract = Val(rows)
+    }
+    first :: parser_current_kind(&state)
+    second :: parser_kind_at(&state, 1)
+    canonical :: first == TOKEN_MINUS && second == TOKEN_LBRACKET
+    retired_colon :: first == TOKEN_COLON && second == TOKEN_LBRACKET
+    retired_eq :: first == TOKEN_EQ && second == TOKEN_LBRACKET
+    retired_double :: first == TOKEN_MINUS_MINUS
+    effect_bound := [EffectRowEntry]?{None}
+    if canonical || retired_colon || retired_eq || retired_double {
+        if !canonical -> parser_report_retired_effect_syntax(&state, after_params)
+        effect_bound = Val(parser_parse_effect_arrow_row(&state, canonical, retired_colon, retired_eq))
+    }
+    arrow_return := false
+    result := ParsedType?{None}
+    if {
+        canonical || retired_colon -> {
+            result = parser_parse_unit_fallible_return(&state)
+            if !parser_has_type(result) && parser_type_starts_here(&state) {
+                arrow_return = true
+                result = Val(parser_parse_type(&state, depth + 1))
+            }
+        }
+        retired_eq || retired_double || parser_at_unified_arrow(&state) -> {
+            if parser_at_unified_arrow(&state) -> parser_bump(&state)
+            arrow_return = true
+            result = parser_parse_unit_fallible_return(&state)
+            if !parser_has_type(result) && parser_type_starts_here(&state) -> result = Val(parser_parse_type(&state, depth + 1))
+        }
+        else -> {
+            result = parser_parse_unit_fallible_return(&state)
+            if !parser_has_type(result) && parser_type_starts_here(&state) {
+                parsed :: parser_parse_type(&state, depth + 1)
+                parser_add_error_code(&state, "E0068", parsed.span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
+                result = Val(parsed)
+            }
+        }
+    }
     returned := Type?{None}
     end := close.span
-    current_kind :: parser_current_kind(&state)
-    if current_kind == TOKEN_UNIFIED_ARROW {
-        parser_bump(&state)
-        result :: parser_parse_type(&state, depth + 1)
-        returned = Val(result.ty)
-        end = result.span
+    if result == .Val(parsed) {
+        returned = Val(parsed.ty)
+        end = parsed.span
+        if arrow_return && parser_is_unit_fallible(parsed.ty) {
+            parser_add_error_code(&state, "E0003", parsed.span, "this unit-fallible signature uses the retired arrow-and-unit form", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
+        }
     }
-    ty :: Type.Fn{params: params, ret: returned, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    owners := [String]{}
+    loop index in 0..<names.len() {
+        &owners.push(if names[index] == "" -> "_{index}" else -> names[index])
+    }
+    return_view :: parser_parse_opt_declared_view_from(&state, owners)
+    if effect_bound == None && parser_func_effect_starts_here(&state) {
+        late_first :: parser_current_kind(&state)
+        late_canonical :: late_first == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET
+        late_colon :: late_first == TOKEN_COLON && parser_kind_at(&state, 1) == TOKEN_LBRACKET
+        late_eq :: late_first == TOKEN_EQ && parser_kind_at(&state, 1) == TOKEN_LBRACKET
+        late_span :: parser_current(&state).span
+        if !late_canonical -> parser_report_retired_effect_syntax(&state, late_span)
+        effect_bound = Val(parser_parse_effect_arrow_row(&state, late_canonical, late_colon, late_eq))
+    }
+    end = parser_lookahead(&state, -1).span
+    ty :: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: None, return_view_provenance: return_view}
     ParsedType{ty: ty, span: parser_cover(start.span, end)}
+}
+
+fn parser_has_type(value: ParsedType?) -> Bool Never! {
+    if value == .Val(_) -> return true
+    false
+}
+
+// D-EFF1: the effect row of a function type, `-[E]>`; the retired `:[E]>`,
+// `=[E]=>` and `--[E]->` spellings are read after their E0066 teaching.
+fn parser_parse_effect_arrow_row(state: &JetParserState, canonical: Bool, retired_colon: Bool, retired_eq: Bool) -> [EffectRowEntry] {
+    if {
+        canonical -> parser_expect(&state, TOKEN_MINUS, "`-` to start an effect arrow")
+        retired_colon -> parser_expect(&state, TOKEN_COLON, "`:` to start an effect arrow")
+        retired_eq -> parser_expect(&state, TOKEN_EQ, "`=` to start an effect arrow")
+        else -> parser_expect(&state, TOKEN_MINUS_MINUS, "`--` to start an effect arrow")
+    }
+    parser_expect(&state, TOKEN_LBRACKET, "`[` to start an effect row")
+    effects :: parser_parse_effect_row_entries(&state, TOKEN_RBRACKET)
+    parser_expect(&state, TOKEN_RBRACKET, "`]` to close the effect row")
+    if {
+        canonical || retired_colon -> parser_expect(&state, TOKEN_GT, "`>` after the effect row")
+        retired_eq -> parser_expect(&state, TOKEN_LAMBDA_ARROW, "`=>` after the effect row")
+        else -> parser_expect(&state, TOKEN_UNIFIED_ARROW, "`->` after the effect row")
+    }
+    effects
+}
+
+fn parser_report_fn_type_zone(state: &JetParserState, span: Span) {
+    parser_add_error_code(&state, "E0763", span, "this function type's parameter zones are out of order", "the zones read left to right: positional-only, then either, then label-only", "write at most one `/` before at most one `*`, each with parameters on its side")
 }
 
 fn parser_parse_applied_type(state: &JetParserState, name: String, prefix: Span, depth: Int) -> ParsedType {

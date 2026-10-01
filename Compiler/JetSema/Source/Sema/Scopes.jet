@@ -92,6 +92,9 @@ pub struct SemaCallReturnViewFact {
     pub access: AccessConvention
     pub places: [SemaOwnershipPlace]
     pub sources: [ViewSourcePath]
+    // Argument spans of parameter sources that name no place (a temporary
+    // owner dropped at the end of the statement).
+    pub temporaries: [Span]{[Span]{}}
 }
 
 pub struct SemaCallReturnView {
@@ -396,6 +399,29 @@ pub struct SemaCheckContext {
     // D-DISCARD1=A: the last statement of a named function with no written
     // return type; a non-Unit value there is thrown away (E0433).
     pub lost_tail_span: Span?
+    // D-DISCARD1=A / #3886: the last statement of a named function with a
+    // written value return; it is checked as the value the function hands back.
+    pub value_tail_span: Span?
+    // #3708: the function keys whose failures this body propagates; "" marks a
+    // failure source of its own (`Err`, a propagated non-call, a propagating
+    // callback). Callback bodies add their rows too, as the Rust body walk does.
+    pub failure_edges: [String]
+    // #3708: a direct failure source outside callbacks (a fallible value
+    // returned as-is, or a statement that owns its own failure route).
+    pub failure_direct_source: Bool
+    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: what reaches this body's default
+    // `Err` route outside callbacks: typed failures (made here or passed up
+    // from a callee with a written contract), function-owned cases
+    // (`Err(.NotFound(n))`), the unannotated callees whose failures pass up,
+    // and whether the general `Err` reaches it. The bundle failure-union
+    // solve joins these rows (FailureUnion.jet).
+    pub failure_union_members: [Type]{[Type]{}}
+    pub failure_union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
+    pub failure_union_edges: [String]{[String]{}}
+    pub failure_union_general: Bool{false}
+    // Rust `iter_borrowed` (E0507): the collections an active `loop x in xs`
+    // reads across its body, so a change to one of them there is rejected.
+    pub iter_borrowed: [String]{[String]{}}
 }
 
  
@@ -417,6 +443,9 @@ pub struct SemaScopeTable {
     pub transaction_depth: Int
     pub transaction_wall_depth: Int
     pub unit_explicit_units: Bool
+    // D-MEM-COPYSEM1: `copies: .Explicit` is active for the function being
+    // checked (package, module, or function scope).
+    pub copies_explicit: Bool{false}
 }
 
 pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
@@ -512,6 +541,9 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
         fallback_err_denial: None,
         noelse_chain_starts: [Int]{},
         lost_tail_span: None,
+        value_tail_span: None,
+        failure_edges: [String]{},
+        failure_direct_source: false,
         arrow_loop_body: false,
     }
 }
@@ -564,6 +596,13 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         fallback_err_denial: source.fallback_err_denial,
         noelse_chain_starts: ~source.noelse_chain_starts,
         lost_tail_span: source.lost_tail_span,
+        value_tail_span: source.value_tail_span,
+        failure_edges: ~source.failure_edges,
+        failure_direct_source: source.failure_direct_source,
+        failure_union_members: ~source.failure_union_members,
+        failure_union_cases: ~source.failure_union_cases,
+        failure_union_edges: ~source.failure_union_edges,
+        failure_union_general: source.failure_union_general,
     }
 }
 
@@ -591,6 +630,7 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_depth: source.transaction_depth,
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
+        copies_explicit: source.copies_explicit,
     }
 }
 

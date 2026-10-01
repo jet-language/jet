@@ -3426,14 +3426,14 @@ fn mime_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
     Ok(mime_kernel::jet_mime_to_string(
         &parts.top,
         &parts.sub,
-        &parts.params,
+        parts.params.iter().map(|(key, value)| (key.as_str(), value.as_str())),
     ))
 }
 
 fn mime_param(value: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
     let parts = mime_parts(value, span)?;
     Ok(option_string(mime_kernel::jet_mime_param(
-        &parts.params,
+        parts.params.iter().map(|(key, value)| (key.as_str(), value.as_str())),
         string_arg(args, 0, span)?,
     )))
 }

@@ -54,6 +54,7 @@ use jet_foundation.[
     UnitRatio,
     UnitScaleProvenance,
     VariantPayload,
+    core_module_export,
     expr_span,
     symbol_id,
     type_identity,
@@ -1452,6 +1453,12 @@ fn sema_registration_foreign_handle_close_key(module_row: SemaRegistrationModule
 }
 
 pub fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> SemaRegistrationModuleResult {
+    sema_registration_prepare_module_with(input, [SemaGenericModuleSource]{})
+}
+
+// `templates` are the generic-module templates the module imports; its own
+// templates come from its program.
+fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
     diagnostics := [Diagnostic]{}
     module_row := SemaRegistrationModule{
         package_identity: input.package_identity,
@@ -1489,6 +1496,17 @@ pub fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> S
             &module_row.nominals.push(value)
         }
     }
+    // D-CONF-GENSPELL1=A: each valid module alias becomes an expanded module
+    // instance before anything else sees the items (Rust expands before
+    // sibling mangling and registration).
+    module_row.program = sema_generic_modules_expand(module_row.program, module_row.module_identity, templates)
+    // D-MOD2/D-MOD3: inline modules give their members one lifted identity
+    // (types beside the module, top-level member functions by member name)
+    // and resolve `module.f(...)` and `use module.[f]` before registration.
+    module_row.program = sema_inline_modules_lower(module_row.program, &diagnostics)
+    // D-STRUCT-ONCE1=A: root `prep loop` declarations expand first, so every
+    // generated impl, conversion, and test registers as a written item.
+    module_row.program.items = sema_derive_expand_template_loops(module_row.program.items, &diagnostics)
     // D-ERR-CONV: declared conversions register once per module and become
     // their checked conversion routines before any declaration is resolved.
     module_row.program.items = sema_error_conversion_items(module_row.program.items, &diagnostics)
@@ -1665,6 +1683,19 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
         if declaration.kind == {
             .Unqualified(_, _, items, _, _) -> loop item in items {
                 local :: sema_registration_import_local(item)
+                // D-CORE-USELIST1=A (Rust `core_list_path`): a member naming a
+                // Core submodule (`use core.mem`, `core.encoding.[json]`) binds
+                // that module as a namespace, exactly like `use core.mem as mem`.
+                submodule :: "{target.module_name}.{item.original}"
+                if (target.module_name == "core" || target.module_name.starts_with("core.")) && core_module_export(submodule) != None {
+                    if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) {
+                        sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                        next
+                    }
+                    module_symbol :: Symbol{id: symbol_id(SymbolKind.Import, source_identity, submodule, local), kind: SymbolKind.Import, name: local, module_name: submodule, owner: None, span: declaration.span, ty: None, visibility: graph.modules[module_index].imports[import_index].visibility}
+                    &graph.modules[module_index].imports[import_index].bindings.push(SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration: None, target_module_identity: submodule, visibility: graph.modules[module_index].imports[import_index].visibility})
+                    next
+                }
                 resolved :: sema_registration_resolve_export(graph, target_index, item.original, source_identity, source_package, [String]{})
                 if resolved == {
                     .Val(export) -> {
@@ -1683,7 +1714,14 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     }
                     .None -> {
                         direct :: sema_registration_direct_symbol(target, item.original)
+                        private_template := false
+                        if direct == .Val(private_export) {
+                            if private_export.declaration == .Val(declared) {
+                                if declared == .GenericModule(_) -> private_template = true
+                            }
+                        }
                         if {
+                            private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
                             direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target.module_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
                             else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target.module_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
                         }
@@ -1745,7 +1783,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     loop input in inputs {
-        prepared := sema_registration_prepare_module(input)
+        prepared := sema_registration_prepare_module_with(input, sema_generic_modules_imported(inputs, edges, input.module_identity))
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         duplicate :: loop existing in modules {
             if existing.module_identity == prepared.module_row.module_identity -> break true
@@ -1831,6 +1869,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     module_index = 0
     loop module_index < graph.modules.len() {
         sema_registration_populate_imports(&graph, module_index)
+        sema_inline_modules_check_imports(&graph, module_index)
         module_index += 1
     }
     module_index = 0
@@ -1842,6 +1881,26 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
         module_index += 1
     }
     graph.complete = graph.diagnostics.len() == 0
+    // D-CONF-GENSPELL1=A: generic-module aliases resolve and check their
+    // arguments once every import is bound (Rust's expansion pre-pass).
+    sema_generic_modules_check(&graph, inputs)
+    graph.complete = graph.diagnostics.len() == 0
+    // Rust erases templates and aliases once expanded: their symbols stay
+    // registered, but no later pass sees an unexpanded body.
+    loop erased_index in 0..<graph.modules.len() {
+        kept := [Item]{}
+        loop item in graph.modules[erased_index].program.items {
+            if item == {
+                .GenericModule(_) | .ModuleAlias(_) -> {}
+                else -> &kept.push(item)
+            }
+        }
+        graph.modules[erased_index].program.items = kept
+    }
+    // D-METADERIVE1=A / D-META-USER1=A: user derives and declared marker
+    // bodies expand over the complete graph's reflection and register their
+    // generated items before any body is checked.
+    sema_registration_expand_user_templates(&graph)
     graph
 }
 

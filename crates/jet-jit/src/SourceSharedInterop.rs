@@ -78,11 +78,7 @@ pub fn checked_type_id_for_program(
     }
     if let jet_foundation::MIR::MirTypeKind::Apply { name, args } = &ty.kind {
         if args.is_empty() {
-            if let Some(definition) = program.types.iter().find(|definition| {
-                definition.id == name.id
-                    || definition.key == name.name
-                    || definition.name == name.name
-            }) {
+            if let Some(definition) = crate::functions_compile::nominal_ref_definition(program, name) {
                 return definition.id.0;
             }
         }

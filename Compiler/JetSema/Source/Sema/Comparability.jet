@@ -370,3 +370,193 @@ pub fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? 
     if why == "" -> return None
     Val(sema_error("E0905", span, "`{member}` needs comparable values", why, "use Int, Float, String, Char, Bool, or a comparable type"))
 }
+
+// Rust `map_key_type_eligible` (D-MAP-KEY1, E0502): map keys are ordered
+// values. Scalars and tuples of keys qualify, and a nominal qualifies when it
+// is a struct whose fields all qualify or an enum without payloads. A nominal
+// reached again while it is still being decided lies on a cycle and answers
+// false, as the Rust walk's active set does.
+pub fn sema_type_map_key_eligible(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
+    query := sema_comparability_query()
+    sema_comparability_map_key(environment, environment.module_identity, ty, &query)
+}
+
+// Rust `check_declared_type_rules` (D-MAP-KEY1, E0502): every map written in
+// a declared type needs a key-eligible key. False when one was reported.
+pub fn sema_type_check_declared_map_keys(environment: SemaScopeEnvironment, ty: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if ty == {
+        .Map(key, key_span, value) -> {
+            valid := sema_type_check_declared_map_keys(environment, key, span, &diagnostics)
+            if !sema_type_check_declared_map_keys(environment, value, span, &diagnostics) -> valid = false
+            if !sema_type_map_key_eligible(environment, key) {
+                &diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type (D-MAP-KEY1)", key_span ?? span))
+                valid = false
+            }
+            valid
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_type_check_declared_map_keys(environment, inner, span, &diagnostics)
+        .Result(ok, err) -> {
+            valid := sema_type_check_declared_map_keys(environment, ok, span, &diagnostics)
+            if !sema_type_check_declared_map_keys(environment, err, span, &diagnostics) -> valid = false
+            valid
+        }
+        .Apply(_, members) | .Union(members) -> {
+            valid := true
+            loop member in members {
+                if !sema_type_check_declared_map_keys(environment, member, span, &diagnostics) -> valid = false
+            }
+            valid
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            valid := true
+            loop param in params {
+                if !sema_type_check_declared_map_keys(environment, param, span, &diagnostics) -> valid = false
+            }
+            if ret == .Val(result) && !sema_type_check_declared_map_keys(environment, result, span, &diagnostics) -> valid = false
+            valid
+        }
+        .Tuple(fields) -> {
+            valid := true
+            loop field in fields {
+                if !sema_type_check_declared_map_keys(environment, field.ty, span, &diagnostics) -> valid = false
+            }
+            valid
+        }
+        else -> true
+    }
+}
+
+fn sema_comparability_map_key(environment: SemaScopeEnvironment, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> Bool Never! {
+    if ty == {
+        .Int | .Bool | .String | .Char | .IntN(_, _) -> true
+        .Tagged(_, inner) -> sema_comparability_map_key(environment, module_identity, inner, &query)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_comparability_map_key(environment, module_identity, field.ty, &query) -> return false
+            }
+            true
+        }
+        .Named(name) -> {
+            if sema_serde_named_leaf(name) == "U8" -> return true
+            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            key := sema_comparability_definition_key(definition)
+            if query.visited.get(key) == .Val(answer) -> return answer
+            query.visited[key] = false
+            eligible := sema_comparability_definition_map_key(environment, definition, &query)
+            query.visited[key] = eligible
+            eligible
+        }
+        else -> false
+    }
+}
+
+fn sema_comparability_definition_map_key(environment: SemaScopeEnvironment, definition: TTypeDef, query: &SemaComparabilityQuery) -> Bool Never! {
+    if definition.kind == {
+        .Struct(fields, _) -> {
+            loop field in fields {
+                if !sema_comparability_map_key(environment, definition.module_identity, field.ty, &query) -> return false
+            }
+            true
+        }
+        .Enum(variants, _) -> {
+            loop variant in variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    else -> return false
+                }
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+// Rust `hashable_type_eligible` (D-SET-HASH1, E0506): the `Hash + Eq`
+// capability a `Set` or `Tally` element needs. Structural carriers follow
+// their parts; a nominal needs value equality and hashable fields. A nominal
+// still being decided answers false, and a finished one reuses its answer.
+pub fn sema_type_hashable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
+    query := sema_comparability_query()
+    sema_comparability_hashable(environment, environment.module_identity, ty, &query)
+}
+
+fn sema_comparability_hashable(environment: SemaScopeEnvironment, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> Bool Never! {
+    if ty == {
+        .Int | .Bool | .String | .Char | .IntN(_, _) -> true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_comparability_hashable(environment, module_identity, inner, &query)
+        .Result(ok, err) -> sema_comparability_hashable(environment, module_identity, ok, &query) && sema_comparability_hashable(environment, module_identity, err, &query)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_comparability_hashable(environment, module_identity, field.ty, &query) -> return false
+            }
+            true
+        }
+        .Union(members) -> {
+            loop member in members {
+                if !sema_comparability_hashable(environment, module_identity, member, &query) -> return false
+            }
+            true
+        }
+        .Named(name) -> {
+            if sema_serde_named_leaf(name) == "U8" -> return true
+            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            key := sema_comparability_definition_key(definition)
+            if query.visited.get(key) == .Val(answer) -> return answer
+            query.visited[key] = false
+            eligible := sema_comparability_definition_hashable(environment, definition, ty, [SemaInferenceBinding]{}, &query)
+            query.visited[key] = eligible
+            eligible
+        }
+        .Apply(name, args) -> {
+            leaf := sema_serde_named_leaf(name)
+            if leaf == "ID" -> return sema_type_equatable(environment, ty)
+            if leaf == "Task" || leaf == "Sender" || leaf == "Receiver" || leaf == "SharedGuard" || leaf == "Pool" || leaf == "Set" -> return false
+            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            if definition.generic_params.len() != args.len() -> return false
+            key := "<{type_name(ty)}>"
+            if query.visited.get(key) == .Val(answer) -> return answer
+            query.visited[key] = false
+            bindings :: loop (index, param) in definition.generic_params -> SemaInferenceBinding{name: param.name, ty: args[index], source: "hashable owner"}
+            eligible := sema_comparability_definition_hashable(environment, definition, ty, bindings, &query)
+            query.visited[key] = eligible
+            eligible
+        }
+        else -> false
+    }
+}
+
+fn sema_comparability_definition_hashable(environment: SemaScopeEnvironment, definition: TTypeDef, ty: Type, bindings: [SemaInferenceBinding], query: &SemaComparabilityQuery) -> Bool Never! {
+    owner := definition.module_identity
+    if definition.kind == {
+        .Distinct(base, _) -> sema_type_equatable(environment, ty) && sema_comparability_hashable(environment, owner, sema_inference_substitute_type_bindings(base, bindings), &query)
+        .Alias(target) -> {
+            if bindings.len() == 0 && definition.generic_params.len() > 0 -> return false
+            sema_comparability_hashable(environment, owner, sema_inference_substitute_type_bindings(target, bindings), &query)
+        }
+        .Struct(fields, _) -> {
+            if !sema_type_equatable(environment, ty) -> return false
+            loop field in fields {
+                if !sema_comparability_hashable(environment, owner, sema_inference_substitute_type_bindings(field.ty, bindings), &query) -> return false
+            }
+            true
+        }
+        .Enum(variants, _) -> {
+            if !sema_type_equatable(environment, ty) -> return false
+            loop variant in variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(value) -> {
+                        if !sema_comparability_hashable(environment, owner, sema_inference_substitute_type_bindings(value, bindings), &query) -> return false
+                    }
+                    .Named(fields) -> {
+                        loop field in fields {
+                            if !sema_comparability_hashable(environment, owner, sema_inference_substitute_type_bindings(field.ty, bindings), &query) -> return false
+                        }
+                    }
+                }
+            }
+            true
+        }
+        else -> false
+    }
+}

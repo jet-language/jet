@@ -3352,6 +3352,9 @@ fn jet_string_trim_view(s: &str) -> &str {
 fn jet_string_lines(s: &String) -> Vec<String> {
     s.lines().map(|x| x.to_string()).collect()
 }
+fn jet_string_chars(s: &String) -> Vec<char> {
+    s.chars().collect()
+}
 fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
     jet_string_slice_value(s, a, b, false)
         .unwrap_or_else(|message| jet_panic(file, line, &message))

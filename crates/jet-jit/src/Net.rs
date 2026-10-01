@@ -37,7 +37,7 @@ pub(crate) mod runtime {
         pub struct JetMIME {
             pub top: String,
             pub sub: String,
-            pub params: Vec<(String, String)>,
+            pub parameters: Vec<Vec<String>>,
         }
 
         pub(crate) use crate::Encoding::json_rt::{
@@ -337,9 +337,11 @@ pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
         })
         .unwrap_or_default()
 }
-pub(crate) fn mime_parts(handle: i64) -> Option<(String, String, Vec<(String, String)>)> {
+pub(crate) fn mime_parts(handle: i64) -> Option<(String, String, Vec<Vec<String>>)> {
     with_net(handle, |value| match value {
-        NetValue::Mime(mime) => Some((mime.top.clone(), mime.sub.clone(), mime.params.clone())),
+        NetValue::Mime(mime) => {
+            Some((mime.top.clone(), mime.sub.clone(), mime.parameters.clone()))
+        }
         _ => None,
     })
 }

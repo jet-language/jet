@@ -1,0 +1,87 @@
+// D-MUSTUSE1 (c18iwxqx): a `#MustUse` result carries work or a resource that
+// is lost when nothing checks it, so dropping it as a bare expression
+// statement is E0419. The result is must-use when the statement calls a
+// `#MustUse` function or method, or when its type is a `#MustUse` struct or
+// enum or a Core guard/handle (Rust `core_must_use_type`). Task handles owe
+// `join` instead (L1101). `.drop("reason")` is the explicit discard.
+use jet_foundation.[
+    Call,
+    Diagnostic,
+    Expr,
+    Span,
+    Type,
+    type_name,
+]
+
+fn sema_must_use_core_type(name: String) -> Bool Never! {
+    name == "ScopeGuard" || name == "Iter" || name == "Delivery"
+}
+
+// Rust `type_is_must_use`.
+fn sema_must_use_type(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+    name :: sema_expr_type_base_name(ty) ?? return false
+    if sema_must_use_core_type(name) -> return true
+    definition :: sema_serde_type_definition(environment, name) ?? return false
+    definition.must_use
+}
+
+fn sema_must_use_function(call: Call, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    symbol :: sema_scope_resolve(scopes, call.name) ?? return false
+    declaration :: sema_scope_resolve_declaration(environment, symbol.id) ?? return false
+    if declaration == {
+        .Func(func) -> func.is_must_use
+        else -> false
+    }
+}
+
+// Rust `method_is_must_use`: a `#MustUse` method declared on the receiver's
+// nominal type.
+fn sema_must_use_method(type_name: String, method: String, environment: SemaScopeEnvironment) -> Bool {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
+    loop graph_module in graph.modules {
+        loop nominal in graph_module.nominals {
+            owner_name :: sema_expr_type_base_name(nominal.ty) ?? next
+            if owner_name != type_name -> next
+            loop function in nominal.methods {
+                if function.symbol.name == method && function.declaration.is_must_use -> return true
+            }
+        }
+    }
+    false
+}
+
+// Rust `ignored_must_use_call_target`: the name of the `#MustUse` function or
+// method the statement calls. A method counts only on a named receiver.
+fn sema_must_use_call_target(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? {
+    if expr == {
+        .Call(call) -> {
+            if sema_must_use_function(call, environment, scopes) -> return Val(call.name)
+        }
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+            if receiver == .Ident(name, _) {
+                symbol :: sema_scope_resolve(scopes, name) ?? return None
+                ty :: symbol.ty ?? return None
+                owner :: sema_expr_type_base_name(ty) ?? return None
+                if sema_must_use_method(owner, method, environment) -> return Val("{owner}.{method}")
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// Rust `check_ignored_must_use`, for a statement whose value is not fallible.
+pub fn sema_must_use_check_statement(expr: Expr, ty: Type, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if ty == .Apply(name, _) {
+        if name == "Task" -> return
+    }
+    target := sema_must_use_call_target(expr, environment, scopes)
+    if target == None {
+        if ty == (Type.Named{name: "Unit"}) -> return
+        if !sema_must_use_type(ty, environment) -> return
+        target = Val(type_name(ty))
+    }
+    shown :: target ?? return
+    &diagnostics.push(sema_error("E0419", span, "`{shown}` must be used — it was dropped as a bare statement", "a `#MustUse` result carries work or a resource that is lost when nothing checks it", "bind it (`x := …`), use `?`, `panic …`, or `.drop(\"reason\")` to discard intentionally"))
+}

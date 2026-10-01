@@ -146,14 +146,16 @@ mod jet_std {
 
     /// The `core.net.url.URL` carrier: exactly the field layout declared in
     /// `Core/net/url.jet`, so generated struct literals and field reads name
-    /// the same Rust fields (`port` is the native Int slot, -1 when absent).
+    /// the same Rust fields (`port` is the native Int slot, -1 when absent;
+    /// `port_explicit` records an authority port written in the source text).
     #[derive(Clone, Debug, PartialEq)]
     pub struct JetURL {
         pub scheme: String,
-        pub user: String,
-        pub password: String,
+        pub user_text: String,
+        pub password_text: String,
         pub host: String,
         pub port: i64,
+        pub port_explicit: bool,
         pub path: String,
         pub query: String,
         pub fragment: String,
@@ -181,6 +183,7 @@ mod jet_std {
         /// scheme default, as `core.net.url.parse` does.
         pub fn from_url_parts(parts: JetURLParts) -> Self {
             let raw = parts.to_string_value();
+            let port_explicit = parts.port.is_some();
             let port = parts
                 .port
                 .or_else(|| parts.default_port().ok())
@@ -188,10 +191,11 @@ mod jet_std {
             JetURL {
                 query: jet_url_render_query(&parts.query),
                 scheme: parts.scheme,
-                user: parts.username.unwrap_or_default(),
-                password: parts.password.unwrap_or_default(),
+                user_text: parts.username.unwrap_or_default(),
+                password_text: parts.password.unwrap_or_default(),
                 host: parts.host.unwrap_or_default(),
                 port,
+                port_explicit,
                 path: parts.path,
                 fragment: parts.fragment.unwrap_or_default(),
                 raw,
@@ -202,8 +206,8 @@ mod jet_std {
             let some = |text: &String| (!text.is_empty()).then(|| text.clone());
             let mut parts = JetURLParts {
                 scheme: self.scheme.clone(),
-                username: some(&self.user),
-                password: some(&self.password),
+                username: some(&self.user_text),
+                password: some(&self.password_text),
                 host: some(&self.host),
                 port: None,
                 path: self.path.clone(),
@@ -212,7 +216,9 @@ mod jet_std {
                 typed_host: None,
                 typed_path: None,
             };
-            if self.port >= 0 && parts.default_port().ok() != Some(self.port) {
+            if self.port >= 0
+                && (self.port_explicit || parts.default_port().ok() != Some(self.port))
+            {
                 parts.port = Some(self.port);
             }
             parts
@@ -222,10 +228,10 @@ mod jet_std {
             self.scheme.clone()
         }
         pub fn username(&self) -> String {
-            self.user.clone()
+            self.user_text.clone()
         }
         pub fn password(&self) -> String {
-            self.password.clone()
+            self.password_text.clone()
         }
         pub fn userinfo(&self) -> String {
             self.parts().userinfo()
@@ -297,9 +303,12 @@ mod jet_std {
         JetURL::from_url_parts(jet_typed_url_parts_literal(literals, holes))
     }
 
+    /// The `core.net.mime.MIME` carrier: exactly the field layout declared in
+    /// `Core/net/mime.jet`, so generated struct literals and field reads name
+    /// the same Rust fields (`parameters` holds lowercase `[name, value]` rows).
     #[derive(Clone, Debug, PartialEq)]
     pub struct JetMIME {
         pub top: String,
         pub sub: String,
-        pub params: Vec<(String, String)>,
+        pub parameters: Vec<Vec<String>>,
     }

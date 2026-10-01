@@ -1,0 +1,168 @@
+// Compiler-facing `jet` verbs of the self-hosted driver. Each verb returns the
+// exact bytes and exit status the Rust CLI produces for the same input
+// (Source/main.rs `report_problems_with_summary`, Source/CmdCompile.rs
+// `emit_check_outcome`, Source/CmdDevTools.rs `run_explain`), so both front
+// doors print one meaning (I9). Writing the bytes and exiting stay with the
+// host that owns the process.
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticOrigin,
+    MIRSourceFile,
+    Span,
+    TextEdit,
+    DIAGNOSTIC_ERROR,
+    DIAGNOSTIC_LINT,
+    diagnostic_explanation,
+    diagnostic_explanation_render,
+    diagnostic_from_registry,
+    diagnostic_render_all,
+    diagnostic_theme_dim,
+    mir_sha256_hex,
+]
+
+// crates/jet-foundation/src/ExitCodes.rs
+pub JET_DRIVER_EXIT_OK :: 0
+pub JET_DRIVER_EXIT_USER_ERROR :: 1
+pub JET_DRIVER_EXIT_USAGE :: 2
+
+pub struct JetDriverVerbOutput {
+    pub stdout: String
+    pub stderr: String
+    pub exit_code: Int
+}
+
+// Accessibility lints that only `jet lint --a11y` shows
+// (Source/CmdDevTools.rs `A11Y_LINT_CODES`).
+fn jet_driver_is_a11y_lint(code: String) -> Bool Never! {
+    code == "E2930" || code == "E2931"
+}
+
+// The one dim teaching pointer after a rendered report.
+pub fn jet_driver_explain_pointer_line(code: String, color: Bool) -> String Never! {
+    diagnostic_theme_dim(color, "run `jet explain {code}` to learn more")
+}
+
+// `jet explain <CODE>` for a registered diagnostic code: the essay on stdout,
+// or E2104 on stderr when no such code exists. The other explain subjects
+// (syntax tokens, build facts, policies, markers, and the `--cost`,
+// `--reload`, and `--web-graph` views) are not owned by this driver yet.
+pub fn jet_driver_explain_code(code: String?, color: Bool) -> JetDriverVerbOutput Never! {
+    if code == .Val(query) {
+        if diagnostic_explanation(query) == .Val(explanation) {
+            return JetDriverVerbOutput{stdout: diagnostic_explanation_render(explanation, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+        report :: diagnostic_from_registry(
+            "E2104",
+            None,
+            "no diagnostic code `{query}` exists",
+            "Jet needs valid command input before it can run this command",
+            "run a command that reports an error to see its code, e.g. `jet check file.jet`",
+        )
+        return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{report}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n",
+        exit_code: JET_DRIVER_EXIT_USAGE,
+    }
+}
+
+fn jet_driver_shift_span(span: Span, shift: Int) -> Span Never! {
+    Span{start: span.start + shift, end: span.end + shift}
+}
+
+fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> DiagnosticOrigin? Never! {
+    loop file in generated {
+        if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+    }
+    loop root in snapshot.roots {
+        loop file in root.files {
+            if file.path == path -> return Val(DiagnosticOrigin{display: file.relative_path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+        }
+        loop file in root.foreign_cache_files {
+            if file.path == path -> return Val(DiagnosticOrigin{display: file.relative_path, path: path, source: file.source, revision: mir_sha256_hex(file.source)})
+        }
+    }
+    None
+}
+
+// Project one checked diagnostic onto the file that owns it, the way the
+// bootstrap host does (Compiler/Bootstrap/Host/DiagnosticCodec.rs): a named
+// source path becomes the origin (root-relative display; a generated source
+// shows its path), and the span, edit, and labels move from aggregate offsets
+// to offsets in that file's exact bytes.
+pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> Diagnostic Never! {
+    presented := ~diagnostic
+    path :: diagnostic.source_path ?? return presented
+    if presented.origin == None {
+        presented.origin = jet_driver_present_origin(path, snapshot, generated)
+        if presented.origin == None -> return presented
+    }
+    shift :: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
+    if diagnostic.span == .Val(span) -> presented.span = Val(jet_driver_shift_span(span, shift))
+    if diagnostic.edit == .Val(edit) -> presented.edit = Val(TextEdit{span: jet_driver_shift_span(edit.span, shift), new_text: edit.new_text})
+    loop index in 0..<presented.labels.len() {
+        presented.labels[index].span = jet_driver_shift_span(presented.labels[index].span, shift)
+    }
+    presented.source_path = None
+    presented.source_offset = None
+    presented.source_start = None
+    presented
+}
+
+pub fn jet_driver_present_diagnostics(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> [Diagnostic] Never! {
+    presented :: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated)
+    presented
+}
+
+// Rendered problems, a blank line, the summary verdict, and the pointer that
+// names the first code.
+fn jet_driver_problem_report(file: String, source: String, diagnostics: [Diagnostic], summary: String, color: Bool) -> String Never! {
+    if diagnostics.len() == 0 -> return ""
+    rendered :: diagnostic_render_all(file, source, diagnostics, color)
+    pointer :: jet_driver_explain_pointer_line(diagnostics[0].code, color)
+    "{rendered}\n{summary}\n{pointer}\n"
+}
+
+fn jet_driver_plural(count: Int) -> String Never! {
+    if count == 1 -> "" else -> "s"
+}
+
+// Front-end problems ending in the "N problems found" count. `run`, `dev`,
+// and `test` hide ordinary advisory lints unless `--verbose` asks
+// (D-LINT-VISIBILITY2=A); pass `show_advisories` accordingly.
+pub fn jet_driver_report_problems(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
+    shown := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
+    }
+    count :: shown.len()
+    jet_driver_problem_report(file, source, shown, "{count} problem{jet_driver_plural(count)} found", color)
+}
+
+// `jet check` human output for presented diagnostics: errors fail with the
+// problem count; warnings alone end in one `ok:` verdict; a clean check says
+// so unless `--quiet`. `file` is the entry as the user named it and `source`
+// its bytes, used for any diagnostic that carries no origin of its own.
+pub fn jet_driver_check_outcome(file: String, source: String, diagnostics: [Diagnostic], color: Bool, quiet: Bool) -> JetDriverVerbOutput Never! {
+    errors := [Diagnostic]{}
+    lints := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if {
+            diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic)
+            jet_driver_is_a11y_lint(diagnostic.code) -> {}
+            else -> &lints.push(diagnostic)
+        }
+    }
+    if errors.len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    count :: lints.len()
+    stderr := ""
+    if {
+        count > 0 -> stderr = jet_driver_problem_report(file, source, lints, "ok: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)
+        quiet -> {}
+        else -> stderr = "ok: `{file}` has no problems\n"
+    }
+    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
+}

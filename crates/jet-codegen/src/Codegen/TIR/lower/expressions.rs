@@ -5938,7 +5938,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
                 // parses as `Expr::Call`. Function-type params are unmarked Read params.
-                if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
+                // A declared function of the same name wins over the local, exactly
+                // as sema's `check_call` resolves it.
+                if env.locals.contains_key(&call.name)
+                    && !cx.consts.contains_key(&call.name)
+                    && !cx.sigs.contains_key(&call.name)
+                {
                     return in_own_frame(|| {
                         let callee_ty = env.ty_of(&call.name).unwrap_or_else(unit_type);
                         let callee_t = TExpr {
@@ -8919,9 +8924,31 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let subject = lower_expr(subject, cx, env);
             super::patterns::str_match_pattern_cond_expr(pattern, subject, cx)
         }
-        // A PatternTest that reaches value lowering with any other pattern is
-        // a condition-only shape consumed by the if-condition lowerer.
-        Expr::PatternTest { span, .. } => invariant_violation_expr(*span, "PatternTest"),
+        // S31: a pattern-bound name is in scope only for the rest of an `if`
+        // condition, so sema never brings a value-position binding into scope
+        // (`return r == .Val(name)` binds a fresh, unread `name`, even when an
+        // outer `name` exists). The value is the truth of the same condition:
+        // `if <test> { true } else { false }`, lowered by the if-condition
+        // lowerer, which owns every carrier, refinement, and binding shape.
+        Expr::PatternTest { .. } => {
+            let (cond, _bindings, then_body) = super::control_flow::lower_if_cond(e, cx, env);
+            canonicalize_pre_tier_expr(TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::IfExpr {
+                    cond: Box::new(cond),
+                    then_body,
+                    then_value: Box::new(TExpr {
+                        ty: Type::Bool,
+                        kind: TExprKind::BoolLit(true),
+                    }),
+                    else_body: Vec::new(),
+                    else_value: Box::new(TExpr {
+                        ty: Type::Bool,
+                        kind: TExprKind::BoolLit(false),
+                    }),
+                },
+            })
+        }
     }
 }
 
@@ -9232,8 +9259,13 @@ pub(crate) fn consume_plain_helper_route(
 /// cleanup guard.
 fn lower_present(inner: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let mut t = lower_owned_expr(inner, cx, env);
+    // The return type shapes only a list payload (`return Val([…])` in a
+    // `-> [T]?` function). Any other payload keeps its own checked type: a
+    // `Val(Label{…})` stored in a field must not be retagged as the list.
     if let Some(Type::Option(want)) = &env.ret_ty {
-        t = preserve_typed_list_shape(t, want, cx);
+        if matches!(t.ty.without_user_tags(), Type::List(_) | Type::FixedList { .. }) {
+            t = preserve_typed_list_shape(t, want, cx);
+        }
     }
     TExpr {
         ty: Type::Option(Box::new(t.ty.clone())),

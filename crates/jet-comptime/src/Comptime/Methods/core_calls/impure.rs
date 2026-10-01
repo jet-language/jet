@@ -821,6 +821,19 @@ pub fn apply_impure_core_call_with_type_args(
             type_name: "StdinHandle".to_string(),
             fields: vec![],
         }),
+        // D-COREIO1=A: the process stream handles are tokens; their writes go
+        // through the native `jet_std_io_{stdout,stderr}_*` rows.
+        ("core.term", "stdout" | "stderr") if repl_mode => {
+            Err(repl_native_module_diag("core.term", method, span))
+        }
+        ("core.term", "stdout") => Ok(CtValue::Struct {
+            type_name: "Stdout".to_string(),
+            fields: vec![("fd".to_string(), CtValue::Int(1))],
+        }),
+        ("core.term", "stderr") => Ok(CtValue::Struct {
+            type_name: "Stderr".to_string(),
+            fields: vec![("fd".to_string(), CtValue::Int(2))],
+        }),
         ("core.process", "exit") => {
             let code = match one(0)? {
                 CtValue::Int(n) => *n,

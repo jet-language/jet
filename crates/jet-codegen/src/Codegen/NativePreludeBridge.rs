@@ -350,7 +350,43 @@ fn is_native_route(symbol: &str) -> bool {
             | "jet_std::jet_unit_conversion_exact_measurement"
             | "jet_unit_conversion_rounded"
             | "jet_std::jet_unit_conversion_rounded_measurement"
-    )
+    ) || stdio_route(symbol).is_some()
+}
+
+/// D-COREIO1=A: `Stdout`/`Stderr` handle rows (`jet_std_io_{stream}_{method}`).
+/// The handles are tokens for the process streams, so only the stream name and
+/// method select the write.
+fn stdio_route(symbol: &str) -> Option<(&'static str, &str)> {
+    let rest = symbol.strip_prefix("jet_std_io_")?;
+    let (stream, method) = if let Some(method) = rest.strip_prefix("stdout_") {
+        ("stdout", method)
+    } else {
+        ("stderr", rest.strip_prefix("stderr_")?)
+    };
+    matches!(method, "write" | "write_line" | "write_bytes" | "flush" | "is_tty")
+        .then_some((stream, method))
+}
+
+fn byte_list(args: &[MirRuntimeValue], index: usize, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    match args.get(index) {
+        Some(MirRuntimeValue::Bytes(bytes)) => Ok(bytes.clone()),
+        Some(MirRuntimeValue::List(values)) => values
+            .iter()
+            .map(|value| match value {
+                MirRuntimeValue::Int(byte) => u8::try_from(*byte).map_err(|_| {
+                    bridge_error(span, format!("native Prelude argument {index} has a non-U8 item"))
+                }),
+                _ => Err(bridge_error(
+                    span,
+                    format!("native Prelude argument {index} has a non-U8 item"),
+                )),
+            })
+            .collect(),
+        _ => Err(bridge_error(
+            span,
+            format!("native Prelude argument {index} requires [U8]"),
+        )),
+    }
 }
 
 /// Dispatch one checked native Prelude row.
@@ -429,6 +465,36 @@ fn dispatch_route(
                 value: MirRuntimeValue::Unit,
                 stdout: Vec::new(),
                 stderr: frame.into_bytes(),
+            })
+        })();
+        return Some(result);
+    }
+    if let Some((stream, method)) = stdio_route(symbol) {
+        let result = (|| -> Result<AmbientMirPreludeResult, Diagnostic> {
+            let bytes = match method {
+                "write" => text(&args, 1, span)?.as_bytes().to_vec(),
+                "write_line" => format!("{}\n", text(&args, 1, span)?).into_bytes(),
+                "write_bytes" => byte_list(&args, 1, span)?,
+                "flush" => Vec::new(),
+                _ => {
+                    return Ok(AmbientMirPreludeResult::Value(MirRuntimeValue::Bool(
+                        if stream == "stdout" {
+                            crate::terminal_runtime::jet_term_stdout_is_terminal()
+                        } else {
+                            crate::terminal_runtime::jet_term_stderr_is_terminal()
+                        },
+                    )));
+                }
+            };
+            let (stdout, stderr) = if stream == "stdout" {
+                (bytes, Vec::new())
+            } else {
+                (Vec::new(), bytes)
+            };
+            Ok(AmbientMirPreludeResult::Effect {
+                value: MirRuntimeValue::Present(Box::new(MirRuntimeValue::Unit)),
+                stdout,
+                stderr,
             })
         })();
         return Some(result);

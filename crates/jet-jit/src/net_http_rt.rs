@@ -196,7 +196,7 @@ pub mod jet_std {
     pub struct JetMIME {
         pub top: String,
         pub sub: String,
-        pub params: Vec<(String, String)>,
+        pub parameters: Vec<Vec<String>>,
     }
 
     pub(crate) use crate::Encoding::json_rt::{

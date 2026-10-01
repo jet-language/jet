@@ -1,0 +1,297 @@
+// Human terminal rendering of diagnostics: the byte-stable form the
+// tests/ui snapshots pin (Docs/spec/diagnostics.md). Mirrors
+// crates/jet-foundation/src/Diagnostics.rs `render_inner`/`push_snippet`
+// and Terminal.rs `Theme`. With `color` false the text is plain; color only
+// wraps the same text in ANSI styling, so scripts read identical bytes.
+use core.text as diagnostic_unicode
+
+DIAGNOSTIC_THEME_ACCENT :: "1;96"
+DIAGNOSTIC_THEME_DIM :: "2;37"
+DIAGNOSTIC_THEME_WARN :: "33"
+DIAGNOSTIC_THEME_ERROR :: "31"
+DIAGNOSTIC_THEME_BOLD :: "1"
+
+// One `Theme` role: `ESC [ sgr m text ESC [ 0 m` when color is on.
+pub fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String Never! {
+    if !color -> return ~text
+    escape :: String.from_bytes([U8]{"\x1b"}) ?? ""
+    "{escape}[{sgr}m{text}{escape}[0m"
+}
+
+pub fn diagnostic_theme_accent(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, text) }
+pub fn diagnostic_theme_dim(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, text) }
+pub fn diagnostic_theme_bold(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, text) }
+
+fn diagnostic_theme_severity(color: Bool, severity: Int, text: String) -> String Never! {
+    if severity == DIAGNOSTIC_LINT -> return diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, text)
+    diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ERROR, text)
+}
+
+fn diagnostic_push_text(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+
+fn diagnostic_bytes_text(bytes: [U8], start: Int, end: Int) -> String Never! {
+    out := [U8]{}
+    index := if start < 0 -> 0 else -> start
+    limit :: if end > bytes.len() -> bytes.len() else -> end
+    loop index < limit {
+        &out.push(bytes[index])
+        index += 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn diagnostic_codepoint_at(bytes: [U8], index: Int, width: Int) -> Int Never! {
+    first :: diagnostic_byte_at(bytes, index)
+    if {
+        width == 2 -> (first - 192) * 64 + diagnostic_byte_at(bytes, index + 1) - 128
+        width == 3 -> (first - 224) * 4096 + (diagnostic_byte_at(bytes, index + 1) - 128) * 64 + diagnostic_byte_at(bytes, index + 2) - 128
+        width == 4 -> (first - 240) * 262144 + (diagnostic_byte_at(bytes, index + 1) - 128) * 4096 + (diagnostic_byte_at(bytes, index + 2) - 128) * 64 + diagnostic_byte_at(bytes, index + 3) - 128
+        else -> first
+    }
+}
+
+// Rust `char::is_control` (general category Cc) plus the Unicode line and
+// paragraph separators.
+fn diagnostic_is_terminal_control(codepoint: Int) -> Bool Never! {
+    codepoint < 32 || (codepoint >= 127 && codepoint <= 159) || codepoint == 8232 || codepoint == 8233
+}
+
+fn diagnostic_lower_hex(value: Int, min_digits: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    reversed := [U8]{}
+    rest := value
+    loop rest > 0 || reversed.len() < min_digits {
+        &reversed.push(digits[rest % 16])
+        rest /%= 16
+    }
+    out := [U8]{}
+    index := reversed.len() - 1
+    loop index >= 0 {
+        &out.push(reversed[index])
+        index -= 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// Escape untrusted text before it is projected to a terminal. Display-only:
+// C0/C1 controls, line separators, and line breaks become visible escapes.
+pub fn diagnostic_escape_terminal_text(value: String) -> String Never! {
+    bytes :: value.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        width :: diagnostic_utf8_width(bytes, index)
+        codepoint :: diagnostic_codepoint_at(bytes, index, width)
+        if {
+            codepoint == 10 -> diagnostic_push_text(&out, "\\n")
+            codepoint == 13 -> diagnostic_push_text(&out, "\\r")
+            codepoint == 9 -> diagnostic_push_text(&out, "\\t")
+            diagnostic_is_terminal_control(codepoint) -> diagnostic_push_text(&out, "\\u{{{diagnostic_lower_hex(codepoint, 4)}}}")
+            else -> {
+                loop offset in 0..<width -> &out.push(bytes[index + offset])
+            }
+        }
+        index += width
+    }
+    String.from_bytes(out) ?? value
+}
+
+// Byte offset just past the last newline before `offset` (0 on line one).
+fn diagnostic_line_start(bytes: [U8], offset: Int) -> Int Never! {
+    index := offset - 1
+    loop index >= 0 {
+        if bytes[index] == (U8{10}) -> return index + 1
+        index -= 1
+    }
+    0
+}
+
+fn diagnostic_clamp_offset(bytes: [U8], offset: Int) -> Int Never! {
+    if offset < 0 -> return 0
+    if offset > bytes.len() -> return bytes.len()
+    offset
+}
+
+// 1-based line of `offset`; offsets past the end read as the end.
+pub fn diagnostic_line_at(source: String, offset: Int) -> Int Never! {
+    bytes :: source.bytes()
+    limit :: diagnostic_clamp_offset(bytes, offset)
+    line := 1
+    loop index in 0..<limit {
+        if bytes[index] == (U8{10}) -> line += 1
+    }
+    line
+}
+
+// 1-based column of `offset`: every character that starts before it counts.
+pub fn diagnostic_column_at(source: String, offset: Int) -> Int Never! {
+    bytes :: source.bytes()
+    limit :: diagnostic_clamp_offset(bytes, offset)
+    column := 1
+    loop index in diagnostic_line_start(bytes, limit)..<limit {
+        if !diagnostic_is_continuation(Int.from_u8(bytes[index])) -> column += 1
+    }
+    column
+}
+
+// The text of the line holding `offset`, as Rust `str::lines` yields it.
+fn diagnostic_line_text_at(bytes: [U8], offset: Int) -> String Never! {
+    start :: diagnostic_line_start(bytes, diagnostic_clamp_offset(bytes, offset))
+    end := start
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
+    diagnostic_bytes_text(bytes, start, end)
+}
+
+// The first `count` characters of `text`.
+fn diagnostic_prefix_chars(text: String, count: Int) -> String Never! {
+    bytes :: text.bytes()
+    index := 0
+    taken := 0
+    loop taken < count && index < bytes.len() {
+        index += diagnostic_utf8_width(bytes, index)
+        taken += 1
+    }
+    diagnostic_bytes_text(bytes, 0, index)
+}
+
+fn diagnostic_is_char_boundary(bytes: [U8], index: Int) -> Bool Never! {
+    if index == bytes.len() -> return true
+    if index < 0 || index > bytes.len() -> return false
+    !diagnostic_is_continuation(Int.from_u8(bytes[index]))
+}
+
+// Rust `src.get(start..end)` up to its first newline; an invalid range is "".
+fn diagnostic_snippet_first_line(bytes: [U8], span: Span) -> String Never! {
+    end :: if span.end > bytes.len() -> bytes.len() else -> span.end
+    if span.start > end || !diagnostic_is_char_boundary(bytes, span.start) || !diagnostic_is_char_boundary(bytes, end) -> return ""
+    stop := span.start
+    loop stop < end && bytes[stop] != (U8{10}) -> stop += 1
+    diagnostic_bytes_text(bytes, span.start, stop)
+}
+
+fn diagnostic_right_align(text: String, width: Int) -> String Never! {
+    padding :: width - text.bytes().len()
+    if padding <= 0 -> return ~text
+    "{" ".repeat(padding)}{text}"
+}
+
+// Draw one `--> file:line:col` snippet with a caret under `span`; a secondary
+// label prints its message after the carets.
+fn diagnostic_push_snippet(out: &[U8], diagnostic: Diagnostic, color: Bool, file: String, source: String, span: Span, message: String?) Never! {
+    bytes :: source.bytes()
+    line :: diagnostic_line_at(source, span.start)
+    column :: diagnostic_column_at(source, span.start)
+    location :: diagnostic_theme_dim(color, "--> {file}:{line}:{column}")
+    diagnostic_push_text(&out, "  {location}\n")
+    raw_line_text :: diagnostic_line_text_at(bytes, span.start)
+    line_text :: diagnostic_escape_terminal_text(raw_line_text)
+    diagnostic_push_text(&out, "    |\n")
+    diagnostic_push_text(&out, "{diagnostic_right_align("{line}", 3)} | {line_text}\n")
+    // Width-aware underline: pad by the display width of everything before
+    // the span, then draw carets as wide as the spanned text.
+    prefix :: diagnostic_escape_terminal_text(diagnostic_prefix_chars(raw_line_text, column - 1))
+    pad_width :: diagnostic_unicode.display_width(prefix)
+    snippet_first_line :: diagnostic_escape_terminal_text(diagnostic_snippet_first_line(bytes, span))
+    line_width :: diagnostic_unicode.display_width(line_text)
+    avail :: if line_width > pad_width -> line_width - pad_width else -> 0
+    caret_len := diagnostic_unicode.display_width(snippet_first_line)
+    if caret_len < 1 -> caret_len = 1
+    if avail > 0 && caret_len > avail -> caret_len = avail
+    pad :: " ".repeat(pad_width)
+    // Color only the caret glyphs, not the leading pad (keeps columns).
+    marks :: diagnostic_theme_severity(color, diagnostic.severity, "^".repeat(caret_len))
+    if {
+        message == .Val(text) -> diagnostic_push_text(&out, "    | {pad}{marks} {diagnostic_escape_terminal_text(text)}\n")
+        else -> diagnostic_push_text(&out, "    | {pad}{marks}\n")
+    }
+}
+
+// A detail whose first line is `kind:value` is structured data for machine
+// consumers; the terminal projection leaves it out.
+fn diagnostic_has_structured_detail_key(detail: String) -> Bool Never! {
+    bytes :: detail.bytes()
+    if bytes.len() == 0 -> return false
+    end := 0
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    if end > 0 && bytes[end - 1] == (U8{13}) -> end -= 1
+    colon := -1
+    loop index in 0..<end {
+        if bytes[index] == (U8{58}) {
+            colon = index
+            break
+        }
+    }
+    if colon <= 0 || colon + 1 >= end -> return false
+    loop index in 0..<colon {
+        value :: Int.from_u8(bytes[index])
+        is_key_byte :: (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95 || value == 45
+        if !is_key_byte -> return false
+    }
+    !diagnostic_is_whitespace_at(bytes, colon + 1)
+}
+
+fn diagnostic_join_escaped(parts: [String], separator: String) -> String Never! {
+    joined := ""
+    loop (index, part) in parts {
+        escaped :: diagnostic_escape_terminal_text(part)
+        joined = if index == 0 -> escaped else -> "{joined}{separator}{escaped}"
+    }
+    joined
+}
+
+// One diagnostic as terminal text. `file` and `source` name the checked
+// source; a diagnostic's own origin replaces both.
+pub fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, color: Bool) -> String Never! {
+    display := file
+    text := source
+    if diagnostic.origin == .Val(origin) {
+        display = origin.display
+        text = origin.source
+    }
+    display = diagnostic_escape_terminal_text(display)
+    what :: diagnostic_escape_terminal_text(diagnostic.what)
+    why :: diagnostic_escape_terminal_text(diagnostic.why)
+    fix :: diagnostic_escape_terminal_text(diagnostic.fix)
+    label :: if diagnostic.severity == DIAGNOSTIC_LINT -> diagnostic_theme_severity(color, diagnostic.severity, "Warning") else -> diagnostic_theme_severity(color, diagnostic.severity, "Error")
+    lint_name := String?{None}
+    if diagnostic_registry_row(diagnostic.code) == .Val(row) {
+        if row.severity == DIAGNOSTIC_LINT -> lint_name = row.lint_name
+    }
+    out := [U8]{}
+    if {
+        lint_name == .Val(name) -> diagnostic_push_text(&out, "{label} [{diagnostic.code}] ({name}): {what}\n")
+        else -> diagnostic_push_text(&out, "{label} [{diagnostic.code}]: {what}\n")
+    }
+    if diagnostic.span == .Val(span) -> diagnostic_push_snippet(&out, diagnostic, color, display, text, span, None)
+    loop secondary in diagnostic.labels -> diagnostic_push_snippet(&out, diagnostic, color, display, text, secondary.span, Val(secondary.message))
+    diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Why:")} {why}\n")
+    diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Fix:")} {fix}\n")
+    if diagnostic.detail == .Val(detail) {
+        if !diagnostic_has_structured_detail_key(detail) {
+            escaped :: diagnostic_escape_terminal_text(detail)
+            diagnostic_push_text(&out, escaped)
+            if !escaped.ends_with("\n") -> diagnostic_push_text(&out, "\n")
+        }
+    }
+    if diagnostic.denial_kind == .Val(kind) {
+        diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Denial:")} {diagnostic_escape_terminal_text(kind)}\n")
+        if diagnostic.call_chain.len() > 0 -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Call chain:")} {diagnostic_join_escaped(diagnostic.call_chain, " → ")}\n")
+        if diagnostic.scope_chain.len() > 0 -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Scope chain:")} {diagnostic_join_escaped(diagnostic.scope_chain, " → ")}\n")
+        if diagnostic.nearest_granting_scope == .Val(scope) -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
+    }
+    diagnostic_push_text(&out, "More: jet-lang.dev/e/{diagnostic.code}\n")
+    String.from_bytes(out) ?? ""
+}
+
+// A batch of diagnostics, one blank line between each.
+pub fn diagnostic_render_all(file: String, source: String, diagnostics: [Diagnostic], color: Bool) -> String Never! {
+    rendered := ""
+    loop (index, diagnostic) in diagnostics {
+        text :: diagnostic_render(diagnostic, file, source, color)
+        rendered = if index == 0 -> text else -> "{rendered}\n{text}"
+    }
+    rendered
+}

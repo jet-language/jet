@@ -146,17 +146,33 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
             }
             &lines.push("        }}")
         }
-        else -> {}
+        .Distinct(_, _) -> &lines.push("        self.0.{method}()")
+        .UnitFamily(members) -> {
+            &lines.push("        match self {{")
+            loop member in members {
+                member_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(member))
+                &lines.push("            Self::{jet_rust_emit_sanitize(member)} => jet_debug_variant({member_name}, None),")
+            }
+            &lines.push("        }}")
+        }
+        .Alias(_) -> {}
     }
     &lines.push("    }}")
     &lines.push("}}")
+}
+
+// A Core web query status enum keeps its native Prelude display; MIRRust
+// is_source_owned_core_web_query_enum.
+fn jet_codegen_auto_derives_core_web_query_enum(key: String) -> Bool Never! {
+    if !key.starts_with("<corelib>/Core/web::Core/web/query.jet::") -> return false
+    key.ends_with("::WebQueryNetworkMode") || key.ends_with("::WebMutationStatus") || key.ends_with("::WebQueryStatus")
 }
 
 // D-DISPLAYDBG1: bare `{value}` of a plain enum (every case a unit case) renders
 // its case name on every tier, so `jet_fmt_display<T: JetDisplay>` gets that
 // render here. A selected user `Display` impl keeps its own rendering.
 fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, variants: [MIRVariant], lines: &[String]) Never! {
-    if definition.generic_params.len() > 0 || variants.len() == 0 -> return
+    if definition.generic_params.len() > 0 || variants.len() == 0 || jet_codegen_auto_derives_core_web_query_enum(definition.key) -> return
     loop variant in variants {
         if variant.payload == {
             .Unit -> {}
@@ -177,16 +193,33 @@ fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, 
     &lines.push("}}")
 }
 
+// D-CAPBUNDLE1: `#Printable` on a distinct type admits bare `{value}` and
+// renders the base value on every tier, so `JetDisplay` forwards to the base;
+// a selected user `Display` impl keeps its own rendering.
+fn jet_codegen_auto_derives_append_distinct_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
+    if definition.kind == {
+        .Distinct(_, _) -> {}
+        else -> return
+    }
+    if !definition.auto_printable || jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display") -> return
+    &lines.push("impl JetDisplay for {jet_rust_emit_type_name(&ctx, definition.id)} {{")
+    &lines.push("    fn jet_display(&self) -> String {{")
+    &lines.push("        self.0.jet_display()")
+    &lines.push("    }}")
+    &lines.push("}}")
+}
+
 // D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family member
 // onto `Err` with `Err("{self}")`, and every Prelude-owned member renders that
 // text through its `JetShow`. A member declared in Core Jet source
 // (`UUIDError`) is emitted from MIR, so it forwards `JetDisplay` to the
-// structural `JetShow` above. A unit-only enum keeps its case-name display; a
-// selected user `Display` impl keeps its own rendering.
+// structural `JetShow` below. A unit-only enum keeps its case-name display;
+// distinct and alias rows have no structural body; a selected user `Display`
+// impl keeps its own rendering.
 fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
     if !definition.key.starts_with("<corelib>/") || !sema_core_error_family_member(definition.key) || definition.generic_params.len() > 0 -> return
     if definition.kind == {
-        .Struct(_, _) -> {}
+        .Struct(_, _) | .UnitFamily(_) -> {}
         .Enum(variants, _) -> {
             unit_only := true
             loop variant in variants {
@@ -210,29 +243,25 @@ fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, 
 
 
 // The selection booleans are checked semantic facts keyed to one canonical MIR
-// type. They are deliberately independent of source `derives` and native Rust
-// capability derives; callers must not reconstruct them from either.
+// type: `printable` is the row's auto-Printable fact and `debug` its declared
+// Debug derive. Mirrors MIRRust emit_structural_show_impl.
 pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
     lines := [String]{}
     if facts.type_id != definition.id {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "auto-derive facts name a different MIR type", "structural auto-derive selections are bound to the exact canonical type ID", Val(definition.span))
         return lines
     }
+    emit_show :: facts.printable && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Printable")
+    emit_debug :: facts.debug && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Debug")
     if definition.kind == {
         .Enum(variants, _) -> jet_codegen_auto_derives_append_plain_enum_display(&ctx, definition, variants, &lines)
         else -> {}
     }
-    if !facts.printable && !facts.debug -> return lines
-    if definition.kind == {.Struct(_, _) | .Enum(_, _) -> {} else -> {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "structural auto-derive facts target a non-structural type", "Printable and Debug auto bodies are defined only for checked structs and enums", Val(definition.span))
-        return lines
-    }}
-    if facts.printable && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Printable") {
-        jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
-        jet_codegen_auto_derives_append_core_error_display(&ctx, definition, &lines)
-    }
-    if facts.debug && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Debug") {
-        jet_codegen_auto_derives_append_show(&ctx, definition, "JetDebug", "jet_debug", "JetDebug", &lines)
-    }
+    jet_codegen_auto_derives_append_distinct_display(&ctx, definition, &lines)
+    if emit_show -> jet_codegen_auto_derives_append_core_error_display(&ctx, definition, &lines)
+    if !emit_show && !emit_debug -> return lines
+    if definition.kind == .Alias(_) -> return lines
+    if emit_show -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
+    if emit_debug -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetDebug", "jet_debug", "JetDebug", &lines)
     lines
 }

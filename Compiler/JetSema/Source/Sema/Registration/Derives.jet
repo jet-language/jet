@@ -16,6 +16,7 @@ use jet_foundation.[
     CallArg,
     ContextField,
     ContractClause,
+    CtEnumArg,
     CtValue,
     DIAGNOSTIC_ERROR,
     DeriveBodyItem,
@@ -48,6 +49,7 @@ use jet_foundation.[
     Pattern,
     Span,
     Stmt,
+    StrFormat,
     StrMatchPart,
     StrPart,
     StructDef,
@@ -114,15 +116,16 @@ fn sema_derive_static_value(expansion: SemaDeriveExpansion, expression: Expr) ->
     if expression == {
         .Int(value, _, _, _) -> Val(CtValue.Int{value: value})
         .Bool(value, _) -> Val(CtValue.Bool{value: value})
-        .Str(parts, _) -> {
-            text := ""
-            loop part in parts {
-                if part == {
-                    .Lit(value) -> text = "{text}{value}"
-                    else -> return None
-                }
-            }
-            Val(CtValue.Str{value: text})
+        .Str(parts, _) -> sema_derive_static_str(expansion, parts)
+        .StructLit(type_name, _, _, _, fields, _, _) -> sema_derive_static_struct(expansion, type_name, fields)
+        .TypedLit(head, body, _) -> sema_derive_static_typed(expansion, head, body)
+        .EnumLit(type_name, variant, _, args, _, _) -> {
+            if args.len() != 0 -> return None
+            Val(CtValue.Enum{type_name: type_name, variant: sema_derive_bare(variant), args: [CtEnumArg]{}})
+        }
+        .Present(value, _) -> {
+            inner :: sema_derive_static_value(expansion, value) ?? return None
+            Val(CtValue.Present{value: inner})
         }
         .Unary(op, operand, _) -> {
             if op != UnOp.Not -> return None
@@ -153,7 +156,9 @@ fn sema_derive_static_value(expansion: SemaDeriveExpansion, expression: Expr) ->
         }
         .Field(base, member, _) -> {
             owner :: sema_derive_static_value(expansion, base) ?? return None
-            sema_derive_struct_field(owner, member)
+            direct :: sema_derive_struct_field(owner, member)
+            if direct != None || !member.starts_with("$") -> return direct
+            sema_derive_fact_read(owner, sema_derive_bare(member))
         }
         .Index(base, index, _, _) -> {
             owner :: sema_derive_static_value(expansion, base) ?? return None
@@ -163,21 +168,135 @@ fn sema_derive_static_value(expansion: SemaDeriveExpansion, expression: Expr) ->
                     if at >= 0 && at < values.len() -> return Val(values[at])
                 }
             }
+            // `info[.count]`: a typed selector names one reflected field row.
+            if position == .Enum(_, variant, selector_args) {
+                if selector_args.len() == 0 -> return sema_derive_named_row(owner, "fields", variant)
+            }
             CtValue?{None}
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
-            if method != "len" || args.len() != 0 -> return None
-            owner :: sema_derive_static_value(expansion, receiver) ?? return None
-            if owner == {
-                .List(values) -> Val(CtValue.Int{value: values.len()})
-                .Bytes(values) -> Val(CtValue.Int{value: values.len()})
-                .Map(entries) -> Val(CtValue.Int{value: entries.len()})
-                .Str(value) -> Val(CtValue.Int{value: value.chars().len()})
-                else -> CtValue?{None}
-            }
-        }
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> sema_derive_static_method(expansion, receiver, method, args)
         else -> CtValue?{None}
     }
+}
+
+fn sema_derive_static_length(owner: CtValue) -> CtValue? Never! {
+    count := -1
+    if owner == .List(values) -> count = values.len()
+    if owner == .Bytes(bytes) -> count = bytes.len()
+    if owner == .Map(entries) -> count = entries.len()
+    if owner == .Str(text) -> count = text.chars().len()
+    if count < 0 -> return None
+    Val(CtValue.Int{value: count})
+}
+
+// `.len()`, `T.reflect()` over the handle itself, and the reflection
+// metadata predicates over the handle's own rows.
+fn sema_derive_static_method(expansion: SemaDeriveExpansion, receiver: Expr, method: String, args: [CallArg]) -> CtValue? Never! {
+    owner :: sema_derive_static_value(expansion, receiver) ?? return None
+    if args.len() == 0 {
+        if method == "len" -> return sema_derive_static_length(owner)
+        if method == "reflect" && sema_derive_named_type(owner) == "TypeInfo" -> return Val(owner)
+        return None
+    }
+    if args.len() != 1 -> return None
+    argument :: sema_derive_static_value(expansion, args[0].expr) ?? return None
+    wanted := ""
+    if argument == .Str(text) -> wanted = text
+    if wanted == "" -> return None
+    if method == "has_marker" -> return Val(CtValue.Bool{value: sema_derive_named_row(owner, "markers", wanted) != None})
+    if method == "has_method" -> return Val(CtValue.Bool{value: sema_derive_named_row(owner, "methods", wanted) != None})
+    if method != "implements" -> return None
+    if sema_derive_struct_field(owner, "implements") == .Val(.List(names)) {
+        loop name in names {
+            if name == .Str(text) {
+                if text == wanted -> return Val(CtValue.Bool{value: true})
+            }
+        }
+        return Val(CtValue.Bool{value: false})
+    }
+    None
+}
+
+fn sema_derive_named_type(value: CtValue) -> String Never! {
+    if value == .Struct(owner, _) -> return owner
+    ""
+}
+
+// A string literal whose interpolations are known-time scalars.
+fn sema_derive_static_str(expansion: SemaDeriveExpansion, parts: [StrPart]) -> CtValue? Never! {
+    text := ""
+    loop part in parts {
+        if part == .Lit(value) {
+            text = "{text}{value}"
+            next
+        }
+        if part == .Interp(inner, format) {
+            if format != StrFormat.Display -> return None
+            value :: sema_derive_static_value(expansion, inner) ?? return None
+            rendered :: sema_derive_static_text(value) ?? return None
+            text = "{text}{rendered}"
+            next
+        }
+        return None
+    }
+    Val(CtValue.Str{value: text})
+}
+
+fn sema_derive_static_typed(expansion: SemaDeriveExpansion, head: Type?, body: TypedLitBody) -> CtValue? Never! {
+    if body == .Elements(elements) {
+        values := [CtValue]{}
+        loop element in elements {
+            value :: sema_derive_static_value(expansion, element) ?? return None
+            &values.push(value)
+        }
+        return Val(CtValue.List{values: values})
+    }
+    if body == .Fields(fields) {
+        if head == .Val(.Named(owner)) -> return sema_derive_static_struct(expansion, owner, fields)
+    }
+    None
+}
+
+fn sema_derive_static_text(value: CtValue) -> String? Never! {
+    if value == {
+        .Str(text) -> Val(text)
+        .Int(number) -> Val("{number}")
+        .Bool(flag) -> Val("{flag}")
+        else -> None
+    }
+}
+
+fn sema_derive_static_struct(expansion: SemaDeriveExpansion, type_name: String, fields: [ExprField]) -> CtValue? Never! {
+    values := [NamedCtValue]{}
+    loop field in fields {
+        value :: sema_derive_static_value(expansion, field.value) ?? return None
+        &values.push(NamedCtValue{name: field.name, value: value})
+    }
+    Val(CtValue.Struct{type_name: type_name, fields: values})
+}
+
+// The reflected row named `name` in the handle's `rows` list (`fields`,
+// `markers`, `methods`).
+fn sema_derive_named_row(owner: CtValue, rows: String, name: String) -> CtValue? Never! {
+    if sema_derive_struct_field(owner, rows) == .Val(.List(values)) {
+        key :: sema_derive_bare(name)
+        loop value in values {
+            if sema_derive_struct_field(value, "name") == .Val(.Str(text)) {
+                if text == key -> return Val(value)
+            }
+        }
+    }
+    None
+}
+
+// D-FACT-READ1: `handle.$read` over a reflected handle without a direct
+// field reads the handle's homed fact row of that name; the fact value keeps
+// its detail under the same name.
+fn sema_derive_fact_read(owner: CtValue, read: String) -> CtValue? Never! {
+    fact :: sema_derive_named_row(owner, "facts", read) ?? return None
+    value :: sema_derive_struct_field(fact, "value") ?? return None
+    if sema_derive_struct_field(value, read) == .Val(.Present(detail)) -> return Val(detail)
+    None
 }
 
 fn sema_derive_ct_bool(value: CtValue) -> Bool? Never! {
@@ -208,6 +327,15 @@ fn sema_derive_ct_scalar_equal(lhs: CtValue, rhs: CtValue) -> Bool? Never! {
         }
         .Str(a) -> {
             if rhs == .Str(b) -> return Val(a == b)
+        }
+        // A unit variant compares by variant; a leading-dot literal carries no
+        // owner name, so only two named owners must also agree.
+        .Enum(left_type, left_variant, left_args) -> {
+            if rhs == .Enum(right_type, right_variant, right_args) {
+                if left_args.len() != 0 || right_args.len() != 0 -> return None
+                if left_type != "" && right_type != "" && left_type != right_type -> return Val(false)
+                return Val(left_variant == right_variant)
+            }
         }
         else -> {}
     }
@@ -822,7 +950,10 @@ fn sema_derive_expand_loop_block(expansion: &SemaDeriveExpansion, body: [Stmt], 
     if body.len() == 0 -> return
     if body[0] == .For(var, _, _, kind, loop_body, _, _, _, _) {
         if kind == .In(collection, _) {
-            values :: sema_derive_loop_values(&expansion, collection, span) ?? return
+            values :: sema_derive_loop_values(expansion, collection) ?? {
+                sema_derive_fail(&expansion, sema_error("E0956", span, "a `prep loop` source is not a compile-time list", "`prep loop` expands one statement template for each value in its source list", "use a reflected/comptime list such as `T.$fields`"))
+                return
+            }
             loop value in values {
                 &expansion.scope.push(NamedCtValue{name: var, value: value})
                 loop inner in loop_body {
@@ -840,7 +971,7 @@ fn sema_derive_expand_loop_block(expansion: &SemaDeriveExpansion, body: [Stmt], 
 
 // Rust `eval_template_loop_source`: a reflected list, or a closed list of
 // written type names as text bindings.
-fn sema_derive_loop_values(expansion: &SemaDeriveExpansion, source: Expr, span: Span) -> [CtValue]? Never! {
+fn sema_derive_loop_values(expansion: SemaDeriveExpansion, source: Expr) -> [CtValue]? Never! {
     value := sema_derive_static_value(expansion, source)
     if value == None {
         if source == .ListLit(elements, _) {
@@ -861,7 +992,6 @@ fn sema_derive_loop_values(expansion: &SemaDeriveExpansion, source: Expr, span: 
         }
     }
     if value == .Val(.List(values)) -> return Val(values)
-    sema_derive_fail(&expansion, sema_error("E0956", span, "a `prep loop` source is not a compile-time list", "`prep loop` expands one statement template for each value in its source list", "use a reflected/comptime list such as `T.$fields`"))
     None
 }
 
@@ -1135,7 +1265,8 @@ fn sema_derive_expand_body(expansion: &SemaDeriveExpansion, body: [DeriveBodyIte
                 if stmt == .Val(binding) {
                     init :: sema_derive_expand_expr(&expansion, binding.init)
                     value :: sema_derive_static_value(expansion, init) ?? {
-                        sema_derive_fail(&expansion, sema_error("E0956", binding.name_span, "a derive template binding is not a known-time value", "a template binding names a reflected fact or literal the expansion reads directly", "bind a reflected fact such as `T.$fields` or a literal"))
+                        failure :: sema_derive_binding_failure(expansion, binding.name_span, init)
+                        sema_derive_fail(&expansion, failure)
                         return
                     }
                     &expansion.scope.push(NamedCtValue{name: binding.name, value: value})
@@ -1145,8 +1276,11 @@ fn sema_derive_expand_body(expansion: &SemaDeriveExpansion, body: [DeriveBodyIte
                 }
             }
             .Item(item) -> &out.push(sema_derive_expand_item(&expansion, item))
-            .Loop(var, _, source, loop_body, span) -> {
-                values :: sema_derive_loop_values(&expansion, source, span) ?? return
+            .Loop(var, _, source, loop_body, _) -> {
+                values :: sema_derive_loop_values(expansion, source) ?? {
+                    sema_derive_fail(&expansion, sema_error("E0956", expr_span(source), "a `prep loop` source is not a compile-time list", "`prep loop` expands one item template for each value in its source list", "use a reflected/comptime list such as `T.$fields`, or a closed type list like `[TypeA, TypeB]`"))
+                    return
+                }
                 loop value in values {
                     &expansion.scope.push(NamedCtValue{name: var, value: value})
                     sema_derive_expand_body(&expansion, loop_body, &out)
@@ -1156,6 +1290,23 @@ fn sema_derive_expand_body(expansion: &SemaDeriveExpansion, body: [DeriveBodyIte
             }
         }
     }
+}
+
+// Rust's typed selector reports an unknown field as E0302; any other binding
+// the expansion cannot read is E0956.
+fn sema_derive_binding_failure(expansion: SemaDeriveExpansion, span: Span, init: Expr) -> Diagnostic Never! {
+    if init == .Index(base, index, _, _) {
+        if index == .EnumLit(_, variant, _, args, _, _) {
+            if args.len() == 0 {
+                if sema_derive_static_value(expansion, base) == .Val(owner) {
+                    if sema_derive_struct_field(owner, "fields") != None && sema_derive_named_row(owner, "fields", variant) == None {
+                        return sema_error("E0302", span, "the reflected layout has no field `{sema_derive_bare(variant)}`", "typed selectors must name a field declared by the reflected type", "use one of the names in `T.reflect().fields`")
+                    }
+                }
+            }
+        }
+    }
+    sema_error("E0956", span, "a derive template binding is not a known-time value", "a template binding names a reflected fact or literal the expansion reads directly", "bind a reflected fact such as `T.$fields` or a literal")
 }
 
 fn sema_derive_stmt_span(stmt: Stmt) -> Span Never! {
@@ -1170,9 +1321,17 @@ fn sema_derive_stmt_span(stmt: Stmt) -> Span Never! {
 // Rust `Comptime::expand_derive_body`: `name` and the provider's type
 // parameter are bound to the target's reflected handle.
 pub fn sema_derive_expand_provider_body(body: [DeriveBodyItem], type_param: String, type_info: CtValue, diagnostics: &[Diagnostic]) -> [Item]? {
-    expansion := SemaDeriveExpansion{scope: [NamedCtValue]{}, failure: None}
-    if sema_derive_struct_field(type_info, "name") == .Val(.Str(name)) -> &expansion.scope.push(NamedCtValue{name: "name", value: CtValue.Str{value: name}})
-    &expansion.scope.push(NamedCtValue{name: type_param, value: type_info})
+    scope := [NamedCtValue]{}
+    if sema_derive_struct_field(type_info, "name") == .Val(.Str(name)) -> &scope.push(NamedCtValue{name: "name", value: CtValue.Str{value: name}})
+    &scope.push(NamedCtValue{name: type_param, value: type_info})
+    sema_derive_expand_template_body(body, scope, &diagnostics)
+}
+
+// Rust `Comptime::expand_template_body`: expand one typed item template in
+// the caller's compile-time scope. A failed expansion reports its one
+// diagnostic and generates nothing.
+pub fn sema_derive_expand_template_body(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: &[Diagnostic]) -> [Item]? {
+    expansion := SemaDeriveExpansion{scope: scope, failure: None}
     items := [Item]{}
     sema_derive_expand_body(&expansion, body, &items)
     if expansion.failure == .Val(diagnostic) {

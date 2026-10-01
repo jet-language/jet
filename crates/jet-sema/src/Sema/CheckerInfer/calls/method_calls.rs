@@ -5434,19 +5434,15 @@ impl<'a> Checker<'a> {
             *resolved_ret_out = ret.clone();
             return ret;
         }
-        // D-URL1=A: method calls on typed Url/Mime values.
+        // D-URL1=A: method calls on typed MIME values.
         if let Some(ret) = url_mime_method_return(&recv_ty, method, args) {
             let recv_name = match &recv_ty {
                 Type::Named(n) => n.as_str(),
                 _ => "",
             };
             match (recv_name, method, args.len()) {
-                ("URL", "join", 1) | ("MIME", "param", 1) => {
+                ("MIME", "param", 1) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-                }
-                ("URL", "set_query" | "add_query", 2) => {
-                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-                    self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
                 }
                 _ => {
                     for a in args.iter_mut() {
@@ -5456,7 +5452,7 @@ impl<'a> Checker<'a> {
             }
             *recv_type_out = Some(match &recv_ty {
                 Type::Named(n) => n.clone(),
-                _ => "URL".to_string(),
+                _ => "MIME".to_string(),
             });
             return ret;
         }

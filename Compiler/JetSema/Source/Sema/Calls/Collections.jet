@@ -13,6 +13,7 @@ use jet_foundation.[
     TExpr,
     TExprKind,
     Type,
+    expr_span,
     sema_collection_is_map,
     sema_collection_method_argument_type,
     sema_collection_method_contract,
@@ -137,7 +138,21 @@ fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallPa
 pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     if method == "zip" || method == "zip_short" || method == "zip_pad" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    // E0964: length-changing methods are forbidden on a fixed-size `[T#N]`.
+    if sema_expr_unwrap_tag(receiver_value.ty) == .FixedList(_, _) && (method == "push" || method == "pop" || method == "insert" || method == "remove" || method == "clear") {
+        &diagnostics.push(sema_error("E0964", span, "`{method}` changes a list's length, but this is a fixed-size {sema_type_show(receiver_value.ty)}", "the length of `[T#N]` is fixed at compile time and cannot change", "bind a growable list with `:=` (e.g. `r := [...]`) if you need to change its length"))
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     contract :: sema_collection_method_contract(receiver_value.ty, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if method != "len" && method != "is_empty" && method != "push" && sema_columnar_list_element(environment, receiver_value.ty) == .Val(element) {
+        &diagnostics.push(sema_error("E1108", span, "`.{method}()` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(receiver_value.ty))}` yet", "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration", "drop `#Layout(columnar)` from `{element}` to use `.{method}()`, or rewrite the loop with indexing"))
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if contract.receiver_access == AccessConvention.Write && sema_expr_place_root_ident(receiver) == .Val(root) && context.iter_borrowed.contains(root) {
+        &diagnostics.push(sema_collection_changed_in_loop(root, "`{root}.{method}()`", expr_span(receiver)))
+    }
     labels_valid := sema_call_collections_check_labels(method, updated_args, &diagnostics)
     if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -254,6 +269,13 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
             set_list := sema_tir_expr(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
             sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: set_list, operation: TBuiltinOp.Min{float: false}, args: [TExpr]{}}, span)
+        }
+        .IterToSet -> {
+            // #4009: `Set.from` collects a list; drain the iterator through the
+            // same `.to_list()` a user would write before building the set.
+            element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
+            drained := sema_tir_expr(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IterToList, args: [TExpr]{}}, span)
+            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
         }
     }
     checked := sema_expr_expected(value, expected, environment, &diagnostics)

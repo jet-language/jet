@@ -268,7 +268,7 @@ pub fn sema_taskgroup_receiver_ok(receiver: Expr, span: Span, scopes: SemaScopeT
         return false
     }
     frame :: context.taskgroups.stack[frame_index ?? 0]
-    if frame.origin == SemaTaskGroupOrigin.Parameter || sema_taskgroup_active_lexical_name(context.taskgroups) == .Val(name) -> return true
+    if frame.origin == SemaTaskGroupOrigin.Parameter || sema_taskgroup_active_lexical_name(context.taskgroups) == (Val(name)) -> return true
     active :: sema_taskgroup_active_lexical_name(context.taskgroups) ?? ""
     &diagnostics.push(sema_error("E1110", span, "`task` must use the active task group `{active}`, not `{name}`", "each lexical `task.group` block owns its spawns; a helper can instead receive a `Group` parameter", "write the spawn in the active group, or pass its handle to `fn helper(group: Group)`"))
     false
@@ -356,7 +356,7 @@ pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr
     nested := sema_check_statements(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
     sema_taskgroup_mark_spawns_owned(&context, SemaTaskGroupOrigin.Lexical, scopes, &state, &diagnostics)
     if context.taskgroups.stack.len() > 0 -> _ := &context.taskgroups.stack.pop()
-    sema_scope_leave(&scopes, &state)
+    sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     if !nested.complete || !valid -> return None
     group_local := tir_symbol_local(name, name_span, id)
     TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}

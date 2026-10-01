@@ -135,6 +135,7 @@ use jet_codegen.[
     JetRustEmitConfig,
     JetRustEmitManifest,
     JetWebEmitConfig,
+    jet_codegen_reachable_core_functions,
     jet_rust_emit_program,
     jet_web_emit,
     lower_comptime_item,
@@ -2037,6 +2038,24 @@ fn jet_driver_runtime_artifact_id(program: MIRProgram) -> MIRArtifactID? {
     selected
 }
 
+// The Core source modules whose top-level bodies are lowered only when
+// reached (Rust `core_source_module_indices`). Compiler-private parts and
+// host-only Core modules are not listed, so their bodies stay rooted; so is
+// a Core module with foreign rows, whose close and undo adapters Codegen
+// resolves by key.
+fn jet_driver_prunable_core_modules(load: JetDriverLoadResult, core_sources: [JetDriverCoreSource], modules: [SemaGraphModuleResult]) -> [String] Never! {
+    identities := [String]{}
+    loop semantic_module in modules {
+        if semantic_module.foreign_functions.len() > 0 || semantic_module.foreign_providers.len() > 0 -> next
+        loop module_row in load.modules {
+            if module_row.module_identity != semantic_module.module_identity -> next
+            unit :: load.source_units[module_row.source_unit_index]
+            if jet_driver_unit_is_core(unit) && unit.file_index >= 0 && unit.file_index < core_sources.len() && core_sources[unit.file_index].owner == "" -> &identities.push(semantic_module.module_identity)
+        }
+    }
+    identities
+}
+
 pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     trace := jet_driver_empty_compile_trace()
     load := jet_driver_load(request)
@@ -2282,6 +2301,10 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     }
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
     if failed_stage != None -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, failed_stage, false, trace)
+
+    // #3980: lower only the Core source bodies the program reaches (Rust
+    // TIR `should_lower_imported_core_body`).
+    sema_functions = jet_codegen_reachable_core_functions(^sema_functions, jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules))
 
     lowered := lower_functions(sema_functions, runtime_semantic_modules, load.source_files)
     if lowered.functions.len() != sema_functions.len() {

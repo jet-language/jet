@@ -71,6 +71,11 @@ pub enum JetEvalRuntimeValue {
     Aggregate(value: JetEvalRuntimeAggregate)
     RuntimeFailure(value: JetEvalRuntimeValue, span: Span)
     HostCursor(value: JetEvalRuntimeValue, has_next: MIRPreludeCallID, value_call: MIRPreludeCallID, advance: MIRPreludeCallID)
+    // A lazy `Iter` over list items (`list_lazy`). Each stage is an
+    // `iter_enumerate` row callback applied to `(position, item)` in order;
+    // every stage keeps one row per item, so `index` is also the position.
+    // A loop walks it by `step`; it never materializes as data.
+    Stream(values: [TComptimeValue], index: Int, step: Int, stages: [JetEvalRuntimeValue])
 }
 pub struct JetEvalCallbackRoot {
     pub value: JetEvalRuntimeValue
@@ -1225,6 +1230,9 @@ fn jet_eval_runtime_contains_address(value: JetEvalRuntimeValue) -> Bool Never! 
             if jet_eval_runtime_contains_address(capture) -> return true
         }
         .HostCursor(inner, _, _, _) -> return jet_eval_runtime_contains_address(inner)
+        .Stream(_, _, _, stages) -> loop stage in stages {
+            if jet_eval_runtime_contains_address(stage) -> return true
+        }
         .Aggregate(aggregate) -> {
             if aggregate == {
                 .List(values) -> loop item in values {
@@ -1284,6 +1292,11 @@ fn jet_eval_validate_borrow(value: JetEvalRuntimeValue, machine: &JetEvalMachine
                 if !jet_eval_validate_borrow(capture, &machine, span) -> return false
             }
         }
+        .Stream(_, _, _, stages) -> {
+            loop stage in stages {
+                if !jet_eval_validate_borrow(stage, &machine, span) -> return false
+            }
+        }
         .HostCursor(inner, _, _, _) -> {
             if inner == .ForeignHandle(handle, raw, token) -> return jet_eval_cursor_handle_matches(&machine, handle, raw, token, span)
             jet_eval_compiler_fail(&machine, span, "MIR host cursor carries a non-native cursor value")
@@ -1315,6 +1328,9 @@ fn jet_eval_value_transferable(machine: &JetEvalMachine, value: JetEvalRuntimeVa
             if !jet_eval_value_transferable(&machine, capture, span) -> return false
         }
         .HostCursor(inner, _, _, _) -> return jet_eval_value_transferable(&machine, inner, span)
+        .Stream(_, _, _, stages) -> loop stage in stages {
+            if !jet_eval_value_transferable(&machine, stage, span) -> return false
+        }
         .Aggregate(aggregate) -> {
             if aggregate == {
                 .List(values) -> loop item in values {
@@ -1375,6 +1391,11 @@ fn jet_eval_runtime_contains_moved(value: JetEvalRuntimeValue) -> Bool Never! {
             }
         }
         .HostCursor(nested, _, _, _) -> return jet_eval_runtime_contains_moved(nested)
+        .Stream(_, _, _, stages) -> {
+            loop stage in stages {
+                if jet_eval_runtime_contains_moved(stage) -> return true
+            }
+        }
         else -> return false
     }
     false
@@ -1469,6 +1490,7 @@ fn jet_eval_retain_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, s
         .Aggregate(aggregate) -> return jet_eval_retain_aggregate(&machine, aggregate, span)
         .Closure(_, captures) -> return jet_eval_retain_values(&machine, captures, span)
         .HostCursor(inner, _, _, _) -> return jet_eval_retain_value(&machine, inner, span)
+        .Stream(_, _, _, stages) -> return jet_eval_retain_values(&machine, stages, span)
         else -> {}
     }
     true
@@ -1576,7 +1598,7 @@ fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Spa
             jet_eval_unsupported(&machine, span, "materializing a shared runtime handle")
             return None
         }
-        .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .HostCursor(_, _, _, _) -> {
+        .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .HostCursor(_, _, _, _) | .Stream(_, _, _, _) -> {
             jet_eval_unsupported(&machine, span, "materializing an iterator cursor")
             return None
         }

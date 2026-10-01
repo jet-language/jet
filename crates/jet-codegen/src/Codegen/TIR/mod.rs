@@ -4420,7 +4420,7 @@ fn lower_mir_fragment_program(
         .map(|function| function.id)
         .ok_or_else(|| LowerError::new(span, "MIR fragment function row was not emitted"))?;
     let mir = jet_foundation::MIR::optimize_mir_program(
-        &mir,
+        mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
     )
     .map_err(|error| {
@@ -13202,7 +13202,7 @@ pub enum TBuiltinOp {
     },
     /// `clear()` → `(recv).clear()`.
     Clear,
-    /// `chars()` → `(recv).chars().collect::<Vec<char>>()`.
+    /// `chars()` → `jet_string_chars(&(recv))`, the String's chars as a `[Char]`.
     Chars,
     /// `bytes()` on a proven owned String rvalue consumes it; a place/view keeps
     /// the borrowing copy helper. `owned` is a lowering fact, not an emitter guess.
@@ -13601,6 +13601,7 @@ impl TBuiltinOp {
             | Self::SetSymmetricDifferenceUpdate
             | Self::SetRemove
             | Self::SetPop
+            | Self::SetReplace
             | Self::SortedSetInsert
             | Self::SortedSetRemove
             | Self::BitSetAdd

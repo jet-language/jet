@@ -18,6 +18,7 @@ use jet_lexer.[
     STRING_PART_INTERPOLATION,
     TOKEN_AT,
     TOKEN_BANG,
+    TOKEN_COLON,
     TOKEN_COLON_COLON,
     TOKEN_EOF,
     TOKEN_HASH,
@@ -30,6 +31,7 @@ use jet_lexer.[
     TOKEN_KW_EXTERN,
     TOKEN_KW_FN,
     TOKEN_KW_IMPL,
+    TOKEN_KW_LOOP,
     TOKEN_KW_MODULE,
     TOKEN_KW_PRIV,
     TOKEN_KW_PUB,
@@ -47,23 +49,23 @@ use jet_lexer.[
 ]
 
 pub fn parse_source(source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lex(source), parser_line_starts(source))
+    parser_parse_lexed_lines(lex(source), source, parser_line_starts(source))
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
 // the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
 // loader's embedded-Core path parses this way; a user file never does.
 pub fn parse_generated_source(source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lex_generated(source), parser_line_starts(source))
+    parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source))
 }
 
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
-    parser_parse_lexed_lines(lexed, [Int]{})
+    parser_parse_lexed_lines(lexed, [U8]{}, [Int]{})
 }
 
-fn parser_parse_lexed_lines(lexed: Lexed, line_starts: [Int]) -> ParseResult {
+fn parser_parse_lexed_lines(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
-    parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts)
+    parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts, source)
 }
 
 fn parser_line_starts(source: [U8]) -> [Int] Never! {
@@ -82,22 +84,23 @@ pub fn parse_tokens(tokens: [Token]) -> ParseResult {
         }
         else -> 0
     }
-    parser_parse_prepared(parser_prepare_tokens(tokens), [Diagnostic]{}, source_end, [Int]{})
+    parser_parse_prepared(parser_prepare_tokens(tokens), [Diagnostic]{}, source_end, [Int]{}, [U8]{})
 }
 
 // D-EACH1=C: fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
-fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int]) -> ParseResult {
+fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8]) -> ParseResult {
     if prepared.diagnostics.len() > 0 {
         diagnostics := [Diagnostic]{}
         loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
-    state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts}
+    state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
+    loop declaration in state.block_policy_declarations -> &program.policy_declarations.push(declaration)
     program.fenced_statements = prepared.fenced_statements
     program.used_import_names = parser_used_import_names(state.tokens, program.imports)
     ParseResult{program: program, diagnostics: state.diagnostics}
@@ -150,11 +153,21 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         if parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
         if {
+            // D-VERDICT-732-1 / D-ONCE-AT1=D: a top-level `@` other than the
+            // retired `@loop` head is a misspelled applied rule.
+            parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) != TOKEN_KW_LOOP -> {
+                at :: parser_bump(&state)
+                parser_add_error_code(&state, "E0063", at.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)", "replace the leading `@` with `#`")
+                parser_sync_top(&state)
+            }
             parser_user_policy_ahead(&state) -> {
                 declaration :: parser_parse_user_policy(&state)
                 if declaration.valid -> &program.user_policy_declarations.push(declaration.value)
             }
+            parser_section_label_ahead(&state) -> parser_report_section_label(&state)
+            parser_foreign_top_word_ahead(&state) -> parser_report_foreign_top_word(&state)
             parser_file_directive_ahead(&state) -> parser_parse_file_directive(&state, &program)
+            parser_policy_file_decl_ahead(&state) -> parser_parse_policy_file_decl(&state, &program)
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
                 if declaration.import == {
@@ -172,30 +185,65 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                     }
                 }
             }
-            else -> &program.script_body.push(parser_parse_statement(&state))
+            else -> {
+                // Rust resynchronizes a failed script line like a block line
+                // and steps over a token the line could not consume.
+                &program.script_body.push(parser_parse_statement(&state))
+                parser_recover_aborted_statement(&state, before)
+                if state.position == before -> parser_bump(&state)
+            }
         }
+        parser_recover_aborted_item(&state, before)
+        // An abort that no item or line took ends with its item.
+        state.abort_mark = 0
         parser_skip_semicolons(&state)
         if state.position == before {
             token :: parser_current(&state)
-            parser_add_error(&state, token.span, "the parser could not advance through this source item", "top-level recovery prevents repeated diagnostics at one token", "remove or complete this item")
+            parser_add_error_code(&state, "E0003", token.span, "the parser could not advance through this source item", "top-level recovery prevents repeated diagnostics at one token", "remove or complete this item")
             parser_bump(&state)
         }
     }
     program
 }
 
+// Foreign top-level words that teach the Jet spelling: `namespace` (E0323)
+// and `unsafe` (E0031). `unsafe extern rust` keeps its block.
+fn parser_foreign_top_word_ahead(state: &JetParserState) -> Bool Never! {
+    token :: parser_current(&state)
+    token.kind == TOKEN_IDENT && (token.payload.decoded == "namespace" || token.payload.decoded == "unsafe")
+}
+
+fn parser_report_foreign_top_word(state: &JetParserState) {
+    word :: parser_bump(&state)
+    if word.payload.decoded == "namespace" {
+        parser_add_error_code(&state, "E0323", word.span, "in-file grouping uses `module name {{ }}`, not `namespace`", "Jet has one spelling for in-file grouping: a named `module` block", "write `module mygroup {{ fn foo() {{ … }} }}` instead")
+        parser_sync_top(&state)
+        return
+    }
+    parser_add_error_code(&state, "E0031", word.span, "Jet doesn't use `unsafe` to call Rust crates", "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`", "write: extern rust \"crate@version\" {{ fn name(...) T = \"rust::path\"; }}")
+    if parser_current_kind(&state) != TOKEN_KW_EXTERN -> parser_sync_top(&state)
+}
+
 fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
-    if name.payload.decoded == "PubFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "Html" -> return true
+    if name.payload.decoded == "PubFile" || name.payload.decoded == "PublicFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "Html" -> return true
     name.payload.decoded == "Target" && !parser_hash_leads_to_item(&state)
 }
 
 fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
     marker :: parser_parse_marker(&state)
     if marker.name == {
-        "PubFile" -> program.pub_file = true
+        "PubFile" | "PublicFile" -> {
+            hash :: Span{start: marker.span.start, end: marker.span.start + 1}
+            if marker.name == "PublicFile" -> parser_add_error_code(&state, "E0418", hash, "write `#PubFile`, not `#PublicFile`", "`#PubFile` flips this file to public-by-default (D-VISDEFAULT2)", "write `#PubFile` at the top of the file")
+            if program.pub_file {
+                parser_add_error_code(&state, "E0999", hash, "`#PubFile` is already applied to this file", "`#PubFile` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+            }
+            program.pub_file = true
+            state.pub_file_default = true
+        }
         "NoPrelude" -> program.no_prelude = true
         "Target" -> {
             first :: parser_marker_first_expr(marker)
@@ -233,6 +281,20 @@ fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
     }
 }
 
+// D-VISDEFAULT2=A: `pub:` / `priv:` section labels would let one line flip
+// the visibility of everything below it; E0415 rejects the label itself.
+fn parser_section_label_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_kind_at(&state, 1) != TOKEN_COLON -> return false
+    token :: parser_current(&state)
+    token.kind == TOKEN_KW_PUB || token.kind == TOKEN_KW_PRIV || (token.kind == TOKEN_IDENT && token.payload.decoded == "private")
+}
+
+fn parser_report_section_label(state: &JetParserState) {
+    first :: parser_bump(&state)
+    colon :: parser_bump(&state)
+    parser_add_error_code(&state, "E0415", parser_cover(first.span, colon.span), "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change whether it exports", "write `#PubFile` once at the top of the file, then mark exceptions with `priv`")
+}
+
 fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
     token :: parser_current(&state)
@@ -243,6 +305,8 @@ fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
         parser_is_item_keyword(kind) -> true
         kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME -> true
         token.kind == TOKEN_IDENT && token.payload.decoded == "alias" -> true
+        token.kind == TOKEN_IDENT && token.payload.decoded == "private" -> parser_foreign_private_ahead(&state)
+        token.kind == TOKEN_IDENT && token.payload.decoded == "sanitizer" -> parser_kind_at(&state, 1) == TOKEN_KW_FN || parser_kind_at(&state, 1) == TOKEN_KW_PUB
         kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
         else -> false
     }

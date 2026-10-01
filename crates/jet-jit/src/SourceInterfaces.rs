@@ -3283,7 +3283,10 @@ mod tests {
                 provider_identity: String::new(),
                 closure_identity: String::new(),
                 artifact_identity: String::new(),
-                program_identity: MirProgramIdentity::unavailable(String::new(), Vec::new()),
+                program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
+                    String::new(),
+                    Vec::new(),
+                )),
             },
         }
     }

@@ -393,6 +393,77 @@ fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, 
     SemaFailureProvenance{callee: "this fallible expression", definition: fallback, contract: "inferred failure contract"}
 }
 
+// #3708: the declared function a failing call names, by symbol key, and
+// whether it writes no failure contract (so the bundle failure solve may
+// still prove its failure set empty).
+struct SemaFailureCallee {
+    key: String
+    inferable: Bool
+}
+
+fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaFailureCallee? {
+    source :: expr ?? return None
+    if source == {
+        .Paren(inner, _) -> return sema_failure_callee(Val(inner), environment, scopes)
+        .Call(call) -> {
+            index :: sema_scope_resolve_index(scopes, call.name) ?? return None
+            symbol :: scopes.bindings[index].symbol
+            if symbol.kind != SymbolKind.Function -> return None
+            item :: sema_scope_resolve_declaration(environment, symbol.id) ?? return None
+            if item == .Func(func) -> return Val(SemaFailureCallee{key: symbol.id.key, inferable: func.inline_foreign == None && sema_failure_contract_source(func.return_type) == "implicit default !Err"})
+            return None
+        }
+        else -> return None
+    }
+}
+
+// #3708: one propagated failure of this body: the callee's key when the
+// propagated value is a call of a declared function, else "" (a failure
+// source the solve can never discharge).
+fn sema_failure_record_edge(callee: SemaFailureCallee?, context: &SemaCheckContext) Never! {
+    if callee == .Val(found) {
+        &context.failure_edges.push(found.key)
+        return
+    }
+    &context.failure_edges.push("")
+}
+
+// D-FAIL-INFER-UNION1=A: a failure passing up into the default `Err` route
+// joins this body's failure-union row: an unannotated callee as an edge the
+// bundle solve joins, any other failure as a member (the Rust reference's
+// failure-union probe arm of `infer_try`).
+fn sema_failure_union_record_propagation(callee: SemaFailureCallee?, error: Type, context: &SemaCheckContext) Never! {
+    if callee == .Val(found) {
+        if found.inferable {
+            loop edge in context.failure_union_edges {
+                if edge == found.key -> return
+            }
+            &context.failure_union_edges.push(found.key)
+            return
+        }
+    }
+    sema_failure_union_add_member(&context, error)
+}
+
+// The detail prefix of a failure-domain diagnostic that the bundle failure
+// solve emits or discharges once every body is checked (#3708).
+pub fn sema_failure_obligation_mark() -> String Never! {
+    "inferred-failure-obligation:"
+}
+
+// #3708: the diagnostic just reported against an unannotated callee becomes
+// an obligation of the bundle failure solve. The call checks as the `T Never!`
+// plain return it has when the solve discharges the obligation; otherwise the
+// solve emits the diagnostic unchanged.
+fn sema_failure_defer_obligation(callee: SemaFailureCallee?, diagnostics: &[Diagnostic]) -> TTryConvert? {
+    found :: callee ?? return None
+    if !found.inferable || diagnostics.len() == 0 -> return None
+    last :: diagnostics.len() - 1
+    detail :: diagnostics[last].detail ?? ""
+    diagnostics[last].detail = Val("{sema_failure_obligation_mark()}{found.key}\n{detail}")
+    Val(TTryConvert.Never)
+}
+
 // E2404: no declared route from the operand's failure domain to the caller's.
 // The `failure-domain:` detail keys the bundle-level one-root dedupe.
 fn sema_failure_domain_mismatch(expr: Expr?, span: Span, source: Type, target: Type, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext) -> Diagnostic {
@@ -450,16 +521,19 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
         .Result(_, error) -> {
             // `Never` is uninhabited whatever the caller's rail.
             if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> return Val(TTryConvert.Never)
+            callee :: sema_failure_callee(source_expr, environment, scopes)
+            sema_failure_record_edge(callee, &context)
             target :: sema_failure_parent_error(error, scopes, &context) ?? {
                 &diagnostics.push(sema_failure_no_carrier(error, span, implicit))
-                return None
+                return sema_failure_defer_obligation(callee, &diagnostics)
             }
             normalized_target :: sema_expr_unwrap_tag(target)
+            if normalized_target == (Type.Named{name: "Err"}) -> sema_failure_union_record_propagation(callee, error, &context)
             // `Never!` proves no failure route remains, even when a
             // conversion happens to be declared.
             if normalized_target == (Type.Named{name: "Never"}) {
                 &diagnostics.push(sema_failure_domain_mismatch(source_expr, span, error, target, environment, scopes, context))
-                return None
+                return sema_failure_defer_obligation(callee, &diagnostics)
             }
             if type_identity_equal(error, target) -> return Val(TTryConvert.NoConversion)
             if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String -> return Val(TTryConvert.DefaultErr)
@@ -475,7 +549,7 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
             // signature; keep the success value typed and report nothing more.
             if normalized_target == (Type.Named{name: "_"}) -> return Val(TTryConvert.NoConversion)
             &diagnostics.push(sema_failure_domain_mismatch(source_expr, span, error, target, environment, scopes, context))
-            return None
+            return sema_failure_defer_obligation(callee, &diagnostics)
         }
         .Option(value) -> {
             if scopes.failure_carrier == .Val(parent) {
@@ -597,7 +671,14 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
     inner :: sema_check_expression_carrier(value, None, environment, &scopes, &state, &tail_store, &check_context, &diagnostics) ?? return None
     try_conversion :: if conversion == {
         .NoConversion -> sema_expression_propagation_conversion(inner, Val(value), span, false, environment, &scopes, &check_context, &diagnostics) ?? return None
-        else -> sema_expression_try_declared_conversion(inner, conversion, span, &scopes, &check_context, &diagnostics) ?? return None
+        else -> {
+            unreachable_route :: if conversion == {
+                .Never -> true
+                else -> false
+            }
+            if !unreachable_route -> sema_failure_record_edge(sema_failure_callee(Val(value), environment, scopes), &check_context)
+            sema_expression_try_declared_conversion(inner, conversion, span, &scopes, &check_context, &diagnostics) ?? return None
+        }
     }
     value_tir := sema_expression_propagated(inner, try_conversion, span) ?? return None
     if context_expr == .Val(context_source) {
@@ -820,7 +901,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
                     return None
                 }
             }
-            sema_scope_leave(&block_scopes, &fallback_state)
+            sema_single_use_leave_scope(&block_scopes, &fallback_state, &diagnostics)
             if {
                 checked_block.value.len() == 0 && tail_value != None -> {
                     fallback_tir = Val(TOrFallback.Value{value: tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span)})
@@ -896,7 +977,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         }
     }
     context.fallback_err_denial = enclosing_err_denial
-    sema_scope_leave(&fallback_scopes, &fallback_state)
+    sema_single_use_leave_scope(&fallback_scopes, &fallback_state, &diagnostics)
     if fallback_reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
     result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: subject, fallback: fallback_tir ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}, ambient_err: ambient_err}, span)
     sema_expr_expected(result, expected, environment, &diagnostics)
@@ -1271,7 +1352,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         return None
     }
     else_reaches_merge :: !sema_stmt_block_has_no_fallthrough(else_body) && else_checked.ty != Type.Named{name: "Never"}
-    sema_scope_leave(&else_scopes, &else_state)
+    sema_single_use_leave_scope(&else_scopes, &else_state, &diagnostics)
 
     then_checked :: then_first ?? {
         sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, &then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
@@ -1280,7 +1361,11 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         }
     }
     then_reaches_merge :: !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named{name: "Never"}
-    sema_scope_leave(&then_scopes, &then_state)
+    sema_single_use_leave_scope(&then_scopes, &then_state, &diagnostics)
+    single_use_paths := [SemaOwnershipState]{}
+    if then_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(then_state))
+    if else_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(else_state))
+    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
 
     if {
         then_reaches_merge && else_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, else_state, true)

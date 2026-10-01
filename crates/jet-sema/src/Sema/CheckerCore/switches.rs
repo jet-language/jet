@@ -2086,6 +2086,17 @@ impl<'a> Checker<'a> {
         let mut all_pattern = !raw.is_empty();
         for mut p in raw {
             self.normalize_pattern_tree(&mut p, &st);
+            // A subject that is not a name (a direct call, fallible or not)
+            // is evaluated once for every level, so each arm tests the same
+            // value and joins the coverage proof, as the statement table and
+            // the Jet checker (span-keyed coverage) already do.
+            if subj_name.is_none()
+                && same_subject
+                && !matches!(p, Pattern::StrMatch { .. } | Pattern::BinMatch { .. })
+            {
+                resolved.push(p);
+                continue;
+            }
             let pspan = p.span();
             let cond = Expr::PatternTest {
                 subject: Box::new(subj.clone()),

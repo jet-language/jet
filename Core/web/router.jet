@@ -116,7 +116,7 @@ pub fn preload(router: &WebRouter, path: String) -> WebNavigation WebRouterError
     nav.status = WebNavigationStatus.Preloading
     router.current = ~path
     router.status = WebNavigationStatus.Preloading
-    if cache_path(router, path, WebRouterCacheStatus.Stale) < 0 -> return Err(WebRouterError.Invalid)
+    if cache_path(&router, path, WebRouterCacheStatus.Stale) < 0 -> return Err(WebRouterError.Invalid)
     Ok(nav)
 }
 
@@ -134,14 +134,14 @@ pub fn stale(router: WebRouter, path: String) -> Int Never! {
 pub fn invalidate(router: &WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
-    _ :: cache_path(router, path, WebRouterCacheStatus.Invalidated)
+    _ :: cache_path(&router, path, WebRouterCacheStatus.Invalidated)
     1
 }
 
 pub fn collect(router: &WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
-    _ :: cache_path(router, path, WebRouterCacheStatus.Collected)
+    _ :: cache_path(&router, path, WebRouterCacheStatus.Collected)
     1
 }
 

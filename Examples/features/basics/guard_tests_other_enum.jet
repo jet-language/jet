@@ -1,0 +1,43 @@
+// A variant arm's guard may test a different enum value: `form == .Iterator`
+// compares `form`, never the switch subject.
+enum Form { Unconditional Counted Iterator }
+
+enum Op {
+    RangeInit(a: Int, b: Int)
+    IterInit(a: Int, b: Int)
+    IterAdvance(a: Int, value: Int)
+    Other
+}
+
+struct Instr {
+    operation: Op
+    result: Int?
+}
+
+fn pick(instructions: [Instr], form: Form) -> Int? {
+    loop instruction in instructions {
+        if instruction.operation == {
+            .RangeInit(_, _) && form == .Counted -> return Val(1)
+            .IterInit(_, _) && form == .Iterator -> return Val(2)
+            else -> {}
+        }
+    }
+    None
+}
+
+fn pick_local(op: Op, form: Form) -> Int {
+    if op == {
+        .RangeInit(_, _) && form == .Counted -> 1
+        .IterInit(_, _) && form == .Iterator -> 2
+        else -> 0
+    }
+}
+
+fn run() {
+    instructions :: [Instr]{Instr{operation: Op.IterInit{a: 1, b: 2}, result: None}, Instr{operation: Op.RangeInit{a: 0, b: 3}, result: Val(3)}}
+    print(pick(instructions, Form.Iterator) ?? 0)
+    print(pick(instructions, Form.Counted) ?? 0)
+    print(pick(instructions, Form.Unconditional) ?? 0)
+    print(pick_local(Op.IterInit{a: 1, b: 2}, Form.Iterator))
+    print(pick_local(Op.IterInit{a: 1, b: 2}, Form.Counted))
+}

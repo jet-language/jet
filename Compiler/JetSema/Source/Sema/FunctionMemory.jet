@@ -307,7 +307,8 @@ pub fn sema_function_memory_plan_for_program(program: Program, module_identity: 
 
 pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {
     loop declaration in declarations {
-        if declaration.key != PolicyKey.ScopedGC -> return true
+        // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet).
+        if declaration.key != PolicyKey.ScopedGC && declaration.key != PolicyKey.Copies -> return true
     }
     false
 }

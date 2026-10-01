@@ -10,6 +10,7 @@ use jet_foundation.[
     MIRParam,
     MIRPlaceBase,
     MIRPlaceID,
+    MIRFailureCarrier,
     MIRScopeKind,
     MIRTraitDef,
     MIRTraitMethod,
@@ -83,6 +84,32 @@ fn jet_rust_emit_function_has_deadline_scope(function: MIRFunction) -> Bool Neve
         if scope.kind == MIRScopeKind.Context && scope.deadline != None -> return true
     }
     false
+}
+
+fn jet_rust_emit_function_has_unsafe_scope(function: MIRFunction) -> Bool Never! {
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.Unsafe -> return true
+    }
+    false
+}
+
+// MIRRust function_stack_context: the source path, 1-based line and trimmed
+// source text of the function's first byte enter the runtime stack frame.
+fn jet_rust_emit_function_stack_frame(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
+    loop source in ctx.program.source_files {
+        if source.id != function.source_file -> next
+        starts :: jet_rust_emit_source_line_starts(ctx, source.path)
+        line :: jet_codegen_line_of(starts, function.span.start)
+        bytes :: source.source.bytes()
+        line_start :: starts[line - 1]
+        line_end := line_start
+        loop line_end < bytes.len() && bytes[line_end] != (U8{10}) -> line_end += 1
+        loop line_end > line_start && (bytes[line_end - 1] == (U8{13}) || bytes[line_end - 1] == (U8{32}) || bytes[line_end - 1] == (U8{9})) -> line_end -= 1
+        text :: String.from_bytes(bytes[line_start..line_end]) ?? ""
+        return "let _jet_stack_frame = jet_stack_enter({jet_rust_emit_quote(source.path)}, {line}u32, {jet_rust_emit_quote(function.name)}, {jet_rust_emit_quote(text)});"
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR function source file has no row", "runtime stack frames report the checked source line of each function", Val(function.span))
+    "let _jet_stack_frame = ();"
 }
 
 fn jet_rust_emit_partial_declare_node(ctx: &JetRustEmitContext, function: MIRFunction, base: MIRPlaceBase, prefix: [MIRFieldID], owner: MIRTypeID, seen: &[String], lines: &[String]) Never! {
@@ -246,12 +273,17 @@ fn jet_rust_emit_trait_definition(ctx: &JetRustEmitContext, definition: MIRTrait
 fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDef, function: MIRFunction, enclosing_generic_params: [MIRGenericParam], lines: &[String]) Never! {
     self_access := MIRAccess?{None}
     owner := MIRType?{None}
+    // MIRRust emit_impl: a codec impl bridges the Jet `encode`/`decode` verbs to
+    // the runtime `__jet_Encode::jet_encode(&self) -> DataTree` and the static
+    // `__jet_Decode::jet_decode(&DataTree) -> Result<Self, Vec<FieldError>>`.
+    encode_codec := false
+    decode_codec := false
     if function.form == {
         .Method(declared_owner, access) -> {
             self_access = access
             owner = Val(declared_owner)
         }
-        .TraitMethod(declared_owner, declared_trait_ref, access, _) -> {
+        .TraitMethod(declared_owner, declared_trait_ref, access, codec) -> {
             self_access = access
             owner = Val(declared_owner)
             if implementation.trait_ref == .Val(expected_trait_ref) {
@@ -259,6 +291,17 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait impl method trait identity disagrees with its impl row", "trait wrappers must preserve the exact checked trait identity", Val(function.span))
                     return
                 }
+            }
+            if codec != implementation.serde {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait impl method codec disagrees with its impl row", "codec wrappers must preserve the checked Encode/Decode bridge of their impl", Val(function.span))
+                return
+            }
+            if codec == {
+                .Val(value) -> if value == {
+                    .Encode -> encode_codec = true
+                    .Decode -> decode_codec = true
+                }
+                None -> {}
             }
         }
         .TopLevel -> {
@@ -315,11 +358,23 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     loop parameter in function.params {
         if jet_rust_emit_is_receiver(function, parameter.index) -> next
         name :: jet_rust_emit_trait_param_name(parameter, index)
-        &params.push("{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
-        &call_args.push(name)
+        param_type :: if decode_codec -> "&{ctx.config.root_prefix}jet_std::DataTree" else -> jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+        &params.push("{name}: {param_type}")
+        &call_args.push(if decode_codec && parameter.access != MIRAccess.Read -> "{name}.clone()" else -> name)
         index += 1
     }
-    if implementation.trait_ref == .Val(trait_ref) {
+    if encode_codec && (self_access != Val(MIRAccess.Read) || index != 0) {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Encode implementation method is not an argument-free instance method", "the codec bridge renders Encode as `jet_encode(&self)`", Val(function.span))
+        return
+    }
+    if decode_codec && (self_access != None || index != 1) {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Decode implementation method is not static with one argument", "the codec bridge renders Decode as `jet_decode(tree: &DataTree)`", Val(function.span))
+        return
+    }
+    // Codec, compiler-generated and compiler-owned trait rows carry identity
+    // only; sema checked their signatures against the Prelude registry.
+    validate_signature :: implementation.serde == None && !implementation.compiler_generated
+    if implementation.trait_ref == .Val(trait_ref) && validate_signature && !jet_rust_emit_compiler_owned_trait(trait_ref.name) {
         found_method := false
         valid_signature := true
         loop definition in ctx.program.traits {
@@ -353,7 +408,16 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
             return
         }
     }
-    method_name :: jet_rust_emit_sanitize(function.name)
+    method_name :: if {
+        encode_codec -> "jet_encode"
+        decode_codec -> "jet_decode"
+        else -> jet_rust_emit_sanitize(function.name)
+    }
+    return_type :: if {
+        encode_codec -> "{ctx.config.root_prefix}jet_std::DataTree"
+        decode_codec -> "Result<Self, Vec<{ctx.config.root_prefix}jet_std::FieldError>>"
+        else -> jet_rust_emit_type(&ctx, function.return_type)
+    }
     unsafe_prefix := ""
     if function.is_unsafe {
         if implementation.trait_ref != None {
@@ -366,7 +430,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     generics :: if implementation.trait_ref == None -> jet_rust_emit_generic_params(&ctx, local_generic_params) else -> ""
     direct_call :: "{jet_rust_emit_function_name(&ctx, function.id)}({call_args.join(", ")})"
     call_expression :: if function.is_unsafe -> "unsafe {{ {direct_call} }}" else -> direct_call
-    &lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {jet_rust_emit_type(&ctx, function.return_type)} {{")
+    &lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {return_type} {{")
     &lines.push("        {call_expression}")
     &lines.push("    }}")
 }
@@ -394,7 +458,7 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
                     if !declared -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl declares an unknown associated type", "impl aliases must name only associated types declared by the checked trait", Val(actual.span))
                 }
                 loop required in definition.methods {
-                    if required.default == None {
+                    if implementation.serde == None && (required.default == None || implementation.delegation != None) {
                         implemented := false
                         loop method_id in implementation.methods {
                             loop function in ctx.program.functions {
@@ -452,8 +516,14 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     generator :: function.generator != None
     if generator -> &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
     indent :: if generator -> "    " else -> ""
-    if jet_rust_emit_function_has_sentry_scope(function) -> &lines.push("{indent}    let mut __jet_sentry_scopes = Vec::new();")
-    if jet_rust_emit_function_has_deadline_scope(function) -> &lines.push("{indent}    let mut __jet_deadline_scopes = Vec::new();")
+    // MIRRust emit_callable_named: every body enters a stack frame for runtime
+    // reports; only fallible, unsafe or policy-scoped bodies keep it in release.
+    retain_stack_frame :: function.failure != MIRFailureCarrier.Infallible || function.is_unsafe || jet_rust_emit_function_has_sentry_scope(function)
+    if !retain_stack_frame -> &lines.push("{indent}    #[cfg(not(jet_release))]")
+    &lines.push("{indent}    {jet_rust_emit_function_stack_frame(&ctx, function)}")
+    if jet_rust_emit_function_has_unsafe_scope(function) -> &lines.push("{indent}    let __jet_sentry_frame = jet_mem::jet_sentry_frame();")
+    if jet_rust_emit_function_has_sentry_scope(function) -> &lines.push("{indent}    let mut __jet_sentry_scopes: Vec<jet_mem::JetSentryGuard> = Vec::new();")
+    if jet_rust_emit_function_has_deadline_scope(function) -> &lines.push("{indent}    let mut __jet_deadline_scopes: Vec<JetDeadlineGuard> = Vec::new();")
     if jet_rust_emit_coverage_for(&ctx, function) -> &lines.push("{indent}    {ctx.config.root_prefix}jet_cov_function({jet_rust_emit_coverage_function_line(&ctx, function)});")
     &lines.push("{indent}    let mut __jet_mir_dispatch_pc: u64 = {jet_rust_emit_block_id(function.entry)};")
     &lines.push("{indent}    let mut __jet_mir_dispatch_prev: u64 = 0u64;")

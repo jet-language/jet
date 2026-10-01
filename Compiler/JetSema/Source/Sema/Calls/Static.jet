@@ -567,6 +567,11 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         if !sema_call_builtin_static_bound(bindings, name) -> &bindings.push(SemaInferenceBinding{name: name, ty: Type.Int, source: "builtin static default"})
     }
     result := sema_inference_substitute_type_bindings(row.return_type, bindings)
+    // D-SET-HASH1 (E0506): `Set.new()` / `Set.from(list)` need a hashable element.
+    if row.owner == "Set" && result == .Apply(_, result_args) && result_args.len() == 1 && !sema_type_hashable(environment, result_args[0]) {
+        element_name :: type_name(result_args[0])
+        &diagnostics.push(sema_error("E0506", span, "`Set<{element_name}>` is not valid — `{element_name}` is not hashable", "Set elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type", "change the element type to a hashable type, or use a `[{element_name}]` list instead"))
+    }
 
     if row.lowering == .CoreCall(core_module, member) {
         record :: core_call(core_module, member) ?? {

@@ -1277,11 +1277,9 @@ fn runtime_type_id_for_program(program: &MirProgram, ty: &MirType) -> Option<u64
     }
     if let MirTypeKind::Apply { name, args } = &ty.kind {
         if args.is_empty() {
-            if let Some(definition) = program.types.iter().find(|definition| {
-                definition.id == name.id
-                    || definition.key == name.name
-                    || definition.name == name.name
-            }) {
+            if let Some(definition) =
+                super::functions_compile::nominal_ref_definition(program, name)
+            {
                 return Some(definition.id.0);
             }
         }
@@ -1769,11 +1767,8 @@ pub(crate) fn runtime_type_descriptors(program: &MirProgram) -> Vec<RuntimeTypeD
         if args.is_empty() {
             continue;
         }
-        let Some(definition) = program.types.iter().find(|definition| {
-            definition.id == name.id
-                || definition.key == name.name
-                || definition.name == name.name
-        }) else {
+        let Some(definition) = super::functions_compile::nominal_ref_definition(program, name)
+        else {
             continue;
         };
         if definition.generic_params.is_empty() {
@@ -18397,7 +18392,7 @@ host_fns! {
     str_split: "jet_jit_str_split" => jet_jit_str_split: sig_str_binary_i64;
     str_rsplit: "jet_jit_str_rsplit" => jet_jit_str_rsplit: sig_str_binary_i64;
     checked_str_rsplit: "jet_iter_string_rsplit" => jet_jit_str_rsplit: sig_str_binary_i64;
-    str_chars: "jet_jit_str_chars" => jet_jit_str_chars: sig_str_unary_i64;
+    str_chars: "jet_string_chars" => jet_jit_str_chars: sig_str_unary_i64;
     str_bytes: "jet_string_bytes" => jet_jit_str_bytes: sig_str_unary_i64;
     str_from_bytes: "jet_jit_str_from_bytes" => jet_jit_str_from_bytes: sig_str_unary_i64;
     str_from_bytes_lossy: "jet_jit_str_from_bytes_lossy" => jet_jit_str_from_bytes_lossy: sig_str_unary_i64;
@@ -18979,14 +18974,14 @@ mod native_shared_interop_tests {
                 provider_identity: String::new(),
                 closure_identity: String::new(),
                 artifact_identity: image.to_string(),
-                program_identity: MirProgramIdentity {
+                program_identity: std::sync::Arc::new(MirProgramIdentity {
                     semantic_hash: image.to_string(),
                     optimized_hash: format!("{image}-optimized"),
                     function_ids: Vec::new(),
                     core_ids: Vec::new(),
                     target_facts: Vec::new(),
                     source_map: Vec::new(),
-                },
+                }),
             },
         }
     }

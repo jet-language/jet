@@ -1091,6 +1091,21 @@ fn fold_anonymous_union_declarations(types: &mut Vec<MirTypeDef>) {
     });
 }
 
+/// `JET_DEBUG_LOWER_ALL`: print one failure line at its source position.
+fn report_lower_sweep_failure(
+    indexed_sources: &BTreeMap<String, IndexedSource<'_>>,
+    source_file: &str,
+    error: &LowerError,
+) {
+    let (line, column) = indexed_sources
+        .get(source_file)
+        .map_or((0, 0), |source| source.lines.line_col(source.text, error.span.start));
+    eprintln!(
+        "JET_DEBUG_LOWER_ALL ice {source_file}:{line}:{column}: {}",
+        error.message
+    );
+}
+
 pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> {
     let mut function_registry =
         FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
@@ -1137,90 +1152,156 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             (path.clone(), source)
         })
         .collect();
+    // Debug sweep (off by default): `JET_DEBUG_LOWER_ALL=1` lowers every
+    // function even after one fails, prints one line per failure, then
+    // returns the first failure exactly as the default path would.
+    let sweep = std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0");
+    let mut sweep_failures: Vec<LowerError> = Vec::new();
     for function in &program.funcs {
-        let (lowered, calls, files, instances, nested, function_callbacks) = lower_function(
-            function,
-            &types,
-            &nominal_identities,
-            &program.reflect_paths,
-            &program.declarations.traits,
-            &function_registry,
-            &indexed_sources,
-            &program.artifact_facts.modules,
-            None,
-            None,
-        )
-        .map_err(|error| {
-            LowerError::new(error.span, format!("{}: {}", function.name, error.message))
-        })?;
-        for embedded in function_type_rows(&lowered) {
-            let instance =
-                canonical_type_instance(&types, &mir_type_as_ast(&embedded), lowered.span)?;
-            merge_type_instance(&mut type_instances, instance, lowered.span)?;
-        }
-        for nested_function in &nested {
-            for embedded in function_type_rows(nested_function) {
-                let instance = canonical_type_instance(
-                    &types,
-                    &mir_type_as_ast(&embedded),
-                    nested_function.span,
-                )?;
-                merge_type_instance(&mut type_instances, instance, nested_function.span)?;
-            }
-        }
-        functions.push(lowered);
-        functions.extend(nested);
-        for instance in instances {
-            merge_type_instance(&mut type_instances, instance, function.source_span)?;
-        }
-        for call in calls {
-            if let Some(existing) = prelude_calls.iter().find(|row| row.id == call.id) {
-                if existing.module != call.module
-                    || existing.member != call.member
-                    || existing.symbol != call.symbol
-                    || existing.signature != call.signature
-                    || existing.abi != call.abi
-                {
-                    return Err(LowerError::new(
+        let lower = || {
+            lower_function(
+                function,
+                &types,
+                &nominal_identities,
+                &program.reflect_paths,
+                &program.declarations.traits,
+                &function_registry,
+                &indexed_sources,
+                &program.artifact_facts.modules,
+                None,
+                None,
+            )
+            .map_err(|error| {
+                LowerError::new(error.span, format!("{}: {}", function.name, error.message))
+            })
+        };
+        let result = if sweep {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(lower)).unwrap_or_else(
+                |payload| {
+                    let message = payload
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("non-string panic");
+                    Err(LowerError::new(
                         function.source_span,
-                        format!("conflicting semantic Prelude row {:?}", call.id),
-                    ));
-                }
-            } else {
-                prelude_calls.push(call);
+                        format!("{}: panic: {message}", function.name),
+                    ))
+                },
+            )
+        } else {
+            lower()
+        };
+        let (lowered, calls, files, instances, nested, function_callbacks) = match result {
+            Ok(lowered) => lowered,
+            Err(error) if sweep => {
+                report_lower_sweep_failure(&indexed_sources, &function.source_file, &error);
+                sweep_failures.push(error);
+                continue;
             }
-        }
-        for callback in function_callbacks {
-            if let Some(existing) = callbacks.iter().find(|row| row.id == callback.id) {
-                if format!("{existing:?}") != format!("{callback:?}") {
-                    return Err(LowerError::new(
-                        function.source_span,
-                        format!("conflicting semantic callback row {:?}", callback.id),
-                    ));
-                }
-            } else {
-                callbacks.push(callback);
+            Err(error) => return Err(error),
+        };
+        // Merge the function's rows into the program. Under the debug sweep a
+        // conflicting row is one more reported failure, not the end of the run.
+        let merge = || -> Result<(), LowerError> {
+            for embedded in function_type_rows(&lowered) {
+                let instance =
+                    canonical_type_instance(&types, &mir_type_as_ast(&embedded), lowered.span)?;
+                merge_type_instance(&mut type_instances, instance, lowered.span)?;
             }
-        }
-        // `lower_function` names files by path only; the text is attached once
-        // per file here instead of being cloned and compared per function.
-        for file in files {
-            if let Some(existing) = source_files.iter().find(|row| row.id == file.id) {
-                if existing.path != file.path {
-                    return Err(LowerError::new(
-                        function.source_span,
-                        format!("conflicting source-file row {:?}", file.id),
-                    ));
+            for nested_function in &nested {
+                for embedded in function_type_rows(nested_function) {
+                    let instance = canonical_type_instance(
+                        &types,
+                        &mir_type_as_ast(&embedded),
+                        nested_function.span,
+                    )?;
+                    merge_type_instance(&mut type_instances, instance, nested_function.span)?;
                 }
-            } else {
-                let source = program
-                    .source_files
-                    .get(&file.path)
-                    .cloned()
-                    .unwrap_or_default();
-                source_files.push(MirSourceFile { source, ..file });
             }
+            functions.push(lowered);
+            functions.extend(nested);
+            for instance in instances {
+                merge_type_instance(&mut type_instances, instance, function.source_span)?;
+            }
+            for call in calls {
+                if let Some(existing) = prelude_calls.iter().find(|row| row.id == call.id) {
+                    if existing.module != call.module
+                        || existing.member != call.member
+                        || existing.symbol != call.symbol
+                        || existing.signature != call.signature
+                        || existing.abi != call.abi
+                    {
+                        return Err(LowerError::new(
+                            function.source_span,
+                            format!("conflicting semantic Prelude row {:?}", call.id),
+                        ));
+                    }
+                } else {
+                    prelude_calls.push(call);
+                }
+            }
+            for callback in function_callbacks {
+                if let Some(existing) = callbacks.iter().find(|row| row.id == callback.id) {
+                    if format!("{existing:?}") != format!("{callback:?}") {
+                        return Err(LowerError::new(
+                            function.source_span,
+                            format!("conflicting semantic callback row {:?}", callback.id),
+                        ));
+                    }
+                } else {
+                    callbacks.push(callback);
+                }
+            }
+            // `lower_function` names files by path only; the text is attached
+            // once per file here instead of being cloned and compared per
+            // function.
+            for file in files {
+                if let Some(existing) = source_files.iter().find(|row| row.id == file.id) {
+                    if existing.path != file.path {
+                        return Err(LowerError::new(
+                            function.source_span,
+                            format!("conflicting source-file row {:?}", file.id),
+                        ));
+                    }
+                } else {
+                    let source = program
+                        .source_files
+                        .get(&file.path)
+                        .cloned()
+                        .unwrap_or_default();
+                    source_files.push(MirSourceFile { source, ..file });
+                }
+            }
+            Ok(())
+        };
+        let merged = if sweep {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(merge)).unwrap_or_else(|_| {
+                Err(LowerError::new(function.source_span, "panic while merging rows"))
+            })
+        } else {
+            merge()
+        };
+        match merged {
+            Ok(()) => {}
+            Err(error) if sweep => {
+                let error = LowerError::new(
+                    error.span,
+                    format!("{}: merge: {}", function.name, error.message),
+                );
+                report_lower_sweep_failure(&indexed_sources, &function.source_file, &error);
+                sweep_failures.push(error);
+            }
+            Err(error) => return Err(error),
         }
+    }
+    if let Some(first) = sweep_failures.first() {
+        eprintln!(
+            "JET_DEBUG_LOWER_ALL summary: {} of {} functions failed to lower",
+            sweep_failures.len(),
+            program.funcs.len()
+        );
+        return Err(first.clone());
     }
     ensure_artifact_source_files(
         &mut source_files,
@@ -1306,7 +1387,9 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
         .iter()
         .filter(|row| is_runtime_constant(row))
     {
-        let instance = canonical_type_instance(&types, &row.ty, row.span);
+        // A bare spelling resolves in the constant's own module first, so a
+        // user `FontStyle` row never reads as a same-named Core declaration.
+        let instance = module_relative_type_instance(&types, &row.ty, &row.module, row.span);
         // A prepared constant is materialized only when its folded value has
         // a canonical MIR type; reads of any other stay folded at the use.
         if row.is_comptime && instance.is_err() {
@@ -3533,11 +3616,14 @@ pub fn lower_checked_mir_program_for_with_debug(
     let kind = request.kind;
     let tir = super::lower_checked_tir_program_for_with_debug(bundle, request, debug_linemap)?;
     let mut mir = lower_tir_to_mir(&tir)?;
+    // The TIR program is as large as the MIR it lowered to; release it before
+    // optimization holds the MIR program.
+    drop(tir);
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.
     crate::Codegen::MIREval::fold_pure_calls(&mut mir);
     let mir = jet_foundation::MIR::optimize_mir_program(
-        &mir,
+        mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
     )
     .map_err(|error| {

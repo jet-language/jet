@@ -1,0 +1,22 @@
+// E0307: a value dispatch over a call (not a name) must still prove coverage.
+// The call is the table's one subject, so its arms join the coverage proof
+// exactly as arms over a local do.
+enum Light {
+    Red
+    Green
+    Yellow
+}
+
+fn pick(n: Int) -> Light {
+    if n == 0 -> return Light.Red
+    Light.Green
+}
+
+fn describe(n: Int) -> String {
+    if pick(n) == {
+        .Red -> "stop"
+        .Green -> "go"
+    }
+}
+
+fn run() { print(describe(1)) }

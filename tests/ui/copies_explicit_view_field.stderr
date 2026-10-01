@@ -1,0 +1,17 @@
+Error [E2307]: `label` cannot be used directly here without an owning copy
+  --> copies_explicit_view_field.jet:12:24
+    |
+ 12 |     user :: User{name: label}
+    |                        ^^^^^
+ Why: `label` is a zero-copy view into `text` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
+ Fix: Write `~label` first, or remove `copies: .Explicit` to use the default owning copy
+More: jet-lang.dev/e/E2307
+
+Error [E2307]: `user` cannot be used directly here without an owning copy
+  --> copies_explicit_view_field.jet:13:11
+    |
+ 13 |     print(user.name)
+    |           ^^^^
+ Why: `user` is a zero-copy view into `text` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
+ Fix: Write `~user` first, or remove `copies: .Explicit` to use the default owning copy
+More: jet-lang.dev/e/E2307

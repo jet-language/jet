@@ -68,7 +68,7 @@ fn parser_expression_form_result_handler_inner(state: &JetParserState, value: Pa
     if ok_binding.payload.decoded == "_" {
         parser_expression_form_result_error(&state, ok_binding.span, "A Result handler success branch needs a payload binding", "the compact handler exposes the success payload inside its branch", "name the payload after `?`, for example `? ok -> ...`")
     }
-    parser_expect(&state, TOKEN_UNIFIED_ARROW, "after the success payload binding")
+    parser_expect_unified_arrow(&state, "after the success payload binding")
     ok_branch :: parser_expression_form_result_branch(&state, depth + 1)
     if !parser_expression_form_result_separator_ahead(&state) {
         token :: parser_current(&state)
@@ -84,7 +84,7 @@ fn parser_expression_form_result_handler_inner(state: &JetParserState, value: Pa
     if err_binding.payload.decoded == ok_binding.payload.decoded {
         parser_expression_form_result_error(&state, err_binding.span, "A Result handler cannot bind both payloads to the same name", "the success and failure payloads are distinct branch-local values", "give the success and failure payloads different names")
     }
-    parser_expect(&state, TOKEN_UNIFIED_ARROW, "after the failure payload binding")
+    parser_expect_unified_arrow(&state, "after the failure payload binding")
     err_branch :: parser_expression_form_result_branch(&state, depth + 1)
     if check_duplicate_failure && parser_expression_form_result_separator_ahead(&state) {
         separator :: parser_current(&state)

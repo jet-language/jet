@@ -1694,6 +1694,11 @@ pub fn apply_method(
             }
         }
     }
+    if let CtValue::Str(s) = recv {
+        if let Some(value) = super::TextLite::string_route(s, method, &args) {
+            return Ok(value);
+        }
+    }
     if let Some(result) = super::MathLayout::apply_method(recv, method, &args, span) {
         return result;
     }

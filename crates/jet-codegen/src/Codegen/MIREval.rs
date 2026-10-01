@@ -3350,6 +3350,13 @@ enum MirInterpreterStream {
         source: MirStreamHandle,
         callback: RuntimeValue,
     },
+    /// `jet_iter_enumerate`: pairs each pulled item with its zero-based
+    /// position through the checked row callback.
+    Enumerate {
+        source: MirStreamHandle,
+        callback: RuntimeValue,
+        position: i64,
+    },
     FilterMap {
         source: MirStreamHandle,
         callback: RuntimeValue,
@@ -3570,6 +3577,7 @@ fn mir_stream_exact_len(handle: &MirStreamHandle) -> Option<usize> {
             }
         }
         MirInterpreterStream::Map { source, .. }
+        | MirInterpreterStream::Enumerate { source, .. }
         | MirInterpreterStream::Scan { source, .. }
         | MirInterpreterStream::Progress { source, .. } => mir_stream_exact_len(source),
         _ => None,
@@ -3674,6 +3682,30 @@ impl MirInterpreterStream {
                 };
                 let value = machine.invoke_callback(callback, RuntimeValue::Data(value), span)?;
                 Ok(Some(Machine::closure_callback_data(value, span)?))
+            }
+            Self::Enumerate {
+                source,
+                callback,
+                position,
+            } => {
+                let source = source.clone();
+                let callback = callback.clone();
+                let Some(value) = mir_stream_pull_handle(&source, machine, span)? else {
+                    return Ok(None);
+                };
+                let index = *position;
+                *position = index
+                    .checked_add(1)
+                    .ok_or_else(|| mir_error_at("MIR indexed iterator position overflows Int", span))?;
+                let row = machine.invoke_callback_args(
+                    callback,
+                    vec![
+                        RuntimeValue::Data(MirEvalValue::Int(index)),
+                        RuntimeValue::Data(value),
+                    ],
+                    span,
+                )?;
+                Ok(Some(Machine::closure_callback_data(row, span)?))
             }
             Self::FilterMap { source, callback } => loop {
                 let source = source.clone();
@@ -7548,7 +7580,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     collection_type.nominal_name(),
                     Some(crate::Syntax::TYPE_STREAM | crate::Syntax::TYPE_ITER | crate::Syntax::TYPE_VIEW_ITER)
                 ) || matches!(collection_value, RuntimeValue::Stream(_));
-                let is_stdin = collection_type.nominal_name() == Some("StdinHandle");
+                // The checked handle type is the bare nominal or the canonical
+                // `core.files`/`core.term` source identity; both dispatch alike.
+                let handle_kind = collection_type
+                    .nominal_name()
+                    .and_then(crate::Sema::core_file_handle_dispatch_name);
+                let is_stdin = handle_kind == Some("StdinHandle");
                 let step_value = step
                     .map(|step| self.value(frame_index, step, span))
                     .transpose()?
@@ -7603,7 +7640,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     ))));
                 }
                 if matches!(source_kind, MirLoopSourceKind::LinesFile) {
-                    if collection_type.nominal_name() != Some("FileReader") {
+                    if handle_kind != Some("FileReader") {
                         return Err(mir_error_at(
                             "interpreter file line iterator requires a checked FileReader value",
                             span,
@@ -7614,6 +7651,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                     let receiver = match collection_value {
                         RuntimeValue::Ambient(receiver) => receiver,
+                        RuntimeValue::Address(address) => {
+                            require_address_access(&address, MirAccess::Read, span)?;
+                            let value = self.read_place(address.frame, address.place, span)?;
+                            self.runtime_to_ct(value, span)?
+                        }
                         RuntimeValue::Moved => {
                             return Err(mir_error_at(
                                 "interpreter FileReader iterator receiver was already moved",
@@ -9930,8 +9972,19 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if let Some(member) = codec_member {
                     return self.eval_codec_prelude(member, values, type_args, result_ty, span);
                 }
-                self.eval_prelude(*call, values, result_ty, span)
-                    .map(RuntimeValue::Data)
+                // A lazy `Iter` result (the `list_lazy` source that `.indexed()`
+                // and the two-binding list loop insert) stays a private Stream;
+                // every other result is plain data.
+                let result = self.eval_prelude_runtime(
+                    *call,
+                    values.into_iter().map(RuntimeValue::Data).collect(),
+                    result_ty,
+                    span,
+                )?;
+                match result {
+                    RuntimeValue::Stream(_) => Ok(result),
+                    result => runtime_to_data(result, span).map(RuntimeValue::Data),
+                }
             }
             MirSemanticOp::HostCall { call, args } => {
                 let (module, member) = {
@@ -10107,6 +10160,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     return runtime_from_ct(result, span);
                 }
                 let callback_args = self.call_args(frame_index, args, span)?;
+                // `para_map`, `para_filter` and `para_partition` keep input
+                // order and raise the lowest failing row on every tier, so the
+                // interpreter runs the sequential row; the worker limit only
+                // bounds host threads.
+                let (member, callback_args) = match (module.as_str(), member.as_str()) {
+                    ("core.list", "para_map") => {
+                        let mut callback_args = callback_args;
+                        callback_args.truncate(1);
+                        ("map".to_string(), callback_args)
+                    }
+                    ("core.list", "para_filter") => ("filter".to_string(), callback_args),
+                    ("core.list", "para_partition") => ("partition".to_string(), callback_args),
+                    _ => (member, callback_args),
+                };
                 if family == jet_foundation::MIR::MirPreludeFamily::ClosureMethod
                     && Self::is_direct_collection_closure(&module, &member)
                 {
@@ -10120,6 +10187,41 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         result_ty,
                         span,
                     );
+                }
+                // `.indexed()` and the two-binding list loop: a lazy source
+                // stays a private Stream, so pair it through its own cursor
+                // rather than serializing it.
+                if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+                    && module == "core.builtin"
+                    && member == "iter_enumerate"
+                {
+                    let [callback] = <[RuntimeValue; 1]>::try_from(callback_args).map_err(|_| {
+                        mir_error_at("MIR indexed route requires one row callback", span)
+                    })?;
+                    let source = match receiver_value {
+                        RuntimeValue::Stream(source) => source,
+                        RuntimeValue::Data(MirEvalValue::List(values)) => {
+                            Rc::new(RefCell::new(MirInterpreterStream::Source {
+                                values: values.into(),
+                            }))
+                        }
+                        RuntimeValue::Moved => {
+                            return Err(mir_error_at("MIR indexed receiver was moved", span));
+                        }
+                        _ => {
+                            return Err(mir_error_at(
+                                "MIR indexed receiver is not an Iter",
+                                span,
+                            ));
+                        }
+                    };
+                    return Ok(RuntimeValue::Stream(Rc::new(RefCell::new(
+                        MirInterpreterStream::Enumerate {
+                            source,
+                            callback,
+                            position: 0,
+                        },
+                    ))));
                 }
                 let mut values = vec![runtime_to_data(receiver_value, span)?];
                 values.extend(
@@ -10205,11 +10307,25 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         MirBinaryPatternPart::Rest { .. } => Ok(JetBinMatchPart::Rest),
                     })
                     .collect::<Result<Vec<_>, Diagnostic>>()?;
-                let MirEvalValue::Bytes(subject) = subject else {
-                    return Err(mir_error_at(
-                        "MIR binary pattern subject is not Bytes",
-                        span,
-                    ));
+                // A `[U8]` subject is a Bytes carrier or a list of U8 items.
+                let subject = match subject {
+                    MirEvalValue::Bytes(subject) => subject,
+                    MirEvalValue::List(items) => items
+                        .iter()
+                        .map(|item| match item {
+                            MirEvalValue::Int(byte) => u8::try_from(*byte).ok(),
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<u8>>>()
+                        .ok_or_else(|| {
+                            mir_error_at("MIR binary pattern subject has a non-U8 item", span)
+                        })?,
+                    _ => {
+                        return Err(mir_error_at(
+                            "MIR binary pattern subject is not Bytes",
+                            span,
+                        ))
+                    }
                 };
                 let captures = jet_binary_pattern_match(&subject, &pattern);
                 pattern_match_carrier(captures, result_ty, span)
@@ -10503,6 +10619,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         receiver_value,
                         args,
                         frame_index,
+                        span,
+                    );
+                }
+                if route.module == "core.handle" && route.member.starts_with("rng.") {
+                    return self.eval_rng_handle(
+                        &route.member,
+                        *receiver,
+                        args,
+                        frame_index,
+                        result_ty,
                         span,
                     );
                 }
@@ -15220,12 +15346,44 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     "shl" | "shr" => "Invalid shift count",
                     _ => "divided by zero",
                 };
-                let (file, line) = location.ok_or_else(|| {
-                    mir_error_at("exact Int operator stop requires a source location", span)
-                })?;
+                // The two-operand `div_euclid`/`rem_euclid` method rows carry
+                // no line; like the JIT (`set_arithmetic_stop(0, …)`) the stop
+                // names the calling file at line 0.
+                let (file, line) = match location {
+                    Some(location) => location,
+                    None if matches!(member, "div_euclid" | "rem_euclid") => {
+                        (self.current_source_path(span)?, 0)
+                    }
+                    None => {
+                        return Err(mir_error_at(
+                            "exact Int operator stop requires a source location",
+                            span,
+                        ))
+                    }
+                };
                 Err(self.located_runtime_stop("E3010", &file, line, message, span))
             }
         }
+    }
+
+    fn current_source_path(&self, span: Span) -> Result<String, Diagnostic> {
+        let frame = self
+            .frames
+            .last()
+            .ok_or_else(|| mir_error_at("MIR runtime stop has no active frame", span))?;
+        let function = program_function(self.program, frame.function)?;
+        let module = self
+            .program
+            .modules
+            .iter()
+            .find(|module| module.id == function.module_id)
+            .ok_or_else(|| mir_error_at("MIR function has no module row", span))?;
+        self.program
+            .source_files
+            .iter()
+            .find(|source| source.id == module.source_file)
+            .map(|source| source.path.clone())
+            .ok_or_else(|| mir_error_at("MIR module has no source-file row", span))
     }
 
     /// One `precise_builtin_route` row. The type name is the module and the
@@ -17022,7 +17180,64 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     };
                     return runtime_from_ct(result, span);
                 }
-                "set_from" => {
+                // `jet_list_replace`: a copy with one slot replaced; an index
+                // outside the list leaves the copy unchanged.
+                "list_replace" => {
+                    let [receiver, index, value] = args.as_slice() else {
+                        return Err(mir_error_at(
+                            "MIR List.replace route requires a list, index and value",
+                            span,
+                        ));
+                    };
+                    let MirEvalValue::List(mut items) =
+                        runtime_to_data(self.materialize_runtime(receiver.clone(), span)?, span)?
+                    else {
+                        return Err(mir_error_at("MIR List.replace receiver is not a List", span));
+                    };
+                    let index = int_value(runtime_to_data(index.clone(), span)?, span)?;
+                    if let Some(slot) = usize::try_from(index).ok().and_then(|index| items.get_mut(index)) {
+                        *slot = runtime_to_data(value.clone(), span)?;
+                    }
+                    return Ok(RuntimeValue::Data(MirEvalValue::List(items)));
+                }
+                // `jet_iter_indexes(n)`: every valid index `0..<n` of a
+                // sequence of length `n` (a negative length has none).
+                "indexes" => {
+                    let [length] = args.as_slice() else {
+                        return Err(mir_error_at(
+                            "MIR indexes route requires one sequence length",
+                            span,
+                        ));
+                    };
+                    let length = int_value(runtime_to_data(length.clone(), span)?, span)?;
+                    return Ok(RuntimeValue::Data(MirEvalValue::List(
+                        (0..length.max(0)).map(MirEvalValue::Int).collect(),
+                    )));
+                }
+                // `jet_map_from_keys_kernel`: every key maps to the default.
+                "map_from_keys" => {
+                    let [keys, default] = args.as_slice() else {
+                        return Err(mir_error_at(
+                            "MIR Map.from_keys route requires keys and a default",
+                            span,
+                        ));
+                    };
+                    let CtValue::List(keys) = self.runtime_to_ct(keys.clone(), span)? else {
+                        return Err(mir_error_at("MIR Map.from_keys keys are not a List", span));
+                    };
+                    let default = self.runtime_to_ct(default.clone(), span)?;
+                    let mut entries = BTreeMap::new();
+                    for key in keys {
+                        let key = crate::AST::CtKey::from_value(key).ok_or_else(|| {
+                            mir_error_at("MIR Map.from_keys key is not a canonical key", span)
+                        })?;
+                        entries.insert(key, default.clone());
+                    }
+                    return runtime_from_ct(CtValue::Map(entries), span);
+                }
+                // `jet_sorted_set_from` builds the ordered `Rank` carrier from
+                // the same list kernel as `Set.from` (sorted, unique).
+                "set_from" | "sorted_set_from" => {
                     let [receiver] = args.as_slice() else {
                         return Err(mir_error_at(
                             "MIR Set.from route requires one receiver",
@@ -17031,7 +17246,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     };
                     let receiver = self.runtime_to_ct(receiver.clone(), span)?;
                     let result = crate::Comptime::CollectionEval::from_list(
-                        crate::Syntax::TYPE_SET,
+                        if member_name == "sorted_set_from" {
+                            crate::Syntax::TYPE_RANK
+                        } else {
+                            crate::Syntax::TYPE_SET
+                        },
                         &receiver,
                         span,
                     )?;
@@ -17160,6 +17379,22 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 _ => {}
             }
+        }
+        // `jet_eq`: the structural `==` that `assert_eq`, `require_eq` and
+        // `String.equal` lower to for any checked operand type.
+        if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+            && module == "core.compare"
+            && member_name == "eq"
+            && symbol == "jet_eq"
+        {
+            let [left, right] = args.as_slice() else {
+                return Err(mir_error_at("MIR equality route requires two operands", span));
+            };
+            let left = runtime_to_data(self.materialize_runtime(left.clone(), span)?, span)?;
+            let right = runtime_to_data(self.materialize_runtime(right.clone(), span)?, span)?;
+            return Ok(RuntimeValue::Data(MirEvalValue::Bool(mir_structural_eq(
+                &left, &right,
+            ))));
         }
         if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
             && module == "core.builtin"
@@ -17296,7 +17531,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
             && (module == "core.builtin"
-                || (module == "core.list" && member_name == "min_max"))
+                || (module == "core.list" && member_name == "min_max")
+                || (module == "core.map" && member_name == "to_list"))
         {
             let static_method = match member_name.as_str() {
                 "int_parse" => Some(("Int", "parse")),
@@ -17317,6 +17553,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "product" => Some("product"),
                 "iter_collect" => Some("collect"),
                 "list_lazy" => Some("lazy"),
+                "list_concat" => Some("concat"),
+                "map_merge" => Some("merge"),
+                "list_equal" => Some("equal"),
+                "list_starts_with" => Some("starts_with"),
+                "list_ends_with" => Some("ends_with"),
                 "iter_take" | "list_take" => Some("take"),
                 "iter_skip" | "list_skip" => Some("skip"),
                 "iter_step_by" => Some("step_by"),
@@ -17333,16 +17574,37 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "iter_last_index_of" => Some("last_index_of"),
                 "iter_average_int" | "iter_average_float" => Some("average"),
                 "len_string" => Some("len"),
-                "string_trim" => Some("trim"),
+                "string_trim" | "string_trim_view" => Some("trim"),
                 "string_upper" | "upper" => Some("to_upper"),
                 "string_replace" | "replace" => Some("replace"),
                 "string_repeat" => Some("repeat"),
                 "string_lower" | "lower" => Some("to_lower"),
                 "string_lines" => Some("lines"),
+                "string_chars" => Some("chars"),
                 "string_slice" => Some("slice"),
                 "string_split_once" => Some("split_once"),
+                // Text views read as the String they borrow: the zero-copy
+                // `before`/`after`/`trim` rows return the same text as the
+                // owned rows (`jet_string_before_view` and `jet_string_before`
+                // share one search).
+                "string_before_view" => Some("before"),
+                "string_after_view" => Some("after"),
+                "title" => Some("to_title"),
+                "string_index_of" | "list_index_of" => Some("index_of"),
+                "last_index_of" => Some("last_index_of"),
+                "int_to_radix" => Some("to_radix"),
+                "to_list" => Some("to_list"),
+                "is_lower" | "is_upper" | "capitalize" | "swapcase" | "reverse"
+                | "normalize" | "remove_prefix" | "remove_suffix" => Some(member_name.as_str()),
+                // `string_method_route` rows whose Text.rs kernel the shared
+                // `TextLite::string_route` adapter calls.
+                "casefold" | "find" | "rfind" | "strip" | "lstrip" | "rstrip" | "zfill"
+                | "center" | "ljust" | "rjust" | "expandtabs" | "partition" | "rpartition"
+                | "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit"
+                | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle"
+                | "islower" | "isupper" => Some(member_name.as_str()),
                 "map_has_key" => Some("has_key"),
-                "set_to_list" => Some("to_list"),
+                "set_to_list" | "sorted_set_to_list" => Some("to_list"),
                 "set_values" => Some("values"),
                 "set_sort" => Some("sort"),
                 "set_equal" => Some("equal"),
@@ -20424,6 +20686,54 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         Ok(Some(function.id))
     }
 
+    /// Decode a DataTree at a checked target: the shared typed walker reads
+    /// containers and scalars, and each nominal leaf (a `#Codable` type) runs
+    /// its generated Decode MIR method. `None` when some leaf has neither.
+    fn decode_typed_tree(
+        &mut self,
+        target: &MirType,
+        tree: &CtValue,
+        span: Span,
+    ) -> Result<Option<Result<CtValue, CtValue>>, Diagnostic> {
+        let ast_target = crate::Comptime::MirBridge::mir_to_ast_type(target);
+        let mut failure = None;
+        let decoded = {
+            let mut decode_nominal = |nominal: &Type, tree: &CtValue| {
+                let nominal = crate::Comptime::MirBridge::ast_to_mir_type(nominal);
+                let outcome = (|| {
+                    if self.typed_decode_function(&nominal, span)?.is_none() {
+                        return Ok(None);
+                    }
+                    let tree = crate::Comptime::MirBridge::ct_to_mir_value(tree.clone(), span)?;
+                    let result = self.invoke_typed_decode(&nominal, tree, span)?;
+                    let result = self.runtime_to_ct(result, span)?;
+                    Ok(Some(result))
+                })();
+                match outcome {
+                    Ok(Some(CtValue::Present(value))) => Some(Ok(*value)),
+                    Ok(Some(CtValue::Failed(CtReport::Told(error)))) => Some(Err(*error)),
+                    Ok(Some(_)) => {
+                        failure = Some(mir_error_at(
+                            "generated Decode MIR method returned a non-outcome value",
+                            span,
+                        ));
+                        None
+                    }
+                    Ok(None) => None,
+                    Err(error) => {
+                        failure = Some(error);
+                        None
+                    }
+                }
+            };
+            crate::Comptime::decode_typed_value_for_mir(&ast_target, tree, &mut decode_nominal)
+        };
+        if let Some(failure) = failure {
+            return Err(failure);
+        }
+        Ok(decoded)
+    }
+
     fn invoke_typed_decode(
         &mut self,
         target: &MirType,
@@ -20431,12 +20741,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
         let Some(function) = self.typed_decode_function(target, span)? else {
-            let target = crate::Comptime::MirBridge::mir_to_ast_type(target);
             let tree = crate::Comptime::MirBridge::mir_to_ct_value(tree, span)?;
-            let decoded = crate::Comptime::decode_typed_builtin_value_for_mir(&target, &tree)
-                .ok_or_else(|| {
-                    mir_error_at("checked target has no generated Decode MIR method", span)
-                })?;
+            let decoded = self.decode_typed_tree(target, &tree, span)?.ok_or_else(|| {
+                mir_error_at("checked target has no generated Decode MIR method", span)
+            })?;
             let value = match decoded {
                 Ok(value) => CtValue::Present(Box::new(value)),
                 Err(error) => CtValue::failed(Box::new(error)),
@@ -20727,6 +21035,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(None);
         }
         let [target] = type_args else {
+            // `json.decode(text)` without a target type is the untyped
+            // DataTree decode, which the ordinary codec row answers.
+            if type_args.is_empty()
+                && row.member == "decode"
+                && row.module.starts_with("core.encoding.")
+            {
+                return Ok(None);
+            }
             return Err(mir_error_at(
                 "typed Core decode requires one checked target type",
                 span,
@@ -21160,6 +21476,89 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }
         };
         Ok(RuntimeValue::Data(MirEvalValue::Int(now)))
+    }
+
+    /// The place a written handle operand lives in. A borrowed operand
+    /// arrives as the owner's Address; a plain read names its source place.
+    fn written_operand(
+        &mut self,
+        frame_index: usize,
+        operand: MirValueId,
+        span: Span,
+    ) -> Result<(Option<(usize, MirPlaceId)>, RuntimeValue), Diagnostic> {
+        let mut value = self.value(frame_index, operand, span)?;
+        let mut target = self
+            .receiver_place_for_value(frame_index, operand)
+            .map(|place| (frame_index, place));
+        while let RuntimeValue::Address(address) = value {
+            target = Some((address.frame, address.place));
+            value = self.read_place(address.frame, address.place, span)?;
+        }
+        Ok((target, value))
+    }
+
+    /// D-DET1 `RNG` draws: the seeded state advances in the receiver's own
+    /// place through the shared seeded kernel, as `jet_rng_*(&mut rng, …)`
+    /// does on AOT and the JIT; `shuffle` permutes its list operand in place.
+    fn eval_rng_handle(
+        &mut self,
+        member: &str,
+        receiver: MirValueId,
+        args: &[MirValueId],
+        frame_index: usize,
+        result_ty: Option<&MirType>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let method = match member.strip_prefix("rng.") {
+            Some("bool_p") => "bool",
+            Some(method) => method,
+            None => return Err(mir_error_at("MIR RNG route member is malformed", span)),
+        };
+        let (receiver_place, receiver_value) = self.written_operand(frame_index, receiver, span)?;
+        let mut state = match runtime_to_data(receiver_value, span)? {
+            MirEvalValue::Struct { type_name, fields } if type_name == crate::Syntax::RNG_TYPE => {
+                fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("state", MirEvalValue::Int(state)) => Some(*state as u64),
+                        _ => None,
+                    })
+                    .ok_or_else(|| mir_error_at("MIR RNG receiver has no seeded state", span))?
+            }
+            _ => return Err(mir_error_at("MIR RNG receiver is not a seeded RNG", span)),
+        };
+        let mut operand_places = Vec::with_capacity(args.len());
+        let mut values = Vec::with_capacity(args.len());
+        for arg in args {
+            let (place, value) = self.written_operand(frame_index, *arg, span)?;
+            let value = self.materialize_runtime(value, span)?;
+            operand_places.push(place);
+            values.push(self.runtime_to_ct(value, span)?);
+        }
+        let result_type = result_ty.map(crate::Comptime::MirBridge::mir_to_ast_type);
+        let result = crate::Comptime::apply_seeded_rng_method_with_type(
+            &mut state,
+            method,
+            &mut values,
+            span,
+            result_type.as_ref(),
+        )?;
+        if let Some((frame, place)) = receiver_place {
+            let updated = CtValue::Struct {
+                type_name: crate::Syntax::RNG_TYPE.to_string(),
+                fields: vec![("state".to_string(), CtValue::Int(state as i64))],
+            };
+            self.write_place(frame, place, runtime_from_ct(updated, span)?, span)?;
+        }
+        if method == "shuffle" {
+            let (Some(Some((frame, place))), Some(list)) =
+                (operand_places.first().copied(), values.into_iter().next())
+            else {
+                return Err(mir_error_at("MIR RNG.shuffle has no list place", span));
+            };
+            self.write_place(frame, place, runtime_from_ct(list, span)?, span)?;
+        }
+        runtime_from_ct(result, span)
     }
 
     /// D-TTLVAL1=A: `ExpiringValue.new` / `ExpiringSecret.new`. The clock is
@@ -25480,6 +25879,114 @@ fn direct_mutating_collection(
                 _ => Err(mir_error_at("MIR set pop receiver is not a Set", span)),
             }
         }
+        // The `Set` value is a struct over its unique `items`; these rows
+        // mirror the SetAlgebra/Collections kernels (`jet_set_insert`,
+        // `jet_set_remove`, `jet_set_replace_kernel`, `jet_set_*_update`).
+        "set_insert" | "set_remove" | "set_replace" => {
+            let value = args
+                .next()
+                .ok_or_else(|| mir_error_at("MIR set write is missing its value", span))?;
+            let items = mir_set_items_mut(receiver, span)?;
+            let position = items.iter().position(|item| item == &value);
+            Ok(Some(match (member, position) {
+                ("set_insert", Some(_)) => MirEvalValue::Unit,
+                ("set_insert", None) => {
+                    items.push(value);
+                    MirEvalValue::Unit
+                }
+                ("set_remove", Some(index)) => {
+                    items.remove(index);
+                    MirEvalValue::Unit
+                }
+                ("set_remove", None) => MirEvalValue::Unit,
+                (_, Some(index)) => {
+                    MirEvalValue::Present(Box::new(std::mem::replace(&mut items[index], value)))
+                }
+                (_, None) => {
+                    items.push(value);
+                    direct_absent_value(result_ty, span)?
+                }
+            }))
+        }
+        // `Rank` keeps its unique `items` in order (`jet_sorted_set_insert`,
+        // `jet_sorted_set_remove` over a BTreeSet): an insert re-ranks through
+        // the same `Rank.from` ordering the constructor uses.
+        "sorted_set_insert" | "sorted_set_remove" => {
+            let value = args
+                .next()
+                .ok_or_else(|| mir_error_at("MIR Rank write is missing its value", span))?;
+            let MirEvalValue::Struct { type_name, fields } = receiver else {
+                return Err(mir_error_at("MIR Rank write receiver is not a Rank", span));
+            };
+            if type_name != crate::Syntax::TYPE_RANK {
+                return Err(mir_error_at("MIR Rank write receiver is not a Rank", span));
+            }
+            let Some(MirEvalValue::List(items)) = fields
+                .iter_mut()
+                .find_map(|(name, field)| (name == "items").then_some(field))
+            else {
+                return Err(mir_error_at("MIR Rank has no List items field", span));
+            };
+            let position = items.iter().position(|item| item == &value);
+            match (member, position) {
+                ("sorted_set_insert", None) => {
+                    items.push(value);
+                    let list = CtValue::List(
+                        std::mem::take(items)
+                            .into_iter()
+                            .map(|item| crate::Comptime::MirBridge::mir_to_ct_value(item, span))
+                            .collect::<Result<Vec<_>, Diagnostic>>()?,
+                    );
+                    let ranked = crate::Comptime::CollectionEval::from_list(
+                        crate::Syntax::TYPE_RANK,
+                        &list,
+                        span,
+                    )?;
+                    *receiver = crate::Comptime::MirBridge::ct_to_mir_value(ranked, span)?;
+                }
+                ("sorted_set_remove", Some(index)) => {
+                    items.remove(index);
+                }
+                _ => {}
+            }
+            Ok(Some(MirEvalValue::Unit))
+        }
+        "set_update"
+        | "set_difference_update"
+        | "set_intersection_update"
+        | "set_symmetric_difference_update" => {
+            let mut other = args
+                .next()
+                .ok_or_else(|| mir_error_at("MIR set update is missing its operand", span))?;
+            let other = std::mem::take(mir_set_items_mut(&mut other, span)?);
+            let items = mir_set_items_mut(receiver, span)?;
+            match member {
+                "set_update" => {
+                    for value in other {
+                        if !items.contains(&value) {
+                            items.push(value);
+                        }
+                    }
+                }
+                "set_difference_update" => items.retain(|item| !other.contains(item)),
+                "set_intersection_update" => items.retain(|item| other.contains(item)),
+                _ => {
+                    let original = std::mem::take(items);
+                    let mut kept = original
+                        .iter()
+                        .filter(|item| !other.contains(item))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    for value in other {
+                        if !original.contains(&value) && !kept.contains(&value) {
+                            kept.push(value);
+                        }
+                    }
+                    *items = kept;
+                }
+            }
+            Ok(Some(MirEvalValue::Unit))
+        }
         "get_disjoint_write" => Err(mir_error_at(
             "MIR disjoint write requires the view adapter",
             span,
@@ -25492,16 +25999,29 @@ fn direct_mutating_collection(
             let value = args
                 .next()
                 .ok_or_else(|| mir_error_at("MIR map insert is missing its value", span))?;
+            // `jet_map_insert` returns the displaced value (`replace`/`add`
+            // read it as `V?`); a Unit-typed row discards it.
+            let wants_outcome = result_ty.is_some_and(|ty| {
+                ty.option_inner().is_some()
+                    || ty.result_parts().is_some_and(|(ok, _)| ok.option_inner().is_some())
+            });
             match receiver {
                 MirEvalValue::Map(entries) => {
-                    if let Some((_, existing)) =
+                    let previous = if let Some((_, existing)) =
                         entries.iter_mut().find(|(candidate, _)| *candidate == key)
                     {
-                        *existing = value;
+                        Some(std::mem::replace(existing, value))
                     } else {
                         insert_map_entry(entries, key, value);
+                        None
+                    };
+                    if !wants_outcome {
+                        return Ok(Some(MirEvalValue::Unit));
                     }
-                    Ok(Some(MirEvalValue::Unit))
+                    Ok(Some(match previous {
+                        Some(previous) => MirEvalValue::Present(Box::new(previous)),
+                        None => direct_absent_value(result_ty, span)?,
+                    }))
                 }
                 _ => Err(mir_error_at("MIR map insert receiver is not a Map", span)),
             }
@@ -25633,6 +26153,22 @@ fn direct_mutating_collection(
             }
         }
         _ => Ok(None),
+    }
+}
+
+fn mir_set_items_mut(
+    value: &mut MirEvalValue,
+    span: Span,
+) -> Result<&mut Vec<MirEvalValue>, Diagnostic> {
+    match value {
+        MirEvalValue::Struct { type_name, fields } if type_name == "Set" => fields
+            .iter_mut()
+            .find_map(|(name, field)| match (name.as_str(), field) {
+                ("items", MirEvalValue::List(items)) => Some(items),
+                _ => None,
+            })
+            .ok_or_else(|| mir_error_at("MIR set has no List items field", span)),
+        _ => Err(mir_error_at("MIR set operand is not a Set", span)),
     }
 }
 
@@ -30196,6 +30732,21 @@ fn pattern_match_carrier(
         )
     })?;
     match captures {
+        // TIR's scan emits the untyped `Option<()>` carrier and each
+        // `PatternCapture` reads one position at its own checked type, so
+        // that carrier keeps every capture in scan order.
+        Some(captures) if tuple_fields.is_empty() => Ok(RuntimeValue::Data(MirEvalValue::Present(
+            Box::new(MirEvalValue::Struct {
+                type_name: tuple_ty.display_name(),
+                fields: captures
+                    .into_iter()
+                    .enumerate()
+                    .map(|(position, capture)| {
+                        (position.to_string(), pattern_capture_value(capture))
+                    })
+                    .collect(),
+            }),
+        ))),
         Some(captures) => {
             // A probe can discard checked captures; AOT maps only the tuple's
             // fields and ignores any additional captures from the shared scan.
@@ -30665,6 +31216,51 @@ fn mir_values_equal(left: &MirEvalValue, right: &MirEvalValue) -> bool {
                 .unwrap_or(false)
         }
         _ => left == right,
+    }
+}
+
+/// `jet_eq` over checked operands of one type: aggregates compare member by
+/// member and two absences are equal (their element types are the one checked
+/// operand type, whatever spelling each carrier recorded).
+fn mir_structural_eq(left: &MirEvalValue, right: &MirEvalValue) -> bool {
+    match (left, right) {
+        (MirEvalValue::Absent { .. }, MirEvalValue::Absent { .. }) => true,
+        (MirEvalValue::Present(left), MirEvalValue::Present(right))
+        | (MirEvalValue::FailedTold(left), MirEvalValue::FailedTold(right)) => {
+            mir_structural_eq(left, right)
+        }
+        (MirEvalValue::List(left), MirEvalValue::List(right)) => {
+            left.len() == right.len()
+                && left.iter().zip(right).all(|(left, right)| mir_structural_eq(left, right))
+        }
+        (MirEvalValue::Map(left), MirEvalValue::Map(right)) => {
+            left.len() == right.len()
+                && left.iter().zip(right).all(|((left_key, left), (right_key, right))| {
+                    left_key == right_key && mir_structural_eq(left, right)
+                })
+        }
+        (
+            MirEvalValue::Struct { type_name: left_type, fields: left },
+            MirEvalValue::Struct { type_name: right_type, fields: right },
+        ) => {
+            left_type == right_type
+                && left.len() == right.len()
+                && left.iter().zip(right).all(|((left_name, left), (right_name, right))| {
+                    left_name == right_name && mir_structural_eq(left, right)
+                })
+        }
+        (
+            MirEvalValue::Enum { type_name: left_type, variant: left_variant, args: left },
+            MirEvalValue::Enum { type_name: right_type, variant: right_variant, args: right },
+        ) => {
+            left_type == right_type
+                && left_variant == right_variant
+                && left.len() == right.len()
+                && left.iter().zip(right).all(|((left_name, left), (right_name, right))| {
+                    left_name == right_name && mir_structural_eq(left, right)
+                })
+        }
+        _ => mir_values_equal(left, right),
     }
 }
 

@@ -1,5 +1,7 @@
 use jet_foundation.[
     AppliedRuleApplication,
+    CallArg,
+    Call,
     Diagnostic,
     Expr,
     Func,
@@ -10,6 +12,7 @@ use jet_foundation.[
     Program,
     RuleSite,
     Span,
+    Stmt,
     Symbol,
     SymbolKind,
     TAppliedRule,
@@ -27,6 +30,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     diagnostic_with_edit,
     expr_span,
+    symbol_id,
     type_name,
 ]
 
@@ -1536,4 +1540,257 @@ pub fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembers
     }
     resolved_type := sema_type_resolve_declared_with_generics(graph, argument.ty, environment.module_identity, environment.generic_params)
     SemaMarkerRulesDeclaredTypeCheck{resolved_type: Val(resolved_type), diagnostics: [Diagnostic]{}, complete: true}
+}
+
+// D-METHODMACRO1=A: `#Inline(Always)` is a checked promise. A function that
+// calls itself directly (E0917) or whose body has more statements than the
+// ceiling (E0919) cannot be expanded in place, and a top-level function whose
+// bare name is read as a value anywhere in the bundle (E0918) needs a real
+// function to point at. Statements count transitively through nested blocks
+// but not through a lambda body, which compiles to its own closure. Only
+// direct self-recursion is checked, exactly as in the Rust checker.
+SEMA_INLINE_ALWAYS_MAX_STMTS :: prep { 40 }
+
+struct SemaInlineAlwaysScan {
+    target: String
+    stmt_count: Int
+    self_recursive: Bool
+}
+
+fn sema_inline_always_scan_body(statements: [Stmt], scan: &SemaInlineAlwaysScan) {
+    loop statement in statements -> sema_inline_always_scan_statement(statement, &scan)
+}
+
+fn sema_inline_always_scan_args(args: [CallArg], scan: &SemaInlineAlwaysScan) {
+    loop arg in args -> sema_inline_always_scan_expr(arg.expr, &scan)
+}
+
+fn sema_inline_always_scan_optional(expression: Expr?, scan: &SemaInlineAlwaysScan) {
+    if expression == .Val(value) -> sema_inline_always_scan_expr(value, &scan)
+}
+
+fn sema_inline_always_scan_statement(statement: Stmt, scan: &SemaInlineAlwaysScan) {
+    scan.stmt_count += 1
+    if statement == {
+        .Expr(value) | .DeferClose(value, _) | .BreakValue(value, _) | .Yield(value, _) -> sema_inline_always_scan_expr(value, &scan)
+        .BreakLabelValue(_, _, value, _) -> sema_inline_always_scan_expr(value, &scan)
+        .Val(binding) -> sema_inline_always_scan_expr(binding.init, &scan)
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Local(_, _) -> {}
+                .Index(base, index, _, _) -> {
+                    sema_inline_always_scan_expr(base, &scan)
+                    sema_inline_always_scan_expr(index, &scan)
+                }
+                .Field(base, _, _) -> sema_inline_always_scan_expr(base, &scan)
+            }
+            sema_inline_always_scan_expr(value, &scan)
+        }
+        .Return(value, _) -> sema_inline_always_scan_optional(value, &scan)
+        .While(cond, body, _, _, _) -> {
+            sema_inline_always_scan_expr(cond, &scan)
+            sema_inline_always_scan_body(body, &scan)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    sema_inline_always_scan_expr(start, &scan)
+                    sema_inline_always_scan_expr(end, &scan)
+                    sema_inline_always_scan_optional(step, &scan)
+                }
+                .In(collection, step) -> {
+                    sema_inline_always_scan_expr(collection, &scan)
+                    sema_inline_always_scan_optional(step, &scan)
+                }
+            }
+            sema_inline_always_scan_body(body, &scan)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            sema_inline_always_scan_expr(subject, &scan)
+            loop arm in arms {
+                sema_inline_always_scan_expr(arm.cond, &scan)
+                sema_inline_always_scan_body(arm.body, &scan)
+            }
+            if else_body == .Val(body) -> sema_inline_always_scan_body(body, &scan)
+        }
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Live(body, _) -> sema_inline_always_scan_body(body, &scan)
+        .Switched(_, body, _) | .Policy(_, body, _) | .Region(_, _, body, _) | .Layout(_, _, body, _) -> sema_inline_always_scan_body(body, &scan)
+        .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .AssumeDet(_, _, body, _) -> sema_inline_always_scan_body(body, &scan)
+        .TaskGroup(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Transact(_, _, body, _, _) -> sema_inline_always_scan_body(body, &scan)
+        .AuthorityScope(_, _, _, body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_inline_always_scan_body(body, &scan)
+        .CountedLoop(init, cond, step, body, _, _, _) -> {
+            sema_inline_always_scan_expr(init.init, &scan)
+            sema_inline_always_scan_expr(cond, &scan)
+            if step == .Val(inner) -> sema_inline_always_scan_statement(inner, &scan)
+            sema_inline_always_scan_body(body, &scan)
+        }
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            sema_inline_always_scan_expr(cond, &scan)
+            sema_inline_always_scan_body(then_body, &scan)
+            if else_body == .Val(body) -> sema_inline_always_scan_body(body, &scan)
+        }
+        .ContextBlock(fields, body, _) -> {
+            loop field in fields -> sema_inline_always_scan_expr(field.value, &scan)
+            sema_inline_always_scan_body(body, &scan)
+        }
+        else -> {}
+    }
+}
+
+fn sema_inline_always_scan_expr(expression: Expr, scan: &SemaInlineAlwaysScan) {
+    if expression == {
+        .Call(call) -> {
+            if call.name == scan.target -> scan.self_recursive = true
+            sema_inline_always_scan_args(call.args, &scan)
+        }
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, method, _, _, args, _) -> {
+            if method == scan.target -> scan.self_recursive = true
+            sema_inline_always_scan_expr(receiver, &scan)
+            sema_inline_always_scan_args(args, &scan)
+        }
+        .CallValue(callee, args, _) -> {
+            sema_inline_always_scan_expr(callee, &scan)
+            sema_inline_always_scan_args(args, &scan)
+        }
+        .Str(parts, _) -> loop part in parts {
+            if part == .Interp(value, _) -> sema_inline_always_scan_expr(value, &scan)
+        }
+        .ListLit(elements, _) -> loop element in elements -> sema_inline_always_scan_expr(element, &scan)
+        .CompareChain(operands, _, _, _) -> loop operand in operands -> sema_inline_always_scan_expr(operand, &scan)
+        .MapLit(entries, _) -> loop entry in entries {
+            sema_inline_always_scan_expr(entry.key, &scan)
+            sema_inline_always_scan_expr(entry.value, &scan)
+        }
+        .MemberSpread(base, _, _) | .Spread(base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) -> sema_inline_always_scan_expr(base, &scan)
+        .Field(base, _, _) | .OptField(base, _, _, _, _) | .Tainted(base, _, _) | .Present(base, _) -> sema_inline_always_scan_expr(base, &scan)
+        .Ok(base, _) | .Err(base, _) | .Paren(base, _) | .Unary(_, base, _) | .Place(base, _, _) -> sema_inline_always_scan_expr(base, &scan)
+        .PatternTest(subject, _, _) -> sema_inline_always_scan_expr(subject, &scan)
+        .PtrFromAddr(_, _, _, addr, _) -> sema_inline_always_scan_expr(addr, &scan)
+        .Index(base, index, _, _) -> {
+            sema_inline_always_scan_expr(base, &scan)
+            sema_inline_always_scan_expr(index, &scan)
+        }
+        .Slice(base, start, end, range, _) -> {
+            sema_inline_always_scan_expr(base, &scan)
+            if range == {
+                .Val(value) -> sema_inline_always_scan_expr(value, &scan)
+                .None -> {
+                    sema_inline_always_scan_expr(start, &scan)
+                    sema_inline_always_scan_expr(end, &scan)
+                }
+            }
+        }
+        .Range(start, end, _, _) | .Binary(_, start, end, _) -> {
+            sema_inline_always_scan_expr(start, &scan)
+            sema_inline_always_scan_expr(end, &scan)
+        }
+        .Try(value, _, _, context) -> {
+            sema_inline_always_scan_expr(value, &scan)
+            sema_inline_always_scan_optional(context, &scan)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            sema_inline_always_scan_expr(value, &scan)
+            if fallback == {
+                .Value(inner) -> sema_inline_always_scan_expr(inner, &scan)
+                .Block(body, inner, _) -> {
+                    sema_inline_always_scan_body(body, &scan)
+                    sema_inline_always_scan_optional(inner, &scan)
+                }
+                .Return(inner, _) -> sema_inline_always_scan_optional(inner, &scan)
+                .Panic(_, args) -> sema_inline_always_scan_args(args, &scan)
+                else -> {}
+            }
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            sema_inline_always_scan_expr(cond, &scan)
+            sema_inline_always_scan_body(then_body, &scan)
+            sema_inline_always_scan_expr(then_value, &scan)
+            sema_inline_always_scan_body(else_body, &scan)
+            sema_inline_always_scan_expr(else_value, &scan)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_inline_always_scan_expr(field.value, &scan)
+        .TupleLit(fields, _, _) -> loop field in fields -> sema_inline_always_scan_expr(field.value, &scan)
+        .EnumLit(_, _, _, args, _, _) -> loop arg in args {
+            if arg == {
+                .Positional(value) -> sema_inline_always_scan_expr(value, &scan)
+                .Named(_, value) -> sema_inline_always_scan_expr(value, &scan)
+            }
+        }
+        .TypedLit(_, body, _) -> {
+            if body == {
+                .Fields(fields) -> loop field in fields -> sema_inline_always_scan_expr(field.value, &scan)
+                .Elements(elements) -> loop element in elements -> sema_inline_always_scan_expr(element, &scan)
+                .Entries(entries) -> loop entry in entries {
+                    sema_inline_always_scan_expr(entry.key, &scan)
+                    sema_inline_always_scan_expr(entry.value, &scan)
+                }
+                .Value(value) -> sema_inline_always_scan_expr(value, &scan)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+}
+
+// The local half of the promise: direct self-recursion (E0917) and the size
+// ceiling (E0919), both provable from the function alone.
+fn sema_inline_always_check_function(function: Func, diagnostics: &[Diagnostic]) Never! {
+    if !function.is_inline_always -> return
+    scan := SemaInlineAlwaysScan{target: function.name, stmt_count: 0, self_recursive: false}
+    sema_inline_always_scan_body(function.body, &scan)
+    span :: function.inline_span ?? function.name_span
+    name :: function.name
+    if scan.self_recursive {
+        &diagnostics.push(sema_error("E0917", span, "`{name}` calls itself, so `#Inline(Always)` cannot expand it", "inlining a recursive call would either loop forever at compile time or require an artificial depth cutoff — neither is a real inline.", "drop `#Inline(Always)` (use `#Inline` as a hint), or restructure the function to be non-recursive."))
+    }
+    if scan.stmt_count > SEMA_INLINE_ALWAYS_MAX_STMTS {
+        &diagnostics.push(sema_error("E0919", span, "`{name}` is too large for `#Inline(Always)`", "its body has {scan.stmt_count} statements — over the {SEMA_INLINE_ALWAYS_MAX_STMTS}-statement ceiling `#Inline(Always)` enforces so a promised inline doesn't quietly bloat every call site.", "drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline."))
+    }
+}
+
+// Every body of the bundle has been checked, so the function references
+// read as values are complete for the whole-program E0918 half. Methods
+// cannot be read as bare values, so E0918 applies to top-level functions.
+pub fn sema_marker_rules_check_inline_always(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
+    address_taken := [String:Bool]{}
+    loop module_result in modules {
+        loop reference in module_result.name_references {
+            if reference.kind == "function" -> address_taken[reference.symbol.id.key] = true
+        }
+    }
+    found := false
+    loop source_module in graph.modules {
+        start :: diagnostics.len()
+        loop item in source_module.program.items {
+            if item == .Func(function) {
+                sema_inline_always_check_function(function, &diagnostics)
+                key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", function.name).key
+                if function.is_inline_always && address_taken.get(key) != None {
+                    name :: function.name
+                    &diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", "`#Inline(Always)` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.", "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
+                }
+            }
+        }
+        loop nominal in source_module.nominals {
+            loop method in nominal.methods -> sema_inline_always_check_function(method.declaration, &diagnostics)
+        }
+        loop implementation in source_module.impls {
+            loop method in implementation.methods -> sema_inline_always_check_function(method.declaration, &diagnostics)
+        }
+        if diagnostics.len() > start -> found = true
+        sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+    }
+    found
+}
+
+// D-PRELUDEX1=A: `#NoPrelude` turns the curated prelude names `print` and
+// `input` off for its file (E0429) unless the file declares its own. The
+// arguments are still checked; the call reports once and yields no value.
+pub fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if call.name != "print" && call.name != "input" -> return false
+    if !sema_module_no_prelude(environment) || !sema_call_gate_is_unshadowed(call.name, scopes) -> return false
+    name :: call.name
+    &diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use core.term as io` and call `io.{name}(…)`, or remove `#NoPrelude`"))
+    loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    true
 }

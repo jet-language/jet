@@ -3828,7 +3828,7 @@ fn proof_mir_identity(
         let identity = mir.artifact_identity(artifact).unwrap_or_else(|error| {
             jet_foundation::ice!(None, "canonical MIR identity failed: {error}")
         });
-        return identity.program_identity;
+        return std::sync::Arc::unwrap_or_clone(identity.program_identity);
     }
     unavailable_mir_identity(source_digest, core_abi, members)
 }

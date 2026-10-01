@@ -7,6 +7,7 @@ use jet_foundation.[
     BinOp,
     Call,
     CallArg,
+    CallContractRow,
     CtValue,
     Diagnostic,
     Dimension,
@@ -17,6 +18,7 @@ use jet_foundation.[
     IntegerWidth,
     Measure,
     OperatorMarker,
+    ParamZone,
     QuantityKind,
     Span,
     StrFormat,
@@ -858,12 +860,63 @@ fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvir
     offered := sema_expr_expected_type(value.ty, environment)
     lifted :: sema_expr_optional_lift(value, required, offered, environment)
     if lifted != None -> return lifted
+    if sema_expr_strict_zone_erased(required, offered, environment) {
+        &diagnostics.push(sema_error("E0771", value.span, "this needs {sema_type_show(required)}, but the function value is {sema_type_show(offered)}", "public labels and parameter zones are part of a function's callable type", "use `{type_name(required)}` here"))
+        return None
+    }
     compatible :: sema_expr_expected_assignable(required, offered, environment) ?? return None
     if !compatible {
-        &diagnostics.push(sema_type_mismatch(required, offered, value.span))
+        &diagnostics.push(sema_expr_mismatch_diagnostic(required, offered, value.span))
         return None
     }
     Val(sema_expr_expected_trait_coercion(^value, required, offered, environment))
+}
+
+// The rejection for a value that can't fill `required`: the callable and
+// carrier contracts get their own codes before the plain type mismatch.
+fn sema_expr_mismatch_diagnostic(required: Type, offered: Type, span: Span) -> Diagnostic {
+    // D-NEVER2=B (E2426): a callable promised to return `Never` can't be a
+    // value-producing function.
+    if required == .Fn(_, required_ret, _, _, _, _) && offered == .Fn(_, offered_ret, _, _, _, _) && sema_expr_never_success(required_ret) && !sema_expr_never_success(offered_ret) {
+        return sema_error("E2426", span, "Function value does not satisfy `fn() Never`.", "`fn() Never` promises the callable never completes, so a returning function has the wrong contract (D-NEVER2=B).", "Pass a function declared `Never`, or change the expected function type.")
+    }
+    // E0401: `T !E` where plain `T` is needed.
+    required_plain :: if required == {
+        .Result(_, _) -> false
+        else -> true
+    }
+    if required_plain && offered == .Result(ok, _) && type_identity_equal(ok, required) {
+        return sema_error("E0401", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a fallible result must be checked before its value is used", "use `?`, `??`, or test with `== Ok(...)` / `== Err(...)`")
+    }
+    sema_type_mismatch(required, offered, span)
+}
+
+// Rust `Type::has_never_success`: `Never`, or a fallible `Never !E`.
+fn sema_expr_never_success(ty: Type?) -> Bool Never! {
+    value :: ty ?? return false
+    never :: Type.Named{name: "Never"}
+    if value == {
+        .Result(ok, _) -> ok == never
+        else -> value == never
+    }
+}
+
+// An erased function type carries no proof that it honors a strict
+// positional-only or label-only zone, so it can't cross into one (E0771).
+fn sema_expr_strict_zone_erased(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Bool {
+    if required == .Fn(params, ret, effects, contract, metadata, provenance) && contract == .Val(rows) && offered == .Fn(_, _, _, offered_contract, _, _) && offered_contract == None {
+        if !sema_expr_contract_has_strict_zone(rows) -> return false
+        erased :: Type.Fn{params: params, ret: ret, effect_bound: effects, param_contract: None, call_metadata: metadata, return_view_provenance: provenance}
+        return sema_expr_expected_assignable(erased, offered, environment) == (Val(true))
+    }
+    false
+}
+
+fn sema_expr_contract_has_strict_zone(rows: [CallContractRow]) -> Bool Never! {
+    loop row in rows {
+        if row.zone == ParamZone.PositionalOnly || row.zone == ParamZone.LabelOnly -> return true
+    }
+    false
 }
 fn sema_expr_precise_error(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) {
     &diagnostics.push(sema_error("E0133", span, "{sema_expr_binary_name(op)} isn't defined between `{type_name(lhs)}` and `{type_name(rhs)}`", "`Decimal` supports `+`, `-`, `*`, and `==`/`!=`; `Fraction` and `Complex` support only their declared exact operations", "use a named exact constructor or make both operands the same precise type"))
@@ -2084,8 +2137,12 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     if sema_expression_zip_family_name(call.name) && sema_scope_resolve_index(scopes, call.name) == None {
         return sema_expression_zip_free_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    no_prelude := sema_marker_rules_no_prelude_call(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if no_prelude -> return None
     core_direct := sema_call_try_core_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if core_direct.handled -> return core_direct.value
+    // D-LIN1-DROP: the `consume` builtin, unless a user `consume` shadows it.
+    if call.name == "consume" && sema_call_gate_is_unshadowed(call.name, scopes) -> return sema_single_use_check_consume(call, environment, &scopes, &state, &tail_store, &context, &diagnostics).value
     special := sema_call_try_knowledge_builtin(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if sema_call_default_err_candidate(call, expected, scopes) {
         scopes.ownership_call_depth += 1
@@ -2473,12 +2530,51 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     task_group := sema_taskgroup_check_group_method(receiver, receiver_value.ty, method, args, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if task_group.handled -> return task_group
 
+    value_method := sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if value_method.handled -> return value_method
     builtin := sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if builtin.handled -> return builtin
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
+// D-SHAPE3a=A: the receiver type `.new(...)` takes from its expected type.
+fn sema_expr_inferred_new_owner(expected: Type?) -> Type? {
+    ty :: expected ?? return None
+    if ty == {
+        .Named(_) | .Apply(_, _) -> Val(ty)
+        .Shared(inner) -> Val(Type.Apply{name: "Shared", args: [Type]{inner}})
+        .List(inner) -> Val(Type.Apply{name: "List", args: [Type]{inner}})
+        .Map(key, _, value) -> Val(Type.Apply{name: "Map", args: [Type]{key, value}})
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> Val(Type.Named{name: type_name(ty)})
+        .Tagged(_, inner) -> if inner == {
+            .Named(_) | .Apply(_, _) -> Val(inner)
+            else -> None
+        }
+        else -> None
+    }
+}
+
 fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // D-SHAPE3a=A: `.new(...)` leaves only the static receiver implicit; the
+    // ordinary expected type names it (E0356 when there is none).
+    if receiver == .Ident(receiver_name, receiver_span) && receiver_name == "" {
+        owner :: sema_expr_inferred_new_owner(expected) ?? {
+            loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            &diagnostics.push(sema_error("E0356", method_span, "`.new(...)` needs one known receiver type here", "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry", "add a type annotation or write the full `Type.new(...)` form"))
+            return None
+        }
+        owner_name := ""
+        inferred_args := owner_type_args
+        if owner == {
+            .Apply(name, apply_args) -> {
+                owner_name = name
+                if owner_type_args.len() == 0 -> inferred_args = apply_args
+            }
+            .Named(name) -> owner_name = name
+            else -> return None
+        }
+        return sema_expr_check_method_call(Expr.Ident{name: owner_name, span: receiver_span}, method, method_span, inferred_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     checked_text := sema_expression_checked_text_static_method_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if checked_text.handled -> return checked_text.value
     explicit_unit := sema_expr_try_explicit_unit_method(receiver, method, method_span, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2488,7 +2584,12 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     hardware_pre_receiver := sema_expr_try_hardware_pre_receiver(receiver, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if hardware_pre_receiver.handled -> return hardware_pre_receiver.value
     scopes.ownership_call_depth += 1
+    // D-MEM1: chaining `.trim()`/`.after()`/`.before()` onto a string view
+    // reads it as the `&str` those methods take, so the view read is allowed.
+    previous_string_view_read := context.allow_string_view_read
+    if sema_string_view_exempt_receiver(receiver, method, scopes) -> context.allow_string_view_read = true
     receiver_checked := sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.allow_string_view_read = previous_string_view_read
     scopes.ownership_call_depth -= 1
     receiver_value :: receiver_checked ?? return None
     take_pattern := sema_expr_check_take_pattern_method(receiver, receiver_value, method, args, method_span, expected, environment, &scopes, &state, &diagnostics)
@@ -2567,6 +2668,11 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
             return sema_expr_expected(sema_fact_prepared_expr(known, prepared_ty, span), expected, environment, &diagnostics)
         }
     }
+    // D-UNINIT-SENTINEL2 (E0420): a `Type{ uninit }` binding read before
+    // every path wrote it reports once, then the read resolves as usual.
+    if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(&state, scopes.bindings[read_index].symbol.id.key) != None {
+        &diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`)"))
+    }
     value :: sema_expr_check_ident(name, span, expected, environment, &scopes, &diagnostics) ?? return None
     expr := Expr.Ident{name: name, span: span}
     if unresolved_index != None {
@@ -2578,6 +2684,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     }
     if !sema_ownership_check_use(&state, expr, scopes, &diagnostics) -> return None
     if !sema_hardware_note_cpu_use(expr, scopes, &state, &context, &diagnostics) -> return None
+    sema_string_view_check_read(name, span, scopes, state, context, &diagnostics)
     binding_index :: sema_scope_resolve_index(scopes, name) ?? return Val(value)
     symbol := scopes.bindings[binding_index].symbol
     reference_kind := "semantic"
@@ -2603,7 +2710,12 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
             .Lit(text) -> &tir_parts.push(TStrPart.Literal{text: text})
             .Byte(value) -> &tir_parts.push(TStrPart.Literal{text: sema_expr_byte_text(value)})
             .Interp(value, format) -> {
-                checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                // D-MEM1: interpolation reads a string view through Display.
+                previous_string_view_read := context.allow_string_view_read
+                context.allow_string_view_read = true
+                checked_value := sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                context.allow_string_view_read = previous_string_view_read
+                checked :: checked_value ?? return None
                 if !sema_expr_format_supported(checked.ty, format) -> return None
                 &tir_parts.push(TStrPart.Interpolation{value: checked, format: sema_expr_string_format(format)})
             }
@@ -2945,13 +3057,19 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
         }
         .Unary(op, operand, span) -> sema_expr_check_unary(op, operand, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Binary(op, left, right, span) -> sema_expr_check_binary(op, left, right, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Call(call) -> sema_expr_check_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Call(call) -> {
+            sema_stmt_uninit_write_args(call.args, state, scopes, &diagnostics)
+            sema_expr_check_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
         .CallValue(callee, args, span) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _, _, _) -> {
             // D-CAP-RECEIVER1=D: check the ordinary unmarked call, then
             // compare the written receiver mark with its resolved convention.
             unmarked :: sema_receiver_mark_begin(&state, receiver)
+            fixed_over :: sema_stmt_uninit_fixed_over_take(receiver, method, args, &state, scopes)
+            if fixed_over.len() == 0 -> sema_stmt_uninit_write_args(args, state, scopes, &diagnostics)
             checked := sema_expr_check_method_call(unmarked, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            loop fact in fixed_over -> sema_ownership_uninit_set(&state, fact)
             receiver_last_use := false
             if unmarked == .Ident(name, _) {
                 receiver_last_use = !sema_ownership_name_live_after(name, &tail_store, &context)
@@ -2981,7 +3099,12 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Present(value, span) -> sema_expression_present(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Ok(value, span) -> sema_expression_result_payload(value, true, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Err(value, span) -> sema_expression_result_payload(value, false, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Err(value, span) -> {
+            // #3708: an `Err` written anywhere in the body (callbacks too) is
+            // a failure source of its own; the empty key never resolves.
+            &context.failure_edges.push("")
+            sema_expression_result_payload(value, false, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
         .CompareChain(operands, ops, hooks, span) -> sema_expression_compare_chain(operands, ops, hooks, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .OrFallback(value, fallback, _, span) -> sema_expression_or_fallback(value, fallback, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Try(value, span, conversion, note) -> sema_expression_try(value, span, conversion, note, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3049,6 +3172,7 @@ pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScope
     if checked != None {
         value :: checked ?? return None
         if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
+        sema_cell_guard_check_construct(expr, value.ty, &diagnostics)
     }
     checked
 }

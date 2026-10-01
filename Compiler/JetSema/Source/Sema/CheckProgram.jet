@@ -24,6 +24,7 @@ use jet_foundation.[
     Program,
     Span,
     StateDecl,
+    Stmt,
     Symbol,
     SymbolID,
     SymbolKind,
@@ -97,6 +98,22 @@ pub struct SemaGraphModuleResult {
     pub copy_events: [SemaCopyEvent]
     pub diagnostics: [Diagnostic]
     pub complete: Bool
+    // #3708: the failure rows of this module's checked top-level functions.
+    pub failure_facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}}
+}
+
+// #3708: what one checked function body propagates: the keys of the declared
+// functions whose failures pass up ("" for a source of its own) and whether a
+// statement or returned value is a direct failure source.
+pub struct SemaFunctionFailureFacts {
+    pub function_key: String
+    pub direct: Bool
+    pub edges: [String]
+    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: this body's default-route row.
+    pub union_members: [Type]{[Type]{}}
+    pub union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
+    pub union_edges: [String]{[String]{}}
+    pub union_general: Bool{false}
 }
 
 pub enum SemaComptimeItemKind {
@@ -222,6 +239,9 @@ pub struct SemaGraphResult {
     pub names: MIRNameFacts
     pub diagnostics: [Diagnostic]
     pub complete: Bool
+    // #3708: the unannotated top-level functions the bundle failure solve
+    // proved infallible, by symbol key.
+    pub inferred_infallible: [String]{[String]{}}
 }
 
 struct SemaFunctionResult {
@@ -232,6 +252,7 @@ struct SemaFunctionResult {
     hardware_use: MIRTargetHardwareUse
     comptime_body_sources: [SemaComptimeBodySource]
     compute_facts: SemaComputeFunctionFacts
+    failure: SemaFunctionFailureFacts?
 }
 fn sema_function_compute_facts(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
     SemaComputeFunctionFacts{
@@ -243,6 +264,18 @@ fn sema_function_compute_facts(function_key: String, context: SemaCheckContext) 
     }
 }
 
+fn sema_function_failure_facts(function_key: String, context: SemaCheckContext) -> SemaFunctionFailureFacts? Never! {
+    Val(SemaFunctionFailureFacts{
+        function_key: function_key,
+        direct: context.failure_direct_source,
+        edges: ~context.failure_edges,
+        union_members: ~context.failure_union_members,
+        union_cases: ~context.failure_union_cases,
+        union_edges: ~context.failure_union_edges,
+        union_general: context.failure_union_general || context.failure_direct_source,
+    })
+}
+
 fn sema_function_check_incomplete(function_key: String, context: SemaCheckContext) -> SemaFunctionResult Never! {
     SemaFunctionResult{
         value: None,
@@ -252,6 +285,7 @@ fn sema_function_check_incomplete(function_key: String, context: SemaCheckContex
         hardware_use: sema_hardware_use_snapshot(context.hardware_use),
         comptime_body_sources: ~context.comptime_body_sources,
         compute_facts: sema_function_compute_facts(function_key, context),
+        failure: sema_function_failure_facts(function_key, context),
     }
 }
 
@@ -270,6 +304,7 @@ fn sema_function_check_unavailable(function_key: String) -> SemaFunctionResult N
             autodiff_safe_panic: false,
             autodiff_unsafe_panic: false,
         },
+        failure: None,
     }
 }
 
@@ -515,6 +550,19 @@ fn sema_failure_carrier(return_type: Type?) -> TFailureCarrier Never! {
     TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
 }
 
+// A return that hands back a value: not `Unit` (bare or as a unit-fallible
+// success) and not a `Stream` generator (the Rust reference's value_return).
+fn sema_function_returns_value(effective_return: Type) -> Bool Never! {
+    success :: if effective_return == {
+        .Result(ok, _) -> ok
+        else -> effective_return
+    }
+    if success == (Type.Named{name: "Unit"}) -> return false
+    if effective_return == .Apply(name, _) && name == "Stream" -> return false
+    if success == .Apply(name, _) && name == "Stream" -> return false
+    true
+}
+
 fn sema_function_target_applicability() -> TTargetApplicability Never! {
     TTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true}
 }
@@ -709,10 +757,12 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     scopes := sema_scope_snapshot(module_scopes)
     if updated.registration_graph == .Val(graph) {
         sema_scope_apply_unit_policy_for_function(&scopes, graph, updated.module_identity, func.span)
+        sema_string_view_apply_copies_policy(&scopes, graph, updated.module_identity, func.markers)
     }
     state := sema_ownership_state_init()
     state.fixed_length_write_params = updated.fixed_length_write_params
     state.share_known = share_known
+    if updated.registration_graph == .Val(static_graph) -> state.static_roots = sema_ownership_static_roots(static_graph, module_identity)
     tail_store := sema_statement_tail_store_init()
     effective_return := sema_effective_return_type(func.return_type)
     if updated.registration_graph == .Val(graph) {
@@ -728,11 +778,14 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     context := sema_check_context_init()
     context.generic_params = generic_params
     if func.return_type != None -> context.failure_contract_source = sema_failure_contract_source(func.return_type)
-    context.function_name = func.name
+    // A lifted inline-module member reports its own body under its source name.
+    context.function_name = sema_inline_member_source_name(func.name)
     // D-FAILURE-FOUNDATION1=A / D-NEVER2=B: the declared signature's failure
     // domains and `Never` slots (E2417, E2422).
     generic_names :: loop param in generic_params -> param.name
     if !sema_check_function_failure_contracts(func, updated, generic_names, &diagnostics) -> complete = false
+    if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
+    if !sema_function_header_check_variadic_bound_shape(func, updated, &diagnostics) -> complete = false
     context.comptime_body_values = ~updated.comptime_body_values
     unsafe_gate_valid := true
     if func.is_unsafe {
@@ -767,6 +820,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         if updated.registration_graph == .Val(graph) {
             parameter_ty = sema_type_resolve_declared_with_generics(graph, parameter_ty, module_identity, generic_params)
         }
+        // D-MAP-KEY1 (E0502): a map in a declared parameter type needs a key-eligible key.
+        if !(param_index == 0 && parameter.name == "self") && !sema_type_check_declared_map_keys(updated, parameter_ty, parameter.ty_span, &diagnostics) -> complete = false
         if parameter.root || parameter.variadic_bound_list != None || parameter.declared_view_from_names != None -> complete = false
         default_expr := TExpr?{None}
         if parameter.default != None {
@@ -819,18 +874,31 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         }
         param_index += 1
     }
+    if func.return_type == .Val(declared_return) {
+        resolved_return := declared_return
+        if updated.registration_graph == .Val(graph) -> resolved_return = sema_type_resolve_declared_with_generics(graph, declared_return, module_identity, generic_params)
+        if !sema_type_check_declared_map_keys(updated, resolved_return, func.return_type_span ?? func.name_span, &diagnostics) -> complete = false
+    }
     if func.is_unsafe && unsafe_gate_valid -> context.unsafe_depth = 1
     contract :: sema_contract_check_function(func, updated, &scopes, &state, &tail_store, &context, &diagnostics)
     if !contract.complete -> complete = false
 
 
     // D-DISCARD1=A: with no written return type the function returns
-    // nothing, so a value on its last line is lost (E0433).
-    if func.return_type_span == None && !func.compiler_generated && func.body.len() > 0 {
-        if func.body[func.body.len() - 1] == .Expr(tail) -> context.lost_tail_span = Val(expr_span(tail))
+    // nothing, so a value on its last line is lost (E0433). With a value
+    // return (not a generator; written, or projected by the bundle failure
+    // solve) the last line is the value handed back.
+    if func.body.len() > 0 && func.body[func.body.len() - 1] == .Expr(tail) {
+        if {
+            sema_function_returns_value(effective_return) -> context.value_tail_span = Val(expr_span(tail))
+            func.return_type_span == None && !func.compiler_generated -> context.lost_tail_span = Val(expr_span(tail))
+            else -> {}
+        }
     }
     statements :: sema_check_statements(func.body, Val(effective_return), updated, &scopes, &state, &tail_store, &context, &diagnostics, 0)
     context.lost_tail_span = None
+    value_tail_checked :: context.value_tail_span != None
+    context.value_tail_span = None
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, scopes, &diagnostics) -> complete = false
@@ -844,13 +912,13 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             .Result(ok, _) -> declared_success = ok
             else -> {}
         }
-        if declared_success != (Type.Named{name: "Unit"}) && !sema_stmt_block_has_no_fallthrough(func.body) -> complete = false
+        if declared_success != (Type.Named{name: "Unit"}) && !value_tail_checked && !sema_stmt_block_has_no_fallthrough(func.body) -> complete = false
     }
     sema_ownership_finalize_references(&state, &diagnostics)
     loop fact in context.call_facts -> &call_facts.push(fact)
     loop request in context.comptime_requests -> &comptime_requests.push(request)
     loop reference in context.name_references -> &name_references.push(reference)
-    sema_scope_leave(&scopes, &state)
+    sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     source_line := sema_source_line_at(updated.source_segments, func.name_span)
     if source_line == None -> complete = false
     return_view_provenance := sema_function_return_view_provenance(func, context.return_view_provenance, &diagnostics, &complete)
@@ -918,6 +986,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         hardware_use: sema_hardware_use_snapshot(context.hardware_use),
         comptime_body_sources: ~context.comptime_body_sources,
         compute_facts: sema_function_compute_facts(owner_id.key, context),
+        failure: sema_function_failure_facts(owner_id.key, context),
     }
 }
 
@@ -986,6 +1055,9 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
         }
         item_index += 1
     }
+    // #3708: one program has no bundle failure solve, so every recorded
+    // failure-domain obligation is emitted as reported.
+    if sema_failure_settle_obligations(&diagnostics, [String]{}) -> complete = false
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_segments)
     SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
 }
@@ -1270,6 +1342,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
     compute_facts := [SemaComputeFunctionFacts]{}
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
+    failure_facts := [SemaFunctionFailureFacts]{}
     scopes := sema_scope_init(source_module.module_identity)
     complete := graph.complete
     if !sema_registration_apply_graph_module(graph, source_module.module_identity, &scopes, &diagnostics) -> complete = false
@@ -1292,6 +1365,9 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
     loop item_index < program.items.len() {
         if program.items[item_index] == {
             .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .Const(_) | .UnitFamily(_) | .Impl(_) -> {}
+            .CodeModule(definition) -> {
+                if !sema_inline_module_lowered(definition) -> complete = false
+            }
             else -> complete = false
         }
         item_index += 1
@@ -1379,6 +1455,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
                             sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
                             loop source in checked.comptime_body_sources -> &comptime_body_sources.push(source)
                             &compute_facts.push(checked.compute_facts)
+                            if checked.failure == .Val(facts) -> &failure_facts.push(facts)
                             if checked.value != None {
                                 function :: checked.value ?? next
                                 _ := sema_function_publish_return_views(&scopes, function)
@@ -1489,6 +1566,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
         copy_events: copy_events,
         diagnostics: diagnostics,
         complete: complete,
+        failure_facts: failure_facts,
     }
 }
 
@@ -2396,11 +2474,159 @@ fn sema_compute_module_owns_site(module_result: SemaGraphModuleResult, span: Spa
     false
 }
 
+// #3708: a function whose failure contract sema may infer. No contract was
+// written, and nothing else owns its return protocol (the Rust reference's
+// `failure_inference_candidate`).
+fn sema_failure_inference_candidate(func: Func) -> Bool Never! {
+    if sema_failure_contract_source(func.return_type) != "implicit default !Err" -> return false
+    if func.return_type == .Val(.Apply(name, _)) && name == "Stream" -> return false
+    !func.compiler_generated && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
+}
+
+fn sema_failure_registered_declaration(source_module: SemaRegistrationModule, function_key: String) -> Func? {
+    loop function in source_module.functions {
+        if function.symbol.id.key == function_key -> return Val(function.declaration)
+    }
+    None
+}
+
+// #3708 (D-FAILURE-FOUNDATION1=A): "Every function has the structured Error
+// route by default. Sema removes it when impossible." After every body is
+// checked, a greatest fixpoint over the bundle's propagation edges finds the
+// unannotated top-level functions whose failure set is empty. A function used
+// as a value keeps its declared callable type, and a body with a failure
+// source of its own stays fallible. Returns the inferred-infallible keys.
+fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [String] Never! {
+    address_taken := [String:Bool]{}
+    loop module_result in modules {
+        loop reference in module_result.name_references {
+            if reference.kind == "function" -> address_taken[reference.symbol.id.key] = true
+        }
+    }
+    candidates := [SemaFunctionFailureFacts]{}
+    inferred := [String:Bool]{}
+    loop module_result in modules {
+        source_index :: sema_name_module_index(graph, module_result.module_identity) ?? next
+        loop facts in module_result.failure_facts {
+            if facts.direct || address_taken.get(facts.function_key) != None -> next
+            declaration :: sema_failure_registered_declaration(graph.modules[source_index], facts.function_key) ?? next
+            if !sema_failure_inference_candidate(declaration) -> next
+            &candidates.push(facts)
+            inferred[facts.function_key] = true
+        }
+    }
+    loop {
+        changed := false
+        loop facts in candidates {
+            if !(inferred.get(facts.function_key) ?? false) -> next
+            loop edge in facts.edges {
+                if !(inferred.get(edge) ?? false) {
+                    inferred[facts.function_key] = false
+                    changed = true
+                    break
+                }
+            }
+        }
+        if !changed -> break
+    }
+    solved := [String]{}
+    loop facts in candidates {
+        if inferred.get(facts.function_key) ?? false -> &solved.push(facts.function_key)
+    }
+    solved
+}
+
+// #3708: discharge each failure-domain obligation whose callee the solve
+// proved infallible, and emit the rest with the obligation mark removed.
+// Returns whether any obligation survived as an error.
+fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String]) -> Bool Never! {
+    mark :: sema_failure_obligation_mark()
+    kept := [Diagnostic]{}
+    survived := false
+    loop diagnostic in diagnostics {
+        detail :: diagnostic.detail ?? ""
+        if !detail.starts_with(mark) {
+            &kept.push(diagnostic)
+            next
+        }
+        lines :: detail.split("\n").to_list()
+        callee :: lines[0].replace(mark, "")
+        discharged := false
+        loop key in solved {
+            if key == callee {
+                discharged = true
+                break
+            }
+        }
+        if discharged -> next
+        remainder := [String]{}
+        loop line_index in 1..<lines.len() -> &remainder.push(lines[line_index])
+        emitted := diagnostic
+        rest :: remainder.join("\n")
+        emitted.detail = None
+        if rest != "" -> emitted.detail = Val(rest)
+        &kept.push(emitted)
+        survived = true
+    }
+    diagnostics = kept
+    survived
+}
+
+struct SemaFinalizeModuleChecks {
+    modules: [SemaGraphModuleResult]
+    diagnostics: [Diagnostic]
+    complete: Bool
+}
+
+// One body check of every registered module against the graph's current
+// contracts.
+fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef]) -> SemaFinalizeModuleChecks {
+    memory_plan := sema_function_memory_plan_from_graph(graph)
+    diagnostics := [Diagnostic]{}
+    modules := [SemaGraphModuleResult]{}
+    complete := true
+    module_index := 0
+    loop module_index < graph.modules.len() {
+        checked := sema_check_registration_module(graph, memory_plan, module_index, values, comptime_functions, true, checked_types)
+        loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
+        if !checked.complete -> complete = false
+        &modules.push(checked)
+        module_index += 1
+    }
+    SemaFinalizeModuleChecks{modules: modules, diagnostics: diagnostics, complete: complete}
+}
+
+// D-ENTRY-SCRIPT1=C: only an explicit `fn run` may contain executable entry
+// code. An imported file with loose statements is E0620 and the entry file
+// E0621, spanning the first through the last statement. A file-scope
+// `name :: value` binding is a module global (D-MODULE-BIND1), not a
+// statement.
+fn sema_check_script_entries(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+    found := false
+    loop source_module in graph.modules {
+        statements := [Stmt]{}
+        loop statement in source_module.program.script_body {
+            if statement == .Val(binding) {
+                if binding.pattern == None -> next
+            }
+            &statements.push(statement)
+        }
+        if statements.len() == 0 -> next
+        span :: Span{start: sema_compiler_index_stmt_span(statements[0]).start, end: sema_compiler_index_stmt_span(statements[statements.len() - 1]).end}
+        start :: diagnostics.len()
+        if {
+            source_module.module_identity != graph.entry_module_identity -> &diagnostics.push(sema_error("E0620", span, "imported script `{source_module.module_path}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `fn run`", "move the statements into the entry file's `fn run`, or import a declaration-only file"))
+            else -> &diagnostics.push(sema_error("E0621", span, "top-level executable statements require an explicit `fn run`", "Jet does not invent a runtime function for ordinary files; only `fn run` executes code", "move the statements into `fn run`"))
+        }
+        sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+        found = true
+    }
+    found
+}
+
 pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult]) -> SemaGraphResult {
     resolved_graph := sema_comptime_graph_with_values(graph, values)
-    memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
     diagnostics := stage.diagnostics
-    modules := [SemaGraphModuleResult]{}
     checked_types := [TTypeDef]{}
     loop staged_module in stage.modules {
         loop type_definition in staged_module.declarations.type_defs -> &checked_types.push(type_definition)
@@ -2410,14 +2636,37 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         loop diagnostic in result.diagnostics -> &diagnostics.push(diagnostic)
         if !result.complete -> complete = false
     }
-    module_index := 0
-    loop module_index < resolved_graph.modules.len() {
-        checked := sema_check_registration_module(resolved_graph, memory_plan, module_index, values, comptime_functions, true, checked_types)
-        loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
-        if !checked.complete -> complete = false
-        &modules.push(checked)
-        module_index += 1
+    checked := sema_finalize_check_modules(resolved_graph, values, comptime_functions, checked_types)
+    // #3708: every body is checked, so the failure solve finds the
+    // unannotated functions that can never fail.
+    inferred_infallible := sema_failure_solve(resolved_graph, checked.modules)
+    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: the same rows settle the
+    // failure union of every unannotated function. Each inferred contract,
+    // and the `T Never!` plain return of each infallible one (#3708 T1), is
+    // projected onto the graph; the bundle is then checked once more so every
+    // caller, the bodies and lowering read that one contract.
+    union_start :: diagnostics.len()
+    projected := sema_failure_union_infer(&resolved_graph, checked.modules, &diagnostics)
+    if diagnostics.len() > union_start -> complete = false
+    if sema_failure_project_infallible(&resolved_graph, inferred_infallible, comptime_functions) -> projected = true
+    if projected -> checked = sema_finalize_check_modules(resolved_graph, values, comptime_functions, checked_types)
+    loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
+    if !checked.complete -> complete = false
+    modules := checked.modules
+    // The failure-domain obligations recorded against unannotated callees
+    // are discharged or emitted.
+    if sema_failure_settle_obligations(&diagnostics, inferred_infallible) -> complete = false
+    loop settle_index in 0..<modules.len() {
+        module_diagnostics := modules[settle_index].diagnostics
+        if sema_failure_settle_obligations(&module_diagnostics, inferred_infallible) -> modules[settle_index].complete = false
+        modules[settle_index].diagnostics = module_diagnostics
     }
+    // D-METHODMACRO1=A: the `#Inline(Always)` promise (E0917-E0919) needs
+    // every body's function-value references first.
+    if sema_marker_rules_check_inline_always(resolved_graph, modules, &diagnostics) -> complete = false
+    if sema_check_script_entries(resolved_graph, &diagnostics) -> complete = false
+    if sema_effect_check_declared_leaves(resolved_graph, &diagnostics) -> complete = false
+    if sema_effect_check_authority_handles(resolved_graph, &diagnostics) -> complete = false
 
     effect_inputs := [SemaEffectModuleInput]{}
     loop module_result in modules {
@@ -2429,6 +2678,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
             sources: sema_comptime_effect_sources(source),
             call_facts: module_result.call_facts,
             source_segments: source.source_segments,
+            trait_bounds: sema_effect_trait_bounds(source.program.items),
         })
     }
     effects := sema_effects_check_modules(effect_inputs)
@@ -2547,6 +2797,9 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         loop facts in module_result.compute_facts -> &compute_facts.push(facts)
     }
     if diagnostics.len() > 0 && stage.diagnostics.len() == 0 -> complete = false
+    // D-STRUCT-LIVE1=A: warning-only structure verdicts (L0104/L0105) once
+    // every checked body's references are known.
+    loop diagnostic in sema_liveness_structure(resolved_graph, modules) -> &diagnostics.push(diagnostic)
     SemaGraphResult{
         package_identity: graph.package_identity,
         entry_module_identity: graph.entry_module_identity,
@@ -2562,5 +2815,6 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         names: sema_name_build_facts(resolved_graph, modules),
         diagnostics: diagnostics,
         complete: complete,
+        inferred_infallible: inferred_infallible,
     }
 }

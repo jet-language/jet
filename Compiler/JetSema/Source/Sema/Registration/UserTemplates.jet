@@ -1,0 +1,467 @@
+// D-METADERIVE1=A / D-META-USER1=A / D-STRUCT-ONCE1=A: package-authored
+// templates (user `derive T.Name` providers, declared marker bodies and root
+// `prep loop` declarations) expand through the same typed template engine as
+// the Prelude providers (Registration/Derives.jet). Generated items re-enter
+// ordinary registration as written items; nothing is serialized or re-lexed.
+// Rust: `Bundle/Pipeline/CheckInner.rs` (user derives, marker bodies) and
+// `Bundle/Pipeline.rs` `expand_item_template_loops`.
+use jet_foundation.[
+    CtEnumArg,
+    CtFloat,
+    CtKey,
+    CtMapEntry,
+    CtReport,
+    CtValue,
+    DeriveBodyItem,
+    DeriveDef,
+    Diagnostic,
+    Func,
+    ImplDef,
+    Item,
+    MarkerDecl,
+    NamedCtValue,
+    NamedType,
+    Span,
+    StructDef,
+    TAppliedRule,
+    TAppliedRuleArgumentMenu,
+    TAppliedRuleCatalog,
+    TComptimeKey,
+    TComptimeValue,
+    diagnostic_with_detail,
+]
+
+pub struct SemaUserDeriveProvider {
+    pub module_index: Int
+    pub definition: DeriveDef
+}
+
+// One member a generated method may collide with: its name, how the
+// diagnostic names it, and where it is declared.
+pub struct SemaUserMemberSite {
+    pub name: String
+    pub site: String
+    pub span: Span
+}
+
+// ---------------------------------------------------------------------------
+// Reflection carrier. Reflection builds handles on the typed `TComptimeValue`
+// carrier; the template engine reads the AST `CtValue` carrier. A value with
+// no AST spelling (a character or closure) makes the handle unavailable.
+
+fn sema_user_template_ct_key(key: TComptimeKey) -> CtKey? Never! {
+    if key == {
+        .Int(number) -> Val(CtKey.Int{value: number})
+        .String(text) -> Val(CtKey.Str{value: text})
+        .Bool(flag) -> Val(CtKey.Bool{value: flag})
+        .Enum(owner, variant) -> Val(CtKey.Enum{type_name: owner, variant: variant})
+        else -> None
+    }
+}
+
+fn sema_user_template_ct_values(values: [TComptimeValue]) -> [CtValue]? Never! {
+    converted := [CtValue]{}
+    loop item in values {
+        value :: sema_user_template_ct_value(item) ?? return None
+        &converted.push(value)
+    }
+    Val(converted)
+}
+
+fn sema_user_template_ct_value(value: TComptimeValue) -> CtValue? Never! {
+    if value == {
+        .Int(number) -> Val(CtValue.Int{value: number})
+        .Float(number, bits) -> Val(CtValue.Float{value: if bits == 32 -> CtFloat.F32{value: number} else -> CtFloat.F64{value: number}})
+        .Bool(flag) -> Val(CtValue.Bool{value: flag})
+        .String(text) -> Val(CtValue.Str{value: text})
+        .BigInt(decimal) -> Val(CtValue.BigInt{value: decimal})
+        .Bytes(bytes) -> Val(CtValue.Bytes{value: bytes})
+        .List(values) -> {
+            converted :: sema_user_template_ct_values(values) ?? return None
+            Val(CtValue.List{values: converted})
+        }
+        .Map(entries) -> {
+            converted := [CtMapEntry]{}
+            loop entry in entries {
+                key :: sema_user_template_ct_key(entry.key) ?? return None
+                item :: sema_user_template_ct_value(entry.value) ?? return None
+                &converted.push(CtMapEntry{key: key, value: item})
+            }
+            Val(CtValue.Map{entries: converted})
+        }
+        .Struct(owner, fields) -> {
+            converted := [NamedCtValue]{}
+            loop field in fields {
+                item :: sema_user_template_ct_value(field.value) ?? return None
+                &converted.push(NamedCtValue{name: field.name, value: item})
+            }
+            Val(CtValue.Struct{type_name: owner, fields: converted})
+        }
+        .Enum(owner, variant, args) -> {
+            converted := [CtEnumArg]{}
+            loop arg in args {
+                item :: sema_user_template_ct_value(arg.value) ?? return None
+                &converted.push(CtEnumArg{label: arg.name, value: item})
+            }
+            Val(CtValue.Enum{type_name: owner, variant: variant, args: converted})
+        }
+        .Present(inner) -> {
+            item :: sema_user_template_ct_value(inner) ?? return None
+            Val(CtValue.Present{value: item})
+        }
+        .Failed(report) -> if report == {
+            .Clean(ty) -> Val(CtValue.Failed{report: CtReport.Clean{ty: ty}})
+            .Told(inner) -> {
+                item :: sema_user_template_ct_value(inner) ?? return None
+                Val(CtValue.Failed{report: CtReport.Told{value: item}})
+            }
+        }
+        .Unit -> Val(CtValue.Unit)
+        .Char(_) | .Closure(_) -> None
+    }
+}
+
+fn sema_user_template_catalog() -> TAppliedRuleCatalog Never! {
+    TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+}
+
+// The registered nominal's full reflection handle (Rust
+// `build_struct_type_info_with_path_and_vocabulary_and_engine`).
+fn sema_user_template_type_info(graph: SemaRegistrationGraph, module_index: Int, owner: String) -> CtValue? {
+    info :: sema_comptime_reflection_type_info(graph, graph.modules[module_index].module_identity, owner, sema_user_template_catalog()) ?? return None
+    sema_user_template_ct_value(info)
+}
+
+// Rust `build_function_type_info`: a function rule sees the target's stable
+// source shape; program-wide effect facts stay a separate reflection input,
+// so `effects` lists the declared row.
+fn sema_user_template_function_info(function: Func) -> CtValue? {
+    effects := [TComptimeValue]{}
+    if function.declared_effects == .Val(rows) {
+        loop row in rows -> &effects.push(TComptimeValue.String{value: row.name})
+    }
+    params := [TComptimeValue]{}
+    loop param in function.params -> &params.push(TComptimeValue.String{value: param.name})
+    info :: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
+        SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: ""}},
+        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: function.name}},
+        SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(function)},
+        SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(function.return_type)}},
+        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: params}},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span)},
+        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "values", value: TComptimeValue.List{values: effects}}})},
+        SemaComptimeReflectionField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
+        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function.body)}},
+        SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},
+    })
+    sema_user_template_ct_value(info)
+}
+
+// ---------------------------------------------------------------------------
+// Root `prep loop` declarations (Rust `expand_item_template_loops`). They
+// expand before registration in the module's known-time constant scope.
+
+pub fn sema_derive_expand_template_loops(items: [Item], diagnostics: &[Diagnostic]) -> [Item] {
+    has_loop :: loop item in items {
+        if item == .TemplateLoop(_) -> break true
+    } ?? false
+    if !has_loop -> return ~items
+    scope := [NamedCtValue]{}
+    loop item in items {
+        if item == .Const(definition) {
+            value := definition.ct
+            if value == None -> value = sema_derive_static_value(SemaDeriveExpansion{scope: scope, failure: None}, definition.value)
+            known :: value ?? next
+            &scope.push(NamedCtValue{name: definition.name, value: known})
+        }
+    }
+    expanded := [Item]{}
+    loop item in items {
+        if item == .TemplateLoop(template) {
+            body :: [DeriveBodyItem]{DeriveBodyItem.Loop{var: template.var, var_span: template.var_span, source: template.source, body: template.body, span: template.span}}
+            generated :: sema_derive_expand_template_body(body, scope, &diagnostics) ?? next
+            loop generated_item in generated -> &expanded.push(generated_item)
+            next
+        }
+        &expanded.push(item)
+    }
+    expanded
+}
+
+// ---------------------------------------------------------------------------
+// Registration of generated items: roots first, then impls, exactly like a
+// prepared module, so a generated impl may extend a generated type.
+
+fn sema_user_template_register(graph: &SemaRegistrationGraph, module_index: Int, generated: [Item], diagnostics: [Diagnostic]) {
+    problems := diagnostics
+    if generated.len() > 0 {
+        module_row := graph.modules[module_index]
+        source_file :: ~module_row.source_file
+        source_origin :: ~module_row.source_origin
+        source_segments :: ~module_row.source_segments
+        loop item in generated {
+            &module_row.program.items.push(item)
+            if item == {
+                .Impl(_) -> {}
+                else -> {
+                    _ := sema_registration_add_root(&module_row, item, source_file, source_origin, source_segments, &problems)
+                }
+            }
+        }
+        loop item in generated -> sema_registration_add_impl(&module_row, item, &problems)
+        graph.modules[module_index] = module_row
+    }
+    loop problem in problems -> sema_registration_push_graph_diagnostic(&graph, module_index, problem)
+}
+
+// ---------------------------------------------------------------------------
+// User derives (D-METADERIVE1=A). A struct requesting `#Name` expands the
+// `derive T.Name` provider preferring the entry module, then the target's
+// own module. The orphan law (E2711) requires the provider or the target to
+// be entry-local. Generated functions become ordinary members of the target;
+// other generated items join the target's module.
+
+fn sema_user_derive_member_sites(items: [Item], owner: String) -> [SemaUserMemberSite] {
+    sites := [SemaUserMemberSite]{}
+    loop item in items {
+        if item == {
+            .Struct(candidate) -> {
+                if candidate.name == owner {
+                    loop field in candidate.fields -> &sites.push(SemaUserMemberSite{name: field.name, site: "existing field `{owner}.{field.name}`", span: field.name_span})
+                    loop method in candidate.methods -> &sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
+                }
+            }
+            .Impl(candidate) -> {
+                if candidate.type_name == owner {
+                    loop method in candidate.methods -> &sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
+                }
+            }
+            else -> {}
+        }
+    }
+    sites
+}
+
+// The latest site recorded for `name` (Rust keeps one map entry per name;
+// a later declaration replaces an earlier one).
+fn sema_user_member_site(sites: [SemaUserMemberSite], name: String) -> SemaUserMemberSite? Never! {
+    index := sites.len() - 1
+    loop index >= 0 {
+        if sites[index].name == name -> return Val(sites[index])
+        index -= 1
+    }
+    None
+}
+
+fn sema_user_derive_collision(derive_name: String, owner: String, method: Func, site: SemaUserMemberSite) -> Diagnostic {
+    diagnostic :: sema_error("E0105", method.name_span, "generated method `{method.name}` from `derive T.{derive_name}` collides with {site.site}", "`derive T.{derive_name}` and {site.site} both define a member named `{method.name}` on `{owner}`", "rename the generated member in `derive T.{derive_name}`, or rename the colliding member")
+    diagnostic_with_detail(^diagnostic, "generated member `{method.name}` from `derive T.{derive_name}` at span {method.name_span.start}..{method.name_span.end}\n{site.site} at span {site.span.start}..{site.span.end}")
+}
+
+fn sema_user_derive_provider(providers: [SemaUserDeriveProvider], name: String, module_index: Int, entry_index: Int) -> SemaUserDeriveProvider? Never! {
+    chosen := SemaUserDeriveProvider?{None}
+    rank := 3
+    loop candidate in providers {
+        if candidate.definition.trait_name != name -> next
+        candidate_rank :: if candidate.module_index == entry_index -> 0 else -> if candidate.module_index == module_index -> 1 else -> 2
+        if candidate_rank < rank {
+            chosen = Val(candidate)
+            rank = candidate_rank
+        }
+    }
+    chosen
+}
+
+fn sema_user_derive_expand_struct(graph: SemaRegistrationGraph, module_index: Int, items: [Item], definition: StructDef, providers: [SemaUserDeriveProvider], entry_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
+    sites :: sema_user_derive_member_sites(items, definition.name)
+    generated_sites := [SemaUserMemberSite]{}
+    type_info := CtValue?{None}
+    loop requested in definition.derives {
+        provider :: sema_user_derive_provider(providers, requested.name, module_index, entry_index) ?? next
+        if module_index != entry_index && provider.module_index != entry_index {
+            // The violating marker belongs to an imported source file, so the
+            // diagnostic carries no entry-file caret.
+            &diagnostics.push(sema_error_optional("E2711", None, "derive orphan rule: neither `derive T.{requested.name}` nor `{definition.name}` is local", "a generated implementation is owned locally only when the derive provider or target type lives in the entry module", "define `derive T.{requested.name}` or `{definition.name}` in the entry module"))
+            next
+        }
+        if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
+        info :: type_info ?? next
+        expanded :: sema_derive_expand_provider_body(provider.definition.body, provider.definition.type_param, info, &diagnostics) ?? next
+        methods := [Func]{}
+        loop expanded_item in expanded {
+            if expanded_item == {
+                .Func(function) -> {
+                    existing :: sema_user_member_site(sites, function.name)
+                    if existing == .Val(site) {
+                        &diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
+                        next
+                    }
+                    prior :: sema_user_member_site(generated_sites, function.name)
+                    if prior == .Val(site) {
+                        &diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
+                        next
+                    }
+                    &generated_sites.push(SemaUserMemberSite{name: function.name, site: "generated member `{function.name}` from `derive T.{requested.name}`", span: function.name_span})
+                    &methods.push(function)
+                }
+                else -> &generated.push(expanded_item)
+            }
+        }
+        // The provider name selects the derive; its body supplies ordinary
+        // members on the target, not a trait conformance.
+        if methods.len() > 0 {
+            &generated.push(Item.Impl{value: ImplDef{span: definition.span, type_name: definition.name, type_span: definition.name_span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}})
+        }
+    }
+}
+
+fn sema_user_derive_expand_module(graph: &SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int) {
+    items :: graph.modules[module_index].program.items
+    generated := [Item]{}
+    diagnostics := [Diagnostic]{}
+    loop item in items {
+        if item == .Struct(definition) -> sema_user_derive_expand_struct(graph, module_index, items, definition, providers, entry_index, &generated, &diagnostics)
+    }
+    sema_user_template_register(&graph, module_index, generated, diagnostics)
+}
+
+// ---------------------------------------------------------------------------
+// Declared marker bodies (D-META-USER1=A). `target` is the struct's TypeInfo
+// or the function's FunctionInfo. A generated impl may add members but never
+// change or shadow a written (or earlier generated) member.
+
+fn sema_user_rule_body(declarations: [MarkerDecl], name: String) -> [DeriveBodyItem]? Never! {
+    loop declaration in declarations {
+        if declaration.name == name -> return declaration.body
+    }
+    None
+}
+
+fn sema_user_rule_existing_span(items: [Item], owner: String, member: String) -> Span? Never! {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                if definition.name == owner {
+                    loop field in definition.fields {
+                        if field.name == member -> return Val(field.name_span)
+                    }
+                    loop method in definition.methods {
+                        if method.name == member -> return Val(method.name_span)
+                    }
+                }
+            }
+            .Enum(definition) -> {
+                if definition.name == owner {
+                    loop method in definition.methods {
+                        if method.name == member -> return Val(method.name_span)
+                    }
+                }
+            }
+            .Impl(definition) -> {
+                if definition.type_name == owner {
+                    loop method in definition.methods {
+                        if method.name == member -> return Val(method.name_span)
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+fn sema_user_rule_accept(items: [Item], rule: String, expanded: [Item], generated: &[Item], diagnostics: &[Diagnostic]) {
+    loop expanded_item in expanded {
+        if expanded_item == {
+            .Impl(implementation) -> {
+                methods := [Func]{}
+                loop method in implementation.methods {
+                    existing := sema_user_rule_existing_span(items, implementation.type_name, method.name)
+                    if existing == None -> existing = sema_user_rule_existing_span(generated, implementation.type_name, method.name)
+                    if existing == .Val(span) {
+                        diagnostic :: sema_error("E0105", method.name_span, "generated member `{method.name}` would change or shadow `{method.name}` on `{implementation.type_name}`", "a rule may add a member but cannot change or shadow a written member", "rename the generated member or remove the existing member")
+                        &diagnostics.push(diagnostic_with_detail(^diagnostic, "generated member `{method.name}` from rule `{rule}` at span {method.name_span.start}..{method.name_span.end}\nexisting member `{implementation.type_name}.{method.name}` at span {span.start}..{span.end}"))
+                        next
+                    }
+                    &methods.push(method)
+                }
+                if methods.len() > 0 {
+                    accepted := implementation
+                    accepted.methods = methods
+                    &generated.push(Item.Impl{value: accepted})
+                }
+            }
+            else -> &generated.push(expanded_item)
+        }
+    }
+}
+
+fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int, declarations: [MarkerDecl]) {
+    items :: graph.modules[module_index].program.items
+    generated := [Item]{}
+    diagnostics := [Diagnostic]{}
+    loop item in items {
+        if item == .Struct(definition) {
+            type_info := CtValue?{None}
+            loop marker in definition.type_markers {
+                if marker.negated -> next
+                body :: sema_user_rule_body(declarations, marker.name) ?? next
+                if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
+                info :: type_info ?? next
+                expanded :: sema_derive_expand_provider_body(body, "target", info, &diagnostics) ?? next
+                sema_user_rule_accept(items, marker.name, expanded, &generated, &diagnostics)
+            }
+        }
+    }
+    // Function-site rules see a FunctionInfo and may emit any top-level item.
+    loop item in items {
+        if item == .Func(function) {
+            loop marker in function.markers {
+                if marker.negated -> next
+                body :: sema_user_rule_body(declarations, marker.name) ?? next
+                info :: sema_user_template_function_info(function) ?? next
+                expanded :: sema_derive_expand_provider_body(body, "target", info, &diagnostics) ?? next
+                loop expanded_item in expanded -> &generated.push(expanded_item)
+            }
+        }
+    }
+    sema_user_template_register(&graph, module_index, generated, diagnostics)
+}
+
+// ---------------------------------------------------------------------------
+// Graph pass. Runs once the declaration graph is complete, so reflection sees
+// every registered declaration; generated items register into the target's
+// module before any body is checked.
+
+pub fn sema_registration_expand_user_templates(graph: &SemaRegistrationGraph) {
+    if !graph.complete -> return
+    providers := [SemaUserDeriveProvider]{}
+    declarations := [MarkerDecl]{}
+    has_rule_body := false
+    loop (module_index, module_row) in graph.modules {
+        loop item in module_row.program.items {
+            if item == {
+                .UserDerive(definition) -> &providers.push(SemaUserDeriveProvider{module_index: module_index, definition: definition})
+                .MarkerDecl(declaration) -> {
+                    // One rule name resolves to its first declaration.
+                    known :: loop existing in declarations {
+                        if existing.name == declaration.name -> break true
+                    } ?? false
+                    if !known {
+                        if declaration.body != None -> has_rule_body = true
+                        &declarations.push(declaration)
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    if providers.len() == 0 && !has_rule_body -> return
+    entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
+    loop module_index in 0..<graph.modules.len() {
+        if providers.len() > 0 -> sema_user_derive_expand_module(&graph, module_index, providers, entry_index)
+        if has_rule_body -> sema_user_rule_expand_module(&graph, module_index, declarations)
+    }
+    graph.complete = graph.diagnostics.len() == 0
+}

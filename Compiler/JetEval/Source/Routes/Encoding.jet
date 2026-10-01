@@ -1,0 +1,726 @@
+// Pure base-encoding Core rows: core.encoding.hex, core.encoding.base64 and
+// core.encoding.base32. The kernels mirror the Rust host kernels
+// (Prelude/Core/EncodingBase.rs) and the decode dispatch follows
+// D-ENCBASE-STRICT1 (jet-foundation BaseEncodingDispatch.rs): a package of
+// edition 2027 or later decodes strict RFC 4648 with named allowances, an older
+// package keeps the edition-2026 compatibility parser. The edition is the
+// checked program's own package edition.
+use jet_foundation.[
+    MIRCallFallibility,
+    MIRCoreCall,
+    Span,
+    TComptimeValue,
+]
+
+struct JetEvalEncodingDecode {
+    bytes: [U8]
+    error: String?
+}
+
+struct JetEvalEncodingScan {
+    symbols: [Int]
+    origins: [Int]
+    pad_start: Int?
+    pad_count: Int
+    error: String?
+}
+
+fn jet_eval_route_core_encoding_module(module_name: String) -> Bool Never! {
+    module_name == "core.encoding.hex" || module_name == "core.encoding.base64" || module_name == "core.encoding.base32"
+}
+
+fn jet_eval_encoding_ok(bytes: [U8]) -> JetEvalEncodingDecode Never! {
+    JetEvalEncodingDecode{bytes: bytes, error: None}
+}
+
+fn jet_eval_encoding_err(message: String) -> JetEvalEncodingDecode Never! {
+    JetEvalEncodingDecode{bytes: [U8]{}, error: Val(message)}
+}
+
+fn jet_eval_encoding_text(bytes: [U8]) -> String Never! {
+    // Every encoder emits ASCII, so the strict UTF-8 conversion cannot fail.
+    String.from_bytes(bytes) ?? ""
+}
+
+fn jet_eval_encoding_hex_digit(value: Int, upper: Bool) -> U8 Never! {
+    if value < 10 -> return U8{48 + value}
+    if upper -> return U8{55 + value}
+    U8{87 + value}
+}
+
+fn jet_eval_encoding_push_hex_pair(out: &[U8], value: Int, upper: Bool) Never! {
+    &out.push(jet_eval_encoding_hex_digit((value >> 4) & 15, upper))
+    &out.push(jet_eval_encoding_hex_digit(value & 15, upper))
+}
+
+fn jet_eval_encoding_hex_pair(value: Int, upper: Bool) -> String Never! {
+    out := [U8]{}
+    jet_eval_encoding_push_hex_pair(&out, value, upper)
+    jet_eval_encoding_text(out)
+}
+
+fn jet_eval_encoding_hex_nibble(byte: Int) -> Int? {
+    if byte >= 48 && byte <= 57 -> return Val(byte - 48)
+    if byte >= 97 && byte <= 102 -> return Val(byte - 87)
+    if byte >= 65 && byte <= 70 -> return Val(byte - 55)
+    None
+}
+
+fn jet_eval_encoding_hex_encode(bytes: [U8], upper: Bool) -> String Never! {
+    out := [U8]{}
+    loop byte in bytes -> jet_eval_encoding_push_hex_pair(&out, Int.from_u8(byte), upper)
+    jet_eval_encoding_text(out)
+}
+
+fn jet_eval_encoding_hex_encode_sep(bytes: [U8], separator: String) -> String Never! {
+    out := [U8]{}
+    separator_bytes :: separator.bytes()
+    index := 0
+    loop byte in bytes {
+        if index > 0 {
+            loop part in separator_bytes -> &out.push(part)
+        }
+        jet_eval_encoding_push_hex_pair(&out, Int.from_u8(byte), false)
+        index += 1
+    }
+    // A separator is arbitrary text, so only it can carry non-ASCII bytes.
+    String.from_bytes(out) ?? ""
+}
+
+// Mixed-case digits, whole bytes only, no whitespace. The length check runs
+// before the digit scan.
+fn jet_eval_encoding_hex_decode(text: String) -> JetEvalEncodingDecode {
+    raw :: text.bytes()
+    if raw.len() %% 2 != 0 -> return jet_eval_encoding_err("odd-length hex string; hex text encodes whole bytes, so the length must be even")
+    out := [U8]{}
+    index := 0
+    loop index < raw.len() {
+        high :: jet_eval_encoding_hex_nibble(Int.from_u8(raw[index])) ?? return jet_eval_encoding_err("invalid hex digit; expected 0-9, a-f, or A-F")
+        low :: jet_eval_encoding_hex_nibble(Int.from_u8(raw[index + 1])) ?? return jet_eval_encoding_err("invalid hex digit; expected 0-9, a-f, or A-F")
+        &out.push(U8{high * 16 + low})
+        index += 2
+    }
+    jet_eval_encoding_ok(out)
+}
+
+fn jet_eval_encoding_hex_is_hex(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() %% 2 != 0 -> return false
+    loop byte in raw {
+        if jet_eval_encoding_hex_nibble(Int.from_u8(byte)) == None -> return false
+    }
+    true
+}
+
+// 16-byte rows: an 8-digit offset, the hex bytes, then the printable ASCII.
+fn jet_eval_encoding_hex_dump(bytes: [U8]) -> String {
+    out := [U8]{}
+    offset := 0
+    loop offset < bytes.len() {
+        loop shift in 0..<8 -> &out.push(jet_eval_encoding_hex_digit((offset >> (28 - shift * 4)) & 15, false))
+        &out.push(U8{32})
+        &out.push(U8{32})
+        loop index in 0..<16 {
+            if index > 0 -> &out.push(U8{32})
+            if offset + index < bytes.len() {
+                jet_eval_encoding_push_hex_pair(&out, Int.from_u8(bytes[offset + index]), false)
+            } else {
+                &out.push(U8{32})
+                &out.push(U8{32})
+            }
+        }
+        &out.push(U8{32})
+        &out.push(U8{32})
+        index := 0
+        loop index < 16 && offset + index < bytes.len() {
+            value :: Int.from_u8(bytes[offset + index])
+            if value >= 32 && value <= 126 {
+                &out.push(bytes[offset + index])
+            } else {
+                &out.push(U8{46})
+            }
+            index += 1
+        }
+        &out.push(U8{10})
+        offset += 16
+    }
+    jet_eval_encoding_text(out)
+}
+
+fn jet_eval_encoding_crc_hqx(bytes: [U8], value: Int) -> Int Never! {
+    crc := value & 65535
+    loop byte in bytes {
+        crc = crc ~| (Int.from_u8(byte) << 8)
+        loop _ in 0..<8 {
+            if (crc & 32768) != 0 {
+                crc = ((crc << 1) ~| 4129) & 65535
+            } else {
+                crc = (crc << 1) & 65535
+            }
+        }
+    }
+    crc
+}
+
+fn jet_eval_encoding_crc32(bytes: [U8]) -> Int Never! {
+    crc := 4294967295
+    loop byte in bytes {
+        crc = crc ~| Int.from_u8(byte)
+        loop _ in 0..<8 {
+            if (crc & 1) != 0 {
+                crc = (crc >> 1) ~| 3988292384
+            } else {
+                crc = crc >> 1
+            }
+        }
+    }
+    (crc ~| 4294967295) & 4294967295
+}
+
+fn jet_eval_encoding_b64_encode(bytes: [U8]) -> String {
+    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        remain :: bytes.len() - index
+        b0 :: Int.from_u8(bytes[index])
+        b1 :: if remain > 1 -> Int.from_u8(bytes[index + 1]) else -> 0
+        b2 :: if remain > 2 -> Int.from_u8(bytes[index + 2]) else -> 0
+        n :: (b0 << 16) | (b1 << 8) | b2
+        &out.push(alphabet[n >> 18])
+        &out.push(alphabet[(n >> 12) & 63])
+        third :: if remain > 1 -> alphabet[(n >> 6) & 63] else -> U8{61}
+        fourth :: if remain > 2 -> alphabet[n & 63] else -> U8{61}
+        &out.push(third)
+        &out.push(fourth)
+        index += 3
+    }
+    jet_eval_encoding_text(out)
+}
+
+// Python `base64.encodebytes`: standard Base64 in 76-character lines, each
+// ending in a newline.
+fn jet_eval_encoding_b64_encodebytes(bytes: [U8]) -> String {
+    encoded :: jet_eval_encoding_b64_encode(bytes).bytes()
+    out := [U8]{}
+    index := 0
+    loop index < encoded.len() {
+        &out.push(encoded[index])
+        index += 1
+        if index %% 76 == 0 || index == encoded.len() -> &out.push(U8{10})
+    }
+    jet_eval_encoding_text(out)
+}
+
+// The URL alphabet maps `+` to `-` and `/` to `_`; the unpadded form also
+// drops the trailing `=`.
+fn jet_eval_encoding_b64url_encode(bytes: [U8], padded: Bool) -> String {
+    out := [U8]{}
+    loop byte in jet_eval_encoding_b64_encode(bytes).bytes() {
+        value :: Int.from_u8(byte)
+        if {
+            value == 43 -> { &out.push(U8{45}) }
+            value == 47 -> { &out.push(U8{95}) }
+            value == 61 -> { if padded -> &out.push(byte) }
+            else -> { &out.push(byte) }
+        }
+    }
+    jet_eval_encoding_text(out)
+}
+
+fn jet_eval_encoding_b64_pad(text: String) -> String Never! {
+    remainder :: text.bytes().len() %% 4
+    padded := ~text
+    if remainder == 0 -> return padded
+    loop _ in 0..<(4 - remainder) -> padded = "{padded}="
+    padded
+}
+
+fn jet_eval_encoding_b64_unpad(text: String) -> String Never! {
+    raw :: text.bytes()
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1
+    String.from_bytes(raw[0..<end]) ?? text
+}
+
+fn jet_eval_encoding_base32_encode(bytes: [U8], alphabet_text: String) -> String {
+    alphabet :: alphabet_text.bytes()
+    out := [U8]{}
+    buffer := 0
+    bits := 0
+    loop byte in bytes {
+        buffer = (buffer << 8) | Int.from_u8(byte)
+        bits += 8
+        loop bits >= 5 {
+            &out.push(alphabet[(buffer >> (bits - 5)) & 31])
+            bits -= 5
+        }
+        // Only the unread low bits matter; dropping the rest keeps the
+        // buffer bounded like the host's 32-bit register.
+        buffer = buffer & ((1 << bits) - 1)
+    }
+    if bits > 0 -> &out.push(alphabet[(buffer << (5 - bits)) & 31])
+    loop out.len() %% 8 != 0 -> &out.push(U8{61})
+    jet_eval_encoding_text(out)
+}
+
+fn jet_eval_encoding_std_b64_digit(byte: Int) -> Int? {
+    if byte >= 65 && byte <= 90 -> return Val(byte - 65)
+    if byte >= 97 && byte <= 122 -> return Val(byte - 71)
+    if byte >= 48 && byte <= 57 -> return Val(byte + 4)
+    if byte == 43 -> return Val(62)
+    if byte == 47 -> return Val(63)
+    None
+}
+
+fn jet_eval_encoding_url_b64_digit(byte: Int) -> Int? {
+    if byte >= 65 && byte <= 90 -> return Val(byte - 65)
+    if byte >= 97 && byte <= 122 -> return Val(byte - 71)
+    if byte >= 48 && byte <= 57 -> return Val(byte + 4)
+    if byte == 45 -> return Val(62)
+    if byte == 95 -> return Val(63)
+    None
+}
+
+fn jet_eval_encoding_b32_digit(byte: Int, allow_lowercase: Bool) -> Int? {
+    if byte >= 65 && byte <= 90 -> return Val(byte - 65)
+    if allow_lowercase && byte >= 97 && byte <= 122 -> return Val(byte - 97)
+    if byte >= 50 && byte <= 55 -> return Val(byte - 24)
+    None
+}
+
+// The strict decoders' whitespace set (RFC 4648 allowance): HT, LF, VT, FF,
+// CR and space.
+fn jet_eval_encoding_strict_space(byte: Int) -> Bool Never! {
+    (byte >= 9 && byte <= 13) || byte == 32
+}
+
+// The compatibility decoders' ASCII whitespace: HT, LF, FF, CR and space.
+fn jet_eval_encoding_ascii_space(byte: Int) -> Bool Never! {
+    byte == 9 || byte == 10 || byte == 12 || byte == 13 || byte == 32
+}
+
+fn jet_eval_encoding_strict_error(kind: String, offset: Int, reason: String) -> JetEvalEncodingDecode Never! {
+    jet_eval_encoding_err("invalid {kind} at byte {offset}: {reason}")
+}
+
+fn jet_eval_encoding_strict_scan(text: String, kind: String, alphabet: String, url: Bool, allow_whitespace: Bool, allow_padding: Bool, allow_lowercase: Bool) -> JetEvalEncodingScan {
+    scanned := JetEvalEncodingScan{symbols: [Int]{}, origins: [Int]{}, pad_start: None, pad_count: 0, error: None}
+    raw :: text.bytes()
+    loop offset in 0..<raw.len() {
+        byte :: Int.from_u8(raw[offset])
+        if jet_eval_encoding_strict_space(byte) {
+            if !allow_whitespace {
+                scanned.error = Val("invalid {kind} at byte {offset}: ASCII whitespace is not allowed")
+                return scanned
+            }
+            next
+        }
+        if byte == 61 {
+            if !allow_padding {
+                scanned.error = Val("invalid {kind} at byte {offset}: padding is not allowed")
+                return scanned
+            }
+            if scanned.pad_start == None -> scanned.pad_start = Val(offset)
+            scanned.pad_count += 1
+            next
+        }
+        if scanned.pad_start != None {
+            scanned.error = Val("invalid {kind} at byte {offset}: padding may appear only at the end")
+            return scanned
+        }
+        value := Int?{None}
+        if {
+            kind == "base32" -> { value = jet_eval_encoding_b32_digit(byte, allow_lowercase) }
+            url -> { value = jet_eval_encoding_url_b64_digit(byte) }
+            else -> { value = jet_eval_encoding_std_b64_digit(byte) }
+        }
+        symbol :: value ?? {
+            scanned.error = Val("invalid {kind} at byte {offset}: byte 0x{jet_eval_encoding_hex_pair(byte, true)} is not in the {alphabet} alphabet")
+            return scanned
+        }
+        &scanned.symbols.push(symbol)
+        &scanned.origins.push(offset)
+    }
+    scanned
+}
+
+fn jet_eval_encoding_strict_quanta(kind: String, scanned: JetEvalEncodingScan, allow_missing_padding: Bool, radix: Int) -> JetEvalEncodingDecode {
+    symbol_count :: scanned.symbols.len()
+    pad :: scanned.pad_count
+    eof := 1
+    if scanned.origins.len() > 0 -> eof = scanned.origins[scanned.origins.len() - 1] + 1
+    if scanned.pad_start == Val(start) -> eof = start
+    if symbol_count == 0 && pad == 0 -> return jet_eval_encoding_ok([U8]{})
+    quantum :: if radix == 64 -> 4 else -> 8
+    remainder :: (symbol_count + pad) %% quantum
+    if remainder == 1 || (!allow_missing_padding && remainder != 0) {
+        unpadded_base64 :: pad == 0 && allow_missing_padding && radix == 64 && (remainder == 0 || remainder == 2 || remainder == 3 || remainder == 5 || remainder == 7)
+        unpadded_base32 :: pad == 0 && allow_missing_padding && radix == 32 && (remainder == 0 || remainder == 2 || remainder == 4 || remainder == 5 || remainder == 7)
+        if !unpadded_base64 && !unpadded_base32 {
+            if remainder == 1 -> return jet_eval_encoding_strict_error(kind, eof, "encoded length cannot represent whole bytes")
+            if !allow_missing_padding -> return jet_eval_encoding_strict_error(kind, eof, "expected {quantum - remainder} padding characters")
+        }
+    }
+    symbol_remainder :: symbol_count %% quantum
+    if pad > 0 {
+        pad_start :: scanned.pad_start ?? 0
+        expected := 0
+        if {
+            radix == 64 && symbol_remainder == 2 -> { expected = 2 }
+            radix == 64 && symbol_remainder == 3 -> { expected = 1 }
+            radix == 32 && symbol_remainder == 2 -> { expected = 6 }
+            radix == 32 && symbol_remainder == 4 -> { expected = 4 }
+            radix == 32 && symbol_remainder == 5 -> { expected = 3 }
+            radix == 32 && symbol_remainder == 7 -> { expected = 1 }
+            symbol_remainder == 0 -> { return jet_eval_encoding_strict_error(kind, pad_start, "unexpected padding") }
+            else -> { return jet_eval_encoding_strict_error(kind, pad_start, "expected 0 padding characters") }
+        }
+        if pad > expected -> return jet_eval_encoding_strict_error(kind, pad_start, "unexpected padding")
+        if pad < expected -> return jet_eval_encoding_strict_error(kind, pad_start, "expected {expected} padding characters")
+    } else if !allow_missing_padding {
+        need := 0
+        if {
+            symbol_remainder == 0 -> { need = 0 }
+            symbol_remainder == 2 -> { need = if radix == 64 -> 2 else -> 6 }
+            symbol_remainder == 3 -> { need = 1 }
+            symbol_remainder == 4 && radix == 32 -> { need = 4 }
+            symbol_remainder == 5 -> { need = 3 }
+            symbol_remainder == 7 -> { need = 1 }
+            else -> { return jet_eval_encoding_strict_error(kind, eof, "encoded length cannot represent whole bytes") }
+        }
+        if need > 0 -> return jet_eval_encoding_strict_error(kind, eof, "expected {need} padding characters")
+    }
+    width :: if radix == 64 -> 6 else -> 5
+    out := [U8]{}
+    buffer := 0
+    bits := 0
+    index := 0
+    loop value in scanned.symbols {
+        buffer = (buffer << width) | value
+        bits += width
+        loop bits >= 8 {
+            bits -= 8
+            &out.push(U8{(buffer >> bits) & 255})
+        }
+        buffer = buffer & ((1 << bits) - 1)
+        if index + 1 == symbol_count && bits > 0 && buffer != 0 -> return jet_eval_encoding_strict_error(kind, scanned.origins[index], "non-zero unused bits")
+        index += 1
+    }
+    jet_eval_encoding_ok(out)
+}
+
+fn jet_eval_encoding_strict_base64(text: String, allow_whitespace: Bool, allow_missing_padding: Bool) -> JetEvalEncodingDecode {
+    scanned :: jet_eval_encoding_strict_scan(text, "base64", "standard base64", false, allow_whitespace, true, false)
+    if scanned.error == Val(message) -> return jet_eval_encoding_err(message)
+    jet_eval_encoding_strict_quanta("base64", scanned, allow_missing_padding, 64)
+}
+
+fn jet_eval_encoding_strict_base64url(text: String, allow_whitespace: Bool, allow_padding: Bool) -> JetEvalEncodingDecode {
+    scanned :: jet_eval_encoding_strict_scan(text, "base64url", "URL-safe base64", true, allow_whitespace, allow_padding, false)
+    if scanned.error == Val(message) -> return jet_eval_encoding_err(message)
+    jet_eval_encoding_strict_quanta("base64url", scanned, !allow_padding, 64)
+}
+
+fn jet_eval_encoding_strict_base32(text: String, allow_whitespace: Bool, allow_missing_padding: Bool, allow_lowercase: Bool) -> JetEvalEncodingDecode {
+    scanned :: jet_eval_encoding_strict_scan(text, "base32", "base32", false, allow_whitespace, true, allow_lowercase)
+    if scanned.error == Val(message) -> return jet_eval_encoding_err(message)
+    jet_eval_encoding_strict_quanta("base32", scanned, allow_missing_padding, 32)
+}
+
+// Edition 2026 compatibility: the historical AOT decoder (whitespace dropped,
+// whole quanta, `=` only in the last two places).
+fn jet_eval_encoding_compat_aot(raw: [U8]) -> [U8]? {
+    input := [Int]{}
+    loop byte in raw {
+        value :: Int.from_u8(byte)
+        if !jet_eval_encoding_ascii_space(value) -> &input.push(value)
+    }
+    if input.len() %% 4 != 0 -> return None
+    out := [U8]{}
+    index := 0
+    loop index < input.len() {
+        a :: jet_eval_encoding_std_b64_digit(input[index]) ?? return None
+        b :: jet_eval_encoding_std_b64_digit(input[index + 1]) ?? return None
+        &out.push(U8{((a << 2) | (b >> 4)) & 255})
+        if input[index + 2] != 61 {
+            c :: jet_eval_encoding_std_b64_digit(input[index + 2]) ?? return None
+            &out.push(U8{((b << 4) | (c >> 2)) & 255})
+            if input[index + 3] != 61 {
+                d :: jet_eval_encoding_std_b64_digit(input[index + 3]) ?? return None
+                &out.push(U8{((c << 6) | d) & 255})
+            }
+        }
+        index += 4
+    }
+    Val(out)
+}
+
+// Edition 2026 compatibility: the historical comptime decoder (trailing `=`
+// trimmed, a short final quantum allowed).
+fn jet_eval_encoding_compat_comptime(raw: [U8]) -> [U8]? {
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1
+    if end %% 4 == 1 -> return None
+    out := [U8]{}
+    index := 0
+    loop index < end {
+        digits := [Int]{}
+        loop index + digits.len() < end && digits.len() < 4 {
+            digit :: jet_eval_encoding_std_b64_digit(Int.from_u8(raw[index + digits.len()])) ?? return None
+            &digits.push(digit)
+        }
+        second :: if digits.len() > 1 -> digits[1] else -> 0
+        &out.push(U8{((digits[0] << 2) | (second >> 4)) & 255})
+        if digits.len() > 2 -> &out.push(U8{((digits[1] << 4) | (digits[2] >> 2)) & 255})
+        if digits.len() > 3 -> &out.push(U8{((digits[2] << 6) | digits[3]) & 255})
+        index += 4
+    }
+    Val(out)
+}
+
+fn jet_eval_encoding_compat_error(raw: [U8], url: Bool) -> String Never! {
+    label :: if url -> "base64url" else -> "base64"
+    alphabet :: if url -> "URL-safe base64" else -> "standard base64"
+    loop offset in 0..<raw.len() {
+        byte :: Int.from_u8(raw[offset])
+        alphanumeric :: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        accepted :: alphanumeric || byte == 61 || byte == 43 || byte == 47 || (url && (byte == 45 || byte == 95)) || jet_eval_encoding_ascii_space(byte)
+        if !accepted -> return "invalid {label} at byte {offset}: byte 0x{jet_eval_encoding_hex_pair(byte, true)} is not in the {alphabet} alphabet"
+    }
+    padding := Int?{None}
+    loop offset in 0..<raw.len() {
+        if padding == None && raw[offset] == (U8{61}) -> padding = Val(offset)
+    }
+    if padding == Val(start) {
+        loop offset in (start + 1)..<raw.len() {
+            byte :: Int.from_u8(raw[offset])
+            if byte != 61 && !jet_eval_encoding_ascii_space(byte) -> return "invalid {label} at byte {start}: padding may appear only at the end"
+        }
+    }
+    "invalid {label} at byte {raw.len()}: encoded length cannot represent whole bytes"
+}
+
+fn jet_eval_encoding_compat_base64(text: String, url: Bool) -> JetEvalEncodingDecode {
+    prepared := text
+    if url {
+        prepared = text.trim().replace("-", "+").replace("_", "/")
+        loop prepared.bytes().len() %% 4 != 0 -> prepared = "{prepared}="
+    }
+    raw :: prepared.bytes()
+    aot :: jet_eval_encoding_compat_aot(raw)
+    folded :: jet_eval_encoding_compat_comptime(raw)
+    if aot == Val(aot_bytes) {
+        if folded == Val(folded_bytes) {
+            if aot_bytes != folded_bytes {
+                label :: if url -> "base64url" else -> "base64"
+                return jet_eval_encoding_err("invalid {label} at byte {text.bytes().len()}: historical decoders disagree")
+            }
+        }
+        return jet_eval_encoding_ok(aot_bytes)
+    }
+    if folded == Val(folded_bytes) -> return jet_eval_encoding_ok(folded_bytes)
+    jet_eval_encoding_err(jet_eval_encoding_compat_error(text.bytes(), url))
+}
+
+fn jet_eval_encoding_compat_base32(text: String) -> JetEvalEncodingDecode {
+    out := [U8]{}
+    buffer := 0
+    bits := 0
+    raw :: text.bytes()
+    loop offset in 0..<raw.len() {
+        byte :: Int.from_u8(raw[offset])
+        if jet_eval_encoding_ascii_space(byte) || byte == 61 -> next
+        value :: jet_eval_encoding_b32_digit(byte, true) ?? return jet_eval_encoding_err("invalid base32 at byte {offset}: byte 0x{jet_eval_encoding_hex_pair(byte, true)} is not in the base32 alphabet")
+        buffer = (buffer << 5) | value
+        bits += 5
+        if bits >= 8 {
+            &out.push(U8{(buffer >> (bits - 8)) & 255})
+            bits -= 8
+        }
+        buffer = buffer & ((1 << bits) - 1)
+    }
+    jet_eval_encoding_ok(out)
+}
+
+// Rust `edition_year`: an unparseable edition reads as 2026.
+fn jet_eval_encoding_strict_edition(edition: String) -> Bool Never! {
+    year :: Int.parse(edition.trim()) ?? 2026
+    year >= 2027
+}
+
+fn jet_eval_encoding_decode_base64(edition: String, text: String, allow_whitespace: Bool, allow_missing_padding: Bool) -> JetEvalEncodingDecode {
+    if jet_eval_encoding_strict_edition(edition) -> return jet_eval_encoding_strict_base64(text, allow_whitespace, allow_missing_padding)
+    jet_eval_encoding_compat_base64(text, false)
+}
+
+fn jet_eval_encoding_decode_base64url(edition: String, text: String, allow_whitespace: Bool, allow_padding: Bool) -> JetEvalEncodingDecode {
+    if jet_eval_encoding_strict_edition(edition) -> return jet_eval_encoding_strict_base64url(text, allow_whitespace, allow_padding)
+    jet_eval_encoding_compat_base64(text, true)
+}
+
+fn jet_eval_encoding_decode_base32(edition: String, text: String, allow_whitespace: Bool, allow_missing_padding: Bool, allow_lowercase: Bool) -> JetEvalEncodingDecode {
+    if jet_eval_encoding_strict_edition(edition) -> return jet_eval_encoding_strict_base32(text, allow_whitespace, allow_missing_padding, allow_lowercase)
+    jet_eval_encoding_compat_base32(text)
+}
+
+// RFC 4648 section 7 extended-hex alphabet: each symbol maps one-to-one onto
+// the standard alphabet, so the standard decoder's byte offsets stay the
+// caller's offsets.
+fn jet_eval_encoding_decode_base32hex(edition: String, text: String) -> JetEvalEncodingDecode {
+    standard :: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".bytes()
+    canonical := [U8]{}
+    loop byte in text.bytes() {
+        value :: Int.from_u8(byte)
+        if {
+            value >= 48 && value <= 57 -> { &canonical.push(standard[value - 48]) }
+            value >= 65 && value <= 86 -> { &canonical.push(standard[value - 55]) }
+            value == 61 -> { &canonical.push(byte) }
+            else -> { return jet_eval_encoding_err("invalid Base32hex character") }
+        }
+    }
+    jet_eval_encoding_decode_base32(edition, jet_eval_encoding_text(canonical), false, false, false)
+}
+
+fn jet_eval_encoding_bytes_arg(data: [TComptimeValue], index: Int, machine: &JetEvalMachine, span: Span) -> [U8]? {
+    if index >= data.len() {
+        jet_eval_compiler_fail(&machine, span, "encoding route is missing its byte argument")
+        return None
+    }
+    if data[index] == {
+        .Bytes(values) -> Val(values)
+        .List(values) -> {
+            out := [U8]{}
+            loop value in values {
+                number :: jet_eval_route_int_value(value, &machine, span) ?? return None
+                if number < 0 || number > 255 {
+                    jet_eval_compiler_fail(&machine, span, "encoding route byte value is outside U8")
+                    return None
+                }
+                &out.push(U8{number})
+            }
+            Val(out)
+        }
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "encoding route requires a byte list")
+            None
+        }
+    }
+}
+
+fn jet_eval_encoding_string_arg(data: [TComptimeValue], index: Int, machine: &JetEvalMachine, span: Span) -> String? {
+    if index < data.len() {
+        if data[index] == .String(text) -> return Val(text)
+    }
+    jet_eval_compiler_fail(&machine, span, "encoding route requires a String argument")
+    None
+}
+
+fn jet_eval_encoding_int_arg(data: [TComptimeValue], index: Int, machine: &JetEvalMachine, span: Span) -> Int? {
+    if index >= data.len() {
+        jet_eval_compiler_fail(&machine, span, "encoding route requires an Int argument")
+        return None
+    }
+    jet_eval_route_int_value(data[index], &machine, span)
+}
+
+// A missing named allowance takes its default; a present one must be Bool.
+fn jet_eval_encoding_bool_arg(data: [TComptimeValue], index: Int, absent: Bool, machine: &JetEvalMachine, span: Span) -> Bool? {
+    if index >= data.len() -> return Val(absent)
+    if data[index] == .Bool(value) -> return Val(value)
+    jet_eval_compiler_fail(&machine, span, "encoding route allowance must be Bool")
+    None
+}
+
+fn jet_eval_encoding_string_value(text: String) -> JetEvalRuntimeValue Never! {
+    JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: text}}
+}
+
+fn jet_eval_encoding_decoded(decoded: JetEvalEncodingDecode, fallibility: MIRCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    if decoded.error == Val(message) {
+        failure :: jet_eval_route_told_failure(message, fallibility) ?? {
+            jet_eval_compiler_fail(&machine, span, "encoding decode route has no failure carrier")
+            return None
+        }
+        return Val(failure)
+    }
+    Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: TComptimeValue.Bytes{value: decoded.bytes}}, fallibility))
+}
+
+// Members whose first argument is text: the decoders, `is_hex`, `pad` and
+// `unpad`.
+fn jet_eval_route_core_encoding_text(key: String, data: [TComptimeValue], edition: String, fallibility: MIRCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    text :: jet_eval_encoding_string_arg(data, 0, &machine, span) ?? return None
+    decoded := jet_eval_encoding_ok([U8]{})
+    if key == {
+        "core.encoding.hex.is_hex" -> {
+            return Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: jet_eval_encoding_hex_is_hex(text)}}, fallibility))
+        }
+        "core.encoding.base64.pad" -> {
+            return Val(jet_eval_route_success(jet_eval_encoding_string_value(jet_eval_encoding_b64_pad(text)), fallibility))
+        }
+        "core.encoding.base64.unpad" -> {
+            return Val(jet_eval_route_success(jet_eval_encoding_string_value(jet_eval_encoding_b64_unpad(text)), fallibility))
+        }
+        "core.encoding.hex.decode" -> {
+            decoded = jet_eval_encoding_hex_decode(text)
+        }
+        "core.encoding.base64.decode" -> {
+            allow_whitespace :: jet_eval_encoding_bool_arg(data, 1, false, &machine, span) ?? return None
+            allow_missing_padding :: jet_eval_encoding_bool_arg(data, 2, false, &machine, span) ?? return None
+            decoded = jet_eval_encoding_decode_base64(edition, text, allow_whitespace, allow_missing_padding)
+        }
+        // The MIME forms allow whitespace between quanta.
+        "core.encoding.base64.decodebytes" | "core.encoding.hex.a2b_base64" -> {
+            decoded = jet_eval_encoding_decode_base64(edition, text, true, false)
+        }
+        "core.encoding.base64.decode_url" -> {
+            allow_whitespace :: jet_eval_encoding_bool_arg(data, 1, false, &machine, span) ?? return None
+            allow_padding :: jet_eval_encoding_bool_arg(data, 2, false, &machine, span) ?? return None
+            decoded = jet_eval_encoding_decode_base64url(edition, text, allow_whitespace, allow_padding)
+        }
+        "core.encoding.base32.decode" | "core.encoding.base32.b32decode" -> {
+            allow_whitespace :: jet_eval_encoding_bool_arg(data, 1, false, &machine, span) ?? return None
+            allow_missing_padding :: jet_eval_encoding_bool_arg(data, 2, false, &machine, span) ?? return None
+            allow_lowercase :: jet_eval_encoding_bool_arg(data, 3, false, &machine, span) ?? return None
+            decoded = jet_eval_encoding_decode_base32(edition, text, allow_whitespace, allow_missing_padding, allow_lowercase)
+        }
+        "core.encoding.base32.b32hexdecode" -> {
+            decoded = jet_eval_encoding_decode_base32hex(edition, text)
+        }
+        else -> return jet_eval_route_not_supported(&machine, span, "pure encoding route {key}")
+    }
+    jet_eval_encoding_decoded(decoded, fallibility, &machine, span)
+}
+
+// Executes one pure base-encoding Core row. The decoders read the checked
+// program's package edition (D-ENCBASE-STRICT1).
+fn jet_eval_route_core_encoding(row: MIRCoreCall, data: [TComptimeValue], fallibility: MIRCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    key :: "{row.module_name}.{row.member}"
+    edition :: ~machine.program.facts.edition
+    if data.len() > 0 && data[0] == .String(_) -> return jet_eval_route_core_encoding_text(key, data, edition, fallibility, &machine, span)
+    bytes :: jet_eval_encoding_bytes_arg(data, 0, &machine, span) ?? return None
+    output := jet_eval_encoding_string_value("")
+    if key == {
+        "core.encoding.hex.encode" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_hex_encode(bytes, false)) }
+        "core.encoding.hex.encode_upper" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_hex_encode(bytes, true)) }
+        "core.encoding.hex.dump" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_hex_dump(bytes)) }
+        "core.encoding.hex.crc32" -> { output = JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: jet_eval_encoding_crc32(bytes)}} }
+        "core.encoding.hex.crc_hqx" -> {
+            value :: jet_eval_encoding_int_arg(data, 1, &machine, span) ?? return None
+            output = JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: jet_eval_encoding_crc_hqx(bytes, value)}}
+        }
+        "core.encoding.hex.encode_sep" -> {
+            separator :: jet_eval_encoding_string_arg(data, 1, &machine, span) ?? return None
+            output = jet_eval_encoding_string_value(jet_eval_encoding_hex_encode_sep(bytes, separator))
+        }
+        "core.encoding.hex.b2a_base64" | "core.encoding.base64.encode" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_b64_encode(bytes)) }
+        "core.encoding.base64.encodebytes" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_b64_encodebytes(bytes)) }
+        "core.encoding.base64.encode_url" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_b64url_encode(bytes, false)) }
+        "core.encoding.base64.encode_url_padded" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_b64url_encode(bytes, true)) }
+        "core.encoding.base32.encode" | "core.encoding.base32.b32encode" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_base32_encode(bytes, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")) }
+        "core.encoding.base32.b32hexencode" -> { output = jet_eval_encoding_string_value(jet_eval_encoding_base32_encode(bytes, "0123456789ABCDEFGHIJKLMNOPQRSTUV")) }
+        else -> return jet_eval_route_not_supported(&machine, span, "pure encoding route {key}")
+    }
+    Val(jet_eval_route_success(output, fallibility))
+}

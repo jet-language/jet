@@ -20,6 +20,9 @@ use jet_foundation.[
     MIRPreludeTypeArg,
     MIRSemanticOp,
     MIRSourceFile,
+    MIRStringFormat,
+    MIRStringPart,
+    MIRStringPartKind,
     MIRTerminator,
     MIRType,
     MIRValueID,
@@ -93,7 +96,7 @@ fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
         | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .InsertList | .RemoveMap
         | .RemoveList(_, _) | .MapPopFirst | .ExtendList | .Reverse | .Sort | .SortDesc | .Clear
         | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate
-        | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SortedSetInsert
+        | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert
         | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut
         | .LRUAddNew | .LRUGet | .LRURemove | .DequePushFront | .DequePushBack | .DequePopFront
         | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite(_) | .GetDisjointWrite
@@ -548,6 +551,7 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .StringToTitle -> return jet_codegen_builtin_route("string_to_title", "jet_text_title", 1, [Bool]{true}, None)
         .Split -> return jet_codegen_builtin_route("string_split", "jet_iter_string_split", 2, [Bool]{true, true}, None)
         .Lines -> return jet_codegen_builtin_route("string_lines", "jet_string_lines", 1, [Bool]{true}, None)
+        .Chars -> return jet_codegen_builtin_route("string_chars", "jet_string_chars", 1, [Bool]{true}, None)
         .ParseInt -> return jet_codegen_builtin_route("int_parse", "jet_std::jet_int_parse", 1, [Bool]{true}, None)
         .ParseFloat -> return jet_codegen_builtin_route("float_parse", "jet_std::jet_float_parse", 1, [Bool]{true}, None)
         .IntToRadix(_) -> return jet_codegen_builtin_route("int_to_radix", "jet_std::jet_int_to_radix", 2, [Bool]{false, false}, None)
@@ -565,6 +569,7 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .Keys -> return jet_codegen_builtin_route("map_keys", "jet_map_keys", 1, [Bool]{true}, None)
         .Values -> return jet_codegen_builtin_route("map_values", "jet_map_values", 1, [Bool]{true}, None)
         .MapTopN(_) -> return jet_codegen_builtin_route("map_top_n", "jet_map_top_n", 2, [Bool]{true, false}, None)
+        .MapToList(_) -> return jet_codegen_builtin_route_row("core.map", "to_list", "jet_map_to_list", 1, [Bool]{true}, None, MIRPreludeABI.Aggregate)
         .MapMin -> return jet_codegen_builtin_route("map_min", "jet_map_min_value_kernel", 1, [Bool]{true}, None)
         .MapMax -> return jet_codegen_builtin_route("map_max", "jet_map_max_value_kernel", 1, [Bool]{true}, None)
         .MapPopFirst -> return jet_codegen_builtin_route("map_pop_first", "jet_map_pop_first", 1, [Bool]{true}, Val(Effect.Mem))
@@ -614,6 +619,8 @@ fn jet_codegen_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier
             if is_list_receiver -> return jet_codegen_builtin_route("list_lazy", "jet_iter_from_vec", 1, [Bool]{false}, None)
             panic("checked ListLazy builtin has a non-list receiver")
         }
+        // One collector for lists and iterators: `[T !E]` becomes `[T] !E`.
+        .TryCollect -> return jet_codegen_builtin_route("try_collect", "jet_list_try_collect", 1, [Bool]{false}, None)
         else -> {}
     }
     if !jet_codegen_builtin_iter_receiver(receiver) -> panic("checked iterator builtin has a non-iterator receiver")
@@ -639,7 +646,6 @@ fn jet_codegen_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier
             return jet_codegen_builtin_route("iter_average_int", "jet_iter_average_int", 1, [Bool]{false}, None)
         }
         .IterCompare -> return jet_codegen_builtin_route("iter_compare", "jet_iter_compare", 2, [Bool]{false, false}, None)
-        .TryCollect -> return jet_codegen_builtin_route("try_collect", "jet_list_try_collect", 1, [Bool]{false}, None)
         else -> panic("checked iterator operation has no canonical route")
     }
 }
@@ -754,8 +760,14 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, expression: TEx
         .Indexes -> return jet_codegen_lower_builtin_indexes(&builder, expression, receiver, args)
         .ListMinMax(_) -> return jet_codegen_lower_builtin_list_min_max(&builder, expression, receiver, operation, args)
         .Indexed(_) -> return jet_codegen_lower_builtin_tuple_projection(&builder, expression, receiver, operation, args)
+        .MapToList(_) -> return jet_codegen_lower_builtin_map_to_list(&builder, expression, receiver, operation, args)
         .IterSplit(_) -> return jet_codegen_lower_builtin_tuple_projection(&builder, expression, receiver, operation, args)
         .Zip(_, mode, fields, flatten, input_count, fill_mode, field_types) -> return jet_codegen_lower_builtin_zip(&builder, expression, receiver, args, mode, fields, flatten, input_count, fill_mode, field_types)
+        // `to_string` on a String, Bool, Char or inline range shows the value (Rust `jet_show`).
+        .ToString -> {
+            shown := jet_codegen_lower_expr(&builder, receiver)
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Interpolation{value: shown, format: MIRStringFormat.Display}}}})
+        }
         else -> {}
     }
     if operation == {
@@ -958,6 +970,24 @@ fn jet_codegen_lower_builtin_list_min_max(builder: &JetCodegenBuilder, expressio
     aggregate_fields := [MIRFieldID]{
         jet_codegen_host_field_id(builder, tuple_type, "min"),
         jet_codegen_host_field_id(builder, tuple_type, "max"),
+    }
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
+    route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, carrier)
+    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
+    lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, receiver, false)
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(aggregate_fields)}})
+}
+
+// `map.to_list()` / `map.items()`: the Prelude fills one `(key, value)` named
+// tuple per entry, so the call carries the tuple's two field identities.
+fn jet_codegen_lower_builtin_map_to_list(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: TBuiltinOp, args: [TExpr]) -> MIRValueID {
+    if args.len() != 0 -> panic("checked Map.to_list operation received unexpected arguments")
+    tuple_type := if jet_codegen_builtin_untag(expression.ty) == { .List(inner) -> jet_codegen_builtin_untag(inner) else -> panic("checked Map.to_list result is not a list") }
+    fields := if tuple_type == { .Tuple(fields) -> fields else -> panic("checked Map.to_list result has no named tuple fields") }
+    if fields.len() != 2 -> panic("checked Map.to_list entry must contain exactly key and value fields")
+    aggregate_fields := [MIRFieldID]{
+        jet_codegen_host_field_id(builder, tuple_type, "key"),
+        jet_codegen_host_field_id(builder, tuple_type, "value"),
     }
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, carrier)

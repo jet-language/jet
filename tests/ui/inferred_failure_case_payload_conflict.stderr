@@ -1,0 +1,17 @@
+Error [E0105]: Case `.Bad` of `CheckAgeError` is created with two different payloads
+  --> inferred_failure_case_payload_conflict.jet:5:30
+    |
+  5 |     if age < 0 -> return Err(.Bad(age))
+    |                              ^^^^^^^^^
+ Why: Every `Err(.Bad(…))` in `check_age` adds to the one type `CheckAgeError`, so each case has one payload
+ Fix: Give the two failures different case names, or pass the same payload types to `.Bad`
+More: jet-lang.dev/e/E0105
+
+Error [E0108]: The payload of `CheckAgeError.Bad` holds String (text), but this value is Int (a whole number)
+  --> inferred_failure_case_payload_conflict.jet:5:35
+    |
+  5 |     if age < 0 -> return Err(.Bad(age))
+    |                                   ^^^
+ Why: A variant payload keeps the type its enum declaration gives it
+ Fix: Put the value in text with interpolation: "{x}"
+More: jet-lang.dev/e/E0108

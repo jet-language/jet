@@ -928,6 +928,19 @@ fn lower_local_value(
     Ok(value)
 }
 
+/// Whether `expr` reads an element (or a field path below an element) of a
+/// list, map, or pool. Such a place is never moved out of its container.
+fn reads_container_element(expr: &TExpr) -> bool {
+    let mut current = expr;
+    loop {
+        match &current.kind {
+            TExprKind::Index { .. } | TExprKind::PoolSlot { .. } => return true,
+            TExprKind::Field { recv, .. } => current = recv,
+            _ => return false,
+        }
+    }
+}
+
 pub(super) fn lower_receiver_place(
     ctx: &mut LowerCtx,
     expr: &TExpr,
@@ -951,6 +964,14 @@ pub(super) fn lower_receiver_place(
             Some(ctx.project_deref_place(id, place.ty.clone(), ctx.span())?)
         }
         TExprKind::Local(local) => Some(lower_local_place(ctx, local, access)?),
+        // An element of a list, map, or pool is never moved out of its
+        // container: there is no checked move kernel for an index, and sema
+        // keeps the slot readable after a consuming use (`f(list[i])` into a
+        // `^T` parameter). The caller's value path reads the element instead,
+        // exactly as the Jet codegen lowers a non-local `Move`.
+        TExprKind::Index { .. } | TExprKind::PoolSlot { .. } if access == MirAccess::Move => {
+            return Ok(None);
+        }
         TExprKind::Index {
             base,
             index,
@@ -1841,6 +1862,18 @@ pub(super) fn lower_expr(
                     "explicit-move-place",
                     Some(expr.ty.clone()),
                     MirOperation::MovePlace { place },
+                )
+            } else if reads_container_element(inner) {
+                // A container element stays in its slot (no index move), so
+                // the consumer receives its own copy of the element value.
+                let value = ctx.lower_child(inner)?;
+                ctx.emit(
+                    "explicit-move.element-copy",
+                    Some(expr.ty.clone()),
+                    MirOperation::Copy {
+                        value,
+                        materialize_view: false,
+                    },
                 )
             } else {
                 let value = ctx.lower_child(inner)?;
@@ -3112,6 +3145,19 @@ pub(super) fn lower_expr(
             }
             if matches!(op, TBuiltinOp::ListMinMax { .. }) {
                 return lower_list_min_max(ctx, expr, recv, op, args, &carrier);
+            }
+            // #4009: `to_string()` on a non-numeric receiver (String, Bool, ...)
+            // is the value's Display rendering, the same build numeric
+            // `to_string` (TNumericOp::ToShow) and string interpolation use.
+            if matches!(op, TBuiltinOp::ToString) {
+                let receiver = ctx.lower_child(recv)?;
+                return lower_direct_string_format(
+                    ctx,
+                    receiver,
+                    &recv.ty,
+                    &crate::AST::StrFormat::Display,
+                    &expr.ty,
+                );
             }
             let (mut receiver, receiver_place) = if matches!(op, TBuiltinOp::AtomicMethod { .. }) {
                 if let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Write)? {

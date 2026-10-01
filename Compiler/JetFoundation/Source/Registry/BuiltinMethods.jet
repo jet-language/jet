@@ -1,0 +1,406 @@
+// Built-in value receiver methods: `String`, `Bytes`, the numeric scalars,
+// `Ordering`, and `Atomic<T>`. Collection receivers keep their own table in
+// Collections.jet (COLLECTION_OPERATIONS).
+//
+// The rows mirror the bootstrap's `Collections::builtin_method_return`, its
+// `builtin_method_arg_types` entries, `builtin_receiver_borrow`, and the TIR
+// operation `resolve_builtin_op` / `resolve_numeric_op` select. A row is keyed
+// by receiver family, method name and argument count; an absent row is not a
+// built-in method. Parameter and result types may name two placeholders:
+// `Self` is the (untagged) receiver type and `T` is the `Atomic<T>` scalar.
+
+pub enum BuiltinMethodReceiver {
+    String
+    Bytes
+    // Int, Float, Bool, Char, the fixed widths, F32 and inline ranges.
+    Scalar
+    // Float and F32.
+    Float
+    // Int and the fixed-width integers.
+    Integer
+    // Exact Int only.
+    ExactInt
+    // Fixed-width integers only (`IntN`).
+    FixedInt
+    Ordering
+    // The `Range` value (`lo..hi`).
+    Range
+    // `Atomic<T>` over a lock-free scalar; `AtomicAdd` also needs an addable
+    // scalar and `AtomicInt` an exact Int.
+    Atomic
+    AtomicAdd
+    AtomicInt
+}
+
+pub enum BuiltinMethodLowering {
+    Builtin(operation: TBuiltinOp)
+    // `s.slice(a, b)`: TBuiltinOp.Slice carrying the receiver line.
+    StringSlice
+    // `s.slice(range)`: the checked Range slice expression.
+    StringRangeSlice
+    // Optional `(before, after)` splits; the op names the result tuple struct.
+    StringSplitOnce
+    StringCutLast
+    // `n.to_radix(base)`: TBuiltinOp.IntToRadix carrying the call line.
+    IntToRadix
+    // `to_string` on a scalar: numeric receivers show through TNumericOp.ToShow,
+    // Bool, Char and inline ranges through TBuiltinOp.ToString.
+    Show
+    // Float predicates and integer bit-population queries.
+    Predicate
+    BitCount
+    // Exact Int Euclidean quotient and remainder (NumericBinaryMethod).
+    Euclidean(remainder: Bool)
+    // Fixed-width overflow policy (`checked_add`, `wrapping_mul`, `rotate_left`, …).
+    Overflow(prefix: String, operation: String)
+    Atomic
+}
+
+pub struct BuiltinMethodRow {
+    pub receiver: BuiltinMethodReceiver
+    pub name: String
+    pub parameters: [Type]
+    pub result: Type
+    // Write rows mutate the receiver in place and record `Mem`.
+    pub access: AccessConvention
+    pub lowering: BuiltinMethodLowering
+}
+
+fn builtin_method(receiver: BuiltinMethodReceiver, name: String, parameters: [Type], result: Type, lowering: BuiltinMethodLowering) -> BuiltinMethodRow Never! {
+    BuiltinMethodRow{receiver: receiver, name: name, parameters: parameters, result: result, access: AccessConvention.Read, lowering: lowering}
+}
+
+fn builtin_method_write(row: ^BuiltinMethodRow) -> BuiltinMethodRow Never! {
+    updated := row
+    updated.access = AccessConvention.Write
+    updated
+}
+
+fn builtin_string_op(name: String, parameters: [Type], result: Type, operation: TBuiltinOp) -> BuiltinMethodRow Never! {
+    builtin_method(BuiltinMethodReceiver.String, name, parameters, result, BuiltinMethodLowering.Builtin{operation: operation})
+}
+
+// A `TBuiltinOp.StringMethod` row whose route name is the method spelling.
+fn builtin_string_method(name: String, parameters: [Type], result: Type) -> BuiltinMethodRow Never! {
+    builtin_string_op(name, parameters, result, TBuiltinOp.StringMethod{method: name})
+}
+
+fn builtin_bytes(name: String, parameters: [Type], result: Type) -> BuiltinMethodRow Never! {
+    builtin_method(BuiltinMethodReceiver.Bytes, name, parameters, result, BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferMethod{method: name}})
+}
+
+fn builtin_bytes_write(name: String, parameter: Type) -> BuiltinMethodRow Never! {
+    builtin_method_write(builtin_method(BuiltinMethodReceiver.Bytes, name, [Type]{parameter}, Type.Named{name: "Unit"}, BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{method: name}}))
+}
+
+fn builtin_overflow(name: String, prefix: String, operation: String, checked: Bool) -> BuiltinMethodRow Never! {
+    self_type := Type.Named{name: "Self"}
+    builtin_method(BuiltinMethodReceiver.FixedInt, name, [Type]{self_type}, if checked -> Type.Option{inner: self_type} else -> self_type, BuiltinMethodLowering.Overflow{prefix: prefix, operation: operation})
+}
+
+fn builtin_atomic(receiver: BuiltinMethodReceiver, name: String, parameters: [Type], result: Type) -> BuiltinMethodRow Never! {
+    builtin_method(receiver, name, parameters, result, BuiltinMethodLowering.Atomic)
+}
+
+fn builtin_u8() -> Type Never! {
+    Type.IntN{signed: false, bits: 8}
+}
+
+fn builtin_u8_list() -> Type Never! {
+    Type.List{element: builtin_u8()}
+}
+
+fn builtin_split_pair() -> Type Never! {
+    Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "before", ty: Type.String}, TypeTupleField{name: "after", ty: Type.String}}}}
+}
+
+fn builtin_partition_triple() -> Type Never! {
+    Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "head", ty: Type.String}, TypeTupleField{name: "sep", ty: Type.String}, TypeTupleField{name: "tail", ty: Type.String}}}
+}
+
+BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
+    // String: measures and predicates. `len` counts characters, as the
+    // bootstrap's `LenString` does; `count_bytes` counts UTF-8 bytes.
+    builtin_string_op("len", [Type]{}, Type.Int, TBuiltinOp.LenString),
+    builtin_string_method("count_bytes", [Type]{}, Type.Int),
+    builtin_string_op("is_empty", [Type]{}, Type.Bool, TBuiltinOp.IsEmpty),
+    builtin_method_write(builtin_string_op("try_push", [Type]{Type.String}, Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "AllocError"}}, TBuiltinOp.TryStringPush)),
+    builtin_string_op("contains", [Type]{Type.String}, Type.Bool, TBuiltinOp.Contains),
+    builtin_string_op("starts_with", [Type]{Type.String}, Type.Bool, TBuiltinOp.StartsWith),
+    builtin_string_op("startswith", [Type]{Type.String}, Type.Bool, TBuiltinOp.StartsWith),
+    builtin_string_op("ends_with", [Type]{Type.String}, Type.Bool, TBuiltinOp.EndsWith),
+    builtin_string_op("endswith", [Type]{Type.String}, Type.Bool, TBuiltinOp.EndsWith),
+    builtin_string_op("is_alphabetic", [Type]{}, Type.Bool, TBuiltinOp.StringIsAlphabetic),
+    builtin_string_op("is_numeric", [Type]{}, Type.Bool, TBuiltinOp.StringIsNumeric),
+    builtin_string_op("is_whitespace", [Type]{}, Type.Bool, TBuiltinOp.StringIsWhitespace),
+    builtin_string_op("is_ascii", [Type]{}, Type.Bool, TBuiltinOp.StringIsASCII),
+    builtin_string_method("is_lower", [Type]{}, Type.Bool),
+    builtin_string_method("is_upper", [Type]{}, Type.Bool),
+    builtin_string_method("isalnum", [Type]{}, Type.Bool),
+    builtin_string_method("isalpha", [Type]{}, Type.Bool),
+    builtin_string_method("isascii", [Type]{}, Type.Bool),
+    builtin_string_method("isdecimal", [Type]{}, Type.Bool),
+    builtin_string_method("isdigit", [Type]{}, Type.Bool),
+    builtin_string_method("isidentifier", [Type]{}, Type.Bool),
+    builtin_string_method("islower", [Type]{}, Type.Bool),
+    builtin_string_method("isnumeric", [Type]{}, Type.Bool),
+    builtin_string_method("isprintable", [Type]{}, Type.Bool),
+    builtin_string_method("isspace", [Type]{}, Type.Bool),
+    builtin_string_method("istitle", [Type]{}, Type.Bool),
+    builtin_string_method("isupper", [Type]{}, Type.Bool),
+    // String: owned transforms.
+    builtin_string_op("trim", [Type]{}, Type.String, TBuiltinOp.Trim),
+    builtin_string_op("trim_start", [Type]{}, Type.String, TBuiltinOp.TrimStart),
+    builtin_string_op("trim_end", [Type]{}, Type.String, TBuiltinOp.TrimEnd),
+    builtin_string_method("strip", [Type]{}, Type.String),
+    builtin_string_method("lstrip", [Type]{}, Type.String),
+    builtin_string_method("rstrip", [Type]{}, Type.String),
+    builtin_string_op("to_upper", [Type]{}, Type.String, TBuiltinOp.ToUpper),
+    builtin_string_op("to_lower", [Type]{}, Type.String, TBuiltinOp.ToLower),
+    builtin_string_op("to_ascii_upper", [Type]{}, Type.String, TBuiltinOp.ToASCIIUpper),
+    builtin_string_op("to_ascii_lower", [Type]{}, Type.String, TBuiltinOp.ToASCIILower),
+    builtin_string_op("to_title", [Type]{}, Type.String, TBuiltinOp.StringToTitle),
+    builtin_string_op("to_string", [Type]{}, Type.String, TBuiltinOp.ToString),
+    builtin_string_method("lower", [Type]{}, Type.String),
+    builtin_string_method("upper", [Type]{}, Type.String),
+    builtin_string_method("title", [Type]{}, Type.String),
+    builtin_string_method("casefold", [Type]{}, Type.String),
+    builtin_string_method("capitalize", [Type]{}, Type.String),
+    builtin_string_method("swapcase", [Type]{}, Type.String),
+    builtin_string_method("copy", [Type]{}, Type.String),
+    builtin_string_method("reverse", [Type]{}, Type.String),
+    builtin_string_method("normalize", [Type]{}, Type.String),
+    builtin_string_method("removeprefix", [Type]{Type.String}, Type.String),
+    builtin_string_method("removesuffix", [Type]{Type.String}, Type.String),
+    builtin_string_method("center", [Type]{Type.Int, Type.String}, Type.String),
+    builtin_string_method("ljust", [Type]{Type.Int, Type.String}, Type.String),
+    builtin_string_method("rjust", [Type]{Type.Int, Type.String}, Type.String),
+    builtin_string_method("zfill", [Type]{Type.Int}, Type.String),
+    builtin_string_method("expandtabs", [Type]{Type.Int}, Type.String),
+    builtin_string_op("pad_start", [Type]{Type.Int, Type.String}, Type.String, TBuiltinOp.PadStart),
+    builtin_string_op("pad_end", [Type]{Type.Int, Type.String}, Type.String, TBuiltinOp.PadEnd),
+    builtin_string_method("replace", [Type]{Type.String, Type.String}, Type.String),
+    builtin_string_op("repeat", [Type]{Type.Int}, Type.String, TBuiltinOp.Repeat),
+    builtin_method(BuiltinMethodReceiver.String, "slice", [Type]{Type.Int, Type.Int}, Type.String, BuiltinMethodLowering.StringSlice),
+    builtin_method(BuiltinMethodReceiver.String, "slice", [Type]{Type.Named{name: "Range"}}, Type.String, BuiltinMethodLowering.StringRangeSlice),
+    // D-STR-AFTER1: first-occurrence substring split; an absent separator
+    // yields the whole original string. A `::` binding of `trim`/`after`/
+    // `before` becomes a zero-copy view (Ownership/StringViews.jet).
+    builtin_string_op("after", [Type]{Type.String}, Type.String, TBuiltinOp.After),
+    builtin_string_op("before", [Type]{Type.String}, Type.String, TBuiltinOp.Before),
+    // String: search.
+    builtin_string_op("index_of", [Type]{Type.String}, Type.Option{inner: Type.Int}, TBuiltinOp.StringIndexOf),
+    builtin_string_op("index", [Type]{Type.String}, Type.Option{inner: Type.Int}, TBuiltinOp.StringIndexOf),
+    builtin_string_method("last_index_of", [Type]{Type.String}, Type.Option{inner: Type.Int}),
+    builtin_string_op("rindex", [Type]{Type.String}, Type.Option{inner: Type.Int}, TBuiltinOp.StringMethod{method: "last_index_of"}),
+    builtin_string_method("find", [Type]{Type.String}, Type.Int),
+    builtin_string_method("rfind", [Type]{Type.String}, Type.Int),
+    builtin_string_op("count", [Type]{Type.String}, Type.Int, TBuiltinOp.StringCount),
+    builtin_string_method("compare", [Type]{Type.String}, Type.Int),
+    builtin_string_method("equal", [Type]{Type.String}, Type.Bool),
+    builtin_string_method("partition", [Type]{Type.String}, builtin_partition_triple()),
+    builtin_string_method("rpartition", [Type]{Type.String}, builtin_partition_triple()),
+    builtin_method(BuiltinMethodReceiver.String, "split_once", [Type]{Type.String}, builtin_split_pair(), BuiltinMethodLowering.StringSplitOnce),
+    builtin_method(BuiltinMethodReceiver.String, "cut_last", [Type]{Type.String}, builtin_split_pair(), BuiltinMethodLowering.StringCutLast),
+    // String: decomposition and parsing.
+    builtin_string_op("split", [Type]{Type.String}, Type.Apply{name: "Iter", args: [Type]{Type.String}}, TBuiltinOp.Split),
+    builtin_string_method("rsplit", [Type]{Type.String}, Type.Apply{name: "Iter", args: [Type]{Type.String}}),
+    builtin_string_op("lines", [Type]{}, Type.List{element: Type.String}, TBuiltinOp.Lines),
+    builtin_string_op("splitlines", [Type]{}, Type.List{element: Type.String}, TBuiltinOp.Lines),
+    builtin_string_op("chars", [Type]{}, Type.List{element: Type.Char}, TBuiltinOp.Chars),
+    builtin_string_op("bytes", [Type]{}, builtin_u8_list(), TBuiltinOp.Bytes{owned: false}),
+    builtin_string_op("encode", [Type]{}, builtin_u8_list(), TBuiltinOp.Bytes{owned: false}),
+    builtin_string_op("parse", [Type]{}, Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, TBuiltinOp.ParseInt),
+    builtin_string_op("to_int", [Type]{}, Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, TBuiltinOp.ParseInt),
+    builtin_string_op("to_float", [Type]{}, Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, TBuiltinOp.ParseFloat),
+    // D-STR-DECLINE1=C: one core.regex engine; a bad pattern is the `!String` failure.
+    builtin_string_method("matches", [Type]{Type.String}, Type.Result{ok: Type.Bool, err: Type.String}),
+    builtin_string_method("match", [Type]{Type.String}, Type.Result{ok: Type.Option{inner: Type.String}, err: Type.String}),
+
+    // Bytes: builder, read cursor and string-like reads (#1467).
+    builtin_bytes("len", [Type]{}, Type.Int),
+    builtin_bytes("capacity", [Type]{}, Type.Int),
+    builtin_bytes("position", [Type]{}, Type.Int),
+    builtin_bytes("is_empty", [Type]{}, Type.Bool),
+    builtin_bytes("eof", [Type]{}, Type.Bool),
+    builtin_bytes("is_ascii", [Type]{}, Type.Bool),
+    builtin_method_write(builtin_bytes("clear", [Type]{}, Type.Named{name: "Unit"})),
+    builtin_method_write(builtin_bytes("rewind", [Type]{}, Type.Named{name: "Unit"})),
+    builtin_method_write(builtin_bytes("flush", [Type]{}, Type.Named{name: "Unit"})),
+    builtin_method_write(builtin_bytes("close", [Type]{}, Type.Named{name: "Unit"})),
+    builtin_method_write(builtin_bytes("shutdown", [Type]{}, Type.Named{name: "Unit"})),
+    builtin_method(BuiltinMethodReceiver.Bytes, "to_bytes", [Type]{}, builtin_u8_list(), BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferToBytes}),
+    builtin_bytes("get_buffer", [Type]{}, builtin_u8_list()),
+    builtin_bytes("buffer", [Type]{}, builtin_u8_list()),
+    builtin_bytes("to_string", [Type]{}, Type.String),
+    builtin_bytes("string", [Type]{}, Type.String),
+    builtin_bytes("trim", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("trim_start", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("trim_end", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("to_lower", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("to_upper", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("to_title", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("title", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("clone", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("copy", [Type]{}, Type.Named{name: "Bytes"}),
+    builtin_bytes("lines", [Type]{}, Type.List{element: Type.String}),
+    builtin_bytes("first", [Type]{}, Type.Option{inner: builtin_u8()}),
+    builtin_method_write(builtin_bytes("next", [Type]{}, Type.Option{inner: builtin_u8()})),
+    builtin_method_write(builtin_bytes("read_byte", [Type]{}, Type.Option{inner: builtin_u8()})),
+    builtin_method_write(builtin_bytes("read", [Type]{}, Type.Option{inner: builtin_u8_list()})),
+    builtin_bytes("get", [Type]{Type.Int}, Type.Option{inner: builtin_u8()}),
+    builtin_method_write(builtin_bytes("seek", [Type]{Type.Int}, Type.Named{name: "Unit"})),
+    builtin_method_write(builtin_bytes("read_bytes", [Type]{Type.Int}, Type.Option{inner: builtin_u8_list()})),
+    builtin_method_write(builtin_bytes("read_string", [Type]{Type.Int}, Type.Option{inner: Type.String})),
+    builtin_bytes("contains", [Type]{Type.String}, Type.Bool),
+    builtin_bytes("starts_with", [Type]{Type.String}, Type.Bool),
+    builtin_bytes("ends_with", [Type]{Type.String}, Type.Bool),
+    builtin_bytes("index_of", [Type]{Type.String}, Type.Option{inner: Type.Int}),
+    builtin_bytes("last_index_of", [Type]{Type.String}, Type.Option{inner: Type.Int}),
+    builtin_bytes("split", [Type]{Type.String}, Type.List{element: Type.String}),
+    builtin_bytes("partition", [Type]{Type.Named{name: "Bytes"}}, Type.Result{ok: Type.List{element: Type.Named{name: "Bytes"}}, err: Type.String}),
+    builtin_bytes("join", [Type]{Type.List{element: Type.String}}, Type.Named{name: "Bytes"}),
+    builtin_bytes("replace", [Type]{Type.String, Type.String}, Type.Named{name: "Bytes"}),
+    builtin_bytes("equal", [Type]{Type.Named{name: "Bytes"}}, Type.Bool),
+    builtin_bytes("compare", [Type]{Type.Named{name: "Bytes"}}, Type.Int),
+    builtin_method_write(builtin_bytes("copy_to", [Type]{Type.Named{name: "Bytes"}}, Type.Named{name: "Unit"})),
+    builtin_method_write(builtin_bytes("write_to", [Type]{Type.Named{name: "Bytes"}}, Type.Named{name: "Unit"})),
+    builtin_bytes("parse", [Type]{}, Type.Result{ok: Type.Int, err: Type.String}),
+    builtin_bytes_write("write_u8", builtin_u8()),
+    builtin_bytes_write("write_byte", builtin_u8()),
+    builtin_bytes_write("write_i8", Type.IntN{signed: true, bits: 8}),
+    builtin_bytes_write("write_u16_le", Type.IntN{signed: false, bits: 16}),
+    builtin_bytes_write("write_u16_be", Type.IntN{signed: false, bits: 16}),
+    builtin_bytes_write("write_i16_le", Type.IntN{signed: true, bits: 16}),
+    builtin_bytes_write("write_i16_be", Type.IntN{signed: true, bits: 16}),
+    builtin_bytes_write("write_u32_le", Type.IntN{signed: false, bits: 32}),
+    builtin_bytes_write("write_u32_be", Type.IntN{signed: false, bits: 32}),
+    builtin_bytes_write("write_i32_le", Type.IntN{signed: true, bits: 32}),
+    builtin_bytes_write("write_i32_be", Type.IntN{signed: true, bits: 32}),
+    builtin_bytes_write("write_u64_le", Type.IntN{signed: false, bits: 64}),
+    builtin_bytes_write("write_u64_be", Type.IntN{signed: false, bits: 64}),
+    builtin_bytes_write("write_i64_le", Type.IntN{signed: true, bits: 64}),
+    builtin_bytes_write("write_i64_be", Type.IntN{signed: true, bits: 64}),
+    builtin_bytes_write("write_f32_le", Type.Float32),
+    builtin_bytes_write("write_f32_be", Type.Float32),
+    builtin_bytes_write("write_f64_le", Type.Float),
+    builtin_bytes_write("write_f64_be", Type.Float),
+    builtin_bytes_write("write_bytes", builtin_u8_list()),
+    builtin_bytes_write("write", builtin_u8_list()),
+
+    // Numbers (D-SG9/D-NUMOPS1, D-GO127-STDLIB1=A, D-INTBIG1).
+    builtin_method(BuiltinMethodReceiver.Scalar, "to_string", [Type]{}, Type.String, BuiltinMethodLowering.Show),
+    builtin_method(BuiltinMethodReceiver.Float, "is_nan", [Type]{}, Type.Bool, BuiltinMethodLowering.Predicate),
+    builtin_method(BuiltinMethodReceiver.Float, "is_infinite", [Type]{}, Type.Bool, BuiltinMethodLowering.Predicate),
+    builtin_method(BuiltinMethodReceiver.Float, "is_finite", [Type]{}, Type.Bool, BuiltinMethodLowering.Predicate),
+    builtin_method(BuiltinMethodReceiver.Integer, "count_ones", [Type]{}, Type.Int, BuiltinMethodLowering.BitCount),
+    builtin_method(BuiltinMethodReceiver.Integer, "count_zeros", [Type]{}, Type.Int, BuiltinMethodLowering.BitCount),
+    builtin_method(BuiltinMethodReceiver.Integer, "leading_zeros", [Type]{}, Type.Int, BuiltinMethodLowering.BitCount),
+    builtin_method(BuiltinMethodReceiver.Integer, "trailing_zeros", [Type]{}, Type.Int, BuiltinMethodLowering.BitCount),
+    builtin_method(BuiltinMethodReceiver.Integer, "bit_count", [Type]{}, Type.Int, BuiltinMethodLowering.BitCount),
+    builtin_method(BuiltinMethodReceiver.Integer, "bit_length", [Type]{}, Type.Int, BuiltinMethodLowering.BitCount),
+    builtin_method(BuiltinMethodReceiver.ExactInt, "div_euclid", [Type]{Type.Int}, Type.Int, BuiltinMethodLowering.Euclidean{remainder: false}),
+    builtin_method(BuiltinMethodReceiver.ExactInt, "rem_euclid", [Type]{Type.Int}, Type.Int, BuiltinMethodLowering.Euclidean{remainder: true}),
+    builtin_method(BuiltinMethodReceiver.ExactInt, "to_radix", [Type]{Type.Int}, Type.String, BuiltinMethodLowering.IntToRadix),
+    builtin_overflow("checked_add", "checked", "add", true),
+    builtin_overflow("checked_sub", "checked", "sub", true),
+    builtin_overflow("checked_mul", "checked", "mul", true),
+    builtin_overflow("checked_div", "checked", "div", true),
+    builtin_overflow("checked_rem", "checked", "rem", true),
+    builtin_overflow("wrapping_add", "wrapping", "add", false),
+    builtin_overflow("wrapping_sub", "wrapping", "sub", false),
+    builtin_overflow("wrapping_mul", "wrapping", "mul", false),
+    builtin_overflow("saturating_add", "saturating", "add", false),
+    builtin_overflow("saturating_sub", "saturating", "sub", false),
+    builtin_overflow("saturating_mul", "saturating", "mul", false),
+    // D-PORT-ROTATE1: rotations ride the same overflow-policy seam.
+    builtin_overflow("rotate_left", "rotate_left", "rotate", false),
+    builtin_overflow("rotate_right", "rotate_right", "rotate", false),
+
+    // Ordering combinators (D-CMP3WAY1).
+    builtin_method(BuiltinMethodReceiver.Ordering, "then", [Type]{Type.Named{name: "Ordering"}}, Type.Named{name: "Ordering"}, BuiltinMethodLowering.Builtin{operation: TBuiltinOp.OrderingThen}),
+    builtin_method(BuiltinMethodReceiver.Ordering, "reverse", [Type]{}, Type.Named{name: "Ordering"}, BuiltinMethodLowering.Builtin{operation: TBuiltinOp.OrderingReverse}),
+    builtin_method(BuiltinMethodReceiver.Range, "contains", [Type]{Type.Int}, Type.Bool, BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Contains}),
+
+    // Atomic<T> (D-PLACE1): one lock-free scalar, read and written through a shared receiver.
+    builtin_atomic(BuiltinMethodReceiver.Atomic, "load", [Type]{}, Type.Named{name: "T"}),
+    builtin_atomic(BuiltinMethodReceiver.Atomic, "observe", [Type]{}, Type.Named{name: "T"}),
+    builtin_atomic(BuiltinMethodReceiver.Atomic, "store", [Type]{Type.Named{name: "T"}}, Type.Named{name: "Unit"}),
+    builtin_atomic(BuiltinMethodReceiver.Atomic, "publish", [Type]{Type.Named{name: "T"}}, Type.Named{name: "Unit"}),
+    builtin_atomic(BuiltinMethodReceiver.AtomicAdd, "add", [Type]{Type.Named{name: "T"}}, Type.Named{name: "T"}),
+    builtin_atomic(BuiltinMethodReceiver.AtomicInt, "try_add", [Type]{Type.Int}, Type.Result{ok: Type.Int, err: Type.Named{name: "AllocError"}}),
+    builtin_atomic(BuiltinMethodReceiver.Atomic, "compare_exchange", [Type]{Type.Named{name: "T"}, Type.Named{name: "T"}}, Type.Bool)
+} }
+
+fn builtin_method_strip_tags(ty: Type) -> Type Never! {
+    if ty == {
+        .Tagged(_, inner) -> builtin_method_strip_tags(inner)
+        else -> ty
+    }
+}
+
+// The `Atomic<T>` scalar a receiver carries, if it is a lock-free atomic.
+pub fn builtin_method_atomic_scalar(receiver: Type) -> Type? {
+    if builtin_method_strip_tags(receiver) == {
+        .Apply(name, args) -> {
+            if name == "Atomic" && args.len() == 1 && jet_target_layout_atomic_scalar_type(args[0]) -> return Val(args[0])
+            None
+        }
+        else -> None
+    }
+}
+
+fn builtin_method_receiver_accepts(family: BuiltinMethodReceiver, receiver: Type) -> Bool Never! {
+    ty := builtin_method_strip_tags(receiver)
+    if family == {
+        .String -> ty == Type.String
+        .Bytes -> ty == (Type.Named{name: "Bytes"})
+        .Scalar -> if ty == {
+            .Int | .Float | .Bool | .Char | .IntN(_, _) | .Float32 | .InlineRange(_, _, _) -> true
+            else -> false
+        }
+        .Float -> ty == Type.Float || ty == Type.Float32
+        .Integer -> if ty == {
+            .Int | .IntN(_, _) -> true
+            else -> false
+        }
+        .ExactInt -> ty == Type.Int
+        .FixedInt -> if ty == {
+            .IntN(_, _) -> true
+            else -> false
+        }
+        .Ordering -> ty == (Type.Named{name: "Ordering"})
+        .Range -> ty == (Type.Named{name: "Range"})
+        .Atomic -> builtin_method_atomic_scalar(ty) != None
+        .AtomicAdd -> {
+            scalar :: builtin_method_atomic_scalar(ty) ?? return false
+            jet_target_layout_atomic_add_type(scalar)
+        }
+        .AtomicInt -> {
+            scalar :: builtin_method_atomic_scalar(ty) ?? return false
+            builtin_method_strip_tags(scalar) == Type.Int && jet_target_layout_atomic_add_type(scalar)
+        }
+    }
+}
+
+// The one lookup: the row for this receiver, method and argument count.
+pub fn builtin_method_row(receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.name == method && row.parameters.len() == argument_count && builtin_method_receiver_accepts(row.receiver, receiver) -> return Val(row)
+    }
+    None
+}
+
+// Replace the `Self` and `T` placeholders with the receiver's types.
+pub fn builtin_method_bind(ty: Type, receiver: Type) -> Type Never! {
+    self_type := builtin_method_strip_tags(receiver)
+    if ty == {
+        .Named(name) -> {
+            if name == "Self" -> return self_type
+            if name == "T" -> return builtin_method_atomic_scalar(self_type) ?? ty
+            ty
+        }
+        .Option(inner) -> Type.Option{inner: builtin_method_bind(inner, receiver)}
+        else -> ty
+    }
+}

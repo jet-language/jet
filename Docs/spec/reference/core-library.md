@@ -543,7 +543,7 @@ runs each of these cases.
 | `[T]` | `reverse()` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `clear()` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `get(Int)` | borrows | Lookup | None | current |
-| `[T]` | `index_of(Int)` | borrows | Lookup | None | current |
+| `[T]` | `index_of(item)` | borrows | Lookup | None | current |
 | `[T]` | `index(item)` | borrows | Lookup | None | current |
 | `[T]` | `contains(item)` | borrows | Measure | false | current |
 | `[T]` | `count(item)` | borrows | Measure | 0 | current |
@@ -614,6 +614,9 @@ runs each of these cases.
 | `[T]`, `Iter<T>` | `indexes()` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
 | `[T]`, `Iter<T>` | `intersperse(item)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
 | `[T]`, `Iter<T>` | `first()` | borrows a list; consumes an iterator | Lookup | None | current |
+| `[T]` | `last()` | borrows | Lookup | None | current |
+| `Iter<T>` | `to_set()` | consumes | Drain | empty Set | current |
+| `[T]`, `Iter<T>` | `try_collect()` | borrows a list; consumes an iterator | Drain | Ok(empty list) | current |
 | `[T]`, `Iter<T>` | `last_index_of(item)` | borrows a list; consumes an iterator | Lookup | None | current |
 | `[T]`, `Iter<T>` | `min()` | borrows a list; consumes an iterator | Lookup | None | current |
 | `[T]`, `Iter<T>` | `max()` | borrows a list; consumes an iterator | Lookup | None | current |
@@ -626,6 +629,28 @@ runs each of these cases.
 | `[T]`, `Iter<T>` | `compare([item])` | borrows a list; consumes an iterator | Measure | 0 against an empty list | current |
 | `[T]`, `Iter<T>` | `is_empty()` | borrows a list; consumes an iterator | Measure | true | current |
 | `[T]`, `Iter<T>` | `len()` | borrows a list; consumes an iterator | Measure | 0 | current |
+| `[K:V]` | `len()` | borrows | Measure | 0 | current |
+| `[K:V]` | `is_empty()` | borrows | Measure | true | current |
+| `[K:V]` | `replace(key, value)` | exclusive, in place | Mutate | None | current |
+| `[K:V]` | `keys()` | borrows | Adapt | empty iterator | current |
+| `[K:V]` | `values()` | borrows | Adapt | empty iterator | current |
+| `[K:V]` | `first()` | borrows | Lookup | None | current |
+| `[K:V]` | `min()` | borrows | Lookup | None | current |
+| `[K:V]` | `max()` | borrows | Lookup | None | current |
+| `[K:V]` | `to_list()` | borrows | Build | empty list | current |
+| `[K:V]` | `items()` | borrows | Build | empty list | current |
+| `View<T>` | `len()` | borrows | Measure | 0 | current |
+| `View<T>` | `is_empty()` | borrows | Measure | true | current |
+| `View<T>` | `get(Int)` | borrows | Lookup | None | current |
+| `View<T>` | `index_of(item)` | borrows | Lookup | None | current |
+| `View<T>` | `first()` | borrows | Lookup | None | current |
+| `View<T>` | `last()` | borrows | Lookup | None | current |
+| `View<T>` | `contains(item)` | borrows | Measure | false | current |
+| `View<T>` | `join(String)` | borrows | Build | empty string | current |
+| `Bits` | `len()` | borrows | Measure | 0 | current |
+| `Bits` | `count()` | borrows | Measure | 0 | current |
+| `Bits` | `is_empty()` | borrows | Measure | true | current |
+| `Bits` | `to_list()` | borrows | Build | empty list | current |
 
 <!-- END GENERATED COLLECTION OPERATIONS -->
 
@@ -1981,10 +2006,12 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.inspect(value)` | `[String]` | Return escaped scalar inspection values. |
 | `text.Cursor` / `text.cursor(value)` / `text.cursor_advance(text, cursor)` | type / cursor | Construct and advance a text cursor. |
 
-`String.len()` is the compiler-owned receiver-first method and reports byte
-length. The public convenience surface is the qualified `core.text` module;
-the old catalogue of unqualified string methods is not a separate core module
-contract (D-STR-DECLINE1=C).
+`String.len()` is the compiler-owned receiver-first method and counts Unicode
+scalars, the items `loop c in s.chars()` visits (S41); it means the same with
+or without `use core.text`. `count_bytes()` and `text.byte_count(value)` report
+the UTF-8 byte length. The public convenience surface is the qualified
+`core.text` module; the old catalogue of unqualified string methods is not a
+separate core module contract (D-STR-DECLINE1=C).
 
 ### `core.time` — dates, durations, and clocks
 

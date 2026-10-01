@@ -6,10 +6,12 @@ use jet_foundation.[
     DiagnosticFixSafety,
     ElseArmSpan,
     Expr,
+    PolicyDeclaration,
     Span,
     Stmt,
     TextEdit,
     diagnostic_from_registry,
+    diagnostic_with_edit,
     diagnostic_with_edit_grade,
     diagnostic_with_label,
 ]
@@ -18,7 +20,15 @@ use jet_lexer.[
     TOKEN_BLOCK_COMMENT,
     TOKEN_EOF,
     TOKEN_GT,
+    TOKEN_KW_COMPTIME,
+    TOKEN_KW_CONST,
+    TOKEN_KW_ENUM,
+    TOKEN_KW_FN,
+    TOKEN_KW_IMPL,
+    TOKEN_KW_PUB,
+    TOKEN_KW_STRUCT,
     TOKEN_IDENT,
+    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LINE_COMMENT,
@@ -28,6 +38,7 @@ use jet_lexer.[
     TOKEN_RPAREN,
     TOKEN_SEMI,
     TOKEN_SHR,
+    TOKEN_UNIFIED_ARROW,
     Token,
     TokenPayload,
 ]
@@ -49,6 +60,31 @@ pub struct JetParserState {
     pub line_starts: [Int]{[Int]{}}
     // L0303 (#3716): the `else` arm of every dispatch table parsed so far.
     pub else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
+    // D-MARK-SCOPE1: block `#Policy(...) { … }` declarations, joined to the
+    // program's policy declarations after the parse.
+    pub block_policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    // D-VISDEFAULT2=A: after `#PubFile`, top-level items default to public.
+    pub pub_file_default: Bool{false}
+    // D-SEMI1=A: an authored `;` reports E0373 once per file.
+    pub explicit_semicolon_reported: Bool{false}
+    // The source text, when known; L0507 and E0373 build their edits from it.
+    pub source: [U8]{[U8]{}}
+    // Rust stops a statement or item at its first fatal error and resumes at
+    // the next boundary, so one mistake reports once. `abort_mark` is the
+    // diagnostics length just after that error (0 = none; a rewind below it
+    // cancels the abort); `abort_position` is the cursor where it was found.
+    pub abort_mark: Int{0}
+    pub abort_position: Int{0}
+    // Depth of one-statement `->` bodies; their statement may end before `else`.
+    pub adjacent_if_body_depth: Int{0}
+}
+
+// One authored piece of a classic branch chain: an arm's condition and body,
+// or the final `else` body. The L0507 fix rebuilds the chain from these.
+pub struct ParserBranchPart {
+    pub is_else: Bool
+    pub cond: Span
+    pub body: Span
 }
 
 pub struct ParsedBlock {
@@ -143,8 +179,34 @@ fn parser_bump(state: &JetParserState) -> Token Never! {
         return token
     }
     token :: parser_current(&state)
+    if token.kind == TOKEN_SEMI && token.span.start < token.span.end && !state.explicit_semicolon_reported -> parser_report_explicit_semicolon(&state, token.span)
     if token.kind != TOKEN_EOF && state.position < state.tokens.len() -> state.position += 1
     token
+}
+
+// D-SEMI1=A: an explicit `;` stays a statement boundary but is not canonical
+// Jet. The edit replaces it with a line break when code follows on the same
+// line and deletes it otherwise.
+fn parser_report_explicit_semicolon(state: &JetParserState, span: Span) Never! {
+    state.explicit_semicolon_reported = true
+    next_start := -1
+    loop index in (state.position + 1)..<state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if !parser_is_trivia(kind) && kind != TOKEN_SEMI && kind != TOKEN_EOF {
+            next_start = state.tokens[index].span.start
+            break
+        }
+    }
+    same_line := next_start >= 0 && next_start <= state.source.len()
+    if same_line {
+        loop index in span.end..<next_start {
+            byte :: Int.from_u8(state.source[index])
+            if byte == 10 || byte == 13 -> same_line = false
+        }
+    }
+    new_text :: if same_line -> "\n" else -> ""
+    diagnostic :: diagnostic_from_registry("E0373", Val(span), "This explicit semicolon is not part of canonical Jet syntax.", "Jet uses line boundaries for statements; the parser preserves this boundary so the same program can be repaired without changing behavior.", "Replace the semicolon with a line break when code follows it, or remove it at the end of a line; `jet fmt` applies this fix.")
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: new_text}))
 }
 
 fn parser_type_close_here(state: &JetParserState) -> Bool Never! {
@@ -174,11 +236,49 @@ fn parser_cover(left: Span, right: Span) -> Span Never! {
 }
 
 fn parser_add_error_code(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
+    if parser_aborting(&state) -> return
     &state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
 }
 
+// A fatal error: Rust returns it as the statement's or item's `Err`, so
+// nothing more is reported until the enclosing loop resynchronizes.
+fn parser_add_fatal_code(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
+    if parser_aborting(&state) -> return
+    &state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
+    state.abort_mark = state.diagnostics.len()
+    state.abort_position = state.position
+}
+
 fn parser_add_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
-    parser_add_error_code(&state, "E0003", span, what, why, fix)
+    parser_add_fatal_code(&state, "E0003", span, what, why, fix)
+}
+
+fn parser_aborting(state: &JetParserState) -> Bool Never! {
+    if state.abort_mark == 0 -> return false
+    if state.diagnostics.len() < state.abort_mark {
+        state.abort_mark = 0
+        return false
+    }
+    true
+}
+
+// Resume after a fatal error found inside the construct that began at token
+// index `start`: put the cursor back where the error was found, as Rust's
+// `?` leaves it. An abort from before `start` belongs to an outer loop.
+fn parser_take_abort(state: &JetParserState, start: Int) -> Bool Never! {
+    if !parser_aborting(&state) || state.abort_position < start -> return false
+    state.abort_mark = 0
+    state.position = state.abort_position
+    state.pending_type_gt = false
+    true
+}
+
+fn parser_recover_aborted_statement(state: &JetParserState, start: Int) Never! {
+    if parser_take_abort(&state, start) -> parser_sync_stmt(&state)
+}
+
+fn parser_recover_aborted_item(state: &JetParserState, start: Int) Never! {
+    if parser_take_abort(&state, start) -> parser_sync_top(&state)
 }
 
 fn parser_add_error_here(state: &JetParserState, what: String, why: String, fix: String) {
@@ -218,6 +318,31 @@ fn parser_expect_name(state: &JetParserState, context: String) -> Token {
         "write an identifier here",
     )
     parser_synthetic_token(TOKEN_IDENT, token.span)
+}
+
+// D-ARROW-UNIFY1: callables, arms and lambdas share one arrow, `->`. The
+// retired `=>` is still read there, with the E0070 teaching edit.
+fn parser_at_unified_arrow(state: &JetParserState) -> Bool Never! {
+    kind :: parser_current_kind(&state)
+    kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW
+}
+
+fn parser_expect_unified_arrow(state: &JetParserState, context: String) -> Token {
+    token :: parser_current(&state)
+    if !parser_at_unified_arrow(&state) {
+        parser_add_error(&state, token.span, "expected `->` {context}, found {parser_describe_token(token)}", "callables, arms, and lambdas use one arrow", "write `->` {context}")
+        return parser_synthetic_token(TOKEN_UNIFIED_ARROW, token.span)
+    }
+    parser_bump(&state)
+    if token.kind == TOKEN_LAMBDA_ARROW -> parser_report_retired_arrow(&state, token.span)
+    token
+}
+
+// D-ARROW-RESPELL1=A: the retired `=>` arrow teaches the canonical spelling.
+fn parser_report_retired_arrow(state: &JetParserState, span: Span) {
+    if parser_aborting(&state) -> return
+    diagnostic :: diagnostic_from_registry("E0070", Val(span), "this uses a retired arrow spelling", "callables, arms, and lambdas use one arrow: `->`", "replace `=>` with `->`")
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "->"}))
 }
 
 fn parser_is_closer(kind: Int) -> Bool Never! {
@@ -305,6 +430,188 @@ fn parser_skip_synthetic_semicolons(state: &JetParserState) Never! {
     }
 }
 
+// Did a parse since diagnostic index `mark` report an error (not a lint)?
+fn parser_error_since(state: JetParserState, mark: Int) -> Bool Never! {
+    loop index in mark..<state.diagnostics.len() {
+        if state.diagnostics[index].severity == 1 -> return true
+    }
+    false
+}
+
+// True when a line ends between token indexes `start` and `end` (the lexer's
+// zero-width terminator marks every authored line break).
+fn parser_authored_line_break(state: JetParserState, start: Int, end: Int) -> Bool Never! {
+    loop index in start..<end {
+        if index >= 0 && index < state.tokens.len() {
+            token :: state.tokens[index]
+            if token.kind == TOKEN_SEMI && token.span.start == token.span.end -> return true
+        }
+    }
+    false
+}
+
+// L0507: a multi-line or chained classic branch prefers one ordered arm
+// table. When the recorded parts cover the whole construct, the arm-table
+// rewrite rides along as a safe fix.
+fn parser_prefer_arm_table(state: &JetParserState, span: Span, parts: [ParserBranchPart], diag_mark: Int) {
+    diagnostic :: diagnostic_from_registry("L0507", Val(span), "prefer an ordered arm table for this branch", "one ordered arm table is Jet's normal form for multi-line and chained choices", "write `if {{ condition -> body else -> body }}`")
+    edit :: parser_arm_table_edit(state, span, parts, diag_mark)
+    if edit == .Val(value) {
+        &state.diagnostics.push(diagnostic_with_edit(diagnostic, value))
+        return
+    }
+    &state.diagnostics.push(diagnostic)
+}
+
+fn parser_is_space_byte(byte: Int) -> Bool Never! {
+    byte == 32 || byte == 9 || byte == 10 || byte == 13
+}
+
+fn parser_source_slice(state: JetParserState, start: Int, end: Int) -> String Never! {
+    String.from_bytes(state.source.slice(start, end)) ?? ""
+}
+
+// The source between two recorded pieces may hold only the chain's own
+// connectors (`if`, `else`, `->`); anything else, such as a comment, would be
+// dropped by the rebuilt table.
+fn parser_branch_gap_is_connector(state: JetParserState, start: Int, end: Int) -> Bool Never! {
+    index := start
+    loop index < end {
+        if parser_is_space_byte(Int.from_u8(state.source[index])) {
+            index += 1
+            next
+        }
+        word_start :: index
+        loop index < end && !parser_is_space_byte(Int.from_u8(state.source[index])) -> index += 1
+        word :: parser_source_slice(state, word_start, index)
+        if word != "if" && word != "else" && word != "->" -> return false
+    }
+    true
+}
+
+// Trimmed byte range of one authored piece starting at or after `cursor`, or
+// None when the pieces are out of order, overrun the construct, or are
+// separated by more than connectors. The caller advances `cursor` to
+// `piece.end`.
+fn parser_take_branch_piece(state: JetParserState, piece: Span, cursor: Int, end: Int) -> Span? Never! {
+    if piece.start < cursor || piece.end < piece.start || piece.end > end -> return None
+    if !parser_branch_gap_is_connector(state, cursor, piece.start) -> return None
+    start := piece.start
+    stop := piece.end
+    loop start < stop && parser_is_space_byte(Int.from_u8(state.source[start])) -> start += 1
+    loop stop > start && parser_is_space_byte(Int.from_u8(state.source[stop - 1])) -> stop -= 1
+    Val(Span{start: start, end: stop})
+}
+
+// Re-indent every line after the first by one level, so a body moved from
+// statement level into a table arm keeps its relative layout.
+fn parser_indent_following_lines(state: JetParserState, piece: Span, unit: String) -> String Never! {
+    out := ""
+    line_start := piece.start
+    first := true
+    loop {
+        line_end := line_start
+        loop line_end < piece.end && Int.from_u8(state.source[line_end]) != 10 -> line_end += 1
+        line :: parser_source_slice(state, line_start, line_end)
+        if first {
+            out = line
+            first = false
+        } else {
+            blank := true
+            loop index in line_start..<line_end {
+                if !parser_is_space_byte(Int.from_u8(state.source[index])) -> blank = false
+            }
+            out = if blank -> "{out}\n" else -> "{out}\n{unit}{line}"
+        }
+        if line_end >= piece.end -> break
+        line_start = line_end + 1
+    }
+    out
+}
+
+// Rebuild a classic chain as `if { cond -> body … else -> body }` from its
+// authored text. None whenever the rewrite could lose or change anything:
+// errors inside the chain, text between parts other than `if`/`else`/`->`,
+// or a guard head the table would read as a readiness timeout.
+fn parser_arm_table_edit(state: JetParserState, if_span: Span, parts: [ParserBranchPart], diag_mark: Int) -> TextEdit? Never! {
+    start :: if_span.start
+    end :: if state.position > 0 -> state.tokens[state.position - 1].span.end else -> 0
+    if start >= end || end > state.source.len() || parser_source_slice(state, start, start + 2) != "if" -> return None
+    if parser_error_since(state, diag_mark) -> return None
+    line_start := start
+    loop line_start > 0 && Int.from_u8(state.source[line_start - 1]) != 10 -> line_start -= 1
+    indent_end := line_start
+    loop indent_end < start && (Int.from_u8(state.source[indent_end]) == 32 || Int.from_u8(state.source[indent_end]) == 9) -> indent_end += 1
+    indent :: parser_source_slice(state, line_start, indent_end)
+    unit :: "    "
+    arms := ""
+    else_line := ""
+    else_seen := false
+    arm_count := 0
+    cursor := start + 2
+    loop part in parts {
+        if else_seen -> return None
+        if !part.is_else {
+            cond :: parser_take_branch_piece(state, part.cond, cursor, end) ?? return None
+            cursor = part.cond.end
+            body :: parser_take_branch_piece(state, part.body, cursor, end) ?? return None
+            cursor = part.body.end
+            if cond.start == cond.end || body.start == body.end -> return None
+            // A guard head that starts with `after` is a readiness timeout,
+            // not a Boolean test.
+            word_end := cond.start
+            loop word_end < cond.end && (parser_is_identifier_byte(Int.from_u8(state.source[word_end]))) -> word_end += 1
+            if parser_source_slice(state, cond.start, word_end) == "after" -> return None
+            arms = "{arms}{indent}{unit}{parser_indent_following_lines(state, cond, unit)} -> {parser_indent_following_lines(state, body, unit)}\n"
+            arm_count += 1
+            next
+        }
+        body :: parser_take_branch_piece(state, part.body, cursor, end) ?? return None
+        cursor = part.body.end
+        if body.start == body.end -> return None
+        else_line = "{indent}{unit}else -> {parser_indent_following_lines(state, body, unit)}\n"
+        else_seen = true
+    }
+    if arm_count == 0 || cursor > end -> return None
+    loop index in cursor..<end {
+        if !parser_is_space_byte(Int.from_u8(state.source[index])) -> return None
+    }
+    Val(TextEdit{span: Span{start: start, end: end}, new_text: "if {{\n{arms}{else_line}{indent}}}"})
+}
+
+// ASCII letters, digits and `_`; the readiness `after` check splits on others.
+fn parser_is_identifier_byte(byte: Int) -> Bool Never! {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
+
+// A keyword token: a written word the lexer reads as a keyword. A marker
+// parameter may be named by any written word (D-VERDICT-1455-1).
+fn parser_is_keyword_token(token: Token) -> Bool Never! {
+    if token.kind == TOKEN_IDENT || token.payload.text.len() == 0 -> return false
+    bytes :: token.payload.text.bytes()
+    first :: Int.from_u8(bytes[0])
+    if !((first >= 97 && first <= 122) || (first >= 65 && first <= 90)) -> return false
+    loop byte in bytes {
+        if !parser_is_identifier_byte(Int.from_u8(byte)) -> return false
+    }
+    true
+}
+
+// End of the token before the cursor, trivia and line terminators included.
+fn parser_prev_token_end(state: JetParserState) -> Int Never! {
+    if state.position <= 0 || state.position > state.tokens.len() -> return 0
+    state.tokens[state.position - 1].span.end
+}
+
+// Undo a speculative parse: restore the cursor and drop every diagnostic,
+// block span and `else` arm it recorded.
+fn parser_rewind(state: &JetParserState, position: Int, diagnostics: Int, blocks: Int, else_arms: Int) {
+    state.position = position
+    loop state.diagnostics.len() > diagnostics -> _ := &state.diagnostics.pop()
+    loop state.block_spans.len() > blocks -> _ := &state.block_spans.pop()
+    loop state.else_arms.len() > else_arms -> _ := &state.else_arms.pop()
+}
+
 fn parser_recover_statement(state: &JetParserState) Never! {
     loop {
         kind :: parser_current_kind(&state)
@@ -317,6 +624,66 @@ fn parser_recover_statement(state: &JetParserState) Never! {
             }
             else -> parser_bump(&state)
         }
+    }
+}
+
+// Consume one balanced `(…)`, `[…]` or `{…}` group starting at the current
+// opener, so a rejected construct does not cascade into its contents.
+fn parser_skip_group(state: &JetParserState) Never! {
+    depth := 0
+    loop {
+        kind :: parser_current_kind(&state)
+        if kind == TOKEN_EOF -> break
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if parser_is_closer(kind) -> depth -= 1
+        parser_bump(&state)
+        if depth <= 0 -> break
+    }
+}
+
+// S73 recovery: skip a rejected parenthesized group through its `)`, stopping
+// early at a line end or block close at the group's own depth.
+fn parser_skip_to_rparen(state: &JetParserState) Never! {
+    depth := 0
+    loop {
+        kind :: parser_current_kind(&state)
+        if kind == TOKEN_EOF -> break
+        if kind == TOKEN_LPAREN -> depth += 1
+        if kind == TOKEN_RPAREN {
+            if depth == 0 {
+                parser_bump(&state)
+                break
+            }
+            depth -= 1
+        }
+        if (kind == TOKEN_SEMI || kind == TOKEN_RBRACE) && depth == 0 -> break
+        parser_bump(&state)
+    }
+}
+
+// After a failed top-level item: skip to the next plausible item start.
+fn parser_sync_top(state: &JetParserState) Never! {
+    loop {
+        kind :: parser_current_kind(&state)
+        if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_PUB || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST || kind == TOKEN_KW_COMPTIME -> break
+        parser_bump(&state)
+    }
+}
+
+// After a failed statement: skip to just past the next `;` at this brace
+// depth, or stop before the block's closing `}`.
+fn parser_sync_stmt(state: &JetParserState) Never! {
+    depth := 0
+    loop {
+        kind :: parser_current_kind(&state)
+        if kind == TOKEN_EOF -> break
+        if kind == TOKEN_RBRACE {
+            if depth == 0 -> break
+            depth -= 1
+        }
+        if kind == TOKEN_LBRACE -> depth += 1
+        parser_bump(&state)
+        if kind == TOKEN_SEMI && depth == 0 -> break
     }
 }
 

@@ -1763,15 +1763,13 @@ fn view_iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<O
 /// `View` never mutates its owner — out of the ratified scope). Mirrors
 /// `list_method_return`'s equivalent entries exactly (I8: one behavior for
 /// the same method name, whether the receiver owns its storage or borrows
-/// it) — `index_of` intentionally matches the list table's existing
-/// `Option<T>` shape rather than `Option<Int>`, for the same reason.
+/// it), including `index_of`'s `Option<Int>` position.
 fn view_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("get" | "first" | "last" | "index_of", 0 | 1) => {
-            Some(Some(Type::Option(Box::new(elem.clone()))))
-        }
+        ("get" | "first" | "last", 0 | 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("contains", 1) => Some(Some(Type::Bool)),
         ("join", 1) => Some(Some(Type::String)),
         // D-ITER1-style closure surface, read-only subset only (D-DYNARRAY1 §2
@@ -2752,6 +2750,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Map { .. } => matches!(
             method,
             "add"
+                | "replace"
                 | "try_insert"
                 | "add_new"
                 | "setdefault"
@@ -2774,6 +2773,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                     | "intersection_update"
                     | "symmetric_difference_update"
                     | "pop"
+                    | "replace"
                     | "clear"
             )
         }
@@ -3055,8 +3055,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "push" | "append" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
             "try_reserve" => Some(vec![Type::Int]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
-            "get" | "index_of" => Some(vec![Type::Int]),
-            "index" => Some(vec![(**inner).clone()]),
+            "get" => Some(vec![Type::Int]),
+            "index_of" | "index" => Some(vec![(**inner).clone()]),
             "remove" => Some(vec![
                 (**inner).clone(),
                 Type::Named(Syntax::TYPE_REMOVE_BY.to_string()),
@@ -3330,7 +3330,16 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             | "split_once"
             | crate::Syntax::METHOD_CUT_LAST
             | "removeprefix"
-            | "removesuffix" => Some(vec![Type::String]),
+            | "removesuffix"
+            | "after"
+            | "before"
+            | "last_index_of"
+            | "compare"
+            | "equal"
+            | "matches"
+            | "match" => Some(vec![Type::String]),
+            "zfill" => Some(vec![Type::Int]),
+            "center" | "ljust" | "rjust" => Some(vec![Type::Int, Type::String]),
             "expandtabs" => Some(vec![Type::Int]),
             "from_bytes" | "from_bytes_lossy" => Some(vec![Type::List(Box::new(u8t()))]),
             "replace" => Some(vec![Type::String, Type::String]),
@@ -3793,7 +3802,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
-                "get" | "contains" => Some(vec![elem]),
+                "get" => Some(vec![Type::Int]),
+                "contains" | "index_of" => Some(vec![elem]),
                 "join" => Some(vec![Type::String]),
                 "fold" => Some(vec![
                     Type::Int, // init — sema refines

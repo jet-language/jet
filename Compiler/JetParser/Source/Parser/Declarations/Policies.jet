@@ -1,0 +1,170 @@
+// D-MARK-SCOPE1: a `#Policy(...)` line that ends at its closing parenthesis
+// is a file-scoped source policy (Rust `policy_is_file_decl` and
+// `policy_declarations_from_marker`). Its arguments become the module's
+// policy declarations; a callable policy (`#Policy(retry(3))`) stays a marker
+// on the declaration that follows it.
+use jet_foundation.[
+    Marker,
+    PolicyDeclaration,
+    PolicyKey,
+    PolicyScope,
+    PolicyValue,
+    Program,
+    Span,
+    Stmt,
+]
+use jet_lexer.[
+    TOKEN_EOF,
+    TOKEN_HASH,
+    TOKEN_IDENT,
+    TOKEN_LPAREN,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+]
+
+fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_HASH -> return false
+    name :: parser_lookahead(&state, 1)
+    if name.kind != TOKEN_IDENT || name.payload.decoded != "Policy" -> return false
+    if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
+    // D-CALLPOLICY2=C: a callable policy starts with a policy call.
+    if parser_kind_at(&state, 3) == TOKEN_IDENT && parser_kind_at(&state, 4) == TOKEN_LPAREN -> return false
+    offset := 2
+    depth := 0
+    loop parser_kind_at(&state, offset) != TOKEN_EOF {
+        kind :: parser_kind_at(&state, offset)
+        if kind == TOKEN_LPAREN -> depth += 1
+        if kind == TOKEN_RPAREN {
+            depth -= 1
+            if depth == 0 {
+                after :: parser_kind_at(&state, offset + 1)
+                return after == TOKEN_SEMI || after == TOKEN_EOF
+            }
+        }
+        offset += 1
+    }
+    true
+}
+
+fn parser_parse_policy_file_decl(state: &JetParserState, program: &Program) {
+    marker :: parser_parse_marker(&state)
+    declarations :: parser_policy_declarations_from_marker(&state, marker, PolicyScope.Module) ?? {
+        parser_sync_top(&state)
+        return
+    }
+    loop declaration in declarations -> &program.policy_declarations.push(declaration)
+}
+
+// D-MARK-SCOPE1: `#Policy(...) { … }` scopes its declarations to the block
+// (Rust `at_policy_stmt`). Each declaration targets the whole statement.
+fn parser_policy_block_stmt(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
+    declarations := parser_policy_declarations_from_marker(&state, marker, PolicyScope.Block) ?? return None
+    loop index in 0..<declarations.len() -> declarations[index].target = Val(span)
+    loop declaration in declarations -> &state.block_policy_declarations.push(declaration)
+    Val(Stmt.Policy{declarations: declarations, body: body, span: span})
+}
+
+fn parser_policy_retired_memory(state: &JetParserState, name: String, span: Span, limit: Int?) -> Bool {
+    replacement :: if name == {
+        "no_alloc" -> "`-[!Mem.Alloc]>`"
+        "zero_rc" -> "`-[!Mem.Rc]>`"
+        "arena_bounded" -> if limit == .Val(bytes) -> "`-[!Mem.Alloc(above: {bytes})]>`" else -> "`-[!Mem.Alloc(above: N)]>`"
+        else -> {
+            return false
+        }
+    }
+    parser_add_error_code(&state, "E0355", span, "`{name}` is a retired memory policy", "memory floors are rights-tree prohibitions, not policy-marker arguments", "write {replacement} on the function signature")
+    true
+}
+
+fn parser_policy_key(name: String) -> PolicyKey? {
+    if name == {
+        "unsafe" -> Val(PolicyKey.Unsafe)
+        "impure" -> Val(PolicyKey.Impure)
+        "nondeterministic" -> Val(PolicyKey.Nondeterministic)
+        "gc" -> Val(PolicyKey.ScopedGC)
+        "explicit_units" -> Val(PolicyKey.ExplicitUnits)
+        "copies" -> Val(PolicyKey.Copies)
+        "sentries" -> Val(PolicyKey.Sentries)
+        else -> None
+    }
+}
+
+// One declaration per argument, or None after reporting the first refusal.
+fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker, scope: PolicyScope) -> [PolicyDeclaration]? {
+    out := [PolicyDeclaration]{}
+    loop index in 0..<marker.args.len() {
+        expr :: parser_marker_expression(marker, index) ?? {
+            parser_marker_shape_error(&state, marker)
+            return None
+        }
+        label :: parser_marker_label(marker, index)
+        name := label
+        name_span := marker.span
+        limit := Int?{None}
+        mode := PolicyValue?{None}
+        if label == "copies" || label == "sentries" {
+            variant :: if expr == {
+                .EnumLit(type_name, written, _, args, _, _) -> if type_name == "" && args.len() == 0 -> written else -> ""
+                else -> ""
+            }
+            mode = if {
+                variant == "Explicit" && label == "copies" -> Val(PolicyValue.Explicit)
+                variant == "On" && label == "sentries" -> Val(PolicyValue.On)
+                variant == "Off" && label == "sentries" -> Val(PolicyValue.Off)
+                else -> {
+                    parser_marker_shape_error(&state, marker)
+                    return None
+                }
+            }
+        } else {
+            if expr == {
+                .Ident(written, span) -> {
+                    name = written
+                    name_span = span
+                }
+                .Call(call) -> {
+                    if call.args.len() != 1 || call.args[0].label != None {
+                        parser_marker_shape_error(&state, marker)
+                        return None
+                    }
+                    if call.args[0].expr == {
+                        .Int(value, _, _, _) -> limit = Val(value)
+                        else -> {
+                            parser_marker_shape_error(&state, marker)
+                            return None
+                        }
+                    }
+                    name = call.name
+                    name_span = call.name_span
+                }
+                else -> {
+                    parser_marker_shape_error(&state, marker)
+                    return None
+                }
+            }
+        }
+        if parser_policy_retired_memory(&state, name, name_span, limit) -> return None
+        key :: parser_policy_key(name) ?? {
+            parser_add_error_code(&state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials")
+            return None
+        }
+        value :: if key == {
+            .Copies -> mode ?? {
+                parser_add_error_code(&state, "E0355", name_span, "`copies` needs an explicit mode", "read-only views copy at owning destinations by default; the policy only restores explicit-copy syntax", "write `copies: .Explicit`")
+                return None
+            }
+            .Sentries -> mode ?? {
+                parser_add_error_code(&state, "E0355", name_span, "`sentries` needs an explicit mode", "sentry instrumentation is either on or off; it is not a boolean memory fact", "write `sentries: .Off` or `sentries: .On`")
+                return None
+            }
+            .ScopedGC | .ExplicitUnits -> PolicyValue.Enabled
+            .Unsafe | .Impure | .Nondeterministic -> {
+                parser_add_error_code(&state, "E0355", name_span, "`{name}` is not a source policy", "organization and package policy own the audited-escape floor; source code can only write the corresponding marker", "use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`")
+                return None
+            }
+        }
+        &out.push(PolicyDeclaration{key: key, value: value, scope: scope, span: marker.span, target: None, source: "<source>"})
+    }
+    Val(out)
+}

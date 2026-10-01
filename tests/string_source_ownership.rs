@@ -55,13 +55,14 @@ fn run() {
 
 #[test]
 fn string_len_source_agrees_across_execution_tiers() {
+    // S41: with `core.text` in scope, `len` still counts Unicode scalars.
     tir_support::assert_tiers_agree(
         "string_len_source",
         r#"
 use core.text as text
 
 fn run() {
-    print("hello".len())
+    print("héllo".len())
 }
 "#,
         "5\n",

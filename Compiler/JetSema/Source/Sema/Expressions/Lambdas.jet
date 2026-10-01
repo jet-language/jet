@@ -1609,6 +1609,7 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
     body_source_start := lambda_context.comptime_body_sources.len()
     compute_call_start := lambda_context.compute_calls.len()
     autodiff_obligation_start := lambda_context.autodiff_obligations.len()
+    failure_edge_start := lambda_context.failure_edges.len()
     lambda_context.autodiff_safe_panic = false
     lambda_context.autodiff_unsafe_panic = false
     frame := sema_scope_enter(&lambda_scopes, &lambda_state, "lambda@{lambda.span.start}")
@@ -1621,7 +1622,7 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
         parameter_ty := parameter.ty
         if parameter_ty == None && expected_params != None && index < (expected_params ?? [Type]{}).len() -> parameter_ty = Val((expected_params ?? [Type]{})[index])
         parameter_type :: parameter_ty ?? {
-            &diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "a lambda parameter has no expected type in this context", "annotate the parameter or provide a function type"))
+            &diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "this lambda parameter has no type to go on", "write `({parameter.name}: Int) -> …` (or whatever type fits)"))
             return None
         }
         parameter_owner := sema_scope_local_owner_key(lambda_scopes)
@@ -1715,6 +1716,7 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
                 statement_index += 1
             }
             checked_block :: sema_check_statements(statement_body, statement_return, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics, 0)
+            sema_single_use_check_scope_end(lambda_state, &diagnostics)
             if !checked_block.complete -> return None
             if !inline_loop && body_expected != None && (body_expected ?? Type.Named{name: "Unit"}) != (Type.Named{name: "Unit"}) && tail_source == None && !sema_stmt_block_has_no_fallthrough(statements) {
                 &diagnostics.push(sema_error("E0113", lambda.span, "this block closure can fall through without returning its value", "a non-Unit closure needs a return on every reachable path", "return a value from every path or make the closure return Unit"))
@@ -1876,6 +1878,7 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
             local.mutable = binding.mutable
             local.integer_bounds = binding.integer_bounds
             &captures.push(TCapture{source: binding.symbol.name, local: local, ty: capture_ty})
+            sema_cell_guard_check_capture(binding.symbol.name, capture_ty, lambda.span, &diagnostics)
             explicit_move := sema_expression_lambda_name_contains(lambda_work.meta.moved_captures, binding.symbol.name)
             is_view := sema_expression_lambda_is_view_type(capture_ty, binding.string_view)
             borrowed := binding.symbol.kind == SymbolKind.Parameter && binding.access != AccessConvention.Move
@@ -2014,5 +2017,26 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
         context.inferred_failure_carrier = lambda_context.inferred_failure_carrier
     }
     sema_expression_lambda_merge_context_facts(&lambda_context, &context, call_fact_start, name_reference_start, comptime_request_start, body_source_start, compute_call_start, autodiff_obligation_start, copy_event_start)
+    // #3708: the callback's propagated failures stay rows of the enclosing
+    // body (the Rust body walk reads callbacks too); a callback that
+    // propagates into its own inferred carrier is a failure source, and an
+    // inline loop shares its owner's direct sources.
+    loop edge_index in failure_edge_start..<lambda_context.failure_edges.len() -> &context.failure_edges.push(lambda_context.failure_edges[edge_index])
+    if lambda_work.meta.fallible_propagation {
+        &context.failure_edges.push("")
+        // D-FAIL-INFER-UNION1=A: the callback's failures belong to its own
+        // carrier, so the enclosing default route only learns that the
+        // general `Err` reaches it.
+        context.failure_union_general = true
+    }
+    if inline_loop {
+        if lambda_context.failure_direct_source -> context.failure_direct_source = true
+        // An inline loop body is the owner's body: its default-route failures
+        // join the owner's failure-union row.
+        context.failure_union_members = ~lambda_context.failure_union_members
+        context.failure_union_cases = ~lambda_context.failure_union_cases
+        context.failure_union_edges = ~lambda_context.failure_union_edges
+        context.failure_union_general = context.failure_union_general || lambda_context.failure_union_general
+    }
     Val(checked)
 }

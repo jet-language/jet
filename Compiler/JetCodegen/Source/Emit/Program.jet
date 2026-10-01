@@ -24,7 +24,7 @@ fn jet_rust_emit_function_target_enabled(config: JetRustEmitConfig, function: MI
     if !jet_rust_emit_target_enabled(config, function.target_applicability) -> return false
     if config.target != "web" -> return true
     bucket :: config.web_bucket ?? return true
-    function.web_bucket == Val(bucket)
+    function.web_bucket == (Val(bucket))
 }
 
 fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MIRForeign) -> Bool Never! {
@@ -218,6 +218,9 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
         jet_rust_emit_period_anchor_impls(&ctx, &lines)
     }
     loop definition in ctx.program.traits {
+        // MIRRust: the cached runtime declares compiler-owned traits; only
+        // Rollback keeps a per-program declaration.
+        if definition.name != "Rollback" && (jet_rust_emit_compiler_owned_trait(definition.name) || jet_rust_emit_compiler_owned_trait(definition.key)) -> next
         trait_lines := [String]{}
         jet_rust_emit_trait_definition(&ctx, definition, &trait_lines)
         loop line in trait_lines -> &lines.push(line)

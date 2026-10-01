@@ -1,0 +1,27 @@
+// A list element passed to a take (`^T`) parameter hands the callee its own
+// value; the slot stays readable, and assigning the result back updates it.
+struct Note {
+    text: String
+    path: String?
+}
+
+fn with_path(note: ^Note, path: String) -> Note Never! {
+    updated := note
+    updated.path = Val(path)
+    updated
+}
+
+fn shout(text: ^String) -> String Never! {
+    "{text}!"
+}
+
+fn run() {
+    notes := [Note]{Note{text: "a", path: None}, Note{text: "b", path: None}}
+    tagged :: with_path(notes[0], "first.jet")
+    print("{tagged.text} {tagged.path ?? "-"} {notes[0].path ?? "-"}")
+    loop i in 0..<notes.len() {
+        notes[i] = with_path(notes[i], "src/main.jet")
+    }
+    loop note in notes -> print("{note.text} {note.path ?? "-"}")
+    print(shout(notes[1].text))
+}

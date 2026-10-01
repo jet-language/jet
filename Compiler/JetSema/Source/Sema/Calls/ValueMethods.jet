@@ -1,0 +1,190 @@
+// Built-in value receiver methods: `String`, `Bytes`, the numeric scalars,
+// `Ordering` and `Atomic<T>` (Rust `builtin_method_return` and
+// `finish_builtin_method`, lowered as `resolve_builtin_op` /
+// `resolve_numeric_op` do). Every row comes from the one table in
+// JetFoundation Registry/BuiltinMethods.jet; collection receivers keep their
+// own table in Calls/Collections.jet. `trim`/`after`/`before` lower to their
+// owned operations here; a `::` binding of one of them becomes a zero-copy
+// view in Ownership/StringViews.jet.
+use jet_foundation.[
+    AccessConvention,
+    BuiltinMethodLowering,
+    BuiltinMethodRow,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    ParamZone,
+    Span,
+    SymbolID,
+    SymbolKind,
+    TBuiltinOp,
+    TCallArg,
+    TClosureOp,
+    TExpr,
+    TExprKind,
+    TMethodRef,
+    TNumericOp,
+    TPreludeArg,
+    TStaticOwner,
+    Type,
+    builtin_method_bind,
+    builtin_method_row,
+    expr_span,
+    symbol_id,
+    type_name,
+    type_tuple_struct_name,
+]
+
+// Built-in methods are positional (Rust `check_builtin_method_labels`).
+fn sema_value_method_check_labels(method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    loop argument in args {
+        if argument.label == .Val(label) {
+            &diagnostics.push(sema_error("E0764", label.span, "`{method}` has no parameter labelled `{label.name}`", "a label binds an argument to the parameter of that name", "`{method}` takes no labelled arguments"))
+            valid = false
+        }
+    }
+    valid
+}
+
+fn sema_value_method_argument(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    value :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_call_type_assignable(required, value.ty, environment) == (Val(true)) -> return Val(value)
+    if sema_expr_numeric_widening_to(value.ty, required) == (Val(true)) {
+        line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+        return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
+    }
+    &diagnostics.push(sema_error("E0108", expr_span(argument.expr), "argument {index + 1} to `.{method}()` should be {sema_type_show(required)}, not {sema_type_show(value.ty)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, value.ty)))
+    None
+}
+
+fn sema_value_method_owner(receiver: Type) -> String Never! {
+    if sema_expr_unwrap_tag(receiver) == {
+        .Apply(name, _) -> name
+        else -> type_name(sema_expr_unwrap_tag(receiver))
+    }
+}
+
+fn sema_value_method_is_float_or_integer(receiver: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(receiver) == {
+        .Int | .Float | .IntN(_, _) | .Float32 -> true
+        else -> false
+    }
+}
+
+fn sema_value_method_bit_width(receiver: Type) -> Int Never! {
+    if sema_expr_unwrap_tag(receiver) == {
+        .IntN(_, bits) -> if bits == 8 || bits == 16 || bits == 32 -> bits else -> 64
+        else -> 64
+    }
+}
+
+// The named tuple inside an optional split result.
+fn sema_value_method_tuple_struct(result: Type) -> String Never! {
+    if result == {
+        .Option(inner) -> if inner == {
+            .Tuple(fields) -> type_tuple_struct_name(fields)
+            else -> ""
+        }
+        else -> ""
+    }
+}
+
+fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment) -> TExprKind {
+    if row.lowering == {
+        .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: typed}
+        .StringSlice -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.Slice{line: line}, args: typed}
+        .StringRangeSlice -> {
+            zero_start := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            zero_end := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            TExprKind.Slice{base: receiver_value, start: zero_start, end: zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, span)}
+        }
+        .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
+        .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
+        .IntToRadix -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IntToRadix{line: line}, args: typed}
+        .Show -> {
+            if sema_value_method_is_float_or_integer(receiver_value.ty) -> return TExprKind.NumericMethod{receiver: receiver_value, operation: TNumericOp.ToShow}
+            TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ToString, args: typed}
+        }
+        .Predicate -> TExprKind.NumericMethod{receiver: receiver_value, operation: TNumericOp.Predicate{name: method}}
+        .BitCount -> TExprKind.NumericMethod{receiver: receiver_value, operation: TNumericOp.BitCount{method: method, width: sema_value_method_bit_width(receiver_value.ty)}}
+        .Euclidean(remainder) -> TExprKind.NumericBinaryMethod{receiver: receiver_value, operation: if remainder -> TNumericOp.EuclideanRem{line: line} else -> TNumericOp.EuclideanDiv{line: line}, argument: typed[0]}
+        .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, policy: None, lhs: receiver_value, rhs: typed[0]}
+        .Atomic -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{method: method}, args: typed}
+    }
+}
+
+// D-HOLE1: `opt.map(f: T -> R) -> R?`; the callback's own failure carrier
+// stays at the call boundary, so the result wraps its success value.
+fn sema_value_method_option_map(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    required := Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    callback :: sema_check_expression_with_lambda_escapes(args[0].expr, Val(required), environment, &scopes, &state, &tail_store, &context, Val(false), &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if sema_call_host_callback_assignable(required, callback.ty, environment) != (Val(true)) {
+        &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "argument 1 to `.map()` should be {sema_type_show(required)}, not {sema_type_show(callback.ty)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, callback.ty)))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    returned := sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
+    success := if returned == {
+        .Result(ok, _) | .Option(ok) -> ok
+        else -> returned
+    }
+    updated_args := args
+    params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false}}
+    ownership := sema_ownership_check_method_call(&state, "Option.map", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}
+
+fn sema_value_method_static_arg(value: TExpr) -> TCallArg Never! {
+    TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+}
+
+// D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a failure;
+// the payload rides through and the Prelude's `JetOptionalView::or_err`
+// holds the one meaning.
+fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    why :: sema_value_method_argument(args[0], "or_err", 0, Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    updated_args := args
+    params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ownership := sema_ownership_check_method_call(&state, "Option.or_err", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "JetOptionalView", "or_err"), name: "or_err", mangled: false, trait_owner: None, operator_identity: None}
+    kind := TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetOptionalView", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{sema_value_method_static_arg(receiver_value), sema_value_method_static_arg(why)}}
+    value := sema_tir_expr(Type.Result{ok: inner, err: Type.Named{name: "Err"}}, kind, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}
+
+pub fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if sema_expr_unwrap_tag(receiver_value.ty) == .Option(inner) && args.len() == 1 {
+        if method == "map" -> return sema_value_method_option_map(receiver, receiver_value, inner, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if method == "or_err" -> return sema_value_method_option_or_err(receiver, receiver_value, inner, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    row :: builtin_method_row(receiver_value.ty, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner := sema_value_method_owner(receiver_value.ty)
+    if row.lowering == BuiltinMethodLowering.Atomic && scopes.transaction_wall_depth > 0 {
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_error("E0041", span, "`Atomic` cannot be used inside `#Transact`", "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics", "move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    labels_valid := sema_value_method_check_labels(method, args, &diagnostics)
+    typed := [TExpr]{}
+    params := [SemaCallParam]{}
+    loop (index, argument) in args {
+        required := builtin_method_bind(row.parameters[index], receiver_value.ty)
+        value :: sema_value_method_argument(argument, method, index, required, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        &typed.push(value)
+        &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false})
+    }
+    if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
+    updated_args := args
+    ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, row.access, params, &updated_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    effect_row := if row.access == AccessConvention.Write -> [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}} else -> [EffectRowEntry]{}
+    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "{owner}.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    result := builtin_method_bind(row.result, receiver_value.ty)
+    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    value := sema_tir_expr(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, environment), span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}

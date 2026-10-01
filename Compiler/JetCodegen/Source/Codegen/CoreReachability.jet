@@ -1,0 +1,115 @@
+// Core source-body reachability (Rust Codegen/TIR/mod.rs
+// `reachable_core_source_callables`, `should_lower_imported_core_body`).
+use jet_foundation.[
+    TExpr,
+    TFunc,
+    TFuncKind,
+    tir_expr_children,
+    tir_stmt_children,
+]
+
+fn jet_codegen_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
+    if kind == {
+        .TopLevel -> true
+        else -> false
+    }
+}
+
+fn jet_codegen_core_reach_add(keys: &[String], key: String) Never! {
+    if key != "" -> &keys.push(key)
+}
+
+// The function keys one checked expression names directly. Children are
+// walked by the caller.
+fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
+    if expression.kind == {
+        .Call(callee, _, args) -> {
+            jet_codegen_core_reach_add(&keys, callee.key)
+            loop argument in args {
+                loop item in argument.template_items -> jet_codegen_core_reach_add(&keys, item.key)
+            }
+        }
+        .ModuleCall(target, _, _, _, args) -> {
+            jet_codegen_core_reach_add(&keys, target.key)
+            loop argument in args {
+                loop item in argument.template_items -> jet_codegen_core_reach_add(&keys, item.key)
+            }
+        }
+        .MethodCall(_, method, _, args) -> {
+            jet_codegen_core_reach_add(&keys, method.symbol.key)
+            loop argument in args {
+                loop item in argument.template_items -> jet_codegen_core_reach_add(&keys, item.key)
+            }
+        }
+        .StaticCall(_, _, method, _, args) -> {
+            jet_codegen_core_reach_add(&keys, method.symbol.key)
+            loop argument in args {
+                loop item in argument.template_items -> jet_codegen_core_reach_add(&keys, item.key)
+            }
+        }
+        .Index(_, _, _, _, checked_call, _) -> {
+            if checked_call == Val(symbol) -> jet_codegen_core_reach_add(&keys, symbol.key)
+        }
+        .FnValue(kind) -> {
+            if kind == .NamedFn(name, _) {
+                if name == Val(key) -> jet_codegen_core_reach_add(&keys, key)
+            }
+        }
+        // A function named as a value checks as a constant reference.
+        .ConstRef(symbol) -> jet_codegen_core_reach_add(&keys, symbol.key)
+        else -> {}
+    }
+}
+
+// Every function key one checked function body names, including its
+// parameter defaults, which call sites lower from the callee.
+fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
+    keys := [String]{}
+    pending := [TExpr]{}
+    loop parameter in function.params {
+        if parameter.default == Val(value) -> &pending.push(value)
+    }
+    loop statement in function.body {
+        loop child in tir_stmt_children(statement) -> &pending.push(child)
+    }
+    loop pending.len() > 0 {
+        expression :: &pending.pop() ?? return keys
+        jet_codegen_core_reach_expr_keys(expression, &keys)
+        loop child in tir_expr_children(expression) -> &pending.push(child)
+    }
+    keys
+}
+
+// The checked functions to lower, in their original order: every function
+// outside `core_module_identities` (user code and compiler-private Core parts)
+// is a root, and a top-level Core source function is kept only when a kept
+// body names it. Core methods stay rooted because Codegen resolves their
+// implicit uses (`close`, `display`, index hooks, trait dispatch) by owner
+// type rather than by a key in the caller's body.
+pub fn jet_codegen_reachable_core_functions(functions: ^[TFunc], core_module_identities: [String]) -> [TFunc] {
+    if core_module_identities.len() == 0 -> return functions
+    by_key := [String:Int]{}
+    reachable := [Bool]{}
+    pending := [Int]{}
+    loop (index, function) in functions {
+        _ := &by_key.add(function.key, index)
+        rooted :: !core_module_identities.contains(function.module_identity) || !jet_codegen_core_reach_is_top_level(function.kind)
+        &reachable.push(rooted)
+        if rooted -> &pending.push(index)
+    }
+    loop pending.len() > 0 {
+        caller :: &pending.pop() ?? return functions
+        loop key in jet_codegen_core_reach_function_keys(functions[caller]) {
+            target :: by_key.get(key) ?? next
+            if !reachable[target] {
+                reachable[target] = true
+                &pending.push(target)
+            }
+        }
+    }
+    kept := [TFunc]{}
+    loop (index, function) in functions {
+        if reachable[index] -> &kept.push(function)
+    }
+    kept
+}

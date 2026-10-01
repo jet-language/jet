@@ -2581,7 +2581,10 @@ impl<'a> Checker<'a> {
                 }
             }
             BinOp::Eq | BinOp::Ne => {
-                if lt == rt {
+                // A Core record read through its owner carries the canonical
+                // identity while a grouped-import literal keeps the leaf; both
+                // name one declaration.
+                if lt == rt || self.nominal_type_identity(&lt, &rt) {
                     if !self.is_equatable_type(&lt) {
                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt) {
                             self.diags.push(Diagnostic::error(

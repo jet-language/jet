@@ -1309,6 +1309,14 @@ index then item; one-binding stays item-only. `xs.indexes()` yields every valid
 **S39 — Indexing**: `xs[i]` / `m[k]` stop with a friendly report on
 OOB/missing key; `xs.get(i) -> (?T)` safe access; `m[k] = v` inserts.
 
+**D-INDEXOF1=A — `index_of` searches by value** *(ratified 2026-10-01, card
+#4010; owner: "d-indexof1 by value, A")*: `[T].index_of(item: T) -> Int?` and
+`View<T>.index_of(item: T) -> Int?` return the position of the first item equal
+to `item`, or `None`, the same lookup as `String.index_of` and `Bytes.index_of`.
+`["a", "b"].index_of("b")` is `Val(1)`. Position lookup stays `xs.get(i)`; an
+argument that is not the element type is E0108. `index(item)` is the same
+by-value lookup.
+
 **S40 — Slicing**: `xs[a..b]` inclusive, copies (no exposed references);
 `s.slice(a..b) -> String` on character positions; L0501 lints slice copies in
 loops.

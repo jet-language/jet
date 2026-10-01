@@ -2466,12 +2466,12 @@ fn jet_jit_http_nominal_static(
             clone_string(arg0),
         ))),
         21 => {
-            let Some((top, sub, params)) = crate::Net::mime_parts(arg1) else {
+            let Some((top, sub, parameters)) = crate::Net::mime_parts(arg1) else {
                 return result_err("invalid MIME".into());
             };
             push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_text_with_mime(
                 clone_string(arg0),
-                jet_std::JetMIME { top, sub, params },
+                jet_std::JetMIME { top, sub, parameters },
             )))
         }
         22 => push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_json(arg0))),

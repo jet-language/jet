@@ -2939,12 +2939,20 @@ fn js_integer_constant(value: i64, width: Option<(bool, u8)>) -> String {
     }
 }
 
+/// The declaration a folded constant names: its exact key, else the one
+/// declaration carrying its display name. A spelling shared by several
+/// declarations (a user `FontStyle` beside Core's) tags nothing rather than
+/// borrowing another declaration's identity (#4003).
 fn js_constant_type_id(program: &MirProgram, type_name: &str) -> Option<jet_foundation::MIR::MirTypeId> {
-    program
+    if let Some(type_def) = program.types.iter().find(|type_def| type_def.key == type_name) {
+        return Some(type_def.id);
+    }
+    let mut named = program
         .types
         .iter()
-        .find(|type_def| type_def.name == type_name || type_def.key == type_name)
-        .map(|type_def| type_def.id)
+        .filter(|type_def| type_def.name == type_name);
+    let type_def = named.next()?;
+    named.next().is_none().then_some(type_def.id)
 }
 
 fn js_constant_expression(

@@ -19,7 +19,7 @@ mod url_kernel {
     pub struct JetMIME {
         pub top: String,
         pub sub: String,
-        pub params: Vec<(String, String)>,
+        pub parameters: Vec<Vec<String>>,
     }
 
     #[allow(unused_imports)]
@@ -112,7 +112,7 @@ pub(super) fn data(mime_rendered: &str, text: &str) -> UrlParts {
         url_kernel::JetMIME {
             top: mime_rendered.to_string(),
             sub: String::new(),
-            params: Vec::new(),
+            parameters: Vec::new(),
         }
     });
     url_kernel::JetURLParts::data(&mime, &text.to_string())

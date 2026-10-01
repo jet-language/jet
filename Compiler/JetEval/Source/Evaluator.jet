@@ -369,7 +369,7 @@ fn jet_eval_drop_borrowed_value(machine: JetEvalMachine, value: JetEvalRuntimeVa
         }
         .SharedCell(_, _) | .Shared(_) | .SharedWeak(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return true
         .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_drop_borrowed_value(machine, nested, span)
-        .Closure(_, captures) -> {
+        .Closure(_, captures) | .Stream(_, _, _, captures) -> {
             ok := true
             loop capture in captures {
                 if !jet_eval_drop_borrowed_value(machine, capture, span) -> ok = false
@@ -1826,6 +1826,7 @@ fn jet_eval_route_prelude_dispatch(machine: &JetEvalMachine, call: MIRPreludeCal
         }
         .Unavailable -> {}
     }
+    if jet_eval_stream_owns_row(row, args) -> return jet_eval_stream_route(&machine, row, args, span)
     if jet_eval_shared_runtime_owns_row(row) -> return jet_eval_shared_runtime_route(&machine, row, args, type_args, result_ty, span)
     jet_eval_route_prelude(&machine, call, args, type_args, result_ty, span)
 }
@@ -2193,6 +2194,7 @@ fn jet_eval_has_next(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span:
         return Val(if step > 0 -> if exclusive -> current < end else -> current <= end else -> if exclusive -> current > end else -> current >= end)
     }
     if value == .ListCursor(values, index, step) -> return Val(index >= 0 && index < values.len())
+    if value == .Stream(values, index, _, _) -> return Val(index >= 0 && index < values.len())
     jet_eval_compiler_fail(&machine, span, "MIR iterator operation does not have a cursor")
     None
 }
@@ -2205,6 +2207,13 @@ fn jet_eval_cursor_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, s
             return None
         }
         return jet_eval_copy_value(values[index], &machine, span)
+    }
+    if value == .Stream(values, index, _, stages) {
+        if index < 0 || index >= values.len() {
+            jet_eval_compiler_fail(&machine, span, "MIR iterator is exhausted")
+            return None
+        }
+        return jet_eval_stream_row(&machine, values[index], index, stages, span)
     }
     jet_eval_compiler_fail(&machine, span, "MIR iterator value operation does not have a cursor")
     None
@@ -2223,8 +2232,106 @@ fn jet_eval_advance_cursor(machine: &JetEvalMachine, frame_index: Int, id: MIRVa
         machine.frames[frame_index].values[id.value] = JetEvalRuntimeValue.ListCursor{values: values, index: index + step, step: step}
         return true
     }
+    if current == .Stream(values, index, step, stages) {
+        machine.frames[frame_index].values[id.value] = JetEvalRuntimeValue.Stream{values: values, index: index + step, step: step, stages: stages}
+        return true
+    }
     jet_eval_compiler_fail(&machine, span, "MIR iterator advance value is not a cursor")
     false
+}
+
+// One pulled `Stream` row: the source item passed through every
+// `iter_enumerate` stage as `(position, row)`. The stages stay owned by the
+// stream, so each call borrows their captures.
+fn jet_eval_stream_row(machine: &JetEvalMachine, item: TComptimeValue, position: Int, stages: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
+    row := JetEvalRuntimeValue.Data{value: item}
+    loop stage in stages {
+        if stage == .Closure(function, captures) {
+            args := [JetEvalRuntimeValue]{JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: position}}, row}
+            row = jet_eval_invoke_with_borrowed_captures(&machine, function, args, captures, true, span) ?? return None
+            next
+        }
+        jet_eval_compiler_fail(&machine, span, "MIR indexed stream stage is not a checked closure")
+        jet_eval_drop_value(&machine, row, span)
+        return None
+    }
+    Val(row)
+}
+
+// `jet_iter_enumerate` (`.indexed()` and the two-binding list loop): a lazy
+// source gains one row stage; a list receiver becomes a lazy source first.
+// `values` is borrowed; the call boundary discharges it.
+fn jet_eval_stream_enumerate(machine: &JetEvalMachine, values: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
+    if values.len() != 2 {
+        jet_eval_compiler_fail(&machine, span, "MIR indexed route requires one row callback")
+        return None
+    }
+    source :: jet_eval_iterator_host_value(values[0], &machine, span) ?? return None
+    if source == .Stream(items, index, step, stages) {
+        callback :: jet_eval_copy_value(values[1], &machine, span) ?? {
+            jet_eval_drop_value(&machine, source, span)
+            return None
+        }
+        staged := stages
+        &staged.push(callback)
+        return Val(JetEvalRuntimeValue.Stream{values: items, index: index, step: step, stages: staged})
+    }
+    if source == .Data(data) {
+        if data == .List(items) {
+            callback :: jet_eval_copy_value(values[1], &machine, span) ?? return None
+            return Val(JetEvalRuntimeValue.Stream{values: items, index: 0, step: 1, stages: [JetEvalRuntimeValue]{callback}})
+        }
+    }
+    jet_eval_drop_value(&machine, source, span)
+    jet_eval_compiler_fail(&machine, span, "MIR indexed receiver is not an Iter")
+    None
+}
+
+fn jet_eval_stream_owns_row(row: MIRPreludeCall, args: [JetEvalRuntimeValue]) -> Bool Never! {
+    if row.family != MIRPreludeFamily.BuiltinMethod || row.module_name != "core.builtin" -> return false
+    if row.member == "iter_enumerate" || row.member == "list_lazy" -> return true
+    if (row.member == "iter_to_list" || row.member == "iter_collect") && args.len() == 1 {
+        if args[0] == .Stream(_, _, _, _) -> return true
+    }
+    false
+}
+
+// The lazy-stream builtin rows; `args` is borrowed.
+fn jet_eval_stream_route(machine: &JetEvalMachine, row: MIRPreludeCall, args: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
+    if row.member == "iter_enumerate" -> return jet_eval_stream_enumerate(&machine, args, span)
+    if row.member == "list_lazy" {
+        if args.len() != 1 {
+            jet_eval_compiler_fail(&machine, span, "MIR lazy route requires one List receiver")
+            return None
+        }
+        source :: jet_eval_iterator_host_value(args[0], &machine, span) ?? return None
+        if source == .Data(data) {
+            if data == .List(items) -> return Val(JetEvalRuntimeValue.Stream{values: items, index: 0, step: 1, stages: [JetEvalRuntimeValue]{}})
+        }
+        jet_eval_drop_value(&machine, source, span)
+        jet_eval_compiler_fail(&machine, span, "MIR lazy route receiver is not a List")
+        return None
+    }
+    jet_eval_stream_collect(&machine, args[0], span)
+}
+
+// `iter_to_list`/`iter_collect` over a `Stream`: pull every remaining row.
+// `stream` is borrowed.
+fn jet_eval_stream_collect(machine: &JetEvalMachine, stream: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
+    if stream == .Stream(values, index, step, stages) {
+        rows := [TComptimeValue]{}
+        position := index
+        loop position >= 0 && position < values.len() {
+            row :: jet_eval_stream_row(&machine, values[position], position, stages, span) ?? return None
+            data := jet_eval_data(row, &machine, span)
+            jet_eval_drop_value(&machine, row, span)
+            &rows.push(data ?? return None)
+            position += step
+        }
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: rows}})
+    }
+    jet_eval_compiler_fail(&machine, span, "MIR iterator collect receiver is not a Stream")
+    None
 }
 
 fn jet_eval_initialize_range(machine: &JetEvalMachine, frame_index: Int, start_id: MIRValueID, end_id: MIRValueID, step_id: MIRValueID?, exclusive: Bool, span: Span) -> JetEvalRuntimeValue? {
@@ -2343,6 +2450,13 @@ fn jet_eval_initialize_iterator_from(machine: &JetEvalMachine, frame_index: Int,
             return Val(JetEvalRuntimeValue.ListCursor{values: values, index: 0, step: step})
         }
         jet_eval_compiler_fail(&machine, span, "MIR char iterator requires a String")
+        return None
+    }
+    // A lazy `Iter` walks its own rows by the loop stride.
+    if source_runtime == .Stream(_, _, _, _) {
+        jet_eval_drop_value(&machine, step_runtime, span)
+        cursor :: jet_eval_copy_value(source_runtime, &machine, span) ?? return None
+        if cursor == .Stream(values, index, _, stages) -> return Val(JetEvalRuntimeValue.Stream{values: values, index: index, step: step, stages: stages})
         return None
     }
     if source_kind != MIRLoopSourceKind.Plain {
@@ -5368,7 +5482,7 @@ pub fn jet_eval_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeV
         }
         .HostCursor(inner, _, _, _) -> return jet_eval_host_projection(&machine, inner, span)
         .Shared(_) | .SharedWeak(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_host_projection(&machine, value, span)
-        .Address(_, _, _) | .SharedCell(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) -> {
+        .Address(_, _, _) | .SharedCell(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
             jet_eval_compiler_fail(&machine, span, "native host argument requires a materialized Source value")
             return None
         }
@@ -5505,7 +5619,7 @@ fn jet_eval_task_host_projection(machine: &JetEvalMachine, value: JetEvalRuntime
         }
         .Shared(_) | .SharedWeak(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_host_projection(&machine, value, span)
         .HostCursor(inner, _, _, _) -> return jet_eval_task_host_projection(&machine, inner, span)
-        .Address(_, _, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) -> {
+        .Address(_, _, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
             jet_eval_ownership_fail(&machine, span, "native scheduler argument has an invalid Source carrier")
             return None
         }
@@ -6098,7 +6212,7 @@ fn jet_eval_close_foreign_value(machine: &JetEvalMachine, value: JetEvalRuntimeV
             }
             return ok
         }
-        .Closure(_, captures) -> {
+        .Closure(_, captures) | .Stream(_, _, _, captures) -> {
             ok := true
             loop capture in captures {
                 if !jet_eval_drop_value(&machine, capture, span) -> ok = false
@@ -6544,7 +6658,16 @@ fn jet_eval_semantic_pattern_match(
         jet_eval_drop_call_values(&machine, prepared.values, prepared.owned, span)
         return None
     }
-    subject_data :: subject_data_result ?? TComptimeValue.Unit
+    subject_data := subject_data_result ?? TComptimeValue.Unit
+    // A `[U8]` subject is a Bytes carrier or a list of U8 items.
+    if binary && subject_data == .List(_) {
+        bytes :: jet_eval_byte_list(subject_data) ?? {
+            jet_eval_compiler_fail(&machine, span, "MIR binary pattern subject has a non-U8 item")
+            jet_eval_drop_call_values(&machine, prepared.values, prepared.owned, span)
+            return None
+        }
+        subject_data = TComptimeValue.Bytes{value: bytes}
+    }
     subject_matches := if {
         binary -> {
             if subject_data == {.Bytes(_) -> true else -> false}
@@ -6559,8 +6682,24 @@ fn jet_eval_semantic_pattern_match(
         jet_eval_drop_call_values(&machine, prepared.values, prepared.owned, span)
         return None
     }
-    result := jet_eval_host_static_row(&machine, row, [JetEvalRuntimeValue]{prepared.values[0]}, result_ty, [JetEvalHostTypeShape]{}, [Bool]{false}, pattern, span)
+    result := jet_eval_host_static_row(&machine, row, [JetEvalRuntimeValue]{JetEvalRuntimeValue.Data{value: subject_data}}, result_ty, [JetEvalHostTypeShape]{}, [Bool]{false}, pattern, span)
     jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.owned, result, span)
+}
+
+fn jet_eval_byte_list(value: TComptimeValue) -> [U8]? {
+    bytes := [U8]{}
+    if value == .List(items) {
+        loop item in items {
+            if item == .Int(number) {
+                if number >= 0 && number <= 255 {
+                    &bytes.push(U8{number})
+                    next
+                }
+            }
+            return None
+        }
+    }
+    Val(bytes)
 }
 fn jet_eval_take_pattern_result_shape_valid(machine: &JetEvalMachine, result_ty: MIRType?, span: Span) -> Bool Never! {
     checked :: result_ty ?? {
@@ -8582,6 +8721,19 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
         .HardwareCall(call, hardware_operation, receiver, args) -> return jet_eval_hardware(&machine, frame_index, call, hardware_operation, receiver, args, result_ty, span)
         .CoreClosureCall(call, kind, values, closure, site, label) -> return jet_eval_core_closure_call(&machine, frame_index, call, kind, values, closure, site, label, span)
         .BuiltinMethod(call, receiver, receiver_place, args, _) -> {
+            if receiver_place != None {
+                row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
+                if jet_eval_route_is_mutating_member(row.member) {
+                    receiver_data :: jet_eval_data(jet_eval_value(&machine, frame_index, receiver, span) ?? return None, &machine, span) ?? return None
+                    operands := [TComptimeValue]{}
+                    loop arg in args {
+                        &operands.push(jet_eval_data(jet_eval_value(&machine, frame_index, arg, span) ?? return None, &machine, span) ?? return None)
+                    }
+                    mutation :: jet_eval_route_mutating_builtin(row.member, receiver_data, operands, result_ty, &machine, span) ?? return None
+                    if !jet_eval_write_place(&machine, frame_index, receiver_place, JetEvalRuntimeValue.Data{value: mutation.receiver}, span) -> return None
+                    return Val(mutation.result)
+                }
+            }
             result :: jet_eval_semantic_route_values(&machine, frame_index, call, Val(receiver), args, result_ty, span) ?? return None
             if receiver_place != None {
                 writable :: jet_eval_copy_value(result, &machine, span) ?? {

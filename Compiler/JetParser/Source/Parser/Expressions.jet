@@ -13,6 +13,7 @@ use jet_foundation.[
     EnumLitArg,
     Expr,
     ExprField,
+    ExprMember,
     ExprPair,
     IndexKind,
     Lambda,
@@ -71,7 +72,6 @@ use jet_lexer.[
     TOKEN_KW_MOVE,
     TOKEN_KW_TAG,
     TOKEN_KW_USE,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LE,
@@ -273,6 +273,11 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
                 &ops.push(parser_binary_operator(next_operator))
                 &operands.push(next_operand.expr)
                 end = next_operand.span
+            }
+            // D-CHAINCMP1: a chain reads in one direction only.
+            if parser_is_relational(parser_current_kind(&state)) {
+                turn :: parser_current(&state)
+                parser_add_error_code(&state, "E0333", turn.span, "this comparison chain changes direction", "a chain like `0 <= sev < 10` reads in one direction; mixing `<` and `>` in one chain is almost always a mistake and has no single meaning", "split it into two comparisons joined with `&&`")
             }
             chain_span := parser_cover(left.span, end)
             if {
@@ -536,9 +541,10 @@ fn parser_try_parse_typed_literal(state: &JetParserState, depth: Int) -> ParsedE
 }
 
 fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
-    if parser_expression_form_ahead(&state) -> return parser_parse_expression_form(&state, depth + 1)
+    if parser_expression_form_ahead(&state, allow_struct_lit) -> return parser_parse_expression_form(&state, depth + 1)
     token :: parser_current(&state)
     kind :: token.kind
+    if kind == TOKEN_IDENT && token.payload.decoded == "task" -> return parser_parse_task_surface(&state, depth + 1)
     // D-PREP-SURFACE2=A: `prep { … }` in value position. The block's final
     // expression is its value, but no build-time value fold exists yet, so
     // the block is consumed and E0391 teaches the statement form. Where a
@@ -611,11 +617,28 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
     }
     if kind == TOKEN_KW_IF -> return parser_parse_if_expression(&state, depth + 1)
     if kind == TOKEN_KW_LOOP -> return parser_parse_loop_expression(&state)
-    if allow_struct_lit && kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+    // D-LIT-DOT1: `.{ … }` is retired; an inferred record is `{ … }`.
+    if kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+        dot :: parser_bump(&state)
+        parser_add_fatal_code(&state, "E0320", dot.span, "inferred record construction uses `{{…}}`, not `.{{…}}`", "D-LIT-DOT1 drops the constructor dot from every literal head", "write `{{…}}`")
         fields :: parser_parse_expression_fields(&state, depth + 1)
+        span :: parser_cover(dot.span, fields.span)
         return ParsedExpr{
-            expr: Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields.fields, inferred: true, span: fields.span},
-            span: fields.span,
+            expr: Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields.fields, inferred: true, span: span},
+            span: span,
+        }
+    }
+    // D-SHAPE3a=A: `.new(...)` leaves only the static receiver implicit; sema
+    // fills the empty receiver name from the expected type.
+    if kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).payload.decoded == "new" {
+        parser_bump(&state)
+        method :: parser_bump(&state)
+        if parser_current_kind(&state) != TOKEN_LPAREN -> parser_expect(&state, TOKEN_LPAREN, "`(` after `.new`")
+        args :: if parser_current_kind(&state) == TOKEN_LPAREN -> parser_parse_call_args(&state, depth + 1, false) else -> [CallArg]{}
+        span :: parser_cover(token.span, parser_lookahead(&state, -1).span)
+        return ParsedExpr{
+            expr: Expr.MethodCall{receiver: Expr.Ident{name: "", span: token.span}, method: "new", method_span: method.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false},
+            span: span,
         }
     }
     if kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT {
@@ -782,9 +805,16 @@ fn parser_parse_parenthesized(state: &JetParserState, depth: Int) -> ParsedExpr 
     }
     first :: parser_parse_expression(&state, 1, depth + 1)
     &fields.push(TupleField{name: first_name, value: first.expr})
+    // S73: tuples name every member; a positional `(a, b)` teaches E0048.
+    if first_name == "" && parser_current_kind(&state) == TOKEN_COMMA {
+        parser_add_error_code(&state, "E0048", open.span, "Jet tuples name every member — positional `(1, 2)` isn't allowed (S73)", "named members make field access obvious and avoid `.0`, which collides with decimal numbers", "write named members: `(x: 1, y: 2)` and use `p.x`, not `p.0`")
+        parser_skip_to_rparen(&state)
+        return ParsedExpr{expr: Expr.Int{value: 0, span: open.span, width: None, raw: None}, span: open.span}
+    }
     if parser_current_kind(&state) != TOKEN_COMMA {
         close :: parser_expect(&state, TOKEN_RPAREN, "`)` after the expression")
         span := parser_cover(open.span, close.span)
+        if first_name != "" -> parser_add_error(&state, span, "a tuple needs at least two named members", "a single `(name: value)` would be ambiguous with grouping — use a one-field `struct` instead", "add another member: `(x: 1, y: 2)`")
         return ParsedExpr{expr: Expr.Paren{value: first.expr, span: span}, span: span}
     }
     parser_bump(&state)
@@ -805,22 +835,89 @@ fn parser_parse_parenthesized(state: &JetParserState, depth: Int) -> ParsedExpr 
     ParsedExpr{expr: Expr.TupleLit{fields: fields, span: span, ty: None}, span: span}
 }
 
-fn parser_looks_like_lambda(state: &JetParserState) -> Bool Never! {
+// S46: `(` … `)` opens a lambda only when the contents have parameter shape
+// and a lambda interface or arrow follows; `(a > b) ->` stays a condition.
+fn parser_looks_like_lambda(state: &JetParserState) -> Bool {
     if parser_current_kind(&state) != TOKEN_LPAREN -> return false
-    nesting := 0
-    index := state.position
-    loop index < state.tokens.len() {
-        kind := state.tokens[index].kind
-        if kind == TOKEN_LPAREN -> nesting += 1
-        if kind == TOKEN_RPAREN {
-            nesting -= 1
-            if nesting == 0 {
-                return index + 1 < state.tokens.len() && state.tokens[index + 1].kind == TOKEN_LAMBDA_ARROW
+    index := parser_next_code_index(state, state.position + 1)
+    if index < 0 -> return false
+    if state.tokens[index].kind == TOKEN_RPAREN -> return parser_lambda_tail_starts_at(&state, index + 1)
+    loop {
+        if index < 0 || state.tokens[index].kind != TOKEN_IDENT -> return false
+        index = parser_next_code_index(state, index + 1)
+        if index < 0 -> return false
+        if state.tokens[index].kind == TOKEN_COLON {
+            index += 1
+            type_start :: index
+            parens := 0
+            brackets := 0
+            braces := 0
+            angles := 0
+            loop index < state.tokens.len() {
+                kind :: state.tokens[index].kind
+                if parens == 0 && brackets == 0 && braces == 0 && angles == 0 && (kind == TOKEN_COMMA || kind == TOKEN_RPAREN) -> break
+                if {
+                    kind == TOKEN_LPAREN -> parens += 1
+                    kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+                    kind == TOKEN_LBRACKET -> brackets += 1
+                    kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+                    kind == TOKEN_LBRACE -> braces += 1
+                    kind == TOKEN_RBRACE && braces > 0 -> braces -= 1
+                    kind == TOKEN_LT -> angles += 1
+                    kind == TOKEN_GT && angles > 0 -> angles -= 1
+                    kind == TOKEN_SHR && angles > 0 -> angles = if angles > 2 -> angles - 2 else -> 0
+                    else -> {}
+                }
+                index += 1
             }
+            if index == type_start || index >= state.tokens.len() -> return false
         }
-        index += 1
+        kind :: state.tokens[index].kind
+        if kind == TOKEN_RPAREN -> return parser_lambda_tail_starts_at(&state, index + 1)
+        if kind != TOKEN_COMMA -> return false
+        index = parser_next_code_index(state, index + 1)
     }
     false
+}
+
+// D-LAMBDA-IFACE1=A: probe the real result and effect parsers after a
+// parameter list, so type-start tokens that are also expression operators
+// (`*`, `(`, `[`, `?`) do not turn grouped expressions into lambdas.
+fn parser_lambda_tail_starts_at(state: &JetParserState, index: Int) -> Bool {
+    saved_position :: state.position
+    saved_diagnostics :: state.diagnostics.len()
+    saved_blocks :: state.block_spans.len()
+    saved_else_arms :: state.else_arms.len()
+    saved_type_gt :: state.pending_type_gt
+    saved_type_gt_span :: Span{start: state.pending_type_gt_span.start, end: state.pending_type_gt_span.end}
+    saved_semicolon :: state.explicit_semicolon_reported
+    state.position = index
+    state.pending_type_gt = false
+    _ := parser_parse_lambda_return_interface(&state, 0)
+    effects :: parser_parse_opt_func_effects(&state)
+    failed :: parser_aborting(&state) && state.abort_mark > saved_diagnostics
+    starts :: !failed && (effects.effects != None || effects.via != None || parser_at_unified_arrow(&state))
+    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    state.pending_type_gt = saved_type_gt
+    state.pending_type_gt_span = saved_type_gt_span
+    state.explicit_semicolon_reported = saved_semicolon
+    starts
+}
+
+pub struct ParsedLambdaInterface {
+    pub result_type: Type?
+    pub error_type: Type?
+}
+
+// The optional result between a lambda's parameters and its arrow: a type,
+// or a unit-fallible `E!`. A result type `T E!` splits into both halves.
+fn parser_parse_lambda_return_interface(state: &JetParserState, depth: Int) -> ParsedLambdaInterface {
+    result :: if !parser_func_effect_starts_here(&state) && parser_type_starts_here(&state) -> Val(parser_parse_type(&state, depth + 1)) else -> parser_parse_unit_fallible_return(&state)
+    if result == .Val(parsed) {
+        if parsed.ty == .Result(ok, err) -> return ParsedLambdaInterface{result_type: Val(ok), error_type: Val(err)}
+        return ParsedLambdaInterface{result_type: Val(parsed.ty), error_type: None}
+    }
+    ParsedLambdaInterface{result_type: None, error_type: None}
 }
 
 fn parser_parse_lambda_takes(state: &JetParserState) -> [NamedSpan] {
@@ -864,11 +961,11 @@ fn parser_parse_lambda_takes(state: &JetParserState) -> [NamedSpan] {
 }
 
 fn parser_parse_lambda(state: &JetParserState, depth: Int, take_names: [NamedSpan]) -> ParsedExpr {
-    open :: parser_bump(&state)
+    open :: parser_expect(&state, TOKEN_LPAREN, "`(` before lambda parameters")
     params := [LambdaParam]{}
     if parser_current_kind(&state) != TOKEN_RPAREN {
-        loop {
-            name :: parser_expect_name(&state, "in lambda parameters")
+        loop !parser_aborting(&state) {
+            name :: parser_expect_name(&state, "as a lambda parameter")
             ty := Type?{None}
             ty_span := Span?{None}
             if parser_current_kind(&state) == TOKEN_COLON {
@@ -879,42 +976,234 @@ fn parser_parse_lambda(state: &JetParserState, depth: Int, take_names: [NamedSpa
             }
             &params.push(LambdaParam{name: name.payload.decoded, name_span: name.span, ty: ty, ty_span: ty_span})
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
-            if parser_current_kind(&state) != TOKEN_COMMA {
-                token :: parser_current(&state)
-                parser_add_error(&state, token.span, "expected `,` between lambda parameters", "lambda parameters are comma-separated", "add a comma or close the parameter list")
-                break
-            }
-            parser_bump(&state)
+            parser_expect(&state, TOKEN_COMMA, "`,` between lambda parameters")
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
         }
     }
-    parser_expect(&state, TOKEN_RPAREN, "`)` after lambda parameters")
-    arrow :: parser_expect(&state, TOKEN_LAMBDA_ARROW, "`->` after lambda parameters")
-    end := arrow.span
-    body := if {
-        parser_current_kind(&state) == TOKEN_LBRACE -> {
-            block :: parser_parse_block(&state)
-            end = block.span
-            LambdaBody.Block{body: block.statements}
-        }
-        else -> {
-            value :: parser_parse_expression(&state, 1, depth + 1)
-            end = value.span
-            LambdaBody.Expr{value: value.expr}
-        }
+    close :: parser_expect(&state, TOKEN_RPAREN, "`)` after lambda parameters")
+    interface :: parser_parse_lambda_return_interface(&state, depth)
+    effects :: parser_parse_opt_func_effects(&state)
+    if effects.via == .Val(via) {
+        parser_add_fatal_code(&state, "E0119", via.span, "a lambda effect row cannot publish `via`", "a lambda stores a concrete effect row as part of its callable interface", "write the effects directly, for example `-[Net]>`")
     }
-    span := parser_cover(open.span, end)
+    if effects.effects == None -> parser_expect_unified_arrow(&state, "after the lambda interface")
+    body :: parser_parse_lambda_arrow_body(&state, depth, close.span.end)
+    span := Span{start: open.span.start, end: body.end}
     lambda := Lambda{
         take_names: take_names,
         params: params,
-        result_type: None,
-        error_type: None,
-        effects: None,
-        body: body,
+        result_type: interface.result_type,
+        error_type: interface.error_type,
+        effects: effects.effects,
+        body: body.body,
         span: span,
         meta: ast_empty_lambda_meta(),
     }
     ParsedExpr{expr: Expr.Lambda{lambda: lambda}, span: span}
+}
+
+pub struct ParsedLambdaBody {
+    pub body: LambdaBody
+    pub end: Int
+}
+
+// S46: the body after a lambda's arrow, `-> expr` or `-> {{ … }}`. A single
+// assignment needs no braces: `a -> a.balance -= n` is the one-statement form
+// of `a -> {{ a.balance -= n }}`. `fallback_end` bounds the lambda's span.
+fn parser_parse_lambda_arrow_body(state: &JetParserState, depth: Int, fallback_end: Int) -> ParsedLambdaBody {
+    if parser_current_kind(&state) == TOKEN_LBRACE {
+        // D-TAIL-RETURN1=A: a block lambda keeps one unadorned final value.
+        block :: parser_parse_body_block(&state, true)
+        return ParsedLambdaBody{body: LambdaBody.Block{body: block.statements}, end: block.span.end}
+    }
+    value :: parser_parse_expression(&state, 1, depth + 1)
+    if parser_is_assignment_operator(parser_current_kind(&state)) {
+        operator :: parser_bump(&state)
+        right :: parser_parse_expression(&state, 1, depth + 1)
+        target :: parser_expression_lvalue(&state, value.expr, value.span, operator)
+        end :: if right.span.end > fallback_end -> right.span.end else -> fallback_end
+        return ParsedLambdaBody{body: LambdaBody.Block{body: [Stmt]{Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr}}}, end: end}
+    }
+    end :: if value.span.end > fallback_end -> value.span.end else -> fallback_end
+    ParsedLambdaBody{body: LambdaBody.Expr{value: value.expr}, end: end}
+}
+
+// D-UI-CLOSURE1=A: the brace body attached directly to a call.
+fn parser_parse_trailing_lambda(state: &JetParserState) -> Lambda {
+    open :: parser_current(&state).span
+    body :: parser_parse_lambda_arrow_body(&state, 0, open.end)
+    Lambda{
+        take_names: [NamedSpan]{},
+        params: [LambdaParam]{},
+        result_type: None,
+        error_type: None,
+        effects: None,
+        body: body.body,
+        span: Span{start: open.start, end: body.end},
+        meta: ast_empty_lambda_meta(),
+    }
+}
+
+// D-SPREAD1=A: after `.`, `[a, b, c]` lists member names that hang off the
+// prefix; S84 package names may be dashed (`util-linux`). Anything else in
+// the list is E0961, skipped to the next `,` or `]`.
+fn parser_parse_member_spread(state: &JetParserState, base: ParsedExpr) -> ParsedExpr {
+    parser_bump(&state)
+    members := [ExprMember]{}
+    if parser_current_kind(&state) != TOKEN_RBRACKET {
+        loop {
+            if parser_current_kind(&state) == TOKEN_IDENT {
+                first :: parser_bump(&state)
+                name := first.payload.decoded
+                end := first.span.end
+                loop parser_current_kind(&state) == TOKEN_MINUS && parser_current(&state).span.start == end && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).span.start == end + 1 {
+                    parser_bump(&state)
+                    segment :: parser_bump(&state)
+                    name = "{name}-{segment.payload.decoded}"
+                    end = segment.span.end
+                }
+                if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_RBRACKET {
+                    &members.push(ExprMember{name: name, span: Span{start: first.span.start, end: end}})
+                } else {
+                    parser_report_member_spread_entry(&state)
+                }
+            } else {
+                parser_report_member_spread_entry(&state)
+            }
+            if parser_current_kind(&state) != TOKEN_COMMA -> break
+            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+        }
+    }
+    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` to close a member spread `.[…]`")
+    span :: parser_cover(base.span, close.span)
+    ParsedExpr{expr: Expr.MemberSpread{base: base.expr, members: members, span: span}, span: span}
+}
+
+fn parser_report_member_spread_entry(state: &JetParserState) {
+    bad :: parser_current(&state).span
+    parser_add_error_code(&state, "E0961", bad, "`.[ ]` lists member names, not calls or expressions", "member spread names fields or package names that hang off the prefix", "write bare names like `default.[cargo, ripgrep]`")
+    loop parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
+}
+
+// Rust `Syntax::INTERNAL_TASK_*`: NUL-led compiler-private names the `task`
+// sugar lowers into, so no source name can collide with them.
+fn parser_task_internal(name: String) -> String Never! {
+    nul :: String.from_bytes([U8]{U8{0}}) ?? ""
+    "{nul}jet.{name}"
+}
+
+fn parser_task_call(head: Span, method: String, method_span: Span, argument: Expr, argument_span: Span) -> Expr Never! {
+    Expr.MethodCall{receiver: Expr.Ident{name: parser_task_internal("task"), span: head}, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+}
+
+fn parser_task_spawn(head: Span, take_names: [NamedSpan], body: LambdaBody, body_span: Span) -> Expr Never! {
+    lambda :: Lambda{take_names: take_names, params: [LambdaParam]{}, result_type: None, error_type: None, effects: None, body: body, span: body_span, meta: ast_empty_lambda_meta()}
+    parser_task_call(head, "task.spawn", head, Expr.Lambda{lambda: lambda}, body_span)
+}
+
+// D-CONC-SPAWN1=D / D-CONC-ALLNAMED1=A: one `task` word owns single-task
+// spawn (`task { … }`, `task ^name { … }`, `task value`), `task.timeout(d)`
+// and the `all`/`race`/`any` combinators. Named `task.all` branches build a
+// tuple, positional ones a list; mixing the two is E1117.
+fn parser_parse_task_surface(state: &JetParserState, depth: Int) -> ParsedExpr {
+    head :: parser_bump(&state).span
+    if parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        selector :: parser_expect_name(&state, "after `task.`")
+        name :: selector.payload.decoded
+        if name == "group" {
+            parser_add_error(&state, selector.span, "`task.group` is a statement, not a value", "a task group owns a block and its children until the closing brace", "write `task.group name {{ … }}`")
+            return ParsedExpr{expr: Expr.Unit{span: head}, span: head}
+        }
+        if name == "timeout" {
+            parser_expect(&state, TOKEN_LPAREN, "after `task.timeout`")
+            argument :: parser_parse_expression(&state, 1, depth + 1)
+            close :: parser_expect(&state, TOKEN_RPAREN, "to finish `task.timeout`")
+            span :: parser_cover(head, close.span)
+            return ParsedExpr{expr: parser_task_call(head, "task.timeout", selector.span, argument.expr, argument.span), span: span}
+        }
+        if name != "all" && name != "race" && name != "any" {
+            parser_add_error(&state, selector.span, "unknown task selector `{name}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`")
+            return ParsedExpr{expr: Expr.Unit{span: head}, span: head}
+        }
+        open :: parser_expect(&state, TOKEN_LBRACE, "after the task selector")
+        named := [TupleField]{}
+        positional := [Expr]{}
+        saw_named := false
+        saw_positional := false
+        mixed := Span?{None}
+        if parser_current_kind(&state) != TOKEN_RBRACE {
+            loop !parser_aborting(&state) {
+                label := ""
+                style_span := parser_current(&state).span
+                if name == "all" && parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
+                    label_token :: parser_bump(&state)
+                    parser_bump(&state)
+                    label = label_token.payload.decoded
+                    style_span = label_token.span
+                    saw_named = true
+                } else {
+                    saw_positional = true
+                }
+                if saw_named && saw_positional && mixed == None -> mixed = Val(style_span)
+                spawn := Expr.Unit{span: style_span}
+                if parser_current_kind(&state) == TOKEN_LBRACE {
+                    block :: parser_parse_block(&state)
+                    spawn = parser_task_spawn(head, [NamedSpan]{}, LambdaBody.Block{body: block.statements}, block.span)
+                } else {
+                    value :: parser_parse_expression(&state, 1, depth + 1)
+                    spawn = parser_task_spawn(head, [NamedSpan]{}, LambdaBody.Expr{value: value.expr}, value.span)
+                }
+                if label.len() > 0 {
+                    &named.push(TupleField{name: label, value: spawn})
+                } else {
+                    &positional.push(spawn)
+                }
+                parser_skip_semicolons(&state)
+                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                parser_expect(&state, TOKEN_COMMA, "between task branches")
+                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+            }
+        }
+        close :: parser_expect(&state, TOKEN_RBRACE, "to close the task combinator")
+        list_span :: parser_cover(open.span, close.span)
+        if mixed == .Val(mixed_span) {
+            parser_add_fatal_code(&state, "E1117", mixed_span, "`task.all` branches must all be named or all positional.", "D-CONC-ALLNAMED1=A gives named results stable record fields and keeps positional results as ordered lists; mixing the two shapes would make the result type ambiguous.", "Use `task.all {{ first: work(), second: other() }}`, or remove every branch label.")
+        }
+        argument :: if saw_named -> Expr.TupleLit{fields: named, span: list_span, ty: None} else -> Expr.ListLit{elements: positional, span: list_span}
+        span :: parser_cover(head, close.span)
+        return ParsedExpr{expr: parser_task_call(head, "task.{name}", selector.span, argument, list_span), span: span}
+    }
+    // D-CONC-FREEZE1=A: `task ^name { … }` consumes one enclosing binding.
+    take_names := [NamedSpan]{}
+    if parser_current_kind(&state) == TOKEN_CARET {
+        caret :: parser_bump(&state)
+        taken :: parser_expect_name(&state, "after the task capture `^`")
+        &take_names.push(NamedSpan{name: taken.payload.decoded, span: parser_cover(caret.span, taken.span)})
+    }
+    if parser_current_kind(&state) != TOKEN_LBRACE {
+        value :: parser_parse_expression(&state, 1, depth + 1)
+        span :: parser_cover(head, value.span)
+        return ParsedExpr{expr: parser_task_spawn(head, take_names, LambdaBody.Expr{value: value.expr}, value.span), span: span}
+    }
+    // A brace body holding one tail expression folds into an expression
+    // body, so every tier sees one task-value shape.
+    saved_position :: state.position
+    saved_diagnostics :: state.diagnostics.len()
+    saved_blocks :: state.block_spans.len()
+    saved_else_arms :: state.else_arms.len()
+    open :: parser_bump(&state)
+    tail :: parser_parse_expression(&state, 1, depth + 1)
+    if parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE -> parser_bump(&state)
+    if parser_current_kind(&state) == TOKEN_RBRACE && !parser_error_since(state, saved_diagnostics) {
+        close :: parser_bump(&state)
+        body_span :: parser_cover(open.span, close.span)
+        return ParsedExpr{expr: parser_task_spawn(head, take_names, LambdaBody.Expr{value: tail.expr}, body_span), span: parser_cover(head, close.span)}
+    }
+    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    block :: parser_parse_block(&state)
+    ParsedExpr{expr: parser_task_spawn(head, take_names, LambdaBody.Block{body: block.statements}, block.span), span: parser_cover(head, block.span)}
 }
 
 fn parser_parse_collection(state: &JetParserState, depth: Int) -> ParsedExpr {
@@ -1025,6 +1314,18 @@ fn parser_parse_loop_expression(state: &JetParserState) -> ParsedExpr {
     ParsedExpr{expr: Expr.Lambda{lambda: lambda}, span: span}
 }
 
+// The dotted name an `Ident(.Ident)*` chain spells, or "" for any other shape.
+fn parser_literal_head_path(expr: Expr) -> String Never! {
+    if expr == {
+        .Ident(name, _) -> name
+        .Field(base, member, _) -> {
+            prefix :: parser_literal_head_path(base)
+            if prefix == "" -> "" else -> "{prefix}.{member}"
+        }
+        else -> ""
+    }
+}
+
 fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
     expression := initial
     loop {
@@ -1046,6 +1347,20 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 else -> {
                     args = parser_parse_call_args(&state, depth + 1, false)
                 }
+            }
+            // D-UI-CLOSURE1=A: a direct call may carry one trailing block
+            // closure, kept as a typed lambda argument; sema assigns its
+            // parameter label after resolving the call.
+            optional_call :: if expression.expr == {
+                .OptField(_, _, _, _, _) -> true
+                else -> false
+            }
+            if allow_struct_lit && !optional_call && parser_current_kind(&state) == TOKEN_LBRACE {
+                lambda :: parser_parse_trailing_lambda(&state)
+                lambda_span :: lambda.span
+                flags := ast_empty_call_arg_flags()
+                flags.is_trailing_block = true
+                &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Lambda{lambda: lambda}, span: lambda_span, flags: flags, label: None, spread: false})
             }
             close_span :: parser_current(&state)
             end := close_span.span
@@ -1072,6 +1387,39 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             }
             next
         }
+        // A bare `{ }` after a field chain is a struct literal only on an
+        // `alias.Type` head; after any other field or an index it is E0335.
+        if kind == TOKEN_LBRACE && allow_struct_lit {
+            alias := ""
+            type_name := ""
+            bad_block := false
+            if expression.expr == {
+                .Field(base, member, _) -> {
+                    if base == {
+                        .Ident(name, _) -> {
+                            alias = name
+                            type_name = member
+                        }
+                        else -> bad_block = true
+                    }
+                }
+                .Index(_, _, _, _) | .Slice(_, _, _, _, _) -> bad_block = true
+                else -> {}
+            }
+            if bad_block {
+                bad_span :: parser_current(&state).span
+                parser_add_fatal_code(&state, "E0335", bad_span, "trailing blocks are only valid on direct calls", "a bare `{{ }}` here is not a call argument; code arguments use `() -> {{ … }}` inside a call's parentheses", "write `callee(() -> {{ … }})` on a call")
+                break
+            }
+            if alias.len() == 0 -> break
+            parsed :: parser_parse_expression_fields(&state, depth + 1)
+            span := parser_cover(expression.span, parsed.span)
+            first_byte :: Int.from_u8(alias.bytes()[0])
+            upper :: first_byte >= 65 && first_byte <= 90
+            literal :: if upper -> Expr.StructLit{type_name: "{alias}.{type_name}", type_args: [Type]{}, import_ns: None, as_trait: None, fields: parsed.fields, inferred: false, span: span} else -> Expr.StructLit{type_name: type_name, type_args: [Type]{}, import_ns: Val(alias), as_trait: None, fields: parsed.fields, inferred: false, span: span}
+            expression = ParsedExpr{expr: literal, span: span}
+            next
+        }
         if kind == TOKEN_LBRACKET {
             parser_bump(&state)
             index :: parser_parse_expression(&state, 1, depth + 1)
@@ -1091,18 +1439,29 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
         }
         if kind == TOKEN_DOT || kind == TOKEN_QUESTION_DOT {
             operator :: parser_bump(&state)
+            // D-LIT-DOT1: `Type.{ … }` / `alias.Type.{ … }` is retired; the
+            // literal head touches its brace. Any other `x.{` leaves the
+            // brace to open a block.
             if allow_struct_lit && operator.kind == TOKEN_DOT && parser_current_kind(&state) == TOKEN_LBRACE {
-                parsed :: parser_parse_expression_fields(&state, depth + 1)
-                type_name := ""
-                if expression.expr == {
-                    .Ident(name, _) -> type_name = name
-                    else -> {}
-                }
-                span := parser_cover(expression.span, parsed.span)
-                expression = ParsedExpr{
-                    expr: Expr.StructLit{type_name: type_name, type_args: [Type]{}, import_ns: None, as_trait: None, fields: parsed.fields, inferred: type_name == "", span: span},
-                    span: span,
-                }
+                path :: parser_literal_head_path(expression.expr)
+                if path == "" -> break
+                construction :: if path.contains(".") -> "literal" else -> "struct"
+                brace :: parser_current(&state).span
+                parser_add_error_code(&state, "E0320", brace, "{construction} construction uses `{path}{{…}}`, not `{path}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{path}{{…}}`")
+                expression = parser_parse_typed_literal_body(&state, Val(Type.Named{name: path}), expression.span, depth + 1)
+                next
+            }
+            // D-SPREAD1=A: `prefix.[a, b, c]` member spread.
+            if operator.kind == TOKEN_DOT && parser_current_kind(&state) == TOKEN_LBRACKET {
+                expression = parser_parse_member_spread(&state, expression)
+                next
+            }
+            // S73: `.0` reads like a decimal number, so tuple members are named.
+            if parser_current_kind(&state) == TOKEN_INT || parser_current_kind(&state) == TOKEN_FLOAT {
+                number :: parser_bump(&state)
+                parser_add_error_code(&state, "E0049", number.span, "Jet doesn't use numeric field access like `.0` (S73)", "`.0` looks like the start of a decimal number, so tuple members must have names", "name the members when you build the tuple: `(x: 1, y: 2)`, then read `p.x`")
+                span := parser_cover(expression.span, number.span)
+                expression = ParsedExpr{expr: Expr.Field{base: expression.expr, member: "0", span: span}, span: span}
                 next
             }
             member :: if parser_current_kind(&state) == TOKEN_KW_COPY || parser_current_kind(&state) == TOKEN_KW_MOVE -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")

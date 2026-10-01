@@ -1,0 +1,94 @@
+// `jet explain <CODE>`: the offline essay for one registered diagnostic code.
+// Mirrors crates/jet-cli/src/Explain.rs `index`, `lookup`, and `render`.
+// Every registry row explains itself (I4: no code without an explain); a row
+// with a detailed what/why/fix template gets the richer essay.
+
+pub struct DiagnosticExplanation {
+    pub code: String
+    // Pipeline stage (`jet` / `parse` / `sema` / ...) from the registry row.
+    pub stage: String
+    // One-line meaning from the registry row (always present).
+    pub meaning: String
+    pub what: String?
+    pub why: String?
+    pub fix: String?
+    // A short worked example for rows that need more than prose.
+    pub example: String?
+    // A retired code is kept only so old build logs stay readable.
+    pub retired: Bool
+}
+
+fn diagnostic_explanation_example(code: String) -> String? Never! {
+    if code == "E0003" -> return Val("fn save(path: String) IOError! {{\n    print(path)\n}}")
+    None
+}
+
+// Look up one diagnostic code (surrounding space and letter case ignored).
+pub fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
+    row :: diagnostic_registry_row(code.trim().to_upper()) ?? return None
+    what := String?{None}
+    why := String?{None}
+    fix := String?{None}
+    if row.detail {
+        what = Val(diagnostic_sentence_case_line(row.what))
+        why = Val(diagnostic_sentence_case_line(row.why))
+        fix = Val(diagnostic_sentence_case_line(row.fix))
+    }
+    Val(DiagnosticExplanation{
+        code: row.code,
+        stage: row.stage,
+        meaning: row.meaning,
+        what: what,
+        why: why,
+        fix: fix,
+        example: diagnostic_explanation_example(row.code),
+        retired: row.status == DiagnosticRegistryStatus.Retired,
+    })
+}
+
+// Rust `str::lines`: split at `\n`, drop one `\r` before it, and yield no
+// empty line after a final line ending.
+pub fn diagnostic_text_lines(text: String) -> [String] Never! {
+    bytes :: text.bytes()
+    lines := [String]{}
+    start := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{10}) {
+            end := index
+            if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
+            &lines.push(diagnostic_bytes_text(bytes, start, end))
+            start = index + 1
+        }
+    }
+    if start < bytes.len() -> &lines.push(diagnostic_bytes_text(bytes, start, bytes.len()))
+    lines
+}
+
+// The essay with beginner-friendly headers; `color` styles the code line and
+// headers on a terminal.
+pub fn diagnostic_explanation_render(explanation: DiagnosticExplanation, color: Bool) -> String Never! {
+    out := "{diagnostic_theme_accent(color, explanation.code)}\n\n"
+    if explanation.retired {
+        return "{out}This code is retired: it is no longer produced by the current\ncompiler, and is kept here only so old build logs stay readable.\n"
+    }
+    what :: explanation.what ?? explanation.meaning
+    out = "{out}{diagnostic_theme_bold(color, "What this means:")}\n"
+    loop line in diagnostic_text_lines(what) {
+        if line.len() > 0 -> out = "{out}  {line}"
+        out = "{out}\n"
+    }
+    out = "{out}\n"
+    if explanation.why == .Val(why) -> out = "{out}{diagnostic_theme_bold(color, "Why Jet enforces it:")}\n  {why}\n\n"
+    if explanation.fix == .Val(fix) -> out = "{out}{diagnostic_theme_bold(color, "How to fix it:")}\n  {fix}\n\n"
+    if explanation.example == .Val(example) {
+        out = "{out}{diagnostic_theme_bold(color, "Example:")}\n"
+        loop line in diagnostic_text_lines(example) -> out = "{out}  {line}\n"
+        out = "{out}\n"
+    }
+    if explanation.what == None {
+        // No detailed block yet: show the stage so the entry is still useful.
+        if explanation.stage.len() > 0 -> out = "{out}Stage: {explanation.stage}\n\n"
+        out = "{out}A longer explanation will land with the detailed typed row.\n\n"
+    }
+    "{out}This explanation comes from jet's diagnostics reference.\n"
+}

@@ -354,6 +354,63 @@ mod text_kernel {
     pub(super) fn unicode_scalars(s: &str) -> Vec<String> {
         jet_text_unicode_scalars(&s.to_string())
     }
+    /// The receiver-first String routes of `string_method_route` whose
+    /// AOT/JIT kernel lives in Text.rs. The evaluator calls the same kernel
+    /// functions, so `find` stays a byte offset and `partition` keeps the
+    /// `(head, sep, tail)` shape on every tier (I9). `None`: not a kernel row.
+    pub(super) fn string_route(
+        s: &str,
+        member: &str,
+        args: &[crate::AST::CtValue],
+    ) -> Option<crate::AST::CtValue> {
+        use crate::AST::CtValue;
+        let text = s.to_string();
+        let str_arg = |index: usize| match args.get(index) {
+            Some(CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        };
+        let int_arg = |index: usize| match args.get(index) {
+            Some(CtValue::Int(value)) => Some(*value),
+            _ => None,
+        };
+        let triple = |(head, sep, tail): (String, String, String)| CtValue::Struct {
+            type_name: "(head,sep,tail)".to_string(),
+            fields: vec![
+                ("head".to_string(), CtValue::Str(head)),
+                ("sep".to_string(), CtValue::Str(sep)),
+                ("tail".to_string(), CtValue::Str(tail)),
+            ],
+        };
+        let width = |index: usize| int_arg(index).map(jet_foundation::Numeric::JetInt::from_i64);
+        Some(match (member, args.len()) {
+            ("casefold", 0) => CtValue::Str(jet_text_casefold(&text)),
+            ("strip", 0) => CtValue::Str(jet_text_parse_strip(&text)),
+            ("lstrip", 0) => CtValue::Str(jet_text_parse_lstrip(&text)),
+            ("rstrip", 0) => CtValue::Str(jet_text_parse_rstrip(&text)),
+            ("isalnum", 0) => CtValue::Bool(jet_text_isalnum(&text)),
+            ("isalpha", 0) => CtValue::Bool(jet_text_is_alphabetic(&text)),
+            ("isascii", 0) => CtValue::Bool(jet_text_unicode_is_ascii(&text)),
+            ("isdecimal", 0) => CtValue::Bool(jet_text_isdecimal(&text)),
+            ("isdigit", 0) => CtValue::Bool(jet_text_isdigit(&text)),
+            ("isidentifier", 0) => CtValue::Bool(jet_text_isidentifier(&text)),
+            ("isnumeric", 0) => CtValue::Bool(jet_text_isnumeric(&text)),
+            ("isprintable", 0) => CtValue::Bool(jet_text_isprintable(&text)),
+            ("isspace", 0) => CtValue::Bool(jet_text_is_whitespace(&text)),
+            ("istitle", 0) => CtValue::Bool(jet_text_istitle(&text)),
+            ("islower", 0) => CtValue::Bool(jet_text_is_lower(&text)),
+            ("isupper", 0) => CtValue::Bool(jet_text_is_upper(&text)),
+            ("find", 1) => CtValue::Int(jet_text_parse_find(&text, &str_arg(0)?)),
+            ("rfind", 1) => CtValue::Int(jet_text_parse_rfind(&text, &str_arg(0)?)),
+            ("partition", 1) => triple(jet_text_parse_partition(&text, &str_arg(0)?)),
+            ("rpartition", 1) => triple(jet_text_parse_rpartition(&text, &str_arg(0)?)),
+            ("zfill", 1) => CtValue::Str(jet_text_zfill(&text, int_arg(0)?)),
+            ("expandtabs", 1) => CtValue::Str(jet_text_expandtabs(&text, width(0)?)),
+            ("center", 2) => CtValue::Str(jet_text_center(&text, width(0)?, &str_arg(1)?)),
+            ("ljust", 2) => CtValue::Str(jet_text_pad_end(&text, width(0)?, &str_arg(1)?)),
+            ("rjust", 2) => CtValue::Str(jet_text_pad_start(&text, width(0)?, &str_arg(1)?)),
+            _ => return None,
+        })
+    }
 
     // ── D-I9: the ONE `core.files` kernel ────────────────────────────────
     // `Prelude/CoreLib/Top/Text.rs` (included above) owns fault injection,
@@ -1178,4 +1235,11 @@ pub(super) fn unicode_upper(s: &str) -> String {
 }
 pub(super) fn unicode_scalars(s: &str) -> Vec<String> {
     text_kernel::unicode_scalars(s)
+}
+pub(super) fn string_route(
+    s: &str,
+    member: &str,
+    args: &[crate::AST::CtValue],
+) -> Option<crate::AST::CtValue> {
+    text_kernel::string_route(s, member, args)
 }

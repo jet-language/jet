@@ -109,7 +109,7 @@ fn parser_expression_form_loop_step(state: &JetParserState, depth: Int) -> Stmt?
     if parser_is_assignment_operator(parser_current_kind(&state)) {
         operator :: parser_bump(&state)
         value :: parser_parse_expression(&state, 1, depth + 1)
-        target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span)
+        target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span, operator)
         return Val(Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
     }
     Val(Stmt.Expr{expr: step_expr.expr})
@@ -261,7 +261,7 @@ fn parser_expression_form_parse_counted_loop(state: &JetParserState, start: Span
                 parser_is_assignment_operator(parser_current_kind(&state)) -> {
                     operator :: parser_bump(&state)
                     value :: parser_parse_expression(&state, 1, depth + 1)
-                    target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span)
+                    target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span, operator)
                     Val(Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
                 }
                 else -> Val(Stmt.Expr{expr: step_expr.expr})

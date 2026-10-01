@@ -1,0 +1,35 @@
+package {
+    name: "memory_shared_field_chain"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }
+}
+// A field read through a `Shared<T>` handle that is itself a struct field
+// (`graph.hooks.name`) is one locked read, the same as through a local handle.
+struct Hooks {
+    pub name: String
+}
+
+struct Graph {
+    pub hooks: Shared<Hooks>
+}
+
+fn via_local(graph: Graph) -> String {
+    hooks :: graph.hooks
+    hooks.name
+}
+
+fn via_field(graph: Graph) -> String {
+    graph.hooks.name
+}
+
+fn via_binding(graph: Graph) -> String {
+    name :: graph.hooks.name
+    "{name}!"
+}
+
+fn run() {
+    graph :: Graph{hooks: shared Hooks{name: "hooks"}}
+    print(via_local(graph))
+    print(via_field(graph))
+    print(via_binding(graph))
+}

@@ -272,10 +272,7 @@ fn jet_web_js_constant(ctx: &JetWebEmitContext, constant: MIRConstant) -> String
             rendered := [String]{}
             loop field in fields -> &rendered.push("{jet_web_js_quote(field.name)}: {jet_web_js_constant(&ctx, field.value)}")
             object := "{{ {rendered.join(", ")} }}"
-            type_id := MIRTypeID?{None}
-            loop definition in ctx.program.types {
-                if definition.name == type_name || definition.key == type_name -> type_id = Val(definition.id)
-            }
+            type_id := jet_web_js_constant_type_id(&ctx, type_name)
             if type_id != None {
                 type_id_text :: "{(type_id ?? MIRTypeID{value: 0}).value}"
                 type_id_json :: jet_web_js_quote(type_id_text)
@@ -287,10 +284,7 @@ fn jet_web_js_constant(ctx: &JetWebEmitContext, constant: MIRConstant) -> String
             rendered := [String]{}
             loop arg in args -> &rendered.push(jet_web_js_constant(&ctx, arg.value))
             object := "{{ tag: {jet_web_js_quote(variant)}, values: [{rendered.join(", ")}] }}"
-            type_id := MIRTypeID?{None}
-            loop definition in ctx.program.types {
-                if definition.name == type_name || definition.key == type_name -> type_id = Val(definition.id)
-            }
+            type_id := jet_web_js_constant_type_id(&ctx, type_name)
             if type_id != None {
                 type_id_text :: "{(type_id ?? MIRTypeID{value: 0}).value}"
                 type_id_json :: jet_web_js_quote(type_id_text)
@@ -306,6 +300,24 @@ fn jet_web_js_constant(ctx: &JetWebEmitContext, constant: MIRConstant) -> String
             }
         }
     }
+}
+
+// The declaration a folded constant names: its exact key, else the one
+// declaration carrying its display name. A spelling shared by several
+// declarations (a user `FontStyle` beside Core's) tags nothing rather than
+// borrowing another declaration's identity (#4003).
+fn jet_web_js_constant_type_id(ctx: &JetWebEmitContext, type_name: String) -> MIRTypeID? {
+    loop definition in ctx.program.types {
+        if definition.key == type_name -> return Val(definition.id)
+    }
+    found := MIRTypeID?{None}
+    loop definition in ctx.program.types {
+        if definition.name == type_name {
+            if found != None -> return None
+            found = Val(definition.id)
+        }
+    }
+    found
 }
 
 fn jet_web_js_const_key(ctx: &JetWebEmitContext, key: MIRConstKey) -> String Never! {
