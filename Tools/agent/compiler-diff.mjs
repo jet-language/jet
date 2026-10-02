@@ -431,6 +431,45 @@ function requireExecutable(path, role) {
   return absolute;
 }
 
+// A compiler is pinned to the identity of every file it executes, taken once at
+// startup and re-verified around each invocation. Snapshot rotation can delete
+// or replace a binary mid-run; both sides then fail the same way, and that must
+// be unavailable, never compared as a match.
+function fileIdentity(path) {
+  try {
+    const { dev, ino, size, mtimeMs } = statSync(path);
+    return `dev ${dev} ino ${ino} size ${size} mtime ${mtimeMs}`;
+  } catch (error) {
+    return error.code ?? error.message;
+  }
+}
+
+function pinFiles(paths) {
+  return paths.map((path) => ({ path, identity: fileIdentity(path) }));
+}
+
+function verifyPinned(compiler, when) {
+  for (const { path, identity } of compiler.pinned) {
+    const current = fileIdentity(path);
+    if (current !== identity) {
+      throw new Unavailable(`${compiler.role} compiler ${path} changed or disappeared ${when} (pinned ${identity}; now ${current})`);
+    }
+  }
+}
+
+// systemd-run reports its own failure to exec the compiler as exit 1, an empty
+// stdout and exactly one stderr line; that is no observation of the compiler.
+export function launcherFailure(run, executable, memLimit) {
+  if (memLimit === "none" || run.code !== 1 || run.stdout !== "") return null;
+  const lines = run.stderr.split("\n");
+  if (lines.length !== 2 || lines[1] !== "") return null;
+  const [line] = lines;
+  const launcher = line.startsWith(`Failed to find executable ${executable}:`)
+    || line.startsWith("Failed to execute: ")
+    || line.startsWith("Failed to start transient scope unit: ");
+  return launcher ? line : null;
+}
+
 function toolAvailable(tool, args, env) {
   const result = spawnSync(tool, args, { env, stdio: "ignore" });
   return !result.error && result.status === 0;
@@ -816,10 +855,15 @@ async function runSide(testCase, compiler, workDir, context, options) {
   const observations = [];
   for (const command of testCase.commands) {
     const before = snapshotTree(workDir);
+    const where = `${testCase.id} (${command.phase})`;
+    verifyPinned(compiler, `before ${where}`);
     const run = await invoke(compiler, command, staged.cwd, env, options);
     if (run.spawnError) {
-      throw new Unavailable(`${compiler.role} could not start for ${testCase.id} (${command.phase}): ${run.spawnError}`);
+      throw new Unavailable(`${compiler.role} could not start for ${where}: ${run.spawnError}`);
     }
+    const launcher = launcherFailure(run, compiler.argv[0], options.memLimit);
+    if (launcher) throw new Unavailable(`${compiler.role} could not be launched for ${where}: ${launcher}`);
+    verifyPinned(compiler, `during ${where}`);
     const after = snapshotTree(workDir);
     observations.push({
       command,
@@ -1042,7 +1086,14 @@ async function compare(options) {
     rmSync(join(root, "repro"), { recursive: true, force: true });
     const context = {
       root,
-      reference: { role: "reference", path: referencePath, argv: [referencePath], env: {}, sideRoot: join(root, "reference") },
+      reference: {
+        role: "reference",
+        path: referencePath,
+        argv: [referencePath],
+        env: {},
+        sideRoot: join(root, "reference"),
+        pinned: pinFiles([referencePath]),
+      },
       candidate: options.canary
         ? {
           role: "candidate",
@@ -1050,8 +1101,16 @@ async function compare(options) {
           argv: [process.execPath, CANARY_CANDIDATE],
           env: { COMPILER_DIFF_CANARY_REAL: referencePath },
           sideRoot: join(root, "candidate"),
+          pinned: pinFiles([CANARY_CANDIDATE, referencePath]),
         }
-        : { role: "candidate", path: candidatePath, argv: [candidatePath], env: {}, sideRoot: join(root, "candidate") },
+        : {
+          role: "candidate",
+          path: candidatePath,
+          argv: [candidatePath],
+          env: {},
+          sideRoot: join(root, "candidate"),
+          pinned: pinFiles([candidatePath]),
+        },
     };
     prepareSideRoot(context.reference.sideRoot);
     prepareSideRoot(context.candidate.sideRoot);

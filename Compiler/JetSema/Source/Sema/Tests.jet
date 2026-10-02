@@ -53,7 +53,8 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
     comptime_requests := [SemaComptimeRequest]{}
     name_references := [SemaNameReferenceFact]{}
     diagnostics := [Diagnostic]{}
-    checked := sema_function_check(synthetic, owner_id, TFuncKind.TopLevel, ~environment, scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    check_environment := environment
+    checked := sema_function_check(synthetic, owner_id, TFuncKind.TopLevel, &check_environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
     function := TFunc?{None}
     if checked.value == .Val(value) {
         updated_value := value

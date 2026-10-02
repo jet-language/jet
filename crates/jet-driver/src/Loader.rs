@@ -2630,15 +2630,23 @@ fn load_entry_with_overlays_mode_on_stack(
         build_facts,
         edition: package_edition,
     };
+    // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
+    // record, so a module that names it loads that Core source without a `use`.
+    let url_carrier = jet_foundation::Syntax::TypedHeadKind::URL.carrier_record_module();
+    let names_url_carrier = bundle
+        .modules
+        .iter()
+        .any(|module| source_names_identifier(&module.source, "URL"));
     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
-            bundle.modules.iter().any(|module| {
-                module.imports.iter().any(|import| {
-                    core_source_import_module(import).as_deref() == Some(source_module.module)
+            (names_url_carrier && Some(source_module.module) == url_carrier)
+                || bundle.modules.iter().any(|module| {
+                    module.imports.iter().any(|import| {
+                        core_source_import_module(import).as_deref() == Some(source_module.module)
+                    })
                 })
-            })
         })
         .collect::<Vec<_>>();
     let mut scheduled_core_source_modules = core_source_modules
@@ -4947,6 +4955,18 @@ fn resolve_import(
 
 pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
     imp.core_module_path()
+}
+
+/// True when `source` spells `name` as a whole identifier. A comment or string
+/// that mentions it only schedules one more Core source, never a wrong one.
+fn source_names_identifier(source: &str, name: &str) -> bool {
+    let is_ident = |byte: u8| byte == b'_' || byte.is_ascii_alphanumeric();
+    let bytes = source.as_bytes();
+    source.match_indices(name).any(|(start, _)| {
+        let end = start + name.len();
+        (start == 0 || !is_ident(bytes[start - 1]))
+            && bytes.get(end).map_or(true, |byte| !is_ident(*byte))
+    })
 }
 
 /// Resolve Core source package imports, including selective `use core.x.[T]`

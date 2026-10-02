@@ -3355,12 +3355,14 @@ fn jet_string_lines(s: &String) -> Vec<String> {
 fn jet_string_chars(s: &String) -> Vec<char> {
     s.chars().collect()
 }
+// `s.slice(a, b)` excludes the end, like list and byte `.slice` and `a..<b`
+// (owner ruling #4001).
 fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
-    jet_string_slice_value(s, a, b, false)
+    jet_string_slice_value(s, a, b, true)
         .unwrap_or_else(|message| jet_panic(file, line, &message))
 }
 fn jet_string_slice_builtin(s: &String, a: i64, b: i64) -> String {
-    jet_string_slice_value(s, a, b, false)
+    jet_string_slice_value(s, a, b, true)
         .unwrap_or_else(|message| jet_panic("<core.builtin>", 0, &message))
 }
 fn jet_list_each<T, F, I>(xs: I, f: F)

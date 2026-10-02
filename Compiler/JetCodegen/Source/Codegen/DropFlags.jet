@@ -1,0 +1,327 @@
+// Static drop-flag resolution (tir_to_mir_drop_flags.rs, #4155).
+//
+// Lowering guards each owned local's scope-end cleanup with a live flag:
+// written false in the entry block, set where the binding is initialized,
+// cleared by every whole move, and read by the Branch in front of the
+// cleanup's move and drop. On most paths the flag holds one constant wherever
+// a guard reads it, which is what drop elaboration finds statically for Rust.
+// One forward pass over the constant flag values resolves each such guard to a
+// Jump: true keeps the cleanup unconditionally, false leaves it unreachable
+// for UnreachableBlockElimination. A flag with no read left loses its writes,
+// the constants only they consumed, and its local, so no backend carries dead
+// flag traffic. The pass only removes branches whose outcome is the same on
+// every path, so execution order and drop timing are unchanged.
+//
+// Flag states: 1 live, 2 not live, 3 unknown.
+
+fn jet_codegen_drop_flag_count_use(uses: &[Int:Int], value: MIRValueID) Never! {
+    _ := &uses.add(value.value, (uses.get(value.value) ?? 0) + 1)
+}
+
+fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
+    if builder.drop_live_all.len() == 0 -> return
+    block_count :: builder.blocks.len()
+    block_index := [Int:Int]{}
+    loop (block, row) in builder.blocks -> _ := &block_index.add(row.id.value, block)
+    place_row := [Int:Int]{}
+    loop (index, row) in builder.places -> _ := &place_row.add(row.id.value, index)
+
+    // Candidate flags: a whole-local place whose local has no other place.
+    flag_of_place := [Int:Int]{}
+    flag_of_local := [Int:Int]{}
+    flag_count := 0
+    loop record in builder.drop_live_all {
+        if flag_of_place.get(record.live.value) != None -> next
+        if place_row.get(record.live.value) == None -> next
+        row :: builder.places[place_row.get(record.live.value) ?? panic("checked drop flag row is missing")]
+        if row.projections.len() != 0 || row.persist_key != None -> next
+        if row.base == .Local(local) {
+            _ := &flag_of_place.add(record.live.value, flag_count)
+            _ := &flag_of_local.add(local.value, flag_count)
+            flag_count += 1
+        }
+    }
+    count :: flag_count
+    if count == 0 -> return
+    rejected := [Bool]{}
+    loop filler in 0..<count -> &rejected.push(false)
+    loop row in builder.places {
+        if row.base == .Local(local) {
+            if flag_of_local.get(local.value) == .Val(flag) {
+                if (flag_of_place.get(row.id.value) ?? -1) != flag -> rejected[flag] = true
+            }
+        }
+    }
+
+    // Every mention of a flag is a constant-or-unknown write or a read.
+    constants := [Int:Bool]{}
+    read_values := [Int]{}
+    read_flags := [Int]{}
+    read_blocks := [Int]{}
+    loop (block, row) in builder.blocks {
+        loop instruction in row.instructions {
+            if instruction.result == .Val(result) {
+                if instruction.operation == .Constant(constant) {
+                    if constant == .Bool(value) -> _ := &constants.add(result.value, value)
+                }
+            }
+            loop local in jet_codegen_last_use_locals(instruction.operation) {
+                if flag_of_local.get(local.value) == .Val(flag) -> rejected[flag] = true
+            }
+            loop place in jet_codegen_last_use_places(instruction.operation) {
+                if flag_of_place.get(place.value) == None -> next
+                flag :: flag_of_place.get(place.value) ?? panic("checked drop flag row is missing")
+                if instruction.operation == {
+                    .WritePlace(_, _) -> {}
+                    .ReadPlace(_) -> {
+                        if instruction.result == .Val(result) {
+                            &read_values.push(result.value)
+                            &read_flags.push(flag)
+                            &read_blocks.push(block)
+                        } else {
+                            rejected[flag] = true
+                        }
+                    }
+                    else -> rejected[flag] = true
+                }
+            }
+        }
+    }
+
+    // A read must feed exactly one use: its own block's two-way Branch.
+    uses := [Int:Int]{}
+    loop row in builder.blocks {
+        loop instruction in row.instructions {
+            loop value in mir_operation_value_uses(instruction.operation) -> jet_codegen_drop_flag_count_use(&uses, value)
+        }
+        loop value in mir_terminator_value_uses(row.terminator) -> jet_codegen_drop_flag_count_use(&uses, value)
+    }
+    loop row in builder.places {
+        if row.base == .Temporary(value) -> jet_codegen_drop_flag_count_use(&uses, value)
+        loop projection in row.projections {
+            if projection == {
+                .Index(_, index, _, _, _, _, _) -> jet_codegen_drop_flag_count_use(&uses, index)
+                .Range(range, _, _) -> jet_codegen_drop_flag_count_use(&uses, range)
+                else -> {}
+            }
+        }
+    }
+    guard_read := [Int:Int]{}
+    guard_flag := [Int:Int]{}
+    loop (row, result) in read_values {
+        flag :: read_flags[row]
+        block :: read_blocks[row]
+        is_guard := false
+        if builder.blocks[block].terminator == .Branch(condition, then_target, else_target) {
+            is_guard = condition.value == result && then_target != else_target
+        }
+        if !is_guard || (uses.get(result) ?? 0) != 1 {
+            rejected[flag] = true
+            next
+        }
+        _ := &guard_read.add(block, result)
+        _ := &guard_flag.add(block, flag)
+    }
+    any_open := false
+    loop flag in 0..<count {
+        if !rejected[flag] -> any_open = true
+    }
+    if !any_open -> return
+
+    // Forward constant propagation of every flag to a fixed point over flat
+    // block x flag rows. A resolved guard only passes its state along the
+    // edge it takes.
+    states := [Int]{}
+    loop filler in 0..<(block_count * count) -> &states.push(3)
+    reached := [Bool]{}
+    queued := [Bool]{}
+    loop filler in 0..<block_count {
+        &reached.push(false)
+        &queued.push(false)
+    }
+    pending := [Int]{}
+    entry :: block_index.get(builder.entry.value) ?? -1
+    if entry >= 0 {
+        reached[entry] = true
+        queued[entry] = true
+        &pending.push(entry)
+    }
+    read_state := [Int:Int]{}
+    loop pending.len() > 0 {
+        block :: &pending.pop() ?? { break }
+        queued[block] = false
+        base :: block * count
+        state := [Int]{}
+        loop flag in 0..<count -> &state.push(states[base + flag])
+        loop instruction in builder.blocks[block].instructions {
+            if instruction.operation == {
+                .WritePlace(place, value) -> {
+                    if flag_of_place.get(place.value) == .Val(flag) {
+                        written := 3
+                        if constants.get(value.value) == .Val(known) {
+                            written = 2
+                            if known -> written = 1
+                        }
+                        state[flag] = written
+                    }
+                }
+                .ReadPlace(place) -> {
+                    if flag_of_place.get(place.value) == .Val(flag) {
+                        if instruction.result == .Val(result) -> _ := &read_state.add(result.value, state[flag])
+                    }
+                }
+                else -> {}
+            }
+        }
+        targets := mir_terminator_targets(builder.blocks[block].terminator)
+        if guard_read.get(block) == .Val(result) {
+            flag :: guard_flag.get(block) ?? panic("checked drop guard has no flag")
+            if !rejected[flag] {
+                known :: read_state.get(result) ?? 3
+                if builder.blocks[block].terminator == .Branch(_, then_target, else_target) {
+                    if known == 1 -> targets = [MIRBlockID]{then_target}
+                    if known == 2 -> targets = [MIRBlockID]{else_target}
+                }
+            }
+        }
+        loop target in targets {
+            position :: block_index.get(target.value) ?? -1
+            if position < 0 -> next
+            target_base :: position * count
+            changed := false
+            if !reached[position] {
+                reached[position] = true
+                changed = true
+                loop flag in 0..<count -> states[target_base + flag] = state[flag]
+            } else {
+                loop flag in 0..<count {
+                    if states[target_base + flag] != state[flag] && states[target_base + flag] != 3 {
+                        states[target_base + flag] = 3
+                        changed = true
+                    }
+                }
+            }
+            if changed && !queued[position] {
+                queued[position] = true
+                &pending.push(position)
+            }
+        }
+    }
+
+    // Resolve the guards with a known flag; a flag keeps its writes while
+    // any read of it remains.
+    live_reads := [Int]{}
+    loop filler in 0..<count -> &live_reads.push(0)
+    resolved := [Int:Int]{}
+    loop (row, result) in read_values {
+        flag :: read_flags[row]
+        if rejected[flag] -> next
+        known :: read_state.get(result) ?? 3
+        if known == 3 {
+            live_reads[flag] = live_reads[flag] + 1
+            next
+        }
+        _ := &resolved.add(read_blocks[row], known)
+    }
+    loop block in 0..<block_count {
+        known :: resolved.get(block) ?? 0
+        if known == 0 -> next
+        if builder.blocks[block].terminator == .Branch(_, then_target, else_target) {
+            taken := then_target
+            dropped := else_target
+            if known == 2 {
+                taken = else_target
+                dropped = then_target
+            }
+            builder.blocks[block].terminator = MIRTerminator.Jump{target: taken}
+            source :: builder.blocks[block].id
+            position :: block_index.get(dropped.value) ?? -1
+            if position >= 0 {
+                loop index in 0..<builder.blocks[position].instructions.len() {
+                    if builder.blocks[position].instructions[index].operation == .Phi(incoming) {
+                        kept :: loop row in incoming if row.block != source -> row
+                        builder.blocks[position].instructions[index].operation = MIROperation.Phi{incoming: kept}
+                    }
+                }
+            }
+        }
+    }
+
+    // Delete the traffic of every flag nothing reads any more: its reads
+    // (each fed only a resolved branch), its writes, the constants only
+    // those writes used, and its local and place.
+    dead := [Bool]{}
+    any_dead := false
+    loop flag in 0..<count {
+        is_dead :: !rejected[flag] && live_reads[flag] == 0
+        &dead.push(is_dead)
+        if is_dead -> any_dead = true
+    }
+    if !any_dead -> return
+    removed := [Int:Bool]{}
+    released := [MIRValueID]{}
+    loop block in 0..<block_count {
+        kept := [MIRInstruction]{}
+        loop instruction in builder.blocks[block].instructions {
+            flag := -1
+            if instruction.operation == {
+                .WritePlace(place, value) -> {
+                    flag = flag_of_place.get(place.value) ?? -1
+                    if flag >= 0 && dead[flag] -> &released.push(value)
+                }
+                .ReadPlace(place) -> flag = flag_of_place.get(place.value) ?? -1
+                else -> {}
+            }
+            if flag >= 0 && dead[flag] {
+                if instruction.result == .Val(result) -> _ := &removed.add(result.value, true)
+                next
+            }
+            &kept.push(instruction)
+        }
+        builder.blocks[block].instructions = kept
+    }
+    orphaned := [Int:Bool]{}
+    loop value in released {
+        left :: (uses.get(value.value) ?? 0) - 1
+        _ := &uses.add(value.value, left)
+        if left == 0 && constants.get(value.value) != None -> _ := &orphaned.add(value.value, true)
+    }
+    if orphaned.len() > 0 {
+        loop block in 0..<block_count {
+            kept := [MIRInstruction]{}
+            loop instruction in builder.blocks[block].instructions {
+                if instruction.result == .Val(result) {
+                    if orphaned.get(result.value) != None {
+                        _ := &removed.add(result.value, true)
+                        next
+                    }
+                }
+                &kept.push(instruction)
+            }
+            builder.blocks[block].instructions = kept
+        }
+    }
+    values := [MIRValueFact]{}
+    loop fact in builder.values {
+        if removed.get(fact.id.value) == None -> &values.push(fact)
+    }
+    builder.values = values
+    locals := [MIRLocal]{}
+    loop local in builder.locals {
+        flag :: flag_of_local.get(local.id.value) ?? -1
+        if flag < 0 || !dead[flag] -> &locals.push(local)
+    }
+    builder.locals = locals
+    places := [MIRPlace]{}
+    loop row in builder.places {
+        flag :: flag_of_place.get(row.id.value) ?? -1
+        if flag < 0 || !dead[flag] -> &places.push(row)
+    }
+    builder.places = places
+    records := [JetCodegenDropLive]{}
+    loop record in builder.drop_live_all {
+        flag :: flag_of_place.get(record.live.value) ?? -1
+        if flag < 0 || !dead[flag] -> &records.push(record)
+    }
+    builder.drop_live_all = records
+}

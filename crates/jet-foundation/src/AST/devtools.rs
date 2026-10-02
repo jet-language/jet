@@ -1,4 +1,4 @@
-use super::{Func, Item, Marker, Type};
+use super::{Func, Marker, Type};
 use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::collections::BTreeMap;

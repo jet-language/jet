@@ -3634,6 +3634,15 @@ fn push_corelib_prelude_body(
     // CommonTypes' exact-Int formatting adapters are always emitted.
     out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
     out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));
+    // D-EXEC1: the C-ABI export surface the Jet-native backend links. It
+    // adapts carriers only; every export calls the Prelude function above.
+    out.push_str(
+        "\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi\n\
+         // AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n\
+         // adapters of the Jet-native backend's runtime ABI in this module.\n",
+    );
+    out.push_str(include_str!("../Prelude/Core/CAbi.rs"));
+    out.push_str("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n");
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by
     // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.

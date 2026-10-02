@@ -51,7 +51,7 @@ fn jet_rust_emit_selected_artifact(ctx: &JetRustEmitContext) -> MIRArtifactPlan?
 }
 
 fn jet_rust_emit_find_function(ctx: &JetRustEmitContext, id: MIRFunctionID) -> MIRFunction? {
-    loop function in ctx.program.functions {
+    loop function in jet_rust_emit_function_rows(ctx, id) {
         if function.id == id -> return Val(function)
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR artifact references a missing function row", "entry, command, job, and export rows must resolve to one checked function", None)

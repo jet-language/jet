@@ -23,17 +23,29 @@ use jet_foundation::MIR::{
 /// A terminator ends the current path.  The caller owns creation and selection
 /// of any continuation block, so statements after a terminator are unreachable
 pub(super) fn lower_stmts(ctx: &mut LowerCtx, stmts: &[TStmt]) -> Result<(), LowerError> {
-    let before_payload =
-        CanonicalPass::enabled().then(|| super::canonical_statements_payload(stmts));
-    let before_identity =
-        CanonicalPass::enabled().then(|| super::canonical_statements_identity(stmts));
+    let before = canonical_statements_before(stmts);
     for stmt in stmts {
         if ctx.is_terminated() {
             break;
         }
         lower_stmt(ctx, stmt)?;
     }
-    if let (Some(before_payload), Some(before_identity)) = (before_payload, before_identity) {
+    record_lowered_statements(ctx, before);
+    Ok(())
+}
+
+/// The canonical-pass input of one `lower_stmts` call, when tracing is on.
+fn canonical_statements_before(stmts: &[TStmt]) -> Option<(String, String)> {
+    CanonicalPass::enabled().then(|| {
+        (
+            super::canonical_statements_payload(stmts),
+            super::canonical_statements_identity(stmts),
+        )
+    })
+}
+
+fn record_lowered_statements(ctx: &LowerCtx, before: Option<(String, String)>) {
+    if let Some((before_payload, before_identity)) = before {
         CanonicalPass::record(
             "lowering",
             "mir.lower-statements",
@@ -47,7 +59,6 @@ pub(super) fn lower_stmts(ctx: &mut LowerCtx, stmts: &[TStmt]) -> Result<(), Low
             "preserve",
         );
     }
-    Ok(())
 }
 
 /// Lower one checked TIR statement into canonical MIR.
@@ -71,7 +82,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             kw,
             let_ty,
             init,
-            gc_promotion: _,
+            gc_promotion,
             gc_transferred: _,
         } => {
             let scope_guard_binding = matches!(
@@ -97,6 +108,25 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 } if matches!(recv.ty.without_user_tags(), Type::List(_)) => {
                     super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Write)?
                         .map(|place| (place, true))
+                }
+                // D-MEM-COPYSEM1: an immutable binding of a read parameter's
+                // place (or of its payload past a diverging `??`) aliases the
+                // place. The parameter cannot change while the function runs,
+                // so the alias reads exactly what a copy would hold.
+                _ if !kw.contains("mut")
+                    && !scope_guard_binding
+                    && let_binds_init_type(let_ty, &init.ty)
+                    && gc_promotion.is_none() =>
+                {
+                    let place = match &init.kind {
+                        TExprKind::OrFallback { value, fallback } => {
+                            super::tir_to_mir_expr::lower_or_fallback_window(
+                                ctx, init, value, fallback,
+                            )?
+                        }
+                        _ => ctx.read_window_place(init)?,
+                    };
+                    place.map(|place| (place, false))
                 }
                 _ => None,
             };
@@ -716,6 +746,21 @@ fn let_binding_type(let_ty: &TLetTy, init_ty: &Type) -> Type {
     }
 }
 
+/// True when the binding holds its initializer's own type: no annotation, or
+/// sema's recorded binding type with no wrapper. Sema records the inferred
+/// type on every `::` binding, so the annotated form is the common one; a
+/// differing type (a trait box, a union widen) keeps the value path.
+fn let_binds_init_type(let_ty: &TLetTy, init_ty: &Type) -> bool {
+    match let_ty {
+        TLetTy::Inferred => true,
+        TLetTy::Annotated {
+            ty,
+            wrapper: super::TLetWrapper::None,
+        } => ty.without_user_tags() == init_ty.without_user_tags(),
+        _ => false,
+    }
+}
+
 fn local_for_binding(name: &str, kw: &str) -> TLocal {
     if kw.contains("mut") {
         TLocal::user(name).as_mutable()
@@ -787,7 +832,10 @@ fn lower_refutable_bind(
     init: &TExpr,
     fallback: &[TStmt],
 ) -> Result<(), LowerError> {
-    let subject = lower_expr(ctx, init)?;
+    let subject = match ctx.lower_read_window(init)? {
+        Some(subject) => subject,
+        None => lower_expr(ctx, init)?,
+    };
     let pattern = ctx.lower_pattern(pattern)?;
     let shadow_mark = ctx.shadow_mark();
     let test = ctx.lower_pattern_condition(subject, &pattern)?;
@@ -1392,40 +1440,92 @@ fn lower_swizzle_assign(
     Ok(())
 }
 
-fn lower_if(
+/// One `if` of an else-if chain whose join block is still pending. A link
+/// reached through its parent's `else` also holds that else scope and the
+/// canonical-pass input of the `lower_stmts` call it stands for.
+struct IfChainLink {
+    join: MirBlockId,
+    else_scope: Option<(MirScopeId, Option<(String, String)>)>,
+}
+
+/// Lower an `if` and its else-if chain (an `else` that is exactly one `if`,
+/// which is how every N-arm decision table reaches TIR) in a loop rather than
+/// one recursion per arm. The loop holds borrowed links, so the walk is linear
+/// in the arm count. Blocks, scopes, shadow restores, and terminators are
+/// emitted in exactly the order the nested `lower_stmts` -> `lower_stmt` ->
+/// `lower_if` calls produced. The Jet compiler's `jet_codegen_lower_if` emits
+/// the same order by direct recursion, since a Jet local holding the rest of
+/// the chain would be a copy of it.
+fn lower_if<'a>(
     ctx: &mut LowerCtx,
-    cond: &TIfCond,
-    then_body: &[TStmt],
-    else_body: Option<&[TStmt]>,
+    cond: &'a TIfCond,
+    then_body: &'a [TStmt],
+    else_body: Option<&'a [TStmt]>,
 ) -> Result<(), LowerError> {
-    let then_block = ctx.new_block(ctx.span(), "if.then")?;
-    let else_block = ctx.new_block(ctx.span(), "if.else")?;
-    let join = ctx.new_block(ctx.span(), "if.join")?;
-    // Condition bindings (`x == .Val(x)`) hold only on the then path.
-    let shadow_mark = ctx.shadow_mark();
-    lower_cond(ctx, cond, then_block, else_block)?;
+    let mut links = Vec::new();
+    let (mut cond, mut then_body, mut else_body) = (cond, then_body, else_body);
+    loop {
+        let then_block = ctx.new_block(ctx.span(), "if.then")?;
+        let else_block = ctx.new_block(ctx.span(), "if.else")?;
+        let join = ctx.new_block(ctx.span(), "if.join")?;
+        // Condition bindings (`x == .Val(x)`) hold only on the then path.
+        let shadow_mark = ctx.shadow_mark();
+        lower_cond(ctx, cond, then_block, else_block)?;
 
-    ctx.switch_to(then_block);
-    {
-        let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
-        lower_stmts(ctx, then_body)?;
-        ctx.exit_scope(scope)?;
-    }
-    if !ctx.is_terminated() {
-        ctx.terminate(MirTerminator::Jump { target: join });
-    }
+        ctx.switch_to(then_block);
+        {
+            let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
+            lower_stmts(ctx, then_body)?;
+            ctx.exit_scope(scope)?;
+        }
+        if !ctx.is_terminated() {
+            ctx.terminate(MirTerminator::Jump { target: join });
+        }
 
-    ctx.restore_shadowed_locals(shadow_mark);
-    ctx.switch_to(else_block);
-    if let Some(body) = else_body {
-        let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
-        lower_stmts(ctx, body)?;
-        ctx.exit_scope(scope)?;
+        ctx.restore_shadowed_locals(shadow_mark);
+        ctx.switch_to(else_block);
+        if let Some(body) = else_body {
+            let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
+            if let [TStmt::If {
+                cond: next_cond,
+                then_body: next_then,
+                else_body: next_else,
+                ..
+            }] = body
+            {
+                let before = canonical_statements_before(body);
+                if !ctx.is_terminated() {
+                    links.push(IfChainLink {
+                        join,
+                        else_scope: Some((scope, before)),
+                    });
+                    cond = next_cond;
+                    then_body = next_then.as_slice();
+                    else_body = next_else.as_deref();
+                    continue;
+                }
+                record_lowered_statements(ctx, before);
+            } else {
+                lower_stmts(ctx, body)?;
+            }
+            ctx.exit_scope(scope)?;
+        }
+        links.push(IfChainLink {
+            join,
+            else_scope: None,
+        });
+        break;
     }
-    if !ctx.is_terminated() {
-        ctx.terminate(MirTerminator::Jump { target: join });
+    while let Some(link) = links.pop() {
+        if let Some((scope, before)) = link.else_scope {
+            record_lowered_statements(ctx, before);
+            ctx.exit_scope(scope)?;
+        }
+        if !ctx.is_terminated() {
+            ctx.terminate(MirTerminator::Jump { target: link.join });
+        }
+        ctx.switch_to(link.join);
     }
-    ctx.switch_to(join);
     Ok(())
 }
 
@@ -1809,6 +1909,90 @@ fn lower_range_loop(
     }
     Ok(())
 }
+/// D-MEM-COPYSEM1: a plain `loop item in list` over a read parameter's list
+/// walks the list in place. The loop becomes an index range over the list's
+/// length whose item is a read-only alias of its slot, so neither the list
+/// nor any item is copied. The parameter cannot change while the loop runs,
+/// so every alias reads exactly what the copied item would hold.
+fn read_list_walk(
+    ctx: &mut LowerCtx,
+    label: Option<&str>,
+    var: &str,
+    var2: Option<&str>,
+    collection: &TExpr,
+    step: Option<&TExpr>,
+    method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
+    by_value: bool,
+    body: &[TStmt],
+) -> Result<Option<TStmt>, LowerError> {
+    if method_kind.is_some() || var2.is_some() || step.is_some() || by_value {
+        return Ok(None);
+    }
+    let Type::List(element) = collection.ty.without_user_tags() else {
+        return Ok(None);
+    };
+    let element = (**element).clone();
+    if ctx.read_window_place(collection)?.is_none() {
+        return Ok(None);
+    }
+    let list = match &collection.kind {
+        TExprKind::Clone(inner) => (**inner).clone(),
+        _ => collection.clone(),
+    };
+    let index_name = format!("__jet_read_walk_{}", ctx.span().start);
+    let index = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::Local(TLocal::user(index_name.clone())),
+    };
+    let item = TExpr {
+        ty: element.clone(),
+        kind: TExprKind::Borrow {
+            place: Box::new(TExpr {
+                ty: element,
+                kind: TExprKind::Index {
+                    base: Box::new(list.clone()),
+                    index: Box::new(index),
+                    is_map: false,
+                    uninit_fixed: false,
+                    line: ctx.source_line() as usize,
+                },
+            }),
+            mutable: false,
+        },
+    };
+    let mut walk_body = Vec::with_capacity(body.len() + 1);
+    walk_body.push(TStmt::Let {
+        name: var.to_string(),
+        kw: "let",
+        let_ty: TLetTy::Inferred,
+        init: item,
+        gc_promotion: None,
+        gc_transferred: false,
+    });
+    walk_body.extend(body.iter().cloned());
+    Ok(Some(TStmt::Range {
+        label: label.map(str::to_string),
+        var: index_name,
+        source: None,
+        start: TExpr {
+            ty: Type::Int,
+            kind: TExprKind::IntLit(0, None),
+        },
+        end: TExpr {
+            ty: Type::Int,
+            kind: TExprKind::BuiltinMethod {
+                recv: Box::new(list),
+                op: TBuiltinOp::LenList,
+                args: Vec::new(),
+            },
+        },
+        step: None,
+        exclusive: true,
+        auto_vectorization: None,
+        body: walk_body,
+    }))
+}
+
 fn lower_for_in(
     ctx: &mut LowerCtx,
     label: Option<&str>,
@@ -1821,6 +2005,9 @@ fn lower_for_in(
     by_value: bool,
     body: &[TStmt],
 ) -> Result<(), LowerError> {
+    if let Some(walk) = read_list_walk(ctx, label, var, var2, collection, step, method_kind, by_value, body)? {
+        return lower_stmt(ctx, &walk);
+    }
     let routes = super::loop_route_bundle();
     let iter_init_call = ctx.intern_prelude_route(routes.iter_init)?;
     let iter_has_next_call = ctx.intern_prelude_route(routes.iter_has_next)?;
@@ -2132,7 +2319,9 @@ fn lower_enum_match(
     fallthrough: bool,
 ) -> Result<(), LowerError> {
     let mut subject = ctx.lower_pattern_subject(scrutinee)?;
-    if clone_subject {
+    // A read window tests the parameter's own place, which nothing can
+    // change during the match: no copy is needed to keep the subject stable.
+    if clone_subject && ctx.read_window_of(subject).is_none() {
         subject = ctx.emit(
             "match.subject.copy",
             Some(scrutinee.ty.clone()),
@@ -2404,9 +2593,7 @@ fn lower_scope_member(
             let whole_test = ctx.scopes.is_empty()
                 && ctx.current == ctx.entry
                 && ctx
-                    .blocks
-                    .iter()
-                    .find(|block| block.id == ctx.current)
+                    .block_by_id(ctx.current)
                     .is_some_and(|block| block.instructions.is_empty());
             let scope = ctx.enter_scope(
                 MirScopeKind::ScopeMember,
@@ -2556,7 +2743,7 @@ fn emit_scope_exits_on_early_paths(
         .iter()
         .copied()
         .filter(|block_id| {
-            let Some(block) = ctx.blocks.iter().find(|block| block.id == *block_id) else {
+            let Some(block) = ctx.block_by_id(*block_id) else {
                 return false;
             };
             let leaves_scope = match &block.terminator {

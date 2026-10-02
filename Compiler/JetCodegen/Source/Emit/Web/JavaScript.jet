@@ -4,10 +4,13 @@ use jet_foundation.[
     MIRBasicBlock,
     MIRFunction,
     MIRModule,
+    MIROperation,
     MIRParam,
     MIRRuntimePartID,
+    MIRType,
     MIRWebBucket,
     mir_sha256_hex,
+    mir_type_canonical_key,
 ]
 
 fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MIRFunction, block: MIRBasicBlock, out: &[String]) Never! {
@@ -19,17 +22,22 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MIRFunction, bl
             &out.push("        __jet_pred = __jet_block; __jet_block = Boolean(__jet_values.get({condition.value})) ? {then_target.value} : {else_target.value}; continue;")
         }
         .Switch(subject, arms, otherwise) -> {
-            expression := "__jet_values.get({subject.value})"
-            index := arms.len()
-            loop index > 0 {
-                index -= 1
-                arm :: arms[index]
-                expression = "({expression} === __jet_values.get({arm.condition.value}) ? {arm.target.value} : {otherwise.value})"
-            }
-            &out.push("        __jet_pred = __jet_block; __jet_block = {expression}; continue;")
+            // MIRWeb emit_js_terminator: read the subject once, then test the
+            // arms in order.
+            tests := [String]{}
+            loop arm in arms -> &tests.push("__jet_subject === __jet_values.get({arm.condition.value}) ? {arm.target.value} : ")
+            &out.push("        __jet_pred = __jet_block; const __jet_subject = __jet_values.get({subject.value}); __jet_block = {tests.join("")}{otherwise.value}; continue;")
         }
         .Return(value) -> {
-            if value == .Val(id) -> &out.push("        return __jet_values.get({id.value});") else -> &out.push("        return undefined;")
+            if value == .Val(id) {
+                // MIRWeb js_return_expression: an Option return leaves no
+                // dirty absent sentinel behind.
+                returned := "__jet_values.get({id.value})"
+                if function.return_type.kind == .Option(_) -> returned = "jet_clean_option({returned})"
+                &out.push("        return {returned};")
+                return
+            }
+            &out.push("        return undefined;")
         }
         .Yield(value, resume) -> {
             if {
@@ -47,6 +55,34 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MIRFunction, bl
         }
         .Continue(target) -> &out.push("        __jet_pred = __jet_block; __jet_block = {target.value}; continue;")
         .Unreachable(reason) -> &out.push("        throw new Error({jet_web_js_quote(reason)});")
+    }
+}
+
+// MIRWeb js_persist_live_value_update: under the local devtools rail, a write
+// to a persistent place publishes its new value (scalar text forms only).
+fn jet_web_js_persist_type_renderable(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> return true
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> return jet_web_js_persist_type_renderable(base)
+        else -> return false
+    }
+}
+
+fn jet_web_js_persist_live_value_update(ctx: &JetWebEmitContext, function: MIRFunction, operation: MIROperation) -> String? {
+    if !ctx.config.release_devtools_policy.local_rail -> return None
+    if operation == {
+        .WritePlace(place_id, _) -> {
+            loop place in function.places {
+                if place.id == place_id {
+                    key :: place.persist_key ?? return None
+                    rendered :: if jet_web_js_persist_type_renderable(place.ty) -> "String({jet_web_js_read_place(&ctx, function, place_id)})" else -> "null"
+                    return Val("jetDom.publishLiveValueUpdate({jet_web_js_quote(key)}, {jet_web_js_quote(mir_type_canonical_key(place.ty))}, {rendered});")
+                }
+            }
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web MIR place is missing", "persistent place writes must resolve one checked place row", Val(function.span))
+            return None
+        }
+        else -> return None
     }
 }
 
@@ -102,6 +138,7 @@ fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MIRFunction, out:
                 &out.push("          void ({expression});")
                 }
             }
+            if jet_web_js_persist_live_value_update(&ctx, function, instruction.operation) == .Val(update) -> &out.push("          {update}")
         }
         jet_web_emit_js_terminator(&ctx, function, block, &out)
         &out.push("        }}")

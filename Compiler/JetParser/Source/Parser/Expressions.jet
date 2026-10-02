@@ -758,33 +758,94 @@ fn parser_parse_string(state: &JetParserState, depth: Int) -> ParsedExpr {
     ParsedExpr{expr: Expr.Str{parts: parts, span: token.span}, span: token.span}
 }
 
+// D-ONCE-HASH1=B / D-FMT-INTERP3=B: the closed interpolation selector
+// vocabulary. An unknown selector is E0914 and leaves the bare Display form.
 fn parser_parse_string_format(state: &JetParserState) -> StrFormat {
     if parser_current_kind(&state) != TOKEN_COLON -> return StrFormat.Display
     parser_bump(&state)
-    selector :: parser_expect_name(&state, "after `:` in a string interpolation")
-    name := selector.payload.decoded
+    if parser_current_kind(&state) != TOKEN_IDENT {
+        parser_expect_name(&state, "after `:` in interpolation")
+        return StrFormat.Display
+    }
+    selector :: parser_bump(&state)
+    name :: selector.payload.decoded
+    head :: ":{name}"
     if name == "Debug" -> return StrFormat.Debug
     if name == "Pretty" -> return StrFormat.Pretty
     if name == "Bin" -> return StrFormat.Bin
     if name == "Oct" -> return StrFormat.Oct
-    if name == "Name" -> return StrFormat.Unit{format: UnitFormat.Name}
-    if name == "Bare" -> return StrFormat.Unit{format: UnitFormat.Bare}
-    if name == "Unit" -> return StrFormat.Unit{format: UnitFormat.Symbol}
-    if parser_current_kind(&state) == TOKEN_LPAREN {
-        parser_bump(&state)
-        amount :: parser_current(&state)
-        if amount.kind == TOKEN_INT -> parser_bump(&state)
-        digits := amount.payload.integer ?? 0
-        parser_expect(&state, TOKEN_RPAREN, "`)` after interpolation format")
-        if name == "Fixed" -> return StrFormat.Fixed{digits: digits}
-        if name == "Grouped" -> return StrFormat.Grouped{digits: digits}
-        if name == "Hex" -> return StrFormat.Hex{digits: digits}
-        if name == "Sci" -> return StrFormat.Sci{digits: digits}
-        if name == "Percent" -> return StrFormat.Percent{digits: digits}
-        if name == "Pad" -> return StrFormat.Pad{width: digits, fill: " "}
-        if name == "PadLeft" -> return StrFormat.PadLeft{width: digits, fill: " "}
+    if name == "Fixed" -> return StrFormat.Fixed{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+    if name == "Grouped" -> return StrFormat.Grouped{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+    if name == "Sci" -> return StrFormat.Sci{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+    if name == "Percent" -> return StrFormat.Percent{digits: parser_parse_selector_argument(&state, head, "decimal places")}
+    if name == "Hex" -> return StrFormat.Hex{digits: parser_parse_selector_argument(&state, head, "width")}
+    if name == "Pad" || name == "PadLeft" {
+        parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
+        width :: parser_parse_selector_integer(&state, head, "width")
+        fill := ""
+        if parser_current_kind(&state) == TOKEN_COMMA {
+            parser_bump(&state)
+            fill = parser_parse_selector_fill(&state, head)
+        }
+        parser_expect(&state, TOKEN_RPAREN, "after the fill in `{head}(n, fill)`")
+        if name == "Pad" -> return StrFormat.Pad{width: width, fill: fill}
+        return StrFormat.PadLeft{width: width, fill: fill}
     }
+    if name == "Unit" {
+        parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
+        style :: parser_expect_name(&state, "inside `{head}( )`")
+        format := StrFormat.Unit{format: UnitFormat.Name}
+        if style.payload.decoded == "bare" -> format = StrFormat.Unit{format: UnitFormat.Bare}
+        if style.kind == TOKEN_IDENT && style.payload.decoded != "name" && style.payload.decoded != "bare" {
+            parser_add_error(&state, style.span, "unknown unit style `{style.payload.decoded}`", "`{head}` accepts `name` or `bare`", "write `{head}(name)` or `{head}(bare)`")
+        }
+        parser_expect(&state, TOKEN_RPAREN, "after the style in `{head}( )`")
+        return format
+    }
+    parser_add_error_code(&state, "E0914", selector.span, "unknown interpolation selector `{head}`", "string interpolation supports a closed selector set — use `:Debug`, `:Pretty`, `:Fixed(n)`, `:Grouped(n)`, `:Hex(n)`, `:Pad(n[, \"fill\"])`, `:PadLeft(n[, \"fill\"])`, `:Sci(n)`, `:Percent(n)`, `:Bin`, `:Oct`, or `:Unit(name|bare)`", "write `{{value:Debug}}`, `{{value:Pretty}}`, `{{value:Fixed(2)}}`, `{{value:Grouped(2)}}`, `{{value:Hex(2)}}`, `{{value:Pad(2, \" \")}}`, `{{value:PadLeft(2, \" \")}}`, `{{value:Sci(2)}}`, `{{value:Percent(2)}}`, `{{value:Bin}}`, `{{value:Oct}}`, `{{value:Unit(name)}}` or `{{value:Unit(bare)}}`, or `{{value}}`")
     StrFormat.Display
+}
+
+// `:Fixed(n)` and the other one-integer selectors.
+fn parser_parse_selector_argument(state: &JetParserState, head: String, parameter: String) -> Int {
+    parser_expect(&state, TOKEN_LPAREN, "after `{head}` in interpolation")
+    value :: parser_parse_selector_integer(&state, head, parameter)
+    parser_expect(&state, TOKEN_RPAREN, "after the {parameter} in `{head}(n)`")
+    value
+}
+
+fn parser_parse_selector_integer(state: &JetParserState, head: String, parameter: String) -> Int {
+    token :: parser_bump(&state)
+    if token.kind == TOKEN_INT -> return token.payload.integer ?? 0
+    example :: if parameter == "width" -> "16" else -> "2"
+    noun :: if parameter == "width" -> "width" else -> "precision"
+    parser_add_error(&state, token.span, "expected {parameter} inside `{head}( )`", "`{head}(n)` takes one nonnegative integer literal", "write a {noun} such as `{head}({example})`")
+    0
+}
+
+// The quoted fill of `:Pad(n, "fill")`: fixed text, never a second
+// interpolation.
+fn parser_parse_selector_fill(state: &JetParserState, head: String) -> String {
+    token :: parser_bump(&state)
+    if token.kind == TOKEN_RAW_STRING -> return token.payload.decoded
+    if token.kind != TOKEN_STRING {
+        parser_add_error(&state, token.span, "expected a literal fill string inside `{head}( )`", "`{head}(n, fill)` takes a quoted fill string", "write a fill such as `{head}(8, \"0\")`")
+        return ""
+    }
+    if token.payload.string_parts.len() == 0 -> return token.payload.decoded
+    fill := ""
+    loop part in token.payload.string_parts {
+        if part.kind == STRING_PART_INTERPOLATION {
+            parser_add_error(&state, token.span, "padding fill inside `{head}( )` cannot interpolate", "a padding fill is fixed text, not a second interpolation", "write a quoted fill such as `{head}(8, \"0\")`")
+            return ""
+        }
+        if part.kind == STRING_PART_TEXT -> fill = "{fill}{part.text}"
+        if part.kind == STRING_PART_BYTE {
+            byte_text :: String.from_bytes([U8]{U8{part.byte}}) ?? ""
+            fill = "{fill}{byte_text}"
+        }
+    }
+    fill
 }
 
 fn parser_parse_parenthesized(state: &JetParserState, depth: Int) -> ParsedExpr {
@@ -1468,6 +1529,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             member_name :: if member.kind == TOKEN_KW_COPY || member.kind == TOKEN_KW_MOVE -> member.payload.text else -> member.payload.decoded
             span := parser_cover(expression.span, member.span)
             expression = if operator.kind == TOKEN_QUESTION_DOT -> ParsedExpr{expr: Expr.OptField{base: expression.expr, member: member_name, member_span: member.span, flatten: false, span: span}, span: span} else -> ParsedExpr{expr: Expr.Field{base: expression.expr, member: member_name, span: span}, span: span}
+            next
         }
         if kind == TOKEN_QUESTION {
             if parser_expression_result_handler_ahead(&state) {

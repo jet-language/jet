@@ -31,6 +31,7 @@ use jet_foundation.[
     TStmt,
     Type,
     diagnostic_with_rights,
+    diagnostic_with_source_derived_suggestion,
     symbol_id,
     tir_expr_children,
     tir_stmt_children,
@@ -1666,8 +1667,11 @@ fn sema_effect_row_has_no_outcome(node: SemaEffectNode, solved: [String]) -> Boo
     true
 }
 
+// The callee as written stands in for the call text (the Rust reference's
+// span covers the callee name, so its call text is that name).
 fn sema_effect_discarded_result_diagnostic(node: SemaEffectNode, span: Span) -> Diagnostic {
-    sema_error("E0433", span, "the result of this `{node.name}` call is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result :: …`, or write `.drop(\"reason\")` if dropping it is intended")
+    diagnostic :: sema_error("E0433", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result :: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
+    diagnostic_with_source_derived_suggestion(diagnostic, Span{start: span.start, end: span.start}, "result :: ")
 }
 
 // D-EFF1: the part of `expression` inside `region` (a `#FX` block span).

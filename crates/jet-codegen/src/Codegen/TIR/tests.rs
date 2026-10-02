@@ -1922,41 +1922,21 @@ fn run() {}
             .expect("projected Shared field is moved");
         assert!(projected_move.result.is_some());
 
-        let live_local = take_shared
-            .locals
-            .iter()
-            .find(|local| local.name.starts_with("owned_live_"))
-            .expect("owner liveness local");
+        // The projected move leaves the owner live on every path, so its
+        // cleanup guard resolves statically and the live flag disappears; a
+        // move that cleared whole-owner liveness would drop the cleanup below.
+        assert!(
+            !take_shared
+                .locals
+                .iter()
+                .any(|local| local.name.starts_with("owned_live_")),
+            "a projected move must not clear whole-owner liveness"
+        );
         let instructions = take_shared
             .blocks
             .iter()
             .flat_map(|block| &block.instructions)
             .collect::<Vec<_>>();
-        assert_eq!(
-            instructions
-                .iter()
-                .filter(|instruction| matches!(
-                    &instruction.operation,
-                    jet_foundation::MIR::MirOperation::WritePlace { place, .. }
-                        if *place == live_local.place
-                ))
-                .count(),
-            1,
-            "a projected move must not clear whole-owner liveness"
-        );
-        let live_test = instructions
-            .iter()
-            .find(|instruction| matches!(
-                &instruction.operation,
-                jet_foundation::MIR::MirOperation::ReadPlace(place)
-                    if *place == live_local.place
-            ))
-            .and_then(|instruction| instruction.result)
-            .expect("owner cleanup tests its live flag");
-        assert!(take_shared.blocks.iter().any(|block| matches!(
-            &block.terminator,
-            jet_foundation::MIR::MirTerminator::Branch { condition, .. } if *condition == live_test
-        )));
         let root_move = instructions
             .iter()
             .find(|instruction| matches!(

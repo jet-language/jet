@@ -1,0 +1,681 @@
+// MIR -> LIR lowering fixtures: small checked-MIR programs built by hand
+// (hello, exact-Int arithmetic, control flow with locals, phis, a switch and a
+// range loop, structs, payload and tag enums, Options and string
+// interpolation). Each program is lowered, its LIR printed, and every lowering
+// issue and LIR lint finding reported. The fixture is assembled into a test
+// unit by Compiler/JetBackend/Tests/run-lower-fixtures.mjs and is never listed
+// in Compiler/Bootstrap/sources.list.
+use jet_foundation.[
+    MIRAccess,
+    MIRArtifactPlan,
+    MIRBasicBlock,
+    MIRBinaryDispatch,
+    MIRBinaryOp,
+    MIRBinaryOverflow,
+    MIRBlockID,
+    MIRCImportLink,
+    MIRCLIBinding,
+    MIRCLib,
+    MIRCOverlayOverride,
+    MIRCallArg,
+    MIRCallFallibility,
+    MIRCallSignature,
+    MIRCallbackAdapter,
+    MIRCallee,
+    MIRCaptureParam,
+    MIRCffiFacts,
+    MIRCloseAdapter,
+    MIRConstant,
+    MIRConstantDef,
+    MIRCoreCall,
+    MIRCoreOwner,
+    MIRDropAction,
+    MIRDropKind,
+    MIREffectFacts,
+    MIREnumArg,
+    MIRFFIBoundaryFacts,
+    MIRFailureCarrier,
+    MIRField,
+    MIRFieldRow,
+    MIRFieldValue,
+    MIRForeign,
+    MIRFunction,
+    MIRFunctionForm,
+    MIRFunctionID,
+    MIRFunctionKind,
+    MIRGenericParam,
+    MIRHandleLifecycle,
+    MIRHardwareSetup,
+    MIRHarnessPlan,
+    MIRImplDef,
+    MIRImport,
+    MIRInstruction,
+    MIRJob,
+    MIRLinkUnit,
+    MIRLocal,
+    MIRLocalID,
+    MIRModule,
+    MIRModuleID,
+    MIRNameAlias,
+    MIRNameDeclaration,
+    MIRNameFacts,
+    MIRNameModule,
+    MIRNameReference,
+    MIRNamedSpan,
+    MIROpID,
+    MIROperation,
+    MIROwnership,
+    MIROwnershipMode,
+    MIRPackageFacts,
+    MIRPanicLoc,
+    MIRParam,
+    MIRPhiIncoming,
+    MIRPlace,
+    MIRPlaceBase,
+    MIRPlaceID,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRPreludeCallID,
+    MIRPreludeFamily,
+    MIRProgram,
+    MIRProjection,
+    MIRRuntimeLayer,
+    MIRRuntimePartID,
+    MIRSchemaMigrationPlan,
+    MIRScope,
+    MIRSemanticOp,
+    MIRSerdeAttribute,
+    MIRShapeFieldNames,
+    MIRSourceFile,
+    MIRSourceFileID,
+    MIRStringFormat,
+    MIRStringPart,
+    MIRStringPartKind,
+    MIRStructureFact,
+    MIRSwitchArm,
+    MIRSymbol,
+    MIRTargetApplicability,
+    MIRTargetDMAOperationFact,
+    MIRTargetDossier,
+    MIRTargetHardwareUnresolvedReference,
+    MIRTargetHardwareUse,
+    MIRTargetInterruptHandlerFact,
+    MIRTargetRegisterAccessFact,
+    MIRTerminator,
+    MIRTestCase,
+    MIRTraitDef,
+    MIRTraitID,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeDefKind,
+    MIRTypeKind,
+    MIRUnreachable,
+    MIRValueFact,
+    MIRValueID,
+    MIRVariant,
+    MIRVariantPayload,
+    MIRVisibility,
+    MIRWebParamReconstruction,
+    MIR_SCHEMA_VERSION,
+    Span,
+    mir_copy_ownership,
+    mir_empty_optimization_facts,
+    mir_field_id,
+    mir_function_id,
+    mir_nominal_ref,
+    mir_owned_ownership,
+    mir_ownership_from_access,
+    mir_type_from_kind,
+    mir_type_id,
+    mir_type_with_identity,
+    stable_id,
+]
+use jet_backend.[LIRFunctionID, lir_lower_program, lir_print_module, x64_relocatable_object, x64_static_executable]
+use core.files as files
+
+fn fx_span() -> Span Never! { Span{start: 0, end: 0} }
+
+fn fx_int() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.Int) }
+
+fn fx_bool() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.Bool) }
+
+fn fx_string() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.String) }
+
+fn fx_unit() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}) }
+
+fn fx_named(name: String) -> MIRType Never! {
+    mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(name), args: [MIRType]{}}), mir_type_id(name))
+}
+
+fn fx_borrow() -> MIROwnership Never! { mir_ownership_from_access(MIRAccess.Read) }
+
+struct FxBuilder {
+    pub values: [MIRValueFact]
+    pub blocks: [MIRBasicBlock]
+    pub current: [MIRInstruction]
+    pub locals: [MIRLocal]
+    pub places: [MIRPlace]
+    pub params: [MIRParam]
+    pub next: Int
+}
+
+fn fx_builder() -> FxBuilder Never! {
+    FxBuilder{values: [MIRValueFact]{}, blocks: [MIRBasicBlock]{}, current: [MIRInstruction]{}, locals: [MIRLocal]{}, places: [MIRPlace]{}, params: [MIRParam]{}, next: 0}
+}
+
+fn fx_value(b: &FxBuilder, ty: MIRType, ownership: MIROwnership, operation: MIROperation) -> MIRValueID Never! {
+    b.next = b.next + 1
+    id :: MIRValueID{value: 100 + b.next}
+    &b.values.push(MIRValueFact{id: id, ty: ty, span: fx_span(), ownership: ownership})
+    &b.current.push(MIRInstruction{id: MIROpID{value: b.next}, span: fx_span(), source_line: None, result: Val(id), ty: Val(ty), operation: operation})
+    id
+}
+
+fn fx_copy(b: &FxBuilder, ty: MIRType, operation: MIROperation) -> MIRValueID Never! {
+    fx_value(&b, ty, mir_copy_ownership(), operation)
+}
+
+fn fx_owned(b: &FxBuilder, ty: MIRType, operation: MIROperation) -> MIRValueID Never! {
+    fx_value(&b, ty, mir_owned_ownership(), operation)
+}
+
+fn fx_do(b: &FxBuilder, operation: MIROperation) Never! {
+    b.next = b.next + 1
+    &b.current.push(MIRInstruction{id: MIROpID{value: b.next}, span: fx_span(), source_line: None, result: None, ty: None, operation: operation})
+}
+
+fn fx_block(b: &FxBuilder, id: Int, terminator: MIRTerminator) Never! {
+    &b.blocks.push(MIRBasicBlock{id: MIRBlockID{value: id}, span: fx_span(), instructions: b.current, terminator: terminator})
+    b.current = [MIRInstruction]{}
+}
+
+fn fx_local(b: &FxBuilder, name: String, ty: MIRType, ownership: MIROwnership) -> MIRPlaceID Never! {
+    local :: MIRLocalID{value: 300 + b.locals.len()}
+    place :: MIRPlaceID{value: 500 + b.places.len()}
+    &b.locals.push(MIRLocal{id: local, name: name, span: fx_span(), ty: ty, place: place, mutable: true, ownership: ownership, is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
+    &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: MIRPlaceBase.Local{local: local}, projections: [MIRProjection]{}, access: MIRAccess.Write, persist_key: None})
+    place
+}
+
+// A field place of the local behind `root`.
+fn fx_field_place(b: &FxBuilder, root: MIRPlaceID, field: String, ty: MIRType) -> MIRPlaceID Never! {
+    base := MIRPlaceBase.Static{name: ""}
+    loop row in b.places {
+        if row.id == root -> base = row.base
+    }
+    place :: MIRPlaceID{value: 500 + b.places.len()}
+    &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: base, projections: [MIRProjection]{MIRProjection.Field{field: mir_field_id(field), span: fx_span()}}, access: MIRAccess.Read, persist_key: None})
+    place
+}
+
+fn fx_param(b: &FxBuilder, name: String, ty: MIRType, ownership: MIROwnership) -> MIRValueID Never! {
+    index :: b.params.len()
+    &b.params.push(MIRParam{index: index, name: name, span: fx_span(), ty: ty, access: MIRAccess.Read, ownership: ownership, public_label: name, variadic: false, default_present: false})
+    fx_value(&b, ty, ownership, MIROperation.Parameter{index: index, name: name})
+}
+
+fn fx_arg(value: MIRValueID, access: MIRAccess) -> MIRCallArg Never! {
+    MIRCallArg{value: value, place: None, access: access, span: fx_span(), label: None, source_index: None, binder_slot: None, spread: false, implicit_clone: false, shared_auto_clone: false, owned_last_use: false, authority_boundary: false, fn_coercion: None, widen_fixed_to_list: false, widen_to_union: None, box_as_trait: None}
+}
+
+fn fx_int_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
+    fx_copy(&b, fx_int(), MIROperation.Constant{value: MIRConstant.Int{value: value, width: None, spelling: None}})
+}
+
+fn fx_print(b: &FxBuilder, value: MIRValueID) Never! {
+    _ := fx_copy(&b, fx_unit(), MIROperation.Semantic{operation: MIRSemanticOp.Print{call: fx_prelude_id("core.term", "print"), value: value}})
+}
+
+// Exact Int arithmetic through its Prelude route, as Jet codegen emits it.
+fn fx_int_op(b: &FxBuilder, op: MIRBinaryOp, member: String, left: MIRValueID, right: MIRValueID) -> MIRValueID Never! {
+    location :: if member == "div" -> Val(MIRPanicLoc{file: fx_source_file(), line: 3, column: 0}) else -> None
+    dispatch :: MIRBinaryDispatch.Prelude{call: fx_prelude_id("core.numeric", member), location: location}
+    fx_copy(&b, fx_int(), MIROperation.Binary{op: op, dispatch: dispatch, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+}
+
+fn fx_compare(b: &FxBuilder, op: MIRBinaryOp, left: MIRValueID, right: MIRValueID) -> MIRValueID Never! {
+    fx_copy(&b, fx_bool(), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+}
+
+fn fx_function(name: String, b: FxBuilder, ret: MIRType) -> MIRFunction Never! {
+    MIRFunction{
+        id: mir_function_id(name),
+        module_id: MIRModuleID{value: 0},
+        source_file: fx_source_file(),
+        key: name,
+        module_name: "fixture",
+        name: name,
+        span: fx_span(),
+        kind: MIRFunctionKind.Jet,
+        form: MIRFunctionForm.TopLevel,
+        visibility: MIRVisibility.Private,
+        target_applicability: MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: false},
+        web_bucket: None,
+        web_marker: None,
+        generic_params: [MIRGenericParam]{},
+        capture_params: [MIRCaptureParam]{},
+        params: b.params,
+        declared_return: Val(ret),
+        return_type: ret,
+        failure: MIRFailureCarrier.Infallible,
+        effects: MIREffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MIRNamedSpan]{}},
+        captures: None,
+        generator: None,
+        optimization: mir_empty_optimization_facts(),
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        gc_return: false,
+        return_view_provenance: None,
+        web_param_reconstructions: [MIRWebParamReconstruction]{},
+        blocks: b.blocks,
+        entry: MIRBlockID{value: 0},
+        locals: b.locals,
+        values: b.values,
+        places: b.places,
+        scopes: [MIRScope]{},
+        drops: [MIRDropAction]{},
+        foreign_language: None,
+    }
+}
+
+fn fx_source_file() -> MIRSourceFileID Never! { MIRSourceFileID{value: 1} }
+
+fn fx_prelude_id(module_name: String, member: String) -> MIRPreludeCallID Never! {
+    MIRPreludeCallID{value: stable_id("fixture-prelude", "{module_name}.{member}")}
+}
+
+fn fx_prelude(family: MIRPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, abi: MIRPreludeABI) -> MIRPreludeCall Never! {
+    mask := [Bool]{}
+    loop _ in 0..<arity -> &mask.push(false)
+    MIRPreludeCall{
+        id: fx_prelude_id(module_name, member),
+        family: family,
+        module_name: module_name,
+        member: member,
+        symbol: MIRSymbol.Prelude{name: symbol},
+        signature: MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: mask},
+        effect_kind: None,
+        fallibility: MIRCallFallibility.Infallible,
+        abi: abi,
+        authority: None,
+        db_metadata: None,
+    }
+}
+
+fn fx_prelude_rows() -> [MIRPreludeCall] Never! {
+    [MIRPreludeCall]{
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "core.term", "print", "jet_term_write_stdout_line", 2, MIRPreludeABI.Effect),
+        fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "add", "jet_std::jet_int_add", 2, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "sub", "jet_std::jet_int_sub", 2, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "mul", "jet_std::jet_int_mul", 2, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "div", "jet_std::jet_int_div", 4, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_init", "jet_loop_range_init", 5, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_has_next", "jet_loop_range_has_next", 1, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_value", "jet_loop_range_value", 1, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_advance", "jet_loop_range_advance", 1, MIRPreludeABI.Value),
+    }
+}
+
+fn fx_field(owner: String, name: String, ty: MIRType) -> MIRField Never! {
+    MIRField{
+        id: mir_field_id("{owner}.{name}"),
+        name: name,
+        shape_names: MIRShapeFieldNames{text: name, json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: name, env: name, db: None, layout: None},
+        skip: false,
+        ty: ty,
+        span: fx_span(),
+        public: true,
+        package_public: true,
+        computed: false,
+        has_default: false,
+        redact: false,
+    }
+}
+
+fn fx_variant(name: String, payload: MIRVariantPayload) -> MIRVariant Never! {
+    MIRVariant{name: name, wire_name: name, span: fx_span(), payload: payload, discriminant: None}
+}
+
+fn fx_type_def(name: String, kind: MIRTypeDefKind) -> MIRTypeDef Never! {
+    MIRTypeDef{
+        id: mir_type_id(name),
+        module_id: MIRModuleID{value: 0},
+        key: name,
+        name: name,
+        span: fx_span(),
+        public: true,
+        package_public: true,
+        generic_params: [MIRGenericParam]{},
+        derives: [MIRTraitID]{},
+        auto_derive_default: false,
+        auto_printable: false,
+        published_schema: false,
+        single_use: false,
+        must_use: false,
+        layout: None,
+        c_layout_tag: None,
+        enum_layout: None,
+        layout_alignment: None,
+        cli: None,
+        serde: [MIRSerdeAttribute]{},
+        cli_bindings: [MIRCLIBinding]{},
+        ownership: MIROwnershipMode.Owned,
+        boxed_edges: [String]{},
+        compiler_builtin: None,
+        kind: kind,
+    }
+}
+
+fn fx_program(functions: [MIRFunction], types: ^[MIRTypeDef]) -> MIRProgram Never! {
+    MIRProgram{
+        cffi: MIRCffiFacts{import_links: [MIRCImportLink]{}, libs: [MIRCLib]{}, overlay_overrides: [MIRCOverlayOverride]{}, boundaries: [MIRFFIBoundaryFacts]{}, direct_links: [String]{}, transitive_links: [String]{}, close_adapters: [MIRCloseAdapter]{}},
+        schema_version: MIR_SCHEMA_VERSION,
+        package_identity: "fixture",
+        facts: MIRPackageFacts{
+            project_root: "",
+            edition: "2028",
+            runtime_parts: [MIRRuntimePartID]{},
+            uses_arrow: false,
+            active_os: "linux",
+            inferred_layer: "std",
+            allocator: "",
+            package_version: "0.1.0",
+            artifact_target: None,
+            target_dossier: MIRTargetDossier{machine: None, layer: MIRRuntimeLayer.Std, provider_identity: "", closure_identity: "", linker_identity: "", tier_identity: "", compiler_identity: "", environment_identity: "", dependency_identity: ""},
+            web_app: None,
+            authority_needs: [String]{},
+            hardware_use: MIRTargetHardwareUse{register_accesses: [MIRTargetRegisterAccessFact]{}, interrupt_handlers: [MIRTargetInterruptHandlerFact]{}, dma_operations: [MIRTargetDMAOperationFact]{}, unresolved_references: [MIRTargetHardwareUnresolvedReference]{}},
+            hardware_profile: None,
+            hardware_profile_id: "",
+            hardware_capabilities: [String]{},
+            hardware_setups: [MIRHardwareSetup]{},
+        },
+        names: MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}},
+        modules: [MIRModule]{},
+        imports: [MIRImport]{},
+        types: types,
+        traits: [MIRTraitDef]{},
+        core_owners: [MIRCoreOwner]{},
+        impls: [MIRImplDef]{},
+        constants: [MIRConstantDef]{},
+        fields: [MIRFieldRow]{},
+        source_files: [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "fixture.jet", source: ""}},
+        functions: functions,
+        foreign: [MIRForeign]{},
+        links: [MIRLinkUnit]{},
+        callbacks: [MIRCallbackAdapter]{},
+        handles: [MIRHandleLifecycle]{},
+        jobs: [MIRJob]{},
+        tests: [MIRTestCase]{},
+        harnesses: [MIRHarnessPlan]{},
+        artifacts: [MIRArtifactPlan]{},
+        core_calls: [MIRCoreCall]{},
+        prelude_calls: fx_prelude_rows(),
+        type_instances: [MIRType]{},
+        codec_migrations: [String:MIRSchemaMigrationPlan]{},
+        unreachable: [MIRUnreachable]{},
+    }
+}
+
+// fn run() { print("hello, world") }
+fn fx_hello() -> MIRProgram Never! {
+    b := fx_builder()
+    text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "hello, world"}})
+    fx_print(&b, text)
+    fx_do(&b, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+// fn calc(a: Int, b: Int) -> Int { (a + b) * 2 - a / b }
+// fn run() { print(calc(7, 3)) }
+fn fx_arithmetic() -> MIRProgram Never! {
+    c := fx_builder()
+    a :: fx_param(&c, "a", fx_int(), mir_copy_ownership())
+    d :: fx_param(&c, "b", fx_int(), mir_copy_ownership())
+    sum :: fx_int_op(&c, MIRBinaryOp.Add, "add", a, d)
+    two :: fx_int_const(&c, 2)
+    product :: fx_int_op(&c, MIRBinaryOp.Mul, "mul", sum, two)
+    quotient :: fx_int_op(&c, MIRBinaryOp.Div, "div", a, d)
+    result :: fx_int_op(&c, MIRBinaryOp.Sub, "sub", product, quotient)
+    fx_block(&c, 0, MIRTerminator.Return{value: Val(result)})
+
+    r := fx_builder()
+    seven :: fx_int_const(&r, 7)
+    three :: fx_int_const(&r, 3)
+    called :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("calc")}, args: [MIRCallArg]{fx_arg(seven, MIRAccess.Read), fx_arg(three, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, called)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("calc", c, fx_int()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// fn sum_to(n: Int) -> Int {
+//     total := 0
+//     i := 0
+//     loop i < n { i += 1; total += i }
+//     if total > 10 -> total else -> 0
+// }
+// fn classify(n: Int) -> Int { if { n == 0 -> 0  n < 0 -> -1  else -> 1 } }
+// fn run() {
+//     loop k in 0..<3 { print(k) }
+//     s :: sum_to(5)
+//     print("sum = {s}")
+//     print(classify(s) == 1 && s < 100)
+// }
+fn fx_control_flow() -> MIRProgram Never! {
+    s := fx_builder()
+    n :: fx_param(&s, "n", fx_int(), mir_copy_ownership())
+    total :: fx_local(&s, "total", fx_int(), mir_copy_ownership())
+    i :: fx_local(&s, "i", fx_int(), mir_copy_ownership())
+    total_start :: fx_int_const(&s, 0)
+    fx_do(&s, MIROperation.WritePlace{place: total, value: total_start})
+    i_start :: fx_int_const(&s, 0)
+    fx_do(&s, MIROperation.WritePlace{place: i, value: i_start})
+    fx_block(&s, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    i_now :: fx_copy(&s, fx_int(), MIROperation.ReadPlace{place: i})
+    more :: fx_compare(&s, MIRBinaryOp.Lt, i_now, n)
+    fx_block(&s, 1, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 3}})
+    i_old :: fx_copy(&s, fx_int(), MIROperation.ReadPlace{place: i})
+    one :: fx_int_const(&s, 1)
+    i_next :: fx_int_op(&s, MIRBinaryOp.Add, "add", i_old, one)
+    fx_do(&s, MIROperation.WritePlace{place: i, value: i_next})
+    total_old :: fx_copy(&s, fx_int(), MIROperation.ReadPlace{place: total})
+    i_read :: fx_copy(&s, fx_int(), MIROperation.ReadPlace{place: i})
+    total_next :: fx_int_op(&s, MIRBinaryOp.Add, "add", total_old, i_read)
+    fx_do(&s, MIROperation.WritePlace{place: total, value: total_next})
+    fx_block(&s, 2, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    total_end :: fx_copy(&s, fx_int(), MIROperation.ReadPlace{place: total})
+    ten :: fx_int_const(&s, 10)
+    large :: fx_compare(&s, MIRBinaryOp.Gt, total_end, ten)
+    fx_block(&s, 3, MIRTerminator.Branch{condition: large, then_target: MIRBlockID{value: 4}, else_target: MIRBlockID{value: 5}})
+    kept :: fx_copy(&s, fx_int(), MIROperation.ReadPlace{place: total})
+    fx_block(&s, 4, MIRTerminator.Jump{target: MIRBlockID{value: 6}})
+    zero :: fx_int_const(&s, 0)
+    fx_block(&s, 5, MIRTerminator.Jump{target: MIRBlockID{value: 6}})
+    joined :: fx_copy(&s, fx_int(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 4}, value: kept}, MIRPhiIncoming{block: MIRBlockID{value: 5}, value: zero}}})
+    fx_block(&s, 6, MIRTerminator.Return{value: Val(joined)})
+
+    c := fx_builder()
+    m :: fx_param(&c, "n", fx_int(), mir_copy_ownership())
+    zero_limit :: fx_int_const(&c, 0)
+    is_zero :: fx_compare(&c, MIRBinaryOp.Eq, m, zero_limit)
+    is_negative :: fx_compare(&c, MIRBinaryOp.Lt, m, zero_limit)
+    arms :: [MIRSwitchArm]{MIRSwitchArm{condition: is_zero, target: MIRBlockID{value: 1}, span: fx_span()}, MIRSwitchArm{condition: is_negative, target: MIRBlockID{value: 2}, span: fx_span()}}
+    fx_block(&c, 0, MIRTerminator.Switch{subject: m, arms: arms, otherwise: MIRBlockID{value: 3}})
+    when_zero :: fx_int_const(&c, 0)
+    fx_block(&c, 1, MIRTerminator.Jump{target: MIRBlockID{value: 4}})
+    when_negative :: fx_int_const(&c, -1)
+    fx_block(&c, 2, MIRTerminator.Jump{target: MIRBlockID{value: 4}})
+    when_positive :: fx_int_const(&c, 1)
+    fx_block(&c, 3, MIRTerminator.Jump{target: MIRBlockID{value: 4}})
+    sign :: fx_copy(&c, fx_int(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 1}, value: when_zero}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: when_negative}, MIRPhiIncoming{block: MIRBlockID{value: 3}, value: when_positive}}})
+    fx_block(&c, 4, MIRTerminator.Return{value: Val(sign)})
+
+    r := fx_builder()
+    k :: fx_local(&r, "k", fx_int(), mir_copy_ownership())
+    first :: fx_int_const(&r, 0)
+    last :: fx_int_const(&r, 3)
+    cursor :: fx_owned(&r, fx_named("RangeCursor"), MIROperation.LoopRangeInit{call: fx_prelude_id("core.loop", "loop_range_init"), start: first, end: last, step: None, exclusive: true})
+    fx_block(&r, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    has_next :: fx_copy(&r, fx_bool(), MIROperation.LoopRangeHasNext{call: fx_prelude_id("core.loop", "loop_range_has_next"), cursor: cursor})
+    fx_block(&r, 1, MIRTerminator.Branch{condition: has_next, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 4}})
+    item :: fx_copy(&r, fx_int(), MIROperation.LoopRangeValue{call: fx_prelude_id("core.loop", "loop_range_value"), cursor: cursor})
+    fx_do(&r, MIROperation.WritePlace{place: k, value: item})
+    k_now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: k})
+    fx_print(&r, k_now)
+    fx_block(&r, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    fx_do(&r, MIROperation.LoopRangeAdvance{call: fx_prelude_id("core.loop", "loop_range_advance"), cursor: cursor})
+    fx_block(&r, 3, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    fx_do(&r, MIROperation.Drop{value: cursor, kind: MIRDropKind.Value})
+    five :: fx_int_const(&r, 5)
+    total_value :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_to")}, args: [MIRCallArg]{fx_arg(five, MIRAccess.Read)}, type_args: [MIRType]{}})
+    message :: fx_owned(&r, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Literal{text: "sum = "}}, MIRStringPart{kind: MIRStringPartKind.Interpolation{value: total_value, format: MIRStringFormat.Display}}}})
+    fx_print(&r, message)
+    fx_do(&r, MIROperation.Drop{value: message, kind: MIRDropKind.Value})
+    classified :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("classify")}, args: [MIRCallArg]{fx_arg(total_value, MIRAccess.Read)}, type_args: [MIRType]{}})
+    one_class :: fx_int_const(&r, 1)
+    positive :: fx_compare(&r, MIRBinaryOp.Eq, classified, one_class)
+    hundred :: fx_int_const(&r, 100)
+    small :: fx_compare(&r, MIRBinaryOp.Lt, total_value, hundred)
+    both :: fx_copy(&r, fx_bool(), MIROperation.Binary{op: MIRBinaryOp.And, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: positive, right: small})
+    fx_print(&r, both)
+    fx_block(&r, 4, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("sum_to", s, fx_int()), fx_function("classify", c, fx_int()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// struct Point { x: Int, y: Int }
+// enum Shape { Dot, Circle(r: Int) }
+// enum Color { Red, Green }
+// fn area(s: Shape) -> Int { if s == .Circle(r) -> r * r * 3 else -> 0 }
+// fn run() {
+//     p := Point{x: 3, y: 4}
+//     print(p.x + p.y)
+//     o := Val(5)
+//     if o == .Val(v) -> print(v)
+//     print(area(Shape.Circle(2)))
+//     print(Color.Green == .Green)
+//     print("p.x = {p.x}")
+// }
+fn fx_aggregates() -> MIRProgram Never! {
+    point :: fx_named("Point")
+    shape :: fx_named("Shape")
+    color :: fx_named("Color")
+    option_int :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    types :: [MIRTypeDef]{
+        fx_type_def("Point", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Point", "x", fx_int()), fx_field("Point", "y", fx_int())}, methods: [MIRFunctionID]{}}),
+        fx_type_def("Shape", MIRTypeDefKind.Enum{variants: [MIRVariant]{fx_variant("Dot", MIRVariantPayload.Unit), fx_variant("Circle", MIRVariantPayload.Named{fields: [MIRField]{fx_field("Shape.Circle", "r", fx_int())}})}, methods: [MIRFunctionID]{}}),
+        fx_type_def("Color", MIRTypeDefKind.Enum{variants: [MIRVariant]{fx_variant("Red", MIRVariantPayload.Unit), fx_variant("Green", MIRVariantPayload.Unit)}, methods: [MIRFunctionID]{}}),
+    }
+
+    a := fx_builder()
+    subject :: fx_param(&a, "s", shape, mir_owned_ownership())
+    is_circle :: fx_compare_value(&a, MIROperation.EnumIs{subject: subject, owner: mir_type_id("Shape"), variant: "Circle"})
+    fx_block(&a, 0, MIRTerminator.Branch{condition: is_circle, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    radius :: fx_copy(&a, fx_int(), MIROperation.EnumPayload{subject: subject, owner: mir_type_id("Shape"), variant: "Circle", index: 0})
+    squared :: fx_int_op(&a, MIRBinaryOp.Mul, "mul", radius, radius)
+    three :: fx_int_const(&a, 3)
+    scaled :: fx_int_op(&a, MIRBinaryOp.Mul, "mul", squared, three)
+    fx_block(&a, 1, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    none :: fx_int_const(&a, 0)
+    fx_block(&a, 2, MIRTerminator.Jump{target: MIRBlockID{value: 3}})
+    area :: fx_copy(&a, fx_int(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: 1}, value: scaled}, MIRPhiIncoming{block: MIRBlockID{value: 2}, value: none}}})
+    fx_do(&a, MIROperation.Drop{value: subject, kind: MIRDropKind.Value})
+    fx_block(&a, 3, MIRTerminator.Return{value: Val(area)})
+
+    r := fx_builder()
+    p :: fx_local(&r, "p", point, mir_owned_ownership())
+    p_x :: fx_field_place(&r, p, "Point.x", fx_int())
+    x_init :: fx_int_const(&r, 3)
+    y_init :: fx_int_const(&r, 4)
+    built :: fx_owned(&r, point, MIROperation.Struct{type_id: mir_type_id("Point"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Point.x"), value: x_init}, MIRFieldValue{field: mir_field_id("Point.y"), value: y_init}}})
+    fx_do(&r, MIROperation.WritePlace{place: p, value: built})
+    x :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: p_x})
+    whole :: fx_value(&r, point, fx_borrow(), MIROperation.ReadPlace{place: p})
+    y :: fx_copy(&r, fx_int(), MIROperation.Field{base: whole, field: mir_field_id("Point.y")})
+    sum :: fx_int_op(&r, MIRBinaryOp.Add, "add", x, y)
+    fx_print(&r, sum)
+    five :: fx_int_const(&r, 5)
+    maybe :: fx_owned(&r, option_int, MIROperation.Present{value: five})
+    present :: fx_compare_value(&r, MIROperation.OptionIsSome{subject: maybe})
+    fx_block(&r, 0, MIRTerminator.Branch{condition: present, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    inside :: fx_copy(&r, fx_int(), MIROperation.OptionValue{subject: maybe})
+    fx_print(&r, inside)
+    fx_block(&r, 1, MIRTerminator.Jump{target: MIRBlockID{value: 2}})
+    fx_do(&r, MIROperation.Drop{value: maybe, kind: MIRDropKind.Value})
+    two :: fx_int_const(&r, 2)
+    circle :: fx_owned(&r, shape, MIROperation.Enum{type_id: mir_type_id("Shape"), variant: "Circle", args: [MIREnumArg]{MIREnumArg{field: Val(mir_field_id("Shape.Circle.r")), value: two, boxed: false}}})
+    area_value :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("area")}, args: [MIRCallArg]{fx_arg(circle, MIRAccess.Move)}, type_args: [MIRType]{}})
+    fx_print(&r, area_value)
+    green :: fx_copy(&r, color, MIROperation.Enum{type_id: mir_type_id("Color"), variant: "Green", args: [MIREnumArg]{}})
+    is_green :: fx_compare_value(&r, MIROperation.EnumIs{subject: green, owner: mir_type_id("Color"), variant: "Green"})
+    fx_print(&r, is_green)
+    label :: fx_owned(&r, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Literal{text: "p.x = "}}, MIRStringPart{kind: MIRStringPartKind.Interpolation{value: x, format: MIRStringFormat.Display}}}})
+    fx_print(&r, label)
+    fx_do(&r, MIROperation.Drop{value: label, kind: MIRDropKind.Value})
+    released :: fx_owned(&r, point, MIROperation.MovePlace{place: p})
+    fx_do(&r, MIROperation.Drop{value: released, kind: MIRDropKind.Value})
+    fx_block(&r, 2, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("area", a, fx_int()), fx_function("run", r, fx_unit())}, ^types)
+}
+
+fn fx_compare_value(b: &FxBuilder, operation: MIROperation) -> MIRValueID Never! {
+    fx_copy(&b, fx_bool(), operation)
+}
+
+// Lower `program`, print its LIR and issues, and, when it is clean, compile
+// it (entry `run`) to a static x86-64 executable `<name>.elf`, a relocatable
+// object `<name>.o` for the compiled runtime, and an in-memory image
+// `<name>.image` with its load manifest `<name>.mem` (`entry <offset>`, then
+// one `import <slot offset> <symbol>` line per runtime import), in the
+// working directory; check-native-fixtures.mjs runs, links and loads them.
+fn fx_report(name: String, program: MIRProgram) -> Bool {
+    lowered :: lir_lower_program(program)
+    print("== {name}")
+    print(lir_print_module(lowered.lir))
+    loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
+    if lowered.issues.len() > 0 -> return false
+    print("{name}: lint-clean")
+    entry := -1
+    loop function in lowered.lir.functions { if function.name == "run" -> entry = function.id.value }
+    image :: x64_static_executable(lowered.lir, LIRFunctionID{value: entry})
+    loop error in image.errors -> print("native {name}: {error}")
+    if image.errors.len() > 0 -> return false
+    path :: "{name}.elf"
+    files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
+    files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
+    print("{name}: native image {path} ({image.bytes.len()} bytes)")
+    relocatable :: x64_relocatable_object(lowered.lir, LIRFunctionID{value: entry})
+    loop error in relocatable.errors -> print("object {name}: {error}")
+    if relocatable.errors.len() > 0 -> return false
+    object_path :: "{name}.o"
+    files.write_bytes(object_path, relocatable.bytes) ?? panic("cannot write {object_path}")
+    print("{name}: object {object_path} ({relocatable.bytes.len()} bytes)")
+    memory :: x64_memory_image(lowered.lir, LIRFunctionID{value: entry})
+    loop error in memory.errors -> print("in-memory {name}: {error}")
+    if memory.errors.len() > 0 -> return false
+    image_path :: "{name}.image"
+    files.write_bytes(image_path, memory.text) ?? panic("cannot write {image_path}")
+    manifest := "entry {memory.entry}\n"
+    loop (index, symbol) in memory.imports -> manifest = "{manifest}import {memory.slots[index]} {symbol}\n"
+    files.write("{name}.mem", manifest) ?? panic("cannot write {name}.mem")
+    print("{name}: in-memory image {image_path} ({memory.text.len()} bytes, {memory.imports.len()} runtime imports)")
+    true
+}
+
+fn run() {
+    clean := true
+    if !fx_report("hello", fx_hello()) -> clean = false
+    if !fx_report("arithmetic", fx_arithmetic()) -> clean = false
+    if !fx_report("control-flow", fx_control_flow()) -> clean = false
+    if !fx_report("aggregates", fx_aggregates()) -> clean = false
+    print(if clean -> "all fixtures lowered lint-clean and compiled" else -> "FIXTURE ISSUES")
+}

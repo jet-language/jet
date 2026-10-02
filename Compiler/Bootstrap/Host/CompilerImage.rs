@@ -12,7 +12,7 @@ use jet_foundation::MIR::{
 };
 
 const MAGIC: &[u8; 8] = b"JETCIMG\0";
-const FORMAT_VERSION: u16 = 2;
+const FORMAT_VERSION: u16 = 3;
 const CHECKSUM_BYTES: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,26 +363,34 @@ fn checked_identity(
         .map_err(|error| CompilerImageError(format!("invalid compiler-image identity: {error}")))
 }
 
+/// Content identity of an authorized compiler source snapshot: which bytes
+/// were compiled, under which root-relative paths. The physical facts of the
+/// open (absolute root paths, device, inode, mtime) are deliberately left out:
+/// they differ between two assemblies of the same tree, and this digest is
+/// embedded in every generated compiler and decides whether a self-compile is
+/// compiling the compiler's own source, so it must not depend on the build
+/// directory or on when the files were written.
 pub(crate) fn compiler_image_source_authority_digest(
     source: &AuthorizedSourceSnapshot,
 ) -> [u8; 32] {
     let mut writer = CompilerImageMetadataWriter::new();
+    let entry_root = source
+        .roots
+        .iter()
+        .position(|root| root.identity == source.entry_root_identity);
+    writer.write_u64(entry_root.map_or(u64::MAX, |index| index as u64));
+    let entry = entry_root
+        .and_then(|index| {
+            source.entry_path.strip_prefix(&source.roots[index].canonical_path)
+        })
+        .map_or(source.entry_path.as_str(), |relative| relative.trim_start_matches('/'));
     writer
-        .write_string(&source.entry_root_identity)
-        .expect("source authority string length fits u64");
-    writer
-        .write_string(&source.entry_path)
+        .write_string(entry)
         .expect("source authority string length fits u64");
     writer
         .write_len(source.roots.len())
         .expect("source root count fits u64");
     for root in &source.roots {
-        writer
-            .write_string(&root.canonical_path)
-            .expect("source authority string length fits u64");
-        writer
-            .write_string(&root.identity)
-            .expect("source authority string length fits u64");
         writer.write_u8(u8::from(root.allow_hardlinks));
         write_authorized_files(&mut writer, &root.files);
         write_authorized_files(&mut writer, &root.foreign_cache_files);
@@ -397,13 +405,7 @@ fn write_authorized_files(
     writer.write_len(files.len()).expect("source file count fits u64");
     for file in files {
         writer
-            .write_string(&file.path)
-            .expect("source authority string length fits u64");
-        writer
             .write_string(&file.relative_path)
-            .expect("source authority string length fits u64");
-        writer
-            .write_string(&file.identity)
             .expect("source authority string length fits u64");
         writer
             .write_len(file.source.len())

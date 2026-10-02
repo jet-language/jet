@@ -231,9 +231,12 @@ environment. It compares panics, exit status, diagnostics, stdout, stderr and
 side-effect files phase by phase (`check`, `run`, `run --interpret`, `build`)
 and reports the first divergence with its case, phase, expected and candidate
 values and a repro directory. A missing binary or tool exits 2 and is never a
-match. `--canary` runs the checked cases in `tests/compiler-diff/` through a
-wrapper that plants known divergences, proving detection without editing
-source. The comparator claims behavior only; artifact identity stays with
+match. Each compiler file is pinned by identity at startup and re-verified
+around every invocation, and a `systemd-run` launch failure is not an
+observation: a binary deleted or replaced mid-run also exits 2. `--canary`
+runs the checked cases in `tests/compiler-diff/` through a wrapper that plants
+known divergences, proving detection without editing source. The comparator
+claims behavior only; artifact identity stays with
 #815.
 
 

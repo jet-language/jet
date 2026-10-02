@@ -24,6 +24,7 @@ use jet_foundation.[
     core_module_retirement,
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
+    mir_boundary_head_carrier_module,
     mir_source_file_id,
 ]
 use jet_lexer.[
@@ -1994,6 +1995,35 @@ fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool
     source_units.len() - 1
 }
 
+// True when `source` spells `name` as a whole identifier (Rust
+// `source_names_identifier`). A comment or string that mentions it only
+// schedules one more Core source, never a wrong one.
+fn jet_driver_source_names_identifier(source: String, name: String) -> Bool Never! {
+    bytes :: source.bytes()
+    needle :: name.bytes()
+    if needle.len() == 0 || bytes.len() < needle.len() -> return false
+    loop start in 0..<(bytes.len() - needle.len() + 1) {
+        matched := true
+        loop offset in 0..<needle.len() {
+            if bytes[start + offset] != needle[offset] {
+                matched = false
+                break
+            }
+        }
+        if !matched -> next
+        end :: start + needle.len()
+        if start > 0 && jet_driver_identifier_byte(bytes[start - 1]) -> next
+        if end < bytes.len() && jet_driver_identifier_byte(bytes[end]) -> next
+        return true
+    }
+    false
+}
+
+fn jet_driver_identifier_byte(byte: U8) -> Bool Never! {
+    n :: Int.from_u8(byte)
+    n == 95 || (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+}
+
 // The source unit of the Core module `module_name`, cataloged once. A public
 // source row also schedules the compiler-private parts it owns (`core.text`
 // owns `Core/text/string.jet`), which no import names. A Core module with no
@@ -2068,11 +2098,11 @@ fn jet_driver_place_core_module(modules: [JetDriverLoadedModule], source_units: 
 }
 
 // Rust Loader.rs 2633-2785 appends the Core source modules after every user
-// module: first the Core modules user code imports, in Core table order, each
-// followed by the private parts it owns; then, breadth first, the Core modules
-// those import, in import order. Host-only Core modules, which Rust never
-// loads, come last in load order.
-fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource]) -> [JetDriverLoadedModule] Never! {
+// module: first the Core modules user code imports (or reaches by naming a
+// bare `URL`), in Core table order, each followed by the private parts it
+// owns; then, breadth first, the Core modules those import, in import order.
+// Host-only Core modules, which Rust never loads, come last in load order.
+fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [JetDriverLoadedModule] Never! {
     placed := [Bool]{}
     direct := [Bool]{}
     loop position in 0..<modules.len() {
@@ -2086,6 +2116,10 @@ fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units:
             position :: jet_driver_core_module_position(modules, source_units, core_name) ?? next
             direct[position] = true
         }
+    }
+    if names_url_carrier {
+        url_carrier :: mir_boundary_head_carrier_module("URL") ?? ""
+        if jet_driver_core_module_position(modules, source_units, url_carrier) == .Val(position) -> direct[position] = true
     }
     order := [Int]{}
     loop row_index in 0..<core_sources.len() {
@@ -2159,6 +2193,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     resolved_imports := [SemaRegistrationImportEdge]{}
     // Exact text records of the embedded Core modules the closure loads.
     core_generated := [MIRSourceFile]{}
+    names_url_carrier := false
     pending_index := 0
     loop pending_index < pending.len() {
         source_unit_index := pending[pending_index]
@@ -2197,6 +2232,20 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             program: program,
         })
         if jet_driver_has_errors(parse_result.diagnostics) -> next
+        // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
+        // record, so a module that names it loads that Core source without a
+        // `use` (Rust `source_names_identifier` in the loader).
+        if !is_core && jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "URL") {
+            names_url_carrier = true
+            url_carrier :: mir_boundary_head_carrier_module("URL") ?? ""
+            url_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, url_carrier, Span{start: 0, end: 0}, &diagnostics)
+            if url_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
         import_diagnostic_start :: diagnostics.len()
 
         aliases := [String:Int]{}
@@ -2332,7 +2381,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(&modules, &resolved_imports, source_units, catalog.packages, request.authorized_sources.roots, &diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
-    modules = jet_driver_order_core_modules(modules, source_units, request.core_sources)
+    modules = jet_driver_order_core_modules(modules, source_units, request.core_sources, names_url_carrier)
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, core_generated)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)

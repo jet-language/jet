@@ -2844,14 +2844,14 @@ pub fn apply_method(
             };
             let chars = s.chars().collect::<Vec<_>>();
             let len = chars.len() as i64;
-            if a < 0 || b < 0 || a > b || b >= len {
+            if a < 0 || b < 0 || a > b || b > len {
                 return Err(comptime_panic(
-                    &format!("can't slice {len} characters from {a} to {b} (inclusive)"),
+                    &format!("can't slice {len} characters from {a} to {b} (exclusive)"),
                     span,
                 ));
             }
             Ok(CtValue::Str(
-                chars[a as usize..=b as usize].iter().collect(),
+                chars[a as usize..b as usize].iter().collect(),
             ))
         }
         (CtValue::Str(s), "repeat") => {

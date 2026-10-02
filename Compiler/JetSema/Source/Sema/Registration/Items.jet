@@ -466,6 +466,14 @@ pub struct SemaBuildFacts {
     pub stamp_dirty: Bool
     pub stamp_toolchain: String
     pub stamp_at: String
+    // D-DBG1=A: this compile produces a shipped artifact (`jet build`).
+    pub artifact_build: Bool{false}
+}
+
+// D-DBG1=A: `debug(…)` traces are development-only. A shipped artifact or a
+// release-profile compile rejects any that remain (E3405).
+pub fn sema_build_facts_reject_debug_traces(facts: SemaBuildFacts) -> Bool Never! {
+    facts.artifact_build || facts.profile == "release" || facts.profile == "hardened"
 }
 
 pub struct SemaRegistrationGraph {
@@ -1265,6 +1273,7 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
         &diagnostics.push(sema_defined_twice(name, "module declarations share one namespace", sema_registration_root_span(item)))
         return false
     }
+    if !sema_registration_value_type_rules(module_row, item, &diagnostics) -> return false
     function :: if item == {
         .Func(value) -> Val(sema_registration_function(value, module_row.module_identity, None, source_file, source_origin, source_segments, &diagnostics))
         else -> None
@@ -1281,6 +1290,39 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
     if item == {
         .Const(value) -> {
             &module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, identity_key: "{module_row.module_identity}:{value.name}"})
+        }
+        else -> {}
+    }
+    true
+}
+
+// D-DIST1/D-RANGETYPE1/D-TYPEALIAS1: the registration rules of the Rust
+// reference's `register_distinct` and `register_type_alias`. A distinct
+// built on a distinct declared earlier (E0129) and an alias without type
+// parameters (E0324) are not registered; a range constraint on a base other
+// than `Int` is reported and the type still registers.
+fn sema_registration_value_type_rules(module_row: SemaRegistrationModule, item: Item, diagnostics: &[Diagnostic]) -> Bool {
+    if item == {
+        .Distinct(definition) -> {
+            if definition.base == .Named(base_name) {
+                loop nominal in module_row.nominals {
+                    if nominal.kind == SemaRegistrationNominalKind.Distinct && nominal.symbol.name == base_name {
+                        &diagnostics.push(sema_error("E0129", definition.base_span, "`{definition.name}` can't be built on `{base_name}` — `{base_name}` is itself a distinct type", "`distinct`-over-`distinct` chaining is not allowed in v1; `{base_name}` is already a distinct type", "use `{base_name}` directly, or build on the shared base type"))
+                        return false
+                    }
+                }
+            }
+            if definition.range == .Val(range) {
+                if definition.base != Type.Int {
+                    &diagnostics.push(sema_error("E0003", range.span, "a range constraint only works on `Int`, but `{definition.name}` is {sema_type_show(definition.base)}", "`distinct Base(lo..hi)` provably bounds a whole-number value", "use `distinct Int({range.lo}..{range.hi})`, or drop the range"))
+                }
+            }
+        }
+        .TypeAlias(definition) -> {
+            if definition.type_params.len() == 0 {
+                &diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `alias Name<T> :: …`", "transparent `alias` is only for shortening generic spellings (D-TYPEALIAS1)", "for a distinct type name over a primitive, use `struct Name(BaseType)` instead"))
+                return false
+            }
         }
         else -> {}
     }

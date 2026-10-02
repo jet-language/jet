@@ -4,13 +4,15 @@
 //
 // Keep the boundary typed: the request owns its selected target and Eval config.
 // The native host installs callbacks once, then transfers the complete request.
+// The host ABI is infallible: a failure escaping the driver becomes the
+// result's internal problem instead of a Result the host cannot decode.
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
     jet_driver_compile,
+    jet_driver_compile_escaped_failure,
 ]
 
-fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
-    jet_driver_compile(^request)
+fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
+    jet_driver_compile(^request) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
 }
-

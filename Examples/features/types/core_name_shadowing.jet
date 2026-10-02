@@ -29,7 +29,7 @@ FACES :: prep {
 ORDER :: prep { [FontStyle]{FontStyle.Title, FontStyle.Body} }
 
 fn describe(style: FontStyle) -> String {
-    return if style == {
+    if style == {
         .Monospace -> "fixed-width"
         .Title -> "heading"
         .Body -> "running text"
@@ -38,10 +38,9 @@ fn describe(style: FontStyle) -> String {
 
 fn run() {
     loop face in FACES {
-        if face.style == Val(style) {
-            print("{face.family} {face.size}pt {style} ({describe(style)})")
-        } else {
-            print("{face.family} {face.size}pt unstyled")
+        if face.style == {
+            .Val(style) -> print("{face.family} {face.size}pt {style} ({describe(style)})")
+            .None -> print("{face.family} {face.size}pt unstyled")
         }
     }
     loop style in ORDER {

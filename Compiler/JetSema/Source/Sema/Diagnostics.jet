@@ -196,6 +196,16 @@ pub fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
 }
 
 pub fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
+    // D-TYPEDTEXT1 / D-FFI-SH1 / D-REGEX-LIT1 (Rust `typed_text_mismatch`): a
+    // runtime `String` never becomes a checked typed text or a `Regex`.
+    if required == .Named(name) && offered == Type.String {
+        head :: sema_call_reflection_leaf_name(name)
+        if head == "Regex" -> return sema_error("E0152", span, "a `String` is not a `Regex` pattern", "regex patterns are typed literals, so Jet can validate them before the program runs", "write `.{{\"...\"}}` here, or call `re.compile(text)` for a pattern built at run time")
+        if head == "SQL" || head == "HTML" || head == "Sh" {
+            why :: if head == "Sh" -> "a runtime string could change the executable or argument boundaries; only a checked literal may build `Sh`, where every `{{value}}` hole is exactly one argv item" else -> "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{{value}}` holes become bound parameters or escaped insertions) may build one"
+            return sema_error("E0149", span, "a runtime `String` can't be used as `{head}`", why, "write `{head}{{\"...\"}}` with `{{value}}` holes, or use `{head}.raw(\"…\")` if you have audited the text")
+        }
+    }
     required_name :: type_name(required)
     offered_name :: type_name(offered)
     sema_error(

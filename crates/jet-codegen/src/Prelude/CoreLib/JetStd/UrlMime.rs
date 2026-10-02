@@ -359,6 +359,50 @@
             }
             out
         }
+
+        /// D-BOUND-HEAD1=A: the `core.net.url.URL` record projection every
+        /// tier shares (AOT `JetURL`, the JIT record, the evaluator struct).
+        /// An absent port takes the scheme default, as `core.net.url.parse`
+        /// does; the flag records an authority port written in the source.
+        pub fn core_port(&self) -> (i64, bool) {
+            let port = self
+                .port
+                .or_else(|| self.default_port().ok())
+                .unwrap_or(-1);
+            (port, self.port.is_some())
+        }
+
+        /// Re-enter the kernel from the Core record fields (the inverse of
+        /// `core_port`/`query`): a default port written implicitly stays absent.
+        pub fn from_core_record(
+            scheme: &str,
+            user_text: &str,
+            password_text: &str,
+            host: &str,
+            port: i64,
+            port_explicit: bool,
+            path: &str,
+            query: &str,
+            fragment: &str,
+        ) -> Self {
+            let some = |text: &str| (!text.is_empty()).then(|| text.to_string());
+            let mut parts = JetURLParts {
+                scheme: scheme.to_string(),
+                username: some(user_text),
+                password: some(password_text),
+                host: some(host),
+                port: None,
+                path: path.to_string(),
+                query: jet_url_parse_query(query).unwrap_or_default(),
+                fragment: some(fragment),
+                typed_host: None,
+                typed_path: None,
+            };
+            if port >= 0 && (port_explicit || parts.default_port().ok() != Some(port)) {
+                parts.port = Some(port);
+            }
+            parts
+        }
     }
 
     /// D-BOUND-HEAD1=A: validate the URL skeleton before lowering. Scheme and

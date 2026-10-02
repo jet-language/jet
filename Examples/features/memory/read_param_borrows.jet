@@ -1,0 +1,117 @@
+// A read parameter cannot change while its function runs, so reading one of
+// its places in place is the same as reading a copy. Matches, `??` bindings,
+// plain bindings, and loops over a read parameter's places read the place
+// itself; a copy is made only where the value is kept, edited, or consumed.
+
+struct Graph {
+    names: [String]
+}
+
+struct Env {
+    graph: Graph?
+    plain: Graph
+}
+
+fn names_in(env: Env) -> Int {
+    if env.graph == .Val(graph) -> return graph.names.len()
+    0
+}
+
+fn has_graph(env: Env) -> Bool {
+    env.graph != None
+}
+
+fn first_name(env: Env) -> String {
+    graph :: env.graph ?? return "none"
+    graph.names[0]
+}
+
+fn total_length(env: Env) -> Int {
+    graph_option :: env.graph
+    graph :: graph_option ?? return 0
+    total := 0
+    loop name in graph.names -> total += name.len()
+    total
+}
+
+fn count_matches(env: Env, wanted: String) -> Int {
+    if env.graph == {
+        .Val(graph) -> {
+            count := 0
+            loop name in graph.names {
+                if name == wanted -> count += 1
+            }
+            count
+        }
+        else -> 0
+    }
+}
+
+// Keeping a read alias copies it: the caller's later edits never reach it.
+fn kept_graph(env: Env) -> Graph {
+    graph :: env.graph ?? return env.plain
+    graph
+}
+
+// Editing a copy taken from a read alias never reaches the parameter.
+fn renamed(env: Env) -> Graph {
+    plain :: env.plain
+    updated := plain
+    &updated.names.push("added")
+    updated
+}
+
+fn consume(graph: ^Graph) -> Int {
+    graph.names.len()
+}
+
+fn consumed(env: Env) -> Int {
+    graph :: env.graph ?? return 0
+    consume(^graph)
+}
+
+fn count_names(names: [String]) -> Int {
+    names.len()
+}
+
+// Slicing a read parameter's list reads the list in place; only the slice
+// is a new list.
+fn tail_count(env: Env) -> Int {
+    graph :: env.graph ?? return 0
+    count_names(graph.names[1..<3])
+}
+
+struct Holder {
+    graph: Graph
+    note: String
+}
+
+// An owned parameter's last use moves it into the struct; no copy is left.
+fn hold(graph: ^Graph, note: ^String) -> Holder {
+    Holder{graph: graph, note: note}
+}
+
+fn run() {
+    env := Env{graph: Val(Graph{names: [String]{"ab", "c", "ab"}}), plain: Graph{names: [String]{"p"}}}
+    print(names_in(env))
+    print(has_graph(env))
+    print(first_name(env))
+    print(total_length(env))
+    print(count_matches(env, "ab"))
+    kept := kept_graph(env)
+    edited := renamed(env)
+    print(consumed(env))
+    print(tail_count(env))
+    held :: hold(Graph{names: [String]{"h", "i"}}, "note")
+    env.graph = None
+    env.plain = Graph{names: [String]{}}
+    print(kept.names.len())
+    print(edited.names.len())
+    print(names_in(env))
+    print(has_graph(env))
+    print(first_name(env))
+    print(kept_graph(env).names.len())
+    print(tail_count(env))
+    print(held.graph.names.len())
+    print(held.note)
+}

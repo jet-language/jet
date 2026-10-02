@@ -1859,15 +1859,13 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             Ok(url_parts_to_ct(&crate::Comptime::UrlLite::file(path)))
         }
         ("core.net.url", "data") => {
-            // `mime` arg is a `CtValue::Struct { type_name: "Mime", .. }`
-            // (D-URL1's `Mime` type) with `top`/`sub`/`params` fields — the
-            // `core.net.mime` module port isn't in this card's slice, so render
-            // its essence + params here the same way AOT's
-            // `JetMIME::to_string_value` does, matching field-for-field.
+            // `mime` arg is the `core.net.mime.MIME` record (`top`/`sub`/
+            // `parameters`); render its essence + parameters the same way
+            // AOT's `JetMIME::to_string_value` does, matching field-for-field.
             let mime = one(0)?;
             let text = as_string(one(1)?, span)?;
             let rendered = match mime {
-                CtValue::Struct { type_name, fields } if type_name == "Mime" => {
+                CtValue::Struct { type_name, fields } if type_name == "MIME" => {
                     let get = |name: &str| {
                         fields
                             .iter()
@@ -1893,7 +1891,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                         }
                     };
                     let mut out = format!("{}/{}", top, sub);
-                    if let Some(CtValue::List(params)) = get("params") {
+                    if let Some(CtValue::List(params)) = get("parameters") {
                         for p in params {
                             if let CtValue::List(kv) = p {
                                 if let [CtValue::Str(k), CtValue::Str(v)] = &kv[..] {
@@ -1909,7 +1907,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 }
                 _ => {
                     return Err(unsupported(
-                        "core.net.url.data: first argument must be a Mime",
+                        "core.net.url.data: first argument must be a MIME",
                         span,
                     ))
                 }

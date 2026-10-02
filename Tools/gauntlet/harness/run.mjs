@@ -1421,7 +1421,7 @@ async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, ful
 
 async function discoverJetArtifact(dir) {
   for (const name of ["run", "main"]) {
-    const preferred = path.join(dir, "build", name);
+    const preferred = path.join(dir, ".jet", "build", name);
     if (await exists(preferred)) return preferred;
   }
   const found = [];

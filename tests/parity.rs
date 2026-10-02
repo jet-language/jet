@@ -630,8 +630,8 @@ fn aot_specialized_value_methods() -> BTreeSet<Entry> {
     add_arm(
         &mut entries,
         &time,
-        "Mime",
-        "Type::Named(n) if n == \"Mime\" => match method {",
+        "MIME",
+        "Type::Named(n) if n == \"MIME\" => match method {",
     );
     let date_marker = "Type::Named(n) if n == \"Date\" || n == \"LocalDate\" => match method {";
     add_arm(&mut entries, &time, "Date", date_marker);
@@ -1805,7 +1805,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "params",
     ] {
         assert_eq!(
-            record(&records, Surface::Value, "Mime", method).class,
+            record(&records, Surface::Value, "MIME", method).class,
             Class::Covered
         );
     }

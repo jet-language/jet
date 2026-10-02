@@ -50,6 +50,18 @@ pub struct Program {
     // file spells outside its import declarations, so sema can report an
     // import that is never read.
     pub used_import_names: [String]{[String]{}}
+    // D-DBG1=A: the authored text of every `debug(…)` call, so sema can
+    // write the trace site and the E3405 unwrap edit without the source.
+    pub debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
+}
+
+// D-DBG1=A: one `debug(…)` call as written. `name_start` keys it to the call's
+// name span; `text` is the argument exactly as written; `close_end` is the
+// byte after the closing `)`.
+pub struct DebugTraceSite {
+    pub name_start: Int
+    pub text: String
+    pub close_end: Int
 }
 
 pub struct ElseArmSpan {

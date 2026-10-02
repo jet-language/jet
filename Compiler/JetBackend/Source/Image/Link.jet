@@ -1,0 +1,76 @@
+// Image linking: lay compiled x86-64 functions, the runtime functions and the
+// module's read-only data out in one block and resolve every rel32
+// relocation. Function targets name a compiled function by ID, runtime
+// targets name a runtime function by symbol, and data targets name a module
+// data object. All references are relative, so the block runs at any address:
+// a static image maps it at a fixed base, an in-memory image wherever the
+// mapping lands.
+
+pub struct X64LinkedText {
+    pub text: [U8]
+    // offsets[i] is where functions[i] starts in `text`, runtime_offsets[i]
+    // where runtime[i] starts.
+    pub offsets: [Int]
+    pub runtime_offsets: [Int]
+    pub errors: [String]
+}
+
+X64_FUNCTION_ALIGN :: prep { 16 }
+
+fn x64_link_place(text: &[U8], function: X64CompiledFunction) -> Int Never! {
+    loop text.len() % X64_FUNCTION_ALIGN != 0 -> x64_int3(&text)
+    at :: text.len()
+    loop byte in function.code -> &text.push(byte)
+    at
+}
+
+pub fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunction], data: [LIRData]) -> X64LinkedText Never! {
+    text := [U8]{}
+    offsets := [Int]{}
+    errors := [String]{}
+    loop function in functions -> &offsets.push(x64_link_place(&text, function))
+    runtime_offsets := [Int]{}
+    loop function in runtime -> &runtime_offsets.push(x64_link_place(&text, function))
+    data_offsets := [Int]{}
+    loop object in data {
+        loop text.len() % object.align != 0 -> &text.push(U8{0})
+        &data_offsets.push(text.len())
+        loop byte in object.bytes -> &text.push(byte)
+    }
+    // Every function with its start, compiled functions first.
+    placed := [X64CompiledFunction]{}
+    starts := [Int]{}
+    loop (index, function) in functions {
+        &placed.push(function)
+        &starts.push(offsets[index])
+    }
+    loop (index, function) in runtime {
+        &placed.push(function)
+        &starts.push(runtime_offsets[index])
+    }
+    loop (index, function) in placed {
+        loop reloc in function.relocs {
+            at :: starts[index] + reloc.at
+            target := -1
+            if reloc.target == {
+                .Function(id) -> {
+                    loop (candidate_index, candidate) in functions { if target < 0 && candidate.id == id -> target = offsets[candidate_index] }
+                    if target < 0 -> &errors.push("{function.name}: call to function {id.value}, which is not in the image")
+                }
+                .Runtime(symbol) -> {
+                    loop (candidate_index, candidate) in runtime { if target < 0 && candidate.name == symbol -> target = runtime_offsets[candidate_index] }
+                    if target < 0 -> &errors.push("{function.name}: runtime symbol `{symbol}` is not in the image runtime")
+                }
+                .Data(id) -> {
+                    if id.value >= 0 && id.value < data_offsets.len() {
+                        target = data_offsets[id.value]
+                    } else {
+                        &errors.push("{function.name}: data {id.value} is not in the module")
+                    }
+                }
+            }
+            if target >= 0 -> x64_patch_rel32(&text, at, target)
+        }
+    }
+    X64LinkedText{text: text, offsets: offsets, runtime_offsets: runtime_offsets, errors: errors}
+}

@@ -1,9 +1,13 @@
 // S40 / D-RANGE-VALUE1: String slices use character positions and accept
-// both an inline Range and a stored Range value.
+// both an inline Range and a stored Range value. `.slice(a, b)` excludes the
+// end, like list and byte `.slice` and `a..<b` (#4001).
 fn run() {
     text :: "hello"
     r :: 0..4
     print(text.slice(0..4))
-    print(text.slice(0, 4))
+    print(text.slice(0, 5))
     print(text.slice(r))
+    print(text.slice(1, 3))
+    print(text.slice(1, 3) == text.slice(1..<3))
+    print(text.slice(2, 2) == "")
 }

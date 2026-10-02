@@ -4,6 +4,7 @@
 use jet_foundation.[
     AccessConvention,
     Diagnostic,
+    DebugTraceSite,
     ElseArmSpan,
     Expr,
     Item,
@@ -337,6 +338,8 @@ pub struct SemaScopeEnvironment {
     // D-SHAPE-PLACE1=A: the module's proven length-preserving list write
     // parameters, copied into each function's ownership state.
     pub fixed_length_write_params: [String]{[String]{}}
+    // D-DBG1=A: the module's `debug(…)` call texts, from the parser.
+    pub debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
 }
  
 pub struct SemaCheckContext {
@@ -422,6 +425,13 @@ pub struct SemaCheckContext {
     // Rust `iter_borrowed` (E0507): the collections an active `loop x in xs`
     // reads across its body, so a change to one of them there is rejected.
     pub iter_borrowed: [String]{[String]{}}
+    // D-RANGETYPE1 (E0136): a binding's initializer is being checked, so a
+    // propagating runtime range conversion inside it is reported there.
+    pub binding_initializer: Bool{false}
+    // D-COMPILE-STACK1=A (E1403): source forms being checked right now, one per
+    // statement and per expression level, against the limit the parser and
+    // the TIR evaluator share.
+    pub source_nesting: Int{0}
 }
 
  
@@ -429,6 +439,11 @@ pub struct SemaCheckContext {
 pub struct SemaScopeTable {
     pub frames: [SemaScopeFrame]
     pub bindings: [SemaScopeBinding]
+    // Binding positions per name, ascending: `name_slots` maps a name to its
+    // row in `name_positions`. Every push goes through
+    // sema_scope_push_binding, so name resolution never rescans `bindings`.
+    pub name_slots: [String:Int]
+    pub name_positions: [[Int]]
     pub loop_labels: [SemaScopeLoopLabel]
     pub hardware_transfers: [SemaHardwareDMATransferFact]
     pub hardware_definite_transfers: [SemaHardwareDMATransferFact]
@@ -446,6 +461,32 @@ pub struct SemaScopeTable {
     // D-MEM-COPYSEM1: `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
     pub copies_explicit: Bool{false}
+    // Rollback support (sema_scope_mark / sema_scope_rollback): while a mark
+    // is open, an in-place edit of an existing binding first records the old
+    // row here, so a rollback restores the table without a whole-table copy.
+    pub binding_undo: [SemaScopeBindingUndo]{[SemaScopeBindingUndo]{}}
+    pub open_marks: Int{0}
+}
+
+pub struct SemaScopeBindingUndo {
+    pub index: Int
+    pub binding: SemaScopeBinding
+}
+
+// A rollback point: the table's row counts plus a copy of its small fields.
+// `saved` holds no frames, bindings or name rows.
+pub struct SemaScopeMark {
+    pub frames: Int
+    pub bindings: Int
+    pub undo: Int
+    pub saved: SemaScopeTable
+}
+
+// The hardware transfer facts of one path, joined at a control-flow merge.
+pub struct SemaScopeHardwareFacts {
+    pub transfers: [SemaHardwareDMATransferFact]
+    pub definite: [SemaHardwareDMATransferFact]
+    pub pending: [SemaHardwareDMATransferFact]
 }
 
 pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
@@ -603,6 +644,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         failure_union_cases: ~source.failure_union_cases,
         failure_union_edges: ~source.failure_union_edges,
         failure_union_general: source.failure_union_general,
+        source_nesting: source.source_nesting,
     }
 }
 
@@ -616,6 +658,8 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: ~source.frames,
         bindings: ~source.bindings,
+        name_slots: ~source.name_slots,
+        name_positions: ~source.name_positions,
         loop_labels: ~source.loop_labels,
         hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
         hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
@@ -631,6 +675,93 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        binding_undo: ~source.binding_undo,
+        open_marks: source.open_marks,
+    }
+}
+
+// Opens a rollback point. Control-flow paths and function bodies are checked
+// in place and rolled back, instead of copying the whole table (which holds
+// every module declaration) per path.
+pub fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
+    table.open_marks += 1
+    SemaScopeMark{
+        frames: table.frames.len(),
+        bindings: table.bindings.len(),
+        undo: table.binding_undo.len(),
+        saved: SemaScopeTable{
+            frames: [SemaScopeFrame]{},
+            bindings: [SemaScopeBinding]{},
+            name_slots: [String:Int]{},
+            name_positions: [[Int]]{},
+            loop_labels: ~table.loop_labels,
+            hardware_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
+            hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
+            hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_pending_transfers),
+            current: table.current,
+            knowledge_gate: table.knowledge_gate,
+            return_type: table.return_type,
+            failure_carrier: table.failure_carrier,
+            loop_depth: table.loop_depth,
+            ownership_call_depth: table.ownership_call_depth,
+            comptime_execution_depth: table.comptime_execution_depth,
+            transaction_depth: table.transaction_depth,
+            transaction_wall_depth: table.transaction_wall_depth,
+            unit_explicit_units: table.unit_explicit_units,
+            copies_explicit: table.copies_explicit,
+        },
+    }
+}
+
+// Restores the table to `mark`: in-place binding edits are undone newest
+// first, rows pushed since the mark are dropped (with their name positions,
+// which are ascending per name), and the small fields are restored.
+pub fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
+    undo_index := table.binding_undo.len()
+    loop undo_index > mark.undo {
+        undo_index -= 1
+        restored_index :: table.binding_undo[undo_index].index
+        if restored_index < mark.bindings -> table.bindings[restored_index] = ~table.binding_undo[undo_index].binding
+    }
+    loop table.binding_undo.len() > mark.undo -> _ := &table.binding_undo.pop()
+    loop table.bindings.len() > mark.bindings {
+        last :: table.bindings.len() - 1
+        if table.name_slots.get(table.bindings[last].symbol.name) == .Val(slot) -> _ := &table.name_positions[slot].pop()
+        _ := &table.bindings.pop()
+    }
+    loop table.frames.len() > mark.frames -> _ := &table.frames.pop()
+    saved :: mark.saved
+    table.loop_labels = ~saved.loop_labels
+    table.hardware_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_transfers)
+    table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_definite_transfers)
+    table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_pending_transfers)
+    table.current = saved.current
+    table.knowledge_gate = saved.knowledge_gate
+    table.return_type = saved.return_type
+    table.failure_carrier = saved.failure_carrier
+    table.loop_depth = saved.loop_depth
+    table.ownership_call_depth = saved.ownership_call_depth
+    table.comptime_execution_depth = saved.comptime_execution_depth
+    table.transaction_depth = saved.transaction_depth
+    table.transaction_wall_depth = saved.transaction_wall_depth
+    table.unit_explicit_units = saved.unit_explicit_units
+    table.copies_explicit = saved.copies_explicit
+    if table.open_marks > 0 -> table.open_marks -= 1
+}
+
+// Call before editing `table.bindings[index]` in place, so an open rollback
+// point can restore the old row.
+pub fn sema_scope_note_binding_edit(table: &SemaScopeTable, index: Int) Never! {
+    if table.open_marks == 0 -> return
+    previous :: ~table.bindings[index]
+    &table.binding_undo.push(SemaScopeBindingUndo{index: index, binding: previous})
+}
+
+pub fn sema_scope_hardware_facts(table: SemaScopeTable) -> SemaScopeHardwareFacts Never! {
+    SemaScopeHardwareFacts{
+        transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
+        definite: sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
+        pending: sema_scope_hardware_transfers_snapshot(table.hardware_pending_transfers),
     }
 }
 
@@ -638,6 +769,8 @@ pub fn sema_scope_init(module_name: String) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
         bindings: [SemaScopeBinding]{},
+        name_slots: [String:Int]{},
+        name_positions: [[Int]]{},
         loop_labels: [SemaScopeLoopLabel]{},
         hardware_transfers: [SemaHardwareDMATransferFact]{},
         hardware_definite_transfers: [SemaHardwareDMATransferFact]{},
@@ -731,18 +864,23 @@ fn sema_scope_hardware_union(left: [SemaHardwareDMATransferFact], right: [SemaHa
     }
     result
 }
-pub fn sema_scope_join_hardware_paths(table: &SemaScopeTable, before: SemaScopeTable, then_path: SemaScopeTable, else_path: SemaScopeTable, has_else: Bool) Never! {
-    transfers := sema_scope_hardware_union(before.hardware_transfers, then_path.hardware_transfers)
-    definite := sema_scope_hardware_intersection(before.hardware_definite_transfers, then_path.hardware_definite_transfers)
-    pending := sema_scope_hardware_union(before.hardware_pending_transfers, then_path.hardware_pending_transfers)
+pub fn sema_scope_hardware_join(before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) -> SemaScopeHardwareFacts Never! {
+    transfers := sema_scope_hardware_union(before.transfers, then_path.transfers)
+    definite := sema_scope_hardware_intersection(before.definite, then_path.definite)
+    pending := sema_scope_hardware_union(before.pending, then_path.pending)
     if has_else {
-        transfers = sema_scope_hardware_union(transfers, else_path.hardware_transfers)
-        definite = sema_scope_hardware_intersection(definite, else_path.hardware_definite_transfers)
-        pending = sema_scope_hardware_union(pending, else_path.hardware_pending_transfers)
+        transfers = sema_scope_hardware_union(transfers, else_path.transfers)
+        definite = sema_scope_hardware_intersection(definite, else_path.definite)
+        pending = sema_scope_hardware_union(pending, else_path.pending)
     }
-    table.hardware_transfers = transfers
-    table.hardware_definite_transfers = definite
-    table.hardware_pending_transfers = pending
+    SemaScopeHardwareFacts{transfers: transfers, definite: definite, pending: pending}
+}
+
+pub fn sema_scope_join_hardware_paths(table: &SemaScopeTable, before: SemaScopeHardwareFacts, then_path: SemaScopeHardwareFacts, else_path: SemaScopeHardwareFacts, has_else: Bool) Never! {
+    joined :: sema_scope_hardware_join(before, then_path, else_path, has_else)
+    table.hardware_transfers = sema_scope_hardware_transfers_snapshot(joined.transfers)
+    table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(joined.definite)
+    table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(joined.pending)
 }
 
 pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool Never! {
@@ -760,10 +898,13 @@ pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool 
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
 pub fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
-    loop binding in table.bindings {
-        if binding.frame == 0 && !binding.compiler_builtin && binding.symbol.name == symbol.name -> return false
+    if table.name_slots.get(symbol.name) == .Val(slot) {
+        loop index in table.name_positions[slot] {
+            binding :: table.bindings[index]
+            if binding.frame == 0 && !binding.compiler_builtin -> return false
+        }
     }
-    &table.bindings.push(SemaScopeBinding{frame: 0, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+    sema_scope_push_binding(&table, SemaScopeBinding{frame: 0, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
     true
 }
 
@@ -772,7 +913,7 @@ pub fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegist
     loop binding in table.bindings {
         if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id.key == nominal.symbol.id.key -> return true
     }
-    &table.bindings.push(SemaScopeBinding{frame: 0, symbol: nominal.symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: true})
+    sema_scope_push_binding(&table, SemaScopeBinding{frame: 0, symbol: nominal.symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: true})
     true
 }
 
@@ -922,14 +1063,27 @@ pub fn sema_scope_pop_loop_label(table: &SemaScopeTable) Never! {
     if table.loop_labels.len() > 0 -> _ := &table.loop_labels.pop()
 }
 
+// Appends one binding and records its position under its name.
+pub fn sema_scope_push_binding(table: &SemaScopeTable, binding: SemaScopeBinding) Never! {
+    position :: table.bindings.len()
+    if table.name_slots.get(binding.symbol.name) == .Val(slot) {
+        &table.name_positions[slot].push(position)
+    } else {
+        &table.name_slots.add(binding.symbol.name, table.name_positions.len()).drop("the lookup above proved this name has no slot")
+        &table.name_positions.push([Int]{position})
+    }
+    &table.bindings.push(binding)
+}
+
 pub fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
+    slot :: table.name_slots.get(name) ?? return None
     frame := table.current
     loop frame >= 0 {
-        index := table.bindings.len() - 1
-        loop index >= 0 {
-            binding :: table.bindings[index]
-            if binding.frame == frame && binding.symbol.name == name -> return Val(index)
-            index -= 1
+        cursor := table.name_positions[slot].len() - 1
+        loop cursor >= 0 {
+            index :: table.name_positions[slot][cursor]
+            if table.bindings[index].frame == frame -> return Val(index)
+            cursor -= 1
         }
         frame = table.frames[frame].parent
     }
@@ -937,13 +1091,15 @@ pub fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
 }
 
 pub fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
+    slot :: table.name_slots.get(name) ?? return None
     frame := table.current
     loop frame >= 0 {
-        index := table.bindings.len() - 1
-        loop index >= 0 {
+        cursor := table.name_positions[slot].len() - 1
+        loop cursor >= 0 {
+            index :: table.name_positions[slot][cursor]
             binding :: table.bindings[index]
-            if binding.frame == frame && binding.symbol.name == name && binding.symbol.span.start <= use_span.start -> return Val(index)
-            index -= 1
+            if binding.frame == frame && binding.symbol.span.start <= use_span.start -> return Val(index)
+            cursor -= 1
         }
         frame = table.frames[frame].parent
     }
@@ -964,7 +1120,8 @@ pub fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable:
         previous :: table.bindings[index].symbol
         if sema_scope_name_blocks_binding(previous.kind) -> return false
     }
-    &table.bindings.push(SemaScopeBinding{frame: table.current, symbol: symbol, mutable: mutable, access: access, integer_bounds: integer_bounds, string_view: string_view, compiler_builtin: false})
+    frame :: table.current
+    sema_scope_push_binding(&table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: mutable, access: access, integer_bounds: integer_bounds, string_view: string_view, compiler_builtin: false})
     true
 }
 
@@ -972,7 +1129,8 @@ pub fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable:
 // of its scope. The refinement shadows the carrier binding on purpose, so it
 // skips the duplicate-name rule that ordinary declarations obey.
 pub fn sema_scope_refine_local(table: &SemaScopeTable, symbol: Symbol) Never! {
-    &table.bindings.push(SemaScopeBinding{frame: table.current, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+    frame :: table.current
+    sema_scope_push_binding(&table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
 }
 
 pub fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolID) -> Symbol? {

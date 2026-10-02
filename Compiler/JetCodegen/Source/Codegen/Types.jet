@@ -555,23 +555,46 @@ struct JetCodegenResolvedField {
     pub field_name: String
 }
 
-fn jet_codegen_resolve_field_by_symbol(modules: [SemaGraphModuleResult], reference: TFieldRef) -> JetCodegenResolvedField Never! {
-    resolved := JetCodegenResolvedField?{None}
+// One registered nominal field, keyed in the program index by its field
+// symbol key so each checked TFieldRef resolves without rescanning every
+// module's nominals.
+struct JetCodegenFieldSymbolRow {
+    pub owner_key: String
+    pub name: String
+    pub resolved: JetCodegenResolvedField
+}
+
+// Built once per lowered program; rows keep module, nominal and field order.
+fn jet_codegen_field_symbol_index(modules: [SemaGraphModuleResult]) -> [String:[JetCodegenFieldSymbolRow]] Never! {
+    index := [String:[JetCodegenFieldSymbolRow]]{}
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
-            if reference.owner != None && nominal.symbol.id.key != (reference.owner ?? SymbolID{key: ""}).key -> next
             loop field in nominal.fields {
-                if field.symbol.id.key == reference.field.key {
-                    if field.symbol.name != reference.name -> panic("checked field reference name disagrees with its registered symbol")
-                    if resolved != None -> panic("ambiguous checked field symbol in Codegen input")
-                    resolved = Val(JetCodegenResolvedField{
+                rows := index.get(field.symbol.id.key) ?? [JetCodegenFieldSymbolRow]{}
+                &rows.push(JetCodegenFieldSymbolRow{
+                    owner_key: nominal.symbol.id.key,
+                    name: field.symbol.name,
+                    resolved: JetCodegenResolvedField{
                         module_identity: semantic_module.module_identity,
                         nominal_name: nominal.symbol.name,
                         field_name: field.symbol.name,
-                    })
-                }
+                    },
+                })
+                index[field.symbol.id.key] = rows
             }
         }
+    }
+    index
+}
+
+fn jet_codegen_resolve_field_by_symbol(field_symbols: [String:[JetCodegenFieldSymbolRow]], reference: TFieldRef) -> JetCodegenResolvedField Never! {
+    resolved := JetCodegenResolvedField?{None}
+    rows :: field_symbols.get(reference.field.key) ?? [JetCodegenFieldSymbolRow]{}
+    loop row in rows {
+        if reference.owner != None && row.owner_key != (reference.owner ?? SymbolID{key: ""}).key -> next
+        if row.name != reference.name -> panic("checked field reference name disagrees with its registered symbol")
+        if resolved != None -> panic("ambiguous checked field symbol in Codegen input")
+        resolved = Val(row.resolved)
     }
     resolved ?? panic("checked TFieldRef has no registered nominal field")
 }

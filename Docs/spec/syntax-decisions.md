@@ -1319,7 +1319,8 @@ by-value lookup.
 
 **S40 — Slicing**: `xs[a..b]` inclusive, copies (no exposed references);
 `s.slice(a..b) -> String` on character positions; L0501 lints slice copies in
-loops.
+loops. The two-Int form `.slice(a, b)` excludes the end for String, lists and
+bytes alike (`slice(1, 3)` = items 1 and 2, same as `a..<b`; owner ruling #4001).
 
 **D-ITER1 / D-ITERTOOLS1=A — Iterator adapters**: `map`, `filter`, `each`,
 `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`,

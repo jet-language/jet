@@ -2699,7 +2699,26 @@ pub(super) fn lower_expr(
                 &carrier,
             )?)?;
             let location = panic_location(ctx, *line);
-            let base = ctx.lower_child(base)?;
+            // D-MEM-COPYSEM1: the list slice kernel borrows its base, so a
+            // place base (under at most a compiler-inserted clone) is read in
+            // place rather than copied whole before slicing.
+            let list_base = match &base.kind {
+                TExprKind::Clone(inner) => &**inner,
+                _ => &**base,
+            };
+            let place = if matches!(list_base.ty.without_user_tags(), Type::List(_)) {
+                lower_receiver_place(ctx, list_base, MirAccess::Read)?
+            } else {
+                None
+            };
+            let base = match place {
+                Some(place) => ctx.emit(
+                    "slice.base",
+                    Some(list_base.ty.clone()),
+                    MirOperation::ReadPlace(place),
+                )?,
+                None => ctx.lower_child(base)?,
+            };
             let start = ctx.lower_child(start)?;
             let end = ctx.lower_child(end)?;
             let range = range
@@ -4540,6 +4559,12 @@ pub(super) fn lower_expr(
         }
     };
     let value = value?;
+    record_lowered_expression(expr, &value);
+    Ok(value)
+}
+
+/// The canonical-pass row of one lowered expression.
+fn record_lowered_expression(expr: &TExpr, value: &jet_foundation::MIR::MirValueId) {
     if CanonicalPass::enabled() {
         CanonicalPass::record(
             "lowering",
@@ -4549,12 +4574,11 @@ pub(super) fn lower_expr(
             super::canonical_expression_payload(expr),
             super::canonical_expression_identity(expr),
             "mir",
-            CanonicalPass::debug_payload("mir", "mir.lower-expression", &value),
-            CanonicalPass::debug_identity("mir", "mir.lower-expression", &value),
+            CanonicalPass::debug_payload("mir", "mir.lower-expression", value),
+            CanonicalPass::debug_identity("mir", "mir.lower-expression", value),
             "preserve",
         );
     }
-    Ok(value)
 }
 
 fn lower_values(
@@ -5573,50 +5597,123 @@ fn lower_compare_chain(
         MirOperation::Phi { incoming },
     )
 }
-fn lower_if_expr(
+/// One open level of an if-expression chain: its expression and else value,
+/// its join block, the arm values that reach the join, and its shadow mark.
+struct IfExprLevel<'a> {
+    expr: &'a TExpr,
+    else_value: &'a TExpr,
+    join: MirBlockId,
+    incoming: Vec<(MirBlockId, jet_foundation::MIR::MirValueId)>,
+    shadow_mark: usize,
+}
+
+/// Lower an if-expression and the if-expressions chained through its else
+/// values (how a value `match` reaches TIR: one level per arm) in a loop, not
+/// one `lower_expr` recursion per arm. Blocks, shadow restores, terminators,
+/// phis and canonical rows are emitted in exactly the order the recursive
+/// `lower_child(else_value)` calls produced.
+fn lower_if_expr<'a>(
+    ctx: &mut LowerCtx,
+    expr: &'a TExpr,
+    cond: &'a super::TIfCond,
+    then_body: &'a [super::TStmt],
+    then_value: &'a TExpr,
+    else_body: &'a [super::TStmt],
+    else_value: &'a TExpr,
+) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+    let mut levels: Vec<IfExprLevel<'a>> = Vec::new();
+    let (mut expr, mut cond, mut then_body, mut then_value, mut else_body, mut else_value) =
+        (expr, cond, then_body, then_value, else_body, else_value);
+    let mut value = loop {
+        let then_block = ctx.new_block(ctx.span(), "if-then")?;
+        let else_block = ctx.new_block(ctx.span(), "if-else")?;
+        let join = ctx.new_block(ctx.span(), "if-join")?;
+
+        // Condition bindings (`x == .Val(x)`) hold only on the then path.
+        let shadow_mark = ctx.shadow_mark();
+        lower_if_cond(ctx, cond, then_block, else_block)?;
+
+        let mut incoming = Vec::with_capacity(2);
+
+        ctx.switch_to(then_block);
+        ctx.lower_nested_stmts(then_body)?;
+        if !ctx.is_terminated() {
+            let value = ctx.lower_child(then_value)?;
+            let value = ctx.trait_box_value(value, &then_value.ty, &expr.ty)?;
+            let source = ctx.current_block();
+            if !ctx.is_terminated() {
+                ctx.terminate(MirTerminator::Jump { target: join });
+                incoming.push((source, value));
+            }
+        }
+
+        ctx.restore_shadowed_locals(shadow_mark);
+        ctx.switch_to(else_block);
+        ctx.lower_nested_stmts(else_body)?;
+        if !ctx.is_terminated() {
+            if let TExprKind::IfExpr {
+                cond: next_cond,
+                then_body: next_then_body,
+                then_value: next_then_value,
+                else_body: next_else_body,
+                else_value: next_else_value,
+            } = &else_value.kind
+            {
+                levels.push(IfExprLevel {
+                    expr,
+                    else_value,
+                    join,
+                    incoming,
+                    shadow_mark,
+                });
+                expr = else_value;
+                cond = &**next_cond;
+                then_body = next_then_body.as_slice();
+                then_value = &**next_then_value;
+                else_body = next_else_body.as_slice();
+                else_value = &**next_else_value;
+                continue;
+            }
+            let value = ctx.lower_child(else_value)?;
+            close_if_expr_arm(ctx, expr, else_value, join, &mut incoming, value)?;
+        }
+        break finish_if_expr_level(ctx, expr, join, incoming, shadow_mark)?;
+    };
+    while let Some(mut level) = levels.pop() {
+        // What `lower_expr` did after the nested level returned.
+        record_lowered_expression(level.else_value, &value);
+        close_if_expr_arm(ctx, level.expr, level.else_value, level.join, &mut level.incoming, value)?;
+        value = finish_if_expr_level(ctx, level.expr, level.join, level.incoming, level.shadow_mark)?;
+    }
+    Ok(value)
+}
+
+/// Jump from the end of an if-expression arm to the join with its value.
+fn close_if_expr_arm(
     ctx: &mut LowerCtx,
     expr: &TExpr,
-    cond: &super::TIfCond,
-    then_body: &[super::TStmt],
-    then_value: &TExpr,
-    else_body: &[super::TStmt],
-    else_value: &TExpr,
+    arm_value: &TExpr,
+    join: MirBlockId,
+    incoming: &mut Vec<(MirBlockId, jet_foundation::MIR::MirValueId)>,
+    value: jet_foundation::MIR::MirValueId,
+) -> Result<(), LowerError> {
+    let value = ctx.trait_box_value(value, &arm_value.ty, &expr.ty)?;
+    let source = ctx.current_block();
+    if !ctx.is_terminated() {
+        ctx.terminate(MirTerminator::Jump { target: join });
+        incoming.push((source, value));
+    }
+    Ok(())
+}
+
+/// Close one if-expression level: the phi of its arm values at the join.
+fn finish_if_expr_level(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    join: MirBlockId,
+    incoming: Vec<(MirBlockId, jet_foundation::MIR::MirValueId)>,
+    shadow_mark: usize,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-    let then_block = ctx.new_block(ctx.span(), "if-then")?;
-    let else_block = ctx.new_block(ctx.span(), "if-else")?;
-    let join = ctx.new_block(ctx.span(), "if-join")?;
-
-    // Condition bindings (`x == .Val(x)`) hold only on the then path.
-    let shadow_mark = ctx.shadow_mark();
-    lower_if_cond(ctx, cond, then_block, else_block)?;
-
-    let mut incoming = Vec::with_capacity(2);
-
-    ctx.switch_to(then_block);
-    ctx.lower_nested_stmts(then_body)?;
-    if !ctx.is_terminated() {
-        let value = ctx.lower_child(then_value)?;
-        let value = ctx.trait_box_value(value, &then_value.ty, &expr.ty)?;
-        let source = ctx.current_block();
-        if !ctx.is_terminated() {
-            ctx.terminate(MirTerminator::Jump { target: join });
-            incoming.push((source, value));
-        }
-    }
-
-    ctx.restore_shadowed_locals(shadow_mark);
-    ctx.switch_to(else_block);
-    ctx.lower_nested_stmts(else_body)?;
-    if !ctx.is_terminated() {
-        let value = ctx.lower_child(else_value)?;
-        let value = ctx.trait_box_value(value, &else_value.ty, &expr.ty)?;
-        let source = ctx.current_block();
-        if !ctx.is_terminated() {
-            ctx.terminate(MirTerminator::Jump { target: join });
-            incoming.push((source, value));
-        }
-    }
-
     ctx.restore_shadowed_locals(shadow_mark);
     if incoming.is_empty() {
         ctx.block_mut(join)?.terminator = MirTerminator::Unreachable {
@@ -6473,6 +6570,37 @@ fn lower_or_fallback_expr(
     }
 
     ctx.switch_to(failure_block);
+    let fallback_value =
+        lower_or_fallback_failure(ctx, expr, value, value_id, fallback, failure_is_never)?;
+    if let Some(fallback_value) = fallback_value {
+        let source = ctx.current_block();
+        if !ctx.is_terminated() {
+            ctx.terminate(MirTerminator::Jump { target: join });
+            incoming.push((source, fallback_value));
+        }
+    }
+    if incoming.is_empty() {
+        return unsupported_expr(ctx, "TExprKind::OrFallback (no reachable value)");
+    }
+    ctx.switch_to(join);
+    ctx.emit(
+        "or-fallback-phi",
+        Some(expr.ty.clone()),
+        MirOperation::Phi { incoming },
+    )
+}
+
+/// The failure route of `value ?? fallback` from the current (failure)
+/// block: binds the ambient `err` of a Result carrier, then lowers the
+/// fallback. Returns the fallback value when the fallback produces one.
+fn lower_or_fallback_failure(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    value: &TExpr,
+    value_id: jet_foundation::MIR::MirValueId,
+    fallback: &super::TOrFallback,
+    failure_is_never: bool,
+) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
     // The ambient `err` binding and the fallback body get their own cleanup
     // frame: `err` is bound only on the failure path, so its owned-drop must
     // not be queued on a frame the success path also exits.
@@ -6528,21 +6656,92 @@ fn lower_or_fallback_expr(
             ctx.local_values.insert(name, value);
         }
     }
-    if let Some(fallback_value) = fallback_value {
-        let source = ctx.current_block();
-        if !ctx.is_terminated() {
-            ctx.terminate(MirTerminator::Jump { target: join });
-            incoming.push((source, fallback_value));
-        }
+    Ok(fallback_value)
+}
+
+/// D-MEM-COPYSEM1: `name :: place ?? <diverging fallback>` over a read
+/// parameter's place. The carrier test reads the place itself and the
+/// success route names the payload in place, so the binding copies nothing.
+/// Returns the payload place, with lowering continuing on the success route;
+/// `None` (nothing emitted) when `value` is not such a place or the fallback
+/// can produce a value.
+pub(super) fn lower_or_fallback_window(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    value: &TExpr,
+    fallback: &super::TOrFallback,
+) -> Result<Option<MirPlaceId>, LowerError> {
+    let diverges = match fallback {
+        super::TOrFallback::Value(value) => inline_block_diverges(value),
+        _ => true,
+    };
+    let (payload_ty, kind) = match &value.ty {
+        Type::Option(inner) => (
+            (**inner).clone(),
+            jet_foundation::MIR::MirPayloadKind::Option,
+        ),
+        Type::Result { ok, err } if !ok.is_never() && !err.is_never() => (
+            (**ok).clone(),
+            jet_foundation::MIR::MirPayloadKind::Result { ok: true },
+        ),
+        _ => return Ok(None),
+    };
+    if !diverges || payload_ty != expr.ty {
+        return Ok(None);
     }
-    if incoming.is_empty() {
-        return unsupported_expr(ctx, "TExprKind::OrFallback (no reachable value)");
+    let Some(subject) = ctx.lower_read_window(value)? else {
+        return Ok(None);
+    };
+    let condition = match &value.ty {
+        Type::Option(_) => ctx.emit(
+            "or-fallback-option-condition",
+            Some(Type::Bool),
+            MirOperation::OptionIsSome { subject },
+        )?,
+        _ => ctx.emit(
+            "or-fallback-result-condition",
+            Some(Type::Bool),
+            MirOperation::ResultIsOk { subject },
+        )?,
+    };
+    let success_block = ctx.new_block(ctx.span(), "or-fallback-success")?;
+    let failure_block = ctx.new_block(ctx.span(), "or-fallback-failure")?;
+    ctx.terminate(MirTerminator::Branch {
+        condition,
+        then_target: success_block,
+        else_target: failure_block,
+    });
+    ctx.switch_to(failure_block);
+    if lower_or_fallback_failure(ctx, expr, value, subject, fallback, false)?.is_some() {
+        return Err(ctx.error(ctx.span(), "diverging `??` fallback produced a value"));
     }
-    ctx.switch_to(join);
-    ctx.emit(
-        "or-fallback-phi",
-        Some(expr.ty.clone()),
-        MirOperation::Phi { incoming },
+    if !ctx.is_terminated() {
+        ctx.terminate(MirTerminator::Unreachable {
+            reason: "diverging or-fallback".to_string(),
+        });
+    }
+    ctx.switch_to(success_block);
+    let window = ctx
+        .read_window_of(subject)
+        .ok_or_else(|| ctx.error(ctx.span(), "missing checked read window place"))?;
+    Ok(Some(ctx.project_payload_place(window, kind, &payload_ty)?))
+}
+
+/// True when a `??` value fallback is an inline block that leaves through
+/// its final `return`, `break`, or `next`.
+fn inline_block_diverges(value: &TExpr) -> bool {
+    matches!(
+        &value.kind,
+        TExprKind::InlineBlock(stmts)
+            if matches!(
+                stmts.last(),
+                Some(
+                    super::TStmt::Return(_)
+                        | super::TStmt::Break(_)
+                        | super::TStmt::BreakValue { .. }
+                        | super::TStmt::Continue(_)
+                )
+            )
     )
 }
 
@@ -6553,19 +6752,11 @@ fn lower_fallback_block(
 ) -> Result<Option<jet_foundation::MIR::MirValueId>, LowerError> {
     match fallback {
         super::TOrFallback::Value(value) => {
-            if let TExprKind::InlineBlock(stmts) = &value.kind {
-                if matches!(
-                    stmts.last(),
-                    Some(
-                        super::TStmt::Return(_)
-                            | super::TStmt::Break(_)
-                            | super::TStmt::BreakValue { .. }
-                            | super::TStmt::Continue(_)
-                    )
-                ) {
+            if inline_block_diverges(value) {
+                if let TExprKind::InlineBlock(stmts) = &value.kind {
                     ctx.lower_nested_stmts(stmts)?;
-                    return Ok(None);
                 }
+                return Ok(None);
             }
             let source_ty = value.ty.clone();
             let value = ctx.lower_child(value)?;

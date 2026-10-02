@@ -15,7 +15,8 @@ use crate::Codegen::MIRRust::{
 };
 use jet_jit::SourceResources::SourceResourceRetireError;
 use jet_foundation::MIR::{MirFieldId, MirProgram, MirType, MirTypeId};
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Write as _};
 use std::path::Path;
 #[path = "NativeAdapter.rs"]
@@ -420,6 +421,21 @@ pub(crate) enum BootstrapHostCodecError {
         cause: Box<BootstrapHostCodecError>,
         retirement: SourceResourceRetireError,
     },
+    /// Every failure one packaging run found: packaging keeps going after a
+    /// failed lookup or stage so a single stage-zero run reports them all.
+    Multiple(Vec<BootstrapHostCodecError>),
+}
+
+impl BootstrapHostCodecError {
+    /// One error for a non-empty `errors` list: the error itself when alone.
+    pub(crate) fn combine(mut errors: Vec<BootstrapHostCodecError>) -> Self {
+        if errors.len() == 1 {
+            if let Some(error) = errors.pop() {
+                return error;
+            }
+        }
+        Self::Multiple(errors)
+    }
 }
 
 impl fmt::Display for BootstrapHostCodecError {
@@ -439,7 +455,14 @@ impl fmt::Display for BootstrapHostCodecError {
                 "{cause}; Source resource retirement failed: {}",
                 retirement.error
             ),
-    }
+            Self::Multiple(errors) => {
+                write!(formatter, "{} bootstrap packaging errors:", errors.len())?;
+                for error in errors {
+                    write!(formatter, "\n  - {error}")?;
+                }
+                Ok(())
+            }
+        }
 }
 }
 /// Source-coupled bindings emitted by one Rust artifact.
@@ -600,30 +623,89 @@ impl BootstrapBindingDescriptor {
 pub(crate) struct BootstrapCodecSymbols<'a> {
     metadata: &'a BootstrapBindingDescriptor,
     types: BTreeMap<&'a str, &'a str>,
+    // First row per key, matching the linear-scan meaning these replace: the
+    // host glue walks the whole compiler type graph once per root, so each
+    // field and variant lookup must not rescan every row.
+    definitions: HashMap<&'a str, MirTypeId>,
+    fields: HashMap<(MirTypeId, &'a str), &'a BootstrapFieldBinding>,
+    // Enum variants with named payloads may repeat a field name across
+    // variants, so their payload fields resolve by checked field identity.
+    field_ids: HashMap<(MirTypeId, MirFieldId), &'a BootstrapFieldBinding>,
+    variants: HashMap<(MirTypeId, &'a str), &'a str>,
+    // Failed symbol lookups. A miss yields `MISSING_SYMBOL` so packaging keeps
+    // going and `finish` reports every miss of one run, not just the first.
+    missed: RefCell<Vec<BootstrapHostCodecError>>,
 }
+
+/// Placeholder spelling returned for a failed lookup; the packaging result is
+/// an error whenever one was handed out, so it never reaches emitted Rust.
+const MISSING_SYMBOL: &str = "__jet_bootstrap_missing_symbol";
 
 impl<'a> BootstrapCodecSymbols<'a> {
     pub(crate) fn new(metadata: &'a BootstrapBindingDescriptor) -> Result<Self, BootstrapHostCodecError> {
         let mut types = BTreeMap::new();
+        let mut definitions = HashMap::new();
         for row in &metadata.types {
             types.insert(row.source_name.as_str(), row.symbol.as_str());
+            definitions.entry(row.source_name.as_str()).or_insert(row.ty);
         }
-        Ok(Self { metadata, types })
+        let mut fields = HashMap::new();
+        let mut field_ids = HashMap::new();
+        for row in &metadata.fields {
+            fields.entry((row.owner, row.source_name.as_str())).or_insert(row);
+            field_ids.entry((row.owner, row.field)).or_insert(row);
+        }
+        let mut variants = HashMap::new();
+        for row in &metadata.variants {
+            variants
+                .entry((row.owner, row.source_name.as_str()))
+                .or_insert(row.symbol.as_str());
+        }
+        Ok(Self { metadata, types, definitions, fields, field_ids, variants, missed: RefCell::new(Vec::new()) })
+    }
+
+    /// Keep a packaging failure and go on, so `finish` reports it with the rest.
+    pub(crate) fn record(&self, error: BootstrapHostCodecError) {
+        self.missed.borrow_mut().push(error);
+    }
+
+    fn symbol_or_record<'s>(&self, symbol: Result<&'s str, BootstrapHostCodecError>) -> &'s str {
+        symbol.unwrap_or_else(|error| {
+            self.record(error);
+            MISSING_SYMBOL
+        })
+    }
+
+    /// `result`, unless lookups were recorded: then every recorded failure
+    /// plus `result`'s own error, in the order they happened.
+    pub(crate) fn finish<T>(
+        &self,
+        result: Result<T, BootstrapHostCodecError>,
+    ) -> Result<T, BootstrapHostCodecError> {
+        let mut missed = std::mem::take(&mut *self.missed.borrow_mut());
+        match result {
+            Ok(value) if missed.is_empty() => Ok(value),
+            Ok(_) => Err(BootstrapHostCodecError::combine(missed)),
+            Err(error) => {
+                missed.push(error);
+                Err(BootstrapHostCodecError::combine(missed))
+            }
+        }
     }
 
     pub(crate) fn type_symbol(&self, name: &str) -> Result<&str, BootstrapHostCodecError> {
-        self.types
-            .get(name)
-            .copied()
-            .ok_or_else(|| BootstrapHostCodecError::MissingType(name.to_string()))
+        Ok(self.symbol_or_record(
+            self.types
+                .get(name)
+                .copied()
+                .ok_or_else(|| BootstrapHostCodecError::MissingType(name.to_string())),
+        ))
     }
 
     fn definition_id(&self, name: &str) -> Result<MirTypeId, BootstrapHostCodecError> {
-        self.metadata
-            .types
-            .iter()
-            .find(|row| row.source_name == name)
-            .map(|row| row.ty)
+        self.definitions
+            .get(name)
+            .copied()
             .ok_or_else(|| BootstrapHostCodecError::MissingType(name.to_string()))
     }
 
@@ -632,8 +714,7 @@ impl<'a> BootstrapCodecSymbols<'a> {
         owner: &str,
         field: &str,
     ) -> Result<&str, BootstrapHostCodecError> {
-        self.field_binding(owner, field)
-            .map(|row| row.symbol.as_str())
+        Ok(self.symbol_or_record(self.field_binding(owner, field).map(|row| row.symbol.as_str())))
     }
 
     pub(crate) fn field_binding(
@@ -642,13 +723,30 @@ impl<'a> BootstrapCodecSymbols<'a> {
         field: &str,
     ) -> Result<&BootstrapFieldBinding, BootstrapHostCodecError> {
         let owner_id = self.definition_id(owner)?;
-        self.metadata
-            .fields
-            .iter()
-            .find(|row| row.owner == owner_id && row.source_name == field)
+        self.fields
+            .get(&(owner_id, field))
+            .copied()
             .ok_or_else(|| BootstrapHostCodecError::MissingField {
                 owner: owner.to_string(),
                 field: field.to_string(),
+            })
+    }
+
+    /// The binding of one checked field by identity: the lookup for enum
+    /// payload fields, whose names are unique only within their variant.
+    pub(crate) fn field_binding_by_id(
+        &self,
+        owner: MirTypeId,
+        owner_name: &str,
+        field: MirFieldId,
+        field_name: &str,
+    ) -> Result<&BootstrapFieldBinding, BootstrapHostCodecError> {
+        self.field_ids
+            .get(&(owner, field))
+            .copied()
+            .ok_or_else(|| BootstrapHostCodecError::MissingField {
+                owner: owner_name.to_string(),
+                field: field_name.to_string(),
             })
     }
 
@@ -657,16 +755,15 @@ impl<'a> BootstrapCodecSymbols<'a> {
         owner: &str,
         variant: &str,
     ) -> Result<&str, BootstrapHostCodecError> {
-        let owner_id = self.definition_id(owner)?;
-        self.metadata
-            .variants
-            .iter()
-            .find(|row| row.owner == owner_id && row.source_name == variant)
-            .map(|row| row.symbol.as_str())
-            .ok_or_else(|| BootstrapHostCodecError::MissingVariant {
-                owner: owner.to_string(),
-                variant: variant.to_string(),
+        let symbol = self.definition_id(owner).and_then(|owner_id| {
+            self.variants.get(&(owner_id, variant)).copied().ok_or_else(|| {
+                BootstrapHostCodecError::MissingVariant {
+                    owner: owner.to_string(),
+                    variant: variant.to_string(),
+                }
             })
+        });
+        Ok(self.symbol_or_record(symbol))
     }
 
     pub(crate) fn variant_path(
@@ -685,23 +782,24 @@ impl<'a> BootstrapCodecSymbols<'a> {
             .callables
             .iter()
             .filter(|row| row.source_name == source_name);
-        let row = rows
-            .next()
-            .ok_or_else(|| BootstrapHostCodecError::MissingEntry(source_name.to_string()))?;
-        if rows.next().is_some() {
-            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+        let symbol = match (rows.next(), rows.next()) {
+            (Some(row), None) => Ok(row.metadata.symbol.as_str()),
+            (None, _) => Err(BootstrapHostCodecError::MissingEntry(source_name.to_string())),
+            (Some(_), Some(_)) => Err(BootstrapHostCodecError::InvalidMetadata(format!(
                 "Source callable `{source_name}` has an ambiguous emitted symbol"
-            )));
-        }
-        Ok(row.metadata.symbol.as_str())
+            ))),
+        };
+        Ok(self.symbol_or_record(symbol))
     }
     pub(crate) fn trait_symbol(&self, name: &str) -> Result<&str, BootstrapHostCodecError> {
-        self.metadata
+        let symbol = self
+            .metadata
             .traits
             .iter()
             .find(|row| row.name == name)
             .map(|row| row.symbol.as_str())
-            .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{name}`")))
+            .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{name}`")));
+        Ok(self.symbol_or_record(symbol))
     }
 
     pub(crate) fn trait_method_metadata(
@@ -1081,80 +1179,113 @@ pub(crate) fn append_bootstrap_host_glue(
     program: &MirProgram,
 ) -> Result<(), BootstrapHostCodecError> {
     let symbols = BootstrapCodecSymbols::new(bindings)?;
-    validate_bootstrap_numeric_callable_type(
-        symbols.field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?,
-    )?;
+    // Packaging keeps going after a failed check or stage, recording its error
+    // beside the failed lookups, so one stage-zero run reports every failure.
+    let keep = |result: Result<(), BootstrapHostCodecError>| {
+        if let Err(error) = result {
+            symbols.record(error);
+        }
+    };
+    keep(
+        symbols
+            .field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")
+            .and_then(validate_bootstrap_numeric_callable_type),
+    );
     for name in bootstrap_required_type_names() {
         let _ = symbols.type_symbol(name)?;
     }
-    let entry = bootstrap_required_callable(bindings, "jet_bootstrap_compile")?;
-    if entry.parameter_types.len() != 1 || entry.parameter_access.len() != 1 {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
-            "jet_bootstrap_compile must retain exactly one owned request parameter".to_string(),
-        ));
-    }
-    if entry.parameter_types[0].starts_with('&') {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
-            "jet_bootstrap_compile request must be an owned parameter".to_string(),
-        ));
-    }
+    let entry = bootstrap_required_callable(bindings, "jet_bootstrap_compile")
+        .and_then(|entry| {
+            if entry.parameter_types.len() != 1 || entry.parameter_access.len() != 1 {
+                return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "jet_bootstrap_compile must retain exactly one owned request parameter"
+                        .to_string(),
+                ));
+            }
+            if entry.parameter_types[0].starts_with('&') {
+                return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "jet_bootstrap_compile request must be an owned parameter".to_string(),
+                ));
+            }
+            Ok(entry)
+        })
+        .map_err(|error| symbols.record(error))
+        .ok();
 
-    let eval_default = bootstrap_required_callable(bindings, "jet_eval_default_config")?;
-    if !eval_default.parameter_types.is_empty() || !eval_default.parameter_access.is_empty() {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
-            "jet_eval_default_config must be a zero-parameter callable".to_string(),
-        ));
-    }
-    let eval_runtime_config = bootstrap_required_callable(bindings, "jet_eval_runtime_config")?;
-    if eval_runtime_config.parameter_types.len() != 1
-        || eval_runtime_config.parameter_access.as_slice()
-            != [jet_foundation::MIR::MirAccess::Read]
-    {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
-            "jet_eval_runtime_config must be a one-parameter Read fork".to_string(),
-        ));
-    }
+    let eval_default = bootstrap_required_callable(bindings, "jet_eval_default_config")
+        .and_then(|eval_default| {
+            if !eval_default.parameter_types.is_empty() || !eval_default.parameter_access.is_empty() {
+                return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "jet_eval_default_config must be a zero-parameter callable".to_string(),
+                ));
+            }
+            Ok(eval_default)
+        })
+        .map_err(|error| symbols.record(error))
+        .ok();
+    let eval_runtime_config = bootstrap_required_callable(bindings, "jet_eval_runtime_config")
+        .and_then(|eval_runtime_config| {
+            if eval_runtime_config.parameter_types.len() != 1
+                || eval_runtime_config.parameter_access.as_slice()
+                    != [jet_foundation::MIR::MirAccess::Read]
+            {
+                return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "jet_eval_runtime_config must be a one-parameter Read fork".to_string(),
+                ));
+            }
+            Ok(eval_runtime_config)
+        })
+        .map_err(|error| symbols.record(error))
+        .ok();
 
     let native_helper_roots = checked_bootstrap_native_helper_roots(
         bindings,
         program,
         config.execution.artifact,
-    )?;
+    )
+    .map_err(|error| symbols.record(error))
+    .ok();
 
     let mut glue = String::new();
-    emit_bootstrap_type_codec(&mut glue, &symbols)?;
-    emit_bootstrap_value_codec(&mut glue, &symbols)?;
-    emit_bootstrap_host_value_codec(&mut glue, &symbols)?;
-    emit_bootstrap_host_type_shape_codec(&mut glue, &symbols)?;
-    crate::compiler_bootstrap_diagnostic_codec::append_diagnostic_codec(&mut glue, &symbols)?;
-    crate::compiler_bootstrap_runtime_mir_codec::append_runtime_mir_codec(&mut glue, &symbols)?;
-    crate::compiler_bootstrap_entry_codec::append_bootstrap_entry_codec(
-        &mut glue,
-        bindings,
-        &symbols,
-        program,
-        entry.function,
-    )?;
-    emit_bootstrap_source_resource_bridge(&mut glue, &symbols)?;
-    emit_bootstrap_callback(&mut glue, &symbols)?;
-    emit_bootstrap_foreign_callback(&mut glue, &symbols)?;
-    emit_bootstrap_native_adapter_impl(&mut glue, &symbols)?;
-    emit_bootstrap_native_execution_helpers(
-        &mut glue,
-        bindings,
-        &symbols,
-        program,
-        &native_helper_roots,
-    )?;
-    emit_bootstrap_web_asset_provider(&mut glue, &symbols)?;
+    keep(emit_bootstrap_type_codec(&mut glue, &symbols));
+    keep(emit_bootstrap_value_codec(&mut glue, &symbols));
+    keep(emit_bootstrap_host_value_codec(&mut glue, &symbols));
+    keep(emit_bootstrap_host_type_shape_codec(&mut glue, &symbols));
+    keep(crate::compiler_bootstrap_diagnostic_codec::append_diagnostic_codec(&mut glue, &symbols));
+    keep(crate::compiler_bootstrap_runtime_mir_codec::append_runtime_mir_codec(&mut glue, &symbols));
+    if let Some(entry) = entry {
+        keep(crate::compiler_bootstrap_entry_codec::append_bootstrap_entry_codec(
+            &mut glue,
+            bindings,
+            &symbols,
+            program,
+            entry.function,
+        ));
+    }
+    keep(emit_bootstrap_source_resource_bridge(&mut glue, &symbols));
+    keep(emit_bootstrap_callback(&mut glue, &symbols));
+    keep(emit_bootstrap_foreign_callback(&mut glue, &symbols));
+    keep(emit_bootstrap_native_adapter_impl(&mut glue, &symbols));
+    if let Some(native_helper_roots) = &native_helper_roots {
+        keep(emit_bootstrap_native_execution_helpers(
+            &mut glue,
+            bindings,
+            &symbols,
+            program,
+            native_helper_roots,
+        ));
+    }
+    keep(emit_bootstrap_web_asset_provider(&mut glue, &symbols));
 
-    emit_bootstrap_manifest_adapter(&mut glue, &symbols)?;
-    emit_bootstrap_host_factory(
-        &mut glue,
-        &symbols,
-        &eval_default.symbol,
-        &eval_runtime_config.symbol,
-    )?;
+    keep(emit_bootstrap_manifest_adapter(&mut glue, &symbols));
+    if let (Some(eval_default), Some(eval_runtime_config)) = (eval_default, eval_runtime_config) {
+        keep(emit_bootstrap_host_factory(
+            &mut glue,
+            &symbols,
+            &eval_default.symbol,
+            &eval_runtime_config.symbol,
+        ));
+    }
 
     writeln!(
         glue,
@@ -1229,24 +1360,30 @@ fn __jet_bootstrap_native_numeric_unit_conversion(
 }
 "#,
     );
-    emit_bootstrap_native_compile_entry(
-        &mut glue,
-        bindings,
-        &symbols,
-        entry,
-        &eval_runtime_config.symbol,
-        &native_helper_roots,
-    )?;
+    if let (Some(entry), Some(eval_runtime_config), Some(native_helper_roots)) =
+        (entry, eval_runtime_config, &native_helper_roots)
+    {
+        keep(emit_bootstrap_native_compile_entry(
+            &mut glue,
+            bindings,
+            &symbols,
+            entry,
+            &eval_runtime_config.symbol,
+            native_helper_roots,
+        ));
+    }
+    keep(emit_bootstrap_task_roots_fixture(&mut glue, bindings, &symbols));
 
     // `root_prefix` is deliberately read here so a future source-coupled
     // emitter can reject an incompatible root before this private splice is
     // linked. The current bootstrap host is linked as the compiler crate.
 
     if config.root_prefix.is_empty() {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
+        symbols.record(BootstrapHostCodecError::InvalidMetadata(
             "generated Rust root prefix is empty".to_string(),
         ));
     }
+    symbols.finish(Ok(()))?;
     source.push_str(&glue);
     Ok(())
 
@@ -2862,19 +2999,14 @@ fn emit_bootstrap_native_compile_entry(
             "Source host-shape accessor must take its program, checked type, and source span".to_string(),
         ));
     }
-    let shape_arguments = shape_callable.metadata.parameter_types.iter()
-        .zip(["__jet_shape_program", "__jet_shape_type", "__jet_shape_span"])
-        .map(|(ty, value)| {
-            if ty.starts_with("&mut ") {
-                format!("&mut {value}")
-            } else if ty.starts_with('&') {
-                format!("&{value}")
-            } else {
-                format!("{value}.clone()")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let shape_arguments = bootstrap_call_arguments(
+        &shape_callable.metadata.parameter_types,
+        &[
+            ("__jet_shape_program", "__jet_shape_program.clone()"),
+            ("__jet_shape_type", "__jet_shape_type.clone()"),
+            ("__jet_shape_span", "__jet_shape_span.clone()"),
+        ],
+    );
     let generated = r#"
 #[doc(hidden)]
 fn __jet_bootstrap_native_collect_shared_payload_types(
@@ -3357,6 +3489,8 @@ fn emit_bootstrap_host_factory(
     let request_target = symbols.field_symbol("JetDriverCompileRequest", "target")?;
     let request_effect_source = symbols.field_symbol("JetDriverCompileRequest", "canonical_effect_source")?;
     let request_record_store = symbols.field_symbol("JetDriverCompileRequest", "record_store")?;
+    let request_mir_lint_every_pass =
+        symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
     let request_core_sources = symbols.field_symbol("JetDriverCompileRequest", "core_sources")?;
     let core_source_type = symbols.type_symbol("JetDriverCoreSource")?;
     let core_source_module_name = symbols.field_symbol("JetDriverCoreSource", "module_name")?;
@@ -3458,13 +3592,16 @@ fn emit_bootstrap_host_factory(
             "        {request_host_facts}: {host_facts_type} {{\n",
             "            {host_target_triple}: Ok(::jet_foundation::Layout::TargetLayout::host_triple()),\n",
             "            {host_active_os}: Ok(::std::env::consts::OS.to_string()),\n",
-            "            {host_compiler_identity}: option_env!(\"JET_COMPILER_BUILD_ID\").map(|value| Ok(value.to_string())).unwrap_or_else(|| Err(Default::default())),\n",
+            "            {host_compiler_identity}: option_env!(\"JET_COMPILER_SOURCE_ID\").map(|value| Ok(format!(\"{{}}@{{}}#{{}}\", ::jet_foundation::Syntax::BINARY_NAME, ::jet_pkg_model::Manifest::COMPILER_VERSION, value))).unwrap_or_else(|| Err(Default::default())),\n",
             "        }},\n",
             "        {request_effect_source}: ::jet_foundation::Effects::EFFECT_SOURCE.to_string(),\n",
             "        {request_core_sources}: __jet_core_sources,\n",
             "        {request_eval_config}: __jet_eval_config,\n",
             "        {request_target}: __jet_target,\n",
             "        {request_record_store}: __jet_bootstrap_record_store(),\n",
+            "        // Full verification (MIR Lint after every optimizer pass) is an\n",
+            "        // explicit host opt-in for tests and verification runs.\n",
+            "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
             "}}\n",
@@ -3495,6 +3632,7 @@ fn emit_bootstrap_host_factory(
         host_active_os = host_active_os,
         request_effect_source = request_effect_source,
         request_record_store = request_record_store,
+        request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_core_sources = request_core_sources,
         core_source_type = core_source_type,
         core_source_module_name = core_source_module_name,
@@ -3546,6 +3684,145 @@ fn emit_bootstrap_host_factory(
     Ok(())
 }
 
+
+/// Rust argument expressions for one call to an emitted callable: each
+/// `(place, owned)` value is passed the way its checked parameter is emitted:
+/// `&mut place`, `&place`, or the `owned` expression (a move of the place, or
+/// a clone/fork when the caller keeps it).
+fn bootstrap_call_arguments(parameter_types: &[String], values: &[(&str, &str)]) -> String {
+    parameter_types
+        .iter()
+        .zip(values)
+        .map(|(ty, (place, owned))| {
+            if ty.starts_with("&mut ") {
+                format!("&mut {place}")
+            } else if ty.starts_with('&') {
+                format!("&{place}")
+            } else {
+                (*owned).to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn checked_task_roots_callable<'a>(
+    bindings: &'a BootstrapBindingDescriptor,
+    name: &str,
+    arity: usize,
+    returns_bool: bool,
+) -> Result<&'a MirRustCallableMetadata, BootstrapHostCodecError> {
+    let callable = bootstrap_required_callable(bindings, name)?;
+    if callable.parameter_types.len() != arity || (returns_bool && callable.return_type != "bool") {
+        return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+            "task-root fixture `{name}` does not have its checked {arity}-parameter signature"
+        )));
+    }
+    Ok(callable)
+}
+
+/// Entry points of the task-root fixture (Compiler/JetEval/Tests/TaskRoots.jet)
+/// for the harness `main`'s `task-roots` mode. The fixture is part of the
+/// compiler unit only when the harness appends it, so the wrappers are emitted
+/// only when its checked callables are bound. Every Source name resolves
+/// through the binding rows (the emitted symbol and parameter passing differ
+/// between the reference Rust emitter and the Jet emitter); host arguments
+/// convert through the generated Source-MIR codec.
+fn emit_bootstrap_task_roots_fixture(
+    out: &mut String,
+    bindings: &BootstrapBindingDescriptor,
+    symbols: &BootstrapCodecSymbols<'_>,
+) -> Result<(), BootstrapHostCodecError> {
+    if !bindings
+        .callables
+        .iter()
+        .any(|callable| callable.source_name == "jet_eval_task_roots_fixture")
+    {
+        return Ok(());
+    }
+    let program = symbols.type_symbol("MIRProgram")?;
+    let config = symbols.type_symbol("JetEvalConfig")?;
+    let span = symbols.type_symbol("Span")?;
+    let carrier = symbols.type_symbol("JetEvalSharedHostCarrier")?;
+    let fixture = checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture", 6, true)?;
+    let produce =
+        checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture_shared_produce", 3, false)?;
+    let consume =
+        checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture_shared_consume", 4, true)?;
+    // The harness keeps its program and config across the fixture calls: an
+    // owned program parameter takes a clone, an owned config a fork (the
+    // config's host adapter is not `Clone`), as Source code forks it.
+    let fork = bootstrap_required_callable(bindings, "jet_eval_runtime_config")?;
+    let config_fork = format!("{}(&*__jet_config)", fork.symbol);
+    let program_place = ("(*__jet_program)", "(*__jet_program).clone()");
+    let config_place = ("(*__jet_config)", config_fork.as_str());
+    let fixture_arguments = bootstrap_call_arguments(
+        &fixture.parameter_types,
+        &[
+            program_place,
+            config_place,
+            ("__jet_callback", "__jet_callback"),
+            ("__jet_resource_handle", "__jet_resource_handle"),
+            ("__jet_resource_raw", "__jet_resource_raw"),
+            ("__jet_span", "__jet_span"),
+        ],
+    );
+    let produce_arguments = bootstrap_call_arguments(
+        &produce.parameter_types,
+        &[program_place, config_place, ("__jet_span", "__jet_span")],
+    );
+    // `T?` returns are emitted as an outcome carrier; the harness takes an Option.
+    let produce_present = if produce.return_type.starts_with("Option<") { "" } else { ".ok()" };
+    let consume_arguments = bootstrap_call_arguments(
+        &consume.parameter_types,
+        &[program_place, config_place, ("__jet_carrier", "__jet_carrier"), ("__jet_span", "__jet_span")],
+    );
+    writeln!(
+        out,
+        "#[doc(hidden)]\n\
+         fn __jet_bootstrap_task_roots_span() -> Result<{span}, String> {{\n\
+         \x20   __jet_bootstrap_span_from_host(&::jet_foundation::Diagnostics::Span {{ start: 0, end: 0 }})\n\
+         }}\n\
+         #[doc(hidden)]\n\
+         #[allow(unused_mut)]\n\
+         pub(crate) fn __jet_bootstrap_task_roots_fixture(\n\
+         \x20   __jet_program: &mut {program},\n\
+         \x20   __jet_config: &mut {config},\n\
+         \x20   __jet_callback: &::jet_foundation::MIR::MirFunctionId,\n\
+         \x20   __jet_resource_handle: &::jet_foundation::MIR::MirHandleId,\n\
+         \x20   __jet_resource_raw: i64,\n\
+         ) -> Result<bool, String> {{\n\
+         \x20   let mut __jet_callback = __jet_bootstrap_mir_MIRFunctionID_from_host(__jet_callback)?;\n\
+         \x20   let mut __jet_resource_handle = __jet_bootstrap_mir_MIRHandleID_from_host(__jet_resource_handle)?;\n\
+         \x20   let mut __jet_resource_raw = jet_foundation::Numeric::JetInt::from_i64(__jet_resource_raw);\n\
+         \x20   let mut __jet_span = __jet_bootstrap_task_roots_span()?;\n\
+         \x20   Ok({fixture_symbol}({fixture_arguments}))\n\
+         }}\n\
+         #[doc(hidden)]\n\
+         #[allow(unused_mut)]\n\
+         pub(crate) fn __jet_bootstrap_task_roots_fixture_shared_produce(\n\
+         \x20   __jet_program: &mut {program},\n\
+         \x20   __jet_config: &mut {config},\n\
+         ) -> Result<Option<{carrier}>, String> {{\n\
+         \x20   let mut __jet_span = __jet_bootstrap_task_roots_span()?;\n\
+         \x20   Ok({produce_symbol}({produce_arguments}){produce_present})\n\
+         }}\n\
+         #[doc(hidden)]\n\
+         #[allow(unused_mut)]\n\
+         pub(crate) fn __jet_bootstrap_task_roots_fixture_shared_consume(\n\
+         \x20   __jet_program: &mut {program},\n\
+         \x20   __jet_config: &mut {config},\n\
+         \x20   mut __jet_carrier: {carrier},\n\
+         ) -> Result<bool, String> {{\n\
+         \x20   let mut __jet_span = __jet_bootstrap_task_roots_span()?;\n\
+         \x20   Ok({consume_symbol}({consume_arguments}))\n\
+         }}",
+        fixture_symbol = fixture.symbol,
+        produce_symbol = produce.symbol,
+        consume_symbol = consume.symbol,
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
 
 fn emit_bootstrap_web_asset_provider(
     out: &mut String,
@@ -4128,7 +4405,7 @@ fn emit_bootstrap_type_codec(
              Ok(::jet_foundation::MIR::MirTypeId(id))\n\
          }}\n\
          fn __jet_bootstrap_type_id_from_host(value: ::jet_foundation::MIR::MirTypeId) -> Result<{mir_type_id}, String> {{\n\
-             let value = jet_foundation::Numeric::JetInt::from_str(&value.0.to_string())?;\n\
+             let value = jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(value.0));\n\
              Ok({mir_type_id} {{ {id_value}: value }})\n\
          }}"
         , mir_type_id = mir_type_id, value = "value", id_value = id_value
@@ -4181,7 +4458,7 @@ fn emit_bootstrap_type_codec(
         out,
         "fn __jet_bootstrap_measure_from_host(value: &::jet_foundation::MIR::MirMeasure) -> Result<{mir_measure}, String> {{
              match value {{
-                 ::jet_foundation::MIR::MirMeasure::Literal {{ kind, value }} => Ok({literal}(kind.clone(), jet_foundation::Numeric::JetInt::from_str(&value.to_string())?)),
+                 ::jet_foundation::MIR::MirMeasure::Literal {{ kind, value }} => Ok({literal}(kind.clone(), jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(*value)))),
                  ::jet_foundation::MIR::MirMeasure::SignedLiteral {{ kind, value }} => Ok({signed}(kind.clone(), jet_foundation::Numeric::JetInt::from_i64(*value))),
                  ::jet_foundation::MIR::MirMeasure::Symbol {{ kind, name }} => Ok({symbol}(kind.clone(), name.clone())),
                  ::jet_foundation::MIR::MirMeasure::Combined {{ kind, rule, left, right }} => {{
@@ -4352,7 +4629,7 @@ fn emit_bootstrap_type_codec(
          }}
          fn __jet_bootstrap_size_from_host(value: &::jet_foundation::MIR::MirSize) -> Result<{mir_size}, String> {{
              match value {{
-                 ::jet_foundation::MIR::MirSize::Static(value) => Ok({static_size}(jet_foundation::Numeric::JetInt::from_str(&value.to_string())?)),
+                 ::jet_foundation::MIR::MirSize::Static(value) => Ok({static_size}(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(*value)))),
                  ::jet_foundation::MIR::MirSize::Dynamic => Ok({dynamic_size}),
              }}
          }}
@@ -4479,7 +4756,7 @@ fn emit_bootstrap_type_codec(
                  }}, args.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?),
                  ::jet_foundation::MIR::MirTypeKind::TraitObject(bounds) => {trait_object}(bounds.iter().map(|bound| {{
                      if bound.id.0 == 0 {{ return Err(\"MIR trait identity is zero\".to_string()); }}
-                     Ok({mir_trait_ref} {{ {trait_ref_id}: {mir_trait_id} {{ {trait_id_value}: jet_foundation::Numeric::JetInt::from_str(&bound.id.0.to_string())? }}, {trait_ref_name}: bound.name.clone() }})
+                    Ok({mir_trait_ref} {{ {trait_ref_id}: {mir_trait_id} {{ {trait_id_value}: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(bound.id.0)) }}, {trait_ref_name}: bound.name.clone() }})
                  }}).collect::<Result<Vec<_>, String>>()?),
                  ::jet_foundation::MIR::MirTypeKind::Tuple(fields) => {tuple}(fields.iter().map(|(name, ty)| Ok({mir_tuple_field} {{
                      {tuple_name}: name.clone(),
@@ -5322,7 +5599,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
              capability: &{cap_type},
              owner: {host_owner},
          ) -> Result<{host_value}, String> {{
-             let handle_value = jet_foundation::Numeric::JetInt::from_str(&capability.handle.0.to_string())?;
+             let handle_value = jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(capability.handle.0));
              Ok({host_handle}(
                  {source_handle} {{ {handle_value}: handle_value }},
                  jet_foundation::Numeric::JetInt::from_i64(capability.raw),

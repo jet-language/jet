@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e628f7d846899239ad0518f37449b1d00773b5aa16a3861b954bf4f381e08df0
+// Source SHA-256: bf1ce2d4e62af90c68111a66b61a92e4dc7cf7873f3419ee3ebfe31c34a49a66
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -781,7 +781,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.encoding.base64", alias: "core_encoding_base64", path: "Core/encoding/base64.jet", owned_members: &["is_base64", "a2b_base64", "a85decode", "a85encode", "b16decode", "b16encode", "b2a_base64", "b32decode", "b32encode", "b32hexdecode", "b32hexencode", "b64decode", "b64encode", "b85decode", "b85encode", "decode", "decode_padded", "decode_url", "decodebytes", "encode", "encode_url", "encode_url_padded", "encodebytes", "pad", "standard_b64decode", "standard_b64encode", "unpad", "urlsafe_b64decode", "urlsafe_b64encode", "z85decode", "z85encode"] },
     CoreSourceModule { module: "core.encoding.binary", alias: "core_core_encoding_binary", path: "Core/encoding/binary.jet", owned_members: &["calcsize", "iter_unpack", "pack", "pack_f64be", "pack_f64le", "pack_i8", "pack_u16be", "pack_u16le", "pack_u32be", "pack_u32le", "pack_u64be", "pack_u64le", "pack_u8", "sign_extend", "unpack", "unpack_f64be", "unpack_f64le", "unpack_u16be", "unpack_u16le", "unpack_u32be", "unpack_u32le", "unpack_u64be", "unpack_u64le", "unpack_u8"] },
     CoreSourceModule { module: "core.encoding.cbor", alias: "core_core_encoding_cbor", path: "Core/encoding/cbor.jet", owned_members: &["reader", "writer"] },
-    CoreSourceModule { module: "core.encoding.csv", alias: "core_core_encoding_csv", path: "Core/encoding/csv.jet", owned_members: &["dict_get", "dict_get_or", "dict_rows", "fieldnames", "parse", "reader", "rows", "write_dict", "writer"] },
+    CoreSourceModule { module: "core.encoding.csv", alias: "core_core_encoding_csv", path: "Core/encoding/csv.jet", owned_members: &["dict_get", "dict_get_or", "dict_rows", "fieldnames", "parse", "rows", "write_dict"] },
     CoreSourceModule { module: "core.encoding.hex", alias: "core_core_encoding_hex", path: "Core/encoding/hex.jet", owned_members: &["a2b_base64", "a2b_hex", "a2b_qp", "a2b_uu", "b2a_base64", "b2a_hex", "b2a_qp", "b2a_uu", "crc32", "crc_hqx", "decode", "dump", "encode", "encode_prefixed", "encode_sep", "encode_upper", "hexlify", "is_hex", "unhexlify"] },
     CoreSourceModule { module: "core.encoding.ini", alias: "core_core_encoding_ini", path: "Core/encoding/ini.jet", owned_members: &["defaults", "empty", "get", "get_bool", "get_float", "get_int", "get_or", "has_option", "has_section", "items", "options", "parse", "remove_option", "remove_section", "sections", "set", "to_string"] },
     CoreSourceModule { module: "core.encoding.json", alias: "core_core_encoding_json", path: "Core/encoding/json.jet", owned_members: &["canonical", "dump", "dumps", "events", "load", "loads", "parse", "parse_allow_duplicates", "patch", "patch_with_limits", "pointer", "reader", "reader_allow_duplicates", "writer"] },

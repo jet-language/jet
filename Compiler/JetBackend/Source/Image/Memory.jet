@@ -1,0 +1,86 @@
+// In-memory x86-64 images: the compiled module laid out as one
+// position-independent block that a loader maps into the running process and
+// calls, the way Cranelift's JIT module finalizes its definitions. Calls
+// between compiled functions and data addresses are resolved inside the
+// block. Every runtime call goes to an import stub at the end of the code,
+//
+//     jmp qword [rip + 2]; int3; int3; <8-byte slot>
+//
+// whose slot holds the address of the compiled runtime's C-ABI export of that
+// name. The block is 16-byte aligned throughout, so every slot is 8-byte
+// aligned and can later be swapped with one store.
+//
+// Loading (the host primitive, in the loading process):
+// 1. map `text.len()` bytes read+write and copy `text` in;
+// 2. write the address of `imports[i]` into the word at `slots[i]`;
+// 3. flip the mapping to read+execute (it is never writable and executable
+//    at once);
+// 4. run `jet_rt_main(base + entry)`, which sets up the runtime, runs the
+//    entry and returns the exit status.
+
+pub struct X64MemoryImage {
+    pub text: [U8]
+    // Offset of the entry function in `text`.
+    pub entry: Int
+    // imports[i] names a runtime symbol; slots[i] is the offset in `text` of
+    // the little-endian word that must hold its address.
+    pub imports: [String]
+    pub slots: [Int]
+    pub errors: [String]
+}
+
+// Offset of the address slot inside an import stub.
+X64_IMPORT_SLOT_AT :: prep { 8 }
+
+fn x64_memory_image_failure(errors: [String]) -> X64MemoryImage Never! {
+    X64MemoryImage{text: [U8]{}, entry: -1, imports: [String]{}, slots: [Int]{}, errors: errors}
+}
+
+fn x64_import_stub(symbol: String) -> X64CompiledFunction Never! {
+    code := [U8]{}
+    // jmp qword [rip + 2] (FF 25 disp32), past the two traps to the slot.
+    jump :: [Int]{0xff, 0x25, 2, 0, 0, 0}
+    loop byte in jump -> &code.push(U8{byte})
+    x64_int3(&code)
+    x64_int3(&code)
+    loop _ in 0..<8 -> &code.push(U8{0})
+    X64CompiledFunction{id: LIRFunctionID{value: -1}, name: symbol, code: code, relocs: [X64Reloc]{}}
+}
+
+// Compile `program` into an in-memory image whose entry is `entry`, which
+// takes no parameters and returns nothing.
+pub fn x64_memory_image(program: LIRModule, entry: LIRFunctionID) -> X64MemoryImage Never! {
+    if entry.value < 0 || entry.value >= program.functions.len() -> return x64_memory_image_failure([String]{"entry function {entry.value} is not in the module"})
+    signature :: lir_signature(program, program.functions[entry.value].signature) ?? return x64_memory_image_failure([String]{"entry function has no signature"})
+    returns_nothing := false
+    if signature.result == None -> returns_nothing = true
+    if signature.params.len() != 0 || !returns_nothing -> return x64_memory_image_failure([String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"})
+    compiled :: x64_compile_module(program)
+    if compiled.errors.len() > 0 -> return x64_memory_image_failure(compiled.errors)
+
+    // One import per runtime symbol the code calls, in first-use order.
+    imports := [String]{}
+    loop function in compiled.functions {
+        loop reloc in function.relocs {
+            if reloc.target == {
+                .Runtime(symbol) -> {
+                    found := false
+                    loop name in imports { if name == symbol -> found = true }
+                    if !found -> &imports.push(symbol)
+                }
+                else -> {}
+            }
+        }
+    }
+    stubs := [X64CompiledFunction]{}
+    loop symbol in imports -> &stubs.push(x64_import_stub(symbol))
+    linked :: x64_link_text(compiled.functions, stubs, program.data)
+    if linked.errors.len() > 0 -> return x64_memory_image_failure(linked.errors)
+
+    entry_at := -1
+    loop (index, function) in compiled.functions { if function.id == entry -> entry_at = linked.offsets[index] }
+    if entry_at < 0 -> return x64_memory_image_failure([String]{"entry function {entry.value} was not compiled"})
+    slots := [Int]{}
+    loop at in linked.runtime_offsets -> &slots.push(at + X64_IMPORT_SLOT_AT)
+    X64MemoryImage{text: linked.text, entry: entry_at, imports: imports, slots: slots, errors: [String]{}}
+}

@@ -11,13 +11,22 @@ use jet_foundation.[
     ExprField,
     Span,
     StrPart,
+    SymbolKind,
     TContract,
     TExpr,
     TExprKind,
+    TFailureCarrier,
+    TLetTy,
     TStmt,
+    TStrFormat,
+    TStrPart,
+    TextEdit,
     Type,
+    core_call,
     core_call_typed_signature,
+    diagnostic_with_edit,
     expr_span,
+    tir_generated_local,
     type_name,
 ]
 
@@ -105,11 +114,137 @@ fn sema_call_check_special_approx(call: Call, expected: Type?, environment: Sema
     SemaDirectSpecialCheck{handled: true, value: checked}
 }
 
+// Rust `is_debuggable` (D-ATTR4=A): the values `debug(value)` can show in
+// their Debug form. A nominal needs a registered or auto-derived `Debug`.
+fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+    if sema_call_reflection_secret_bearing(ty) -> return false
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) -> true
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_call_debug_traceable(inner, environment)
+        .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment) && sema_call_debug_traceable(err, environment)
+        .Named(name) -> {
+            if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
+            if environment.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
+            sema_call_debug_implemented(ty, environment)
+        }
+        .Apply(name, args) -> {
+            if sema_call_reflection_leaf_name(name) == "KeyRef" -> return true
+            if !sema_call_debug_implemented(ty, environment) -> return false
+            loop argument in args {
+                if !sema_call_debug_traceable(argument, environment) -> return false
+            }
+            true
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_call_debug_traceable(field.ty, environment) -> return false
+            }
+            true
+        }
+        .Union(members) -> {
+            loop member in members {
+                if !sema_call_debug_traceable(member, environment) -> return false
+            }
+            true
+        }
+        .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> false
+    }
+}
+
+// A registered `Debug` implementation or bound, or the auto-derived one.
+fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+    if sema_comparability_implements(environment, ty, "Debug") -> return true
+    graph :: environment.registration_graph ?? return false
+    name :: sema_type_graph_base_name(ty) ?? return false
+    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
+    if resolved.symbol.kind != SymbolKind.Type -> return false
+    item :: resolved.declaration ?? return false
+    module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+    sema_type_metadata_auto_derives(item, graph.modules[module_index].declarations).debug
+}
+
+// The `file.jet:LINE` site of a trace (Rust `check_debug_trace`).
+fn sema_call_debug_site(call: Call, environment: SemaScopeEnvironment) -> String Never! {
+    path :: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, call.name_span)
+    parts :: path.split("/").to_list()
+    file :: if parts.len() > 0 && parts[parts.len() - 1] != "" -> parts[parts.len() - 1] else -> path
+    line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
+    "{file}:{line}"
+}
+
+// The traced expression on one line: each authored line trimmed, blank
+// lines dropped, joined by one space.
+fn sema_call_debug_expression_text(text: String) -> String Never! {
+    lines := [String]{}
+    loop line in text.split("\n").to_list() {
+        trimmed :: ~line.trim()
+        if trimmed != "" -> &lines.push(trimmed)
+    }
+    lines.join(" ")
+}
+
+// D-DBG1=A: `debug(value)` evaluates the value once, writes
+// `[debug] file.jet:LINE expr = <Debug form>` to stderr through the shared
+// `core.term.eprint` row, and yields the value unchanged. The trace adds no
+// effect. A shipped artifact or a release-profile build rejects it (E3405)
+// with an edit that keeps the traced expression exactly as written.
+fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if sema_module_no_prelude(environment) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if call.args.len() != 1 || call.args[0].label != None || call.args[0].spread {
+        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_error("E0104", call.name_span, "`debug` takes exactly one value", "`debug(value)` shows one value and returns it unchanged", "write `debug(value)`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    checked :: sema_check_expression(call.args[0].expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value_span :: expr_span(call.args[0].expr)
+    if !sema_call_debug_traceable(checked.ty, environment) {
+        &diagnostics.push(sema_error("E0112", value_span, "`debug` can't show {sema_type_show(checked.ty)}", "`debug` writes the value's Debug form", "implement `Debug`, or trace a debuggable part of the value"))
+    }
+    authored := String?{None}
+    unwrap := TextEdit?{None}
+    loop recorded in environment.debug_sites {
+        if recorded.name_start == call.name_span.start {
+            authored = Val(recorded.text)
+            unwrap = Val(TextEdit{span: Span{start: call.name_span.start, end: recorded.close_end}, new_text: recorded.text})
+            break
+        }
+    }
+    site :: sema_call_debug_site(call, environment)
+    if environment.registration_graph == .Val(graph) && sema_build_facts_reject_debug_traces(graph.build_facts) {
+        diagnostic :: sema_error("E3405", call.name_span, "A `debug` trace is left at `{site}`.", "`debug(value)` is a development trace: it prints while you run, test, or interpret a program and adds no effect, so a shipped artifact (`jet build`) or a release-profile build must not contain it.", "Remove the `debug(…)` wrapper and keep the expression; `jet fix` applies this edit.")
+        if unwrap == .Val(edit) -> &diagnostics.push(diagnostic_with_edit(diagnostic, edit)) else -> &diagnostics.push(diagnostic)
+    }
+    expression_text :: sema_call_debug_expression_text(authored ?? "")
+    traced := checked
+    if !sema_call_is_scalar(checked.ty) {
+        if checked.kind == {
+            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_expr(checked.ty, TExprKind.Clone{value: checked}, checked.span)
+            else -> {}
+        }
+    }
+    local :: tir_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span)
+    read :: sema_tir_expr(checked.ty, TExprKind.Local{local: local}, call.name_span)
+    line :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
+    record :: core_call("core.term", "eprint") ?? {
+        &diagnostics.push(sema_error("E0906", call.name_span, "the canonical `core.term.eprint` route for `debug` is unavailable", "the development trace writes through the registered Core stderr row", "restore the registered `core.term.eprint` route"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    unit :: Type.Named{name: "Unit"}
+    write :: sema_tir_expr(unit, TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, data_plan: None, fallibility: TFailureCarrier.Infallible}, call.name_span)
+    body :: [TStmt]{
+        TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: traced, gc_promotion: None, gc_transferred: false, span: call.name_span},
+        TStmt.ExprStmt{value: write, span: call.name_span},
+        TStmt.ExprStmt{value: read, span: call.name_span},
+    }
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}
+}
+
 pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
         "wrapping" | "saturating" | "checked" -> sema_call_check_special_overflow(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "approx" -> sema_call_check_special_approx(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        "debug" -> sema_call_check_special_debug(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
 }

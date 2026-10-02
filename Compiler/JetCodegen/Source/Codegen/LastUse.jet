@@ -1,0 +1,643 @@
+// D-MEM-COPYSEM1: last uses move (tir_to_mir_last_use.rs).
+//
+// Lowering reads an owned local with ReadPlace, which every backend
+// materializes as a copy, and a sema-checked `^x` reaches lowering as that
+// same bare read. Once no later code can observe the binding, the copy and
+// the value are indistinguishable, so the read becomes MovePlace and the
+// binding's drop flag clears, exactly as an explicit move lowers. The same
+// liveness fact lets a match arm take the payloads of a subject value that
+// nothing reads after the arm binds them: a Move of the subject feeds those
+// EnumPayloads, which the emitter extracts by value.
+//
+// One backward liveness pass over the function's blocks decides both.
+
+struct JetCodegenLastUseCandidate {
+    // An owned local (whole place and drop flag), or an enum subject value.
+    pub local: Bool
+    pub place: MIRPlaceID
+    pub flag: MIRPlaceID
+    pub value: MIRValueID
+}
+
+struct JetCodegenLastUseEvent {
+    pub index: Int
+    pub candidate: Int
+    pub kill: Bool
+}
+
+struct JetCodegenLastUseEnumUse {
+    pub block: Int
+    pub index: Int
+    pub payload: Bool
+    pub owner: MIRTypeID
+    pub variant: String
+    pub field: Int
+}
+
+struct JetCodegenLastUseGroup {
+    pub candidate: Int
+    pub block: Int
+    pub payloads: [Int]
+}
+
+fn jet_codegen_last_use_call_places(args: [MIRCallArg], places: &[MIRPlaceID]) Never! {
+    loop arg in args {
+        if arg.place == .Val(place) -> &places.push(place)
+    }
+}
+
+// Every place an operation names (checked_operation_place_refs).
+fn jet_codegen_last_use_places(operation: MIROperation) -> [MIRPlaceID] Never! {
+    places := mir_operation_place_uses(operation)
+    if operation == {
+        .Closure(_, captures, _) -> {
+            loop capture in captures {
+                if capture == .Place(place) -> &places.push(place)
+            }
+        }
+        .Call(_, args, _) -> jet_codegen_last_use_call_places(args, &places)
+        .IndirectCall(_, args, _) -> jet_codegen_last_use_call_places(args, &places)
+        .CoreCall(_, _, args, _, _, _) -> jet_codegen_last_use_call_places(args, &places)
+        .Semantic(semantic) -> {
+            if semantic == {
+                .StaticPreludeCall(_, args, _, _) -> jet_codegen_last_use_call_places(args, &places)
+                .HardwareCall(_, _, _, args) -> jet_codegen_last_use_call_places(args, &places)
+                .ClosureMethod(_, args, _) -> jet_codegen_last_use_call_places(args, &places)
+                .HostCall(_, args) -> jet_codegen_last_use_call_places(args, &places)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    places
+}
+
+// Locals an operation reads by identity rather than through a place.
+fn jet_codegen_last_use_locals(operation: MIROperation) -> [MIRLocalID] Never! {
+    locals := [MIRLocalID]{}
+    if operation == {
+        .Semantic(semantic) -> {
+            if semantic == {
+                .DataEntriesToMap(_, local) -> &locals.push(local)
+                .RequireStop(_, _, _, _, context, _, _) -> {
+                    loop row in context.locals -> &locals.push(row.local)
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    locals
+}
+
+fn jet_codegen_last_use_borrowed(mode: MIROwnershipMode) -> Bool Never! {
+    if mode == {
+        .ReadBorrow | .WriteBorrow -> true
+        else -> false
+    }
+}
+
+// Whether `index` lies strictly inside one of the read windows of
+// `candidate` in `block` (flattened start/end pairs).
+fn jet_codegen_last_use_in_window(windows: [String:[Int]], block: Int, index: Int, candidate: Int) -> Bool Never! {
+    bounds :: windows.get("{block}:{candidate}") ?? { return false }
+    position := 0
+    loop position + 1 < bounds.len() {
+        if bounds[position] < index && index < bounds[position + 1] -> return true
+        position += 2
+    }
+    false
+}
+
+fn jet_codegen_last_use_instruction(builder: &JetCodegenBuilder, span: Span, role: String, ty: MIRType?, ownership: MIROwnership, operation: MIROperation) -> MIRInstruction Never! {
+    identity := jet_codegen_identity(&builder, "operation", span, role, "")
+    result := MIRValueID?{None}
+    if ty == .Val(value_type) {
+        value := MIRValueID{value: stable_id("mir-value", identity)}
+        &builder.values.push(MIRValueFact{id: value, ty: value_type, span: span, ownership: ownership})
+        result = Val(value)
+    }
+    MIRInstruction{id: MIROpID{value: stable_id("mir-op", identity)}, span: span, source_line: None, result: result, ty: ty, operation: operation}
+}
+
+fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
+    block_count :: builder.blocks.len()
+    block_index := [Int:Int]{}
+    def_block := [Int:Int]{}
+    def_index := [Int:Int]{}
+    loop (block, row) in builder.blocks {
+        _ := &block_index.add(row.id.value, block)
+        loop (index, instruction) in row.instructions {
+            if instruction.result == .Val(result) {
+                _ := &def_block.add(result.value, block)
+                _ := &def_index.add(result.value, index)
+            }
+        }
+    }
+    value_row := [Int:Int]{}
+    loop (index, fact) in builder.values -> _ := &value_row.add(fact.id.value, index)
+    place_row := [Int:Int]{}
+    loop (index, row) in builder.places -> _ := &place_row.add(row.id.value, index)
+
+    // Owned locals and owned (`^`) parameters: a whole place with a drop flag
+    // whose release has no observable effect (no scope-end `close`, not a
+    // view). Keyed by root: "local:<id>" or "parameter:<value>".
+    candidates := [JetCodegenLastUseCandidate]{}
+    rejected := [Bool]{}
+    root_candidate := [String:Int]{}
+    flag_candidate := [Int:Int]{}
+    loop record in builder.drop_live_all {
+        if place_row.get(record.place.value) == None -> next
+        row_index :: place_row.get(record.place.value) ?? panic("checked last-use row is missing")
+        row :: builder.places[row_index]
+        if row.projections.len() != 0 || row.persist_key != None -> next
+        if jet_codegen_scope_end_close_function(builder, record.ty) != None -> next
+        if row.ty.kind == .Apply(name, _) && (name.name == "View" || name.name == "ViewMut") -> next
+        root_key := String?{None}
+        if row.base == {
+            .Local(local) -> root_key = Val("local:{local.value}")
+            .Parameter(value) -> root_key = Val("parameter:{value.value}")
+            else -> {}
+        }
+        key :: root_key ?? next
+        if root_candidate.get(key) == .Val(existing) {
+            rejected[existing] = true
+            next
+        }
+        _ := &root_candidate.add(key, candidates.len())
+        _ := &flag_candidate.add(record.live.value, candidates.len())
+        &candidates.push(JetCodegenLastUseCandidate{local: true, place: record.place, flag: record.live, value: MIRValueID{value: 0}})
+        &rejected.push(false)
+    }
+    place_candidate := [Int:Int]{}
+    loop row in builder.places {
+        root_key := String?{None}
+        if row.base == {
+            .Local(local) -> root_key = Val("local:{local.value}")
+            .Parameter(value) -> root_key = Val("parameter:{value.value}")
+            else -> {}
+        }
+        key :: root_key ?? next
+        if root_candidate.get(key) == .Val(candidate) -> _ := &place_candidate.add(row.id.value, candidate)
+    }
+    // Locals an operation names by identity (a parameter's local row names
+    // the parameter's own place).
+    local_candidate := [Int:Int]{}
+    loop local in builder.locals {
+        if place_candidate.get(local.place.value) == .Val(candidate) {
+            if local_candidate.get(local.id.value) == None -> _ := &local_candidate.add(local.id.value, candidate)
+        }
+    }
+    // A parameter read as a bare value rather than through its place is
+    // outside this place-based liveness; such a parameter keeps its lexical
+    // lifetime.
+    loop row in builder.blocks {
+        uses := mir_terminator_value_uses(row.terminator)
+        loop instruction in row.instructions {
+            loop value in mir_operation_value_uses(instruction.operation) -> &uses.push(value)
+        }
+        loop value in uses {
+            if root_candidate.get("parameter:{value.value}") == .Val(candidate) -> rejected[candidate] = true
+        }
+    }
+
+    // Copies of a candidate local: the result of a ReadPlace of one of its
+    // places. The emitter may serve a borrowed consumer of a copy by reading
+    // the place itself at that consumer, so the local must hold its value up
+    // to every use of the copy. Uses in the copy's own block form a read
+    // window that no other read of the local may move out of; any other use
+    // counts as a use of the local where it occurs.
+    copy_candidate := [Int:Int]{}
+    copy_block := [Int:Int]{}
+    copy_index := [Int:Int]{}
+    copy_order := [Int]{}
+    loop (block, row) in builder.blocks {
+        loop (index, instruction) in row.instructions {
+            if instruction.operation == .ReadPlace(place) {
+                if instruction.result == .Val(result) {
+                    if place_candidate.get(place.value) == .Val(candidate) {
+                        _ := &copy_candidate.add(result.value, candidate)
+                        _ := &copy_block.add(result.value, block)
+                        _ := &copy_index.add(result.value, index)
+                        &copy_order.push(result.value)
+                    }
+                }
+            }
+        }
+    }
+    copy_end := [Int:Int]{}
+
+    // Enum subjects: every use is an EnumIs or an EnumPayload of one
+    // variant, and the payloads (each index once) sit in one block after
+    // every EnumIs of that block.
+    enum_uses := [JetCodegenLastUseEnumUse]{}
+    enum_subject := [Int]{}
+    other_uses := [Int:Bool]{}
+    loop (block, row) in builder.blocks {
+        loop (index, instruction) in row.instructions {
+            if instruction.operation == {
+                .EnumIs(subject, owner, variant) -> {
+                    &enum_uses.push(JetCodegenLastUseEnumUse{block: block, index: index, payload: false, owner: owner, variant: variant, field: -1})
+                    &enum_subject.push(subject.value)
+                }
+                .EnumPayload(subject, owner, variant, field) -> {
+                    &enum_uses.push(JetCodegenLastUseEnumUse{block: block, index: index, payload: true, owner: owner, variant: variant, field: field})
+                    &enum_subject.push(subject.value)
+                }
+                else -> {
+                    loop value in mir_operation_value_uses(instruction.operation) -> _ := &other_uses.add(value.value, true)
+                }
+            }
+        }
+        loop value in mir_terminator_value_uses(row.terminator) -> _ := &other_uses.add(value.value, true)
+    }
+    loop row in builder.places {
+        if row.base == .Temporary(value) -> _ := &other_uses.add(value.value, true)
+    }
+    uses_by_subject := [Int:[Int]]{}
+    subject_order := [Int]{}
+    loop (row, subject) in enum_subject {
+        rows := uses_by_subject.get(subject) ?? {
+            &subject_order.push(subject)
+            [Int]{}
+        }
+        &rows.push(row)
+        _ := &uses_by_subject.add(subject, rows)
+    }
+    subject_candidate := [Int:Int]{}
+    groups := [JetCodegenLastUseGroup]{}
+    loop subject in subject_order {
+        if other_uses.get(subject) != None -> next
+        if uses_by_subject.get(subject) == None -> next
+        rows :: uses_by_subject.get(subject) ?? panic("checked last-use row is missing")
+        payloads := [Int]{}
+        first := -1
+        loop row in rows {
+            if enum_uses[row].payload {
+                if first < 0 -> first = row
+                &payloads.push(row)
+            }
+        }
+        if first < 0 -> next
+        head :: enum_uses[first]
+        fields := [Int:Bool]{}
+        valid := true
+        loop row in payloads {
+            entry :: enum_uses[row]
+            if entry.block != head.block || entry.owner != head.owner || entry.variant != head.variant || fields.get(entry.field) != None -> valid = false
+            _ := &fields.add(entry.field, true)
+        }
+        loop row in rows {
+            entry :: enum_uses[row]
+            if !entry.payload && entry.block == head.block && entry.index > head.index -> valid = false
+        }
+        if def_block.get(subject) == None -> next
+        defined_block :: def_block.get(subject) ?? panic("checked last-use row is missing")
+        if def_index.get(subject) == None -> next
+        defined_index :: def_index.get(subject) ?? panic("checked last-use row is missing")
+        if builder.blocks[defined_block].instructions[defined_index].operation == {
+            .Parameter(_, _) | .Capture(_) | .Global(_) -> valid = false
+            else -> {}
+        }
+        if value_row.get(subject) == None -> next
+        fact_row :: value_row.get(subject) ?? panic("checked last-use row is missing")
+        if builder.values[fact_row].ownership.mode == {
+            .Owned | .Move -> {}
+            else -> valid = false
+        }
+        if jet_codegen_read_window_of(builder, MIRValueID{value: subject}) != None -> valid = false
+        if !valid -> next
+        indices := [Int]{}
+        loop row in payloads -> &indices.push(enum_uses[row].index)
+        _ := &subject_candidate.add(subject, candidates.len())
+        &groups.push(JetCodegenLastUseGroup{candidate: candidates.len(), block: head.block, payloads: indices})
+        &candidates.push(JetCodegenLastUseCandidate{local: false, place: MIRPlaceID{value: 0}, flag: MIRPlaceID{value: 0}, value: MIRValueID{value: subject}})
+        &rejected.push(false)
+    }
+    count :: candidates.len()
+    if count == 0 -> return
+
+    // CFG: successors, predecessors, blocks reachable from the entry along
+    // explicit edges, and cleanup blocks guarded by one local's drop flag.
+    successors := [[Int]]{}
+    predecessors := [[Int]]{}
+    loop filler in 0..<block_count -> &predecessors.push([Int]{})
+    loop (block, row) in builder.blocks {
+        targets := [Int]{}
+        loop target in mir_terminator_targets(row.terminator) {
+            if block_index.get(target.value) == .Val(target_index) {
+                &targets.push(target_index)
+                &predecessors[target_index].push(block)
+            }
+        }
+        &successors.push(targets)
+    }
+    reachable := [Bool]{}
+    loop filler in 0..<block_count -> &reachable.push(false)
+    if block_index.get(builder.entry.value) == .Val(entry) {
+        pending := [Int]{entry}
+        reachable[entry] = true
+        loop pending.len() > 0 {
+            block :: &pending.pop() ?? { break }
+            loop target in successors[block] {
+                if !reachable[target] {
+                    reachable[target] = true
+                    &pending.push(target)
+                }
+            }
+        }
+    }
+    guard_of := [Int]{}
+    loop (block, row) in builder.blocks {
+        flag_guard := -1
+        if row.terminator == .Branch(condition, then_target, else_target) && then_target != else_target {
+            if def_block.get(condition.value) == .Val(flag_block) {
+                flag_index :: def_index.get(condition.value) ?? -1
+                if builder.blocks[flag_block].instructions[flag_index].operation == .ReadPlace(flag) {
+                    flag_guard = flag_candidate.get(flag.value) ?? -1
+                }
+            }
+        }
+        &guard_of.push(flag_guard)
+    }
+    guarded := [Int]{}
+    loop (block, preds) in predecessors {
+        shared_guard := -1
+        if preds.len() > 0 {
+            shared_guard = guard_of[preds[0]]
+            loop pred in preds {
+                then_index := -1
+                if builder.blocks[pred].terminator == .Branch(_, then_target, _) -> then_index = block_index.get(then_target.value) ?? -1
+                if guard_of[pred] != shared_guard || then_index != block -> shared_guard = -1
+            }
+        }
+        &guarded.push(shared_guard)
+    }
+
+    // Borrows of a candidate local: a borrowed result of an operation on one
+    // of its places. A borrow may only feed operations in its own block that
+    // derive no further borrow; its uses then count as uses of the local.
+    borrow_candidate := [Int:Int]{}
+    borrow_block := [Int:Int]{}
+    loop (block, row) in builder.blocks {
+        loop instruction in row.instructions {
+            loop place in jet_codegen_last_use_places(instruction.operation) {
+                if place_candidate.get(place.value) == None -> next
+                candidate :: place_candidate.get(place.value) ?? panic("checked last-use row is missing")
+                if instruction.operation == {
+                    .RawAddressOf(_) | .Closure(_, _, _) -> rejected[candidate] = true
+                    else -> {}
+                }
+                if instruction.result == .Val(result) {
+                    result_row :: value_row.get(result.value) ?? -1
+                    if result_row >= 0 && jet_codegen_last_use_borrowed(builder.values[result_row].ownership.mode) {
+                        _ := &borrow_candidate.add(result.value, candidate)
+                        _ := &borrow_block.add(result.value, block)
+                    }
+                }
+            }
+        }
+    }
+    loop (block, row) in builder.blocks {
+        loop instruction in row.instructions {
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if borrow_candidate.get(value.value) == None -> next
+                candidate :: borrow_candidate.get(value.value) ?? panic("checked last-use row is missing")
+                derived := false
+                if instruction.result == .Val(result) {
+                    result_row :: value_row.get(result.value) ?? -1
+                    derived = result_row >= 0 && jet_codegen_last_use_borrowed(builder.values[result_row].ownership.mode)
+                }
+                if (borrow_block.get(value.value) ?? -1) != block || derived -> rejected[candidate] = true
+            }
+        }
+        loop value in mir_terminator_value_uses(row.terminator) {
+            if borrow_candidate.get(value.value) == None -> next
+            candidate :: borrow_candidate.get(value.value) ?? panic("checked last-use row is missing")
+            if (borrow_block.get(value.value) ?? -1) != block -> rejected[candidate] = true
+        }
+    }
+
+    // Per-block events in execution order; the terminator's index is the
+    // block's instruction count.
+    events := [JetCodegenLastUseEvent]{}
+    event_start := [Int]{}
+    loop (block, row) in builder.blocks {
+        &event_start.push(events.len())
+        loop (index, instruction) in row.instructions {
+            kills := [Int]{}
+            loop place in jet_codegen_last_use_places(instruction.operation) {
+                if place_candidate.get(place.value) == None -> next
+                candidate :: place_candidate.get(place.value) ?? panic("checked last-use row is missing")
+                whole :: place == candidates[candidate].place
+                if instruction.operation == {
+                    .WritePlace(_, _) | .ReplacePlace(_, _) | .InitializeUninit(_) -> {
+                        if whole -> &kills.push(candidate) else -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+                    }
+                    .MovePlace(_) -> {
+                        if !(whole && guarded[block] == candidate) -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+                    }
+                    else -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+                }
+            }
+            loop local in jet_codegen_last_use_locals(instruction.operation) {
+                if local_candidate.get(local.value) == None -> next
+                candidate :: local_candidate.get(local.value) ?? panic("checked last-use row is missing")
+                &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+            }
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if borrow_candidate.get(value.value) == .Val(candidate) -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+                if subject_candidate.get(value.value) == .Val(candidate) -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+                if copy_candidate.get(value.value) == .Val(candidate) {
+                    if (copy_block.get(value.value) ?? -1) == block && (copy_index.get(value.value) ?? -1) < index {
+                        if (copy_end.get(value.value) ?? -1) < index -> _ := &copy_end.add(value.value, index)
+                    } else {
+                        &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+                    }
+                }
+            }
+            if instruction.result == .Val(result) {
+                if subject_candidate.get(result.value) == .Val(candidate) -> &kills.push(candidate)
+            }
+            loop candidate in kills -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: true})
+        }
+        terminator_index :: row.instructions.len()
+        loop value in mir_terminator_value_uses(row.terminator) {
+            if borrow_candidate.get(value.value) == .Val(candidate) -> &events.push(JetCodegenLastUseEvent{index: terminator_index, candidate: candidate, kill: false})
+            if copy_candidate.get(value.value) == .Val(candidate) {
+                if (copy_block.get(value.value) ?? -1) == block {
+                    if (copy_end.get(value.value) ?? -1) < terminator_index -> _ := &copy_end.add(value.value, terminator_index)
+                } else {
+                    &events.push(JetCodegenLastUseEvent{index: terminator_index, candidate: candidate, kill: false})
+                }
+            }
+        }
+        if !reachable[block] {
+            loop event_index in event_start[block]..<events.len() {
+                if !events[event_index].kill -> rejected[events[event_index].candidate] = true
+            }
+        }
+    }
+    &event_start.push(events.len())
+    read_windows := [String:[Int]]{}
+    loop value in copy_order {
+        if copy_end.get(value) == .Val(window_end) {
+            window_block :: copy_block.get(value) ?? -1
+            window_candidate :: copy_candidate.get(value) ?? -1
+            key :: "{window_block}:{window_candidate}"
+            bounds := read_windows.get(key) ?? [Int]{}
+            &bounds.push(copy_index.get(value) ?? -1)
+            &bounds.push(window_end)
+            _ := &read_windows.add(key, bounds)
+        }
+    }
+
+    // Backward liveness to a fixed point over flat block x candidate rows.
+    generated := [Bool]{}
+    killed := [Bool]{}
+    live_in := [Bool]{}
+    live_out := [Bool]{}
+    loop filler in 0..<(block_count * count) {
+        &generated.push(false)
+        &killed.push(false)
+        &live_in.push(false)
+        &live_out.push(false)
+    }
+    loop block in 0..<block_count {
+        base :: block * count
+        loop event_index in event_start[block]..<event_start[block + 1] {
+            event :: events[event_index]
+            if event.kill {
+                killed[base + event.candidate] = true
+            } else if !killed[base + event.candidate] {
+                generated[base + event.candidate] = true
+            }
+        }
+    }
+    changed := true
+    loop changed {
+        changed = false
+        block := block_count
+        loop block > 0 {
+            block -= 1
+            base :: block * count
+            loop candidate in 0..<count {
+                live_after := false
+                loop target in successors[block] {
+                    if live_in[target * count + candidate] -> live_after = true
+                }
+                live_out[base + candidate] = live_after
+                live_before :: generated[base + candidate] || (live_after && !killed[base + candidate])
+                if live_before != live_in[base + candidate] {
+                    live_in[base + candidate] = live_before
+                    changed = true
+                }
+            }
+        }
+    }
+
+    // Decide each read against the liveness right after it.
+    group_end := [String:Int]{}
+    loop (group_index, row) in groups -> _ := &group_end.add("{row.block}:{row.payloads[row.payloads.len() - 1]}", group_index)
+    conversions := [String:Int]{}
+    moved_groups := [Int]{}
+    loop block in 0..<block_count {
+        if !reachable[block] -> next
+        base :: block * count
+        live := [Bool]{}
+        loop candidate in 0..<count -> &live.push(live_out[base + candidate])
+        cursor := event_start[block + 1]
+        instructions :: builder.blocks[block].instructions
+        index := instructions.len()
+        loop cursor > event_start[block] && events[cursor - 1].index >= index {
+            cursor -= 1
+            live[events[cursor].candidate] = !events[cursor].kill
+        }
+        loop index > 0 {
+            index -= 1
+            if instructions[index].operation == .ReadPlace(place) {
+                if place_candidate.get(place.value) == .Val(candidate) {
+                    if candidates[candidate].local && candidates[candidate].place == place && !rejected[candidate] && !live[candidate] && !jet_codegen_last_use_in_window(read_windows, block, index, candidate) {
+                        _ := &conversions.add("{block}:{index}", candidate)
+                    }
+                }
+            }
+            if group_end.get("{block}:{index}") == .Val(group_index) {
+                candidate :: groups[group_index].candidate
+                if !rejected[candidate] && !live[candidate] -> &moved_groups.push(group_index)
+            }
+            loop cursor > event_start[block] && events[cursor - 1].index >= index {
+                cursor -= 1
+                live[events[cursor].candidate] = !events[cursor].kill
+            }
+        }
+    }
+    if conversions.len() == 0 && moved_groups.len() == 0 -> return
+
+    // Rewrite each touched block once: a group's Move goes before its first
+    // payload, which with the later payloads reads the moved value; a
+    // converted read is followed by its drop-flag clear.
+    takes := [String:MIRInstruction]{}
+    retarget := [String:MIRValueID]{}
+    touched := [Int:Bool]{}
+    loop group_index in moved_groups {
+        row :: groups[group_index]
+        subject :: candidates[row.candidate].value
+        first_span := builder.blocks[row.block].instructions[row.payloads[0]].span
+        if value_row.get(subject.value) == None -> next
+        fact_row :: value_row.get(subject.value) ?? panic("checked last-use row is missing")
+        subject_ty := builder.values[fact_row].ty
+        moved_take :: jet_codegen_last_use_instruction(&builder, first_span, "match.payload.take", Val(subject_ty), mir_ownership_from_access(MIRAccess.Move), MIROperation.Move{value: subject})
+        if moved_take.result == None -> next
+        taken :: moved_take.result ?? panic("checked last-use row is missing")
+        _ := &takes.add("{row.block}:{row.payloads[0]}", moved_take)
+        loop payload in row.payloads -> _ := &retarget.add("{row.block}:{payload}", taken)
+        _ := &touched.add(row.block, true)
+    }
+    clears := [String:[MIRInstruction]]{}
+    bool_type :: jet_codegen_lower_type_for_function(Type.Bool, builder)
+    loop block in 0..<block_count {
+        loop index in 0..<builder.blocks[block].instructions.len() {
+            if conversions.get("{block}:{index}") == None -> next
+            candidate :: conversions.get("{block}:{index}") ?? panic("checked last-use row is missing")
+            row :: candidates[candidate]
+            span := builder.blocks[block].instructions[index].span
+            off :: jet_codegen_last_use_instruction(&builder, span, "owned.local.last-use.state", Val(bool_type), mir_copy_ownership(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+            if off.result == None -> next
+            off_value :: off.result ?? panic("checked last-use row is missing")
+            write :: jet_codegen_last_use_instruction(&builder, span, "owned.local.last-use.update", None, mir_copy_ownership(), MIROperation.WritePlace{place: row.flag, value: off_value})
+            _ := &clears.add("{block}:{index}", [MIRInstruction]{off, write})
+            _ := &touched.add(block, true)
+            if place_row.get(row.place.value) == None -> next
+            place_index :: place_row.get(row.place.value) ?? panic("checked last-use row is missing")
+            builder.places[place_index].access = MIRAccess.Move
+            result_value := builder.blocks[block].instructions[index].result
+            if result_value == None -> next
+            result :: result_value ?? panic("checked last-use row is missing")
+            if value_row.get(result.value) == None -> next
+            fact_row :: value_row.get(result.value) ?? panic("checked last-use row is missing")
+            builder.values[fact_row].ownership = mir_ownership_from_access(MIRAccess.Move)
+        }
+    }
+    loop block in 0..<block_count {
+        if touched.get(block) == None -> next
+        rewritten := [MIRInstruction]{}
+        loop (index, original) in builder.blocks[block].instructions {
+            key :: "{block}:{index}"
+            if takes.get(key) == .Val(moved_take) -> &rewritten.push(moved_take)
+            instruction := original
+            if retarget.get(key) == .Val(taken) && original.operation == .EnumPayload(_, owner, variant, field) {
+                instruction.operation = MIROperation.EnumPayload{subject: taken, owner: owner, variant: variant, index: field}
+            }
+            if clears.get(key) == .Val(extra) {
+                candidate :: conversions.get(key) ?? -1
+                if candidate >= 0 -> instruction.operation = MIROperation.MovePlace{place: candidates[candidate].place}
+                &rewritten.push(instruction)
+                loop added in extra -> &rewritten.push(added)
+            } else {
+                &rewritten.push(instruction)
+            }
+        }
+        builder.blocks[block].instructions = rewritten
+    }
+}

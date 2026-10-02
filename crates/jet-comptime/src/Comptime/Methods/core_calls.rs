@@ -737,7 +737,7 @@ pub(crate) use values::as_string;
 pub(crate) use values::url_parts_to_ct;
 #[allow(unused_imports)]
 use values::{as_string_rows, csv_rows_from_records, named_tuple};
-pub(super) use values::{url_parts_from_ct, URL_INTERNAL_PREFIX};
+pub(super) use values::url_parts_from_ct;
 
 pub(crate) fn eval_data_pivot_sum<F>(
     args: &[CtValue],

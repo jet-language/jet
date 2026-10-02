@@ -43,34 +43,31 @@ pub(super) type UrlParts = url_kernel::JetURLParts;
 /// The one MIME value the HTTP message kernel names as `jet_std::JetMIME`.
 pub(crate) use url_kernel::JetMIME;
 
-/// Re-enter the canonical URL value without reparsing or normalizing it.
-///
-/// The TIR value adapter may only marshal fields across the `CtValue` boundary;
-/// the URL kernel remains the owner of the representation and formatter.
-pub(super) fn from_marshaled(
-    scheme: String,
-    username: Option<String>,
-    password: Option<String>,
-    host: Option<String>,
-    port: Option<i64>,
-    path: String,
-    query: Vec<(String, String)>,
-    fragment: Option<String>,
-    typed_host: Option<Vec<(String, bool)>>,
-    typed_path: Option<Vec<(String, bool)>>,
+/// Re-enter the canonical URL kernel from the `core.net.url.URL` record fields
+/// without reparsing or normalizing; the kernel owns the projection.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn from_core_record(
+    scheme: &str,
+    user_text: &str,
+    password_text: &str,
+    host: &str,
+    port: i64,
+    port_explicit: bool,
+    path: &str,
+    query: &str,
+    fragment: &str,
 ) -> UrlParts {
-    url_kernel::JetURLParts {
+    url_kernel::JetURLParts::from_core_record(
         scheme,
-        username,
-        password,
+        user_text,
+        password_text,
         host,
         port,
+        port_explicit,
         path,
         query,
         fragment,
-        typed_host,
-        typed_path,
-    }
+    )
 }
 
 pub(super) fn parse(input: &str) -> Result<UrlParts, String> {

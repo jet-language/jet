@@ -1,0 +1,392 @@
+// x86-64 machine-code encoder for the integer and control-flow subset the O0
+// generator selects. Registers are hardware numbers (rax 0 ... r15 15); every
+// arithmetic form is the 64-bit (REX.W) encoding. Branch and call forms emit a
+// zero rel32 and return the offset of that field for later patching.
+
+X64_RAX :: prep { 0 }
+X64_RCX :: prep { 1 }
+X64_RDX :: prep { 2 }
+X64_RBX :: prep { 3 }
+X64_RSP :: prep { 4 }
+X64_RBP :: prep { 5 }
+X64_RSI :: prep { 6 }
+X64_RDI :: prep { 7 }
+X64_R8 :: prep { 8 }
+X64_R9 :: prep { 9 }
+X64_R10 :: prep { 10 }
+X64_R11 :: prep { 11 }
+X64_R12 :: prep { 12 }
+X64_R13 :: prep { 13 }
+X64_R14 :: prep { 14 }
+X64_R15 :: prep { 15 }
+
+pub enum X64Cond { O NO B AE E NE BE A S NS P NP L GE LE G }
+
+pub enum X64Alu { Add Sub Cmp And Or Xor }
+
+pub fn x64_cond_code(cond: X64Cond) -> Int Never! {
+    if cond == {
+        .O -> 0
+        .NO -> 1
+        .B -> 2
+        .AE -> 3
+        .E -> 4
+        .NE -> 5
+        .BE -> 6
+        .A -> 7
+        .S -> 8
+        .NS -> 9
+        .P -> 10
+        .NP -> 11
+        .L -> 12
+        .GE -> 13
+        .LE -> 14
+        .G -> 15
+    }
+}
+
+fn x64_byte(code: &[U8], value: Int) Never! {
+    &code.push(U8{value & 255})
+}
+
+fn x64_u32(code: &[U8], value: Int) Never! {
+    loop shift in 0..<4 -> x64_byte(&code, value >> (8 * shift))
+}
+
+fn x64_u64(code: &[U8], value: Int) Never! {
+    loop shift in 0..<8 -> x64_byte(&code, value >> (8 * shift))
+}
+
+pub fn x64_fits_i8(value: Int) -> Bool Never! { value >= -128 && value <= 127 }
+
+pub fn x64_fits_i32(value: Int) -> Bool Never! { value >= -2147483648 && value <= 2147483647 }
+
+// REX prefix: W selects 64-bit operands; R, X and B extend ModRM.reg, SIB.index
+// and ModRM.rm (or the opcode register) to r8-r15.
+fn x64_rex(code: &[U8], wide: Bool, reg: Int, rm: Int) Never! {
+    value := 0x40
+    if wide -> value = value | 8
+    if reg >= 8 -> value = value | 4
+    if rm >= 8 -> value = value | 1
+    x64_byte(&code, value)
+}
+
+fn x64_modrm_reg(code: &[U8], reg: Int, rm: Int) Never! {
+    x64_byte(&code, 0xc0 | ((reg & 7) << 3) | (rm & 7))
+}
+
+// [base + disp]: rsp/r12 need a SIB byte, and rbp/r13 have no disp-free form.
+fn x64_modrm_mem(code: &[U8], reg: Int, base: Int, disp: Int) Never! {
+    mode :: if {
+        disp == 0 && (base & 7) != 5 -> 0
+        x64_fits_i8(disp) -> 1
+        else -> 2
+    }
+    x64_byte(&code, (mode << 6) | ((reg & 7) << 3) | (base & 7))
+    if (base & 7) == 4 -> x64_byte(&code, 0x24)
+    if mode == 1 -> x64_byte(&code, disp)
+    if mode == 2 -> x64_u32(&code, disp)
+}
+
+// mov dst, src (REX.W 89 /r)
+pub fn x64_mov_rr(code: &[U8], dst: Int, src: Int) Never! {
+    x64_rex(&code, true, src, dst)
+    x64_byte(&code, 0x89)
+    x64_modrm_reg(&code, src, dst)
+}
+
+// mov dst, imm: sign-extended imm32 (REX.W C7 /0) or the 64-bit movabs (REX.W B8+r).
+pub fn x64_mov_ri(code: &[U8], dst: Int, value: Int) Never! {
+    if x64_fits_i32(value) {
+        x64_rex(&code, true, 0, dst)
+        x64_byte(&code, 0xc7)
+        x64_modrm_reg(&code, 0, dst)
+        x64_u32(&code, value)
+    } else {
+        x64_rex(&code, true, 0, dst)
+        x64_byte(&code, 0xb8 + (dst & 7))
+        x64_u64(&code, value)
+    }
+}
+
+fn x64_alu_opcode(op: X64Alu) -> Int Never! {
+    if op == {
+        .Add -> 0x01
+        .Sub -> 0x29
+        .Cmp -> 0x39
+        .And -> 0x21
+        .Or -> 0x09
+        .Xor -> 0x31
+    }
+}
+
+fn x64_alu_extension(op: X64Alu) -> Int Never! {
+    if op == {
+        .Add -> 0
+        .Sub -> 5
+        .Cmp -> 7
+        .And -> 4
+        .Or -> 1
+        .Xor -> 6
+    }
+}
+
+// add/sub/cmp/and/or/xor dst, src (REX.W 01|29|39|21|09|31 /r)
+pub fn x64_alu_rr(code: &[U8], op: X64Alu, dst: Int, src: Int) Never! {
+    x64_rex(&code, true, src, dst)
+    x64_byte(&code, x64_alu_opcode(op))
+    x64_modrm_reg(&code, src, dst)
+}
+
+// add/sub/cmp/and/or/xor dst, imm (REX.W 83 /n ib, or REX.W 81 /n id). The immediate must fit i32.
+pub fn x64_alu_ri(code: &[U8], op: X64Alu, dst: Int, value: Int) Never! {
+    x64_rex(&code, true, 0, dst)
+    if x64_fits_i8(value) {
+        x64_byte(&code, 0x83)
+        x64_modrm_reg(&code, x64_alu_extension(op), dst)
+        x64_byte(&code, value)
+    } else {
+        x64_byte(&code, 0x81)
+        x64_modrm_reg(&code, x64_alu_extension(op), dst)
+        x64_u32(&code, value)
+    }
+}
+
+// imul dst, src (REX.W 0F AF /r)
+pub fn x64_imul_rr(code: &[U8], dst: Int, src: Int) Never! {
+    x64_rex(&code, true, dst, src)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xaf)
+    x64_modrm_reg(&code, dst, src)
+}
+
+// test left, right (REX.W 85 /r)
+pub fn x64_test_rr(code: &[U8], left: Int, right: Int) Never! {
+    x64_rex(&code, true, right, left)
+    x64_byte(&code, 0x85)
+    x64_modrm_reg(&code, right, left)
+}
+
+// mov dst, [base + disp] (REX.W 8B /r)
+pub fn x64_load(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(&code, true, dst, base)
+    x64_byte(&code, 0x8b)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+// mov [base + disp], src (REX.W 89 /r)
+pub fn x64_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_rex(&code, true, src, base)
+    x64_byte(&code, 0x89)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+// lea dst, [base + disp] (REX.W 8D /r)
+pub fn x64_lea(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(&code, true, dst, base)
+    x64_byte(&code, 0x8d)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+// movzx dst, byte [base + disp] (REX.W 0F B6 /r)
+pub fn x64_load_u8(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(&code, true, dst, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xb6)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+// mov byte [base + disp], src8 (REX 88 /r); the bare REX selects sil/dil/spl/bpl.
+pub fn x64_store_u8(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x88)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+// lea dst, [rip + disp32] (REX.W 8D /r, mod 00 rm 101); returns the offset of
+// the disp32 field, which ends the instruction, so it patches like a rel32.
+pub fn x64_lea_rip(code: &[U8], dst: Int) -> Int Never! {
+    x64_rex(&code, true, dst, 0)
+    x64_byte(&code, 0x8d)
+    x64_byte(&code, ((dst & 7) << 3) | 5)
+    at :: code.len()
+    x64_u32(&code, 0)
+    at
+}
+
+// One-operand group 3 (REX.W F7 /n): neg 3, div 6, idiv 7.
+fn x64_group3(code: &[U8], extension: Int, reg: Int) Never! {
+    x64_rex(&code, true, 0, reg)
+    x64_byte(&code, 0xf7)
+    x64_modrm_reg(&code, extension, reg)
+}
+
+pub fn x64_neg(code: &[U8], reg: Int) Never! { x64_group3(&code, 3, reg) }
+
+// div src: unsigned rdx:rax / src -> rax quotient, rdx remainder.
+pub fn x64_div(code: &[U8], src: Int) Never! { x64_group3(&code, 6, src) }
+
+// idiv src: signed rdx:rax / src -> rax quotient (truncated), rdx remainder.
+pub fn x64_idiv(code: &[U8], src: Int) Never! { x64_group3(&code, 7, src) }
+
+// cqo: sign-extend rax into rdx (REX.W 99).
+pub fn x64_cqo(code: &[U8]) Never! {
+    x64_byte(&code, 0x48)
+    x64_byte(&code, 0x99)
+}
+
+pub enum X64Shift { Shl Shr Sar }
+
+fn x64_shift_extension(shift: X64Shift) -> Int Never! {
+    if shift == {
+        .Shl -> 4
+        .Shr -> 5
+        .Sar -> 7
+    }
+}
+
+// shl/shr/sar dst, cl (REX.W D3 /n)
+pub fn x64_shift_cl(code: &[U8], shift: X64Shift, dst: Int) Never! {
+    x64_rex(&code, true, 0, dst)
+    x64_byte(&code, 0xd3)
+    x64_modrm_reg(&code, x64_shift_extension(shift), dst)
+}
+
+// shl/shr/sar dst, imm8 (REX.W C1 /n ib)
+pub fn x64_shift_ri(code: &[U8], shift: X64Shift, dst: Int, count: Int) Never! {
+    x64_rex(&code, true, 0, dst)
+    x64_byte(&code, 0xc1)
+    x64_modrm_reg(&code, x64_shift_extension(shift), dst)
+    x64_byte(&code, count)
+}
+
+// rep movsb (F3 A4): copy rcx bytes from [rsi] to [rdi].
+pub fn x64_rep_movsb(code: &[U8]) Never! {
+    x64_byte(&code, 0xf3)
+    x64_byte(&code, 0xa4)
+}
+
+// repe cmpsb (F3 A6): compare rcx bytes at [rsi] and [rdi] while equal.
+pub fn x64_repe_cmpsb(code: &[U8]) Never! {
+    x64_byte(&code, 0xf3)
+    x64_byte(&code, 0xa6)
+}
+
+// push imm8, sign-extended to 64 bits (6A ib).
+pub fn x64_push_i8(code: &[U8], value: Int) Never! {
+    x64_byte(&code, 0x6a)
+    x64_byte(&code, value)
+}
+
+// ud2 (0F 0B): the undefined-instruction trap.
+pub fn x64_ud2(code: &[U8]) Never! {
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x0b)
+}
+
+// setcc dst8 (0F 90+cc /0); the bare REX selects sil/dil/spl/bpl over ah/bh/ch/dh.
+pub fn x64_setcc(code: &[U8], cond: X64Cond, dst: Int) Never! {
+    x64_rex(&code, false, 0, dst)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x90 + x64_cond_code(cond))
+    x64_modrm_reg(&code, 0, dst)
+}
+
+// movzx dst, src8 (REX.W 0F B6 /r)
+pub fn x64_movzx_r8(code: &[U8], dst: Int, src: Int) Never! {
+    x64_rex(&code, true, dst, src)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xb6)
+    x64_modrm_reg(&code, dst, src)
+}
+
+// push r64 (50+r) and pop r64 (58+r)
+pub fn x64_push(code: &[U8], reg: Int) Never! {
+    if reg >= 8 -> x64_byte(&code, 0x41)
+    x64_byte(&code, 0x50 + (reg & 7))
+}
+
+pub fn x64_pop(code: &[U8], reg: Int) Never! {
+    if reg >= 8 -> x64_byte(&code, 0x41)
+    x64_byte(&code, 0x58 + (reg & 7))
+}
+
+pub fn x64_ret(code: &[U8]) Never! { x64_byte(&code, 0xc3) }
+
+pub fn x64_syscall(code: &[U8]) Never! {
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x05)
+}
+
+pub fn x64_int3(code: &[U8]) Never! { x64_byte(&code, 0xcc) }
+
+// call rel32 (E8 cd); returns the offset of the rel32 field.
+pub fn x64_call_rel32(code: &[U8]) -> Int Never! {
+    x64_byte(&code, 0xe8)
+    at :: code.len()
+    x64_u32(&code, 0)
+    at
+}
+
+// jmp rel32 (E9 cd); returns the offset of the rel32 field.
+pub fn x64_jmp_rel32(code: &[U8]) -> Int Never! {
+    x64_byte(&code, 0xe9)
+    at :: code.len()
+    x64_u32(&code, 0)
+    at
+}
+
+// jcc rel32 (0F 80+cc cd); returns the offset of the rel32 field.
+pub fn x64_jcc_rel32(code: &[U8], cond: X64Cond) -> Int Never! {
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x80 + x64_cond_code(cond))
+    at :: code.len()
+    x64_u32(&code, 0)
+    at
+}
+
+// Point the rel32 field at `at` to `target`; both are offsets in `code`.
+pub fn x64_patch_rel32(code: &[U8], at: Int, target: Int) Never! {
+    relative :: target - (at + 4)
+    loop shift in 0..<4 -> code[at + shift] = U8{(relative >> (8 * shift)) & 255}
+}
+
+// SSE2 scalar double. Float values live in general registers as their bits;
+// selection moves them through xmm0-xmm7 around each operation. Encoding:
+// mandatory prefix (66 or F2), REX when W or an extended register is needed,
+// then 0F opcode /r.
+fn x64_sse(code: &[U8], prefix: Int, wide: Bool, opcode: Int, reg: Int, rm: Int) Never! {
+    x64_byte(&code, prefix)
+    if wide || reg >= 8 || rm >= 8 -> x64_rex(&code, wide, reg, rm)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, opcode)
+    x64_modrm_reg(&code, reg, rm)
+}
+
+// movq xmm, r64 (66 REX.W 0F 6E /r)
+pub fn x64_movq_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0x66, true, 0x6e, xmm, src) }
+
+// movq r64, xmm (66 REX.W 0F 7E /r)
+pub fn x64_movq_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, true, 0x7e, xmm, dst) }
+
+pub enum X64FloatOp { Add Sub Mul Div }
+
+// addsd/subsd/mulsd/divsd dst, src (F2 0F 58|5C|59|5E /r)
+pub fn x64_float_op(code: &[U8], op: X64FloatOp, dst: Int, src: Int) Never! {
+    opcode :: if op == {
+        .Add -> 0x58
+        .Sub -> 0x5c
+        .Mul -> 0x59
+        .Div -> 0x5e
+    }
+    x64_sse(&code, 0xf2, false, opcode, dst, src)
+}
+
+// ucomisd left, right (66 0F 2E /r): ZF, PF and CF all set when unordered.
+pub fn x64_ucomisd(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0x66, false, 0x2e, left, right) }
+
+// cvtsi2sd xmm, r64 (F2 REX.W 0F 2A /r)
+pub fn x64_cvtsi2sd(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf2, true, 0x2a, xmm, src) }
+
+// cvttsd2si r64, xmm (F2 REX.W 0F 2C /r): truncates; NaN and out-of-range give the minimum.
+pub fn x64_cvttsd2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf2, true, 0x2c, dst, xmm) }

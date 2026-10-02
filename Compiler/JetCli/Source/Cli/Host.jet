@@ -1,0 +1,202 @@
+// The process side of the Jet-hosted `jet` (D-JETCLI-HOST1=A): run the front
+// door, carry out its plan, and write the bytes. The process entry passes
+// argv without the program name and exits with the returned status.
+use core.files as cli_files
+use core.process as cli_process
+use core.term as cli_term
+use jet_backend.[
+    LIRFunctionID,
+    lir_lower_program,
+    x64_static_executable,
+]
+use jet_driver.[
+    JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileResult,
+    JetDriverVerbOutput,
+    JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USER_ERROR,
+    jet_driver_check_outcome,
+    jet_driver_present_diagnostics,
+    jet_driver_report_problems,
+]
+use jet_foundation.[
+    Diagnostic,
+    DIAGNOSTIC_ERROR,
+]
+
+// crates/jet-foundation/src/ExitCodes.rs `ICE`: Jet's own defect.
+JET_CLI_EXIT_ICE :: 101
+
+// Rust host `render_internal_fault` (Diagnostics.rs `render_ice_report`).
+fn jet_cli_ice(what: String) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: "internal compiler error: {what}\nThis is a bug in jet, NOT in your program. Please report it,\nattaching your source file.",
+        exit_code: JET_CLI_EXIT_ICE,
+    }
+}
+
+fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    errors := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic)
+    }
+    errors
+}
+
+// `jet check <file>`: compile through the Jet compiler, place each diagnostic
+// on the file that owns it, and report the outcome the Rust host prints.
+fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> {
+            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            output = jet_driver_check_outcome(file, source, diagnostics, color, quiet)
+            if jet_cli_errors(diagnostics).len() == 0 {
+                if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
+            }
+        }
+    }
+    output
+}
+
+// Syntax/predicates.rs `sanitize_crate_name`: ASCII letters, digits, and `_`
+// stay; any other character becomes one `_` (a UTF-8 continuation byte
+// belongs to the character before it).
+fn jet_cli_crate_name(stem: String) -> String Never! {
+    name := ""
+    loop byte in stem.bytes() {
+        code :: Int.from_u8(byte)
+        if code >= 128 && code < 192 -> next
+        keep :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+        piece := "_"
+        if keep -> piece = String.from_bytes([U8]{byte}) ?? "_"
+        name = "{name}{piece}"
+    }
+    if name.len() == 0 -> return "out"
+    first :: Int.from_u8(name.bytes()[0])
+    if first >= 48 && first <= 57 -> return "_{name}"
+    name
+}
+
+// The entry's file name without `.jet`.
+fn jet_cli_stem(file: String) -> String Never! {
+    parts := file.split("/").to_list()
+    name :: &parts.pop() ?? file
+    if name.ends_with(".jet") -> return name.slice(0..<(name.len() - 4))
+    name
+}
+
+fn jet_cli_build_failed(what: String, why: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, why, fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Dev builds: the Jet-native backend lowers the optimized MIR to LIR and
+// writes a static x86-64 executable (D-EXEC1). A program it cannot lower yet
+// is refused with the backend's first finding, never built another way.
+fn jet_cli_build_native(file: String, result: JetDriverCompileResult, binary: String, color: Bool) -[FS]> JetDriverVerbOutput Never! {
+    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    entry_id :: result.entry_function ?? return jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
+    entry := -1
+    loop (index, function) in program.functions {
+        if function.id == entry_id -> entry = index
+    }
+    if entry < 0 -> return jet_cli_ice("the MIR program of `{file}` lost its entry function")
+    lowered :: lir_lower_program(program)
+    if lowered.issues.len() > 0 {
+        issue :: lowered.issues[0]
+        return JetDriverVerbOutput{
+            stdout: "",
+            stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet: {issue.function}: {issue.message}", jet_cli_why("E2104"), "build it with `jet build --release {file}` (rustc) until the Jet backend lowers this program", color),
+            exit_code: JET_DRIVER_EXIT_USER_ERROR,
+        }
+    }
+    image :: x64_static_executable(lowered.lir, LIRFunctionID{value: entry})
+    if image.errors.len() > 0 {
+        return JetDriverVerbOutput{
+            stdout: "",
+            stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet: {image.errors[0]}", jet_cli_why("E2104"), "build it with `jet build --release {file}` (rustc) until the Jet backend lowers this program", color),
+            exit_code: JET_DRIVER_EXIT_USER_ERROR,
+        }
+    }
+    cli_files.write_bytes(binary, image.bytes) ?? return jet_cli_build_failed("couldn't write {binary}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
+    cli_files.set_mode(binary, 0o755) ?? return jet_cli_build_failed("couldn't make {binary} executable: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// Release builds: rustc/LLVM over the emitted Rust program, with the argv
+// Source/CmdCompile.rs gives a native release build whose runtime is compiled
+// inline (`PreparedRuntime::inline`): the release cfg and profile flags
+// (main.rs `ProfileConfig::release`), the crate name pinned to the file stem,
+// and the project path remapped out of debug records.
+fn jet_cli_build_release(file: String, result: JetDriverCompileResult, root: String, build_dir: String, stem: String, binary: String, color: Bool) -[FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    rust :: result.emitted_source ?? return jet_cli_ice("the Jet compiler finished `{file}` without emitting Rust")
+    rust_path :: "{build_dir}/{stem}.rs"
+    cli_files.write(rust_path, rust) ?? return jet_cli_build_failed("couldn't write {rust_path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
+    argv :: [String]{
+        "rustc", "--edition", "2021",
+        "--cfg", "jet_release", "--cfg", "jet_release_inspect=\"local\"",
+        "-C", "opt-level=3", "-C", "strip=symbols", "-C", "lto=thin", "-C", "target-cpu=native",
+        "--crate-name", jet_cli_crate_name(stem),
+        "--remap-path-prefix", "{root}=/jet/project",
+        rust_path, "-o", binary,
+    }
+    receipt :: cli_process.cmd(argv).run() ?? return jet_cli_build_failed("couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (Docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again", color)
+    if !receipt.success {
+        log_path :: "{build_dir}/{stem}.rustc.log"
+        cli_files.write(log_path, receipt.errors) ?? return jet_cli_ice("rustc rejected the Rust generated for `{file}`")
+        return jet_cli_ice("rustc rejected the Rust generated for `{file}`; its report is in {log_path}")
+    }
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `jet build <file>`: compile through the Jet compiler, report its problems
+// the way the Rust host does, then write `.jet/build/<stem>` in the source
+// root through the backend the profile selects.
+fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+    if errors.len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
+    root :: snapshot.roots[0].canonical_path
+    build_dir :: "{root}/.jet/build"
+    cli_files.create_dir_all(build_dir) ?? return jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)
+    stem :: jet_cli_stem(file)
+    binary :: "{build_dir}/{stem}"
+    if release -> return jet_cli_build_release(file, result, root, build_dir, stem, binary, color)
+    jet_cli_build_native(file, result, binary, color)
+}
+
+fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, result, snapshot)
+    }
+    output
+}
+
+// Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
+pub fn jet_cli_main(args: [String]) -> Int {
+    plan :: jet_cli_front(args)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
+    if plan == {
+        .Done(done) -> output = ~done
+        .Check(file, source, color, quiet) -> output = jet_cli_compile_check(file, source, color, quiet)
+        .Build(file, source, color, release) -> output = jet_cli_compile_build(file, source, color, release)
+    }
+    if output.stdout.len() > 0 {
+        out :: cli_term.stdout()
+        &out.write(output.stdout).drop("jet stdout")
+    }
+    if output.stderr.len() > 0 {
+        stderr_handle :: cli_term.stderr()
+        &stderr_handle.write(output.stderr).drop("jet stderr")
+    }
+    output.exit_code
+}

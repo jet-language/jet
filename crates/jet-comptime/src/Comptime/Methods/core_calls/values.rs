@@ -93,146 +93,53 @@ pub(super) fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
     Some(rows)
 }
 
-pub(crate) const URL_INTERNAL_PREFIX: &str = "__jet_url_";
-const URL_RAW_HOST: &str = "__jet_url_raw_host";
-const URL_USERNAME: &str = "__jet_url_username";
-const URL_PASSWORD: &str = "__jet_url_password";
-const URL_TYPED_HOST: &str = "__jet_url_typed_host";
-const URL_TYPED_PATH: &str = "__jet_url_typed_path";
-
-fn url_option_string(value: Option<&String>, ty: Type) -> CtValue {
-    match value {
-        Some(value) => CtValue::Present(Box::new(CtValue::Str(value.clone()))),
-        None => CtValue::absent(ty),
-    }
-}
-
-fn url_typed_parts_value(parts: &[(String, bool)]) -> CtValue {
-    CtValue::List(
-        parts
-            .iter()
-            .map(|(part, hole)| {
-                CtValue::List(vec![CtValue::Str(part.clone()), CtValue::Bool(*hole)])
-            })
-            .collect(),
-    )
-}
-
-fn url_option_string_from_ct(
-    value: Option<&CtValue>,
-    label: &str,
-    span: Span,
-) -> Result<Option<String>, Diagnostic> {
-    match value {
-        None | Some(CtValue::Failed(CtReport::Clean(_))) => Ok(None),
-        Some(CtValue::Present(value)) => match value.as_ref() {
-            CtValue::Str(value) => Ok(Some(value.clone())),
-            _ => Err(unsupported(&format!("malformed URL {label}"), span)),
-        },
-        Some(_) => Err(unsupported(&format!("malformed URL {label}"), span)),
-    }
-}
-
-fn url_option_int_from_ct(
-    value: Option<&CtValue>,
-    label: &str,
-    span: Span,
-) -> Result<Option<i64>, Diagnostic> {
-    match value {
-        None | Some(CtValue::Failed(CtReport::Clean(_))) => Ok(None),
-        Some(CtValue::Present(value)) => match value.as_ref() {
-            CtValue::Int(value) => Ok(Some(*value)),
-            _ => Err(unsupported(&format!("malformed URL {label}"), span)),
-        },
-        Some(_) => Err(unsupported(&format!("malformed URL {label}"), span)),
-    }
-}
-
-fn url_typed_parts_from_ct(
-    value: Option<&CtValue>,
-    label: &str,
-    span: Span,
-) -> Result<Option<Vec<(String, bool)>>, Diagnostic> {
-    let Some(CtValue::List(rows)) = value else {
-        return if value.is_none() {
-            Ok(None)
-        } else {
-            Err(unsupported(&format!("malformed URL {label}"), span))
-        };
-    };
-    rows.iter()
-        .map(|row| match row {
-            CtValue::List(parts) => match parts.as_slice() {
-                [CtValue::Str(part), CtValue::Bool(hole)] => Ok((part.clone(), *hole)),
-                _ => Err(unsupported(&format!("malformed URL {label}"), span)),
-            },
-            _ => Err(unsupported(&format!("malformed URL {label}"), span)),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
-}
-
+/// D-BOUND-HEAD1=A: the `core.net.url.URL` record in `Core/net/url.jet` field
+/// order, projected by the URL kernel exactly as AOT's `JetURL::from_url_parts`
+/// and the JIT typed head, so every tier carries one URL layout.
 pub(crate) fn url_parts_to_ct(u: &super::super::super::UrlLite::UrlParts) -> CtValue {
-    let mut fields = vec![
-        ("scheme".to_string(), CtValue::Str(u.scheme.clone())),
-        (
-            "host".to_string(),
-            match &u.host {
-                Some(h) if !h.is_empty() => CtValue::Present(Box::new(CtValue::Str(h.clone()))),
-                _ => CtValue::absent(Type::String),
-            },
-        ),
-        (
-            "port".to_string(),
-            match u.port {
-                Some(p) => CtValue::Present(Box::new(CtValue::Int(p))),
-                None => CtValue::absent(Type::Int),
-            },
-        ),
-        ("path".to_string(), CtValue::Str(u.path.clone())),
-        (
-            "query".to_string(),
-            CtValue::List(
-                u.query
-                    .iter()
-                    .map(|(k, v)| {
-                        CtValue::List(vec![CtValue::Str(k.clone()), CtValue::Str(v.clone())])
-                    })
-                    .collect(),
-            ),
-        ),
-        (
-            "fragment".to_string(),
-            match &u.fragment {
-                Some(f) => CtValue::Present(Box::new(CtValue::Str(f.clone()))),
-                None => CtValue::absent(Type::String),
-            },
-        ),
-        (
-            URL_RAW_HOST.to_string(),
-            url_option_string(u.host.as_ref(), Type::String),
-        ),
-        (
-            URL_USERNAME.to_string(),
-            url_option_string(u.username.as_ref(), Type::String),
-        ),
-        (
-            URL_PASSWORD.to_string(),
-            url_option_string(u.password.as_ref(), Type::String),
-        ),
-    ];
-    if let Some(parts) = &u.typed_host {
-        fields.push((URL_TYPED_HOST.to_string(), url_typed_parts_value(parts)));
-    }
-    if let Some(parts) = &u.typed_path {
-        fields.push((URL_TYPED_PATH.to_string(), url_typed_parts_value(parts)));
-    }
+    let (port, port_explicit) = u.core_port();
+    let text = |value: &Option<String>| CtValue::Str(value.clone().unwrap_or_default());
     CtValue::Struct {
         type_name: "URL".to_string(),
-        fields,
+        fields: vec![
+            ("scheme".to_string(), CtValue::Str(u.scheme.clone())),
+            ("user_text".to_string(), text(&u.username)),
+            ("password_text".to_string(), text(&u.password)),
+            ("host".to_string(), text(&u.host)),
+            ("port".to_string(), CtValue::Int(port)),
+            ("port_explicit".to_string(), CtValue::Bool(port_explicit)),
+            ("path".to_string(), CtValue::Str(u.path.clone())),
+            ("query".to_string(), CtValue::Str(u.query())),
+            ("fragment".to_string(), text(&u.fragment)),
+            ("raw".to_string(), CtValue::Str(u.to_string_value())),
+        ],
     }
 }
 
+fn url_record_field<'a>(
+    fields: &'a [(String, CtValue)],
+    name: &str,
+    span: Span,
+) -> Result<&'a CtValue, Diagnostic> {
+    fields
+        .iter()
+        .find(|(field, _)| field == name)
+        .map(|(_, value)| value)
+        .ok_or_else(|| unsupported(&format!("malformed URL {name}"), span))
+}
+
+fn url_record_text<'a>(
+    fields: &'a [(String, CtValue)],
+    name: &str,
+    span: Span,
+) -> Result<&'a str, Diagnostic> {
+    match url_record_field(fields, name, span)? {
+        CtValue::Str(value) => Ok(value.as_str()),
+        _ => Err(unsupported(&format!("malformed URL {name}"), span)),
+    }
+}
+
+/// Re-enter the URL kernel from the `core.net.url.URL` record fields.
 pub(crate) fn url_parts_from_ct(
     value: &CtValue,
     span: Span,
@@ -246,40 +153,21 @@ pub(crate) fn url_parts_from_ct(
     if type_name != "URL" {
         return Err(unsupported("malformed URL value", span));
     }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(field, _)| field == name)
-            .map(|(_, value)| value)
+    let CtValue::Int(port) = url_record_field(fields, "port", span)? else {
+        return Err(unsupported("malformed URL port", span));
     };
-    let string_field = |name: &str| match field(name) {
-        Some(CtValue::Str(value)) => Ok(value.clone()),
-        _ => Err(unsupported(&format!("malformed URL {name}"), span)),
+    let CtValue::Bool(port_explicit) = url_record_field(fields, "port_explicit", span)? else {
+        return Err(unsupported("malformed URL port_explicit", span));
     };
-    let scheme = string_field("scheme")?;
-    let hidden_field =
-        |name: &str| field(name).ok_or_else(|| unsupported(&format!("malformed URL {name}"), span));
-    let host = url_option_string_from_ct(Some(hidden_field(URL_RAW_HOST)?), "host", span)?;
-    let port = url_option_int_from_ct(field("port"), "port", span)?;
-    let path = string_field("path")?;
-    let query = as_string_rows(
-        field("query").ok_or_else(|| unsupported("malformed URL query", span))?,
-        span,
-    )?
-    .into_iter()
-    .map(|row| {
-        (
-            row.first().cloned().unwrap_or_default(),
-            row.get(1).cloned().unwrap_or_default(),
-        )
-    })
-    .collect();
-    let fragment = url_option_string_from_ct(field("fragment"), "fragment", span)?;
-    let username = url_option_string_from_ct(Some(hidden_field(URL_USERNAME)?), "username", span)?;
-    let password = url_option_string_from_ct(Some(hidden_field(URL_PASSWORD)?), "password", span)?;
-    let typed_host = url_typed_parts_from_ct(field(URL_TYPED_HOST), "typed host", span)?;
-    let typed_path = url_typed_parts_from_ct(field(URL_TYPED_PATH), "typed path", span)?;
-    Ok(super::super::super::UrlLite::from_marshaled(
-        scheme, username, password, host, port, path, query, fragment, typed_host, typed_path,
+    Ok(super::super::super::UrlLite::from_core_record(
+        url_record_text(fields, "scheme", span)?,
+        url_record_text(fields, "user_text", span)?,
+        url_record_text(fields, "password_text", span)?,
+        url_record_text(fields, "host", span)?,
+        *port,
+        *port_explicit,
+        url_record_text(fields, "path", span)?,
+        url_record_text(fields, "query", span)?,
+        url_record_text(fields, "fragment", span)?,
     ))
 }

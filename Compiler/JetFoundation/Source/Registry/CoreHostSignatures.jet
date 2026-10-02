@@ -1,14 +1,6 @@
 // Typed source-call projection of core_fixed_sig_impl's bounded host rows.
-// Keep this table independent from erased CoreCallRecord metadata.
-
-fn core_host_typed_signature(module_name: String, member: String, types: [Type], return_type: Type?, moved_index: Int?) -> CoreTypedCallSignature Never! {
-    parameters := [CoreCallTypedParameter]{}
-    loop (index, ty) in types {
-        access := if (moved_index ?? -1) == index -> AccessConvention.Move else -> AccessConvention.Read
-        &parameters.push(core_sig_positional(ty, access))
-    }
-    core_sig(module_name, member, parameters, return_type)
-}
+// Keep this table independent from erased CoreCallRecord metadata. Rows use
+// the grammar of `core_sig_row_lookup` (CorePlatformSignatures.jet).
 
 fn core_host_callback_type() -> Type Never! {
     Type.Fn{
@@ -28,383 +20,295 @@ fn core_host_callback_type() -> Type Never! {
 }
 
 pub fn core_host_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
-    integer :: Type.Int
-    float :: Type.Float
-    boolean :: Type.Bool
-    unit :: core_sig_named("Unit")
-    io :: core_sig_named("IOError")
-    time_error :: core_sig_named("TimeError")
-    encoding_error :: core_sig_named("EncodingError")
-    u8 :: Type.IntN{signed: false, bits: 8}
-    list_u8 :: Type.List{element: u8}
-    list_float :: Type.List{element: float}
-    list_int :: Type.List{element: integer}
-    list_bool :: Type.List{element: boolean}
-    list_list_int :: Type.List{element: list_int}
-    list_string :: Type.List{element: Type.String}
-    counter :: core_sig_named("Counter")
-    ordered_map :: core_sig_named("OrderedMap")
-    chain :: core_sig_named("Chain")
-    string_set :: core_sig_named("StringSet")
-    path :: Type.Union{members: [Type]{Type.String, core_sig_named("Path")}}
-    json :: core_sig_named("DataTree")
-    measurement :: core_sig_apply("Measurement", float)
-    io_unit :: core_sig_result(unit, io)
-
-    if module_name == "core.files" {
-        if member == "scope" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("Authority")}, Val(core_sig_named("FileScope")), None))
-        if member == "read" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(Type.String, io)), None))
-        if member == "read_bytes" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(list_u8, io)), None))
-        if member == "map" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(core_sig_named("MappedFile"), io)), None))
-        if core_sig_one_of(member, [String]{"write", "append_all"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path, Type.String}, Val(io_unit), None))
-        if member == "write_bytes" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, list_u8}, Val(io_unit), None))
-        if core_sig_one_of(member, [String]{"exists", "is_dir"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(boolean), None))
-        if core_sig_one_of(member, [String]{"remove", "create_dir", "create_dir_all", "remove_dir", "remove_all"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(unit, io)), None))
-        if core_sig_one_of(member, [String]{"stat", "lstat"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(core_sig_named("Stat"), io)), None))
-        if core_sig_one_of(member, [String]{"is_fifo", "is_socket"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(boolean, io)), None))
-        if member == "chown" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, integer, integer}, Val(core_sig_result(unit, io)), None))
-        if member == "mkdtemp" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(Type.String, io)), None))
-        if member == "mktemp" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(Type.String), None))
-        if member == "set_mode" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, integer}, Val(core_sig_result(unit, io)), None))
-        if core_sig_one_of(member, [String]{"canonicalize", "absolute"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(Type.String, io)), None))
-        if member == "list_dir" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(Type.List{element: core_sig_named("DirEntry")}, io)), None))
-        if core_sig_one_of(member, [String]{"copy", "rename"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path, path}, Val(core_sig_result(unit, io)), None))
-        if member == "copy_dir" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, path}, Val(core_sig_result(unit, io)), None))
-        if core_sig_one_of(member, [String]{"symlink", "hard_link"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path, path}, Val(core_sig_result(unit, io)), None))
-        if member == "read_link" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(Type.String, io)), None))
-        if core_sig_one_of(member, [String]{"walk", "walk_parallel", "walk_files"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{path, Type.Option{inner: Type.String}}, Val(core_sig_result(Type.List{element: core_sig_named("WalkEntry")}, io)), None))
-        if member == "glob" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(list_string, io)), None))
-        if member == "read_at" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, integer, integer}, Val(core_sig_result(list_u8, io)), None))
-        if member == "write_at" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, integer, list_u8}, Val(core_sig_result(unit, io)), None))
-        if member == "fsync" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(unit, io)), None))
-        if member == "write_atomic" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, list_u8}, Val(core_sig_result(unit, io)), None))
-        if member == "temp_dir" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(core_sig_named("TempDir"), io)), None))
-        if member == "temp_file" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(core_sig_named("TempFile"), io)), None))
-        if member == "lock" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(core_sig_named("FileLock"), io)), None))
-        return None
-    }
-    if module_name == "core.watcher" {
-        if member == "files" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(core_sig_named("WatchHandle"), io)), None))
-        if member == "process_pid" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("WatchHandle")), None))
-        if member == "port" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, integer}, Val(core_sig_named("WatchHandle")), None))
-        if member == "set" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("WatchSet")), None))
-        return None
-    }
-    if module_name == "core.process" {
-        if core_sig_one_of(member, [String]{"argv", "args"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(list_string), None))
-        if member == "check" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("ProcessReceipt")}, Val(core_sig_result(unit, io)), None))
-        if member == "status_ok" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("ProcessReceipt")}, Val(boolean), None))
-        if member == "exit" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Never")), None))
-        if member == "on_signal" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("ProcessSignal")}, Val(unit), None))
-        if member == "cmd" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_string}, Val(core_sig_named("ProcessSpec")), None))
-        if member == "pipeline" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.List{element: core_sig_named("ProcessSpec")}}, Val(core_sig_result(core_sig_named("ProcessReceipt"), io)), None))
-        return None
-    }
-    if module_name == "core.term" {
-        if member == "confirm" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(boolean), None))
-        if member == "choose" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, list_string}, Val(core_sig_result(Type.String, io)), None))
-        if member == "input_secret" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(Type.String, io)), None))
-        if member == "read_all_input" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(Type.String, io)), None))
-        if member == "readline" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(Type.String, io)), None))
-        if member == "read_until" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(Type.String, io)), None))
-        if member == "take" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_result(list_u8, io)), None))
-        if member == "buffered" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("StdinHandle")), None))
-        if member == "binread" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(list_u8, io)), None))
-        if member == "binwrite" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, list_u8}, Val(core_sig_result(unit, io)), None))
-        if member == "stdin" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("StdinHandle")), None))
-        if member == "stdout" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("Stdout")), None))
-        if member == "stderr" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("Stderr")), None))
-        if core_sig_one_of(member, [String]{"terminal_width", "terminal_height"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(integer), None))
-        if core_sig_one_of(member, [String]{"style", "style_force"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String}, Val(Type.String), None))
-        if member == "progress" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(unit, io)), None))
-        return None
-    }
-    if module_name == "core.sys" {
-        if member == "get" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(Type.Option{inner: Type.String}), None))
-        if member == "set" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String}, None, None))
-        if member == "unset" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(boolean, core_sig_named("EnvError"))), None))
-        if member == "vars" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(list_string, core_sig_named("EnvError"))), None))
-        if member == "current_dir" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(Type.String, io)), None))
-        if member == "home_dir" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(Type.Option{inner: Type.String}), None))
-        if core_sig_one_of(member, [String]{"name", "family", "arch", "temp_dir", "executable", "hostname", "username", "release", "version"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(Type.String), None))
-        if member == "expand" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(Type.String), None))
-        if core_sig_one_of(member, [String]{"pid", "getpid", "cpu_count", "getppid", "getuid", "geteuid", "getgid", "getegid", "getpgrp"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(integer), None))
-        if core_sig_one_of(member, [String]{"umask", "exitcode"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(integer), None))
-        if member == "success" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(boolean), None))
-        if member == "uptime" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(float), None))
-        if member == "getgroups" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(list_int), None))
-        if core_sig_one_of(member, [String]{"loadavg", "times"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(list_float), None))
-        if core_sig_one_of(member, [String]{"getpgid", "getsid"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_result(integer, io)), None))
-        if member == "getpriority" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_result(integer, io)), None))
-        if member == "setpriority" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(core_sig_result(unit, io)), None))
-        if member == "utime" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, integer, integer}, Val(core_sig_result(unit, io)), None))
-        if member == "sync" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, None, None))
-        if member == "stop" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, None, None))
-        if member == "atexit" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_fn([Type]{}, unit)}, None, None))
-        if member == "set_current_dir" -> return Val(core_host_typed_signature(module_name, member, [Type]{path}, Val(core_sig_result(unit, io)), None))
-        if core_sig_one_of(member, [String]{"fork", "setsid", "wait"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(integer, io)), None))
-        if member == "waitpid" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(core_sig_result(integer, io)), None))
-        if core_sig_one_of(member, [String]{"setuid", "setgid"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_result(unit, io)), None))
-        if member == "setpgrp" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(unit, io)), None))
-        if core_sig_one_of(member, [String]{"setpgid", "kill"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(core_sig_result(unit, io)), None))
-        if member == "initgroups" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, integer}, Val(core_sig_result(unit, io)), None))
-        if member == "pipe" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_result(list_int, io)), None))
-        if member == "close_fd" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, None, None))
-        if member == "mkfifo" -> return Val(core_host_typed_signature(module_name, member, [Type]{path, integer}, Val(core_sig_result(unit, io)), None))
-        return None
-    }
-    if module_name == "core.crypto.vault" && member == "get" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(Type.Option{inner: Type.String}), None))
-    if module_name == "core.auth" {
-        if member == "verify_jwt" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, list_u8, Type.String, Type.String, core_sig_named("Duration")}, Val(core_sig_result(core_sig_named("Claims"), core_sig_named("AuthError"))), None))
-        if member == "verify_paseto" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, list_u8, Type.String}, Val(core_sig_result(core_sig_named("Claims"), core_sig_named("AuthError"))), None))
-        if member == "register_user" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String}, Val(core_sig_result(unit, Type.String)), None))
-        if core_sig_one_of(member, [String]{"password_login", "oauth_finish"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String, integer, integer}, Val(core_sig_result(core_sig_named("Session"), Type.String)), None))
-        if member == "magic_link_consume" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, integer, integer}, Val(core_sig_result(core_sig_named("Session"), Type.String)), None))
-        if member == "session_validate" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, integer}, Val(core_sig_result(core_sig_named("Session"), Type.String)), None))
-        if core_sig_one_of(member, [String]{"session_show", "session_user", "session_cookie", "session_id"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("Session")}, Val(Type.String), None))
-        if member == "magic_link_issue" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, integer, integer}, Val(core_sig_result(Type.String, Type.String)), None))
-        if member == "oauth_begin" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(Type.String, Type.String)), None))
-        return None
-    }
-    if module_name == "core.sync" {
-        if member == "text_new" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String}, Val(core_sig_named("SyncText")), None))
-        if member == "text_set" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncText"), Type.String, Type.String}, Val(core_sig_named("SyncText")), None))
-        if member == "text_merge" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncText"), core_sig_named("SyncText")}, Val(core_sig_named("SyncText")), None))
-        if member == "text_show" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncText")}, Val(Type.String), None))
-        if member == "text_edit" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncText"), Type.String, integer, integer, Type.String}, Val(core_sig_named("SyncText")), None))
-        if member == "text_metadata" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncText")}, Val(Type.String), None))
-        if member == "counter_new" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, integer}, Val(core_sig_named("SyncCounter")), None))
-        if member == "counter_inc" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncCounter"), Type.String, integer}, Val(core_sig_named("SyncCounter")), None))
-        if member == "counter_merge" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncCounter"), core_sig_named("SyncCounter")}, Val(core_sig_named("SyncCounter")), None))
-        if member == "counter_value" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncCounter")}, Val(integer), None))
-        if member == "map_new" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("SyncMap")), None))
-        if member == "list_new" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("SyncList")), None))
-        if member == "map_set" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncMap"), Type.String, Type.String}, Val(core_sig_named("SyncMap")), None))
-        if member == "map_get" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncMap"), Type.String}, Val(Type.Option{inner: Type.String}), None))
-        if member == "map_merge" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncMap"), core_sig_named("SyncMap")}, Val(core_sig_named("SyncMap")), None))
-        if member == "map_show" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncMap")}, Val(Type.String), None))
-        if member == "list_push" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncList"), Type.String, Type.String}, Val(core_sig_named("SyncList")), None))
-        if member == "list_merge" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncList"), core_sig_named("SyncList")}, Val(core_sig_named("SyncList")), None))
-        if member == "list_show" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("SyncList")}, Val(Type.String), None))
-        if member == "policy_new" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String}, Val(core_sig_result(core_sig_named("RowPolicy"), Type.String)), None))
-        if member == "policy_allows" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("RowPolicy"), Type.String, Type.String}, Val(boolean), None))
-        if member == "policy_show" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("RowPolicy")}, Val(Type.String), None))
-        return None
-    }
-    if module_name == "core.testing" {
-        if core_sig_one_of(member, [String]{"snap", "golden"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String}, Val(boolean), None))
-        if core_sig_one_of(member, [String]{"fixture", "temp_dir"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(Type.String), None))
-        if member == "corpus" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(list_string), None))
-        if member == "fake_clock" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Clock")), None))
-        if member == "fake_rng" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("RNG")), None))
-        if member == "fake_data" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Fake")), None))
-        if member == "test_suite" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("TestSuite")), None))
-        if member == "world" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_fn([Type]{core_sig_named("DeterministicWorld")}, unit)}, Val(unit), None))
-        if member == "compare" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.List{element: core_sig_named("DataTree")}, core_sig_fn([Type]{core_sig_named("DataTree")}, core_sig_named("DataTree")), core_sig_fn([Type]{core_sig_named("DataTree")}, core_sig_named("DataTree")), Type.String}, Val(core_sig_named("TestComparison")), None))
-        if member == "assert_equal" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("TestComparison")}, Val(boolean), None))
-        if member == "status" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("TestComparison")}, Val(Type.String), None))
-        return None
-    }
-    if module_name == "core.math" {
-        if core_sig_one_of(member, [String]{"abs_float", "log1p"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"min_float", "max_float", "midpoint"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(float), None))
-        if member == "clamp_float" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float, float}, Val(float), None))
-        if member == "hypot3" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float, float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"tau_const", "random"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(float), None))
-        if core_sig_one_of(member, [String]{"gcd_many", "lcm_many", "sum_int", "prod_int"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(integer), None))
-        if member == "powmod" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, integer}, Val(Type.Option{inner: integer}), None))
-        if core_sig_one_of(member, [String]{"abs_diff", "xor"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(integer), None))
-        if core_sig_one_of(member, [String]{"even", "odd"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(boolean), None))
-        if member == "in_range" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, integer}, Val(boolean), None))
-        if core_sig_one_of(member, [String]{"sqrt", "floor", "ceil", "fabs", "expm1"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float}, Val(float), None))
-        if member == "round" -> return Val(core_host_typed_signature(module_name, member, [Type]{float}, Val(integer), None))
-        if member == "pow" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"fmod", "remainder"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(float), None))
-        if member == "isclose" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float, float, float}, Val(boolean), None))
-        if member == "dist" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, list_float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"comb", "perm"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(Type.Option{inner: integer}), None))
-        if core_sig_one_of(member, [String]{"isnan", "isinf", "isfinite"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float}, Val(boolean), None))
-        if member == "fsum" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float}, Val(float), None))
-        if member == "sumprod" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, list_float}, Val(float), None))
-        if member == "prod" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(integer), None))
-        return None
-    }
-    if module_name == "core.math.combinatorics" {
-        if core_sig_one_of(member, [String]{"permutations", "combinations", "combinations_with_replacement", "product", "batched", "tee", "windows"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(list_list_int), None))
-        if member == "cartesian" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, list_int}, Val(list_list_int), None))
-        if core_sig_one_of(member, [String]{"pairwise", "groupby", "powerset"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(list_list_int), None))
-        if member == "zip_longest" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, list_int, integer}, Val(list_list_int), None))
-        if core_sig_one_of(member, [String]{"flatten", "starmap"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_list_int}, Val(list_int), None))
-        if member == "chain" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, list_int}, Val(list_int), None))
-        if member == "compress" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, list_bool}, Val(list_int), None))
-        if member == "drop" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(list_int), None))
-        if core_sig_one_of(member, [String]{"takewhile", "dropwhile", "filterfalse"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, boolean}, Val(list_int), None))
-        if member == "islice" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer, integer, integer}, Val(list_int), None))
-        if member == "unique" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(list_int), None))
-        if member == "repeat" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(list_int), None))
-        if core_sig_one_of(member, [String]{"count_from", "count"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, integer}, Val(list_int), None))
-        if member == "cycle" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(list_int), None))
-        if core_sig_one_of(member, [String]{"accumulate", "reverse"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(list_int), None))
-        if member == "factorial" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(Type.Option{inner: integer}), None))
-        if core_sig_one_of(member, [String]{"binomial", "permutations_count", "combinations_count", "npr", "ncr", "falling_factorial", "rising_factorial"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(Type.Option{inner: integer}), None))
-        if member == "multinomial" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(Type.Option{inner: integer}), None))
-        return None
-    }
-    if module_name == "core.collections" {
-        if member == "heapify" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(list_int), None))
-        if member == "heappush" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(list_int), None))
-        if member == "heappop" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "heap", ty: list_int}, TypeTupleField{name: "value", ty: Type.Option{inner: integer}}}}), None))
-        if member == "heappushpop" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "heap", ty: list_int}, TypeTupleField{name: "value", ty: integer}}}), None))
-        if member == "heapreplace" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "heap", ty: list_int}, TypeTupleField{name: "value", ty: Type.Option{inner: integer}}}}), None))
-        if core_sig_one_of(member, [String]{"bisect_left", "bisect_right"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(integer), None))
-        if core_sig_one_of(member, [String]{"insort_left", "insort_right"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(list_int), None))
-        if member == "merge_sorted" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, list_int}, Val(list_int), None))
-        if core_sig_one_of(member, [String]{"nsmallest", "nlargest"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, list_int}, Val(list_int), None))
-        if member == "counter" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(counter), None))
-        if member == "counter_from" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_string}, Val(counter), None))
-        if core_sig_one_of(member, [String]{"add", "set_count"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{counter, Type.String, integer}, Val(counter), None))
-        if core_sig_one_of(member, [String]{"inc", "dec"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{counter, Type.String}, Val(counter), None))
-        if member == "get" -> return Val(core_host_typed_signature(module_name, member, [Type]{counter, Type.String}, Val(integer), None))
-        if member == "total" -> return Val(core_host_typed_signature(module_name, member, [Type]{counter}, Val(integer), None))
-        if core_sig_one_of(member, [String]{"names", "elements"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{counter}, Val(list_string), None))
-        if member == "most_common" -> return Val(core_host_typed_signature(module_name, member, [Type]{counter, integer}, Val(counter), None))
-        if core_sig_one_of(member, [String]{"subtract", "merge_add"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{counter, counter}, Val(counter), None))
-        if member == "clear_counter" -> return Val(core_host_typed_signature(module_name, member, [Type]{counter}, Val(counter), None))
-        if member == "ordered_map" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(ordered_map), None))
-        if member == "map_get" -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map, Type.String}, Val(Type.Option{inner: Type.String}), None))
-        if member == "map_set" -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map, Type.String, Type.String}, Val(ordered_map), None))
-        if member == "map_remove" -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map, Type.String}, Val(ordered_map), None))
-        if core_sig_one_of(member, [String]{"map_keys", "map_values"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map}, Val(list_string), None))
-        if member == "map_contains" -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map, Type.String}, Val(boolean), None))
-        if member == "map_len" -> return Val(core_host_typed_signature(module_name, member, [Type]{ordered_map}, Val(integer), None))
-        if member == "chain" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(chain), None))
-        if member == "chain_push" -> return Val(core_host_typed_signature(module_name, member, [Type]{chain, list_string, list_string}, Val(chain), None))
-        if member == "chain_get" -> return Val(core_host_typed_signature(module_name, member, [Type]{chain, Type.String}, Val(Type.Option{inner: Type.String}), None))
-        if member == "chain_contains" -> return Val(core_host_typed_signature(module_name, member, [Type]{chain, Type.String}, Val(boolean), None))
-        return None
-    }
-    if module_name == "core.collections.set" {
-        if member == "new" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(string_set), None))
-        if member == "from_list" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_string}, Val(string_set), None))
-        if core_sig_one_of(member, [String]{"add", "discard"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{string_set, Type.String}, Val(string_set), None))
-        if member == "remove" -> return Val(core_host_typed_signature(module_name, member, [Type]{string_set, Type.String}, Val(Type.Option{inner: string_set}), None))
-        if member == "contains" -> return Val(core_host_typed_signature(module_name, member, [Type]{string_set, Type.String}, Val(boolean), None))
-        if core_sig_one_of(member, [String]{"len", "is_empty"}) {
-            return if member == "len" -> Val(core_host_typed_signature(module_name, member, [Type]{string_set}, Val(integer), None)) else -> Val(core_host_typed_signature(module_name, member, [Type]{string_set}, Val(boolean), None))
-        }
-        if member == "to_list" -> return Val(core_host_typed_signature(module_name, member, [Type]{string_set}, Val(list_string), None))
-        if core_sig_one_of(member, [String]{"clear", "clone_set"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{string_set}, Val(string_set), None))
-        if core_sig_one_of(member, [String]{"union", "intersection", "difference", "symmetric_difference"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{string_set, string_set}, Val(string_set), None))
-        if core_sig_one_of(member, [String]{"issubset", "issuperset", "isdisjoint"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{string_set, string_set}, Val(boolean), None))
-        return None
-    }
-    if module_name == "core.math.stats" {
-        if core_sig_one_of(member, [String]{"sum", "prod"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float}, Val(float), None))
-        if member == "count" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float}, Val(integer), None))
-        if core_sig_one_of(member, [String]{"cumsum", "cumprod", "diff", "rank", "zscore"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float}, Val(list_float), None))
-        if member == "moving_average" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, integer}, Val(list_float), None))
-        if member == "ewma" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, float}, Val(list_float), None))
-        if member == "clip" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, float, float}, Val(list_float), None))
-        if core_sig_one_of(member, [String]{"mean", "fmean", "geometric_mean", "harmonic_mean", "median", "median_low", "median_high", "mode", "pvariance", "pstdev", "variance", "stdev", "min", "max", "range", "iqr", "mad", "mean_abs_deviation", "skew", "kurtosis"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float}, Val(Type.Option{inner: float}), None))
-        if core_sig_one_of(member, [String]{"median_grouped", "quantile", "percentile"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, float}, Val(Type.Option{inner: float}), None))
-        if core_sig_one_of(member, [String]{"covariance", "correlation", "sumprod", "weighted_mean", "spearman", "pearson", "covariance_population"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, list_float}, Val(Type.Option{inner: float}), None))
-        if member == "multimode" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float}, Val(list_float), None))
-        if core_sig_one_of(member, [String]{"kde", "winsorize"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, float}, Val(list_float), None))
-        if member == "kde_random" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, float, integer}, Val(list_float), None))
-        if member == "quantiles" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, integer}, Val(list_float), None))
-        if member == "residuals" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, list_float}, Val(list_float), None))
-        if member == "histogram" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_float, integer}, Val(list_int), None))
-        return None
-    }
-    if module_name == "core.math.random" {
-        if core_sig_one_of(member, [String]{"int", "randint"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(integer), None))
-        if core_sig_one_of(member, [String]{"float", "random"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(float), None))
-        if core_sig_one_of(member, [String]{"float_range", "uniform"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(float), None))
-        if member == "bool" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(boolean), None))
-        if core_sig_one_of(member, [String]{"normal", "normalvariate", "gauss"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"exponential", "expovariate"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float}, Val(float), None))
-        if member == "seed" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, None, None))
-        if core_sig_one_of(member, [String]{"bytes", "randbytes"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(list_u8), None))
-        if member == "getrandbits" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(integer), None))
-        if member == "randrange" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(integer), None))
-        if member == "choice" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int}, Val(Type.Option{inner: integer}), None))
-        if member == "choices" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_int, integer}, Val(list_int), None))
-        if member == "triangular" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float, float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"gammavariate", "betavariate", "lognormvariate", "weibullvariate", "vonmisesvariate"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(float), None))
-        if member == "paretovariate" -> return Val(core_host_typed_signature(module_name, member, [Type]{float}, Val(float), None))
-        if core_sig_one_of(member, [String]{"rng", "split"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("RNG")), None))
-        return None
-    }
-    // D-CRYPTO-RNG1=A: the OS CSPRNG kernel is `None` on a missing or rejected
-    // provider; the Jet wrapper in Core/crypto/random.jet reports `Unavailable`.
-    if module_name == "core.crypto.random" && member == "bytes" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(Type.Option{inner: list_u8}), None))
-    // D-SHAPE-RESOURCE1=A: the Core-internal wipe behind each secret type's `Close`.
-    if module_name == "core.crypto" && member == "__zeroize" -> return Val(core_host_typed_signature(module_name, member, [Type]{list_u8}, None, None))
-    if module_name == "core.units" && member == "from" -> return Val(core_host_typed_signature(module_name, member, [Type]{float, float}, Val(measurement), None))
-    if module_name == "core.time" {
-        if member == "sleep" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("Duration")}, None, None))
-        if member == "sleep_until" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("Instant")}, None, None))
-        if member == "start" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("Stopwatch")), None))
-        if member == "instant" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("Instant")), None))
-        if core_sig_one_of(member, [String]{"now", "now_utc"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("DateTime")), None))
-        if member == "from_unix_ms" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("DateTime")), None))
-        if core_sig_one_of(member, [String]{"from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("DateTime")), None))
-        if member == "today" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("LocalDate")), None))
-        if core_sig_one_of(member, [String]{"parse", "parse_iso_week_date"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(core_sig_named("LocalDate"), time_error)), None))
-        if member == "parse_rfc3339" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(core_sig_named("DateTime"), time_error)), None))
-        if member == "from_iso_week" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, integer}, Val(core_sig_result(core_sig_named("LocalDate"), time_error)), None))
-        if member == "parse_zoned" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(core_sig_named("ZonedDateTime"), time_error)), None))
-        if member == "datetime" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, integer, integer, integer, integer}, Val(core_sig_named("DateTime")), None))
-        if core_sig_one_of(member, [String]{"time", "local_time"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, integer}, Val(core_sig_named("LocalTime")), None))
-        if member == "days_in_month" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer}, Val(integer), None))
-        if member == "is_leap_year" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(boolean), None))
-        if member == "parse_time" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(core_sig_named("LocalTime"), time_error)), None))
-        if member == "period" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, integer}, Val(core_sig_named("Period")), None))
-        if core_sig_one_of(member, [String]{"period_days", "period_months", "period_years"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{integer}, Val(core_sig_named("Period")), None))
-        if member == "zone" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(core_sig_named("Zone"), time_error)), None))
-        if member == "utc" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(core_sig_named("Zone")), None))
-        if member == "zoned" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("DateTime"), core_sig_named("Zone")}, Val(core_sig_named("ZonedDateTime")), None))
-        if member == "zoned_local" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("LocalDate"), core_sig_named("LocalTime"), core_sig_named("Zone"), Type.String}, Val(core_sig_result(core_sig_named("ZonedDateTime"), time_error)), None))
-        return None
-    }
-    if module_name == "core.rt" && member == "callback" -> return Val(core_host_typed_signature(module_name, member, [Type]{integer, integer, core_host_callback_type()}, Val(core_sig_named("RealtimeStream")), None))
-    if module_name == "core.tasks" {
-        if member == "timeout" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("Duration")}, Val(unit), None))
-        if member == "interval" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("Duration")}, Val(core_sig_apply("Receiver", integer)), None))
-        if member == "yield_now" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(unit), None))
-        if member == "current_task" -> return Val(core_host_typed_signature(module_name, member, [Type]{}, Val(Type.String), None))
-        return None
-    }
-    if module_name == "core.game" && member == "run" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("GameScene"), core_sig_named("GameReplay"), core_sig_named("GameBackend"), integer}, Val(Type.String), None))
-    if module_name == "core.encoding.json" {
-        if core_sig_one_of(member, [String]{"parse", "loads"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(json, encoding_error)), None))
-        if member == "decode" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(json, encoding_error)), None))
-        if core_sig_one_of(member, [String]{"to_string", "to_string_pretty", "dumps"}) -> return Val(core_host_typed_signature(module_name, member, [Type]{json}, Val(Type.String), None))
-        if member == "canonical" -> return Val(core_host_typed_signature(module_name, member, [Type]{json}, Val(Type.String), None))
-        if member == "events" -> return Val(core_host_typed_signature(module_name, member, [Type]{json}, Val(Type.String), None))
-        if member == "reader" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("FileReader"), core_sig_named("EncodingLimits")}, Val(core_sig_result(core_sig_named("JSONReader"), encoding_error)), Val(0)))
-        if member == "writer" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("FileWriter"), core_sig_named("EncodingLimits"), boolean}, Val(core_sig_result(core_sig_named("JSONWriter"), encoding_error)), Val(0)))
-        return None
-    }
-    if module_name == "core.encoding.jsonl" {
-        if member == "parse" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(Type.List{element: json}, encoding_error)), None))
-        if member == "to_string" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.List{element: json}}, Val(Type.String), None))
-        if member == "loads" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(Type.List{element: json}, encoding_error)), None))
-        if member == "dumps" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.List{element: json}}, Val(Type.String), None))
-        if member == "count_rows" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(integer), None))
-        if member == "append_line" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, json}, Val(Type.String), None))
-        if member == "first" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String}, Val(core_sig_result(Type.Option{inner: json}, encoding_error)), None))
-        if member == "reader" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("FileReader"), core_sig_named("EncodingLimits")}, Val(core_sig_result(core_sig_named("JSONLReader"), encoding_error)), Val(0)))
-        if member == "writer" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("FileWriter"), core_sig_named("EncodingLimits")}, Val(core_sig_result(core_sig_named("JSONLWriter"), encoding_error)), Val(0)))
-        return None
-    }
-    if module_name == "core.encoding.csv" {
-        if member == "parse" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String, boolean, boolean}, Val(core_sig_result(Type.List{element: Type.List{element: Type.String}}, Type.String)), None))
-        if member == "rows" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.String, Type.String, boolean, boolean}, Val(core_sig_result(Type.List{element: core_sig_named("CSVRow")}, Type.String)), None))
-        if member == "to_string" -> return Val(core_host_typed_signature(module_name, member, [Type]{Type.List{element: Type.List{element: Type.String}}}, Val(Type.String), None))
-        if member == "reader" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("FileReader"), core_sig_named("EncodingLimits"), Type.String, boolean, boolean}, Val(core_sig_result(core_sig_named("CSVReader"), encoding_error)), Val(0)))
-        if member == "writer" -> return Val(core_host_typed_signature(module_name, member, [Type]{core_sig_named("FileWriter"), core_sig_named("EncodingLimits")}, Val(core_sig_result(core_sig_named("CSVWriter"), encoding_error)), Val(0)))
-        return None
-    }
-    None
+    rows :: """
+core.files scope Authority FileScope
+core.files read Union<String,Path> Result<String,IOError>
+core.files read_bytes Union<String,Path> Result<[u8],IOError>
+core.files map Union<String,Path> Result<MappedFile,IOError>
+core.files write|append_all Union<String,Path>,String Result<Unit,IOError>
+core.files write_bytes Union<String,Path>,[u8] Result<Unit,IOError>
+core.files exists|is_dir Union<String,Path> Bool
+core.files remove|create_dir|create_dir_all|remove_dir|remove_all Union<String,Path> Result<Unit,IOError>
+core.files stat|lstat Union<String,Path> Result<Stat,IOError>
+core.files is_fifo|is_socket Union<String,Path> Result<Bool,IOError>
+core.files chown Union<String,Path>,Int,Int Result<Unit,IOError>
+core.files mkdtemp String Result<String,IOError>
+core.files mktemp String String
+core.files set_mode Union<String,Path>,Int Result<Unit,IOError>
+core.files canonicalize|absolute Union<String,Path> Result<String,IOError>
+core.files list_dir Union<String,Path> Result<[DirEntry],IOError>
+core.files copy|rename|copy_dir|symlink|hard_link Union<String,Path>,Union<String,Path> Result<Unit,IOError>
+core.files read_link Union<String,Path> Result<String,IOError>
+core.files walk|walk_parallel|walk_files Union<String,Path>,String? Result<[WalkEntry],IOError>
+core.files glob Union<String,Path> Result<[String],IOError>
+core.files read_at Union<String,Path>,Int,Int Result<[u8],IOError>
+core.files write_at Union<String,Path>,Int,[u8] Result<Unit,IOError>
+core.files fsync Union<String,Path> Result<Unit,IOError>
+core.files write_atomic Union<String,Path>,[u8] Result<Unit,IOError>
+core.files temp_dir String Result<TempDir,IOError>
+core.files temp_file String Result<TempFile,IOError>
+core.files lock Union<String,Path> Result<FileLock,IOError>
+core.watcher files Union<String,Path> Result<WatchHandle,IOError>
+core.watcher process_pid Int WatchHandle
+core.watcher port String,Int WatchHandle
+core.watcher set - WatchSet
+core.process argv|args - [String]
+core.process check ProcessReceipt Result<Unit,IOError>
+core.process status_ok ProcessReceipt Bool
+core.process exit Int Never
+core.process on_signal ProcessSignal Unit
+core.process cmd [String] ProcessSpec
+core.process pipeline [ProcessSpec] Result<ProcessReceipt,IOError>
+core.term confirm String Bool
+core.term choose String,[String] Result<String,IOError>
+core.term input_secret String Result<String,IOError>
+core.term read_all_input|readline - Result<String,IOError>
+core.term read_until String Result<String,IOError>
+core.term take Int Result<[u8],IOError>
+core.term buffered - StdinHandle
+core.term binread Union<String,Path> Result<[u8],IOError>
+core.term binwrite Union<String,Path>,[u8] Result<Unit,IOError>
+core.term stdin - StdinHandle
+core.term stdout - Stdout
+core.term stderr - Stderr
+core.term terminal_width|terminal_height - Int
+core.term style|style_force String,String String
+core.term progress String Result<Unit,IOError>
+core.sys temp_dir - String
+core.sys set String,String -
+core.sys get String String?
+core.sys unset String Result<Bool,EnvError>
+core.sys vars - Result<[String],EnvError>
+core.sys current_dir - Result<String,IOError>
+core.sys home_dir - String?
+core.sys name|family|arch|executable|hostname|username|release|version - String
+core.sys expand String String
+core.sys pid|getpid|cpu_count|getppid|getuid|geteuid|getgid|getegid|getpgrp - Int
+core.sys umask|exitcode Int Int
+core.sys success Int Bool
+core.sys uptime - Float
+core.sys getgroups - [Int]
+core.sys loadavg|times - [Float]
+core.sys getpgid|getsid|getpriority Int Result<Int,IOError>
+core.sys setpriority Int,Int Result<Unit,IOError>
+core.sys utime Union<String,Path>,Int,Int Result<Unit,IOError>
+core.sys sync - -
+core.sys stop Int -
+core.sys atexit fn(;Unit) -
+core.sys set_current_dir Union<String,Path> Result<Unit,IOError>
+core.sys fork|setsid|wait - Result<Int,IOError>
+core.sys waitpid Int,Int Result<Int,IOError>
+core.sys setuid|setgid Int Result<Unit,IOError>
+core.sys setpgrp - Result<Unit,IOError>
+core.sys setpgid|kill Int,Int Result<Unit,IOError>
+core.sys initgroups String,Int Result<Unit,IOError>
+core.sys pipe - Result<[Int],IOError>
+core.sys close_fd Int -
+core.sys mkfifo Union<String,Path>,Int Result<Unit,IOError>
+core.crypto.vault get String String?
+core.auth verify_jwt String,[u8],String,String,Duration Result<Claims,AuthError>
+core.auth verify_paseto String,[u8],String Result<Claims,AuthError>
+core.auth register_user String,String Result<Unit,String>
+core.auth password_login|oauth_finish String,String,Int,Int Result<Session,String>
+core.auth magic_link_consume String,Int,Int Result<Session,String>
+core.auth session_validate String,Int Result<Session,String>
+core.auth session_show|session_user|session_cookie|session_id Session String
+core.auth magic_link_issue String,Int,Int Result<String,String>
+core.auth oauth_begin String Result<String,String>
+core.sync text_new String,String SyncText
+core.sync text_set SyncText,String,String SyncText
+core.sync text_merge SyncText,SyncText SyncText
+core.sync text_show SyncText String
+core.sync text_edit SyncText,String,Int,Int,String SyncText
+core.sync text_metadata SyncText String
+core.sync counter_new String,Int SyncCounter
+core.sync counter_inc SyncCounter,String,Int SyncCounter
+core.sync counter_merge SyncCounter,SyncCounter SyncCounter
+core.sync counter_value SyncCounter Int
+core.sync map_new - SyncMap
+core.sync list_new - SyncList
+core.sync map_set SyncMap,String,String SyncMap
+core.sync map_get SyncMap,String String?
+core.sync map_merge SyncMap,SyncMap SyncMap
+core.sync map_show SyncMap String
+core.sync list_push SyncList,String,String SyncList
+core.sync list_merge SyncList,SyncList SyncList
+core.sync list_show SyncList String
+core.sync policy_new String,String Result<RowPolicy,String>
+core.sync policy_allows RowPolicy,String,String Bool
+core.sync policy_show RowPolicy String
+core.testing temp_dir String String
+core.testing snap|golden String,String Bool
+core.testing fixture String String
+core.testing corpus String [String]
+core.testing fake_clock Int Clock
+core.testing fake_rng Int RNG
+core.testing fake_data Int Fake
+core.testing test_suite - TestSuite
+core.testing world fn(DeterministicWorld;Unit) Unit
+core.testing compare [DataTree],fn(DataTree;DataTree),fn(DataTree;DataTree),String TestComparison
+core.testing assert_equal TestComparison Bool
+core.testing status TestComparison String
+core.math abs_float|log1p Float Float
+core.math min_float|max_float|midpoint Float,Float Float
+core.math clamp_float|hypot3 Float,Float,Float Float
+core.math tau_const|random - Float
+core.math gcd_many|lcm_many|sum_int|prod_int [Int] Int
+core.math powmod Int,Int,Int Int?
+core.math abs_diff|xor Int,Int Int
+core.math even|odd Int Bool
+core.math in_range Int,Int,Int Bool
+core.math sqrt|floor|ceil|fabs|expm1 Float Float
+core.math round Float Int
+core.math pow|fmod|remainder Float,Float Float
+core.math isclose Float,Float,Float,Float Bool
+core.math dist [Float],[Float] Float
+core.math comb|perm Int,Int Int?
+core.math isnan|isinf|isfinite Float Bool
+core.math fsum [Float] Float
+core.math sumprod [Float],[Float] Float
+core.math prod [Int] Int
+core.math.combinatorics permutations|combinations|combinations_with_replacement|product|batched|tee|windows [Int],Int [[Int]]
+core.math.combinatorics cartesian [Int],[Int] [[Int]]
+core.math.combinatorics pairwise|groupby|powerset [Int] [[Int]]
+core.math.combinatorics zip_longest [Int],[Int],Int [[Int]]
+core.math.combinatorics flatten|starmap [[Int]] [Int]
+core.math.combinatorics chain [Int],[Int] [Int]
+core.math.combinatorics compress [Int],[Bool] [Int]
+core.math.combinatorics drop [Int],Int [Int]
+core.math.combinatorics takewhile|dropwhile|filterfalse [Int],Bool [Int]
+core.math.combinatorics islice [Int],Int,Int,Int [Int]
+core.math.combinatorics unique [Int] [Int]
+core.math.combinatorics repeat Int,Int [Int]
+core.math.combinatorics count_from|count Int,Int,Int [Int]
+core.math.combinatorics cycle [Int],Int [Int]
+core.math.combinatorics accumulate|reverse [Int] [Int]
+core.math.combinatorics factorial Int Int?
+core.math.combinatorics binomial|permutations_count|combinations_count|npr|ncr|falling_factorial|rising_factorial Int,Int Int?
+core.math.combinatorics multinomial [Int] Int?
+core.collections get Counter,String Int
+core.collections map_set OrderedMap,String,String OrderedMap
+core.collections map_get OrderedMap,String String?
+core.collections chain - Chain
+core.collections heapify [Int] [Int]
+core.collections heappush [Int],Int [Int]
+core.collections heappop [Int] (heap:[Int],value:Int?)
+core.collections heappushpop [Int],Int (heap:[Int],value:Int)
+core.collections heapreplace [Int],Int (heap:[Int],value:Int?)
+core.collections bisect_left|bisect_right [Int],Int Int
+core.collections insort_left|insort_right [Int],Int [Int]
+core.collections merge_sorted [Int],[Int] [Int]
+core.collections nsmallest|nlargest Int,[Int] [Int]
+core.collections counter - Counter
+core.collections counter_from [String] Counter
+core.collections add|set_count Counter,String,Int Counter
+core.collections inc|dec Counter,String Counter
+core.collections total Counter Int
+core.collections names|elements Counter [String]
+core.collections most_common Counter,Int Counter
+core.collections subtract|merge_add Counter,Counter Counter
+core.collections clear_counter Counter Counter
+core.collections ordered_map - OrderedMap
+core.collections map_remove OrderedMap,String OrderedMap
+core.collections map_keys|map_values OrderedMap [String]
+core.collections map_contains OrderedMap,String Bool
+core.collections map_len OrderedMap Int
+core.collections chain_push Chain,[String],[String] Chain
+core.collections chain_get Chain,String String?
+core.collections chain_contains Chain,String Bool
+core.collections.set remove StringSet,String StringSet?
+core.collections.set add StringSet,String StringSet
+core.collections.set new - StringSet
+core.collections.set from_list [String] StringSet
+core.collections.set discard StringSet,String StringSet
+core.collections.set contains StringSet,String Bool
+core.collections.set len StringSet Int
+core.collections.set is_empty StringSet Bool
+core.collections.set to_list StringSet [String]
+core.collections.set clear|clone_set StringSet StringSet
+core.collections.set union|intersection|difference|symmetric_difference StringSet,StringSet StringSet
+core.collections.set issubset|issuperset|isdisjoint StringSet,StringSet Bool
+core.math.stats sumprod [Float],[Float] Float?
+core.math.stats prod [Float] Float
+core.math.stats count [Float] Int
+core.math.stats sum [Float] Float
+core.math.stats cumsum|cumprod|diff|rank|zscore [Float] [Float]
+core.math.stats moving_average [Float],Int [Float]
+core.math.stats ewma [Float],Float [Float]
+core.math.stats clip [Float],Float,Float [Float]
+core.math.stats mean|fmean|geometric_mean|harmonic_mean|median|median_low|median_high|mode|pvariance|pstdev|variance|stdev|min|max|range|iqr|mad|mean_abs_deviation|skew|kurtosis [Float] Float?
+core.math.stats median_grouped|quantile|percentile [Float],Float Float?
+core.math.stats covariance|correlation|weighted_mean|spearman|pearson|covariance_population [Float],[Float] Float?
+core.math.stats multimode [Float] [Float]
+core.math.stats kde|winsorize [Float],Float [Float]
+core.math.stats kde_random [Float],Float,Int [Float]
+core.math.stats quantiles [Float],Int [Float]
+core.math.stats residuals [Float],[Float] [Float]
+core.math.stats histogram [Float],Int [Int]
+core.math.random random - Float
+core.math.random int|randint Int,Int Int
+core.math.random float - Float
+core.math.random float_range|uniform Float,Float Float
+core.math.random bool - Bool
+core.math.random normal|normalvariate|gauss Float,Float Float
+core.math.random exponential|expovariate Float Float
+core.math.random seed Int -
+core.math.random bytes|randbytes Int [u8]
+core.math.random getrandbits Int Int
+core.math.random randrange Int,Int Int
+core.math.random choice [Int] Int?
+core.math.random choices [Int],Int [Int]
+core.math.random triangular Float,Float,Float Float
+core.math.random gammavariate|betavariate|lognormvariate|weibullvariate|vonmisesvariate Float,Float Float
+core.math.random paretovariate Float Float
+core.math.random rng|split Int RNG
+core.crypto.random bytes Int [u8]?
+core.crypto __zeroize [u8] -
+core.units from Float,Float Measurement<Float>
+core.time sleep Duration -
+core.time sleep_until Instant -
+core.time start - Stopwatch
+core.time instant - Instant
+core.time now|now_utc - DateTime
+core.time from_unix_ms|from_unix_seconds|from_unix_microseconds|from_unix_nanoseconds Int DateTime
+core.time today - LocalDate
+core.time parse|parse_iso_week_date String Result<LocalDate,TimeError>
+core.time parse_rfc3339 String Result<DateTime,TimeError>
+core.time from_iso_week Int,Int,Int Result<LocalDate,TimeError>
+core.time parse_zoned String Result<ZonedDateTime,TimeError>
+core.time datetime Int,Int,Int,Int,Int,Int DateTime
+core.time time|local_time Int,Int,Int LocalTime
+core.time days_in_month Int,Int Int
+core.time is_leap_year Int Bool
+core.time parse_time String Result<LocalTime,TimeError>
+core.time period Int,Int,Int Period
+core.time period_days|period_months|period_years Int Period
+core.time zone String Result<Zone,TimeError>
+core.time utc - Zone
+core.time zoned DateTime,Zone ZonedDateTime
+core.time zoned_local LocalDate,LocalTime,Zone,String Result<ZonedDateTime,TimeError>
+core.rt callback Int,Int,callback RealtimeStream
+core.tasks timeout Duration Unit
+core.tasks interval Duration Receiver<Int>
+core.tasks yield_now - Unit
+core.tasks current_task - String
+core.game run GameScene,GameReplay,GameBackend,Int String
+core.encoding.json parse|loads|decode String Result<DataTree,EncodingError>
+core.encoding.json to_string|to_string_pretty|dumps|canonical|events DataTree String
+core.encoding.json reader ^FileReader,EncodingLimits Result<JSONReader,EncodingError>
+core.encoding.json writer ^FileWriter,EncodingLimits,Bool Result<JSONWriter,EncodingError>
+core.encoding.jsonl parse|loads String Result<[DataTree],EncodingError>
+core.encoding.jsonl to_string|dumps [DataTree] String
+core.encoding.jsonl reader ^FileReader,EncodingLimits Result<JSONLReader,EncodingError>
+core.encoding.jsonl writer ^FileWriter,EncodingLimits Result<JSONLWriter,EncodingError>
+core.encoding.jsonl count_rows String Int
+core.encoding.jsonl append_line String,DataTree String
+core.encoding.jsonl first String Result<DataTree?,EncodingError>
+core.encoding.csv parse String,String,Bool,Bool Result<[[String]],String>
+core.encoding.csv to_string [[String]] String
+core.encoding.csv reader ^FileReader,EncodingLimits,String,Bool,Bool Result<CSVReader,EncodingError>
+core.encoding.csv writer ^FileWriter,EncodingLimits Result<CSVWriter,EncodingError>
+core.encoding.csv rows String,String,Bool,Bool Result<[CSVRow],String>
+    """
+    core_sig_row_lookup(rows, module_name, member)
 }

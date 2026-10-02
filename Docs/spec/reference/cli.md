@@ -8,8 +8,11 @@ flag. The executable truth is the generated output of
 target/debug/jet help
 ```
 
-and the command definitions in
-[`crates/jet-cli/src/CLI.rs`](../../../crates/jet-cli/src/CLI.rs). Run
+and the command table in
+[`Compiler/JetCli/Source/Cli/Commands.jet`](../../../Compiler/JetCli/Source/Cli/Commands.jet).
+The Rust host's copy in
+[`crates/jet-cli/src/CLI.rs`](../../../crates/jet-cli/src/CLI.rs) is held
+equal to it by `node Compiler/Bootstrap/check-command-table.mjs`. Run
 `jet help <command>` for the complete options for one command; do not infer an
 option from an older guide.
 
@@ -140,3 +143,26 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `-l`, `-std`, `-dumpmachine`, `-print-sysroot`, `-dumpversion`, `-v`, and
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
+
+## Jet-hosted `check` and `build`
+
+The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
+`jet check <file>` and `jet build <file>` through the Jet compiler
+(`jet_driver_compile`). It gives the compiler one authorized source root: the
+nearest directory at or above the file that holds `package.jet`, or the file's
+own directory for a loose file, with every `.jet` file under it (dot names,
+`target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
+generated C/C++ binding caches. The Core library bodies are read from the Jet
+toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
+`Core/`); the Core row table and the canonical effect source are generated
+into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
+by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
+`node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
+holds current.
+
+`jet build` writes `.jet/build/<stem>` in that source root. The default and
+`--profile debug` builds use the Jet-native backend (`lir_lower_program` and a
+static x86-64 executable); a program that backend cannot lower yet is refused
+with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
+rustc and the release profile flags. Other build flags and profiles are
+refused with E2104 until they are ported.

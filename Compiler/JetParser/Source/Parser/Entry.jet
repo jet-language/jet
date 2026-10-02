@@ -1,5 +1,6 @@
 // Public parser entry points preserve lexer diagnostics and original byte spans.
 use jet_foundation.[
+    DebugTraceSite,
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
@@ -19,7 +20,9 @@ use jet_lexer.[
     TOKEN_AT,
     TOKEN_BANG,
     TOKEN_COLON,
+    TOKEN_COMMA,
     TOKEN_COLON_COLON,
+    TOKEN_DOT,
     TOKEN_EOF,
     TOKEN_HASH,
     TOKEN_IDENT,
@@ -43,6 +46,7 @@ use jet_lexer.[
     TOKEN_LPAREN,
     TOKEN_RBRACKET,
     TOKEN_RPAREN,
+    TOKEN_SEMI,
     Token,
     lex,
     lex_generated,
@@ -103,6 +107,7 @@ fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Dia
     loop declaration in state.block_policy_declarations -> &program.policy_declarations.push(declaration)
     program.fenced_statements = prepared.fenced_statements
     program.used_import_names = parser_used_import_names(state.tokens, program.imports)
+    program.debug_sites = parser_debug_trace_sites(state.tokens, source)
     ParseResult{program: program, diagnostics: state.diagnostics}
 }
 
@@ -143,6 +148,50 @@ fn parser_collect_used_import_names(tokens: [Token], imports: [ImportDecl], cand
         loop part in token.payload.string_parts {
             if part.kind == STRING_PART_INTERPOLATION -> parser_collect_used_import_names(part.tokens, imports, candidates, &used)
         }
+    }
+}
+
+// D-DBG1=A: record each `debug(…)` call's argument text as written, so sema
+// can name the traced expression and build the E3405 unwrap edit. The text
+// runs from the first token after `(` to the last one before its matching
+// `)`, leaving out a trailing comma. Interpolations are scanned as well.
+fn parser_debug_trace_sites(tokens: [Token], source: [U8]) -> [DebugTraceSite] Never! {
+    sites := [DebugTraceSite]{}
+    if source.len() > 0 -> parser_collect_debug_trace_sites(tokens, source, &sites)
+    sites
+}
+
+fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[DebugTraceSite]) Never! {
+    loop index in 0..<tokens.len() {
+        token :: tokens[index]
+        loop part in token.payload.string_parts {
+            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, source, &sites)
+        }
+        if token.kind != TOKEN_IDENT || token.payload.decoded != "debug" || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
+        open :: index + 1
+        depth := 0
+        close := -1
+        loop cursor in open..<tokens.len() {
+            kind :: tokens[cursor].kind
+            if kind == TOKEN_LPAREN -> depth += 1
+            if kind == TOKEN_RPAREN {
+                depth -= 1
+                if depth == 0 {
+                    close = cursor
+                    break
+                }
+            }
+        }
+        if close < 0 -> next
+        last := close - 1
+        if last > open && tokens[last].kind == TOKEN_COMMA -> last -= 1
+        if last <= open -> next
+        start :: tokens[open + 1].span.start
+        end :: tokens[last].span.end
+        close_end :: tokens[close].span.end
+        if start < 0 || end <= start || close_end > source.len() -> next
+        text :: String.from_bytes(source.slice(start, end)) ?? next
+        &sites.push(DebugTraceSite{name_start: token.span.start, text: text, close_end: close_end})
     }
 }
 
@@ -229,7 +278,29 @@ fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
     if name.payload.decoded == "PubFile" || name.payload.decoded == "PublicFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "Html" -> return true
-    name.payload.decoded == "Target" && !parser_hash_leads_to_item(&state)
+    name.payload.decoded == "Target" && (parser_target_selects_file_web(&state) || !parser_hash_leads_to_item(&state))
+}
+
+// Rust `target_marker_selects_file_web_at`: `#Target(Web)` (or a path ending
+// in `Target.Web`) is the file default, never a marker on the next item.
+fn parser_target_selects_file_web(state: &JetParserState) -> Bool Never! {
+    if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
+    previous := ""
+    last := ""
+    count := 0
+    offset := 3
+    loop {
+        token :: parser_lookahead(&state, offset)
+        if token.kind == TOKEN_RPAREN -> break
+        if token.kind != TOKEN_IDENT && token.kind != TOKEN_DOT -> return false
+        if token.kind == TOKEN_IDENT {
+            previous = last
+            last = token.payload.decoded
+            count += 1
+        }
+        offset += 1
+    }
+    last == "Web" && (count == 1 || previous == "Target")
 }
 
 fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
@@ -382,9 +453,13 @@ fn parser_reads_retired_constant(state: &JetParserState) -> Bool Never! {
     false
 }
 
+// Rust `marker_sequence_leads_to_function`: newline terminators between the
+// markers and before the item are skipped, so `#[A, B]` on its own line still
+// attaches to the item below.
 fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     offset := 0
     loop {
+        loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
         if parser_item_declaration_ahead_at(&state, offset) -> return true
         if parser_kind_at(&state, offset) != TOKEN_HASH -> break
         offset += 1
@@ -419,6 +494,7 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
             }
         }
     }
+    loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     kind :: parser_kind_at(&state, offset)
     parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_lookahead(&state, offset).payload.decoded == "alias")
 }

@@ -811,9 +811,8 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
                     graph_option :: environment.registration_graph
                     graph :: graph_option ?? return updated
                     trait_name :: bounds[0]
-                    graph_value := graph
-                    trait_symbol :: sema_expr_expected_trait_symbol(graph_value, trait_name, environment.module_identity) ?? return updated
-                    concrete :: sema_type_resolve_nominal(graph_value, offered, environment.module_identity) ?? return updated
+                    trait_symbol :: sema_expr_expected_trait_symbol(graph, trait_name, environment.module_identity) ?? return updated
+                    concrete :: sema_type_resolve_nominal(graph, offered, environment.module_identity) ?? return updated
                     updated.ty = required
                     updated.kind = TExprKind.StructLit{fields: fields, extra: extra, as_trait: Val(TCoercionTarget{trait_symbol: trait_symbol.id, concrete_type: concrete.symbol.id})}
                     return updated
@@ -2144,6 +2143,7 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     // D-LIN1-DROP: the `consume` builtin, unless a user `consume` shadows it.
     if call.name == "consume" && sema_call_gate_is_unshadowed(call.name, scopes) -> return sema_single_use_check_consume(call, environment, &scopes, &state, &tail_store, &context, &diagnostics).value
     special := sema_call_try_knowledge_builtin(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if special.handled -> return special.value
     if sema_call_default_err_candidate(call, expected, scopes) {
         scopes.ownership_call_depth += 1
         checked_default := sema_call_check_default_err(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2716,6 +2716,7 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                 checked_value := sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                 context.allow_string_view_read = previous_string_view_read
                 checked :: checked_value ?? return None
+                if format == StrFormat.Display && !sema_expression_interpolation_display(checked, environment, &scopes, &diagnostics) -> return None
                 if !sema_expr_format_supported(checked.ty, format) -> return None
                 &tir_parts.push(TStrPart.Interpolation{value: checked, format: sema_expr_string_format(format)})
             }
@@ -3150,7 +3151,29 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
     }
 }
 
+// D-COMPILE-STACK1=A: the deepest source nesting sema checks, the limit the
+// parser and the TIR evaluator share.
+SEMA_MAX_SOURCE_NESTING :: 256
+
+// Enter one checked source form (a statement list or an expression level).
+// Past the shared limit this reports E1403 and refuses the form, so nothing
+// beneath it is checked; a refused form is not entered.
+pub fn sema_enter_source_nesting(context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    depth :: context.source_nesting + 1
+    if depth > SEMA_MAX_SOURCE_NESTING {
+        &diagnostics.push(sema_error("E1403", span, "this code nests {depth} levels deep; the limit is {SEMA_MAX_SOURCE_NESTING}", "each nested source form needs one compiler checking frame, and the parser, sema, and TIR evaluator enforce the same published limit (D-COMPILE-STACK1=A)", "pull inner parts out into named bindings or helper functions"))
+        return false
+    }
+    context.source_nesting = depth
+    true
+}
+
+pub fn sema_leave_source_nesting(context: &SemaCheckContext) Never! {
+    context.source_nesting -= 1
+}
+
 pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !sema_enter_source_nesting(&context, expr_span(expr), &diagnostics) -> return None
     // D-FAILURE-FOUNDATION1=A: a call root auto-propagates its Result carrier
     // unless a carrier consumer claimed it. Grouping is transparent, so the
     // consumer's one-shot token passes through parentheses.
@@ -3164,6 +3187,7 @@ pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScope
     previous_success_view :: context.failure_success_view
     context.failure_success_view = propagates
     checked := sema_check_expression_inner(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_leave_source_nesting(&context)
     context.failure_success_view = previous_success_view
     if propagates && checked != None {
         call_value :: checked ?? return None

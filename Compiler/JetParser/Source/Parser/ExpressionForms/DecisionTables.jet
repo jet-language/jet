@@ -299,12 +299,22 @@ fn parser_expression_form_value_block(state: &JetParserState, depth: Int, result
         parsed :: parser_parse_expression(&state, 1, depth + 1)
         if parser_current_kind(&state) == TOKEN_SEMI {
             semi :: parser_current(&state)
-            if semi.span.start != semi.span.end && parser_kind_at(&state, 1) == TOKEN_RBRACE && !parser_expression_definitely_diverges(parsed.expr) {
-                if result_handler -> parser_expression_form_result_error(&state, parsed.span, "this Result handler branch ends with a semicolon-terminated expression", "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit") else -> parser_expression_form_error(&state, "E0114", parsed.span, "this value branch ends with a semicolon-terminated expression", "a value branch produces its result only from an unadorned final expression", "remove the semicolon or use an early exit")
+            if parser_kind_at(&state, 1) == TOKEN_RBRACE {
+                // S6-R: the lexer ends a tail value's line with a zero-width
+                // terminator before `}`; that value is still the branch value.
+                // An authored `;` makes it a unit statement unless it diverges.
+                if semi.span.start != semi.span.end && !parser_expression_definitely_diverges(parsed.expr) {
+                    if result_handler -> parser_expression_form_result_error(&state, parsed.span, "this Result handler branch ends with a semicolon-terminated expression", "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit") else -> parser_expression_form_error(&state, "E0114", parsed.span, "this value branch ends with a semicolon-terminated expression", "a value branch produces its result only from an unadorned final expression", "remove the semicolon or use an early exit")
+                    parser_bump(&state)
+                    &statements.push(Stmt.Expr{expr: parsed.expr})
+                    next
+                }
+                parser_bump(&state)
+            } else {
+                parser_bump(&state)
+                &statements.push(Stmt.Expr{expr: parsed.expr})
+                next
             }
-            parser_bump(&state)
-            &statements.push(Stmt.Expr{expr: parsed.expr})
-            next
         }
         if parser_current_kind(&state) == TOKEN_RBRACE {
             close :: parser_bump(&state)
@@ -355,6 +365,7 @@ fn parser_expression_form_parse_guard_table(state: &JetParserState, start: Span,
             branch :: parser_expression_form_selected_value(&state, depth + 1)
             else_body = branch.body
             else_value = branch.value
+            parser_skip_semicolons(&state)
             end = parser_current(&state).span
             parser_expect(&state, TOKEN_RBRACE, "after the final `else` value guard arm")
             if state.position > 0 -> end = parser_lookahead(&state, -1).span
@@ -372,10 +383,13 @@ fn parser_expression_form_parse_guard_table(state: &JetParserState, start: Span,
             parser_expression_form_error(&state, "E0003", token.span, "expected a final `else` arm and `}}` for this value guard", "a value guard must produce a value on every path", "add `else -> value` and a closing `}}`")
             break
         }
+        arm_position :: state.position
         condition :: parser_parse_subjectless_arm_head(&state)
         parser_expect_unified_arrow(&state, "after a value guard condition")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
         &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
+        // Malformed input that consumed nothing must not retry forever.
+        if state.position == arm_position -> parser_bump(&state)
     }
     if arms.len() == 0 {
         parser_expression_form_error(&state, "E0003", start, "a value guard needs at least one condition", "`else` is a fallback, not a condition", "add a condition before `else`")
@@ -424,10 +438,12 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
             parser_expression_form_error(&state, "E0003", token.span, "expected a final `else` arm and `}}` for this value dispatch", "a value dispatch must produce a value on every path", "add `else -> value` and a closing `}}`")
             break
         }
+        arm_position :: state.position
         condition :: parser_parse_if_arm_head(&state, subject, subject, op)
         parser_expect_unified_arrow(&state, "after a value dispatch arm head")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
         &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
+        if state.position == arm_position -> parser_bump(&state)
         last_arm_end = branch.span.end
     }
     if arms.len() == 0 {

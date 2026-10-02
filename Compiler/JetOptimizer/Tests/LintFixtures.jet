@@ -1,0 +1,293 @@
+// MIR Lint fixtures: one clean program and one planted bug per rule family of
+// Docs/spec/mir-lint.md, plus the four hand-built MIR programs of the
+// lowering fixtures as programs that must lint clean. The fixture reuses the
+// builders of Compiler/JetBackend/Tests/LowerFixtures.jet, is assembled into a
+// test unit by Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs, and is never
+// listed in Compiler/Bootstrap/sources.list.
+use jet_foundation.[
+    MIRAccess,
+    MIRBinaryDispatch,
+    MIRBinaryOp,
+    MIRBinaryOverflow,
+    MIRBlockID,
+    MIRCallArg,
+    MIRCallee,
+    MIRConstant,
+    MIRDropKind,
+    MIREnumArg,
+    MIRField,
+    MIRFieldValue,
+    MIRFunction,
+    MIRFunctionID,
+    MIROperation,
+    MIRPlace,
+    MIRPlaceID,
+    MIRProgram,
+    MIRProjection,
+    MIRSemanticOp,
+    MIRTerminator,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeDefKind,
+    MIRTypeKind,
+    MIRValueID,
+    MIRVariant,
+    MIRVariantPayload,
+    mir_copy_ownership,
+    mir_field_id,
+    mir_function_id,
+    mir_owned_ownership,
+    mir_type_from_kind,
+    mir_type_id,
+]
+use jet_optimizer.[MIRLintRule, mir_lint_error_text, mir_lint_program, mir_lint_rule_name]
+
+fn lf_expect(name: String, program: MIRProgram, rule: MIRLintRule?) -> Bool {
+    failure :: mir_lint_program(program)
+    if failure == .Val(error) {
+        if rule == .Val(expected) {
+            if error.rule == expected {
+                print("PASS {name}: {mir_lint_error_text(error)}")
+                return true
+            }
+        }
+        print("FAIL {name}: unexpected {mir_lint_error_text(error)}")
+        return false
+    }
+    if rule == .Val(expected) {
+        print("FAIL {name}: the planted {mir_lint_rule_name(expected)} bug was not reported")
+        return false
+    }
+    print("PASS {name}: clean")
+    true
+}
+
+fn lf_single(b: FxBuilder) -> MIRProgram Never! {
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+// value.typed: a copy of a value with no defining row.
+fn lf_value_typed(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    one :: fx_int_const(&b, 1)
+    source :: if planted -> MIRValueID{value: 999} else -> one
+    _ := fx_copy(&b, fx_int(), MIROperation.Copy{value: source, materialize_view: false})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// type.well-formed: a zero-width fixed-width integer.
+fn lf_type_well_formed(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    bits :: if planted -> 0 else -> 32
+    _ := fx_owned(&b, mir_type_from_kind(MIRTypeKind.Option{inner: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: bits})}), MIROperation.Absent)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// operation.typing: a comparison that produces an Int.
+fn lf_operation_typing(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    one :: fx_int_const(&b, 1)
+    two :: fx_int_const(&b, 2)
+    result_type :: if planted -> fx_int() else -> fx_bool()
+    _ := fx_copy(&b, result_type, MIROperation.Binary{op: MIRBinaryOp.Lt, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: one, right: two})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// semantic.typing: checked arithmetic whose result is not an Optional.
+fn lf_semantic_typing(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    one :: fx_int_const(&b, 1)
+    two :: fx_int_const(&b, 2)
+    result_type :: if planted -> fx_int() else -> mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    _ := fx_owned(&b, result_type, MIROperation.Semantic{operation: MIRSemanticOp.OverflowOption{call: fx_prelude_id("core.numeric", "checked_add"), left: one, right: two, location: None}})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// call.signature: an argument of the wrong type, checked against the callee
+// row named by ID.
+fn lf_call_signature(planted: Bool) -> MIRProgram Never! {
+    c := fx_builder()
+    n :: fx_param(&c, "n", fx_int(), mir_copy_ownership())
+    fx_block(&c, 0, MIRTerminator.Return{value: Val(n)})
+    r := fx_builder()
+    argument :: if planted -> fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "seven"}}) else -> fx_int_const(&r, 7)
+    _ := fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("identity")}, args: [MIRCallArg]{fx_arg(argument, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("identity", c, fx_int()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// call.signature: a callee ID that names no function of the program.
+fn lf_missing_callee() -> MIRProgram Never! {
+    r := fx_builder()
+    _ := fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("absent")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lf_single(r)
+}
+
+fn lf_types() -> [MIRTypeDef] Never! {
+    [MIRTypeDef]{
+        fx_type_def("Point", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Point", "x", fx_int()), fx_field("Point", "y", fx_int())}, methods: [MIRFunctionID]{}}),
+        fx_type_def("Shape", MIRTypeDefKind.Enum{variants: [MIRVariant]{fx_variant("Dot", MIRVariantPayload.Unit), fx_variant("Circle", MIRVariantPayload.Named{fields: [MIRField]{fx_field("Shape.Circle", "r", fx_int())}})}, methods: [MIRFunctionID]{}}),
+    }
+}
+
+// enum.variant: a variant the declaration does not have, or the wrong payload arity.
+fn lf_enum_variant(variant: String, with_payload: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    two :: fx_int_const(&b, 2)
+    args :: if with_payload -> [MIREnumArg]{MIREnumArg{field: Val(mir_field_id("Shape.Circle.r")), value: two, boxed: false}} else -> [MIREnumArg]{}
+    shape :: fx_owned(&b, fx_named("Shape"), MIROperation.Enum{type_id: mir_type_id("Shape"), variant: variant, args: args})
+    fx_do(&b, MIROperation.Drop{value: shape, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, lf_types())
+}
+
+// struct.field: a literal that leaves out a field without a default.
+fn lf_struct_field(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    x :: fx_int_const(&b, 3)
+    y :: fx_int_const(&b, 4)
+    fields := [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Point.x"), value: x}}
+    if !planted -> &fields.push(MIRFieldValue{field: mir_field_id("Point.y"), value: y})
+    point :: fx_owned(&b, fx_named("Point"), MIROperation.Struct{type_id: mir_type_id("Point"), fields: fields})
+    fx_do(&b, MIROperation.Drop{value: point, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, lf_types())
+}
+
+// terminator.typing: a branch on an Int.
+fn lf_terminator_typing(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    condition :: if planted -> fx_int_const(&b, 1) else -> fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: condition, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 1}})
+    fx_block(&b, 1, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// ownership.move: an owned value used after it was moved.
+fn lf_use_after_move(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "owned"}})
+    moved :: fx_owned(&b, fx_string(), MIROperation.Move{value: text})
+    dropped :: if planted -> text else -> moved
+    fx_do(&b, MIROperation.Drop{value: dropped, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// A second place over the same local storage as `root`.
+fn lf_alias_place(b: &FxBuilder, root: MIRPlaceID) -> MIRPlaceID Never! {
+    alias :: MIRPlaceID{value: 500 + b.places.len()}
+    loop row in b.places {
+        if row.id == root {
+            &b.places.push(MIRPlace{id: alias, span: fx_span(), ty: row.ty, base: row.base, projections: [MIRProjection]{}, access: MIRAccess.Move, persist_key: None})
+        }
+    }
+    alias
+}
+
+// ownership.move through the guard dataflow: an owner moved in the entry
+// block and moved again by a cleanup block guarded by a Bool local. When the
+// local is provably false on every path the cleanup edge is dead.
+fn lf_guarded_cleanup(live: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    flag :: fx_local(&b, "flag", fx_bool(), mir_copy_ownership())
+    owner :: fx_local(&b, "owner", fx_string(), mir_owned_ownership())
+    again :: lf_alias_place(&b, owner)
+    truth :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: live}})
+    fx_do(&b, MIROperation.WritePlace{place: flag, value: truth})
+    text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "owned"}})
+    fx_do(&b, MIROperation.WritePlace{place: owner, value: text})
+    first :: fx_owned(&b, fx_string(), MIROperation.MovePlace{place: owner})
+    fx_do(&b, MIROperation.Drop{value: first, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Jump{target: MIRBlockID{value: 1}})
+    guard :: fx_copy(&b, fx_bool(), MIROperation.ReadPlace{place: flag})
+    fx_block(&b, 1, MIRTerminator.Branch{condition: guard, then_target: MIRBlockID{value: 2}, else_target: MIRBlockID{value: 3}})
+    second :: fx_owned(&b, fx_string(), MIROperation.MovePlace{place: again})
+    fx_do(&b, MIROperation.Drop{value: second, kind: MIRDropKind.Value})
+    fx_block(&b, 2, MIRTerminator.Return{value: None})
+    fx_block(&b, 3, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// ownership.move: a move on only one branch is not a move on every path.
+fn lf_one_branch_move() -> MIRProgram Never! {
+    b := fx_builder()
+    choice :: fx_param(&b, "choice", fx_bool(), mir_copy_ownership())
+    owner :: fx_local(&b, "owner", fx_string(), mir_owned_ownership())
+    again :: lf_alias_place(&b, owner)
+    text :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "owned"}})
+    fx_do(&b, MIROperation.WritePlace{place: owner, value: text})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: choice, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    first :: fx_owned(&b, fx_string(), MIROperation.MovePlace{place: owner})
+    fx_do(&b, MIROperation.Drop{value: first, kind: MIRDropKind.Value})
+    refill :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "again"}})
+    fx_do(&b, MIROperation.ReplacePlace{place: owner, value: refill})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: 2}})
+    last :: fx_owned(&b, fx_string(), MIROperation.MovePlace{place: again})
+    fx_do(&b, MIROperation.Drop{value: last, kind: MIRDropKind.Value})
+    fx_block(&b, 2, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
+// effect.row: the callee's solved effects must be inside the caller's row.
+fn lf_effect_row(caller_has_effect: Bool) -> MIRProgram Never! {
+    c := fx_builder()
+    fx_block(&c, 0, MIRTerminator.Return{value: None})
+    callee := fx_function("write_file", c, fx_unit())
+    callee.effects.solved = [String]{"FS.Write"}
+    r := fx_builder()
+    _ := fx_copy(&r, fx_unit(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("write_file")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    caller := fx_function("run", r, fx_unit())
+    if caller_has_effect -> caller.effects.solved = [String]{"FS"}
+    fx_program([MIRFunction]{callee, caller}, [MIRTypeDef]{})
+}
+
+fn run() {
+    passed := 0
+    failed := 0
+    results :: [Bool]{
+        lf_expect("hello", fx_hello(), None),
+        lf_expect("arithmetic", fx_arithmetic(), None),
+        lf_expect("control-flow", fx_control_flow(), None),
+        lf_expect("aggregates", fx_aggregates(), None),
+        lf_expect("value.typed clean", lf_value_typed(false), None),
+        lf_expect("value.typed planted", lf_value_typed(true), Val(MIRLintRule.ValueTyped)),
+        lf_expect("type.well-formed clean", lf_type_well_formed(false), None),
+        lf_expect("type.well-formed planted", lf_type_well_formed(true), Val(MIRLintRule.TypeWellFormed)),
+        lf_expect("operation.typing clean", lf_operation_typing(false), None),
+        lf_expect("operation.typing planted", lf_operation_typing(true), Val(MIRLintRule.OperationTyping)),
+        lf_expect("semantic.typing clean", lf_semantic_typing(false), None),
+        lf_expect("semantic.typing planted", lf_semantic_typing(true), Val(MIRLintRule.SemanticTyping)),
+        lf_expect("call.signature clean", lf_call_signature(false), None),
+        lf_expect("call.signature planted argument", lf_call_signature(true), Val(MIRLintRule.CallSignature)),
+        lf_expect("call.signature planted callee", lf_missing_callee(), Val(MIRLintRule.CallSignature)),
+        lf_expect("enum.variant clean", lf_enum_variant("Circle", true), None),
+        lf_expect("enum.variant planted variant", lf_enum_variant("Square", true), Val(MIRLintRule.EnumVariant)),
+        lf_expect("enum.variant planted arity", lf_enum_variant("Dot", true), Val(MIRLintRule.EnumVariant)),
+        lf_expect("struct.field clean", lf_struct_field(false), None),
+        lf_expect("struct.field planted", lf_struct_field(true), Val(MIRLintRule.StructField)),
+        lf_expect("terminator.typing clean", lf_terminator_typing(false), None),
+        lf_expect("terminator.typing planted", lf_terminator_typing(true), Val(MIRLintRule.TerminatorTyping)),
+        lf_expect("ownership.move clean", lf_use_after_move(false), None),
+        lf_expect("ownership.move planted", lf_use_after_move(true), Val(MIRLintRule.OwnershipMove)),
+        lf_expect("ownership.move dead cleanup edge", lf_guarded_cleanup(false), None),
+        lf_expect("ownership.move live cleanup edge", lf_guarded_cleanup(true), Val(MIRLintRule.OwnershipMove)),
+        lf_expect("ownership.move one-branch move", lf_one_branch_move(), None),
+        lf_expect("effect.row clean", lf_effect_row(true), None),
+        lf_expect("effect.row planted", lf_effect_row(false), Val(MIRLintRule.EffectRow)),
+    }
+    loop ok in results {
+        if {
+            ok -> passed += 1
+            else -> failed += 1
+        }
+    }
+    print("{passed} passed, {failed} failed")
+    print(if failed == 0 -> "all lint fixtures passed" else -> "LINT FIXTURE FAILURES")
+}

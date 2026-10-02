@@ -35,6 +35,8 @@ fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> Enc
 // tree without a second table type.
 //
 // Typed `decode<T>` remains a compiler lowering over header-named columns.
+// The streaming `reader(^FileReader, limits)` / `writer(^FileWriter, limits)`
+// handles are host-owned (D-ENCSTREAM-SURFACE1) and use the same row rules.
 // `query` is a deliberately small SQL-shaped selector over caller-provided
 // filesystem input; it does not add a second query engine.
 pub struct CSVRow {
@@ -42,36 +44,21 @@ pub struct CSVRow {
     pub fields: [String]
 }
 
-pub struct CSVReader {
-    pub rows: [CSVRow]
-    pub index: Int
-
-    pub fn next(&self) -> CSVRow? Never! {
-        if self.index >= self.rows.len() -> return None
-        row :: self.rows[self.index]
-        self.index += 1
-        Val(row)
+/// Physical rows (D-ROWS1). `delimiter` is one character other than a quote
+/// or a line ending; `header: true` drops the first record (the header) and
+/// returns only data records; `skip_blank` drops records with no field
+/// content. Every `CSVRow.line` is the one-based physical line where that
+/// record opens.
+pub fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{true}) -> [CSVRow] EncodingError! {
+    delimiter_bytes :: delimiter.bytes()
+    if delimiter.len() != 1 || delimiter_bytes[0] == (U8{34}) || delimiter_bytes[0] == (U8{10}) || delimiter_bytes[0] == (U8{13}) {
+        return Err(unsupported_error(EncodingFormat.CSV, 0, "a CSV delimiter is one character other than a quote or a line ending"))
     }
-}
-
-pub struct CSVWriter {
-    pub parts: [String]
-
-    pub fn write_row(&self, fields: [String]) Never! { &self.parts.push(encode_row(fields)) }
-
-    pub fn to_string(self) -> String Never! {
-        out := ""
-        loop row in self.parts -> out = "{out}{row}\n"
-        out
-    }
-}
-
-/// Physical rows. `header` is accepted for call-site compatibility with the
-/// current Core surface; this codec does not drop the first row — callers
-/// that want a header skip `rows[0]`.
-pub fn rows(text: String, header: Bool{false}, skip_blank: Bool{true}) -> [CSVRow] EncodingError! {
-    _ :: header
-    parse_rows(text, skip_blank)
+    physical :: parse_rows_with(text, delimiter_bytes, skip_blank)
+    if !header || physical.len() == 0 -> return Ok(physical)
+    data := [CSVRow]{}
+    loop i in 1..<physical.len() -> &data.push(physical[i])
+    Ok(data)
 }
 
 pub fn decode(text: String) -> DataTree EncodingError! { parse(text) }
@@ -93,12 +80,6 @@ pub fn to_string(rows: [CSVRow]) -> String Never! {
     out
 }
 
-pub fn reader(text: String) -> CSVReader EncodingError! {
-    physical :: parse_rows(text, true)
-    Ok(CSVReader{rows: physical, index: 0})
-}
-
-pub fn writer() -> CSVWriter Never! { {parts: [String]{}} }
 
 /// Tiny SQL: `SELECT *` (all rows as arrays) or `SELECT COUNT(*)`.
 pub fn query(path: String, sql: String) -[FS]> DataTree EncodingError! {
@@ -157,6 +138,18 @@ fn host_read_text(path: String) -[FS]> String? {
 }
 
 fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] EncodingError! {
+    parse_rows_with(text, [U8]{44}, skip_blank)
+}
+
+fn delimiter_at(raw: [U8], i: Int, delimiter: [U8]) -> Bool {
+    if i + delimiter.len() > raw.len() -> return false
+    loop k in 0..<delimiter.len() {
+        if raw[i + k] != delimiter[k] -> return false
+    }
+    true
+}
+
+fn parse_rows_with(text: String, delimiter: [U8], skip_blank: Bool) -> [CSVRow] EncodingError! {
     raw :: text.bytes()
     rows := [CSVRow]{}
     fields := [String]{}
@@ -196,11 +189,11 @@ fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] EncodingError! {
             next
         }
         if closed {
-            if n == 44 {
+            if delimiter_at(raw, i, delimiter) {
                 &fields.push(String.from_bytes(~field) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
                 field = [U8]{}
                 closed = false
-                i += 1
+                i += delimiter.len()
                 column += 1
                 next
             }
@@ -217,7 +210,7 @@ fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] EncodingError! {
                 i += 1
                 next
             }
-            return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "characters after a closing CSV quote must be a comma or line break"))
+            return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "characters after a closing CSV quote must be a delimiter or line break"))
         }
         if n == 34 {
             if field.len() != 0 -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "a quoted CSV field must begin with a quote"))
@@ -226,10 +219,10 @@ fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] EncodingError! {
             column += 1
             next
         }
-        if n == 44 {
+        if delimiter_at(raw, i, delimiter) {
             &fields.push(String.from_bytes(~field) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
             field = [U8]{}
-            i += 1
+            i += delimiter.len()
             column += 1
             next
         }

@@ -2210,14 +2210,17 @@ newline per row.
 ### `core.encoding.csv` — comma-separated rows
 
 `core.encoding.csv` exposes physical CSV rows and a tree representation. A
-`CSVRow` records its physical line and fields. `csv.rows` does not discard the
-first row when `header` is false; `skip_blank` only skips blank physical rows.
+`CSVRow` records its physical line and fields. `csv.rows` splits on
+`delimiter` (default `","`; one character other than a quote or a line
+ending, otherwise an `Unsupported` error), drops the first record when
+`header` is true, and keeps it when `header` is false; `skip_blank` only skips
+blank physical rows (D-ROWS1).
 The query helper is filesystem-only and supports `SELECT *` and
 `SELECT COUNT(*)`.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `csv.rows(text, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit header and blank-line policy. |
+| `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse rows as an array of arrays. |
 | `csv.to_string(rows)` | `String` | Encode `CSVRow` values. |
 | `csv.reader(text)` / `csv.writer()` | `CSVReader` / `CSVWriter` | Construct incremental CSV objects. |
@@ -2588,12 +2591,15 @@ package source is [`Core/log/log.jet`](../../../Core/log/log.jet).
 | `counter(name: String, value: Int) -> LogField` | field | Build a counter field. |
 | `otlp_file(path: String) -[Log, FS]>` | — | Select a file sink for OTLP output. |
 | `set_trace_id(id: String) -[Log]>` | — | Attach a trace identifier to later records. |
-| `setup(spec: String) -[Log]>` | — | Apply comma-separated `key=value` settings. |
+| `setup(spec: String) -[Log]>` | — | Apply comma-separated `key=value` settings; a bare `auto`, `json` or `text` selects the format. |
 | `enabled(level: String) -[Log]> Bool` | Boolean | Test whether a level is enabled. |
 | `flush() -[Log]>` / `disable() -[Log]>` | — | Flush records or disable logging. |
 
-Sink names are normalized to `stderr`, `stdout`, `json`, `jsonl`, or `text`.
-`jsonl` and `text` sinks require a path. Keep secrets in `redact` fields so
+Sink names are normalized to `stderr`, `json`, `jsonl`, or `text`; there is
+no `stdout` sink. `jsonl` and `text` sinks require a path. An unsupported sink
+kind, a file sink without a path, or an unknown `setup` setting leaves the
+configuration unchanged and logs an `error` record naming the rejected
+setting. Keep secrets in `redact` fields so
 the sink, rather than each caller, owns the redaction decision.
 `fatal` emits, flushes, and terminates the process with status 1; `disable`
 suppresses later emission until process end.

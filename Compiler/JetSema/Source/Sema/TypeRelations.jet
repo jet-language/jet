@@ -574,9 +574,31 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
 
 pub fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
     actual_resolved :: sema_type_resolve_declared_with_generics(graph, actual, caller_module_identity, generic_params)
+    structural :: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
+    if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
     if generic_satisfied != None -> return generic_satisfied
     sema_type_bound_satisfied_resolved(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
+}
+
+// D-SERDE: a list, fixed array, or optional value is codable exactly when its
+// element is, and a map when its key and value are; the dynamic `DataTree` is
+// the codec tree itself (Rust `TraitRegistry::type_implements_trait`).
+fn sema_type_codec_structural_bound(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
+    if bound_name != "Encode" && bound_name != "Decode" && bound_name != "Serialize" -> return None
+    if actual_resolved == {
+        .List(inner) | .Option(inner) | .FixedList(inner, _) -> return sema_type_bound_satisfied_with_generics(graph, inner, bound_name, caller_module_identity, generic_params)
+        .Map(key, _, value) -> {
+            key_satisfied :: sema_type_bound_satisfied_with_generics(graph, key, bound_name, caller_module_identity, generic_params) ?? return None
+            if !key_satisfied -> return Val(false)
+            return sema_type_bound_satisfied_with_generics(graph, value, bound_name, caller_module_identity, generic_params)
+        }
+        .Named(name) -> {
+            if name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val(true)
+        }
+        else -> {}
+    }
+    None
 }
 
 pub fn sema_type_bound_satisfied(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String) -> Bool? {

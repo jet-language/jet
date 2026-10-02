@@ -1,0 +1,776 @@
+// Freestanding runtime for static x86-64 Linux images: the runtime symbols
+// the O0 lowering calls, hand-assembled over raw Linux system calls, for
+// images that link neither libc nor the compiled runtime. It implements the
+// symbol table of the design doc ("Calls into the compiled runtime") with the
+// same System V signatures, so a module links unchanged against either
+// runtime. Hosted images link the compiled runtime's C-ABI exports instead.
+//
+// Representations, private to this runtime:
+// - memory comes from mmap and returns to munmap (`jet_rt_free` passes the size);
+// - a String handle points at `[len: word][bytes]`;
+// - a string builder points at `[buffer: String-shaped, capacity: word]`;
+// - a range cursor points at `[current, end, step, exclusive, done]` words.
+// Int words are inline integers only: a result outside the inline range stops
+// the program with a report, because big integers live in the compiled runtime.
+// A runtime stop writes `error[CODE]: message` to stderr and exits with 70,
+// the compiled runtime's stop status.
+
+struct X64ImageFixup { pub at: Int, pub label: Int }
+
+// One hand-assembled function: local labels, rel32 fixups to them, and
+// relocations to other runtime symbols. Message text is placed after the code.
+struct X64ImageAsm {
+    pub code: [U8]
+    pub relocs: [X64Reloc]
+    pub labels: [Int]
+    pub fixups: [X64ImageFixup]
+    pub texts: [String]
+    pub text_labels: [Int]
+}
+
+X64_IMAGE_STOP_STATUS :: prep { 70 }
+X64_IMAGE_CURSOR_SIZE :: prep { 40 }
+X64_IMAGE_BUILDER_START :: prep { 64 }
+
+fn x64_image_asm() -> X64ImageAsm Never! {
+    X64ImageAsm{code: [U8]{}, relocs: [X64Reloc]{}, labels: [Int]{}, fixups: [X64ImageFixup]{}, texts: [String]{}, text_labels: [Int]{}}
+}
+
+fn x64_image_label(a: &X64ImageAsm) -> Int Never! {
+    &a.labels.push(-1)
+    a.labels.len() - 1
+}
+
+fn x64_image_set(list: &[Int], index: Int, value: Int) Never! {
+    list[index] = value
+}
+
+fn x64_image_bind(a: &X64ImageAsm, label: Int) Never! {
+    x64_image_set(&a.labels, label, a.code.len())
+}
+
+fn x64_image_jmp(a: &X64ImageAsm, label: Int) Never! {
+    at :: x64_jmp_rel32(&a.code)
+    &a.fixups.push(X64ImageFixup{at: at, label: label})
+}
+
+fn x64_image_jcc(a: &X64ImageAsm, cond: X64Cond, label: Int) Never! {
+    at :: x64_jcc_rel32(&a.code, cond)
+    &a.fixups.push(X64ImageFixup{at: at, label: label})
+}
+
+fn x64_image_call(a: &X64ImageAsm, symbol: String) Never! {
+    at :: x64_call_rel32(&a.code)
+    &a.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: symbol}})
+}
+
+// Tail call: jmp rel32 to another runtime symbol.
+fn x64_image_tail(a: &X64ImageAsm, symbol: String) Never! {
+    at :: x64_jmp_rel32(&a.code)
+    &a.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: symbol}})
+}
+
+fn x64_image_jcc_symbol(a: &X64ImageAsm, cond: X64Cond, symbol: String) Never! {
+    at :: x64_jcc_rel32(&a.code, cond)
+    &a.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: symbol}})
+}
+
+fn x64_image_byte_len(text: String) -> Int Never! {
+    count := 0
+    loop _ in text.bytes() -> count += 1
+    count
+}
+
+// reg = address of `text`, placed after this function's code; `len_reg` = its byte length.
+fn x64_image_text(a: &X64ImageAsm, reg: Int, len_reg: Int, text: String) Never! {
+    label :: x64_image_label(&a)
+    &a.texts.push(text)
+    &a.text_labels.push(label)
+    at :: x64_lea_rip(&a.code, reg)
+    &a.fixups.push(X64ImageFixup{at: at, label: label})
+    x64_mov_ri(&a.code, len_reg, x64_image_byte_len(text))
+}
+
+// Stop the program with `message` (a full `error[CODE]: ...` line).
+fn x64_image_stop_with(a: &X64ImageAsm, message: String) Never! {
+    x64_image_text(&a, X64_RDI, X64_RSI, message)
+    x64_image_tail(&a, "jet_image_stop")
+}
+
+fn x64_image_syscall(a: &X64ImageAsm, number: Int) Never! {
+    x64_mov_ri(&a.code, X64_RAX, number)
+    x64_syscall(&a.code)
+}
+
+fn x64_image_finish(a: &X64ImageAsm, name: String) -> X64CompiledFunction Never! {
+    texts :: ~a.texts
+    text_labels :: ~a.text_labels
+    loop (index, text) in texts {
+        x64_image_bind(&a, text_labels[index])
+        loop byte in text.bytes() -> &a.code.push(byte)
+    }
+    loop fixup in a.fixups -> x64_patch_rel32(&a.code, fixup.at, a.labels[fixup.label])
+    X64CompiledFunction{id: LIRFunctionID{value: -1}, name: name, code: a.code, relocs: a.relocs}
+}
+
+// rcx = rax shifted left once, xor rax: negative exactly when rax is not an
+// inline Int (bits 63 and 62 differ); jumps to `outside` then.
+fn x64_image_inline_check(a: &X64ImageAsm, outside: Int) Never! {
+    x64_mov_rr(&a.code, X64_RCX, X64_RAX)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RCX, X64_RCX)
+    x64_alu_rr(&a.code, X64Alu.Xor, X64_RCX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.S, outside)
+}
+
+// ---------------------------------------------------------------------------
+// Process, memory and stops.
+
+// jet_image_write(fd, ptr, len): write every byte, retrying short writes.
+fn x64_image_write() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    top :: x64_image_label(&a)
+    done :: x64_image_label(&a)
+    x64_image_bind(&a, top)
+    x64_test_rr(&a.code, X64_RDX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.E, done)
+    x64_image_syscall(&a, 1)
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.LE, done)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RSI, X64_RAX)
+    x64_alu_rr(&a.code, X64Alu.Sub, X64_RDX, X64_RAX)
+    x64_image_jmp(&a, top)
+    x64_image_bind(&a, done)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_image_write")
+}
+
+// jet_image_stop(ptr, len): write the message to stderr and exit_group(70).
+fn x64_image_stop() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_mov_rr(&a.code, X64_RDX, X64_RSI)
+    x64_mov_rr(&a.code, X64_RSI, X64_RDI)
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_image_call(&a, "jet_image_write")
+    x64_mov_ri(&a.code, X64_RDI, X64_IMAGE_STOP_STATUS)
+    x64_image_syscall(&a, 231)
+    x64_ud2(&a.code)
+    x64_image_finish(&a, "jet_image_stop")
+}
+
+fn x64_image_stop_function(name: String, message: String) -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_image_stop_with(&a, message)
+    x64_image_finish(&a, name)
+}
+
+// jet_rt_unreachable(ptr, len): report the reason and stop.
+fn x64_image_unreachable() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_mov_rr(&a.code, X64_R12, X64_RDI)
+    x64_mov_rr(&a.code, X64_R13, X64_RSI)
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_image_text(&a, X64_RSI, X64_RDX, "error[E3001]: unreachable: ")
+    x64_image_call(&a, "jet_image_write")
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_mov_rr(&a.code, X64_RSI, X64_R12)
+    x64_mov_rr(&a.code, X64_RDX, X64_R13)
+    x64_image_call(&a, "jet_image_write")
+    x64_image_stop_with(&a, "\n")
+    x64_image_finish(&a, "jet_rt_unreachable")
+}
+
+// jet_rt_alloc(size, align) -> ptr: an anonymous private read+write mapping.
+fn x64_image_alloc() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    failed :: x64_image_label(&a)
+    x64_mov_rr(&a.code, X64_RSI, X64_RDI)
+    x64_mov_ri(&a.code, X64_RDI, 0)
+    x64_mov_ri(&a.code, X64_RDX, 3)
+    x64_mov_ri(&a.code, X64_R10, 0x22)
+    x64_mov_ri(&a.code, X64_R8, -1)
+    x64_mov_ri(&a.code, X64_R9, 0)
+    x64_image_syscall(&a, 9)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RAX, -4096)
+    x64_image_jcc(&a, X64Cond.A, failed)
+    x64_ret(&a.code)
+    x64_image_bind(&a, failed)
+    x64_image_stop_with(&a, "error[E3001]: out of memory\n")
+    x64_image_finish(&a, "jet_rt_alloc")
+}
+
+// jet_rt_free(ptr, size, align)
+fn x64_image_free() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_image_syscall(&a, 11)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_free")
+}
+
+// ---------------------------------------------------------------------------
+// Strings.
+
+// jet_image_string_new(len) -> String with its length set and bytes unwritten.
+fn x64_image_string_new() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_push(&a.code, X64_RBX)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_lea(&a.code, X64_RDI, X64_RBX, 8)
+    x64_mov_ri(&a.code, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_alloc")
+    x64_store(&a.code, X64_RAX, 0, X64_RBX)
+    x64_pop(&a.code, X64_RBX)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_image_string_new")
+}
+
+// jet_rt_string_from_static(ptr, len) -> String
+fn x64_image_string_from_static() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_push(&a.code, X64_RBX)
+    x64_push(&a.code, X64_R12)
+    x64_push(&a.code, X64_R13)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_mov_rr(&a.code, X64_R12, X64_RSI)
+    x64_mov_rr(&a.code, X64_RDI, X64_R12)
+    x64_image_call(&a, "jet_image_string_new")
+    x64_mov_rr(&a.code, X64_R13, X64_RAX)
+    x64_lea(&a.code, X64_RDI, X64_RAX, 8)
+    x64_mov_rr(&a.code, X64_RSI, X64_RBX)
+    x64_mov_rr(&a.code, X64_RCX, X64_R12)
+    x64_rep_movsb(&a.code)
+    x64_mov_rr(&a.code, X64_RAX, X64_R13)
+    x64_pop(&a.code, X64_R13)
+    x64_pop(&a.code, X64_R12)
+    x64_pop(&a.code, X64_RBX)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_string_from_static")
+}
+
+// jet_rt_string_clone(String) -> String
+fn x64_image_string_clone() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_load(&a.code, X64_RSI, X64_RDI, 0)
+    x64_lea(&a.code, X64_RDI, X64_RDI, 8)
+    x64_image_tail(&a, "jet_rt_string_from_static")
+    x64_image_finish(&a, "jet_rt_string_clone")
+}
+
+// jet_rt_string_drop(String)
+fn x64_image_string_drop() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_load(&a.code, X64_RSI, X64_RDI, 0)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 8)
+    x64_image_syscall(&a, 11)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_string_drop")
+}
+
+// jet_rt_string_eq(String, String) -> Bool
+fn x64_image_string_eq() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    differ :: x64_image_label(&a)
+    x64_load(&a.code, X64_RCX, X64_RDI, 0)
+    x64_load(&a.code, X64_RDX, X64_RSI, 0)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.NE, differ)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RDI, 8)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 8)
+    // With rcx = 0 the compare runs no step and keeps the equal flags of `cmp`.
+    x64_repe_cmpsb(&a.code)
+    x64_image_jcc(&a, X64Cond.NE, differ)
+    x64_mov_ri(&a.code, X64_RAX, 1)
+    x64_ret(&a.code)
+    x64_image_bind(&a, differ)
+    x64_mov_ri(&a.code, X64_RAX, 0)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_string_eq")
+}
+
+// jet_term_write_stdout_line(String, flush): the text and one newline frame.
+// Writes are unbuffered, so every line is flushed.
+fn x64_image_write_stdout_line() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_push(&a.code, X64_RBX)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_load(&a.code, X64_RDX, X64_RBX, 0)
+    x64_lea(&a.code, X64_RSI, X64_RBX, 8)
+    x64_mov_ri(&a.code, X64_RDI, 1)
+    x64_image_call(&a, "jet_image_write")
+    x64_push_i8(&a.code, 10)
+    x64_mov_rr(&a.code, X64_RSI, X64_RSP)
+    x64_mov_ri(&a.code, X64_RDX, 1)
+    x64_mov_ri(&a.code, X64_RDI, 1)
+    x64_image_call(&a, "jet_image_write")
+    x64_pop(&a.code, X64_RAX)
+    x64_pop(&a.code, X64_RBX)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_term_write_stdout_line")
+}
+
+// jet_rt_string_builder_new() -> builder
+fn x64_image_builder_new() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_push(&a.code, X64_RBX)
+    x64_mov_ri(&a.code, X64_RDI, 16)
+    x64_mov_ri(&a.code, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_alloc")
+    x64_mov_rr(&a.code, X64_RBX, X64_RAX)
+    x64_mov_ri(&a.code, X64_RDI, 8 + X64_IMAGE_BUILDER_START)
+    x64_mov_ri(&a.code, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_alloc")
+    x64_mov_ri(&a.code, X64_RDX, 0)
+    x64_store(&a.code, X64_RAX, 0, X64_RDX)
+    x64_store(&a.code, X64_RBX, 0, X64_RAX)
+    x64_mov_ri(&a.code, X64_RDX, X64_IMAGE_BUILDER_START)
+    x64_store(&a.code, X64_RBX, 8, X64_RDX)
+    x64_mov_rr(&a.code, X64_RAX, X64_RBX)
+    x64_pop(&a.code, X64_RBX)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_string_builder_new")
+}
+
+// jet_rt_string_builder_push_static(builder, ptr, len): append, doubling the
+// buffer (or growing it to fit) when it is full.
+fn x64_image_builder_push_static() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    fits :: x64_image_label(&a)
+    sized :: x64_image_label(&a)
+    saved :: [Int]{X64_RBX, X64_R12, X64_R13, X64_R14, X64_R15}
+    loop reg in saved -> x64_push(&a.code, reg)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_mov_rr(&a.code, X64_R12, X64_RSI)
+    x64_mov_rr(&a.code, X64_R13, X64_RDX)
+    x64_load(&a.code, X64_R14, X64_RBX, 0)
+    x64_load(&a.code, X64_R15, X64_R14, 0)
+    x64_mov_rr(&a.code, X64_RAX, X64_R15)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RAX, X64_R13)
+    x64_load(&a.code, X64_RCX, X64_RBX, 8)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RAX, X64_RCX)
+    x64_image_jcc(&a, X64Cond.LE, fits)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RCX, X64_RCX)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.GE, sized)
+    x64_mov_rr(&a.code, X64_RCX, X64_RAX)
+    x64_image_bind(&a, sized)
+    // The new capacity waits on the stack (twice, keeping rsp aligned).
+    x64_push(&a.code, X64_RCX)
+    x64_push(&a.code, X64_RCX)
+    x64_lea(&a.code, X64_RDI, X64_RCX, 8)
+    x64_mov_ri(&a.code, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_alloc")
+    x64_store(&a.code, X64_RBX, 0, X64_RAX)
+    x64_mov_rr(&a.code, X64_RDI, X64_RAX)
+    x64_mov_rr(&a.code, X64_RSI, X64_R14)
+    x64_lea(&a.code, X64_RCX, X64_R15, 8)
+    x64_rep_movsb(&a.code)
+    x64_mov_rr(&a.code, X64_RDI, X64_R14)
+    x64_load(&a.code, X64_RSI, X64_RBX, 8)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_free")
+    x64_pop(&a.code, X64_RCX)
+    x64_pop(&a.code, X64_RCX)
+    x64_store(&a.code, X64_RBX, 8, X64_RCX)
+    x64_load(&a.code, X64_R14, X64_RBX, 0)
+    x64_image_bind(&a, fits)
+    x64_lea(&a.code, X64_RDI, X64_R14, 8)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RDI, X64_R15)
+    x64_mov_rr(&a.code, X64_RSI, X64_R12)
+    x64_mov_rr(&a.code, X64_RCX, X64_R13)
+    x64_rep_movsb(&a.code)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_R15, X64_R13)
+    x64_store(&a.code, X64_R14, 0, X64_R15)
+    index := saved.len() - 1
+    loop index >= 0 {
+        x64_pop(&a.code, saved[index])
+        index -= 1
+    }
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_string_builder_push_static")
+}
+
+// jet_rt_string_builder_push(builder, String)
+fn x64_image_builder_push() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_load(&a.code, X64_RDX, X64_RSI, 0)
+    x64_lea(&a.code, X64_RSI, X64_RSI, 8)
+    x64_image_tail(&a, "jet_rt_string_builder_push_static")
+    x64_image_finish(&a, "jet_rt_string_builder_push")
+}
+
+// jet_rt_string_builder_finish(builder) -> String: an exact-size copy; the
+// buffer and the builder are released.
+fn x64_image_builder_finish() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_push(&a.code, X64_RBX)
+    x64_push(&a.code, X64_R12)
+    x64_push(&a.code, X64_R13)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_load(&a.code, X64_R12, X64_RBX, 0)
+    x64_load(&a.code, X64_RSI, X64_R12, 0)
+    x64_lea(&a.code, X64_RDI, X64_R12, 8)
+    x64_image_call(&a, "jet_rt_string_from_static")
+    x64_mov_rr(&a.code, X64_R13, X64_RAX)
+    x64_mov_rr(&a.code, X64_RDI, X64_R12)
+    x64_load(&a.code, X64_RSI, X64_RBX, 8)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_free")
+    x64_mov_rr(&a.code, X64_RDI, X64_RBX)
+    x64_mov_ri(&a.code, X64_RSI, 16)
+    x64_image_call(&a, "jet_rt_free")
+    x64_mov_rr(&a.code, X64_RAX, X64_R13)
+    x64_pop(&a.code, X64_R13)
+    x64_pop(&a.code, X64_R12)
+    x64_pop(&a.code, X64_RBX)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_string_builder_finish")
+}
+
+// jet_rt_i64_to_string(word) -> String: decimal digits written backwards
+// into a stack buffer; the magnitude divides unsigned, so the minimum works.
+fn x64_image_i64_to_string() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    digits :: x64_image_label(&a)
+    next :: x64_image_label(&a)
+    done :: x64_image_label(&a)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSP, 40)
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    x64_lea(&a.code, X64_RSI, X64_RSP, 32)
+    x64_mov_ri(&a.code, X64_R8, 0)
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.GE, digits)
+    x64_neg(&a.code, X64_RAX)
+    x64_mov_ri(&a.code, X64_R8, 1)
+    x64_image_bind(&a, digits)
+    x64_mov_ri(&a.code, X64_RCX, 10)
+    x64_image_bind(&a, next)
+    x64_mov_ri(&a.code, X64_RDX, 0)
+    x64_div(&a.code, X64_RCX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RDX, 48)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSI, 1)
+    x64_store_u8(&a.code, X64_RSI, 0, X64_RDX)
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.NE, next)
+    x64_test_rr(&a.code, X64_R8, X64_R8)
+    x64_image_jcc(&a, X64Cond.E, done)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSI, 1)
+    x64_mov_ri(&a.code, X64_RDX, 45)
+    x64_store_u8(&a.code, X64_RSI, 0, X64_RDX)
+    x64_image_bind(&a, done)
+    x64_lea(&a.code, X64_RAX, X64_RSP, 32)
+    x64_alu_rr(&a.code, X64Alu.Sub, X64_RAX, X64_RSI)
+    x64_mov_rr(&a.code, X64_RDI, X64_RSI)
+    x64_mov_rr(&a.code, X64_RSI, X64_RAX)
+    x64_image_call(&a, "jet_rt_string_from_static")
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSP, 40)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_i64_to_string")
+}
+
+// jet_rt_int_to_string(Int) -> String: every Int in this runtime is inline.
+fn x64_image_int_to_string() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_image_tail(&a, "jet_rt_i64_to_string")
+    x64_image_finish(&a, "jet_rt_int_to_string")
+}
+
+// jet_rt_bool_to_string(Bool) -> String
+fn x64_image_bool_to_string() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    no :: x64_image_label(&a)
+    x64_movzx_r8(&a.code, X64_RDI, X64_RDI)
+    x64_test_rr(&a.code, X64_RDI, X64_RDI)
+    x64_image_jcc(&a, X64Cond.E, no)
+    x64_image_text(&a, X64_RDI, X64_RSI, "true")
+    x64_image_tail(&a, "jet_rt_string_from_static")
+    x64_image_bind(&a, no)
+    x64_image_text(&a, X64_RDI, X64_RSI, "false")
+    x64_image_tail(&a, "jet_rt_string_from_static")
+    x64_image_finish(&a, "jet_rt_bool_to_string")
+}
+
+// Byte `index` of a UTF-8 sequence: ((rdi >> shift) & mask) | marker into [rsp + index].
+fn x64_image_utf8_byte(a: &X64ImageAsm, index: Int, shift: Int, mask: Int, marker: Int) Never! {
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    if shift > 0 -> x64_shift_ri(&a.code, X64Shift.Shr, X64_RAX, shift)
+    if mask >= 0 -> x64_alu_ri(&a.code, X64Alu.And, X64_RAX, mask)
+    x64_alu_ri(&a.code, X64Alu.Or, X64_RAX, marker)
+    x64_store_u8(&a.code, X64_RSP, index, X64_RAX)
+}
+
+// jet_rt_char_to_string(Char) -> String: the scalar's UTF-8 encoding.
+fn x64_image_char_to_string() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    two :: x64_image_label(&a)
+    three :: x64_image_label(&a)
+    four :: x64_image_label(&a)
+    out :: x64_image_label(&a)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSP, 24)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RDI, 0x80)
+    x64_image_jcc(&a, X64Cond.AE, two)
+    x64_image_utf8_byte(&a, 0, 0, -1, 0)
+    x64_mov_ri(&a.code, X64_RSI, 1)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, two)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RDI, 0x800)
+    x64_image_jcc(&a, X64Cond.AE, three)
+    x64_image_utf8_byte(&a, 0, 6, -1, 0xc0)
+    x64_image_utf8_byte(&a, 1, 0, 0x3f, 0x80)
+    x64_mov_ri(&a.code, X64_RSI, 2)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, three)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RDI, 0x10000)
+    x64_image_jcc(&a, X64Cond.AE, four)
+    x64_image_utf8_byte(&a, 0, 12, -1, 0xe0)
+    x64_image_utf8_byte(&a, 1, 6, 0x3f, 0x80)
+    x64_image_utf8_byte(&a, 2, 0, 0x3f, 0x80)
+    x64_mov_ri(&a.code, X64_RSI, 3)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, four)
+    x64_image_utf8_byte(&a, 0, 18, -1, 0xf0)
+    x64_image_utf8_byte(&a, 1, 12, 0x3f, 0x80)
+    x64_image_utf8_byte(&a, 2, 6, 0x3f, 0x80)
+    x64_image_utf8_byte(&a, 3, 0, 0x3f, 0x80)
+    x64_mov_ri(&a.code, X64_RSI, 4)
+    x64_image_bind(&a, out)
+    x64_mov_rr(&a.code, X64_RDI, X64_RSP)
+    x64_image_call(&a, "jet_rt_string_from_static")
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSP, 24)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_char_to_string")
+}
+
+// ---------------------------------------------------------------------------
+// Exact Int routes. Operands are inline; results must stay inline.
+
+// jet_int_compare(Int, Int) -> -1, 0 or 1
+fn x64_image_int_compare() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    less :: x64_image_label(&a)
+    greater :: x64_image_label(&a)
+    x64_mov_ri(&a.code, X64_RAX, 0)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RDI, X64_RSI)
+    x64_image_jcc(&a, X64Cond.L, less)
+    x64_image_jcc(&a, X64Cond.G, greater)
+    x64_ret(&a.code)
+    x64_image_bind(&a, less)
+    x64_mov_ri(&a.code, X64_RAX, -1)
+    x64_ret(&a.code)
+    x64_image_bind(&a, greater)
+    x64_mov_ri(&a.code, X64_RAX, 1)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_int_compare")
+}
+
+// jet_int_add / jet_int_sub / jet_int_mul(Int, Int) -> Int
+fn x64_image_int_arithmetic(name: String, op: LIRBinaryOp) -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    outside :: x64_image_label(&a)
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    if op == {
+        .Add -> x64_alu_rr(&a.code, X64Alu.Add, X64_RAX, X64_RSI)
+        .Sub -> x64_alu_rr(&a.code, X64Alu.Sub, X64_RAX, X64_RSI)
+        else -> x64_imul_rr(&a.code, X64_RAX, X64_RSI)
+    }
+    x64_image_jcc(&a, X64Cond.O, outside)
+    x64_image_inline_check(&a, outside)
+    x64_ret(&a.code)
+    x64_image_bind(&a, outside)
+    x64_image_tail(&a, "jet_image_big_int")
+    x64_image_finish(&a, name)
+}
+
+// jet_int_div(Int, Int, file_ptr, file_len, line) -> Int, truncating.
+fn x64_image_int_div() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    outside :: x64_image_label(&a)
+    x64_test_rr(&a.code, X64_RSI, X64_RSI)
+    x64_image_jcc_symbol(&a, X64Cond.E, "jet_rt_panic_division_by_zero")
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    x64_cqo(&a.code)
+    x64_idiv(&a.code, X64_RSI)
+    x64_image_inline_check(&a, outside)
+    x64_ret(&a.code)
+    x64_image_bind(&a, outside)
+    x64_image_tail(&a, "jet_image_big_int")
+    x64_image_finish(&a, "jet_int_div")
+}
+
+// ---------------------------------------------------------------------------
+// Range loops (Prelude `core.loop` routes).
+
+// jet_loop_range_init(start, end, step, has_step, exclusive) -> cursor
+fn x64_image_range_init() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    stepped :: x64_image_label(&a)
+    valid :: x64_image_label(&a)
+    saved :: [Int]{X64_RBX, X64_R12, X64_R13, X64_R14, X64_R15}
+    loop reg in saved -> x64_push(&a.code, reg)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_mov_rr(&a.code, X64_R12, X64_RSI)
+    x64_mov_rr(&a.code, X64_R13, X64_RDX)
+    x64_movzx_r8(&a.code, X64_R14, X64_RCX)
+    x64_movzx_r8(&a.code, X64_R15, X64_R8)
+    x64_test_rr(&a.code, X64_R14, X64_R14)
+    x64_image_jcc(&a, X64Cond.NE, stepped)
+    x64_mov_ri(&a.code, X64_R13, 1)
+    x64_image_bind(&a, stepped)
+    x64_test_rr(&a.code, X64_R13, X64_R13)
+    x64_image_jcc(&a, X64Cond.NE, valid)
+    x64_image_stop_with(&a, "error[E3001]: range loop stride must not be zero\n")
+    x64_image_bind(&a, valid)
+    x64_mov_ri(&a.code, X64_RDI, X64_IMAGE_CURSOR_SIZE)
+    x64_mov_ri(&a.code, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_alloc")
+    x64_store(&a.code, X64_RAX, 0, X64_RBX)
+    x64_store(&a.code, X64_RAX, 8, X64_R12)
+    x64_store(&a.code, X64_RAX, 16, X64_R13)
+    x64_store(&a.code, X64_RAX, 24, X64_R15)
+    x64_mov_ri(&a.code, X64_RDX, 0)
+    x64_store(&a.code, X64_RAX, 32, X64_RDX)
+    index := saved.len() - 1
+    loop index >= 0 {
+        x64_pop(&a.code, saved[index])
+        index -= 1
+    }
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_loop_range_init")
+}
+
+// jet_loop_range_has_next(cursor) -> Bool
+fn x64_image_range_has_next() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    out :: x64_image_label(&a)
+    yes :: x64_image_label(&a)
+    down :: x64_image_label(&a)
+    up_inclusive :: x64_image_label(&a)
+    down_inclusive :: x64_image_label(&a)
+    x64_mov_ri(&a.code, X64_RAX, 0)
+    x64_load(&a.code, X64_RDX, X64_RDI, 32)
+    x64_test_rr(&a.code, X64_RDX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.NE, out)
+    x64_load(&a.code, X64_RCX, X64_RDI, 0)
+    x64_load(&a.code, X64_RDX, X64_RDI, 8)
+    x64_load(&a.code, X64_R8, X64_RDI, 16)
+    x64_load(&a.code, X64_R9, X64_RDI, 24)
+    x64_test_rr(&a.code, X64_R8, X64_R8)
+    x64_image_jcc(&a, X64Cond.LE, down)
+    x64_test_rr(&a.code, X64_R9, X64_R9)
+    x64_image_jcc(&a, X64Cond.E, up_inclusive)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.L, yes)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, up_inclusive)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.LE, yes)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, down)
+    x64_test_rr(&a.code, X64_R9, X64_R9)
+    x64_image_jcc(&a, X64Cond.E, down_inclusive)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.G, yes)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, down_inclusive)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.GE, yes)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, yes)
+    x64_mov_ri(&a.code, X64_RAX, 1)
+    x64_image_bind(&a, out)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_loop_range_has_next")
+}
+
+// jet_loop_range_value(cursor) -> Int
+fn x64_image_range_value() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    exhausted :: x64_image_label(&a)
+    x64_push(&a.code, X64_RBX)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_image_call(&a, "jet_loop_range_has_next")
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.E, exhausted)
+    x64_load(&a.code, X64_RAX, X64_RBX, 0)
+    x64_pop(&a.code, X64_RBX)
+    x64_ret(&a.code)
+    x64_image_bind(&a, exhausted)
+    x64_image_stop_with(&a, "error[E3001]: range loop value requested after exhaustion\n")
+    x64_image_finish(&a, "jet_loop_range_value")
+}
+
+// jet_loop_range_advance(cursor): step once; an overflowing step ends the loop.
+fn x64_image_range_advance() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    out :: x64_image_label(&a)
+    ended :: x64_image_label(&a)
+    x64_push(&a.code, X64_RBX)
+    x64_mov_rr(&a.code, X64_RBX, X64_RDI)
+    x64_load(&a.code, X64_RAX, X64_RBX, 32)
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.NE, out)
+    x64_load(&a.code, X64_RAX, X64_RBX, 0)
+    x64_load(&a.code, X64_RCX, X64_RBX, 16)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RAX, X64_RCX)
+    x64_image_jcc(&a, X64Cond.O, ended)
+    x64_store(&a.code, X64_RBX, 0, X64_RAX)
+    x64_mov_rr(&a.code, X64_RDI, X64_RBX)
+    x64_image_call(&a, "jet_loop_range_has_next")
+    x64_mov_ri(&a.code, X64_RCX, 1)
+    x64_alu_rr(&a.code, X64Alu.Sub, X64_RCX, X64_RAX)
+    x64_store(&a.code, X64_RBX, 32, X64_RCX)
+    x64_image_jmp(&a, out)
+    x64_image_bind(&a, ended)
+    x64_mov_ri(&a.code, X64_RAX, 1)
+    x64_store(&a.code, X64_RBX, 32, X64_RAX)
+    x64_image_bind(&a, out)
+    x64_pop(&a.code, X64_RBX)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_loop_range_advance")
+}
+
+// jet_loop_cursor_drop(cursor)
+fn x64_image_cursor_drop() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_mov_ri(&a.code, X64_RSI, X64_IMAGE_CURSOR_SIZE)
+    x64_image_syscall(&a, 11)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_loop_cursor_drop")
+}
+
+// Every function of the freestanding runtime; the linker resolves runtime
+// relocations against their names.
+pub fn x64_image_runtime() -> [X64CompiledFunction] Never! {
+    [X64CompiledFunction]{
+        x64_image_write(),
+        x64_image_stop(),
+        x64_image_stop_function("jet_rt_panic_overflow", "error[E3010]: arithmetic overflow\n"),
+        x64_image_stop_function("jet_rt_panic_division_by_zero", "error[E3010]: division by zero\n"),
+        x64_image_stop_function("jet_image_big_int", "error[E3010]: Int result outside the inline range; big integers need the compiled runtime\n"),
+        x64_image_unreachable(),
+        x64_image_alloc(),
+        x64_image_free(),
+        x64_image_string_new(),
+        x64_image_string_from_static(),
+        x64_image_string_clone(),
+        x64_image_string_drop(),
+        x64_image_string_eq(),
+        x64_image_write_stdout_line(),
+        x64_image_builder_new(),
+        x64_image_builder_push_static(),
+        x64_image_builder_push(),
+        x64_image_builder_finish(),
+        x64_image_i64_to_string(),
+        x64_image_int_to_string(),
+        x64_image_bool_to_string(),
+        x64_image_char_to_string(),
+        x64_image_int_compare(),
+        x64_image_int_arithmetic("jet_int_add", LIRBinaryOp.Add),
+        x64_image_int_arithmetic("jet_int_sub", LIRBinaryOp.Sub),
+        x64_image_int_arithmetic("jet_int_mul", LIRBinaryOp.Mul),
+        x64_image_int_div(),
+        x64_image_range_init(),
+        x64_image_range_has_next(),
+        x64_image_range_value(),
+        x64_image_range_advance(),
+        x64_image_cursor_drop(),
+    }
+}

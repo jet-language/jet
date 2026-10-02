@@ -592,6 +592,24 @@ pub(crate) mod collection_semantics {
         display(&value)
     }
 
+    /// Exact `Int` list text: spilled words print their value, not the word.
+    pub(super) fn display_exact_int_list(words: Vec<i64>) -> String {
+        display(&exact_int_words(words))
+    }
+
+    pub(super) fn debug_exact_int_list(words: Vec<i64>) -> String {
+        debug(&exact_int_words(words))
+    }
+
+    fn exact_int_words(words: Vec<i64>) -> Vec<JetInt> {
+        words
+            .into_iter()
+            // SAFETY: an exact `Int` list cell owns its word through the arena
+            // roots; cloning retains a spilled node for this rendering only.
+            .map(|word| unsafe { JetInt::clone_from_raw(word) })
+            .collect()
+    }
+
     impl JetDisplay for NativeI64 {
         fn jet_display(&self) -> String {
             self.0.to_string()
@@ -5941,6 +5959,13 @@ fn jet_jit_map_has_key(map: i64, key: i64) -> i8 {
             .any(|(stored, _)| stored == &key),
     )
 }
+/// `[Int:V].has_key`: the arena compares exact Int keys by value.
+fn jet_jit_map_has_key_int(map: i64, key: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.map_get_int(map, key).is_some()))
+}
+fn jet_jit_map_has_key_composite(map: i64, key: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.map_get_composite(map, key).is_some()))
+}
 fn map_callback_key(key: &str) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(key.to_owned()))
 }
@@ -8097,9 +8122,9 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> Strin
         2 => {
             let values = rt.heap.clone_int_list(list).unwrap_or_default();
             if debug {
-                collection_semantics::debug_i64_list(values)
+                collection_semantics::debug_exact_int_list(values)
             } else {
-                collection_semantics::display_i64_list(values)
+                collection_semantics::display_exact_int_list(values)
             }
         }
         3 => {
@@ -11680,6 +11705,8 @@ host_fns! {
     checked_map_contains_value: "jet_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     map_has_key: "jet_jit_map_has_key" => jet_jit_map_has_key: sig_list_eq;
     checked_map_has_key: "jet_map_has_key" => jet_jit_map_has_key: sig_list_eq;
+    map_has_key_int: "jet_jit_map_has_key_int" => jet_jit_map_has_key_int: sig_list_eq;
+    map_has_key_composite: "jet_jit_map_has_key_composite" => jet_jit_map_has_key_composite: sig_list_eq;
     map_any: "jet_jit_map_any" => jet_jit_map_any: sig_closure_predicate;
     checked_map_any: "jet_map_any" => jet_jit_map_any: sig_closure_predicate;
     map_all: "jet_jit_map_all" => jet_jit_map_all: sig_closure_predicate;

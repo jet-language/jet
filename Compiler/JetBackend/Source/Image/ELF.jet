@@ -1,0 +1,94 @@
+// ELF64 output for x86-64 Linux: a static executable with one read+execute
+// PT_LOAD segment that maps the whole file (headers and text) at
+// ELF64_BASE_ADDRESS. No segment is writable. Section headers are omitted;
+// the kernel loads executables from program headers alone.
+
+ELF64_BASE_ADDRESS :: prep { 0x400000 }
+ELF64_HEADER_SIZE :: prep { 64 }
+ELF64_PROGRAM_HEADER_SIZE :: prep { 56 }
+
+pub struct X64ExecutableResult {
+    pub bytes: [U8]
+    pub errors: [String]
+}
+
+fn elf64_u16(bytes: &[U8], value: Int) Never! {
+    loop shift in 0..<2 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
+}
+
+fn elf64_u32(bytes: &[U8], value: Int) Never! {
+    loop shift in 0..<4 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
+}
+
+fn elf64_u64(bytes: &[U8], value: Int) Never! {
+    loop shift in 0..<8 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
+}
+
+// The file: ELF header, one program header, then `text`; execution starts at
+// `entry_offset` within `text`.
+pub fn elf64_static_executable(text: [U8], entry_offset: Int) -> [U8] Never! {
+    text_offset :: ELF64_HEADER_SIZE + ELF64_PROGRAM_HEADER_SIZE
+    file_size :: text_offset + text.len()
+    bytes := [U8]{}
+    // e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT, System V ABI, padding.
+    ident :: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    loop byte in ident -> &bytes.push(U8{byte})
+    elf64_u16(&bytes, 2)
+    elf64_u16(&bytes, 62)
+    elf64_u32(&bytes, 1)
+    elf64_u64(&bytes, ELF64_BASE_ADDRESS + text_offset + entry_offset)
+    elf64_u64(&bytes, ELF64_HEADER_SIZE)
+    elf64_u64(&bytes, 0)
+    elf64_u32(&bytes, 0)
+    elf64_u16(&bytes, ELF64_HEADER_SIZE)
+    elf64_u16(&bytes, ELF64_PROGRAM_HEADER_SIZE)
+    elf64_u16(&bytes, 1)
+    elf64_u16(&bytes, 0)
+    elf64_u16(&bytes, 0)
+    elf64_u16(&bytes, 0)
+    // PT_LOAD, PF_R | PF_X, the whole file at the base address.
+    elf64_u32(&bytes, 1)
+    elf64_u32(&bytes, 5)
+    elf64_u64(&bytes, 0)
+    elf64_u64(&bytes, ELF64_BASE_ADDRESS)
+    elf64_u64(&bytes, ELF64_BASE_ADDRESS)
+    elf64_u64(&bytes, file_size)
+    elf64_u64(&bytes, file_size)
+    elf64_u64(&bytes, 0x1000)
+    loop byte in text -> &bytes.push(byte)
+    bytes
+}
+
+// `_start`: call the entry function, then exit_group(2) with its result as
+// the process status (the kernel keeps the low eight bits), or 0 when the
+// entry returns nothing. The kernel enters with rsp 16-byte aligned, so the
+// entry sees the System V call alignment.
+fn x64_start_stub(entry: LIRFunctionID, returns_word: Bool) -> X64CompiledFunction Never! {
+    code := [U8]{}
+    at :: x64_call_rel32(&code)
+    if returns_word {
+        x64_mov_rr(&code, X64_RDI, X64_RAX)
+    } else {
+        x64_mov_ri(&code, X64_RDI, 0)
+    }
+    x64_mov_ri(&code, X64_RAX, 231)
+    x64_syscall(&code)
+    X64CompiledFunction{id: LIRFunctionID{value: -1}, name: "_start", code: code, relocs: [X64Reloc]{X64Reloc{at: at, target: X64RelocTarget.Function{id: entry}}}}
+}
+
+// Compile `program` into a static x86-64 Linux executable that runs `entry`,
+// which takes no parameters and returns one word (the exit status) or
+// nothing (status 0). Runtime calls link against the freestanding image
+// runtime (Image/Runtime.jet).
+pub fn x64_static_executable(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
+    if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
+    signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
+    if signature.params.len() != 0 || (signature.result != None && signature.result != Val(lir_layout_word())) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return one word or nothing"}}
+    compiled :: x64_compile_module(program)
+    if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
+    functions := [X64CompiledFunction]{x64_start_stub(entry, signature.result != None)}
+    loop function in compiled.functions -> &functions.push(function)
+    linked :: x64_link_text(functions, x64_image_runtime(), program.data)
+    if linked.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: linked.errors}
+    X64ExecutableResult{bytes: elf64_static_executable(linked.text, linked.offsets[0]), errors: [String]{}}
+}

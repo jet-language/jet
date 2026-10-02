@@ -12,6 +12,7 @@ use jet_foundation.[
     Item,
     MIRTargetHardwareUse,
     MIRTypedHeadKind,
+    ParamZone,
     Span,
     StrFormat,
     StrPart,
@@ -540,6 +541,7 @@ fn sema_expression_checked_text_target(head: Type, environment: SemaScopeEnviron
 fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     type_name :: if receiver == {.Ident(name, _) -> name else -> { return SemaMethodSpecialCheck{handled: false, value: None} }}
     target :: sema_expression_checked_text_target(Type.Named{name: type_name}, environment, &scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if method_name == "raw" -> return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     function :: if method_name == "check" -> target.check else -> if method_name == "encode_hole" -> target.encode_hole else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
     if owner_type_args.len() > 0 {
         &diagnostics.push(sema_error("E0119", method_span, "`{type_name}.{method_name}` has no owner type parameters", "CheckedText implementations target one concrete string-backed distinct type", "remove the explicit owner type arguments"))
@@ -577,6 +579,34 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
     &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, &scopes, &context, method_span, checked, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
+}
+
+// D-TEXTHEAD-TYPE1=A: `Type.raw(text)` is the expert escape that wraps one
+// audited String without running the declared checker, so it needs an
+// audited `#Unsafe` region (E0387).
+fn sema_expression_checked_text_raw(target: SemaExpressionCheckedTextTarget, type_name: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    callee :: "{type_name}.raw"
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0103", method_span, "`{callee}` takes exactly one String", "a checked text boundary receives one complete text value", "write `{callee}(text)`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    if context.unsafe_depth == 0 {
+        &diagnostics.push(sema_error("E0387", method_span, "Checked text raw construction requires an audited `#Unsafe` region", "`Type.raw(text)` bypasses the declared CheckedText checker and is an expert-only escape", "Wrap the call in `#Unsafe(\"reason\") {{ … }}`, or use `Type.from(text)` for validation"))
+    }
+    if args.len() != 1 -> return SemaMethodSpecialCheck{handled: true, value: None}
+    argument :: sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if argument.ty != Type.String {
+        &diagnostics.push(sema_type_mismatch(Type.String, argument.ty, expr_span(args[0].expr)))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    params :: [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ownership_args := args
+    ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value := argument
+    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
+    constructed :: sema_tir_expr(Type.Named{name: type_name}, TExprKind.DistinctCtor{owner: target.owner.id, argument: value, base: Type.String}, method_span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(constructed, expected, environment, &diagnostics)}
 }
 
 fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionCheckedTextLiteral {

@@ -300,5 +300,8 @@ fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
     parser_expect(&state, TOKEN_RBRACKET, "`]` after marker-group entries")
     group_end :: parser_lookahead(&state, -1).span
     if markers.len() == 1 -> parser_add_error(&state, parser_cover(hash.span, group_end), "one marker is written without brackets", "brackets group two or more markers", "replace `#[Name]` with `#Name`")
+    // Rust `parse_marker_bracket_group`: a group on its own line still
+    // attaches to the declaration below.
+    parser_skip_semicolons(&state)
     markers
 }

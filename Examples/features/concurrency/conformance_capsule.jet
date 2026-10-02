@@ -1,0 +1,157 @@
+// Conformance capsule (#3180): each cell prints observed transitions under
+// D-CONC-SPAWN1=D, D-CONC-FAIL1=A, D-CONC-JOIN1=A, D-CONC-CHAN1=A,
+// D-CONC-CHAN2=D and D-CANCELMODEL1=C. Deadlines are bounded readiness waits.
+package {
+    name: "conformance_capsule"
+    authority: { holds: { allow: [IO, Mem.Alloc, Panic, Time, Time.Wait] } }
+}
+
+use core.time as time
+
+fn failure_label(error: TaskFailure) -> String {
+    if error == {
+        .Panicked(reason) -> { return "panic:{reason}" }
+        .DeadlineBlown -> { return "deadline" }
+        .Cancelled -> { return "cancelled" }
+    }
+}
+
+// Capacity one: the second send is still blocked after a bounded wait and
+// completes only after the receiver drains the slot.
+fn backpressure_cell() {
+    (tx, values) :: channel<Int>(capacity: 1)
+    (started_tx, started) :: channel<Int>(capacity: 4)
+    (sent_tx, sent) :: channel<Int>(capacity: 4)
+    tx.send(10)
+    second_tx :: ~tx
+    sender :: task {
+        started_tx.send(1)
+        second_tx.send(20)
+        sent_tx.send(1)
+    }
+    started.receive() ?? panic("started closed")
+    if {
+        _v, sent -> { print("backpressure: second send completed before drain") }
+        after 100ms -> { print("backpressure: second send blocked while slot full") }
+    }
+    print("backpressure: drained {values.receive() ?? -1}")
+    sent.receive() ?? panic("sent closed")
+    print("backpressure: second send completed after drain")
+    print("backpressure: drained {values.receive() ?? -1}")
+    ^sender.join() ?? panic(failure_label(err))
+}
+
+fn worker(id: Int, token: Int, token_tx: Sender<Int>, events: Sender<Int>) -> Int {
+    events.send(1)
+    time.sleep(20ms)
+    events.send(-1)
+    token_tx.send(token)
+    id
+}
+
+// Two tokens bound the pool. Workers log +1/-1 while holding a token; the
+// running maximum over the log is the observed in-flight bound.
+fn worker_limit_cell() {
+    (token_tx, tokens) :: channel<Int>(capacity: 2)
+    (events_tx, events) :: channel<Int>(capacity: 16)
+    token_tx.send(1)
+    token_tx.send(2)
+    t1 :: ~token_tx
+    t2 :: ~token_tx
+    t3 :: ~token_tx
+    t4 :: ~token_tx
+    e1 :: ~events_tx
+    e2 :: ~events_tx
+    e3 :: ~events_tx
+    e4 :: ~events_tx
+    a :: task worker(1, tokens.receive() ?? panic("tokens"), t1, e1)
+    b :: task worker(2, tokens.receive() ?? panic("tokens"), t2, e2)
+    c :: task worker(3, tokens.receive() ?? panic("tokens"), t3, e3)
+    d :: task worker(4, tokens.receive() ?? panic("tokens"), t4, e4)
+    ids :: [
+        ^a.join() ?? panic(failure_label(err)),
+        ^b.join() ?? panic(failure_label(err)),
+        ^c.join() ?? panic(failure_label(err)),
+        ^d.join() ?? panic(failure_label(err)),
+    ]
+    in_flight := 0
+    max_in_flight := 0
+    seen := 0
+    loop seen < 8 {
+        delta :: events.try_receive() ?? break
+        in_flight += delta
+        if in_flight > max_in_flight -> max_in_flight = in_flight
+        seen += 1
+    }
+    print("worker limit: joined={ids} events={seen} max_in_flight={max_in_flight} final_in_flight={in_flight}")
+}
+
+fn double(n: Int) -> Int { n * 2 }
+
+// Explicit join and scope-owned join.
+fn join_cell() {
+    t :: task double(21)
+    print("join: explicit {^t.join() ?? -1}")
+    task.group g {
+        both :: task.all {double(1), double(2)} ?? panic("all")
+        print("join: scope-owned {both[0]} {both[1]}")
+    }
+    print("join: group closed")
+}
+
+fn fail_fast(reason: String) -> Int {
+    panic(reason)
+    return 0
+}
+
+fn fail_late(reason: String) -> Int {
+    time.sleep(100ms)
+    panic(reason)
+    return 0
+}
+
+fn sibling(done: Sender<Int>) -> Int {
+    time.sleep(200ms)
+    done.send(1)
+    1
+}
+
+// task.all: first failure keeps its identity; the sibling is cancelled at
+// its sleep wait point and never reports completion.
+fn failfast_cell() {
+    (done_tx, done) :: channel<Int>(capacity: 2)
+    _ :: task.all {fail_fast("first"), fail_late("second"), sibling(done_tx)} ?? {
+        print("failfast: error {failure_label(err)}")
+        [0, 0, 0]
+    }
+    if {
+        _v, done -> { print("failfast: sibling completed") }
+        after 400ms -> { print("failfast: sibling cancelled at wait point") }
+    }
+}
+
+fn shielded() -> Int {
+    #Shield {
+        time.sleep(20ms)
+        print("shield: committed inside shield")
+    }
+    print("shield: after shield (must not print)")
+    1
+}
+
+fn quick() -> Int { 7 }
+
+fn shield_cell() {
+    task.group g {
+        winner :: task.race {shielded(), quick()} ?? panic("race")
+        print("shield: winner {winner}")
+    }
+}
+
+fn run() {
+    backpressure_cell()
+    worker_limit_cell()
+    join_cell()
+    failfast_cell()
+    shield_cell()
+}

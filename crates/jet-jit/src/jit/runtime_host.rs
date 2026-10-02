@@ -3127,6 +3127,11 @@ pub(crate) struct JitRuntime {
     pub(crate) lazy_iters: Vec<Option<JitLazyIter>>,
     pub(crate) type_descriptors: HashMap<u64, RuntimeTypeDescriptor>,
     pub(crate) type_descriptor_names: HashMap<String, u64>,
+    /// Memoized `runtime_type_needs_owned_drop` answers by type identity. The
+    /// recursive descriptor walk runs on every typed drop and copy, so large
+    /// recursive types (compiler ASTs) made it dominate run time. Cleared
+    /// whenever descriptors are installed or merged.
+    pub(crate) owned_drop_cache: std::sync::Mutex<HashMap<u64, bool>>,
     /// Checked identity for the built-in Err record's fixed ABI. Unlike the
     /// generic descriptor registry, this fact is carried by warm artifacts.
     pub(crate) default_error_type: Option<u64>,
@@ -3348,7 +3353,7 @@ pub(crate) struct JitRuntime {
     >,
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
-    /// `core.net.url` / `core.net.mime` / net handles (#1221).
+    /// Email and browser-test handles (#1221); URL and MIME are Core records.
     pub(crate) net_values: Vec<Option<Net::NetValue>>,
     /// Checked service worker function-value handles, keyed by source identity.
     pub(crate) service_callbacks: std::collections::HashMap<String, i64>,
@@ -3931,6 +3936,9 @@ impl JitRuntime {
         &mut self,
         descriptors: impl IntoIterator<Item = RuntimeTypeDescriptor>,
     ) {
+        if let Ok(cache) = self.owned_drop_cache.get_mut() {
+            cache.clear();
+        }
         for descriptor in descriptors {
             let id = descriptor.id;
             if let Some(existing) = self.type_descriptors.get_mut(&id) {
@@ -8059,7 +8067,19 @@ fn runtime_drop_closure(runtime: &mut JitRuntime, handle: i64, depth: usize) -> 
 }
 
 fn runtime_type_needs_owned_drop(runtime: &JitRuntime, type_id: u64) -> Result<bool, String> {
-    runtime_type_needs_owned_drop_on_path(runtime, type_id, &mut Vec::new())
+    if let Some(cached) = runtime
+        .owned_drop_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&type_id).copied())
+    {
+        return Ok(cached);
+    }
+    let needs_drop = runtime_type_needs_owned_drop_on_path(runtime, type_id, &mut Vec::new())?;
+    if let Ok(mut cache) = runtime.owned_drop_cache.lock() {
+        cache.insert(type_id, needs_drop);
+    }
+    Ok(needs_drop)
 }
 
 /// Recursive descriptors (lists of self, tree variants) are walked once per
@@ -8196,7 +8216,9 @@ pub(crate) fn runtime_drop_value(
     if value == JIT_MOVED_OWNER_VALUE {
         return Ok(());
     }
-    if depth > 64 {
+    // Each record or enum level adds two, so 1024 covers ~500 nesting levels
+    // (deep ASTs from real programs) while still stopping a cyclic descriptor.
+    if depth > 1024 {
         return Err("typed drop value recursion limit exceeded".to_string());
     }
     let descriptor = runtime
@@ -9611,7 +9633,7 @@ fn jet_jit_slice_range_value(id: i64, range: i64, _file: i64, line: i32) -> i64 
 }
 
 fn jet_jit_str_slice_direct(id: i64, start: i64, end: i64, _file: i64, line: i32) -> i64 {
-    jet_jit_str_slice_value(id, start, end, false, line.max(0) as u32)
+    jet_jit_str_slice_value(id, start, end, true, line.max(0) as u32)
 }
 
 fn jet_jit_str_after(id: i64, sep_id: i64) -> i64 {
@@ -9678,9 +9700,10 @@ fn jet_jit_str_slice_value(id: i64, start: i64, end: i64, exclusive: bool, line:
     })
 }
 
-/// Inclusive string slice (`s.slice(lo, hi)`). Same start/end = one char.
+/// String slice (`s.slice(lo, hi)`): the end is excluded, like list and byte
+/// `.slice` (#4001). Same start/end = empty text.
 fn jet_jit_str_slice(id: i64, start: i64, end: i64) -> i64 {
-    jet_jit_str_slice_value(id, start, end, false, 0)
+    jet_jit_str_slice_value(id, start, end, true, 0)
 }
 
 fn jet_jit_str_slice_range(id: i64, start: i64, end: i64, exclusive: i8, line: i32) -> i64 {

@@ -47,6 +47,8 @@ mod opt;
 mod routes;
 mod tir_to_mir_core;
 mod tir_to_mir_expr;
+mod tir_to_mir_drop_flags;
+mod tir_to_mir_last_use;
 mod tir_to_mir_stmt;
 pub(crate) mod tir_to_mir_types;
 use artifact_plan::{TirArtifactFacts, lower_tir_artifact_facts_for_request};
@@ -4412,11 +4414,12 @@ fn lower_mir_fragment_program(
         iterable_item_types: std::collections::HashMap::new(),
     };
     opt::optimize_program(&mut tir);
-    let mir = lower_tir_to_mir(&tir)?;
+    let fragment_key = tir.funcs[0].key.clone();
+    let mir = lower_tir_to_mir(tir)?;
     let function_id = mir
         .functions
         .iter()
-        .find(|function| function.key == tir.funcs[0].key)
+        .find(|function| function.key == fragment_key)
         .map(|function| function.id)
         .ok_or_else(|| LowerError::new(span, "MIR fragment function row was not emitted"))?;
     let mir = jet_foundation::MIR::optimize_mir_program(

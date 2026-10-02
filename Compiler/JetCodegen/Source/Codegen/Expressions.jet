@@ -1161,7 +1161,7 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, expression: T
                 }
                 else -> {}
             }
-            resolved := jet_codegen_resolve_field_by_symbol(builder.modules, reference)
+            resolved := jet_codegen_resolve_field_by_symbol(builder.field_symbols, reference)
             return Val(jet_codegen_project_field_place(&builder, base, expression.span, reference.ty, jet_codegen_mir_field_id(resolved)))
         }
         .Index(base, index, kind, _, _, location) -> return Val(jet_codegen_index_place(&builder, base, index, kind, expression.ty, access, location, expression.span))
@@ -1305,7 +1305,7 @@ fn jet_codegen_is_stored_field_chain(modules: [SemaGraphModuleResult], expressio
 fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, reference: TFieldRef) -> MIRValueID {
     folded :: jet_codegen_fold_prepared_field(&builder, expression, reference)
     if folded == .Val(value) -> return value
-    resolved := jet_codegen_resolve_field_by_symbol(builder.modules, reference)
+    resolved := jet_codegen_resolve_field_by_symbol(builder.field_symbols, reference)
     field_id := jet_codegen_mir_field_id(resolved)
     // Reading one stored field only needs that field: project the field place
     // and read it, instead of copying the whole receiver first (#3735).
@@ -1424,7 +1424,7 @@ fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, expression: TEx
     lowered_fields := [MIRFieldValue]{}
     boxed_fields := [MIRFieldID]{}
     loop field in fields {
-        resolved := jet_codegen_resolve_field_by_symbol(builder.modules, field.field)
+        resolved := jet_codegen_resolve_field_by_symbol(builder.field_symbols, field.field)
         field_id := jet_codegen_mir_field_id(resolved)
         value := jet_codegen_lower_expr(&builder, field.value)
         &lowered_fields.push(MIRFieldValue{field: field_id, value: value})
@@ -1579,45 +1579,58 @@ fn jet_codegen_lower_compare_chain(builder: &JetCodegenBuilder, expression: TExp
     }
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
+// A value `if` whose else value is itself a value `if` (the shape sema gives
+// every N-arm value decision table and value match) lowers the next level by
+// direct recursion: one frame per arm, like `jet_codegen_lower_if`. The chain
+// is read in place through read parameters, so no level is copied. Each level
+// emits its condition, branch, then arm, else arm and the phi of the arm
+// values that reach its join, in the order nested `lower_expr` calls would.
 fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, expression: TExpr, condition: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr) -> MIRValueID {
     outer_depth := builder.scope_depth
     jet_codegen_enter_lexical(&builder)
     condition_value := jet_codegen_lower_condition(&builder, condition)
-    then_block := jet_codegen_new_block(&builder, expression.span, "if-expression-then")
-    else_block := jet_codegen_new_block(&builder, expression.span, "if-expression-else")
-    join_block := jet_codegen_new_block(&builder, expression.span, "if-expression-join")
+    then_block := jet_codegen_new_block(&builder, expression.span, "if-then")
+    else_block := jet_codegen_new_block(&builder, expression.span, "if-else")
+    join_block := jet_codegen_new_block(&builder, expression.span, "if-join")
     jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: condition_value, then_target: then_block, else_target: else_block})
     incoming := [MIRPhiIncoming]{}
     jet_codegen_switch_block(&builder, then_block)
-    jet_codegen_lower_block(&builder, then_body)
-    if jet_codegen_current_is_open(builder) {
-        value := jet_codegen_lower_expr(&builder, then_value)
-        if jet_codegen_current_is_open(builder) {
-            predecessor := builder.current
-            jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join_block})
-            &incoming.push(MIRPhiIncoming{block: predecessor, value: value})
-        }
+    jet_codegen_enter_lexical(&builder)
+    jet_codegen_lower_statements(&builder, then_body)
+    then_result := MIRValueID?{None}
+    if jet_codegen_current_is_open(builder) -> then_result = Val(jet_codegen_lower_expr(&builder, then_value))
+    jet_codegen_leave_lexical(&builder)
+    if then_result == .Val(value) && jet_codegen_current_is_open(builder) {
+        &incoming.push(MIRPhiIncoming{block: builder.current, value: value})
+        jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join_block})
     }
     builder.scope_depth = outer_depth
     jet_codegen_switch_block(&builder, else_block)
-    jet_codegen_lower_block(&builder, else_body)
+    jet_codegen_enter_lexical(&builder)
+    jet_codegen_lower_statements(&builder, else_body)
+    else_result := MIRValueID?{None}
     if jet_codegen_current_is_open(builder) {
-        value := jet_codegen_lower_expr(&builder, else_value)
-        if jet_codegen_current_is_open(builder) {
-            predecessor := builder.current
-            jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join_block})
-            &incoming.push(MIRPhiIncoming{block: predecessor, value: value})
+        if else_value.kind == .IfExpr(next_condition, next_then_body, next_then_value, next_else_body, next_else_value) {
+            else_result = Val(jet_codegen_lower_if_expression(&builder, else_value, next_condition, next_then_body, next_then_value, next_else_body, next_else_value))
+        } else {
+            else_result = Val(jet_codegen_lower_expr(&builder, else_value))
         }
     }
-    builder.scope_depth = outer_depth + 1
     jet_codegen_leave_lexical(&builder)
+    if else_result == .Val(value) && jet_codegen_current_is_open(builder) {
+        &incoming.push(MIRPhiIncoming{block: builder.current, value: value})
+        jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join_block})
+    }
+    builder.scope_depth = outer_depth + 1
+    jet_codegen_switch_block(&builder, join_block)
     if incoming.len() == 0 {
-        jet_codegen_switch_block(&builder, join_block)
         jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "every conditional arm diverges"})
+        jet_codegen_leave_lexical(&builder)
         return jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "Unit"}, MIROperation.Constant{value: MIRConstant.Unit})
     }
-    jet_codegen_switch_block(&builder, join_block)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
+    result := jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
+    jet_codegen_leave_lexical(&builder)
+    result
 }
 
 fn jet_codegen_signature_call_args(builder: &JetCodegenBuilder, args: [TCallArg], signature: Type) -> [MIRCallArg] {
@@ -3835,8 +3848,29 @@ fn jet_codegen_lower_index_value(builder: &JetCodegenBuilder, expression: TExpr,
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Index{call: call, base: base_value, index: index_value, kind: mir_kind, access: mir_access, location: panic_location, context: context})
 }
 
+// D-MEM-COPYSEM1: the list slice kernel borrows its base, so a place base
+// (under at most a compiler-inserted clone) is read in place rather than
+// copied whole before slicing (Rust `TExprKind::Slice` lowering).
+fn jet_codegen_lower_slice_base(builder: &JetCodegenBuilder, base: TExpr) -> MIRValueID {
+    if base.kind == .Clone(inner) {
+        read :: jet_codegen_lower_list_place_read(&builder, inner)
+        if read == .Val(value) -> return value
+        return jet_codegen_lower_expr(&builder, base)
+    }
+    jet_codegen_lower_list_place_read(&builder, base) ?? jet_codegen_lower_expr(&builder, base)
+}
+
+fn jet_codegen_lower_list_place_read(builder: &JetCodegenBuilder, base: TExpr) -> MIRValueID? {
+    if jet_codegen_builtin_untag(base.ty) == {
+        .List(_) -> {}
+        else -> return None
+    }
+    place :: jet_codegen_lower_expression_place(&builder, base, MIRAccess.Read) ?? return None
+    Val(jet_codegen_emit_value(&builder, base.span, base.ty, MIROperation.ReadPlace{place: place}))
+}
+
 fn jet_codegen_lower_slice(builder: &JetCodegenBuilder, expression: TExpr, base: TExpr, start: TExpr, end: TExpr, range: TExpr?, checked_location: TPanicLoc) -> MIRValueID {
-    base_value := jet_codegen_lower_expr(&builder, base)
+    base_value := jet_codegen_lower_slice_base(&builder, base)
     start_value := jet_codegen_lower_expr(&builder, start)
     end_value := jet_codegen_lower_expr(&builder, end)
     range_value := if range == {
@@ -4812,6 +4846,11 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> MIR
         .HandleMethod(receiver, operation, args) -> jet_codegen_lower_handle_method(&builder, expression, receiver, operation, args)
         .ClosureMethod(receiver, operation, args) -> jet_codegen_lower_closure_method(&builder, expression, receiver, operation, args)
         .HostCall(call) -> jet_codegen_lower_host_call(&builder, expression, call)
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, expression, condition, then_body, then_value, else_body, else_value)
+        .StaticCall(owner, owner_type, method, type_args, args) -> jet_codegen_lower_static_call(&builder, expression, owner, owner_type, method, type_args, args)
+        .ModuleCall(target, form, target_return, type_args, args) -> jet_codegen_lower_module_call(&builder, expression, target, form, target_return, type_args, args)
+        .DefaultLit | .ListLit(_) | .ColumnarListLit(_, _) | .TupleLit(_, _) | .IndexRead(_, _, _, _, _) | .SliceOwned(_, _, _, _, _) | .MapLit(_) | .LayoutLit(_) -> jet_codegen_lower_collection_expression(&builder, expression)
+        .SharedGuardValue(_, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .AllocNew(_, _) | .Print(_) -> jet_codegen_lower_guard_expression(&builder, expression)
         else -> panic("checked TIR expression lies outside the current Jet codegen contract")
     }
 }
@@ -5021,6 +5060,8 @@ fn jet_codegen_write_pattern_binding(builder: &JetCodegenBuilder, fact: TPattern
 // generated local a hoisted switch aliases to one, is a write window: the
 // variant tests read the place, and every payload binding aliases it through
 // `MIRProjection.Payload`, so edits reach the owner's storage, never a copy.
+// D-MEM-COPYSEM1: a subject naming a read parameter's place is a read window
+// the same way, so testing it never copies the whole subject.
 fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, subject: TExpr) -> MIRValueID {
     window := MIRPlaceID?{None}
     if subject.kind == {
@@ -5032,10 +5073,87 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, subject: TExpr
         }
         else -> {}
     }
+    if window == None {
+        read :: jet_codegen_lower_read_window(&builder, subject)
+        if read == .Val(value) -> return value
+    }
     place :: window ?? return jet_codegen_lower_expr(&builder, subject)
     value := jet_codegen_emit_value(&builder, subject.span, subject.ty, MIROperation.ReadPlace{place: place})
     &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
     value
+}
+
+// D-MEM-COPYSEM1: read `subject` as a read window when it names a read
+// parameter's place; None leaves the subject to the ordinary value path.
+// A Core subject with a native Rust carrier keeps the value path: the
+// carrier can hold a payload in a host representation (DataTree.Int is i64)
+// that only the checked payload readers widen, so an aliased payload place
+// would read the wrong type.
+fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, subject: TExpr) -> MIRValueID? {
+    if subject.ty == .Named(name) && jet_rust_emit_core_rust_type_name(name) != None -> return None
+    place :: jet_codegen_read_window_place(&builder, subject) ?? return None
+    value := jet_codegen_emit_value(&builder, subject.span, subject.ty, MIROperation.ReadPlace{place: place})
+    _ := &builder.read_windows.add(place.value, true)
+    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    Val(value)
+}
+
+// The read-window place `value` was lowered from, if any.
+fn jet_codegen_read_window_of(builder: JetCodegenBuilder, value: MIRValueID) -> MIRPlaceID? {
+    place :: jet_codegen_pattern_window(builder, value) ?? return None
+    if builder.read_windows.get(place.value) == None -> return None
+    Val(place)
+}
+
+// D-MEM-COPYSEM1: the place `expression` names when it is a plain local or
+// stored-field path (under at most a compiler-inserted clone or a read
+// window borrow) over a read parameter. A user `~` copy is never elided.
+fn jet_codegen_read_window_place(builder: &JetCodegenBuilder, expression: TExpr) -> MIRPlaceID? {
+    if expression.kind == {
+        .Clone(inner) -> return jet_codegen_read_window_place(&builder, inner)
+        .Borrow(inner, access) -> {
+            if access == AccessConvention.Read -> return jet_codegen_read_window_place(&builder, inner)
+        }
+        else -> {}
+    }
+    if !jet_codegen_is_stored_field_chain(builder.modules, expression) -> return None
+    if expression.kind == .Local(local) && local.persist_key != None -> return None
+    place :: jet_codegen_lower_expression_place(&builder, expression, MIRAccess.Read) ?? return None
+    if !jet_codegen_read_parameter_place(builder, place) -> return None
+    Val(place)
+}
+
+// D-MEM-COPYSEM1: true when `place` is rooted at a read parameter through
+// field, payload, and list-index projections only. A read parameter cannot
+// change while the function runs, so reading such a place in place is
+// indistinguishable from reading a copy of it.
+fn jet_codegen_read_parameter_place(builder: JetCodegenBuilder, place: MIRPlaceID) -> Bool Never! {
+    row :: jet_codegen_find_place(builder, place) ?? return false
+    rooted := MIRValueID?{None}
+    if row.base == .Parameter(value) -> rooted = Val(value)
+    parameter :: rooted ?? return false
+    loop projection in row.projections {
+        if projection == {
+            .Field(_, _) -> {}
+            .Payload(_, _) -> {}
+            .Index(kind, _, _, _, _, _, _) -> {
+                if kind != MIRIndexKind.List -> return false
+            }
+            else -> return false
+        }
+    }
+    loop block in builder.blocks {
+        loop instruction in block.instructions {
+            if instruction.result != (Val(parameter)) -> next
+            if instruction.operation == .Parameter(index, _) {
+                loop param in builder.params {
+                    if param.index == index -> return param.access == MIRAccess.Read
+                }
+            }
+            return false
+        }
+    }
+    false
 }
 
 fn jet_codegen_pattern_window(builder: JetCodegenBuilder, value: MIRValueID) -> MIRPlaceID? {
@@ -5045,7 +5163,8 @@ fn jet_codegen_pattern_window(builder: JetCodegenBuilder, value: MIRValueID) -> 
     None
 }
 
-// `base` extended by one projection, typed `ty`, as a write place.
+// `base` extended by one projection, typed `ty`: a write place under a write
+// window, a read place under a read window.
 fn jet_codegen_project_window_place(builder: &JetCodegenBuilder, base: MIRPlaceID, projection: MIRProjection, ty: Type, span: Span) -> MIRPlaceID Never! {
     root :: jet_codegen_find_place(builder, base) ?? panic("checked pattern window has no MIR base place")
     projections := [MIRProjection]{}
@@ -5054,7 +5173,12 @@ fn jet_codegen_project_window_place(builder: &JetCodegenBuilder, base: MIRPlaceI
     identity := jet_codegen_identity(&builder, "place", span, "pattern-window", "{base.value}|{projections.len()}")
     id := MIRPlaceID{value: stable_id("mir-place", identity)}
     lowered_ty :: jet_codegen_lower_type_for_function(ty, builder)
-    &builder.places.push(MIRPlace{id: id, span: span, ty: lowered_ty, base: root.base, projections: projections, access: MIRAccess.Write, persist_key: None})
+    read :: builder.read_windows.get(base.value) != None
+    access :: if read -> MIRAccess.Read else -> MIRAccess.Write
+    &builder.places.push(MIRPlace{id: id, span: span, ty: lowered_ty, base: root.base, projections: projections, access: access, persist_key: None})
+    if read {
+        _ := &builder.read_windows.add(id.value, true)
+    }
     id
 }
 
@@ -5062,14 +5186,15 @@ fn jet_codegen_payload_window_place(builder: &JetCodegenBuilder, base: MIRPlaceI
     jet_codegen_project_window_place(&builder, base, MIRProjection.Payload{kind: kind, span: span}, ty, span)
 }
 
-// Bind a payload name under a write window as an alias of `place`: reads and
-// edits go through the owner, nothing is copied.
+// Bind a payload name under a window as an alias of `place`: reads (and,
+// under a write window, edits) go through the owner, nothing is copied.
 fn jet_codegen_bind_window_binding(builder: &JetCodegenBuilder, fact: TPatternBindingFact, place: MIRPlaceID) Never! {
     if fact.name == "" || fact.name == "_" -> return
+    mutable :: builder.read_windows.get(place.value) == None
     local := tir_user_local(fact.name, fact.span)
-    local.mutable = true
+    local.mutable = mutable
     local.symbol_id = fact.symbol_id
-    _ := jet_codegen_bind_local_alias(&builder, local, fact.ty, place, true)
+    _ := jet_codegen_bind_local_alias(&builder, local, fact.ty, place, mutable)
 }
 
 fn jet_codegen_pattern_match_route(builder: &JetCodegenBuilder, binary: Bool) -> MIRPreludeCallID Never! {
@@ -5248,7 +5373,10 @@ fn jet_codegen_pattern_group_leaves(builder: JetCodegenBuilder, owner: SymbolID,
 fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, pattern: TPattern, subject: TExpr, subject_value: MIRValueID, shape: TPatternShape, matched: MIRValueID?, reuse: Bool) {
     // D-OPT-WRITE1 (#3974): under a `&place` subject each binding aliases
     // its payload slot of the place instead of receiving a copy.
-    window :: jet_codegen_pattern_window(builder, subject_value)
+    window := jet_codegen_pattern_window(builder, subject_value)
+    // A mutable binding owns its copy; only an immutable one may alias a read
+    // window.
+    if pattern.mutable && jet_codegen_read_window_of(builder, subject_value) != None -> window = None
     if shape == {
         .Variant(variant, bindings, _, span) -> {
             subject_type := jet_codegen_unwrap_pattern_tags(subject.ty)
@@ -5404,8 +5532,10 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, pattern: TPattern, 
     // or-pattern under a `&place` subject binds read-only copies (sema
     // declares them so): test an unregistered copy of the subject.
     tested := subject_value
-    if jet_codegen_pattern_window(builder, subject_value) != None {
-        tested = jet_codegen_emit_value(&builder, span, subject.ty, MIROperation.Copy{value: subject_value, materialize_view: false})
+    if jet_codegen_pattern_window(builder, subject_value) == .Val(place) {
+        // A read window's place cannot change: an unregistered second read
+        // of it binds payload copies without copying the whole subject.
+        tested = if jet_codegen_read_window_of(builder, subject_value) != None -> jet_codegen_emit_value(&builder, span, subject.ty, MIROperation.ReadPlace{place: place}) else -> jet_codegen_emit_value(&builder, span, subject.ty, MIROperation.Copy{value: subject_value, materialize_view: false})
     }
     index := 0
     loop index < alternatives.len() {

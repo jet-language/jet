@@ -134,7 +134,6 @@ fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Neve
         "true" -> K_TRUE
         "false" -> K_FALSE
         "self" -> K_SELF
-        "null" -> K_NULL
         "break" -> K_BREAK
         "return" -> K_RETURN
         "fn" -> K_FN
@@ -262,6 +261,14 @@ fn scan_plain_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never!
         value :: byte_at(source, i)
         if value == 10 -> return -(i + 1)
         if value == 34 -> return i + 1
+        if (value == 123 || value == 125) && byte_at(source, i + 1) == value {
+            i += 2
+            next
+        }
+        if value == 123 {
+            i = scan_plain_interpolation_end(source, i)
+            next
+        }
         if {
             value == 92 -> {
                 if {
@@ -279,6 +286,48 @@ fn scan_plain_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never!
         }
     }
     -(source.len() + 1)
+}
+
+// The index after one `{…}` inside a plain string, as Rust's string lexer
+// reads it: an interpolation skips nested quoted text, raw backtick fences and
+// nested braces; a `\$` `{…}` template payload only balances braces. An
+// interpolation left open at the line end returns that line end, so the
+// string scan reports it unclosed there.
+fn scan_plain_interpolation_end(source: [U8], open: Int) -> Int Never! {
+    j := open + 1
+    depth := 1
+    template :: byte_at(source, open - 1) == 36 && byte_at(source, open - 2) == 92
+    in_quote := false
+    loop j < source.len() {
+        value :: byte_at(source, j)
+        if {
+            template -> {
+                if value == 123 -> depth += 1
+                if value == 125 -> depth -= 1
+                if depth == 0 -> return j + 1
+            }
+            in_quote -> {
+                if value == 92 -> j += 1
+                if value == 34 -> in_quote = false
+            }
+            value == 34 -> in_quote = true
+            value == 96 -> {
+                fence_end :: scan_raw_fence_end(source, j)
+                if fence_end < 0 -> return source.len()
+                j = fence_end
+                next
+            }
+            value == 123 -> depth += 1
+            value == 125 -> {
+                depth -= 1
+                if depth == 0 -> return j + 1
+            }
+            value == 10 -> return j
+            else -> {}
+        }
+        j += 1
+    }
+    source.len()
 }
 
 fn scan_raw_fence_end(source: [U8], start: Int) -> Int Never! {

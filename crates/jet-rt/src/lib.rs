@@ -97,10 +97,26 @@ mod map_key_semantics {
 }
 pub use map_key_semantics::{jet_map_key_cmp, JetMapKey};
 
-fn canonical_int_map_key(key: i64) -> i64 {
-    unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(key) }
-        .to_i64()
-        .unwrap_or(key)
+/// The value-semantic map key for one exact `Int` word: equal values give
+/// equal keys whether the word is inline or a spilled node, and keys order by
+/// value.
+fn exact_int_map_key(raw: i64) -> JetMapKey {
+    let value = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(raw) };
+    if value.is_inline() {
+        return JetMapKey::Int(raw);
+    }
+    let big = value.to_big();
+    if let Some(small) = big.try_i64() {
+        return JetMapKey::Int(small);
+    }
+    let mut limbs = big.limbs;
+    while limbs.last() == Some(&0) {
+        limbs.pop();
+    }
+    JetMapKey::BigInt {
+        negative: big.negative,
+        limbs,
+    }
 }
 
 #[allow(dead_code)]
@@ -244,24 +260,6 @@ impl JetArena {
         }
     }
 
-    fn retain_map_key(
-        roots: &mut Vec<jet_foundation::Numeric::JetInt>,
-        key: &JetMapKey,
-    ) {
-        match key {
-            JetMapKey::Int(raw) => Self::retain_exact_raw(roots, *raw),
-            JetMapKey::Record(fields) => {
-                for field in fields {
-                    Self::retain_map_key(roots, field);
-                }
-            }
-            JetMapKey::UInt(_)
-            | JetMapKey::String(_)
-            | JetMapKey::Bool(_)
-            | JetMapKey::Char(_) => {}
-        }
-    }
-
     fn retain_value_roots(
         roots: &mut Vec<jet_foundation::Numeric::JetInt>,
         value: &JetVal,
@@ -289,8 +287,7 @@ impl JetArena {
                 Self::retain_exact_raw(roots, *end);
             }
             JetVal::Map(entries) => {
-                for (key, (key_id, value)) in entries {
-                    Self::retain_map_key(roots, key);
+                for (key_id, value) in entries.values() {
                     Self::retain_exact_raw(roots, *key_id);
                     Self::retain_exact_raw(roots, *value);
                 }
@@ -591,7 +588,7 @@ impl JetArena {
             Some(JetVal::Map(entries)) => {
                 Self::retain_exact_raw(&mut self.exact_roots, key);
                 Self::retain_exact_raw(&mut self.exact_roots, value);
-                entries.insert(JetMapKey::Int(canonical_int_map_key(key)), (key, value));
+                entries.insert(exact_int_map_key(key), (key, value));
                 Some(())
             }
             _ => None,
@@ -601,7 +598,7 @@ impl JetArena {
     pub fn map_get_int(&self, map: i64, key: i64) -> Option<i64> {
         match self.values.get(map as usize) {
             Some(JetVal::Map(entries)) => entries
-                .get(&JetMapKey::Int(canonical_int_map_key(key)))
+                .get(&exact_int_map_key(key))
                 .map(|(_, value)| *value),
             _ => None,
         }
@@ -610,7 +607,7 @@ impl JetArena {
     pub fn map_remove_int(&mut self, map: i64, key: i64) -> Option<i64> {
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => entries
-                .remove(&JetMapKey::Int(canonical_int_map_key(key)))
+                .remove(&exact_int_map_key(key))
                 .map(|(_, value)| value),
             _ => None,
         }
@@ -633,7 +630,7 @@ impl JetArena {
 
     fn composite_key_field(&self, field: &JetVal) -> Option<JetMapKey> {
         let fields = match field {
-            JetVal::Int(value) => return Some(JetMapKey::Int(*value)),
+            JetVal::Int(value) => return Some(exact_int_map_key(*value)),
             JetVal::String(value) => return Some(JetMapKey::String(value.clone())),
             JetVal::Bool(value) => return Some(JetMapKey::Bool(*value)),
             JetVal::Char(value) => return Some(JetMapKey::Char(*value)),
@@ -655,7 +652,6 @@ impl JetArena {
         let key = self.composite_key(key_id)?;
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
-                Self::retain_map_key(&mut self.exact_roots, &key);
                 Self::retain_exact_raw(&mut self.exact_roots, value);
                 entries.insert(key, (key_id, value));
                 Some(())

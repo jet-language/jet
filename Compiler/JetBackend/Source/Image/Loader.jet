@@ -1,0 +1,111 @@
+// In-process loader for in-memory x86-64 images (Image/Memory.jet), written
+// on the Jet OS layer (OS/Linux.jet). It does what cranelift-jit's
+// `finalize_definitions` does: map the block read+write, copy it in, bind
+// every runtime import slot to the runtime export of that name, flip the
+// block to read+execute (no page is ever writable and executable at once),
+// and run the entry through the runtime's `jet_rt_main`.
+//
+// Hot swap rebinds one 8-byte slot (`x64_rebind_slot`): an import slot today,
+// a per-function entry slot once the image routes module calls through them
+// (design doc, "Tiered recompilation").
+
+// The runtime whose C-ABI exports bind an image's imports: the compiled
+// runtime's shared library, opened through the dynamic linker.
+pub struct X64Runtime {
+    pub library: Int
+    pub errors: [String]
+}
+
+// A loaded image: `base` is the mapping, `entry` the absolute entry address,
+// and `slots[i]` the absolute address of the slot bound to `imports[i]`.
+pub struct X64LoadedImage {
+    pub base: Int
+    pub size: Int
+    pub entry: Int
+    pub imports: [String]
+    pub slots: [Int]
+    pub errors: [String]
+}
+
+fn x64_loaded_failure(errors: [String]) -> X64LoadedImage Never! {
+    X64LoadedImage{base: 0, size: 0, entry: 0, imports: [String]{}, slots: [Int]{}, errors: errors}
+}
+
+// Open the compiled runtime's shared library at `path`.
+pub fn x64_runtime_open(path: String) -> X64Runtime {
+    library :: os_library_open(path)
+    if library == 0 -> return X64Runtime{library: 0, errors: [String]{"cannot load the runtime library {path}"}}
+    X64Runtime{library: library, errors: [String]{}}
+}
+
+// Map, copy and bind `image`, then make it read+execute.
+pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedImage {
+    if image.errors.len() > 0 -> return x64_loaded_failure(image.errors)
+    if runtime.errors.len() > 0 -> return x64_loaded_failure(runtime.errors)
+    size :: image.text.len()
+    if size == 0 -> return x64_loaded_failure([String]{"the image is empty"})
+    if image.entry < 0 || image.entry >= size -> return x64_loaded_failure([String]{"entry offset {image.entry} is outside the image"})
+    if image.slots.len() != image.imports.len() -> return x64_loaded_failure([String]{"the image has {image.imports.len()} imports but {image.slots.len()} slots"})
+    addresses := [Int]{}
+    loop (index, symbol) in image.imports {
+        at :: image.slots[index]
+        if at < 0 || at + 8 > size || at % 8 != 0 -> return x64_loaded_failure([String]{"slot {at} of {symbol} is not an aligned word inside the image"})
+        address :: os_library_symbol(runtime.library, symbol)
+        if address == 0 -> return x64_loaded_failure([String]{"unresolved runtime symbol {symbol}"})
+        &addresses.push(address)
+    }
+
+    base :: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(base) -> return x64_loaded_failure([String]{"mmap of {size} bytes failed (errno {-base})"})
+    os_copy_in(base, image.text)
+    slots := [Int]{}
+    loop (index, at) in image.slots {
+        #Unsafe("the slot is an aligned word inside the writable mapping, checked above") {
+            os_store_word(base + at, addresses[index])
+        }
+        &slots.push(base + at)
+    }
+    protected :: os_protect(base, size, OS_PROT_READ + OS_PROT_EXEC)
+    if os_failed(protected) {
+        _ := os_unmap(base, size)
+        return x64_loaded_failure([String]{"mprotect to read+execute failed (errno {-protected})"})
+    }
+    X64LoadedImage{base: base, size: os_page_round(size), entry: base + image.entry, imports: image.imports, slots: slots, errors: [String]{}}
+}
+
+// Run the loaded entry through `jet_rt_main`, which sets up the runtime,
+// calls the entry and returns the exit status. A runtime stop ends the
+// process from inside the runtime instead.
+pub fn x64_run_image(loaded: X64LoadedImage, runtime: X64Runtime) -> Int {
+    main :: os_library_symbol(runtime.library, "jet_rt_main")
+    if main == 0 -> return -1
+    status := 0
+    #Unsafe("`main` is the runtime's `int32_t jet_rt_main(void (*)(void))` and `entry` is the image's checked no-argument entry") {
+        status = os_call_address(main, loaded.entry)
+    }
+    // jet_rt_main returns an int32_t in eax; the upper half of rax is undefined.
+    status = status % 4294967296
+    if status < 0 -> status = status + 4294967296
+    if status >= 2147483648 -> status = status - 4294967296
+    status
+}
+
+// Bind the slot at absolute address `slot` to `address`: make its page
+// writable (not executable), store the word, and make it read+execute again.
+// The page never executes while it is writable, so a thread running code on
+// it would fault; the per-function slot table of the tier design lives on its
+// own pages for that reason.
+pub fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool {
+    if slot < loaded.base || slot + 8 > loaded.base + loaded.size || slot % 8 != 0 -> return false
+    page :: slot - (slot - loaded.base) % OS_PAGE_SIZE
+    if os_failed(os_protect(page, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)) -> return false
+    #Unsafe("the slot is an aligned word inside the mapping, now writable") {
+        os_store_word(slot, address)
+    }
+    !os_failed(os_protect(page, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_EXEC))
+}
+
+// Release the mapping. No frame may still return into it.
+pub fn x64_unload_image(loaded: X64LoadedImage) -> Bool {
+    !os_failed(os_unmap(loaded.base, loaded.size))
+}

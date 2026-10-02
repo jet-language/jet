@@ -2577,19 +2577,6 @@ fn callable_symbol(
     symbols: &BootstrapCodecSymbols<'_>,
     source_name: &str,
 ) -> Result<String, BootstrapHostCodecError> {
-    let mut rows = symbols
-        .metadata
-        .callables
-        .iter()
-        .filter(|row| row.source_name == source_name);
-    let row = rows
-        .next()
-        .ok_or_else(|| BootstrapHostCodecError::MissingEntry(source_name.to_string()))?;
-    if rows.next().is_some() {
-        return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-            "Source helper `{source_name}` has an ambiguous emitted symbol"
-        )));
-    }
-    Ok(row.metadata.symbol.clone())
+    symbols.callable_symbol(source_name).map(str::to_string)
 }
 
