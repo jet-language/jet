@@ -4,7 +4,9 @@ use jet_foundation.[
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
+    Expr,
     ImportDecl,
+    Marker,
     ParseResult,
     Program,
     Span,
@@ -13,6 +15,7 @@ use jet_foundation.[
     ast_program,
     diagnostic_from_registry,
     diagnostic_with_edit_grade,
+    expr_span,
 ]
 use jet_lexer.[
     Lexed,
@@ -273,22 +276,71 @@ fn parser_report_foreign_top_word(state: &JetParserState) {
     if parser_current_kind(&state) != TOKEN_KW_EXTERN -> parser_sync_top(&state)
 }
 
+// File rules (D-VISDEFAULT2, D-PRELUDEX1, D-WEBDEFAULT1, D-HTMLPAIR1): bare
+// `#PubFile`/`#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]`
+// list of them. The retired `#PublicFile`/`#Html` spellings are read to teach.
 fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
+    if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_file_marker_group_ahead(&state)
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
-    if name.payload.decoded == "PubFile" || name.payload.decoded == "PublicFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "Html" -> return true
-    name.payload.decoded == "Target" && (parser_target_selects_file_web(&state) || !parser_hash_leads_to_item(&state))
+    if name.payload.decoded == "PubFile" || name.payload.decoded == "PublicFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "HTML" || name.payload.decoded == "Html" -> return true
+    name.payload.decoded == "Target" && (parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state))
+}
+
+fn parser_is_file_rule(name: String) -> Bool Never! {
+    name == "PubFile" || name == "NoPrelude" || name == "Target" || name == "HTML" || name == "Html"
+}
+
+// Rust `marker_list_is_file_rules`: a `#[…]` list whose every entry is a file
+// rule configures the file, unless it heads a type, or every entry is a
+// partition `#Target` that the function below can take (`#[Target(JS)] fn`).
+fn parser_file_marker_group_ahead(state: &JetParserState) -> Bool Never! {
+    offset := 2
+    every_entry_fits_function := true
+    loop {
+        if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
+        name :: parser_lookahead(&state, offset)
+        if name.kind != TOKEN_IDENT || !parser_is_file_rule(name.payload.decoded) -> return false
+        if name.payload.decoded != "Target" || parser_target_selects_file_web_at(&state, offset) -> every_entry_fits_function = false
+        offset += 1
+        if parser_kind_at(&state, offset) == TOKEN_LPAREN {
+            depth := 0
+            loop {
+                kind :: parser_kind_at(&state, offset)
+                if kind == TOKEN_EOF -> return false
+                offset += 1
+                if kind == TOKEN_LPAREN -> depth += 1
+                if kind == TOKEN_RPAREN {
+                    depth -= 1
+                    if depth == 0 -> break
+                }
+            }
+        }
+        if parser_kind_at(&state, offset) == TOKEN_COMMA {
+            offset += 1
+            next
+        }
+        if parser_kind_at(&state, offset) != TOKEN_RBRACKET -> return false
+        offset += 1
+        break
+    }
+    loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
+    after :: parser_kind_at(&state, offset)
+    if after == TOKEN_KW_STRUCT || after == TOKEN_KW_ENUM -> return false
+    function_follows :: after == TOKEN_KW_FN || (after == TOKEN_KW_PUB && parser_kind_at(&state, offset + 1) == TOKEN_KW_FN) || parser_prep_verb_ahead(&state, offset, TOKEN_KW_FN) || after == TOKEN_HASH
+    !(every_entry_fits_function && function_follows)
 }
 
 // Rust `target_marker_selects_file_web_at`: `#Target(Web)` (or a path ending
 // in `Target.Web`) is the file default, never a marker on the next item.
-fn parser_target_selects_file_web(state: &JetParserState) -> Bool Never! {
-    if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
+// `name_offset` is the offset of the `Target` name.
+fn parser_target_selects_file_web_at(state: &JetParserState, name_offset: Int) -> Bool Never! {
+    if parser_kind_at(&state, name_offset + 1) != TOKEN_LPAREN -> return false
     previous := ""
     last := ""
     count := 0
-    offset := 3
+    offset := name_offset + 2
     loop {
         token :: parser_lookahead(&state, offset)
         if token.kind == TOKEN_RPAREN -> break
@@ -303,53 +355,154 @@ fn parser_target_selects_file_web(state: &JetParserState) -> Bool Never! {
     last == "Web" && (count == 1 || previous == "Target")
 }
 
+// One run of file rules, bare or in `#[…]` lists. Two distinct rules belong
+// in one list (E0999); each rule then sets its program field.
 fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
-    marker :: parser_parse_marker(&state)
+    markers := [Marker]{}
+    chunks := 0
+    bracket_chunks := 0
+    sequence := parser_current(&state).span
+    loop parser_file_directive_ahead(&state) && !parser_aborting(&state) {
+        if parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+            group :: parser_parse_marker_group_list(&state)
+            loop marker in group.markers -> &markers.push(marker)
+            sequence.end = group.span.end
+            bracket_chunks += 1
+        } else {
+            marker :: parser_parse_marker(&state)
+            &markers.push(marker)
+            sequence.end = marker.span.end
+            parser_skip_semicolons(&state)
+        }
+        chunks += 1
+    }
+    parser_report_adjacent_markers(&state, markers, chunks, bracket_chunks, sequence, "file")
+    single :: chunks == 1 && bracket_chunks == 0
+    loop marker in markers -> parser_apply_file_marker(&state, &program, marker, single)
+}
+
+fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
+    hash :: Span{start: marker.span.start, end: marker.span.start + 1}
+    repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
         "PubFile" | "PublicFile" -> {
-            hash :: Span{start: marker.span.start, end: marker.span.start + 1}
             if marker.name == "PublicFile" -> parser_add_error_code(&state, "E0418", hash, "write `#PubFile`, not `#PublicFile`", "`#PubFile` flips this file to public-by-default (D-VISDEFAULT2)", "write `#PubFile` at the top of the file")
             if program.pub_file {
-                parser_add_error_code(&state, "E0999", hash, "`#PubFile` is already applied to this file", "`#PubFile` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+                parser_report_repeated_file_marker(&state, "PubFile", repeat_span)
+                return
             }
             program.pub_file = true
             state.pub_file_default = true
         }
-        "NoPrelude" -> program.no_prelude = true
-        "Target" -> {
-            first :: parser_marker_first_expr(marker)
-            if first == {
-                .Val(value) -> {
-                    if value == {
-                        .Ident(name, _) -> {
-                            if name == {
-                                "JS" -> program.web_target_ceiling = Val(WebBucket.JS)
-                                "Wasm" -> program.web_target_ceiling = Val(WebBucket.Wasm)
-                                else -> parser_add_error(&state, marker.span, "unknown file target `{name}`", "`#Target` selects a supported compilation target", "write `#Target(JS)` or `#Target(Wasm)`")
-                            }
-                            program.default_target = Val(name)
-                        }
-                        else -> parser_add_error(&state, marker.span, "expected a target name in `#Target`", "target declarations select a compiler target", "write `#Target(JS)` or `#Target(Wasm)`")
-                    }
-                }
-                .None -> parser_add_error(&state, marker.span, "`#Target` requires a target name", "the target directive must choose a backend bucket", "write `#Target(JS)` or `#Target(Wasm)`")
+        "NoPrelude" -> {
+            if program.no_prelude {
+                parser_report_repeated_file_marker(&state, "NoPrelude", repeat_span)
+                return
             }
+            program.no_prelude = true
         }
-        "Html" -> {
-            first :: parser_marker_first_expr(marker)
-            if first == {
-                .Val(value) -> {
-                    path :: parser_expr_literal_string(value)
-                    if path == {
-                        .Val(text) -> program.html_path = Val(text)
-                        .None -> parser_add_error(&state, marker.span, "`#Html` requires a string path", "the companion page location is source text", "write `#Html(\"index.html\")`")
-                    }
-                }
-                .None -> parser_add_error(&state, marker.span, "`#Html` requires a string path", "the companion page location is source text", "write `#Html(\"index.html\")`")
+        "Target" -> parser_apply_file_target(&state, &program, marker, single)
+        "HTML" -> {
+            if program.html_path != None {
+                parser_add_error(&state, marker.span, "only one `#HTML(…)` marker is allowed per file", "a file may declare at most one companion host page", "remove the duplicate `#HTML(…)` marker")
+                return
             }
+            values :: parser_bind_marker_arguments(&state, marker, [String]{"page"}, 1) ?? return
+            page :: values[0] ?? return
+            program.html_path = parser_html_page_path(page)
         }
+        "Html" -> parser_add_error_code(&state, "E0927", marker.name_span, "`#Html` is retired", "the registry keeps this old spelling only to teach its replacement; it no longer applies a rule", "write `#HTML` instead")
         else -> {}
     }
+}
+
+fn parser_report_repeated_file_marker(state: &JetParserState, name: String, span: Span) {
+    parser_add_error_code(&state, "E0999", span, "`#{name}` is already applied to this file", "`#{name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+}
+
+// Rust `html_from_marker`: the companion page is `Path{"page.html"}` or a
+// plain literal string; any other value names no page.
+fn parser_html_page_path(page: Expr) -> String? {
+    if page == .TypedLit(head, body, _) && head == .Val(ty) && ty == .Named(type_name) && type_name == "Path" && body == .Value(inner) -> return parser_expr_literal_string(inner)
+    parser_expr_literal_string(page)
+}
+
+// D-WASM1=A / D-WEBDEFAULT1 / D-OSTARGET1=A (Rust `web_target_from_marker`):
+// `#Target(Web)` picks the file's default CLI backend, `#Target(Wasm|JS)`
+// caps its web partition, and `#Target(OS.…)` only gates an `impl`.
+fn parser_apply_file_target(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
+    values :: parser_bind_marker_arguments(&state, marker, [String]{"target"}, 1) ?? return
+    target :: values[0] ?? return
+    written :: parser_marker_ident_path(target) ?? {
+        parser_marker_shape_error(&state, marker)
+        return
+    }
+    // Rust `strip_marker_enum_prefix`: the path after the first `Target`
+    // segment, when one follows it.
+    segments :: written.split(".").to_list()
+    kept := [String]{}
+    stripped := false
+    loop (index, segment) in segments {
+        if !stripped && segment == "Target" && index + 1 < segments.len() {
+            stripped = true
+            kept = [String]{}
+            next
+        }
+        &kept.push(segment)
+    }
+    name :: kept.join(".")
+    here :: parser_current(&state).span
+    if kept.len() == 2 && kept[0] == "OS" {
+        os :: kept[1]
+        if os != "Linux" && os != "MacOS" && os != "Windows" {
+            parser_add_error(&state, expr_span(target), "`#Target(OS.{os})` is not a known native OS", "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`", "write `#Target(OS.Linux)`, `#Target(OS.MacOS)`, or `#Target(OS.Windows)`")
+            return
+        }
+        if single {
+            parser_add_error(&state, here, "`#Target(OS.{os})` isn't valid here", "`OS.Linux`/`OS.MacOS`/`OS.Windows` gates a whole `impl` block, not a module, function, or any other item", "write `#Target(OS.{os}) impl Type.Trait {{ … }}`")
+        } else {
+            parser_report_grouped_target_conflict(&state, marker)
+        }
+        return
+    }
+    if name == "Web" {
+        if single && parser_current_kind(&state) == TOKEN_KW_MODULE {
+            parser_add_error(&state, here, "`#Target(Web)` isn't valid on a module", "`Web` is a file-level default-backend marker, not a partition ceiling", "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(JS)` on a module")
+            return
+        }
+        if program.default_target != None {
+            if single {
+                parser_add_error(&state, here, "only one `#Target(Web)` marker is allowed per file", "a file may declare at most one default backend", "remove the duplicate `#Target(Web)` marker")
+            } else {
+                parser_report_grouped_target_conflict(&state, marker)
+            }
+            return
+        }
+        program.default_target = Val("web")
+        return
+    }
+    bucket :: if name == {
+        "Wasm" -> Val(WebBucket.Wasm)
+        "JS" -> Val(WebBucket.JS)
+        else -> WebBucket?{None}
+    }
+    if bucket == None {
+        parser_add_error(&state, expr_span(target), "`#Target({name})` is not a known web partition", "web targets are `Wasm` (compute), `JS` (DOM/view), `Web` (default CLI backend), or `OS.Linux`/`OS.MacOS`/`OS.Windows` (native platform gating)", "write `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, or `#Target(OS.{{Linux|MacOS|Windows}})`")
+        return
+    }
+    if program.web_target_ceiling != None {
+        if single {
+            parser_add_error(&state, here, "only one `#Target(…)` ceiling is allowed per file", "a file may declare at most one web partition ceiling", "remove the duplicate `#Target(Wasm)` or `#Target(JS)` marker")
+        } else {
+            parser_report_grouped_target_conflict(&state, marker)
+        }
+        return
+    }
+    program.web_target_ceiling = bucket
+}
+
+fn parser_report_grouped_target_conflict(state: &JetParserState, marker: Marker) {
+    parser_add_error(&state, marker.span, "this grouped `#Target` duplicates or cannot attach at file scope", "a file marker list may contain one file target and one companion `#HTML` marker", "remove the duplicate, or move an OS target directly onto its `impl`")
 }
 
 // D-VISDEFAULT2=A: `pub:` / `priv:` section labels would let one line flip

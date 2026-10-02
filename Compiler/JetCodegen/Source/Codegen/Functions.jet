@@ -249,12 +249,12 @@ fn jet_codegen_lower_declaration_field(field: TField, owner_key: String, modules
     }
 }
 
-fn jet_codegen_declaration_function_id(functions: [TFunc], key: String, module_identity: String) -> MIRFunctionID Never! {
+fn jet_codegen_declaration_function_id(functions: JetCodegenFunctionIndex, key: String, module_identity: String) -> MIRFunctionID Never! {
     function :: jet_codegen_find_function_by_key(functions, key, module_identity) ?? panic("checked declaration function reference is not reachable")
     return jet_codegen_function_id(function)
 }
 
-fn jet_codegen_type_method_ids(definition: TTypeDef, method_keys: [String], functions: [TFunc]) -> [MIRFunctionID] Never! {
+fn jet_codegen_type_method_ids(definition: TTypeDef, method_keys: [String], functions: JetCodegenFunctionIndex) -> [MIRFunctionID] Never! {
     lowered := [MIRFunctionID]{}
     loop key in method_keys {
         function := jet_codegen_find_function_by_key(functions, key, definition.module_identity)
@@ -360,7 +360,7 @@ fn jet_codegen_lower_cli_inputs(inputs: [TCLIInput], modules: [SemaGraphModuleRe
     return lowered
 }
 
-fn jet_codegen_lower_cli_entry(entry: TCLIEntry, functions: [TFunc], modules: [SemaGraphModuleResult], module_identity: String) -> MIRCLIEntry {
+fn jet_codegen_lower_cli_entry(entry: TCLIEntry, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], module_identity: String) -> MIRCLIEntry {
     commands := [MIRCLICommand]{}
     loop command in entry.commands {
         if command.function != None {
@@ -409,7 +409,7 @@ fn jet_codegen_lower_compiler_builtin(value: TCompilerBuiltin) -> MIRCompilerBui
     }
 }
 
-fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: [TFunc], modules: [SemaGraphModuleResult]) -> MIRTypeDef {
+fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult]) -> MIRTypeDef {
     generic_names := [String]{}
     loop param in definition.generic_params -> &generic_names.push(param.name)
     kind := if definition.kind == {
@@ -574,7 +574,7 @@ fn jet_codegen_lower_declaration_effects(declared: [TEffectSpan]?) -> MIREffectF
     return MIREffectFacts{direct: direct, solved: direct, call_edges: [String]{}, maximal: false, direct_spans: direct_spans}
 }
 
-fn jet_codegen_lower_trait_method(method: TTraitMethod, trait_key: String, module_identity: String, functions: [TFunc], modules: [SemaGraphModuleResult]) -> MIRTraitMethod Never! {
+fn jet_codegen_lower_trait_method(method: TTraitMethod, trait_key: String, module_identity: String, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult]) -> MIRTraitMethod Never! {
     params := [MIRParam]{}
     loop parameter in method.params -> &params.push(jet_codegen_lower_declaration_param(parameter, modules, module_identity))
     declared_return := if method.declared_return == {
@@ -608,7 +608,7 @@ fn jet_codegen_lower_trait_method(method: TTraitMethod, trait_key: String, modul
     }
 }
 
-fn jet_codegen_lower_trait_definition(definition: TTraitDef, functions: [TFunc], modules: [SemaGraphModuleResult]) -> MIRTraitDef Never! {
+fn jet_codegen_lower_trait_definition(definition: TTraitDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult]) -> MIRTraitDef Never! {
     associated_types := [MIRAssociatedTypeDecl]{}
     loop value in definition.associated_types -> &associated_types.push(MIRAssociatedTypeDecl{name: value.name, span: value.span})
     methods := [MIRTraitMethod]{}
@@ -663,7 +663,7 @@ fn jet_codegen_lower_target_os(target: TTargetOS?) -> MIROSTarget? {
     }
 }
 
-fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: [TFunc], modules: [SemaGraphModuleResult], types: [MIRTypeDef]) -> MIRImplDef? {
+fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], types: [MIRTypeDef]) -> MIRImplDef? {
     method_ids := [MIRFunctionID]{}
     loop key in definition.methods {
         function := jet_codegen_find_function_by_key(functions, key, definition.module_identity)
@@ -761,7 +761,7 @@ fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [Sem
 }
 
 fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, expression: TExpr, symbol: SymbolID) -> MIRValueID {
-    if jet_codegen_find_function(builder.functions, symbol.key) != None {
+    if jet_codegen_find_function(builder.function_index, symbol.key) != None {
         return jet_codegen_lower_named_function_value(&builder, expression, symbol.key, false)
     }
     loop semantic_module in builder.modules {
@@ -2003,7 +2003,7 @@ pub fn lower_comptime_item(request: SemaComptimeItemRequest, reachable_functions
         body: [TStmt]{},
         kind: TFuncKind.TopLevel,
     }
-    builder := jet_codegen_new_builder(function, reachable_functions, modules, jet_codegen_field_symbol_index(modules), source_files, jet_codegen_source_index(source_files))
+    builder := jet_codegen_new_builder(function, jet_codegen_function_index(reachable_functions), modules, jet_codegen_field_symbol_index(modules), source_files, jet_codegen_source_index(source_files))
     jet_codegen_lower_function(&builder, function, [TStmt]{}, Val(request.expression), None)
 }
 
@@ -2011,7 +2011,7 @@ pub fn lower_comptime_item(request: SemaComptimeItemRequest, reachable_functions
 // or `ties` list compares as all-equal. Bottom-up merge sort: O(n log n) on
 // the hash-ordered ids the canonical row sorts see, where insertion sort was
 // quadratic.
-fn jet_codegen_sorted_order(keys: [Int], ties: [String]) -> [Int] Never! {
+pub fn jet_codegen_sorted_order(keys: [Int], ties: [String]) -> [Int] Never! {
     count :: if keys.len() > ties.len() -> keys.len() else -> ties.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
@@ -2575,6 +2575,7 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     callbacks := [MIRCallbackAdapter]{}
     source_index :: jet_codegen_source_index(source_files)
     field_symbols :: jet_codegen_field_symbol_index(modules)
+    function_index :: jet_codegen_function_index(functions)
     // Identity sets so each merge step is O(1) rather than a rescan of every
     // row lowered so far: `"id"` and `"module:key"` per top-level and nested
     // function, and row positions of callbacks, routes and Core calls by id.
@@ -2590,7 +2591,7 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     // function copied the whole checked program each time).
     lowered_rows := [JetCodegenLoweredFunction]{}
     if functions.len() > 0 {
-        builder := jet_codegen_new_builder(functions[0], functions, modules, field_symbols, source_files, source_index)
+        builder := jet_codegen_new_builder(functions[0], function_index, modules, field_symbols, source_files, source_index)
         loop function in functions -> &lowered_rows.push(jet_codegen_lower_function(&builder, function, function.body, None, None))
     }
     loop lowered in lowered_rows {
@@ -2668,9 +2669,9 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
         loop definition in semantic_module.declarations.type_defs {
             // core.term stream handles lower to their native carrier, never a record row.
             if jet_codegen_is_core_term_stream_carrier(modules, definition.module_identity, definition.name) -> next
-            &types.push(jet_codegen_lower_type_definition(definition, functions, modules))
+            &types.push(jet_codegen_lower_type_definition(definition, function_index, modules))
         }
-        loop definition in semantic_module.declarations.traits -> &traits.push(jet_codegen_lower_trait_definition(definition, functions, modules))
+        loop definition in semantic_module.declarations.traits -> &traits.push(jet_codegen_lower_trait_definition(definition, function_index, modules))
     }
     jet_codegen_register_synthetic_unions(&types, all_function_rows)
     jet_codegen_sort_type_definitions(&types)
@@ -2682,7 +2683,7 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     impl_index_by_key := [String:Int]{}
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.impls {
-            lowered :: jet_codegen_lower_impl_definition(definition, functions, modules, types) ?? next
+            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, types) ?? next
             if impl_index_by_key.get(lowered.key) == .Val(index) {
                 loop method in lowered.methods {
                     if !impls[index].methods.contains(method) -> &impls[index].methods.push(method)

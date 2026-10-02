@@ -576,9 +576,27 @@ fn emit_struct_from_host_converter(
         ));
     }
 
+    // A native field Source MIR does not carry crosses to native MIR as one
+    // fixed value (`custom_struct_field_to_host`); any other native value would
+    // be dropped by the round trip, so it is refused instead.
+    let mut checks = String::new();
+    for host_field in &host_fields {
+        let source_name = source_field_name(&definition.name, &host_field.name);
+        if source_fields.iter().any(|field| field.name == source_name) {
+            continue;
+        }
+        if let Some(fixed) = custom_struct_field_to_host(symbols, &definition.name, &host_field.name)? {
+            writeln!(
+                checks,
+                "    if !matches!(&value.{0}, {fixed}) {{ return Err(\"native MIR field `{1}.{0}` holds a value Source MIR does not carry\".to_string()); }}",
+                host_field.name, definition.name
+            )
+            .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+        }
+    }
     writeln!(
         out,
-        "fn __jet_bootstrap_mir_{}_from_host(value: &{}) -> Result<{}, String> {{\n    Ok({} {{\n{}\n    }})\n}}\n",
+        "fn __jet_bootstrap_mir_{}_from_host(value: &{}) -> Result<{}, String> {{\n{checks}    Ok({} {{\n{}\n    }})\n}}\n",
         definition.name,
         host_path,
         source,
@@ -879,11 +897,18 @@ fn emit_struct_converter(
 
     // A struct with a crate-private native field cannot be spelled as a
     // literal (not even with a `..Default::default()` base): it starts from
-    // the native default and gets each public field assigned.
+    // the native default, gets each public field assigned and each private
+    // field set through its accessor (`HOST_PRIVATE_FIELDS`).
     let mut private_default = false;
+    let mut private_setters = String::new();
     for host_field in &host_fields {
-        if host_private_field(&definition.name, &host_field.name) {
-            used.insert(source_field_name(&definition.name, &host_field.name), host_field.name.clone());
+        if let Some((_, _, _, setter)) = host_private_row(&definition.name, &host_field.name) {
+            let source_name = source_field_name(&definition.name, &host_field.name);
+            let source_symbol = symbols.field_symbol(&definition.name, &source_name)?;
+            used.insert(source_name, host_field.name.clone());
+            private_setters.push_str(&format!(
+                "    __host.{setter}(value.{source_symbol}.as_ref().ok().map(|__value| __value.as_str()))?;\n"
+            ));
             private_default = true;
             continue;
         }
@@ -929,7 +954,7 @@ fn emit_struct_converter(
             .iter()
             .map(|(field, expression)| format!("    __host.{field} = {expression};\n"))
             .collect::<String>();
-        format!("    let mut __host: {host_path} = ::std::default::Default::default();\n{assignments}    Ok(__host)")
+        format!("    let mut __host: {host_path} = ::std::default::Default::default();\n{assignments}{private_setters}    Ok(__host)")
     } else {
         let fields = initializers
             .iter()
@@ -1813,27 +1838,46 @@ fn custom_struct_field_to_host(
 }
 
 /// The Source side of [`custom_struct_field_to_host`]'s memo split and of
-/// [`host_private_field`]'s unreadable native fields.
+/// [`HOST_PRIVATE_FIELDS`]' crate-private native fields.
 fn custom_struct_field_from_host(owner: &str, source_field: &str) -> Option<String> {
+    if let Some((_, _, getter, _)) = host_private_row(owner, source_field) {
+        return Some(format!(
+            "value.{getter}().ok_or(jet_foundation::Outcome::JetAbsent)"
+        ));
+    }
     match (owner, source_field) {
         ("MIRFunction", "memo_bound") => Some(
             "match &value.memo_bound { Some(Some(__bound)) => Ok(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&__bound.to_string())?)), _ => Err(jet_foundation::Outcome::JetAbsent) }".to_string(),
         ),
         ("MIRFunction", "memo_unbounded") => Some("matches!(value.memo_bound, Some(None))".to_string()),
-        ("MIROptimizationFacts", "derived_from_digest") => {
-            Some("Err(jet_foundation::Outcome::JetAbsent)".to_string())
-        }
         _ => None,
     }
 }
 
 /// Crate-private native fields glue outside `jet_foundation` can neither read
-/// nor write. `MirOptimizationFacts.derived_from_digest` marks rows derived
-/// for the native optimizer's own MIR digest, which a Source MIR digest never
-/// equals: native MIR starts unmarked (the native optimizer re-derives) and
-/// Source MIR gets the marker back absent.
+/// nor write directly, each crossing through a public accessor pair:
+/// `(owner, field, getter -> Option<String>, setter(Option<&str>) -> Result)`.
+/// The native image codec persists these fields, so a restored compiler image
+/// only survives the Source MIR round trip when they cross both ways.
+/// `MirOptimizationFacts.derived_from_digest` is the optimizer pipeline seal;
+/// Source MIR carries it as the lowercase hex `mir_program_digest` spells.
+/// Carrying it (rather than re-digesting the program) keeps image restore
+/// linear in the program and free of whole-program digests.
+const HOST_PRIVATE_FIELDS: &[(&str, &str, &str, &str)] = &[(
+    "MIROptimizationFacts",
+    "derived_from_digest",
+    "pipeline_seal_hex",
+    "set_pipeline_seal_hex",
+)];
+
+fn host_private_row(owner: &str, host_field: &str) -> Option<&'static (&'static str, &'static str, &'static str, &'static str)> {
+    HOST_PRIVATE_FIELDS
+        .iter()
+        .find(|(row_owner, row_field, _, _)| *row_owner == owner && *row_field == host_field)
+}
+
 fn host_private_field(owner: &str, host_field: &str) -> bool {
-    matches!((owner, host_field), ("MIROptimizationFacts", "derived_from_digest"))
+    host_private_row(owner, host_field).is_some()
 }
 
 /// For each native payload field of a variant, the Source payload field it

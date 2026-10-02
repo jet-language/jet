@@ -136,6 +136,7 @@ use jet_codegen.[
     JetRustEmitManifest,
     JetWebEmitConfig,
     jet_codegen_reachable_core_functions,
+    jet_codegen_sorted_order,
     jet_rust_emit_program,
     jet_web_emit,
     lower_comptime_item,
@@ -269,14 +270,10 @@ struct JetDriverMIRItemOrderRow {
     item: MIRItemRef
 }
 
-fn jet_driver_insert_mir_item_order(rows: &[JetDriverMIRItemOrderRow], position: Int, item: MIRItemRef) Never! {
-    index := rows.len()
+// Rows are appended in category order and stably sorted by source position
+// once per module, rather than insertion-sorted per declaration.
+fn jet_driver_add_mir_item_order(rows: &[JetDriverMIRItemOrderRow], position: Int, item: MIRItemRef) Never! {
     &rows.push(JetDriverMIRItemOrderRow{position: position, item: item})
-    loop index > 0 && rows[index - 1].position > position {
-        rows[index] = rows[index - 1]
-        index -= 1
-    }
-    rows[index] = JetDriverMIRItemOrderRow{position: position, item: item}
 }
 
 fn jet_driver_find_lowered_function_id(functions: [MIRFunction], key: String) -> MIRFunctionID? {
@@ -1425,20 +1422,38 @@ fn jet_driver_assemble_mir(
     }
     all_functions := lowered.functions
     loop function in lowered.nested_functions -> &all_functions.push(function)
+    // Next-equal chains preserve the old pairwise diagnostic order without
+    // visiting unrelated functions. Duplicate-heavy input costs only its output.
+    id_heads := [Int:Int]{}
+    key_heads := [String:Int]{}
+    next_id := (loop _ in all_functions -> -1)
+    next_key := (loop _ in all_functions -> -1)
+    index := all_functions.len() - 1
+    loop index >= 0 {
+        function :: all_functions[index]
+        next_id[index] = id_heads.get(function.id.value) ?? -1
+        next_key[index] = key_heads.get(function.key) ?? -1
+        id_heads[function.id.value] = index
+        key_heads[function.key] = index
+        index -= 1
+    }
     function_index := 0
     loop function_index < all_functions.len() {
         function := all_functions[function_index]
         jet_driver_validate_lowered_function_owner(load, function, &diagnostics)
         owner_module_index := jet_driver_loaded_module_index_for_mir_module(load, function.module_id)
-        later := function_index + 1
-        loop later < all_functions.len() {
-            if all_functions[later].id.value == function.id.value {
+        id_later := next_id[function_index]
+        key_later := next_key[function_index]
+        loop id_later >= 0 || key_later >= 0 {
+            later :: if id_later < 0 -> key_later else -> if key_later < 0 || id_later < key_later -> id_later else -> key_later
+            if id_later == later {
                 &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function IDs", "every MIR function ID resolves to exactly one checked function", "report the duplicate Codegen function identity"))
+                id_later = next_id[id_later]
             }
-            if all_functions[later].key == function.key {
+            if key_later == later {
                 &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function keys", "every checked function key resolves to one MIR function", "report the duplicate Codegen function key"))
+                key_later = next_key[key_later]
             }
-            later += 1
         }
         function_index += 1
     }
@@ -1466,7 +1481,7 @@ fn jet_driver_assemble_mir(
                 if import.source_module_identity != loaded_module.module_identity -> next
                 import_id := jet_driver_mir_import_id(import)
                 &module_import_ids.push(import_id)
-                jet_driver_insert_mir_item_order(&ordered_items, import.declaration.span.start, MIRItemRef.Import{id: import_id})
+                jet_driver_add_mir_item_order(&ordered_items, import.declaration.span.start, MIRItemRef.Import{id: import_id})
                 loop edge in load.imports {
                     if edge.source_module_identity == loaded_module.module_identity && edge.declaration.span.start == import.declaration.span.start && edge.declaration.span.end == import.declaration.span.end && jet_driver_import_is_module_edge(edge.declaration.kind) && edge.target_package_identity == loaded_module.package_identity && !jet_driver_is_namespace_binding(edge.declaration) {
                         child_id := mir_module_id(edge.target_module_identity)
@@ -1482,36 +1497,38 @@ fn jet_driver_assemble_mir(
         loop function in all_functions {
             if function.module_id.value != module_id.value -> next
             if !jet_driver_has_source_file_id(load.source_files, function.source_file) -> return None
-            jet_driver_insert_mir_item_order(&ordered_items, function.span.start, MIRItemRef.Function{id: function.id})
+            jet_driver_add_mir_item_order(&ordered_items, function.span.start, MIRItemRef.Function{id: function.id})
             assigned_functions += 1
         }
         loop foreign in foreign_artifacts.foreign {
             if foreign.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, foreign.span.start, MIRItemRef.Foreign{id: foreign.id})
+            jet_driver_add_mir_item_order(&ordered_items, foreign.span.start, MIRItemRef.Foreign{id: foreign.id})
             assigned_foreigns += 1
         }
         loop definition in lowered.types {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Type{id: definition.id})
+            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Type{id: definition.id})
             assigned_types += 1
         }
         loop definition in lowered.traits {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Trait{id: definition.id})
+            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Trait{id: definition.id})
             assigned_traits += 1
         }
         loop definition in lowered.impls {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Impl{id: definition.id})
+            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Impl{id: definition.id})
             assigned_impls += 1
         }
         loop definition in lowered.constants {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Constant{id: definition.id})
+            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Constant{id: definition.id})
             assigned_constants += 1
         }
+        positions := [Int]{}
+        loop row in ordered_items -> &positions.push(row.position)
         item_order := [MIRItemRef]{}
-        loop row in ordered_items -> &item_order.push(row.item)
+        loop row_index in jet_codegen_sorted_order(positions, [String]{}) -> &item_order.push(ordered_items[row_index].item)
         &modules.push(MIRModule{
             id: module_id,
             key: loaded_module.module_identity,
@@ -1959,6 +1976,22 @@ fn jet_driver_compile_internal_result(load: JetDriverLoadResult, trace: JetDrive
     result.internal_problem = Val(message)
     result
 }
+
+// An incomplete-graph internal problem that names every incomplete module and
+// each recorded cause, so a stop with no diagnostic still says what stopped it.
+fn jet_driver_incomplete_graph_problem(summary: String, modules: [SemaGraphModuleResult]) -> String Never! {
+    problem := summary
+    loop graph_module in modules {
+        if graph_module.complete -> next
+        if graph_module.incomplete_reasons.len() == 0 {
+            problem = "{problem}\n  {graph_module.module_identity}: incomplete (no recorded cause)"
+            next
+        }
+        loop reason in graph_module.incomplete_reasons -> problem = "{problem}\n  {graph_module.module_identity}: {reason}"
+    }
+    problem
+}
+
 // The result for a compile whose own failure escaped every stage: no stage
 // produced a load or partial product, so only the internal problem is kept.
 pub fn jet_driver_compile_escaped_failure(message: String) -> JetDriverCompileResult Never! {
@@ -2199,7 +2232,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
         loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
         if load.diagnostics.len() == 0 {
-            result.internal_problem = Val("semantic declaration checking did not return a complete resolved package graph")
+            result.internal_problem = Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({comptime_stage.modules.len()} of {registration_module_count} modules checked)", comptime_stage.modules))
         }
         return result
     }
@@ -2268,7 +2301,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
                 result.internal_problem = body_run.internal_problem
             }
             load.diagnostics.len() == 0 -> {
-                result.internal_problem = Val("semantic body rechecking did not return a complete resolved package graph")
+                result.internal_problem = Val(jet_driver_incomplete_graph_problem("semantic body rechecking did not return a complete resolved package graph", body_run.graph.modules))
             }
         }
         return result
@@ -2307,9 +2340,22 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
 
     sema_functions := [TFunc]{}
     function_owners := [String:String]{}
+    registered_function_keys := [String:[String:Bool]]{}
+    loop source_module in registration_graph.modules {
+        keys := registered_function_keys.get(source_module.module_identity) ?? [String:Bool]{}
+        loop function in source_module.functions -> keys[function.symbol.id.key] = true
+        loop nominal in source_module.nominals {
+            loop function in nominal.methods -> keys[function.symbol.id.key] = true
+        }
+        loop implementation in source_module.impls {
+            loop function in implementation.methods -> keys[function.symbol.id.key] = true
+        }
+        registered_function_keys[source_module.module_identity] = keys
+    }
     failed_stage := JetDriverStage?{None}
     runtime_semantic_modules := [SemaGraphModuleResult]{}
     loop graph_module in checked_graph.modules {
+        registered_keys :: registered_function_keys.get(graph_module.module_identity) ?? [String:Bool]{}
         if graph_module.module_identity != canonical_effect_module_identity {
             &runtime_semantic_modules.push(graph_module)
             module_matches := 0
@@ -2322,8 +2368,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
             }
         }
         loop function in graph_module.functions {
-            registered_function := sema_comptime_find_function_source(registration_graph, graph_module.module_identity, function.key)
-            if function.module_identity != graph_module.module_identity || registered_function == None {
+            if function.module_identity != graph_module.module_identity || registered_keys.get(function.key) == None {
                 &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "a checked function lost its canonical module or symbol identity", "cross-module call resolution and MIR IDs use exact declaration identities", "preserve module_identity and the original function SymbolId through Sema"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
             }

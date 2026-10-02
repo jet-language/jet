@@ -14,7 +14,7 @@ use jet_foundation.[
 
 fn jet_codegen_lower_module_call(builder: &JetCodegenBuilder, expression: TExpr, target: TFunctionRef, form: TModuleCallForm, target_return: Type?, type_args: [Type], args: [TCallArg]) -> MIRValueID {
     // The Rust projection is provenance only; resolve calls from the canonical TFunctionRef.
-    function := jet_codegen_find_function_by_key(builder.functions, target.key, target.module_identity) ?? panic("checked module call target has no reachable TFunc")
+    function := jet_codegen_find_function_by_key(builder.function_index, target.key, target.module_identity) ?? panic("checked module call target has no reachable TFunc")
     if function.name != target.name -> panic("checked module call target name disagrees with its canonical TFunc")
 
     lowered_args := jet_codegen_lower_call_args(&builder, args, function.params)

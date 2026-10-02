@@ -1963,14 +1963,6 @@ pub fn __jet_bootstrap_compile_with_native(
             "requested compiler factory artifact differs from the embedded canonical image".to_string(),
         ));
     }
-    let __jet_image_execution = __jet_compiler_image.program
-        .execution_identity(Some(__jet_compiler_image.header.artifact))
-        .map_err(|error| crate::BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    if __jet_image_execution != __jet_compiler_image.header.identity {
-        return Err(crate::BootstrapHostCodecError::InvalidMetadata(
-            "restored compiler image execution identity changed before factory invocation".to_string(),
-        ));
-    }
     let __jet_image_artifact = __jet_compiler_image.program.artifacts.iter()
         .find(|artifact| artifact.id == __jet_compiler_image.header.artifact)
         .ok_or_else(|| crate::BootstrapHostCodecError::InvalidMetadata(

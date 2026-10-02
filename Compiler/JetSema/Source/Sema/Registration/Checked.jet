@@ -1401,6 +1401,9 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
     inline :: registered.declaration.inline_foreign ?? return None
     if !sema_checked_inline_validation(module_row, registered, &diagnostics) -> return None
     if !sema_checked_inline_undo(graph, module_row, registered, &diagnostics) -> return None
+    // Rust `check_inline_asm`: an assembly body's operand contract (E3223) for
+    // the selected target.
+    if sema_checked_ascii_lower(inline.lang) == "asm" && sema_inline_assembly_contract(registered.declaration, graph.target_machine.triple, &diagnostics) == None -> return None
     language :: sema_checked_ascii_lower(inline.lang)
     wrapper :: "jet_ffi_{registered.declaration.name}"
     module_identity :: module_row.module_identity

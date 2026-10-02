@@ -223,6 +223,17 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     if type_name == "" && contextual_allowed && variant == "None" && args.len() == 0 {
         return sema_expression_absent(span, expected, &diagnostics)
     }
+    // Leading-dot Result cases are contextual only when the expected type
+    // is a Result; a declared enum's `.Ok` / `.Err` remains its own case.
+    if type_name == "" && leading_dot && sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}) == .Result(_, _) && args.len() == 1 {
+        if args[0] == .Positional(value) {
+            if variant == "Ok" -> return sema_expression_result_payload(value, true, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            if variant == "Err" {
+                &context.failure_edges.push("")
+                return sema_expression_result_payload(value, false, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
+        }
+    }
     resolved_name := type_name
     if resolved_name == "" {
         expected_ty :: expected ?? {
@@ -551,9 +562,8 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         &diagnostics.push(sema_error("E0907", method_span, "`{type_name}.{method_name}` must be pure", "CheckedText methods are evaluated through the canonical pure Source evaluator", "declare this CheckedText method pure"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    direct :: sema_call_direct_target_from_registration(function, graph, environment.module_identity, environment.package_identity, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if environment.registration_graph == None -> return SemaMethodSpecialCheck{handled: true, value: None}
+    direct :: sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call := Call{
         name: "{type_name}.{method_name}",
         name_span: method_span,
@@ -1075,7 +1085,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             // `use core.regex` resolves the bare name to its source-owned record.
             regex_head :: Type.Named{name: "Regex"}
             if result_head == regex_head || sema_expr_unwrap_tag(written_head) == regex_head -> return sema_expression_typed_literal_regex(regex_head, value, span, expected, environment, &diagnostics)
-            checked_optional := if sema_expression_list_element_needs_expected_type(value) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             converted := checked
             value_span :: expr_span(value)
@@ -1090,7 +1100,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         }
         .Elements(elements) -> if elements.len() == 1 {
             value := elements[0]
-            checked_optional := if sema_expression_list_element_needs_expected_type(value) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             converted := checked
             value_span :: expr_span(value)
@@ -1106,4 +1116,11 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         else -> {}
     }
     sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
+}
+
+// `Float{0.5}` / `F32{-1.5}`: the machine-float head is the decimal literal's
+// expected carrier, as in Rust's typed-literal inference.
+fn sema_expression_typed_literal_value_needs_head(value: Expr, head: Type) -> Bool Never! {
+    if sema_expression_list_element_needs_expected_type(value) -> return true
+    sema_expr_decimal_literal_operand(value, true) && sema_expr_expects_machine_float(Val(head))
 }

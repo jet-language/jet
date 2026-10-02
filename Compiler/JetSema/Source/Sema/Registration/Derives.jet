@@ -1538,30 +1538,41 @@ fn sema_derive_has_name(derives: [NamedSpan], name: String) -> Bool {
     false
 }
 
-fn sema_derive_has_trait_impl(items: [Item], type_name: String, trait_name: String) -> Bool {
-    loop item in items {
+// Membership facts over one module's items, built once per expansion so
+// readiness and selection ask keyed questions instead of rescanning items.
+pub struct SemaDeriveItemIndex {
+    pub trait_impls: [String:Bool]
+    pub nominals: [String:Int]
+    pub distincts: [String:Bool]
+}
+
+fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
+    index := SemaDeriveItemIndex{trait_impls: [String:Bool]{}, nominals: [String:Int]{}, distincts: [String:Bool]{}}
+    loop (position, item) in items {
         if item == {
             .Impl(definition) -> {
-                if definition.type_name == type_name && (definition.trait_name ?? "") == trait_name -> return true
+                index.trait_impls[sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? "")] = true
             }
             .Struct(definition) -> {
-                if definition.name == type_name {
-                    loop block in definition.trait_impls {
-                        if block.trait_name == trait_name -> return true
-                    }
-                }
+                loop block in definition.trait_impls -> index.trait_impls[sema_type_metadata_impl_key(definition.name, block.trait_name)] = true
+                if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
             }
             .Enum(definition) -> {
-                if definition.name == type_name {
-                    loop block in definition.trait_impls {
-                        if block.trait_name == trait_name -> return true
-                    }
-                }
+                loop block in definition.trait_impls -> index.trait_impls[sema_type_metadata_impl_key(definition.name, block.trait_name)] = true
+                if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
+            }
+            .Distinct(definition) -> {
+                index.distincts[definition.name] = true
+                if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
             }
             else -> {}
         }
     }
-    false
+    index
+}
+
+fn sema_derive_has_trait_impl(index: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Bool {
+    index.trait_impls.get(sema_type_metadata_impl_key(type_name, trait_name)) != None
 }
 
 // ---------------------------------------------------------------------------
@@ -1572,6 +1583,7 @@ fn sema_derive_has_trait_impl(items: [Item], type_name: String, trait_name: Stri
 
 pub struct SemaDeriveReadiness {
     pub items: [Item]
+    pub index: SemaDeriveItemIndex
     pub trait_name: String
     pub candidates: [String:Int]
     pub relied_on: [Int]
@@ -1595,22 +1607,14 @@ fn sema_derive_implements(readiness: &SemaDeriveReadiness, name: String) -> Bool
         return true
     }
     if sema_derive_builtin_supports(name, readiness.trait_name) -> return true
-    if sema_derive_has_trait_impl(readiness.items, name, readiness.trait_name) -> return true
-    loop item in readiness.items {
-        if item == {
-            .Struct(definition) -> {
-                if definition.name == name -> return sema_derive_has_name(definition.derives, readiness.trait_name)
-            }
-            .Enum(definition) -> {
-                if definition.name == name -> return sema_derive_has_name(definition.derives, readiness.trait_name)
-            }
-            .Distinct(definition) -> {
-                if definition.name == name -> return readiness.trait_name == "Equatable" || sema_derive_has_name(definition.derives, readiness.trait_name)
-            }
-            else -> {}
-        }
+    if sema_derive_has_trait_impl(readiness.index, name, readiness.trait_name) -> return true
+    position :: readiness.index.nominals.get(name) ?? return false
+    if readiness.items[position] == {
+        .Struct(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
+        .Enum(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
+        .Distinct(definition) -> readiness.trait_name == "Equatable" || sema_derive_has_name(definition.derives, readiness.trait_name)
+        else -> false
     }
-    false
 }
 
 fn sema_derive_native_ordering_ready(ty: Type) -> Bool {
@@ -1698,8 +1702,8 @@ fn sema_derive_fields_ready(readiness: &SemaDeriveReadiness, item: Item) -> Bool
     }
 }
 
-fn sema_derive_auto_selected(items: [Item], trait_name: String) -> [String] {
-    readiness := SemaDeriveReadiness{items: items, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}}
+fn sema_derive_auto_selected(items: [Item], index: SemaDeriveItemIndex, trait_name: String) -> [String:Bool] {
+    readiness := SemaDeriveReadiness{items: items, index: index, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}}
     names := [String]{}
     nodes := [Item]{}
     loop item in items {
@@ -1716,7 +1720,7 @@ fn sema_derive_auto_selected(items: [Item], trait_name: String) -> [String] {
             }
             else -> next
         }
-        if !requested || readiness.candidates.get(name) != None || sema_derive_has_trait_impl(items, name, trait_name) -> next
+        if !requested || readiness.candidates.get(name) != None || sema_derive_has_trait_impl(index, name, trait_name) -> next
         readiness.candidates[name] = names.len()
         &names.push(name)
         &nodes.push(item)
@@ -1750,9 +1754,9 @@ fn sema_derive_auto_selected(items: [Item], trait_name: String) -> [String] {
             }
         }
     }
-    selected := [String]{}
+    selected := [String:Bool]{}
     loop (node, name) in names {
-        if !failed[node] -> &selected.push(name)
+        if !failed[node] -> selected[name] = true
     }
     selected
 }
@@ -1769,16 +1773,17 @@ fn sema_derive_builtin_traits() -> [String] {
 // requested. A declaration that already implements the capability keeps its
 // own implementation.
 pub fn sema_derive_expand_builtin_items(items: [Item], diagnostics: &[Diagnostic]) -> [Item] {
-    auto_equatable :: sema_derive_auto_selected(items, "Equatable")
-    auto_comparable :: sema_derive_auto_selected(items, "Comparable")
+    facts :: sema_derive_item_index(items)
+    auto_equatable :: sema_derive_auto_selected(items, facts, "Equatable")
+    auto_comparable :: sema_derive_auto_selected(items, facts, "Comparable")
     providers := [DeriveDef]?{None}
     updated := items
     generated := [Item]{}
     loop (index, item) in items {
         if item == {
             .Struct(definition) -> {
-                equatable :: sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.contains(definition.name)
-                comparable :: sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.contains(definition.name)
+                equatable :: sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
+                comparable :: sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
                 if !equatable && !comparable -> next
                 if providers == None -> providers = Val(sema_derive_builtin_providers())
                 available :: providers ?? [DeriveDef]{}
@@ -1787,15 +1792,15 @@ pub fn sema_derive_expand_builtin_items(items: [Item], diagnostics: &[Diagnostic
                 target := definition
                 loop trait_name in sema_derive_builtin_traits() {
                     wanted :: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
-                    if !wanted || sema_derive_has_trait_impl(items, definition.name, trait_name) -> next
+                    if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                     block :: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
                     &target.trait_impls.push(block)
                 }
                 updated[index] = Item.Struct{value: target}
             }
             .Enum(definition) -> {
-                equatable :: sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.contains(definition.name)
-                comparable :: sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.contains(definition.name)
+                equatable :: sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
+                comparable :: sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
                 if !equatable && !comparable -> next
                 if providers == None -> providers = Val(sema_derive_builtin_providers())
                 available :: providers ?? [DeriveDef]{}
@@ -1804,7 +1809,7 @@ pub fn sema_derive_expand_builtin_items(items: [Item], diagnostics: &[Diagnostic
                 target := definition
                 loop trait_name in sema_derive_builtin_traits() {
                     wanted :: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
-                    if !wanted || sema_derive_has_trait_impl(items, definition.name, trait_name) -> next
+                    if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                     block :: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
                     &target.trait_impls.push(block)
                 }
@@ -1813,22 +1818,16 @@ pub fn sema_derive_expand_builtin_items(items: [Item], diagnostics: &[Diagnostic
             .Distinct(definition) -> {
                 // A distinct over another distinct is rejected elsewhere; it
                 // derives nothing here.
-                invalid := false
                 if definition.base == .Named(base) {
-                    loop other in items {
-                        if other == .Distinct(candidate) {
-                            if candidate.name == base -> invalid = true
-                        }
-                    }
+                    if facts.distincts.get(base) != None -> next
                 }
-                if invalid -> next
                 if providers == None -> providers = Val(sema_derive_builtin_providers())
                 available :: providers ?? [DeriveDef]{}
                 owner_type :: Type.Named{name: definition.name}
                 type_info :: sema_derive_distinct_type_info(definition)
                 loop trait_name in sema_derive_builtin_traits() {
                     if trait_name == "Comparable" && !sema_derive_has_name(definition.derives, "Comparable") -> next
-                    if sema_derive_has_trait_impl(items, definition.name, trait_name) -> next
+                    if sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                     block :: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
                     &generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: block.methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}})
                 }

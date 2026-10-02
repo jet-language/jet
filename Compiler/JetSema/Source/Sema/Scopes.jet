@@ -432,6 +432,10 @@ pub struct SemaCheckContext {
     // statement and per expression level, against the limit the parser and
     // the TIR evaluator share.
     pub source_nesting: Int{0}
+    // Why this body stopped without a diagnostic: a construct the checker
+    // does not handle yet or a lost compiler invariant. These reach the
+    // driver's internal-problem report (I2), never the user's diagnostics.
+    pub incomplete_reasons: [String]{[String]{}}
 }
 
  
@@ -671,6 +675,7 @@ pub struct SemaCheckContextMark {
     pub failure_union_members: Int
     pub failure_union_cases: Int
     pub failure_union_edges: Int
+    pub incomplete_reasons: Int
     pub saved: SemaCheckContext
 }
 
@@ -700,6 +705,7 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
         failure_union_members: context.failure_union_members.len(),
         failure_union_cases: context.failure_union_cases.len(),
         failure_union_edges: context.failure_union_edges.len(),
+        incomplete_reasons: context.incomplete_reasons.len(),
         saved: SemaCheckContext{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -785,6 +791,7 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     loop context.failure_union_members.len() > mark.failure_union_members -> _ := &context.failure_union_members.pop()
     loop context.failure_union_cases.len() > mark.failure_union_cases -> _ := &context.failure_union_cases.pop()
     loop context.failure_union_edges.len() > mark.failure_union_edges -> _ := &context.failure_union_edges.pop()
+    loop context.incomplete_reasons.len() > mark.incomplete_reasons -> _ := &context.incomplete_reasons.pop()
     saved :: mark.saved
     context.exact_int_reachable = saved.exact_int_reachable
     context.unsafe_depth = saved.unsafe_depth
@@ -826,6 +833,12 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.iter_borrowed = ~saved.iter_borrowed
     context.binding_initializer = saved.binding_initializer
     context.source_nesting = saved.source_nesting
+}
+
+// Records why the body being checked is incomplete when no diagnostic says so.
+// Every path that marks a body incomplete without a diagnostic calls this.
+pub fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
+    &context.incomplete_reasons.push(reason)
 }
 
 fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
@@ -1325,14 +1338,20 @@ pub fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolID) -> Symbol? {
 
 pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolID) -> Item? {
     if environment.registration_graph == .Val(graph) {
-        loop module_row in graph.modules {
-            loop function in module_row.functions {
-                if function.symbol.id.key == id.key -> return Val(Item.Func{value: function.declaration})
-            }
-            loop nominal in module_row.nominals {
-                if nominal.symbol.id.key == id.key -> return sema_registration_nominal_source_item(nominal.source)
+        // The first function and nominal rows by key replace the module scan
+        // (earlier modules first, functions before nominals in one module).
+        function_module := -1
+        function_row := -1
+        if graph.callable_rows.get(id.key) == .Val(callable) {
+            if callable == .Function(module_index, row) {
+                function_module = module_index
+                function_row = row
             }
         }
+        if graph.nominal_symbol_rows.get(id.key) == .Val(nominal) {
+            if function_module < 0 || nominal.module_index < function_module -> return sema_registration_nominal_source_item(graph.modules[nominal.module_index].nominals[nominal.row].source)
+        }
+        if function_module >= 0 -> return Val(Item.Func{value: graph.modules[function_module].functions[function_row].declaration})
     }
     loop declaration in environment.declarations {
         if declaration.symbol_id.key == id.key -> return Val(declaration.item)

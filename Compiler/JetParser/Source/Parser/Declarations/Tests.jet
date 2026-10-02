@@ -33,11 +33,16 @@ fn parser_test_name_of(value: Expr?, fallback: Span) -> (name: String?, span: Sp
     }
 }
 
+// Rust `test_def`: `#Test(name, faults, expected_fail)` binds its arguments
+// by the registered parameter order or by label. A name that is not one plain
+// literal stays in `name_expr` for compile-time evaluation.
 fn parser_parse_test(state: &JetParserState) -> Item {
     marker :: parser_parse_marker(&state)
-    first :: parser_marker_expression(marker, 0)
-    faults :: parser_marker_expression(marker, 1)
-    expected_fail :: parser_marker_expression(marker, 2)
+    bound :: parser_bind_marker_arguments(&state, marker, [String]{"name", "faults", "expected_fail"}, 0)
+    values := [Expr?]{None, None, None}
+    if bound == .Val(found) -> values = found
+    faults :: values[1]
+    expected_fail :: values[2]
     if parser_current_kind(&state) == TOKEN_KW_FN {
         start :: parser_bump(&state)
         name :: parser_expect_name(&state, "after `fn` in a property test")
@@ -46,12 +51,9 @@ fn parser_parse_test(state: &JetParserState) -> Item {
         value :: TestDef{span: parser_cover(marker.span, body.span), name: Val(name.payload.decoded), name_expr: None, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: name.span, params: params, fn_keyword_span: Val(start.span), body: body.statements}
         return Item.Test{value: value}
     }
+    first :: values[0]
+    if bound != None && first == None -> parser_marker_shape_error(&state, marker)
     named :: parser_test_name_of(first, marker.span)
-    if first == None {
-        parser_add_error(&state, marker.span, "`Test` needs a test name", "named tests keep one fixed source label", "write `#Test(\"name\") {{ ... }}")
-    } else if named.name == None {
-        parser_add_error(&state, named.span, "a test name must be one plain string literal", "test labels are fixed source text", "write `#Test(\"name\") {{ ... }}")
-    }
     body :: parser_parse_block(&state)
     Item.Test{value: TestDef{span: parser_cover(marker.span, body.span), name: named.name, name_expr: first, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: named.span, params: [Param]{}, fn_keyword_span: None, body: body.statements}}
 }

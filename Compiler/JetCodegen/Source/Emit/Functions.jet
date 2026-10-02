@@ -20,6 +20,7 @@ use jet_foundation.[
     mir_type_same_checked_type,
 ]
 
+// MIRRust emit_callable_named: a consuming parameter is a `mut` binding.
 fn jet_rust_emit_function_param(ctx: &JetRustEmitContext, function: MIRFunction, parameter: MIRParam) -> String Never! {
     name :: jet_rust_emit_parameter_name(function, parameter.index)
     // A window parameter takes the range window `&mut [T]` in place; a
@@ -27,11 +28,21 @@ fn jet_rust_emit_function_param(ctx: &JetRustEmitContext, function: MIRFunction,
     if jet_rust_emit_window_param(ctx, function.id, parameter.index) {
         if parameter.ty.kind == .List(element) -> return "{name}: &mut [{jet_rust_emit_type(&ctx, element)}]"
     }
-    "{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}"
+    binding :: if parameter.access == MIRAccess.Move -> "mut " else -> ""
+    "{binding}{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}"
 }
 
+// MIRRust capture_parameter_type: a Read capture is always a shared borrow
+// (whatever its scalar ABI), a Write capture a unique borrow, a Move capture
+// the owned `mut` binding.
 fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MIRCaptureParam) -> String Never! {
-    "{jet_rust_emit_capture_name(capture.slot)}: {jet_rust_emit_callable_param_type(&ctx, capture.ty, capture.access)}"
+    rendered :: jet_rust_emit_type(&ctx, capture.ty)
+    name :: jet_rust_emit_capture_name(capture.slot)
+    if capture.access == {
+        .Read -> "{name}: &{rendered}"
+        .Write -> "{name}: &mut {rendered}"
+        .Move -> "mut {name}: {rendered}"
+    }
 }
 
 fn jet_rust_emit_function_visibility(function: MIRFunction) -> String Never! { jet_rust_emit_visibility(function.visibility) }
@@ -43,6 +54,8 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
             return "let mut {jet_rust_emit_local_slot(local.id)}: Option<{rust_type}> = None;"
         }
     }
+    // MIRRust: a shared-capture local is one shared cell (S47/M2).
+    if jet_rust_emit_local_is_shared(&ctx, local.id) -> return "let {jet_rust_emit_local_slot(local.id)}: std::rc::Rc<std::cell::RefCell<Option<{jet_rust_emit_type(&ctx, local.ty)}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));"
     "let mut {jet_rust_emit_local_slot(local.id)}: Option<{jet_rust_emit_type(&ctx, local.ty)}> = None;"
 }
 
@@ -822,17 +835,6 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
     compacted
 }
 
-fn jet_rust_emit_capture_declaration(ctx: &JetRustEmitContext, function: MIRFunction) -> [String] Never! {
-    lines := [String]{}
-    loop capture in function.capture_params {
-        name :: jet_rust_emit_capture_name(capture.slot)
-        if capture.access == MIRAccess.Write {
-            &lines.push("let mut {name} = {name};")
-        }
-    }
-    lines
-}
-
 fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
     params := [String]{}
     loop capture in function.capture_params -> &params.push(jet_rust_emit_capture_param(&ctx, capture))
@@ -939,22 +941,44 @@ fn jet_rust_emit_partial_declarations(ctx: &JetRustEmitContext, function: MIRFun
 }
 
 fn jet_rust_emit_trait_param_name(parameter: MIRParam, index: Int) -> String Never! {
-    if parameter.name.len() > 0 -> jet_rust_emit_sanitize(parameter.name) else -> "arg_{index}"
+    if parameter.name.len() > 0 -> jet_rust_emit_mangle(parameter.name) else -> "arg_{index}"
 }
 
-fn jet_rust_emit_trait_method_symbol(method: MIRTraitMethod) -> String Never! {
-    jet_rust_emit_sanitize(method.name)
+// MIRRust function_leaf_name: the method leaf of a possibly owner-qualified name.
+fn jet_rust_emit_function_leaf(name: String) -> String Never! {
+    leaf := name
+    loop part in name.split("::") -> leaf = part
+    leaf
 }
 
 // MIRRust compiler_trait_method_symbol: compiler-owned trait methods keep
-// their source leaf, except the runtime `JetDebug` protocol, which spells the
-// Debug method `jet_debug`.
-fn jet_rust_emit_trait_impl_method_symbol(ctx: &JetRustEmitContext, trait_id: MIRTraitID, name: String) -> String Never! {
-    if name == "debug" && jet_rust_emit_trait_name(&ctx, trait_id) == "JetDebug" -> return "jet_debug"
-    jet_rust_emit_sanitize(name)
+// their source leaf (the cached runtime traits declare them unmangled), except
+// the runtime `JetDebug` protocol, which spells the Debug method `jet_debug`.
+fn jet_rust_emit_compiler_trait_method_symbol(trait_name: String, leaf: String) -> String Never! {
+    if trait_name == "Debug" && leaf == "debug" -> "jet_debug" else -> leaf
 }
 
-fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, method: MIRTraitMethod) -> String Never! {
+// MIRRust trait_method_symbol: a user trait method takes the plain mangle.
+fn jet_rust_emit_trait_method_symbol(trait_name: String, method: MIRTraitMethod) -> String Never! {
+    if jet_rust_emit_compiler_owned_trait(trait_name) -> jet_rust_emit_compiler_trait_method_symbol(trait_name, method.name) else -> jet_rust_emit_mangle(method.name)
+}
+
+// The Rust method symbol of one trait method implemented or called through
+// `trait_id` (MIRRust rust_method_symbol / trait_method_call).
+fn jet_rust_emit_trait_impl_method_symbol(ctx: &JetRustEmitContext, trait_id: MIRTraitID, name: String) -> String Never! {
+    leaf :: jet_rust_emit_function_leaf(name)
+    loop row in jet_rust_emit_trait_rows(ctx, trait_id) {
+        if row.id == trait_id && jet_rust_emit_compiler_owned_trait(row.name) -> return jet_rust_emit_compiler_trait_method_symbol(row.name, leaf)
+    }
+    jet_rust_emit_mangle(leaf)
+}
+
+// MIRRust rust_method_symbol for an inherent method: `__jet_<leaf>`.
+fn jet_rust_emit_inherent_method_symbol(name: String) -> String Never! {
+    jet_rust_emit_mangle(jet_rust_emit_function_leaf(name))
+}
+
+fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, trait_name: String, method: MIRTraitMethod) -> String Never! {
     params := [String]{}
     if method.self_access == .Val(access) {
         if access == {
@@ -966,29 +990,25 @@ fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, method: MIRTraitMet
     loop (index, parameter) in method.params {
         &params.push("{jet_rust_emit_trait_param_name(parameter, index)}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
     }
-    "fn {jet_rust_emit_trait_method_symbol(method)}({params.join(", ")}) -> {jet_rust_emit_type(&ctx, method.return_type)}"
+    "fn {jet_rust_emit_trait_method_symbol(trait_name, method)}({params.join(", ")}) -> {jet_rust_emit_type(&ctx, method.return_type)}"
 }
 
-fn jet_rust_emit_trait_method_signature(ctx: &JetRustEmitContext, method: MIRTraitMethod) -> String Never! {
-    "{jet_rust_emit_trait_method_head(&ctx, method)};"
+fn jet_rust_emit_trait_method_signature(ctx: &JetRustEmitContext, trait_name: String, method: MIRTraitMethod) -> String Never! {
+    "{jet_rust_emit_trait_method_head(&ctx, trait_name, method)};"
 }
 
+// A borrowed receiver forwards as `self` (a reborrow of `&self`/`&mut self`);
+// `&mut self` would borrow the immutable binding itself mutably (E0596).
 fn jet_rust_emit_trait_default_args(method: MIRTraitMethod) -> String Never! {
     args := [String]{}
-    if method.self_access == .Val(access) {
-        if access == {
-            .Read -> &args.push("&self")
-            .Write -> &args.push("&mut self")
-            else -> &args.push("self")
-        }
-    }
+    if method.self_access != None -> &args.push("self")
     loop (index, parameter) in method.params -> &args.push(jet_rust_emit_trait_param_name(parameter, index))
     args.join(", ")
 }
 
 fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: MIRTraitDef, method: MIRTraitMethod, lines: &[String]) Never! {
     default_id :: method.default ?? {
-        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, method)}")
+        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
         return
     }
     found := false
@@ -1021,17 +1041,17 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
     }
     if !found {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait default function is missing", "default trait methods must resolve to their checked MIR function row", Val(method.span))
-        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, method)}")
+        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
         return
     }
     if !valid {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait default function ABI disagrees with its declaration", "default trait methods must preserve the checked trait, receiver, parameter, return, and failure facts", Val(method.span))
-        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, method)}")
+        &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
         return
     }
     loop function in jet_rust_emit_function_rows(ctx, default_id) {
         if function.id == default_id {
-            &lines.push("    {jet_rust_emit_trait_method_head(&ctx, method)} {{")
+            &lines.push("    {jet_rust_emit_trait_method_head(&ctx, definition.name, method)} {{")
             &lines.push("        {jet_rust_emit_function_name(&ctx, function.id)}({jet_rust_emit_trait_default_args(method)})")
             &lines.push("    }}")
         }
@@ -1129,24 +1149,36 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
         if access == {
             .Read -> &params.push("&self")
             .Write -> &params.push("&mut self")
-            else -> &params.push("self")
+            else -> &params.push("mut self")
         }
     }
+    // The body function takes the receiver as the same borrow the impl
+    // method holds: forward `self` (a reborrow), never `&mut self` (E0596).
     call_args := [String]{}
-    if self_access != None {
-        if access == {
-            .Read -> &call_args.push("&self")
-            .Write -> &call_args.push("&mut self")
-            else -> &call_args.push("self")
+    if self_access != None -> &call_args.push("self")
+    // MIRRust arithmetic_trait_method: the runtime Add/Sub/Mul/Div traits take
+    // every scalar operand by reference; the body receives the value.
+    arithmetic := false
+    if implementation.trait_ref == .Val(impl_trait) {
+        loop row in jet_rust_emit_trait_rows(ctx, impl_trait.id) {
+            if row.id == impl_trait.id && (row.name == "Add" || row.name == "Sub" || row.name == "Mul" || row.name == "Div") -> arithmetic = true
         }
     }
     index := 0
     loop parameter in function.params {
         if jet_rust_emit_is_receiver(function, parameter.index) -> next
         name :: jet_rust_emit_trait_param_name(parameter, index)
-        param_type :: if decode_codec -> "&{ctx.config.root_prefix}jet_std::DataTree" else -> jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
-        &params.push("{name}: {param_type}")
-        &call_args.push(if decode_codec && parameter.access != MIRAccess.Read -> "{name}.clone()" else -> name)
+        scalar_by_ref :: arithmetic && !jet_rust_emit_type_is_borrowed(parameter.ty)
+        if {
+            decode_codec -> &params.push("{name}: &{ctx.config.root_prefix}jet_std::DataTree")
+            scalar_by_ref -> &params.push("{name}: &{jet_rust_emit_type(&ctx, parameter.ty)}")
+            else -> &params.push("{if parameter.access == MIRAccess.Move -> "mut " else -> ""}{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
+        }
+        if {
+            decode_codec && parameter.access != MIRAccess.Read -> &call_args.push("{name}.clone()")
+            scalar_by_ref -> &call_args.push("*{name}")
+            else -> &call_args.push(name)
+        }
         index += 1
     }
     if encode_codec && (self_access != Val(MIRAccess.Read) || index != 0) {
@@ -1194,7 +1226,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
             return
         }
     }
-    method_name := jet_rust_emit_sanitize(function.name)
+    method_name := jet_rust_emit_inherent_method_symbol(function.name)
     if implementation.trait_ref == .Val(impl_trait) -> method_name = jet_rust_emit_trait_impl_method_symbol(&ctx, impl_trait.id, function.name)
     if encode_codec -> method_name = "jet_encode"
     if decode_codec -> method_name = "jet_decode"
@@ -1218,6 +1250,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     &lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {return_type} {{")
     &lines.push("        {call_expression}")
     &lines.push("    }}")
+    &lines.push("")
 }
 
 fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRImplDef, lines: &[String]) Never! {
@@ -1323,6 +1356,7 @@ fn jet_rust_emit_native_derived_equal(ctx: &JetRustEmitContext, implementation: 
     &lines.push("fn equal(&self, __jet_rhs: &Self) -> bool {{")
     &lines.push("    {equal}")
     &lines.push("}}")
+    &lines.push("")
     true
 }
 
@@ -1412,6 +1446,7 @@ fn jet_rust_emit_native_derived_compare(ctx: &JetRustEmitContext, implementation
     &lines.push("    {body.join("\n    ")}")
     &lines.push("    {equal}")
     &lines.push("}}")
+    &lines.push("")
     true
 }
 
@@ -1670,6 +1705,7 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
     &lines.push("fn jet_decode(__jet_tree: &{root}jet_std::DataTree) -> Result<Self, Vec<{root}jet_std::FieldError>> {{")
     &lines.push("    {body.join("\n    ")}")
     &lines.push("}}")
+    &lines.push("")
     true
 }
 
@@ -1750,6 +1786,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
     &lines.push("fn jet_encode(&self) -> {root}jet_std::DataTree {{")
     &lines.push("    {body.join("\n    ")}")
     &lines.push("}}")
+    &lines.push("")
     true
 }
 
@@ -1757,8 +1794,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
 // `__jet_` lane, which the runtime's compiler-owned traits (`__jet_Index`'s
 // `__jet_Key`/`__jet_Value`) also declare.
 fn jet_rust_emit_associated_type_name(name: String) -> String Never! {
-    if name.starts_with("__jet_") -> return ~name
-    "__jet_{jet_rust_emit_sanitize(name)}"
+    jet_rust_emit_mangle(name)
 }
 
 fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [String] Never! {
@@ -1767,7 +1803,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     previous_move_facts := ctx.move_facts
     previous_body_index := ctx.body_index
     ctx.current_function = Val(function.id)
-    ctx.body_index = jet_rust_emit_body_index(function)
+    ctx.body_index = jet_rust_emit_body_index(function, jet_rust_emit_shared_capture_locals(ctx, function))
     move_facts :: jet_rust_emit_move_facts(ctx, function)
     ctx.move_facts = move_facts
     owner_generic_params :: jet_rust_emit_function_owner_generic_params(&ctx, function)
@@ -1788,10 +1824,6 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         members :: ctx.move_facts.payload_groups.get(subject_key) ?? panic("checked last-use row is missing")
         if members[0].result != value.id -> &lines.push("    let mut {jet_rust_emit_payload_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;")
     }
-    if function.capture_params.len() > 0 {
-        capture_lines :: jet_rust_emit_capture_declaration(&ctx, function)
-        loop line in capture_lines -> &lines.push("    {line}")
-    }
     generator :: function.generator != None
     if generator -> &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
     indent :: if generator -> "    " else -> ""
@@ -1805,7 +1837,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     if jet_rust_emit_function_has_deadline_scope(function) -> &lines.push("{indent}    let mut __jet_deadline_scopes: Vec<JetDeadlineGuard> = Vec::new();")
     if jet_rust_emit_coverage_for(&ctx, function) -> &lines.push("{indent}    {ctx.config.root_prefix}jet_cov_function({jet_rust_emit_coverage_function_line(&ctx, function)});")
     plan :: jet_rust_emit_cfg_plan(function)
-    if plan.phis -> &lines.push("{indent}    let mut __jet_mir_dispatch_prev: u64 = 0u64;")
+    if plan.phis -> &lines.push("{indent}    let mut __jet_mir_dispatch_prev: u64 = 0;")
     // MIRRust emit_structured_body: a body nesting deeper than the structured
     // cap falls back to the dispatch loop.
     body := [String]{}
@@ -1815,7 +1847,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     } else {
         dispatch :: JetRustEmitCFGPlan{structured: false, phis: plan.phis, phi_targets: plan.phi_targets, entry: plan.entry, positions: plan.positions, order: plan.order, headers: plan.headers, merges: plan.merges, follows: plan.follows, debug: plan.debug}
         &lines.push("{indent}    let mut __jet_mir_dispatch_pc: u64 = {jet_rust_emit_block_id(function.entry)};")
-        &lines.push("{indent}    'jet_mir_dispatch: loop {{")
+        &lines.push("{indent}    'mir_dispatch: loop {{")
         &lines.push("{indent}        match __jet_mir_dispatch_pc {{")
         loop (position, block) in function.blocks {
             &lines.push("{indent}            {jet_rust_emit_block_id(block.id)} => {{")
@@ -1835,5 +1867,9 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.current_generic_params = previous_generic_params
     ctx.move_facts = previous_move_facts
     ctx.body_index = previous_body_index
-    lines
+    // MIRRust emit_callable_named: the inline attributes precede the item.
+    if !function.is_inline_always && !function.is_inline -> return lines
+    out := [String]{if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"}
+    loop line in lines -> &out.push(line)
+    out
 }

@@ -249,6 +249,12 @@ fn sema_expr_numeric_host_kind(ty: Type) -> Int? {
 fn sema_expr_integer_literal_value(value: TExpr) -> Int? {
     if value.kind == {
         .IntLit(number, width) -> if width == None -> return Val(number)
+        // D-INTBIG1: a literal beyond i64 keeps its exact value in its bounds.
+        .CtLit(constant) -> {
+            if constant == .BigInt(_) && value.integer_bounds == .Val(bounds) {
+                if bounds.lo == bounds.hi -> return Val(bounds.lo)
+            }
+        }
         .Unary(operator, operand) -> {
             if operator == TUnaryOp.Neg {
                 inner :: sema_expr_integer_literal_value(operand) ?? return None
@@ -371,7 +377,7 @@ struct SemaExprOperatorResolution {
     candidate: SemaCallMethodCandidate
     receiver_is_left: Bool
 }
-fn sema_expr_operator_candidate_from_function(function: SemaRegistrationFunction, graph: SemaRegistrationGraph, owner_type: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: String, caller_package: String, lexical_generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+fn sema_expr_operator_candidate_from_function(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, owner_type: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: String, caller_package: String, lexical_generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     if function.symbol.name != method || function.parameters.len() == 0 -> return None
     trait_symbol_value :: trait_symbol ?? return None
     method_ref := TMethodRef{symbol: function.symbol.id, name: method, mangled: false, trait_owner: Val(trait_symbol_value.id), operator_identity: Val("{type_name(owner_type)}::{trait_name}::{method}<{type_name(rhs)}>")}
@@ -490,118 +496,30 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
     caller_module := environment.module_identity
     if scopes.frames.len() > 0 -> caller_module = scopes.frames[0].owner
     caller_package := environment.package_identity
-    loop graph_module in graph.modules {
-        loop nominal in graph_module.nominals {
-            owner_name :: sema_expr_type_base_name(nominal.ty) ?? next
-            if owner_name != receiver_name -> next
-            owner_inference :: sema_infer_registered_nominal(nominal, graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
-            if !owner_inference.complete || !owner_inference.compatible -> next
-            owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
-            loop implementation in graph_module.impls {
-                if !sema_expr_operator_target_matches(implementation, nominal) -> next
-                if implementation.trait_name != (Val(trait_name)) -> next
-                if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-                implementation_rhs := implementation.operator_rhs
-                if implementation_rhs == None -> implementation_rhs = Val(owner_type)
-                qualified_rhs := sema_inference_substitute_type_bindings(implementation_rhs ?? owner_type, owner_inference.substitutions)
-                if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) -> next
-                trait_symbol := implementation.trait_symbol
-                if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
-                loop function in implementation.methods {
-                    if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph_module.module_identity, graph_module.package_identity) -> next
-                    specialized := function
-                    specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
-                    candidate :: sema_expr_operator_candidate_from_function(specialized, graph, owner_type, trait_symbol, trait_name, method, qualified_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
-                    duplicate := false
-                    loop existing in candidates {
-                        if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
-                            duplicate = true
-                        }
-                    }
-                    if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
-                }
-            }
-            if nominal.source == {
-                .SourceAST(item) -> {
-                    if item == {
-                        .Struct(definition) -> {
-                            loop block in definition.trait_impls {
-                                if block.trait_name != trait_name -> next
-                                if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-                                block_rhs := block.operator_rhs ?? owner_type
-                                block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
-                                if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
-                                trait_symbol :: sema_type_graph_trait_symbol(graph, graph_module.module_identity, trait_name)
-                                loop source_method in block.methods {
-                                    if source_method.name != method -> next
-                                    registered := SemaRegistrationFunction?{None}
-                                    loop function in nominal.methods {
-                                        if function.declaration.span == source_method.span -> registered = Val(function)
-                                    }
-                                    function :: registered ?? next
-                                    if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph_module.module_identity, graph_module.package_identity) -> next
-                                    specialized := function
-                                    specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
-                                    candidate :: sema_expr_operator_candidate_from_function(specialized, graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
-                                    duplicate := false
-                                    loop existing in candidates {
-                                        if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
-                                            duplicate = true
-                                        }
-                                    }
-                                    if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
-                                }
-                            }
-                        }
-                        .Enum(definition) -> {
-                            loop block in definition.trait_impls {
-                                if block.trait_name != trait_name -> next
-                                if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-                                block_rhs := block.operator_rhs ?? owner_type
-                                block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
-                                if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
-                                trait_symbol :: sema_type_graph_trait_symbol(graph, graph_module.module_identity, trait_name)
-                                loop source_method in block.methods {
-                                    if source_method.name != method -> next
-                                    registered := SemaRegistrationFunction?{None}
-                                    loop function in nominal.methods {
-                                        if function.declaration.span == source_method.span -> registered = Val(function)
-                                    }
-                                    function :: registered ?? next
-                                    if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph_module.module_identity, graph_module.package_identity) -> next
-                                    specialized := function
-                                    specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
-                                    candidate :: sema_expr_operator_candidate_from_function(specialized, graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
-                                    duplicate := false
-                                    loop existing in candidates {
-                                        if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
-                                            duplicate = true
-                                        }
-                                    }
-                                    if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
-                            }
-                        }
-                        }
-                        else -> {}
-                    }
-                }
-                else -> {}
-            }
-        }
-    }
-    loop graph_module in graph.modules {
-        loop implementation in graph_module.impls {
-            if implementation.target_type_name != receiver_name -> next
+    // Only the nominals and impls registered under the receiver's base name,
+    // in the module/row order of the whole-graph scans these rows replace.
+    nominal_rows :: graph.nominal_rows.get(receiver_name) ?? [SemaRegistrationRowRef]{}
+    loop nominal_row in nominal_rows {
+        module_index :: nominal_row.module_index
+        nominal :: graph.modules[module_index].nominals[nominal_row.row]
+        owner_inference :: sema_infer_registered_nominal(nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
+        if !owner_inference.complete || !owner_inference.compatible -> next
+        owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
+        loop implementation in graph.modules[module_index].impls {
+            if !sema_expr_operator_target_matches(implementation, nominal) -> next
             if implementation.trait_name != (Val(trait_name)) -> next
             if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-            owner_type := implementation.target_type
-            implementation_rhs := implementation.operator_rhs ?? owner_type
-            if !sema_expr_operator_rhs_matches(Val(implementation_rhs), rhs_type) -> next
+            implementation_rhs := implementation.operator_rhs
+            if implementation_rhs == None -> implementation_rhs = Val(owner_type)
+            qualified_rhs := sema_inference_substitute_type_bindings(implementation_rhs ?? owner_type, owner_inference.substitutions)
+            if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) -> next
             trait_symbol := implementation.trait_symbol
             if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
             loop function in implementation.methods {
-                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph_module.module_identity, graph_module.package_identity) -> next
-                candidate :: sema_expr_operator_candidate_from_function(function, graph, owner_type, trait_symbol, trait_name, method, implementation_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
+                specialized := function
+                specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+                candidate :: sema_expr_operator_candidate_from_function(specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, qualified_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                 duplicate := false
                 loop existing in candidates {
                     if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
@@ -610,6 +528,95 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                 }
                 if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
             }
+        }
+        if nominal.source == {
+            .SourceAST(item) -> {
+                if item == {
+                    .Struct(definition) -> {
+                        loop block in definition.trait_impls {
+                            if block.trait_name != trait_name -> next
+                            if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
+                            block_rhs := block.operator_rhs ?? owner_type
+                            block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
+                            if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
+                            trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
+                            loop source_method in block.methods {
+                                if source_method.name != method -> next
+                                registered := SemaRegistrationFunction?{None}
+                                loop function in nominal.methods {
+                                    if function.declaration.span == source_method.span -> registered = Val(function)
+                                }
+                                function :: registered ?? next
+                                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
+                                specialized := function
+                                specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+                                candidate :: sema_expr_operator_candidate_from_function(specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+                                duplicate := false
+                                loop existing in candidates {
+                                    if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
+                                        duplicate = true
+                                    }
+                                }
+                                if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
+                            }
+                        }
+                    }
+                    .Enum(definition) -> {
+                        loop block in definition.trait_impls {
+                            if block.trait_name != trait_name -> next
+                            if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
+                            block_rhs := block.operator_rhs ?? owner_type
+                            block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
+                            if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
+                            trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
+                            loop source_method in block.methods {
+                                if source_method.name != method -> next
+                                registered := SemaRegistrationFunction?{None}
+                                loop function in nominal.methods {
+                                    if function.declaration.span == source_method.span -> registered = Val(function)
+                                }
+                                function :: registered ?? next
+                                if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
+                                specialized := function
+                                specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+                                candidate :: sema_expr_operator_candidate_from_function(specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+                                duplicate := false
+                                loop existing in candidates {
+                                    if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
+                                        duplicate = true
+                                    }
+                                }
+                                if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
+    impl_rows :: graph.impl_rows.get(receiver_name) ?? [SemaRegistrationRowRef]{}
+    loop impl_row in impl_rows {
+        module_index :: impl_row.module_index
+        implementation :: graph.modules[module_index].impls[impl_row.row]
+        if implementation.trait_name != (Val(trait_name)) -> next
+        if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
+        owner_type := implementation.target_type
+        implementation_rhs := implementation.operator_rhs ?? owner_type
+        if !sema_expr_operator_rhs_matches(Val(implementation_rhs), rhs_type) -> next
+        trait_symbol := implementation.trait_symbol
+        if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
+        loop function in implementation.methods {
+            if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
+            candidate :: sema_expr_operator_candidate_from_function(function, environment.registration_graph, owner_type, trait_symbol, trait_name, method, implementation_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+            duplicate := false
+            loop existing in candidates {
+                if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
+                    duplicate = true
+                }
+            }
+            if !duplicate -> &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
         }
     }
     candidates
@@ -1828,6 +1835,61 @@ fn sema_expr_integer_range_error(value: Int, signed: Bool, bits: Int, span: Span
     &diagnostics.push(sema_error("E1003", span, "{value} does not fit exactly in {ty_name}", "{ty_name} holds every whole number only from {bounds.lo} through {bounds.hi}", "use a whole-number type, or write a value from {bounds.lo} through {bounds.hi}"))
 }
 
+// D-INTBIG1: the token's i64 field is only a fast path. An integer literal's
+// exact value comes from its preserved spelling (Rust
+// `exact_integer_literal`); a spelling that is not an integer literal keeps
+// the token value.
+fn sema_expr_exact_integer_literal(value: Int, raw: String?) -> Int Never! {
+    text :: raw ?? return value
+    bytes :: text.bytes()
+    i := 0
+    negative := false
+    if bytes.len() > 0 && (Int.from_u8(bytes[0]) == 45 || Int.from_u8(bytes[0]) == 43) {
+        negative = Int.from_u8(bytes[0]) == 45
+        i = 1
+    }
+    radix := 10
+    if i + 1 < bytes.len() && Int.from_u8(bytes[i]) == 48 {
+        marker :: Int.from_u8(bytes[i + 1])
+        if marker == 120 || marker == 88 -> radix = 16
+        if marker == 111 || marker == 79 -> radix = 8
+        if marker == 98 || marker == 66 -> radix = 2
+        if radix != 10 -> i += 2
+    }
+    exact := 0
+    digits := 0
+    loop i < bytes.len() {
+        code :: Int.from_u8(bytes[i])
+        i += 1
+        if code == 95 -> next
+        digit :: if {
+            code >= 48 && code <= 57 -> code - 48
+            code >= 97 && code <= 122 -> code - 87
+            code >= 65 && code <= 90 -> code - 55
+            else -> radix
+        }
+        if digit >= radix -> return value
+        exact = exact * radix + digit
+        digits += 1
+    }
+    if digits == 0 -> return value
+    if negative -> -exact else -> exact
+}
+
+// D-INTBIG1: a literal outside the i64 range keeps its exact value as a
+// BigInt constant (Rust TIR `CtLit(BigInt)`); a fixed-width one crosses the
+// checked Int-to-fixed conversion, as in Rust's lowering.
+fn sema_expr_int_literal_tir(value: Int, ty: Type, width: TIntegerWidth?, span: Span, environment: SemaScopeEnvironment) -> TExpr? {
+    bounds :: integer_bounds_exact(value)
+    if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 {
+        return Val(TExpr{ty: ty, kind: TExprKind.IntLit{value: value, width: width}, span: span, integer_bounds: Val(bounds), cost: None})
+    }
+    big :: TExpr{ty: Type.Int, kind: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: "{value}"}}, span: span, integer_bounds: Val(bounds), cost: None}
+    if width == None -> return Val(big)
+    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    sema_expr_numeric_conversion(big, ty, span, line)
+}
+
 fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     if expected != None {
         contextual_expected :: expected
@@ -1859,7 +1921,7 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
         }
         else -> {}
     }
-    bounded :: TExpr{ty: ty, kind: TExprKind.IntLit{value: value, width: tir_width}, span: span, integer_bounds: Val(integer_bounds_exact(value)), cost: None}
+    bounded :: sema_expr_int_literal_tir(value, ty, tir_width, span, environment) ?? return None
     sema_expr_expected(bounded, expected, environment, &diagnostics)
 }
 
@@ -1896,7 +1958,7 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
         }
         else -> {}
     }
-    operand :: TExpr{ty: ty, kind: TExprKind.IntLit{value: value, width: tir_width}, span: span, integer_bounds: Val(integer_bounds_exact(value)), cost: None}
+    operand :: sema_expr_int_literal_tir(value, ty, tir_width, span, environment) ?? return None
     bounded :: TExpr{ty: ty, kind: TExprKind.Unary{op: TUnaryOp.Neg, operand: operand}, span: span, integer_bounds: Val(integer_bounds_exact(negated)), cost: None}
     sema_expr_expected(bounded, expected, environment, &diagnostics)
 }
@@ -2093,7 +2155,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
             owner_name :: sema_expr_type_base_name(nominal.ty) ?? next
             if owner_name != receiver_name -> next
             found_owner = true
-            owner_inference :: sema_infer_registered_nominal(nominal, graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
+            owner_inference :: sema_infer_registered_nominal(nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
             if !owner_inference.complete || !owner_inference.compatible -> next
             owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
             loop function in nominal.methods {
@@ -2102,7 +2164,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
                 method_function := function
                 method_function.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
                 method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-                candidate :: sema_call_method_candidate_from_registration(method_function, graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+                candidate :: sema_call_method_candidate_from_registration(method_function, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
                 &candidates.push(candidate)
             }
         }
@@ -2144,6 +2206,8 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     if call.name == "consume" && sema_call_gate_is_unshadowed(call.name, scopes) -> return sema_single_use_check_consume(call, environment, &scopes, &state, &tail_store, &context, &diagnostics).value
     special := sema_call_try_knowledge_builtin(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if special.handled -> return special.value
+    ambient := sema_call_try_ambient_prelude(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if ambient.handled -> return ambient.value
     if sema_call_default_err_candidate(call, expected, scopes) {
         scopes.ownership_call_depth += 1
         checked_default := sema_call_check_default_err(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2629,7 +2693,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     loop argument_index < args.len() {
         argument := args[argument_index]
         if {
-            sema_call_inference_needs_context(argument.expr) -> {
+            // A decimal literal's carrier comes from the parameter it meets.
+            sema_call_inference_needs_context(argument.expr) || sema_expr_decimal_literal_operand(argument.expr, true) -> {
                 &argument_types.push(None)
             }
             else -> {
@@ -2731,7 +2796,17 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                 context.allow_string_view_read = previous_string_view_read
                 checked :: checked_value ?? return None
                 if format == StrFormat.Display && !sema_expression_interpolation_display(checked, environment, &scopes, &diagnostics) -> return None
-                if !sema_expr_format_supported(checked.ty, format) -> return None
+                // Rust interpolation check (CheckerInfer/expr.rs:3985-4126): bare
+                // Display uses the relation above and the Debug family uses
+                // `is_debuggable`; only the numeric and text selectors use the
+                // primitive table.
+                debug_family :: format == StrFormat.Debug || format == StrFormat.Pretty
+                if debug_family && !sema_call_debug_traceable(checked.ty, environment) {
+                    selector :: if format == StrFormat.Debug -> "Debug" else -> "Pretty"
+                    if sema_call_reflection_secret_bearing(checked.ty) -> &diagnostics.push(sema_error("E0112", checked.span, "secret-bearing `{type_name(checked.ty)}` cannot use `:{selector}`", "Debug output could copy cryptographic secret material into logs or diagnostics", "remove the interpolation; log a public operation label or key identifier instead")) else -> &diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't be shown with :{selector} yet", "debug interpolation needs a debuggable value", "implement `Debug` or use a debuggable part"))
+                    return None
+                }
+                if !debug_family && format != StrFormat.Display && !sema_expr_format_supported(checked.ty, format) -> return None
                 &tir_parts.push(TStrPart.Interpolation{value: checked, format: sema_expr_string_format(format)})
             }
         }
@@ -2766,11 +2841,22 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
 fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if op == UnOp.Neg {
         if operand == {
-            .Int(value, _, width, _) -> return sema_expr_negative_integer(value, width, expected, span, environment, &diagnostics)
+            .Int(value, _, width, raw) -> return sema_expr_negative_integer(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, &diagnostics)
+            // D-TYPE2-DEFAULT1: `-1.5` is one exact Decimal literal; the sign
+            // folds into its spelling unless a Float carrier is expected.
+            .Float(_, _, _, raw) -> {
+                if raw == .Val(text) {
+                    if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected(sema_expr_decimal_literal("-{text}", span), expected, environment, &diagnostics)
+                }
+            }
             else -> {}
         }
     }
-    value :: sema_check_expression(operand, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // Rust checks the operand under the surrounding expectation; only a
+    // Float carrier changes how a decimal literal operand elaborates.
+    operand_expected := Type?{None}
+    if op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true) -> operand_expected = ~expected
+    value :: sema_check_expression(operand, operand_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if op == UnOp.Neg {
         if value.ty == {
             .IntN(signed, _) -> {
@@ -2797,9 +2883,95 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
     None
 }
 
+// D-TYPE2-DEFAULT1: an untyped decimal literal is exact Decimal by default
+// and adopts the machine carrier only where Float or F32 is expected (Rust
+// `Expr::Float` inference).
+fn sema_expr_expects_machine_float(expected: Type?) -> Bool Never! {
+    expected == (Val(Type.Float)) || expected == (Val(Type.Float32))
+}
+
+fn sema_expr_decimal_literal(text: String, span: Span) -> TExpr Never! {
+    spelling :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
+    sema_tir_expr(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span)
+}
+
+fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+    if raw == .Val(text) {
+        if !sema_expr_expects_machine_float(expected) -> return sema_expr_expected(sema_expr_decimal_literal(text, span), expected, environment, &diagnostics)
+    }
+    ty := Type.Float
+    if expected == (Val(Type.Float32)) || (is_f32 && expected != (Val(Type.Float))) -> ty = Type.Float32
+    sema_expr_expected(sema_tir_expr(ty, TExprKind.FloatLit{value: value}, span), expected, environment, &diagnostics)
+}
+
+// Rust `expr_wants_expected_type` for a decimal literal operand. A binary's
+// left operand also inherits the surrounding expectation in Rust, so
+// `through_binary` follows it for an operand that is itself checked under
+// that expectation.
+fn sema_expr_decimal_literal_operand(expr: Expr, through_binary: Bool) -> Bool Never! {
+    if expr == {
+        .Float(_, _, _, _) -> true
+        .Paren(inner, _) -> sema_expr_decimal_literal_operand(inner, through_binary)
+        .Unary(op, inner, _) -> op == UnOp.Neg && sema_expr_decimal_literal_operand(inner, through_binary)
+        .Binary(_, left, _, _) -> through_binary && sema_expr_decimal_literal_operand(left, true)
+        else -> false
+    }
+}
+
+fn sema_expr_measurement_type(ty: Type) -> Bool Never! {
+    if ty == .Apply(name, _) -> return name == "Measurement"
+    false
+}
+
+fn sema_expr_scalable_unit_type(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+    sema_expr_unit_fact(ty, environment) != None || sema_expr_unit_dimension(ty, environment) != None
+}
+
+// Rust `known_unit_expr` / `known_measurement_expr` read a name's or field's
+// known type, a unit literal, a unit-receiver call, or `measurement(...)`;
+// only those right operands are probed.
+fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Ident(_, _) | .Field(_, _, _) | .UnitLit(_, _, _, _, _, _) -> true
+        .Paren(inner, _) -> sema_expr_unit_probe_shape(inner)
+        .Unary(op, inner, _) -> op == UnOp.Neg && sema_expr_unit_probe_shape(inner)
+        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> receiver == .Ident(_, _)
+        .Call(call) -> call.name == "measurement"
+        else -> false
+    }
+}
+
+// Rust `infer_binary`: the left operand keeps the surrounding expectation,
+// and a literal before a measurement (or a unit under `*` or `/`) is Float.
+fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, context: &SemaCheckContext) -> Type? {
+    if !sema_expr_decimal_literal_operand(left, true) -> return None
+    if sema_expr_expects_machine_float(expected) -> return ~expected
+    if !sema_expr_unit_probe_shape(right) -> return None
+    probe_diagnostics := [Diagnostic]{}
+    probe_tail_store := sema_statement_tail_store_init()
+    probed :: sema_probe_expression(right, None, environment, &scopes, state, &probe_tail_store, &context, &probe_diagnostics) ?? return None
+    if sema_expr_measurement_type(probed.ty) || ((op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(probed.ty, environment)) -> return Val(Type.Float)
+    None
+}
+
+// Rust `infer_binary`: for arithmetic and comparison a decimal literal on the
+// right takes the left operand's type, and Float beside a measurement or a
+// scalable unit under `*` or `/`.
+fn sema_expr_decimal_rhs_expected(op: BinOp, lhs: Type, environment: SemaScopeEnvironment) -> Type? {
+    if !(op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Le || op == BinOp.Gt || op == BinOp.Ge) -> return None
+    if sema_expr_measurement_type(lhs) -> return Val(Type.Float)
+    if (op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(lhs, environment) -> return Val(Type.Float)
+    // Any other left type is no Float carrier, so the literal stays Decimal
+    // and the operator check reports the pairing.
+    if lhs == Type.Float || lhs == Type.Float32 -> return Val(lhs)
+    None
+}
+
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked_lhs :: sema_check_expression(left, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    checked_rhs :: sema_check_expression(right, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked_lhs :: sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, &scopes, state, &context), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    rhs_expected := Type?{None}
+    if sema_expr_decimal_literal_operand(right, false) -> rhs_expected = sema_expr_decimal_rhs_expected(op, checked_lhs.ty, environment)
+    checked_rhs :: sema_check_expression(right, rhs_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5, and
     // `x != 5` is its opposite. The plain side lifts once, so the comparison
     // is the existing optional equality.
@@ -3045,16 +3217,13 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
 
 fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     return if expr == {
-        .Int(value, span, width, _) -> sema_expr_integer_literal(value, width, expected, span, environment, &diagnostics)
-        .Float(value, span, is_f32, _) -> {
-            ty := Type.Float
-            if is_f32 -> ty = Type.Float32
-            return sema_expr_expected(sema_tir_expr(ty, TExprKind.FloatLit{value: value}, span), expected, environment, &diagnostics)
-        }
+        .Int(value, span, width, raw) -> sema_expr_integer_literal(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, &diagnostics)
+        .Float(value, span, is_f32, raw) -> sema_expr_float_literal(value, is_f32, raw, span, expected, environment, &diagnostics)
         .Bool(value, span) -> sema_expr_expected(sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: value}, span), expected, environment, &diagnostics)
         .Unit(span) -> sema_expr_expected(sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span), expected, environment, &diagnostics)
         .Absent(span) -> sema_expression_absent(span, expected, &diagnostics)
         .Char(value, span) -> sema_expression_char(value, span, expected, environment, &diagnostics)
+        .Str(parts, span) -> sema_expr_check_string(parts, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .StrMatchLit(_, span) -> {
             &diagnostics.push(sema_error("E0112", span, "a pattern literal is only valid as a `take_pattern` argument", "this string has typed holes (`{{name:Type}}`), which only `take_pattern` understands", "call it as `cursor.take_pattern(\"…\")`, or drop the `:Type` for an ordinary interpolated string"))
             None
@@ -3073,6 +3242,13 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
         .Unary(op, operand, span) -> sema_expr_check_unary(op, operand, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Binary(op, left, right, span) -> sema_expr_check_binary(op, left, right, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Call(call) -> {
+            if sema_expression_contextual_result_call(call, expected, scopes) == .Val(success) {
+                payload := Expr.Unit{span: call.name_span}
+                if call.args.len() == 1 -> payload = call.args[0].expr
+                span :: Span{start: call.name_span.start, end: expr_span(payload).end}
+                if !success -> &context.failure_edges.push("")
+                return sema_expression_result_payload(payload, success, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
             sema_stmt_uninit_write_args(call.args, state, scopes, &diagnostics)
             sema_expr_check_direct_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }

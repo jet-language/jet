@@ -530,14 +530,6 @@ impl FunctionRegistry {
         // — `encode`/`decode` would become ambiguous across every impl.
         if candidates.is_empty() && !name.contains("::") {
             candidates = self.by_name.get(name).cloned().unwrap_or_default();
-            if candidates.is_empty() {
-                candidates = self
-                    .top_level_by_module_name
-                    .iter()
-                    .filter(|((_, function_name), _)| function_name == name)
-                    .flat_map(|(_, ids)| ids.iter().copied())
-                    .collect();
-            }
         }
         candidates.sort_unstable();
         candidates.dedup();

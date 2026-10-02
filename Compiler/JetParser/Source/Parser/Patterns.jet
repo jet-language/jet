@@ -17,15 +17,14 @@ use jet_lexer.[
     STRING_PART_INTERPOLATION,
     STRING_PART_TEXT,
     StringPart,
-    TOKEN_BANG,
     TOKEN_COLON,
     TOKEN_COLON_COLON,
     TOKEN_COMMA,
     TOKEN_DOT,
     TOKEN_DOT_DOT,
     TOKEN_DOT_DOT_DOT,
-    TOKEN_DOT_DOT_LT,
     TOKEN_EOF,
+    TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
     TOKEN_LBRACE,
@@ -33,7 +32,6 @@ use jet_lexer.[
     TOKEN_LPAREN,
     TOKEN_NULL,
     TOKEN_PIPE,
-    TOKEN_QUESTION,
     TOKEN_RAW_STRING,
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
@@ -135,10 +133,10 @@ fn parser_pattern_byte_text(value: Int) -> String Never! {
     String.from_bytes([U8]{U8{high}, U8{low}}) ?? ""
 }
 
-fn parser_take_pattern_bad_hole(state: &JetParserState, span: Span) {
-    parser_add_error_code(&state, "E0003", span, "a take_pattern hole must be a bare name, optionally typed", "each text hole binds a name, optionally with a type", "write a name or a name followed by `:Type`")
-}
-
+// Rust `parse_str_match_hole`: a name, then an optional `:Type`. Tokens
+// after that are not an error here (the `==` gate and the typed
+// `take_pattern` gate reject them first); they only widen the hole span.
+// A hole that does not parse is fatal, as Rust returns it as `Err`.
 fn parser_take_pattern_text_hole(state: &JetParserState, part: StringPart) -> StrMatchPart {
     nested := JetParserState{
         tokens: part.tokens,
@@ -151,34 +149,22 @@ fn parser_take_pattern_text_hole(state: &JetParserState, part: StringPart) -> St
         result_handler_depth: state.result_handler_depth,
         statement_start: -1,
     }
-    name_token :: parser_current(&nested)
-    if name_token.kind != TOKEN_IDENT {
-        parser_take_pattern_bad_hole(&state, part.span)
-        return StrMatchPart.Hole{name: "_", ty: None, span: part.span}
-    }
-    parser_bump(&nested)
+    name_token :: parser_expect_name(&nested, "in a pattern hole")
     ty := Type?{None}
-    if parser_current_kind(&nested) == TOKEN_COLON {
+    if nested.diagnostics.len() == 0 && parser_current_kind(&nested) == TOKEN_COLON {
         parser_bump(&nested)
-        if parser_current_kind(&nested) == TOKEN_EOF {
-            parser_take_pattern_bad_hole(&state, name_token.span)
-            return StrMatchPart.Hole{name: name_token.payload.decoded, ty: None, span: name_token.span}
-        }
         parsed_type :: parser_parse_type(&nested, 1)
         ty = Val(parsed_type.ty)
     }
-    if parser_current_kind(&nested) != TOKEN_EOF {
-        parser_take_pattern_bad_hole(&state, Span{start: name_token.span.start, end: parser_current(&nested).span.end})
+    if nested.diagnostics.len() > 0 {
+        if parser_aborting(&state) -> return StrMatchPart.Hole{name: name_token.payload.decoded, ty: None, span: name_token.span}
+        loop diagnostic in nested.diagnostics -> &state.diagnostics.push(diagnostic)
+        state.abort_mark = state.diagnostics.len()
         return StrMatchPart.Hole{name: name_token.payload.decoded, ty: None, span: name_token.span}
     }
-    index := 0
-    loop index < nested.diagnostics.len() {
-        &state.diagnostics.push(nested.diagnostics[index])
-        index += 1
-    }
-    end := name_token.span.end
-    if nested.position > 0 -> end = parser_lookahead(&nested, -1).span.end
-    StrMatchPart.Hole{name: name_token.payload.decoded, ty: ty, span: Span{start: name_token.span.start, end: end}}
+    span := name_token.span
+    if parser_current_kind(&nested) != TOKEN_EOF -> span = Span{start: name_token.span.start, end: parser_current(&nested).span.end}
+    StrMatchPart.Hole{name: name_token.payload.decoded, ty: ty, span: span}
 }
 
 fn parser_take_pattern_text_parts(state: &JetParserState, parts: [StringPart]) -> [StrMatchPart] {
@@ -273,7 +259,10 @@ fn parser_take_pattern_binary_bits(state: &JetParserState, spec: String, span: S
     BinSpec.Bits{width: width, endian: endian}
 }
 
-fn parser_take_pattern_binary_hole(state: &JetParserState, part: StringPart) -> BinMatchPart {
+// Rust `parse_bin_match_hole`: a hole without a name or colon is dropped
+// (E1007 at the whole literal or the name); a bad or trailing spec keeps
+// the hole with the fallback `U8` reading.
+fn parser_take_pattern_binary_hole(state: &JetParserState, part: StringPart, literal_span: Span) -> BinMatchPart? {
     nested := JetParserState{
         tokens: part.tokens,
         position: 0,
@@ -287,42 +276,38 @@ fn parser_take_pattern_binary_hole(state: &JetParserState, part: StringPart) -> 
     }
     name_token :: parser_current(&nested)
     if name_token.kind != TOKEN_IDENT {
-        parser_take_pattern_binary_bad_hole(&state, part.span)
-        return BinMatchPart.Hole{name: "_", spec: BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}, span: part.span}
+        parser_take_pattern_binary_bad_hole(&state, literal_span)
+        return None
     }
     parser_bump(&nested)
     if parser_current_kind(&nested) != TOKEN_COLON {
         parser_take_pattern_binary_bad_hole(&state, name_token.span)
-        return BinMatchPart.Hole{name: name_token.payload.decoded, spec: BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}, span: name_token.span}
+        return None
     }
     parser_bump(&nested)
-    spec_token :: parser_current(&nested)
-    if spec_token.kind == TOKEN_DOT_DOT_DOT {
-        parser_bump(&nested)
-        if parser_current_kind(&nested) != TOKEN_EOF {
-            parser_take_pattern_binary_bad_hole(&state, Span{start: name_token.span.start, end: parser_current(&nested).span.end})
-        }
-        return BinMatchPart.Hole{name: name_token.payload.decoded, spec: BinSpec.Rest, span: parser_cover(name_token.span, spec_token.span)}
-    }
-    if spec_token.kind != TOKEN_IDENT {
-        parser_take_pattern_binary_bad_hole(&state, spec_token.span)
-        return BinMatchPart.Hole{name: name_token.payload.decoded, spec: BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}, span: parser_cover(name_token.span, spec_token.span)}
-    }
-    parser_bump(&nested)
+    spec_token :: parser_bump(&nested)
+    spec := BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}
     if parser_current_kind(&nested) != TOKEN_EOF {
-        parser_take_pattern_binary_bad_hole(&state, Span{start: name_token.span.start, end: parser_current(&nested).span.end})
+        parser_take_pattern_binary_bad_hole(&state, spec_token.span)
+    } else if spec_token.kind == TOKEN_DOT_DOT_DOT {
+        spec = BinSpec.Rest
+    } else if spec_token.kind == TOKEN_IDENT {
+        spec = parser_take_pattern_binary_bits(&state, spec_token.payload.decoded, spec_token.span)
+    } else {
+        parser_take_pattern_binary_bad_hole(&state, spec_token.span)
     }
-    spec := parser_take_pattern_binary_bits(&state, spec_token.payload.decoded, spec_token.span)
-    BinMatchPart.Hole{name: name_token.payload.decoded, spec: spec, span: parser_cover(name_token.span, spec_token.span)}
+    Val(BinMatchPart.Hole{name: name_token.payload.decoded, spec: spec, span: parser_cover(name_token.span, spec_token.span)})
 }
 
-fn parser_take_pattern_binary_parts(state: &JetParserState, parts: [StringPart]) -> [BinMatchPart] {
+fn parser_take_pattern_binary_parts(state: &JetParserState, parts: [StringPart], literal_span: Span) -> [BinMatchPart] {
     match_parts := [BinMatchPart]{}
     loop part in parts {
         if part.kind == {
             STRING_PART_TEXT -> if part.text != "" -> &match_parts.push(BinMatchPart.Lit{bytes: part.text.bytes()})
             STRING_PART_BYTE -> &match_parts.push(BinMatchPart.Lit{bytes: [U8]{U8{part.byte}}})
-            STRING_PART_INTERPOLATION -> &match_parts.push(parser_take_pattern_binary_hole(&state, part))
+            STRING_PART_INTERPOLATION -> {
+                if parser_take_pattern_binary_hole(&state, part, literal_span) == .Val(hole) -> &match_parts.push(hole)
+            }
             else -> {}
         }
     }
@@ -344,12 +329,21 @@ fn parser_take_pattern_binary_parts(state: &JetParserState, parts: [StringPart])
     match_parts
 }
 
+// Rust `parse_take_pattern_literal`: a typed `[U8]{"…"}` / `String{"…"}`
+// first; typed text holes must be bare names, optionally typed (fatal
+// E0003 at the hole's first token), while a bare string takes any hole.
 fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> ParsedExpr {
     typed :: parser_try_take_pattern_body(&state, depth + 1)
     if typed == .Val(body) {
         if body.binary {
-            parts := parser_take_pattern_binary_parts(&state, body.parts)
+            parts := parser_take_pattern_binary_parts(&state, body.parts, body.span)
             return ParsedExpr{expr: Expr.BinMatchLit{parts: parts, span: body.span}, span: body.span}
+        }
+        loop part in body.parts {
+            if part.kind != STRING_PART_INTERPOLATION || parser_pattern_hole_shape_ok(part) -> next
+            bad_span :: if part.tokens.len() > 0 -> part.tokens[0].span else -> body.span
+            parser_add_error(&state, bad_span, "a `take_pattern` hole must be a bare name, optionally typed", "each hole binds a name or a typed, fallibly-parsed name, the same grammar an `if ==` pattern hole uses", "write `{{name}}` or `{{name:Type}}`")
+            return ParsedExpr{expr: Expr.Unit{span: body.span}, span: body.span}
         }
         parts := parser_take_pattern_text_parts(&state, body.parts)
         return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: body.span}, span: body.span}
@@ -363,26 +357,64 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
     parser_add_error_code(&state, "E0003", token.span, "`take_pattern` needs a literal text or binary pattern", "the pattern is matched at compile time and cannot be computed", "write a string literal, or use `[U8]{{\"…\"}}` for bytes")
     ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
 }
+// Rust `try_pattern_rhs`: the heads that start a pattern after `==` or as a
+// bare arm head. Anything else is an ordinary value.
 fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == {
-        TOKEN_DOT -> parser_kind_at(&state, 1) == TOKEN_IDENT
-        TOKEN_NULL -> true
-        TOKEN_BANG -> true
-        TOKEN_QUESTION -> true
-        TOKEN_LBRACE -> true
-        TOKEN_INT -> {
-            next_kind :: parser_kind_at(&state, 1)
-            next_kind == TOKEN_DOT_DOT || next_kind == TOKEN_DOT_DOT_LT
+        TOKEN_DOT -> {
+            next :: parser_lookahead(&state, 1)
+            if next.kind == TOKEN_IDENT -> return parser_pascal_name(next.payload.decoded) || next.payload.decoded.starts_with("$")
+            next.kind == TOKEN_NULL || next.kind == TOKEN_LBRACE
         }
-        TOKEN_STRING -> token.payload.interpolations > 0
+        TOKEN_NULL -> true
+        TOKEN_LBRACKET -> parser_typed_pattern_ahead(&state)
+        TOKEN_LBRACE -> parser_literal_fields_ahead(&state) || ((parser_kind_at(&state, 1) == TOKEN_STRING || parser_kind_at(&state, 1) == TOKEN_RAW_STRING) && parser_kind_at(&state, 2) == TOKEN_COLON)
+        TOKEN_STRING -> parser_string_pattern_ahead(token)
         // D-ENUMDOT1: a bare `Variant(…)` or `Variant | …` is a pattern that
-        // lacks its leading dot (E0367). `None` is the absent-value literal
-        // (Rust lexes it as a keyword), so it always starts a pattern.
-        TOKEN_IDENT -> parser_bare_variant_head(&state) || token.payload.decoded == "None"
-        TOKEN_RAW_STRING -> token.payload.interpolations > 0
+        // lacks its leading dot (E0367).
+        TOKEN_IDENT -> parser_typed_pattern_ahead(&state) || parser_bare_variant_head(&state)
         else -> false
     }
+}
+
+// Rust `try_typed_pattern_str_body`: `[U8]{"…"}`, `[U8#N]{"…"}` or
+// `String{"…"}` (the retired `.{` spelling too). A `String` head is a
+// pattern only when its string has holes that all read as bare names.
+fn parser_typed_pattern_ahead(state: &JetParserState) -> Bool Never! {
+    token :: parser_current(&state)
+    text :: token.kind == TOKEN_IDENT && token.payload.decoded == "String"
+    offset := 1
+    if !text {
+        if token.kind != TOKEN_LBRACKET || parser_kind_at(&state, 1) != TOKEN_IDENT || parser_lookahead(&state, 1).payload.decoded != "U8" -> return false
+        offset = 2
+        if parser_kind_at(&state, 2) == TOKEN_HASH {
+            loop offset < 8 && parser_kind_at(&state, offset) != TOKEN_RBRACKET && parser_kind_at(&state, offset) != TOKEN_EOF -> offset += 1
+        }
+        if parser_kind_at(&state, offset) != TOKEN_RBRACKET -> return false
+        offset += 1
+    }
+    if parser_kind_at(&state, offset) == TOKEN_DOT -> offset += 1
+    if parser_kind_at(&state, offset) != TOKEN_LBRACE || parser_kind_at(&state, offset + 2) != TOKEN_RBRACE -> return false
+    literal :: parser_lookahead(&state, offset + 1)
+    if literal.kind == TOKEN_STRING && (!text || parser_string_pattern_ahead(literal)) -> return true
+    literal.kind == TOKEN_RAW_STRING && !text
+}
+
+// Rust `try_str_match_pattern`: a string with holes, each a bare name
+// optionally followed by `:Type`.
+fn parser_string_pattern_ahead(token: Token) -> Bool Never! {
+    if token.payload.interpolations == 0 -> return false
+    loop part in token.payload.string_parts {
+        if part.kind == STRING_PART_INTERPOLATION && !parser_pattern_hole_shape_ok(part) -> return false
+    }
+    true
+}
+
+fn parser_pattern_hole_shape_ok(part: StringPart) -> Bool Never! {
+    if part.tokens.len() == 0 || part.tokens[0].kind != TOKEN_IDENT -> return false
+    if part.tokens.len() == 1 || part.tokens[1].kind == TOKEN_EOF -> return true
+    part.tokens[1].kind == TOKEN_COLON && part.tokens.len() >= 3
 }
 
 // D-PAT-NAMED-NEST1=A: `allow_named` admits the named payload form
@@ -399,6 +431,10 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int, allow_named: Bool) -
     end := first.span
     loop parser_current_kind(&state) == TOKEN_PIPE {
         parser_bump(&state)
+        if !parser_pattern_rhs_ahead(&state) && !(parser_current_kind(&state) == TOKEN_IDENT && parser_pascal_name(parser_current(&state).payload.decoded) && !parser_constant_name(parser_current(&state).payload.decoded)) {
+            parser_add_error_here(&state, "expected a variant pattern after `|` in an or-pattern", "or-patterns join two variant patterns: `.A(x) | .B(x)`", "write a leading-dot variant after `|`")
+            break
+        }
         // D-PATO: any bare PascalCase alternative lacks its leading dot.
         alternative :: parser_current(&state)
         if alternative.kind == TOKEN_IDENT && parser_pascal_name(alternative.payload.decoded) && !parser_constant_name(alternative.payload.decoded) && parser_kind_at(&state, 1) != TOKEN_LPAREN && parser_kind_at(&state, 1) != TOKEN_PIPE && parser_kind_at(&state, 1) != TOKEN_DOT {
@@ -415,38 +451,21 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int, allow_named: Bool) -
 
 fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bool) -> ParsedPattern {
     start :: parser_current(&state)
-    if start.kind == TOKEN_QUESTION {
-        parser_bump(&state)
-        binding :: parser_expect_name(&state, "after `?` in a present-value pattern")
-        span :: parser_cover(start.span, binding.span)
-        return ParsedPattern{pattern: Pattern.Present{binding: binding.payload.decoded, binding_span: binding.span, inner: None, span: span}, span: span}
+    if parser_try_take_pattern_body(&state, depth + 1) == .Val(body) {
+        if body.binary -> return ParsedPattern{pattern: Pattern.BinMatch{parts: parser_take_pattern_binary_parts(&state, body.parts, body.span), span: body.span}, span: body.span}
+        return ParsedPattern{pattern: Pattern.StrMatch{parts: parser_take_pattern_text_parts(&state, body.parts), span: body.span}, span: body.span}
     }
-    if start.kind == TOKEN_BANG || start.kind == TOKEN_NULL {
-        parser_bump(&state)
-        return ParsedPattern{pattern: Pattern.Absent{span: start.span}, span: start.span}
-    }
-    // Rust lexes `None` as the absent literal: one token, never a struct
-    // pattern head before a block brace.
-    if start.kind == TOKEN_IDENT && start.payload.decoded == "None" {
+    if start.kind == TOKEN_NULL {
         parser_bump(&state)
         return ParsedPattern{pattern: Pattern.Variant{variant: "None", bindings: [PatSlot]{}, leading_dot: false, span: start.span}, span: start.span}
     }
     if start.kind == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, start.span, depth + 1)
-    if start.kind == TOKEN_STRING || start.kind == TOKEN_RAW_STRING -> return parser_parse_string_pattern(&state)
-    if start.kind == TOKEN_INT {
+    if start.kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+        parser_add_fatal_code(&state, "E0320", start.span, "inferred record patterns use `{{…}}`, not `.{{…}}`", "D-LIT-DOT1 drops the constructor dot from every literal head", "write `{{ kind: …, field, .. }}`")
         parser_bump(&state)
-        low :: start.payload.integer ?? 0
-        range_kind :: parser_current_kind(&state)
-        if range_kind == TOKEN_DOT_DOT || range_kind == TOKEN_DOT_DOT_LT {
-            parser_bump(&state)
-            high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
-            value :: high.payload.integer ?? low
-            span :: parser_cover(start.span, high.span)
-            return ParsedPattern{pattern: Pattern.Range{lo: low, hi: value, span: span}, span: span}
-        }
-        return ParsedPattern{pattern: Pattern.Range{lo: low, hi: low, span: start.span}, span: start.span}
+        return parser_parse_struct_pattern(&state, start.span, depth + 1)
     }
-    if start.kind == TOKEN_LPAREN || start.kind == TOKEN_LBRACKET -> return parser_parse_pattern_sequence(&state, depth + 1)
+    if start.kind == TOKEN_STRING -> return parser_parse_string_pattern(&state)
     leading_dot := false
     path := ""
     path_span := start.span
@@ -454,7 +473,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
         start.kind == TOKEN_DOT -> {
             parser_bump(&state)
             leading_dot = true
-            name :: parser_expect_name(&state, "after `.` in a variant pattern")
+            name :: if parser_current_kind(&state) == TOKEN_NULL -> parser_bump(&state) else -> parser_expect_name(&state, "after `.` in a variant pattern")
             path = name.payload.decoded
             path_span = name.span
         }
@@ -537,13 +556,9 @@ fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
     if start.kind == TOKEN_INT {
         parser_bump(&state)
         low :: start.payload.integer ?? 0
-        range_kind :: parser_current_kind(&state)
-        if range_kind == TOKEN_DOT_DOT || range_kind == TOKEN_DOT_DOT_LT {
-            parser_bump(&state)
-            high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
-            return PatSlot.Range{lo: low, hi: high.payload.integer ?? low}
-        }
-        return PatSlot.Range{lo: low, hi: low}
+        parser_expect(&state, TOKEN_DOT_DOT, "`..` after the lower bound of a range pattern")
+        high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
+        return PatSlot.Range{lo: low, hi: high.payload.integer ?? low}
     }
     name :: parser_expect_name(&state, "in a variant binding")
     if name.payload.decoded == "_" -> PatSlot.Wildcard else -> PatSlot.Bind{name: name.payload.decoded, span: name.span}
@@ -610,25 +625,6 @@ fn parser_parse_named_pattern_slots(state: &JetParserState, variant: String, dep
     (slots: slots, end: close.span)
 }
 
-fn parser_parse_pattern_sequence(state: &JetParserState, depth: Int) -> ParsedPattern {
-    open :: parser_bump(&state)
-    close_kind :: if open.kind == TOKEN_LBRACKET -> TOKEN_RBRACKET else -> TOKEN_RPAREN
-    variant :: if open.kind == TOKEN_LBRACKET -> "list" else -> "tuple"
-    bindings := [PatSlot]{}
-    if parser_current_kind(&state) != close_kind {
-        loop {
-            &bindings.push(parser_parse_pattern_slot(&state, depth + 1))
-            if parser_current_kind(&state) == close_kind -> break
-            if parser_current_kind(&state) != TOKEN_COMMA -> break
-            parser_bump(&state)
-            if parser_current_kind(&state) == close_kind -> break
-        }
-    }
-    close :: parser_expect(&state, close_kind, "the matching delimiter after pattern bindings")
-    span :: parser_cover(open.span, close.span)
-    ParsedPattern{pattern: Pattern.Variant{variant: variant, bindings: bindings, leading_dot: false, span: span}, span: span}
-}
-
 fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: Int) -> ParsedPattern {
     open :: parser_bump(&state)
     fields := [StructPatField]{}
@@ -637,14 +633,19 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
         loop {
             if parser_current_kind(&state) == TOKEN_DOT_DOT {
                 rest = Val(parser_bump(&state).span)
-                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                break
             }
             field :: parser_expect_name(&state, "in a struct pattern")
             if {
                 parser_current_kind(&state) == TOKEN_COLON -> {
                     parser_bump(&state)
-                    value :: parser_parse_expression(&state, 1, depth + 1)
-                    &fields.push(StructPatField.Value{field: field.payload.decoded, field_span: field.span, value: value.expr})
+                    if parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_COMMA || parser_kind_at(&state, 1) == TOKEN_RBRACE) {
+                        local :: parser_bump(&state)
+                        &fields.push(StructPatField.Bind{field: field.payload.decoded, field_span: field.span, local: local.payload.decoded, local_span: local.span})
+                    } else {
+                        value :: parser_parse_expression_no_struct_lit(&state, depth + 1)
+                        &fields.push(StructPatField.Value{field: field.payload.decoded, field_span: field.span, value: value.expr})
+                    }
                 }
                 else -> {
                     &fields.push(StructPatField.Bind{field: field.payload.decoded, field_span: field.span, local: field.payload.decoded, local_span: field.span})
@@ -661,25 +662,9 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
     ParsedPattern{pattern: Pattern.Struct{fields: fields, rest: rest, span: span}, span: span}
 }
 
-fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern Never! {
+fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
     token :: parser_bump(&state)
-    parts := [StrMatchPart]{}
-    if {
-        token.payload.string_parts.len() > 0 -> {
-            loop part in token.payload.string_parts {
-                if part.kind == {
-                    STRING_PART_TEXT -> &parts.push(StrMatchPart.Lit{text: part.text})
-                    STRING_PART_INTERPOLATION -> {
-                        name :: if part.tokens.len() > 1 && part.tokens[0].kind == TOKEN_IDENT -> part.tokens[0].payload.decoded else -> "_"
-                        &parts.push(StrMatchPart.Hole{name: name, ty: None, span: part.span})
-                    }
-                    else -> {}
-                }
-            }
-        }
-        else -> {
-            &parts.push(StrMatchPart.Lit{text: token.payload.decoded})
-        }
-    }
+    parts := parser_take_pattern_text_parts(&state, token.payload.string_parts)
+    if token.payload.string_parts.len() == 0 -> &parts.push(StrMatchPart.Lit{text: token.payload.decoded})
     ParsedPattern{pattern: Pattern.StrMatch{parts: parts, span: token.span}, span: token.span}
 }

@@ -84,7 +84,7 @@ fn jet_rust_emit_type(ctx: &JetRustEmitContext, source: MIRType) -> String Never
         .Float -> "f64"
         .Float32 -> "f32"
         .Bool -> "bool"
-        .String -> "String"
+        .String -> if jet_rust_emit_is_core_layer(&ctx) -> "&'static str" else -> "String"
         .Char -> "char"
         .List(inner) -> if jet_rust_emit_is_columnar_type(&ctx, inner) -> "{ctx.config.root_prefix}JetColumnList<{jet_rust_emit_type(&ctx, inner)}>" else -> "Vec<{jet_rust_emit_type(&ctx, inner)}>"
         .Map(key, value) -> "{ctx.config.root_prefix}JetMap<{jet_rust_emit_type(&ctx, key)}, {jet_rust_emit_type(&ctx, value)}>"
@@ -180,7 +180,7 @@ fn jet_rust_emit_c_abi_unit_enum(variants: [MIRVariant]) -> Bool Never! {
 }
 
 fn jet_rust_emit_c_abi_nominal_name(definition: MIRTypeDef, kind: String) -> String Never! {
-    "__jet_c_abi_{kind}_{jet_rust_emit_sanitize(definition.key)}"
+    jet_rust_emit_generated_path("__jet_c_abi_{kind}::{definition.key}")
 }
 
 fn jet_rust_emit_c_abi_record_definition(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
@@ -423,7 +423,10 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIR
             if layout == .Columnar -> return
             record_type :: MIRType{kind: MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}}, identity: Val(definition.id), layout: mir_type_layout(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}})}
             visited := [MIRTypeID]{}
-            if !jet_rust_emit_c_abi_type_supported(&ctx, record_type, &visited) -> return
+            if !jet_rust_emit_c_abi_type_supported(&ctx, record_type, &visited) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C ABI record has a field with no checked physical representation", "every stored field of a `#layout(C)` record must be a C scalar, fixed array, pointer, C record, or tagged C enum", Val(definition.span))
+                return
+            }
             jet_rust_emit_layout_attributes(definition, &lines)
             &lines.push("#[derive(Clone, Copy)]")
             name := jet_rust_emit_c_abi_nominal_name(definition, "record")
@@ -437,12 +440,17 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIR
             &lines.push("}}")
         }
         .Enum(variants, _) -> {
+            // MIRRust emit_c_abi_enums: only an enum with a checked C tag is a
+            // C ABI row; a payload-free one needs no union carrier.
+            enum_tag :: definition.c_layout_tag ?? return
             if jet_rust_emit_c_abi_unit_enum(variants) -> return
             enum_type :: MIRType{kind: MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}}, identity: Val(definition.id), layout: mir_type_layout(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}})}
             visited := [MIRTypeID]{}
-            if !jet_rust_emit_c_abi_type_supported(&ctx, enum_type, &visited) -> return
+            if !jet_rust_emit_c_abi_type_supported(&ctx, enum_type, &visited) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedForeign, "E0003", "C ABI enum has a payload with no checked physical representation", "every payload of a tagged C enum must be a C scalar, fixed array, pointer, C record, or tagged C enum", Val(definition.span))
+                return
+            }
             name := jet_rust_emit_c_abi_nominal_name(definition, "enum")
-            enum_tag :: definition.c_layout_tag ?? return
             union_name :: "{name}_payload"
             loop variant in variants {
                 if variant.payload == {
@@ -579,7 +587,7 @@ fn jet_rust_emit_current_generic_parameter(ctx: &JetRustEmitContext, name: MIRNo
 }
 
 fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args: [MIRType]) -> String Never! {
-    if args.len() == 0 && jet_rust_emit_current_generic_parameter(&ctx, name) -> return name.name
+    if args.len() == 0 && jet_rust_emit_current_generic_parameter(&ctx, name) -> return jet_rust_emit_mangle(name.name)
     if args.len() == 0 && name.name == "Unit" -> return "()"
     if args.len() == 0 && name.name == "Never" -> return "std::convert::Infallible"
     if args.len() == 0 && name.name == "Stm" -> return "{ctx.config.root_prefix}JetSharedTransaction"
@@ -626,7 +634,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
             }
             else -> {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR nominal type is missing from the emitter registry", "checked Apply types must resolve to a declared or canonical runtime type", None)
-            head = jet_rust_emit_symbol("__jet_nominal_", name.name, name.id.value)
+            head = jet_rust_emit_generated_path(name.name)
             }
         }
     }
@@ -768,7 +776,7 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
     }
     nominal_id :: target_id ?? return false
     expected_trait_ref :: jet_rust_emit_capability_trait_ref(&ctx, trait_name) ?? return false
-    rows :: ~(ctx.user_impls_by_trait.get(jet_rust_emit_id_key(expected_trait_ref.id.value)) ?? [Int]{})
+    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(expected_trait_ref.id.value)) ?? [Int]{})
     loop row in rows {
         implementation :: ~ctx.program.impls[row]
         if implementation.compiler_generated || implementation.trait_ref == None -> next
@@ -936,7 +944,7 @@ fn jet_rust_emit_generic_params(ctx: &JetRustEmitContext, params: [MIRGenericPar
     loop param in params {
         bounds := [String]{}
         loop bound in param.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
-        if bounds.len() == 0 -> &rendered.push(param.name) else -> &rendered.push("{param.name}: {bounds.join(" + ")}")
+        if bounds.len() == 0 -> &rendered.push(jet_rust_emit_mangle(param.name)) else -> &rendered.push("{jet_rust_emit_mangle(param.name)}: {bounds.join(" + ")}")
     }
     "<{rendered.join(", ")}>"
 }
@@ -1078,7 +1086,10 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
         return
     }
     implementation := MIRImplDef?{None}
-    loop candidate in ctx.program.impls {
+    // Only the impls of this trait, in program order (first match wins as before).
+    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(trait_id.value)) ?? [Int]{})
+    loop row in rows {
+        candidate :: ~ctx.program.impls[row]
         if jet_rust_emit_derived_impl_matches_type(candidate, definition, trait_id, trait_key) && jet_rust_emit_impl_target_enabled(&ctx, candidate) {
             implementation = Val(candidate)
             break
@@ -1174,7 +1185,7 @@ fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MIRGe
         bounds := [String]{}
         loop bound in parameter.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
         &bounds.push("Clone")
-        &rendered.push("{parameter.name}: {bounds.join(" + ")}")
+        &rendered.push("{jet_rust_emit_mangle(parameter.name)}: {bounds.join(" + ")}")
     }
     "<{rendered.join(", ")}>"
 }
@@ -1182,7 +1193,7 @@ fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MIRGe
 fn jet_rust_emit_columnar_generic_args(params: [MIRGenericParam]) -> String Never! {
     if params.len() == 0 -> return ""
     rendered := [String]{}
-    loop parameter in params -> &rendered.push(parameter.name)
+    loop parameter in params -> &rendered.push(jet_rust_emit_mangle(parameter.name))
     "<{rendered.join(", ")}>"
 }
 
@@ -1203,7 +1214,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
     }
     generic_args :: jet_rust_emit_columnar_generic_args(definition.generic_params)
     impl_generics :: jet_rust_emit_columnar_impl_generics(&ctx, definition.generic_params)
-    cell_name :: "{jet_rust_emit_sanitize(definition.name)}_cell"
+    cell_name :: jet_rust_emit_generated_path("{definition.name}_cell")
     cell_type :: "{cell_name}{generic_args}"
     row_type :: "{jet_rust_emit_type_name(&ctx, definition.id)}{generic_args}"
     derives :: if debug_capable -> "Clone, Debug" else -> "Clone"
@@ -1309,6 +1320,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
                 }
             }
             &lines.push("}}")
+            &lines.push("")
         }
         .Enum(variants, _) -> {
             &lines.push("{visibility_name}enum {name}{generics} {{")
@@ -1325,25 +1337,36 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
                     }
                     .Named(fields) -> {
                         &lines.push("    {variant_name} {{")
+                        // MIRRust: enum payload fields inherit the enum's
+                        // visibility; a Rust qualifier there is E0449.
                         loop field in fields {
                             boxed := false
                             loop edge in definition.boxed_edges { if edge == "{variant.name}.{field.name}" -> boxed = true }
-                            &lines.push("        {jet_rust_emit_field_declaration(&ctx, field, boxed)},")
+                            rust_type :: jet_rust_emit_type(&ctx, field.ty)
+                            ty :: if boxed -> "Box<{rust_type}>" else -> rust_type
+                            &lines.push("        {jet_rust_emit_field_name(&ctx, field.id)}: {ty},")
                         }
                         &lines.push("    }},")
                     }
                 }
             }
             &lines.push("}}")
+            &lines.push("")
         }
         .Distinct(base, _) -> {
-            &lines.push("#[repr(transparent)] {visibility_name}struct {name}{generics}(pub {jet_rust_emit_type(&ctx, base)});")
+            &lines.push("#[repr(transparent)]")
+            &lines.push("{visibility_name}struct {name}{generics}(pub {jet_rust_emit_type(&ctx, base)});")
+            &lines.push("")
         }
-        .Alias(target) -> &lines.push("{visibility_name}type {name}{generics} = {jet_rust_emit_type(&ctx, target)};")
+        .Alias(target) -> {
+            &lines.push("{visibility_name}type {name}{generics} = {jet_rust_emit_type(&ctx, target)};")
+            &lines.push("")
+        }
         .UnitFamily(members) -> {
             &lines.push("{visibility_name}enum {name}{generics} {{")
-            loop member in members -> &lines.push("    {jet_rust_emit_sanitize(member)},")
+            loop member in members -> &lines.push("    {jet_rust_emit_mangle(member)},")
             &lines.push("}}")
+            &lines.push("")
         }
     }
     debug_derived := false
@@ -1356,7 +1379,10 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
         if layout == {
             .Columnar -> {
                 if definition.kind == {
-                    .Struct(fields, _) -> jet_rust_emit_columnar_row_adapter(&ctx, definition, fields, &lines)
+                    .Struct(fields, _) -> {
+                        jet_rust_emit_columnar_row_adapter(&ctx, definition, fields, &lines)
+                        &lines.push("")
+                    }
                     else -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR columnar layout requires a struct type definition", "columnar row adapters are defined only for checked struct rows", Val(definition.span))
                 }
             }
@@ -1488,29 +1514,74 @@ fn jet_rust_emit_constant_owner(ctx: &JetRustEmitContext, type_name: String, def
     if shared > 1 -> resolved.key else -> type_name
 }
 
-fn jet_rust_emit_constant_field_type(definition: MIRTypeDef?, field_name: String, fallback: MIRType) -> MIRType Never! {
+// MIRRust history_capture_type over the definition's generic bindings: a
+// declared field type renders against the constant's actual type arguments.
+fn jet_rust_emit_constant_bound_type(ctx: &JetRustEmitContext, definition: MIRTypeDef, declared: MIRType, ty: MIRType) -> MIRType Never! {
+    if ty.kind == .Apply(_, args) {
+        if args.len() > 0 && definition.generic_params.len() > 0 -> return jet_rust_emit_partial_substitute_type(&ctx, declared, definition.generic_params, args)
+    }
+    ~declared
+}
+
+fn jet_rust_emit_constant_field_type(ctx: &JetRustEmitContext, definition: MIRTypeDef?, field_name: String, fallback: MIRType) -> MIRType Never! {
     if definition == Val(resolved) {
         if resolved.kind == .Struct(fields, _) {
-            loop field in fields { if field.name == field_name -> return ~field.ty }
+            loop field in fields { if field.name == field_name -> return jet_rust_emit_constant_bound_type(&ctx, resolved, field.ty, fallback) }
         }
     }
     ~fallback
 }
 
-fn jet_rust_emit_constant_payload_type(definition: MIRTypeDef?, variant: String, index: Int, fallback: MIRType) -> MIRType Never! {
+fn jet_rust_emit_constant_payload_type(ctx: &JetRustEmitContext, definition: MIRTypeDef?, variant: String, index: Int, name: String?, fallback: MIRType) -> MIRType Never! {
     if definition == Val(resolved) {
         if resolved.kind == .Enum(variants, _) {
             loop candidate in variants {
                 if candidate.name != variant -> next
                 if candidate.payload == {
-                    .Single(payload) -> return ~payload
-                    .Named(fields) -> { if index < fields.len() -> return ~fields[index].ty }
+                    .Single(payload) -> return jet_rust_emit_constant_bound_type(&ctx, resolved, payload, fallback)
+                    .Named(fields) -> {
+                        loop (position, field) in fields {
+                            if name == (Val(field.name)) || (name == None && position == index) -> return jet_rust_emit_constant_bound_type(&ctx, resolved, field.ty, fallback)
+                        }
+                    }
                     .Unit -> {}
                 }
             }
         }
     }
     ~fallback
+}
+
+// MIRRust boxed_edges: a recursive field or payload edge is stored in a Box,
+// so its folded value is allocated like an ordinary constructor's.
+fn jet_rust_emit_constant_edge_boxed(definition: MIRTypeDef?, edge: String) -> Bool Never! {
+    resolved :: definition ?? return false
+    resolved.boxed_edges.contains(edge)
+}
+
+// The Rust name of one named payload field of a folded enum constant.
+fn jet_rust_emit_constant_payload_field(ctx: &JetRustEmitContext, definition: MIRTypeDef?, type_name: String, variant: String, field_name: String) -> String Never! {
+    if definition == Val(resolved) {
+        if resolved.kind == .Enum(variants, _) {
+            loop candidate in variants {
+                if candidate.name != variant -> next
+                if candidate.payload == .Named(fields) {
+                    loop field in fields { if field.name == field_name -> return jet_rust_emit_field_name(&ctx, field.id) }
+                }
+            }
+        }
+    }
+    if jet_rust_emit_has_native_type_projection(type_name) -> ~field_name else -> jet_rust_emit_mangle(field_name)
+}
+
+// MIRRust Fraction constant: one exact-Int part of an intrinsic ratio.
+fn jet_rust_emit_fraction_part(ctx: &JetRustEmitContext, fields: [MIRConstField], name: String) -> String Never! {
+    int_ty :: MIRType{kind: MIRTypeKind.Int, identity: None, layout: mir_type_layout(MIRTypeKind.Int)}
+    loop field in fields {
+        if field.name == name -> return jet_rust_emit_constant(&ctx, field.value, int_ty)
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Fraction constant is missing a part", "a folded Fraction carries both an exact-Int numerator and denominator", None)
+    "unreachable!(\"MIR Fraction part\")"
 }
 
 // MIRRust `(value as u64)`: an unsigned literal spells its two's-complement word.
@@ -1550,11 +1621,11 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
         }
         .Float(value, f32, spelling) -> spelling ?? jet_rust_emit_float_literal(value, f32)
         .Bool(value) -> if value -> "true" else -> "false"
-        .Char(value) -> "char::from_u32({value}u32).expect(\"checked MIR char\")"
+        .Char(value) -> jet_rust_emit_char_literal(value)
         .String(value) -> if jet_rust_emit_is_core_layer(&ctx) -> jet_rust_emit_quote(value) else -> "{jet_rust_emit_quote(value)}.to_string()"
         .Bytes(values) -> {
             rendered := [String]{}
-            loop value in values -> &rendered.push("{Int.from_u8(value)}u8")
+            loop value in values -> &rendered.push("{Int.from_u8(value)}")
             "vec![{rendered.join(", ")}]"
         }
         .Unit -> "()"
@@ -1563,7 +1634,7 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
                 .IntN(signed, bits) -> return "{value}{if signed -> "i" else -> "u"}{bits}"
                 else -> {}
             }
-            "{ctx.config.root_prefix}jet_std::jet_int_owned_from_str({jet_rust_emit_quote(value)}).expect(\"checked MIR Int\")"
+            "{ctx.config.root_prefix}jet_std::jet_int_owned_from_str({jet_rust_emit_quote(value)}).expect(\"MIR Int\")"
         }
         .List(values) -> {
             element :: jet_rust_emit_constant_inner_type(ty, 0)
@@ -1584,8 +1655,8 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             rendered := [String]{}
             loop entry in entries {
                 key :: if entry.key == {
-                    .Int(literal) -> if typed -> jet_rust_emit_constant(&ctx, MIRConstant.Int{value: literal, width: None, spelling: None}, key_ty) else -> jet_rust_emit_const_key(entry.key)
-                    else -> jet_rust_emit_const_key(entry.key)
+                    .Int(literal) -> if typed -> jet_rust_emit_constant(&ctx, MIRConstant.Int{value: literal, width: None, spelling: None}, key_ty) else -> jet_rust_emit_const_key(&ctx, entry.key)
+                    else -> jet_rust_emit_const_key(&ctx, entry.key)
                 }
                 &rendered.push("({key}, {jet_rust_emit_constant(&ctx, entry.value, value_ty)})")
             }
@@ -1594,24 +1665,46 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
         }
         .Struct(type_name, fields) -> {
             definition :: jet_rust_emit_constant_type_definition(&ctx, type_name, ty)
+            // MIRRust constant: an intrinsic Fraction with no declaration row
+            // takes the native constructor over its exact-Int parts.
+            if definition == None && type_name == "Fraction" && ctx.type_by_name.get(type_name) == None {
+                return "{ctx.config.root_prefix}jet_fraction_from_parts({jet_rust_emit_fraction_part(&ctx, fields, "numerator")}, {jet_rust_emit_fraction_part(&ctx, fields, "denominator")})"
+            }
             owner :: jet_rust_emit_constant_owner(&ctx, type_name, definition)
             rendered := [String]{}
             loop field in fields {
-                field_ty :: jet_rust_emit_constant_field_type(definition, field.name, ty)
-                &rendered.push("{jet_rust_emit_named_field(&ctx, owner, field.name)}: {jet_rust_emit_constant(&ctx, field.value, field_ty)}")
+                field_ty :: jet_rust_emit_constant_field_type(&ctx, definition, field.name, ty)
+                value := jet_rust_emit_constant(&ctx, field.value, field_ty)
+                if jet_rust_emit_constant_edge_boxed(definition, field.name) -> value = "Box::new({value})"
+                &rendered.push("{jet_rust_emit_named_field(&ctx, owner, field.name)}: {value}")
             }
             "{jet_rust_emit_named_type(&ctx, owner)} {{ {rendered.join(", ")} }}"
         }
+        // MIRRust typed_enum_constant: named payloads keep their field names,
+        // positional payloads stay positional; boxed edges allocate.
         .Enum(type_name, variant, args) -> {
             definition :: jet_rust_emit_constant_type_definition(&ctx, type_name, ty)
-            owner :: jet_rust_emit_constant_owner(&ctx, type_name, definition)
+            path :: jet_rust_emit_variant_symbol(&ctx, definition, type_name, variant)
+            if args.len() == 0 -> return path
+            named := 0
+            loop arg in args { if arg.name != None -> named += 1 }
+            if named != 0 && named != args.len() {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR enum constant mixes named and positional payloads", "a folded enum payload is either all named or all positional", None)
+                return path
+            }
             rendered := [String]{}
             loop (index, arg) in args {
-                payload_ty :: jet_rust_emit_constant_payload_type(definition, variant, index, ty)
-                &rendered.push(jet_rust_emit_constant(&ctx, arg.value, payload_ty))
+                payload_ty :: jet_rust_emit_constant_payload_type(&ctx, definition, variant, index, arg.name, ty)
+                value := jet_rust_emit_constant(&ctx, arg.value, payload_ty)
+                if arg.name == .Val(field) {
+                    if jet_rust_emit_constant_edge_boxed(definition, "{variant}.{field}") -> value = "Box::new({value})"
+                    &rendered.push("{jet_rust_emit_constant_payload_field(&ctx, definition, type_name, variant, field)}: {value}")
+                } else {
+                    if jet_rust_emit_constant_edge_boxed(definition, variant) -> value = "Box::new({value})"
+                    &rendered.push(value)
+                }
             }
-            path :: jet_rust_emit_variant_symbol(&ctx, owner, variant)
-            if rendered.len() == 0 -> path else -> "{path}({rendered.join(", ")})"
+            if named != 0 -> "{path} {{ {rendered.join(", ")} }}" else -> "{path}({rendered.join(", ")})"
         }
         .Present(value) -> "Ok({jet_rust_emit_constant(&ctx, value, jet_rust_emit_constant_inner_type(ty, 0))})"
         .Failed(report) -> {
@@ -1623,23 +1716,26 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
     }
 }
 
-fn jet_rust_emit_const_key(key: MIRConstKey) -> String Never! {
+// MIRRust const_key: a map key literal; nominal keys take the emitted type
+// and mangled member names (native carriers keep their Prelude spelling).
+fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String Never! {
     if key == {
         .Int(value) -> "{value}"
-        .String(value) -> "{jet_rust_emit_quote(value)}.to_string()"
+        .String(value) -> if jet_rust_emit_is_core_layer(&ctx) -> jet_rust_emit_quote(value) else -> "{jet_rust_emit_quote(value)}.to_string()"
         .Bool(value) -> if value -> "true" else -> "false"
-        .Char(value) -> "char::from_u32({value}u32).expect(\"checked MIR char\")"
+        .Char(value) -> jet_rust_emit_char_literal(value)
         .Tuple(fields) -> {
             values := [String]{}
-            loop field in fields -> &values.push(jet_rust_emit_const_key(field.key))
+            loop field in fields -> &values.push(jet_rust_emit_const_key(&ctx, field.key))
             "({values.join(", ")})"
         }
         .Struct(type_name, fields) -> {
+            native :: jet_rust_emit_has_native_type_projection(type_name)
             values := [String]{}
-            loop field in fields -> &values.push("{jet_rust_emit_sanitize(field.name)}: {jet_rust_emit_const_key(field.key)}")
-            "{jet_rust_emit_sanitize(type_name)} {{ {values.join(", ")} }}"
+            loop field in fields -> &values.push("{if native -> field.name else -> jet_rust_emit_mangle(field.name)}: {jet_rust_emit_const_key(&ctx, field.key)}")
+            "{jet_rust_emit_named_type(&ctx, type_name)} {{ {values.join(", ")} }}"
         }
-        .Enum(type_name, variant) -> "{jet_rust_emit_sanitize(type_name)}::{jet_rust_emit_sanitize(variant)}"
+        .Enum(type_name, variant) -> "{jet_rust_emit_named_type(&ctx, type_name)}::{if jet_rust_emit_has_native_type_projection(type_name) -> variant else -> jet_rust_emit_mangle_variant(variant)}"
     }
 }
 

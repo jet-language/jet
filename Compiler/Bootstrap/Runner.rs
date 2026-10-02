@@ -625,7 +625,6 @@ fn append_embedded_compiler_image(
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     source.push_str(
         "                 crate::__jet_bootstrap_mir_program_from_host,\n\
-         crate::__jet_bootstrap_mir_program_to_host,\n\
              )\n\
          }\n",
     );

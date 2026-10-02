@@ -223,7 +223,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  if receiver_type.canonical_key() != {expected_receiver_key} {{\n\
                      return Err(\"native adapter constructor receiver type differs from the checked host-adapter field\".to_string());\n\
                  }}\n\
-                 let execution = program.execution_identity(Some(artifact)).map_err(|error| error.to_string())?;\n\
+                 let execution = program.sealed_execution_identity(Some(artifact)).map_err(|error| error.to_string())?;\n\
                  let root = ::std::sync::Arc::new(__JetBootstrapNativeAdapterRoot {{\n\
                      bindings,\n\
                      program,\n\
@@ -1256,7 +1256,7 @@ fn emit_native_binding_helpers(
             )?;
             let expected_numeric = checked_numeric.option_inner()
                 .ok_or_else(|| "checked SemaRegistrationHostHooks.numeric_unit_conversion_exact lost its Option leaf".to_string())?;
-            let expected_execution = program.execution_identity(Some(artifact))
+            let expected_execution = program.sealed_execution_identity(Some(artifact))
                 .map_err(|error| error.to_string())?;
             // The Source owner identity, as its key (callables only) and checked host type.
             let (owner_key, owner_type) = match &binding {

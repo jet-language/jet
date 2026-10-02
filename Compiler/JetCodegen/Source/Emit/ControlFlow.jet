@@ -24,7 +24,7 @@ use jet_foundation.[
     mir_type_is_unit,
 ]
 
-fn jet_rust_emit_block_id(block: MIRBlockID) -> String Never! { "{block.value}u64" }
+fn jet_rust_emit_block_id(block: MIRBlockID) -> String Never! { "{block.value}" }
 
 fn jet_rust_emit_store_result(result: MIRValueID?, expression: String) -> String Never! {
     if result == .Val(slot) -> "{jet_rust_emit_value_slot(slot)} = Some({expression});" else -> "{expression};"
@@ -132,6 +132,9 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
         if jet_rust_emit_partial_projection_only(&ctx, function, value) -> return lines
         if jet_rust_emit_inspected_only(&ctx, function, value) -> return lines
     }
+    // MIRRust: a HostBorrowCallback is a one-use boundary adapter its consuming
+    // call inlines; an ordinary owned callable slot would erase the borrowed ABI.
+    if jet_rust_emit_is_host_borrow_callback(instruction) -> return lines
     if instruction.operation == {
         .Constant(constant) -> {
             if constant == {
@@ -147,7 +150,8 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     }
     if instruction.operation == {
         .WritePlace(place, value) | .ReplacePlace(place, value) -> {
-            &lines.push("{jet_rust_emit_place_write(&ctx, function, place, jet_rust_emit_value_move(value))};")
+            transferred :: jet_rust_emit_value_transfer(ctx, function, value)
+            &lines.push("{jet_rust_emit_place_write(&ctx, function, place, transferred)};")
             if jet_rust_emit_persist_value_update(&ctx, function, place) == .Val(update) -> &lines.push("{update};")
             return lines
         }
@@ -161,7 +165,7 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
                                 &lines.push("{jet_rust_emit_local_slot(local)} = Some({ctx.config.root_prefix}jet_mem::JetUninitFixed::new());")
                                 }
                                 else -> {
-                                &lines.push("{jet_rust_emit_local_slot(local)} = None;")
+                                &lines.push("{jet_rust_emit_local_storage(&ctx, local)} = None;")
                                 }
                             }
                         }
@@ -446,7 +450,7 @@ fn jet_rust_emit_cfg_run(ctx: &JetRustEmitContext, function: MIRFunction, plan: 
                     }
                 } else {
                     &expanded.push(jet_rust_emit_cfg_line("{indent}__jet_mir_dispatch_pc = {jet_rust_emit_block_id(target)};"))
-                    &expanded.push(jet_rust_emit_cfg_line("{indent}continue 'jet_mir_dispatch;"))
+                    &expanded.push(jet_rust_emit_cfg_line("{indent}continue 'mir_dispatch;"))
                 }
             }
         }
@@ -491,8 +495,14 @@ fn jet_rust_emit_drop_edge_matches(action: MIRDropEdge, wanted: MIRDropEdge) -> 
     }
 }
 
+// MIRRust close_handle_drop: the foreign raw close takes precedence over a Jet
+// close function when a lifecycle row carries both.
 fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MIRFunction, moved: String, span: Span, handle: MIRHandleLifecycle) -> String Never! {
     if handle.ownership != MIRHandleOwnership.Owned -> return "{{ let _ = {moved}; () }}"
+    if handle.close_foreign == .Val(foreign) {
+        close :: jet_rust_emit_foreign_name(&ctx, foreign)
+        return "{{ let __jet_handle = {moved}; unsafe {{ let _ = {close}(__jet_handle.into_raw()); }} () }}"
+    }
     if handle.close == .Val(close_id) {
         close :: jet_rust_emit_function_name(&ctx, close_id)
         needs_unsafe := false
@@ -502,44 +512,41 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MIRFunction, mo
         call :: if needs_unsafe -> "unsafe {{ {close}(__jet_handle) }}" else -> "{close}(__jet_handle)"
         return "{{ let __jet_handle = {moved}; let _ = {call}; () }}"
     }
-    if handle.close_foreign == .Val(foreign) {
-        close :: jet_rust_emit_foreign_name(&ctx, foreign)
-        return "{{ let __jet_handle = {moved}; unsafe {{ let _ = {close}(__jet_handle.into_raw()); }} () }}"
-    }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "owned foreign handle has no close adapter", "checked handle lifecycle rows must retain the canonical close operation required by MIR", Val(span))
     "unreachable!(\"foreign handle close adapter missing\")"
 }
 
+// MIRRust emit_drops: a handle closes its moved place; any other drop action
+// drops a read of the place, so the owner's slot keeps its state.
 fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MIRFunction, place: MIRPlaceID, span: Span) -> String Never! {
     loop row in function.places {
         if row.id == place {
             partial :: jet_rust_emit_partial_drop(&ctx, function, place)
-            if row.access != MIRAccess.Move {
-                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a non-owned place", "checked drop actions must use a move-access place", Val(span))
-                return "unreachable!(\"non-owned MIR drop\")"
-            }
             if partial == .Val(partial_drop) -> return partial_drop
             uninit_drop :: jet_rust_emit_uninit_fixed_drop_place(function, place)
             if uninit_drop == .Val(fixed_drop) -> return fixed_drop
-            if row.projections.len() > 0 {
-                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a projected place without partial-drop storage", "checked projected drops require a canonical partial-move/drop plan", Val(span))
-                return "unreachable!(\"unsupported projected MIR drop\")"
-            }
-            moved :: jet_rust_emit_place_move(&ctx, function, place)
             loop handle in ctx.program.handles {
-                if jet_rust_emit_same_handle_type(handle.ty, row.ty) -> return jet_rust_emit_handle_drop(&ctx, function, moved, row.span, handle)
+                if jet_rust_emit_same_handle_type(handle.ty, row.ty) {
+                    if row.access != MIRAccess.Move {
+                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR drop targets a non-owned place", "checked handle drop actions must use a move-access place", Val(span))
+                        return "unreachable!(\"non-owned MIR drop\")"
+                    }
+                    moved :: jet_rust_emit_place_move(&ctx, function, place)
+                    return jet_rust_emit_handle_drop(&ctx, function, moved, row.span, handle)
+                }
             }
-            return "drop({moved})"
+            return "drop({jet_rust_emit_place_read(&ctx, function, place)})"
         }
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR drop targets a missing place", "checked drop actions must resolve to one function place row", Val(span))
     "unreachable!(\"missing MIR drop place\")"
 }
 
+// Each drop action is one statement (MIRRust writes `{expression};`).
 fn jet_rust_emit_drops(ctx: &JetRustEmitContext, function: MIRFunction, edge: MIRDropEdge) -> [String] Never! {
     lines := [String]{}
     loop action in function.drops {
-        if jet_rust_emit_drop_edge_matches(action.edge, edge) -> &lines.push(jet_rust_emit_drop_place(&ctx, function, action.place, action.span))
+        if jet_rust_emit_drop_edge_matches(action.edge, edge) -> &lines.push("{jet_rust_emit_drop_place(&ctx, function, action.place, action.span)};")
     }
     lines
 }
@@ -558,16 +565,26 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
         .Branch(condition, then_target, else_target) -> {
             loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             coverage :: jet_rust_emit_coverage_for(&ctx, function)
-            invert :: !coverage && jet_rust_emit_cfg_edge_inlines(plan, block_id, then_target) && !jet_rust_emit_cfg_edge_inlines(plan, block_id, else_target)
+            // MIRRust emit_terminator: a coverage branch keeps both arms in an
+            // explicit if/else so each records its own branch hit.
+            if coverage {
+                &items.push(jet_rust_emit_cfg_line("{indent}if {jet_rust_emit_value_read(condition)} {{"))
+                &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, true)}"))
+                &items.push(jet_rust_emit_cfg_edge(block_id, then_target, "{indent}    "))
+                &items.push(jet_rust_emit_cfg_line("{indent}}} else {{"))
+                &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, false)}"))
+                &items.push(jet_rust_emit_cfg_edge(block_id, else_target, "{indent}    "))
+                &items.push(jet_rust_emit_cfg_line("{indent}}}"))
+                return
+            }
+            invert :: jet_rust_emit_cfg_edge_inlines(plan, block_id, then_target) && !jet_rust_emit_cfg_edge_inlines(plan, block_id, else_target)
             condition_text :: jet_rust_emit_value_read(condition)
             nested :: if invert -> else_target else -> then_target
             follow :: if invert -> then_target else -> else_target
             head :: if invert -> "{indent}if !({condition_text}) {{" else -> "{indent}if {condition_text} {{"
             &items.push(jet_rust_emit_cfg_line(head))
-            if coverage -> &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, true)}"))
             &items.push(jet_rust_emit_cfg_edge(block_id, nested, "{indent}    "))
             &items.push(jet_rust_emit_cfg_line("{indent}}}"))
-            if coverage -> &items.push(jet_rust_emit_cfg_line("{indent}{jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, false)}"))
             &items.push(jet_rust_emit_cfg_edge(block_id, follow, indent))
         }
         // Each arm condition is the checked Bool for that arm (MIRRust
@@ -630,7 +647,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
                         }
                     }
                 }
-                if !feeds_phi -> &items.push(jet_rust_emit_cfg_line("{indent}drop({jet_rust_emit_value_move(incoming_value)});"))
+                if !feeds_phi -> &items.push(jet_rust_emit_cfg_line("{indent}let _ = {jet_rust_emit_value_move(incoming_value)};"))
             }
             &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }

@@ -240,9 +240,48 @@ fn jet_codegen_builder_source_row(builder: JetCodegenBuilder, ambiguous: String,
     row
 }
 
+// Checked rows in input order. Unqualified calls keep the first match;
+// qualified duplicates are recorded, but rejected only when looked up.
+pub struct JetCodegenFunctionIndex {
+    pub rows: [TFunc]
+    pub first_by_key: [String:Int]
+    pub first_by_name: [String:Int]
+    pub next_by_key: [Int]
+    pub next_by_name: [Int]
+    pub qualified_rows: [String:Int]
+}
+
+fn jet_codegen_qualified_function_key(module_identity: String, key: String) -> String Never! {
+    "{module_identity.len()}:{module_identity}{key}"
+}
+
+fn jet_codegen_function_index(functions: [TFunc]) -> JetCodegenFunctionIndex Never! {
+    first_by_key := [String:Int]{}
+    first_by_name := [String:Int]{}
+    next_by_key := [Int]{}
+    next_by_name := [Int]{}
+    qualified_rows := [String:Int]{}
+    loop _ in functions {
+        &next_by_key.push(-1)
+        &next_by_name.push(-1)
+    }
+    row := functions.len() - 1
+    loop row >= 0 {
+        function :: functions[row]
+        next_by_key[row] = first_by_key.get(function.key) ?? -1
+        next_by_name[row] = first_by_name.get(function.name) ?? -1
+        first_by_key[function.key] = row
+        first_by_name[function.name] = row
+        qualified :: jet_codegen_qualified_function_key(function.module_identity, function.key)
+        if qualified_rows.get(qualified) == None -> qualified_rows[qualified] = row else -> qualified_rows[qualified] = -1
+        row -= 1
+    }
+    JetCodegenFunctionIndex{rows: functions, first_by_key: first_by_key, first_by_name: first_by_name, next_by_key: next_by_key, next_by_name: next_by_name, qualified_rows: qualified_rows}
+}
+
 struct JetCodegenBuilder {
     pub function: TFunc
-    pub functions: [TFunc]
+    pub function_index: JetCodegenFunctionIndex
     pub modules: [SemaGraphModuleResult]
     // Program-wide field symbol index (jet_codegen_field_symbol_index).
     pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
@@ -601,7 +640,7 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
     JetCodegenOwnerTypeBindings{names: ordered_names, arguments: ordered_arguments, complete: true}
 }
 
-fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGraphModuleResult], field_symbols: [String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
+fn jet_codegen_new_builder(function: TFunc, function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], field_symbols: [String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
     loop name in jet_codegen_function_type_generic_names(function, modules) {
@@ -609,7 +648,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
     }
     builder := JetCodegenBuilder{
         function: function,
-        functions: functions,
+        function_index: function_index,
         modules: modules,
         field_symbols: field_symbols,
         source_files: source_files,
@@ -670,7 +709,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
 }
 
 // The per-function part of a `JetCodegenBuilder`: every field except the
-// program-wide inputs (functions, modules, field_symbols, source_files,
+// program-wide inputs (function_index, modules, field_symbols, source_files,
 // source_index). A new builder field that belongs to one function must be
 // added here, to `jet_codegen_begin_function`, `jet_codegen_function_state`
 // and `jet_codegen_restore_function_state`, or it leaks between functions.
@@ -1697,21 +1736,15 @@ fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, base: MIRPlaceID
 }
 
 
-fn jet_codegen_find_function(functions: [TFunc], key: String) -> TFunc? {
-    loop function in functions {
-        if function.key == key -> return Val(function)
-    }
-    None
+fn jet_codegen_find_function(function_index: JetCodegenFunctionIndex, key: String) -> TFunc? {
+    row :: function_index.first_by_key.get(key) ?? return None
+    Val(function_index.rows[row])
 }
-fn jet_codegen_find_function_by_key(functions: [TFunc], key: String, module_identity: String) -> TFunc? {
-    found := TFunc?{None}
-    loop function in functions {
-        if function.key == key && function.module_identity == module_identity {
-            if found != None -> panic("ambiguous checked function key in Codegen input")
-            found = Val(function)
-        }
-    }
-    found
+fn jet_codegen_find_function_by_key(function_index: JetCodegenFunctionIndex, key: String, module_identity: String) -> TFunc? {
+    qualified :: jet_codegen_qualified_function_key(module_identity, key)
+    row :: function_index.qualified_rows.get(qualified) ?? return None
+    if row < 0 -> panic("ambiguous checked function key in Codegen input")
+    Val(function_index.rows[row])
 }
 
 

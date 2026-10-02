@@ -12,6 +12,10 @@ use jet_foundation.[
     MarkerCallArg,
     MarkerDecl,
     MarkerDeclParam,
+    Span,
+    TextEdit,
+    diagnostic_from_registry,
+    diagnostic_with_edit,
 ]
 use jet_lexer.[
     TOKEN_AT,
@@ -21,6 +25,7 @@ use jet_lexer.[
     TOKEN_DOT_DOT_DOT,
     TOKEN_EOF,
     TOKEN_EQ,
+    TOKEN_GT,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_ENUM,
@@ -32,14 +37,27 @@ use jet_lexer.[
     TOKEN_KW_PUB,
     TOKEN_KW_STRUCT,
     TOKEN_KW_TAG,
+    TOKEN_KW_USE,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
+    TOKEN_MINUS,
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
     TOKEN_RPAREN,
     TOKEN_SEMI,
+    Token,
 ]
+
+pub struct ParsedMarkerArgs {
+    pub args: [MarkerCallArg]
+    pub labels: [CallLabel?]
+}
+
+pub struct ParsedMarkerGroup {
+    pub markers: [Marker]
+    pub span: Span
+}
 
 fn parser_marker_expression(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
@@ -264,7 +282,9 @@ fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
     DeriveBodyItem.Loop{var: parsed.var, var_span: parsed.var_span, source: parsed.source, body: parsed.body, span: parsed.span}
 }
 
-fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
+// D-SHAPE2: one `#[A, B(…)]` list. Rust `parse_marker_bracket_group`: every
+// entry is read like a bare marker, and a list of one is E0999.
+fn parser_parse_marker_group_list(state: &JetParserState) -> ParsedMarkerGroup {
     hash :: parser_expect(&state, TOKEN_HASH, "before a marker group")
     parser_expect(&state, TOKEN_LBRACKET, "`[` after a marker-group sigil")
     markers := [Marker]{}
@@ -276,18 +296,14 @@ fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
             negated = true
         }
         name :: parser_expect_name(&state, "for a marker in a marker group")
-        args := [MarkerCallArg]{}
-        labels := [CallLabel?]{}
+        if negated -> parser_check_signed_marker(&state, start.start, name)
+        args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
         end := name.span
         if parser_current_kind(&state) == TOKEN_LPAREN {
-            parsed :: parser_parse_call_args(&state, 1, true)
-            loop arg in parsed {
-                &args.push(MarkerCallArg.Expr{value: arg.expr})
-                &labels.push(arg.label)
-            }
+            args = parser_parse_marker_args(&state)
             if state.position > 0 -> end = parser_lookahead(&state, -1).span
         }
-        &markers.push(Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: args, arg_labels: labels, span: parser_cover(start, end), ct: None})
+        &markers.push(Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(start, end), ct: None})
         if parser_current_kind(&state) == TOKEN_COMMA {
             parser_bump(&state)
             next
@@ -297,11 +313,111 @@ fn parser_parse_marker_group(state: &JetParserState) -> [Marker] {
             break
         }
     }
-    parser_expect(&state, TOKEN_RBRACKET, "`]` after marker-group entries")
-    group_end :: parser_lookahead(&state, -1).span
-    if markers.len() == 1 -> parser_add_error(&state, parser_cover(hash.span, group_end), "one marker is written without brackets", "brackets group two or more markers", "replace `#[Name]` with `#Name`")
+    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after marker-group entries")
+    span :: parser_cover(hash.span, close.span)
+    if markers.len() == 1 -> parser_report_singleton_marker_group(&state, span, markers[0])
     // Rust `parse_marker_bracket_group`: a group on its own line still
     // attaches to the declaration below.
     parser_skip_semicolons(&state)
-    markers
+    ParsedMarkerGroup{markers: markers, span: span}
+}
+
+// D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: `!` refuses only a trait the
+// structural auto-derive engine can provide, bare or inside `#[…]`.
+fn parser_check_signed_marker(state: &JetParserState, bang_start: Int, name: Token) {
+    if parser_marker_is_signed_auto_derive(name.payload.decoded) -> return
+    parser_add_fatal_code(&state, "E0931", Span{start: bang_start, end: name.span.end}, "`!{name.payload.decoded}` is not a signed auto-derive trait", "`!` rejects compiler generation only for structurally auto-derived traits", "remove `!` from `#{name.payload.decoded}`, or use it with an auto-derived trait")
+}
+
+// Rust `marker_call_arg`: a marker argument is an ordinary (optionally
+// labeled) call argument or an effect row `-[Effects]>`, which keeps its own
+// carrier until sema checks the rule's effect slot.
+fn parser_parse_marker_args(state: &JetParserState) -> ParsedMarkerArgs {
+    parser_expect(&state, TOKEN_LPAREN, "`(` before marker arguments")
+    args := [MarkerCallArg]{}
+    labels := [CallLabel?]{}
+    if parser_current_kind(&state) != TOKEN_RPAREN {
+        loop {
+            label := CallLabel?{None}
+            label_kind :: parser_current_kind(&state)
+            if (label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_TAG || label_kind == TOKEN_KW_USE) && parser_kind_at(&state, 1) == TOKEN_COLON {
+                label_token :: parser_bump(&state)
+                parser_bump(&state)
+                label_name := label_token.payload.decoded
+                if label_token.kind == TOKEN_KW_TAG -> label_name = "tag"
+                if label_token.kind == TOKEN_KW_USE -> label_name = "use"
+                label = Val(CallLabel{name: label_name, span: label_token.span})
+            }
+            if parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+                start :: parser_bump(&state)
+                parser_bump(&state)
+                effects :: parser_parse_effect_row_entries(&state, TOKEN_RBRACKET)
+                parser_expect(&state, TOKEN_RBRACKET, "`]` to close the effect row")
+                close :: parser_expect(&state, TOKEN_GT, "`>` after the effect row")
+                &args.push(MarkerCallArg.EffectRow{effects: effects, span: parser_cover(start.span, close.span)})
+            } else {
+                // A marker value is read, never written or taken; the access
+                // sigil is consumed as in an ordinary call argument.
+                parser_call_access_prefix(&state)
+                argument :: parser_parse_expression(&state, 1, 2)
+                &args.push(MarkerCallArg.Expr{value: argument.expr})
+            }
+            &labels.push(label)
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            if parser_current_kind(&state) != TOKEN_COMMA {
+                if parser_unclosed_delimiter(&state, "call") -> return ParsedMarkerArgs{args: args, labels: labels}
+                token :: parser_current(&state)
+                parser_add_error(&state, token.span, "expected `,` between marker arguments", "marker arguments are comma-separated", "add a comma or close the marker arguments")
+                break
+            }
+            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        }
+    }
+    parser_expect(&state, TOKEN_RPAREN, "`)` after marker arguments")
+    ParsedMarkerArgs{args: args, labels: labels}
+}
+
+// The marker as written after its `#`, for E0999 repair edits; None when the
+// parse has no source text.
+fn parser_marker_written_text(state: &JetParserState, marker: Marker) -> String? {
+    start := marker.span.start
+    end :: marker.span.end
+    if start < 0 || end > state.source.len() || end <= start -> return None
+    if state.source[start] == (U8{35}) -> start += 1
+    text :: String.from_bytes(state.source.slice(start, end)) ?? return None
+    Val(text)
+}
+
+fn parser_report_singleton_marker_group(state: &JetParserState, span: Span, marker: Marker) {
+    if parser_aborting(&state) -> return
+    diagnostic :: diagnostic_from_registry("E0999", Val(span), "one marker is written without brackets", "brackets group two or more markers; one marker stays bare", "replace `#[{marker.name}]` with `#{marker.name}`")
+    written :: parser_marker_written_text(&state, marker) ?? {
+        &state.diagnostics.push(diagnostic)
+        return
+    }
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "#{written}"}))
+}
+
+// D-MARK-STACK1=A (Rust `parse_attached_marker_sequence`): two or more
+// distinct rules on one target are one ordered `#[A, B]` list. `chunks`
+// counts the bare markers and lists written; `span` covers all of them.
+fn parser_report_adjacent_markers(state: &JetParserState, markers: [Marker], chunks: Int, bracket_chunks: Int, span: Span, noun: String) {
+    if (chunks == 1 && bracket_chunks == 1) || parser_aborting(&state) -> return
+    distinct := [String]{}
+    loop marker in markers {
+        if !distinct.contains(marker.name) -> &distinct.push(marker.name)
+    }
+    if distinct.len() <= 1 -> return
+    diagnostic :: diagnostic_from_registry("E0999", Val(span), "adjacent {noun} markers belong in one bracket list", "two or more rules attached to one {noun} use one ordered `#[A, B]` group", "replace the adjacent markers with one bracket list")
+    rendered := [String]{}
+    loop marker in markers {
+        text :: parser_marker_written_text(&state, marker) ?? {
+            &state.diagnostics.push(diagnostic)
+            return
+        }
+        &rendered.push(text)
+    }
+    joined :: rendered.join(", ")
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "#[{joined}]"}))
 }

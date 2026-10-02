@@ -7,6 +7,7 @@
 // payload that is not a copy site is an actual transfer and records the move.
 use jet_foundation.[
     AccessConvention,
+    Binding,
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
@@ -16,6 +17,7 @@ use jet_foundation.[
     TextEdit,
     Type,
     diagnostic_with_edit_grade,
+    type_name,
 ]
 
 struct SemaCopySite {
@@ -67,13 +69,48 @@ fn sema_copy_site_find(value: Expr, environment: SemaScopeEnvironment, scopes: S
 // Rust `with_ownership_copy_edit`: the `~` edit only for a proven
 // cloneable, non-resource type.
 fn sema_copy_site_report(site: SemaCopySite, what: String, why: String, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
-    diagnostic :: sema_error("E0120", site.span, what, why, "copy it explicitly with `~{site.name}`")
+    sema_copy_site_push(sema_error("E0120", site.span, what, why, "copy it explicitly with `~{site.name}`"), site, environment, context, &diagnostics)
+}
+
+fn sema_copy_site_push(diagnostic: Diagnostic, site: SemaCopySite, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, context.generic_params, false)
     if facts.complete && facts.cloneable && !facts.resource {
         &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.start, end: site.span.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         return
     }
     &diagnostics.push(diagnostic)
+}
+
+// A bare read or write parameter of a non-scalar type (Rust `is_scalar`, not
+// Copy): the value an owning binding or return would take from storage this
+// function does not own.
+fn sema_copy_site_borrowed_param(value: Expr, scopes: SemaScopeTable) -> SemaCopySite? {
+    if value == .Ident(name, span) {
+        index :: sema_scope_resolve_index(scopes, name) ?? return None
+        binding :: scopes.bindings[index]
+        if !sema_ownership_binding_is_borrowed_param(binding) -> return None
+        ty :: binding.symbol.ty ?? return None
+        if sema_ownership_type_is_scalar(ty) -> return None
+        return Val(SemaCopySite{name: name, span: span, ty: ty, borrowed: true})
+    }
+    None
+}
+
+// Rust `check_binding`: an immutable binding initialized by a bare borrowed
+// parameter is E0120 under every copy policy, before the initializer is
+// checked.
+pub fn sema_copy_site_check_borrowed_binding(binding: Binding, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if binding.mutable -> return
+    site :: sema_copy_site_borrowed_param(binding.init, scopes) ?? return
+    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be taken with the move marker `^`", "this function has read access only and does not own the value", "copy it instead: `{binding.name} :: ~{site.name}`"), site, environment, context, &diagnostics)
+}
+
+// Rust `check_return`: a bare borrowed parameter returned as-is is E0120
+// unless its type is one of the function's generic parameters.
+pub fn sema_copy_site_check_borrowed_return(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    site :: sema_copy_site_borrowed_param(value, scopes) ?? return
+    if sema_copy_site_is_type_parameter(site.ty, context) -> return
+    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return ~{site.name};` — or take ownership with the move marker `^`: `{site.name}: ^{type_name(site.ty)}`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`ID<T>` once a real program needs shared ownership"), site, environment, context, &diagnostics)
 }
 
 // An owned struct or variant field filled from `value`.

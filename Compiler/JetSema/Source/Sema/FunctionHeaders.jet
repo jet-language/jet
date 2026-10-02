@@ -161,6 +161,55 @@ pub fn sema_function_header_check_marker_gates(function: Func, function_allowed_
     valid
 }
 
+// The function rules whose meaning the parser projects onto `Func` fields
+// that the checker, foreign stage and lowering read; the marker row itself
+// adds nothing.
+fn sema_function_header_marker_projected(name: String) -> Bool Never! {
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI"
+}
+
+// The header forms the body checker does not handle yet. Each one records
+// why on `context`, so an incomplete function never fails without a cause.
+pub fn sema_function_header_supported(function: Func, context: &SemaCheckContext) -> Bool Never! {
+    supported := true
+    if function.head_pattern != None {
+        sema_check_unsupported(&context, "the multi-head pattern function `{function.name}` reached body checking without being desugared")
+        supported = false
+    }
+    if function.external_type != None {
+        sema_check_unsupported(&context, "the external method header `fn Type.{function.name}` is not normalized into an impl by the self-hosted checker yet")
+        supported = false
+    }
+    if function.inline_foreign != None {
+        sema_check_unsupported(&context, "the inline foreign (`#FFI`) body of `{function.name}` is not checked by the self-hosted checker yet")
+        supported = false
+    }
+    if function.is_reactive {
+        sema_check_unsupported(&context, "`#Reactive fn` is not lowered by the self-hosted checker yet")
+        supported = false
+    }
+    loop marker in function.markers {
+        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) -> next
+        sema_check_unsupported(&context, "the function marker `#{marker.name}` is not supported by the self-hosted checker yet")
+        supported = false
+    }
+    loop parameter in function.params {
+        if parameter.root {
+            sema_check_unsupported(&context, "the `#Root` parameter `{parameter.name}` (reversible dot call) is not supported by the self-hosted checker yet")
+            supported = false
+        }
+        if parameter.variadic_bound_list != None {
+            sema_check_unsupported(&context, "the variadic bound list on parameter `{parameter.name}` is not supported by the self-hosted checker yet")
+            supported = false
+        }
+        if parameter.declared_view_from_names != None {
+            sema_check_unsupported(&context, "the declared `from` view sources on parameter `{parameter.name}` are not supported by the self-hosted checker yet")
+            supported = false
+        }
+    }
+    supported
+}
+
 fn sema_function_header_inline_scalar(ty: Type, asm: Bool) -> Bool Never! {
     if ty == {
         .Int -> true

@@ -2,10 +2,10 @@
 // Rust parser or semantic compiler is involved.
 use jet_foundation.[
     AccessConvention,
-    CallArg,
     CallLabel,
     ConstAttr,
     ConstDef,
+    CtValue,
     DeriveBodyItem,
     DeriveDef,
     EffectDecl,
@@ -30,6 +30,8 @@ use jet_foundation.[
     OperatorMarker,
     Param,
     ParamZone,
+    PatSlot,
+    Pattern,
     PrepParam,
     RustConstKind,
     Span,
@@ -115,6 +117,7 @@ use jet_lexer.[
     TOKEN_SLASH,
     TOKEN_STAR,
     TOKEN_STRING,
+    TOKEN_TILDE_TILDE,
     TOKEN_UNIFIED_ARROW,
     Token,
 ]
@@ -332,6 +335,9 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     is_comptime := false
     is_sanitizer := false
     markers := [Marker]{}
+    marker_chunks := 0
+    bracket_chunks := 0
+    sequence := parser_current(&state).span
     loop {
         kind := parser_current_kind(&state)
         if kind == TOKEN_KW_PUB {
@@ -392,17 +398,21 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
         if kind == TOKEN_HASH {
             if parser_item_declaration_ahead_at(&state, 0) -> break
             if parser_kind_at(&state, 1) == TOKEN_LBRACKET {
-                group := parser_parse_marker_group(&state)
-                index := 0
-                loop index < group.len() {
-                    marker :: group[index]
+                group :: parser_parse_marker_group_list(&state)
+                if marker_chunks == 0 -> sequence.start = group.span.start
+                sequence.end = group.span.end
+                marker_chunks += 1
+                bracket_chunks += 1
+                loop marker in group.markers {
                     &markers.push(marker)
                     if marker.name == "Comptime" -> is_comptime = true
-                    index += 1
                 }
                 next
             }
             marker :: parser_parse_marker(&state)
+            if marker_chunks == 0 -> sequence.start = marker.span.start
+            sequence.end = marker.span.end
+            marker_chunks += 1
             &markers.push(marker)
             if marker.name == "Comptime" -> is_comptime = true
             // Rust `parse_attached_marker_sequence`: a marker on its own line
@@ -412,7 +422,23 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
         }
         break
     }
+    noun :: parser_marker_sequence_noun(&state, item_visibility)
+    if noun != "" -> parser_report_adjacent_markers(&state, markers, marker_chunks, bracket_chunks, sequence, noun)
     ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer}
+}
+
+// The target a declaration marker sequence attaches to, named as Rust's
+// marker-sequence sites name it; empty where no sequence check applies.
+fn parser_marker_sequence_noun(state: &JetParserState, item_visibility: Bool) -> String {
+    kind :: parser_current_kind(&state)
+    if kind == TOKEN_KW_FN || parser_prep_fn_ahead(&state) {
+        if item_visibility -> return "function"
+        return "method"
+    }
+    if kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM -> return "type"
+    if kind == TOKEN_KW_IMPL -> return "impl"
+    if !item_visibility && kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON -> return "field"
+    ""
 }
 
 // The foreign `private` word before an item (E0412 teaches `priv`).
@@ -430,27 +456,14 @@ fn parser_parse_marker(state: &JetParserState) -> Marker {
         negated = true
     }
     name :: parser_expect_name(&state, "after `#` in a declaration marker")
-    // D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: `!` refuses only a trait the
-    // structural auto-derive engine can provide.
-    signed :: ["Printable", "Equatable", "Debug", "Comparable", "Encode", "Decode", "Codable"]
-    if negated && !signed.contains(name.payload.decoded) {
-        parser_add_fatal_code(&state, "E0931", Span{start: bang_start, end: name.span.end}, "`!{name.payload.decoded}` is not a signed auto-derive trait", "`!` rejects compiler generation only for structurally auto-derived traits", "remove `!` from `#{name.payload.decoded}`, or use it with an auto-derived trait")
-    }
-    args := [CallArg]{}
+    if negated -> parser_check_signed_marker(&state, bang_start, name)
+    args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
     end := name.span
     if parser_current_kind(&state) == TOKEN_LPAREN {
-        args = parser_parse_call_args(&state, 1, true)
+        args = parser_parse_marker_args(&state)
         if state.position > 0 -> end = parser_lookahead(&state, -1).span
     }
-    marker_args := [MarkerCallArg]{}
-    labels := [CallLabel?]{}
-    index := 0
-    loop index < args.len() {
-        &marker_args.push(MarkerCallArg.Expr{value: args[index].expr})
-        &labels.push(args[index].label)
-        index += 1
-    }
-    Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: parser_cover(hash.span, end), ct: None}
+    Marker{name: name.payload.decoded, negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(hash.span, end), ct: None}
 }
 fn parser_marker_first_expr(marker: Marker) -> Expr? {
     if marker.args.len() == 0 -> return None
@@ -879,26 +892,51 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
             }
         }
     }
-    default := Expr?{None}
-    if parser_current_kind(&state) == TOKEN_LBRACE {
-        parser_bump(&state)
-        default = Val(parser_parse_expression(&state, 1, 0).expr)
-        parser_expect(&state, TOKEN_RBRACE, "`}}` after the parameter default")
-    }
-    if variadic && default != None {
-        parser_add_error_code(&state, "E1310", name.span, "variadic parameter `{name.payload.decoded}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
-    }
+    // D-MEMPROVENANCE3=A: an optional `from src (| src)*` follows the type,
+    // then the D-DEFAULT-SHAPE1=B default `{expr}`; the retired `= expr`
+    // default is read once to teach E0385.
     declared_from := [String]?{None}
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "from" {
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "from" && (parser_kind_at(&state, 1) == TOKEN_IDENT || parser_kind_at(&state, 1) == TOKEN_SELF) {
         parser_bump(&state)
         sources := [String]{}
         loop {
-            source :: parser_expect_name(&state, "after `from` in a parameter view declaration")
-            &sources.push(source.payload.decoded)
+            source :: parser_current(&state)
+            if source.kind == TOKEN_SELF || (source.kind == TOKEN_IDENT && source.payload.decoded == "self") {
+                parser_bump(&state)
+                &sources.push("self")
+            } else if source.kind == TOKEN_IDENT {
+                parser_bump(&state)
+                &sources.push(source.payload.decoded)
+            } else {
+                break
+            }
+            // A projection names a field of the source; the requirement keys
+            // on the owner name only.
+            loop parser_current_kind(&state) == TOKEN_DOT {
+                parser_bump(&state)
+                if parser_current_kind(&state) == TOKEN_IDENT -> parser_bump(&state)
+            }
             if parser_current_kind(&state) != TOKEN_PIPE -> break
             parser_bump(&state)
         }
-        declared_from = Val(sources)
+        if sources.len() > 0 -> declared_from = Val(sources)
+    }
+    default := Expr?{None}
+    if {
+        parser_current_kind(&state) == TOKEN_LBRACE -> {
+            parser_bump(&state)
+            default = Val(parser_parse_expression(&state, 1, 0).expr)
+            parser_expect(&state, TOKEN_RBRACE, "`}}` after the parameter default")
+        }
+        parser_current_kind(&state) == TOKEN_EQ -> {
+            eq :: parser_bump(&state)
+            parser_add_error_code(&state, "E0385", eq.span, "This declaration uses the retired `name: Type = value` default spelling.", "Declaration defaults ride the type as `name: Type{{value}}`; `=` remains for reassignment and extern slot fill.", "Write `name: Type{{value}}` for a declaration default, or keep `=` for reassignment and extern slot fill.")
+            default = Val(parser_parse_expression(&state, 1, 0).expr)
+        }
+        else -> {}
+    }
+    if variadic && default != None {
+        parser_add_error_code(&state, "E1310", name.span, "variadic parameter `{name.payload.decoded}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
     }
     Param{convention: convention, root: root, name: name.payload.decoded, name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from}
 }
@@ -909,15 +947,43 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     func_name := name.payload.decoded
     func_name_span := name.span
     external_type := NamedSpan?{None}
-    if parser_current_kind(&state) == TOKEN_DOT {
-        parser_bump(&state)
+    // Rust `func_after_fn`: `fn Type.method(` attaches an external method;
+    // the retired `~~` connector teaches E0325 and recovers the same way.
+    connector :: parser_current_kind(&state)
+    if connector == TOKEN_DOT || (connector == TOKEN_TILDE_TILDE && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN) {
+        separator :: parser_bump(&state)
+        if separator.kind == TOKEN_TILDE_TILDE -> parser_add_error_code(&state, "E0325", separator.span, "external methods attach with `.`, not `~~`", "the dot connector matches trait impls and ordinary member access", "write `fn {func_name}.method(...)`")
         method :: parser_expect_name(&state, "after `.` in an external method name")
         external_type = Val(NamedSpan{name: func_name, span: name.span})
         func_name = method.payload.decoded
         func_name_span = method.span
     }
     type_params := parser_parse_type_params(&state)
-    params := parser_parse_param_list(&state)
+    // S83: one bare variant head, `Circle(r: Float)` or `Empty()`, in place
+    // of the parameter list; its payload parameters feed sema's dispatch fold.
+    head_pattern := Pattern?{None}
+    params := [Param]{}
+    if parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_RPAREN) {
+        parser_bump(&state)
+        variant :: parser_expect_name(&state, "for a multi-head variant")
+        pattern_end := variant.span.end
+        if parser_current_kind(&state) == TOKEN_LPAREN {
+            params = parser_parse_param_list(&state)
+            pattern_end = parser_lookahead(&state, -1).span.end
+        }
+        parser_expect(&state, TOKEN_RPAREN, "`)` after a multi-head variant")
+        bindings := [PatSlot]{}
+        loop param in params {
+            if param.name == "_" {
+                &bindings.push(PatSlot.Wildcard)
+            } else {
+                &bindings.push(PatSlot.Bind{name: param.name, span: param.name_span})
+            }
+        }
+        head_pattern = Val(Pattern.Variant{variant: variant.payload.decoded, bindings: bindings, leading_dot: false, span: Span{start: variant.span.start, end: pattern_end}})
+    } else {
+        params = parser_parse_param_list(&state)
+    }
     signature :: parser_parse_callable_result(&state)
     return_type := signature.return_type
     return_type_span := signature.return_type_span
@@ -946,7 +1012,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
         }
     }
     guest_import :: loop applied in modifiers.markers {
-        if applied.name == "Import" -> break true
+        if parser_marker_is_c_guest_import(applied) -> break true
     } ?? false
     is_ffi :: loop applied in modifiers.markers {
         if applied.name == "FFI" -> break true
@@ -990,8 +1056,9 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     if declared_effects == .Val(row) {
         if row.len() == 0 -> func.is_pure = true
     }
+    func.head_pattern = head_pattern
     func.markers = modifiers.markers
-    parser_apply_function_markers(&func, modifiers.markers)
+    parser_apply_function_markers(&state, &func, modifiers.markers)
     has_body := false
     if {
         is_ffi -> {
@@ -1000,7 +1067,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
             has_body = true
         }
         parser_current_kind(&state) == TOKEN_LBRACE -> {
-            body :: parser_parse_body_block(&state, parser_return_type_has_value(return_type))
+            body :: parser_parse_callable_body(&state, parser_return_type_has_value(return_type))
             func.body = body.statements
             func.span = parser_cover(modifiers.start_span, body.span)
             has_body = true
@@ -1018,7 +1085,42 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
             func.span = parser_cover(modifiers.start_span, signature_end)
         }
     }
+    if guest_import && !is_ffi -> parser_bind_guest_import_symbol(&state, &func)
     ParsedFunction{value: func, has_body: has_body}
+}
+
+// Rust `is_c_guest_import_marker`: the per-callable C import `#Import(c)`.
+// Declared infallible: it is called inside the `guest_import` loop
+// expression, which would otherwise carry its failure into the parser.
+fn parser_marker_is_c_guest_import(marker: Marker) -> Bool Never! {
+    if marker.negated || marker.name != "Import" -> return false
+    first :: parser_marker_first_expr(marker) ?? return false
+    if first == .Ident(name, _) -> return name == "c"
+    false
+}
+
+// D-ADOPT-GUEST1=A (Rust `guest_import_fn_from_markers`): the one string body
+// of an `#Import(c)` function names its C symbol. The symbol moves into the
+// marker's compile-time fact and the Jet body is cleared, so it never reaches
+// expression checking or codegen.
+fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
+    symbol := ""
+    error_span := func.span
+    if func.body.len() == 1 && func.body[0] == .Expr(value) && value == .Str(parts, span) {
+        error_span = span
+        if parts.len() == 1 && parts[0] == .Lit(text) -> symbol = text
+    }
+    if symbol == "" {
+        parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) Return = \"c_symbol\"`")
+        return
+    }
+    loop index in 0..<func.markers.len() {
+        if parser_marker_is_c_guest_import(func.markers[index]) {
+            func.markers[index].ct = Val(CtValue.Str{value: symbol})
+            break
+        }
+    }
+    func.body = [Stmt]{}
 }
 
 pub struct ParsedFuncEffects {
@@ -1447,42 +1549,63 @@ fn parser_return_type_has_value(return_type: Type?) -> Bool Never! {
     }
 }
 
-fn parser_apply_function_markers(func: &Func, markers: [Marker]) Never! {
-    index := 0
-    loop index < markers.len() {
-        marker :: markers[index]
-        if marker.name == "Pure" -> func.is_pure = true
-        if marker.name == "Unsafe" {
-            func.is_unsafe = true
-            func.unsafe_span = Val(marker.span)
-            first := parser_marker_first_expr(marker)
-            if first == .Val(reason) -> func.unsafe_reason = parser_expr_literal_string(reason)
+// Rust `apply_callable_markers`: the typed projections of the function rules.
+// The marker list itself stays on the function. Retired spellings (`#Pure`,
+// `#Sanitizer`, `#InlineAlways`) project nothing; sema teaches their
+// replacement (E0927).
+fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [Marker]) {
+    loop marker in markers {
+        if marker.name == {
+            "Unsafe" -> {
+                func.is_unsafe = true
+                func.unsafe_span = Val(marker.span)
+                first := parser_marker_first_expr(marker)
+                if first == .Val(reason) -> func.unsafe_reason = parser_expr_literal_string(reason)
+            }
+            "Reactive" -> {
+                if marker.args.len() == 0 -> func.is_reactive = true
+            }
+            "Replayable" -> {
+                if marker.args.len() == 0 {
+                    func.is_replayable = true
+                    func.replayable_span = Val(marker.span)
+                }
+            }
+            "MustUse" -> {
+                if marker.args.len() == 0 {
+                    func.is_must_use = true
+                    func.must_use_span = Val(marker.span)
+                }
+            }
+            // D-TAG-SURFACE1=A: `#Scrub(Tag)` names the one fact tag removed.
+            "Scrub" -> {
+                if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) && values[0] == .Val(written) && written == .Ident(name, _) -> func.scrub_tag = Val(name)
+            }
+            // D-METHODMACRO1=A: bare `#Inline` is a hint; `#Inline(Always)`
+            // is the checked promise. A written `Hint` or `Never` mode is
+            // E0930 here (Rust `apply_callable_markers`); sema's menu check
+            // reports any other value.
+            "Inline" -> {
+                func.inline_span = Val(marker.span)
+                mode := Expr?{None}
+                if parser_marker_bindings(marker, [String]{"mode"}) == .Val(values) -> mode = values[0]
+                if mode == {
+                    .Val(value) -> {
+                        variant :: parser_marker_enum_variant(value)
+                        if {
+                            variant == "Always" -> func.is_inline_always = true
+                            variant == "Hint" || variant == "Never" -> parser_marker_shape_error(&state, marker)
+                            else -> {}
+                        }
+                    }
+                    else -> func.is_inline = true
+                }
+            }
+            else -> {}
         }
-        if marker.name == "Reactive" -> func.is_reactive = true
-        if marker.name == "Replayable" {
-            func.is_replayable = true
-            func.replayable_span = Val(marker.span)
-        }
-        if marker.name == "Sanitizer" {
-            func.is_sanitizer = true
-            first := parser_marker_first_expr(marker)
-            if first == .Val(scrub) -> func.scrub_tag = parser_expr_literal_string(scrub)
-        }
-        if marker.name == "MustUse" {
-            func.is_must_use = true
-            func.must_use_span = Val(marker.span)
-        }
-        if marker.name == "Inline" {
-            func.is_inline = true
-            func.inline_span = Val(marker.span)
-        }
-        if marker.name == "InlineAlways" {
-            func.is_inline = true
-            func.is_inline_always = true
-            func.inline_span = Val(marker.span)
-        }
-        index += 1
     }
+    // D-TASKS-LIST1=A: `#Job` metadata and its `#Every` schedule (E0925).
+    _ := parser_project_function_job_markers(&state, &func, markers)
 }
 
 fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -> StructDef {
@@ -1636,15 +1759,28 @@ fn parser_parse_type_method(state: &JetParserState) -> Func {
     parser_parse_function(&state, modifiers, true).value
 }
 
-// D-SERDE5/7 + D-SHAPE2: the markers on one variant, as bare `#Name` markers
-// or one `#[…]` list.
+// D-SERDE5/7 + D-SHAPE2: the markers on one variant, bare `#Name` markers or
+// `#[…]` lists; two distinct rules belong in one list (E0999).
 fn parser_parse_variant_markers(state: &JetParserState) -> [Marker] {
-    if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_parse_marker_group(&state)
     markers := [Marker]{}
-    loop parser_current_kind(&state) == TOKEN_HASH {
-        &markers.push(parser_parse_marker(&state))
-        parser_skip_semicolons(&state)
+    chunks := 0
+    bracket_chunks := 0
+    sequence := parser_current(&state).span
+    loop parser_current_kind(&state) == TOKEN_HASH && !parser_aborting(&state) {
+        if parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+            group :: parser_parse_marker_group_list(&state)
+            loop marker in group.markers -> &markers.push(marker)
+            sequence.end = group.span.end
+            bracket_chunks += 1
+        } else {
+            marker :: parser_parse_marker(&state)
+            &markers.push(marker)
+            sequence.end = marker.span.end
+            parser_skip_semicolons(&state)
+        }
+        chunks += 1
     }
+    parser_report_adjacent_markers(&state, markers, chunks, bracket_chunks, sequence, "variant")
     markers
 }
 

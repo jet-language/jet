@@ -584,7 +584,7 @@ fn jet_rust_emit_cli_decode_and_invoke(ctx: &JetRustEmitContext, function: MIRFu
     if receiver_inputs == .Val(receiver_rows) {
         receiver :: jet_rust_emit_cli_record_argument(&ctx, function, receiver_rows, "__jet_cli_self_")
         separator :: if args.len() == 0 -> "" else -> ", "
-        call = if is_method -> "({receiver}).{jet_rust_emit_sanitize(function.name)}({args})" else -> "{jet_rust_emit_function_name(&ctx, function.id)}({receiver}{separator}{args})"
+        call = if is_method -> "({receiver}).{jet_rust_emit_inherent_method_symbol(function.name)}({args})" else -> "{jet_rust_emit_function_name(&ctx, function.id)}({receiver}{separator}{args})"
     }
     pad :: "{indent}    "
     &lines.push("{indent}let __jet_cli_result = (|| -> Result<(), String> {{")
@@ -1038,7 +1038,7 @@ fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! 
         decode := ""
         args := [String]{}
         loop parameter in function.params {
-            name :: jet_rust_emit_sanitize(parameter.name)
+            name :: jet_rust_emit_mangle(parameter.name)
             reconstruction := MIRWebParamReconstruction?{None}
             loop candidate in function.web_param_reconstructions {
                 if candidate.local == parameter.name && reconstruction == None -> reconstruction = Val(candidate)
@@ -1046,9 +1046,9 @@ fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! 
             if reconstruction == .Val(row) {
                 fields := [String]{}
                 loop field in row.fields {
-                    flat :: jet_rust_emit_sanitize(field.parameter)
+                    flat :: jet_rust_emit_mangle(field.parameter)
                     &params.push("{flat}: {jet_rust_emit_web_abi_scalar(&ctx, field.ty)}")
-                    &fields.push("{jet_rust_emit_sanitize(field.field)}: {jet_rust_emit_web_abi_decode(&ctx, field.ty, flat)}")
+                    &fields.push("{jet_rust_emit_mangle(field.field)}: {jet_rust_emit_web_abi_decode(&ctx, field.ty, flat)}")
                 }
                 decode = "{decode}    let mut {name} = {jet_rust_emit_type(&ctx, row.ty)} {{ {fields.join(", ")} }};\n"
             } else {

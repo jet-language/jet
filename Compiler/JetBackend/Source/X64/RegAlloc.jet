@@ -49,6 +49,11 @@ fn x64_falses(count: Int) -> [Bool] Never! {
 
 fn x64_liveness(function: LIRFunction) -> X64Liveness Never! {
     count :: function.values.len()
+    // First row per block id, so each CFG edge resolves without a block scan.
+    block_rows := [Int:Int]{}
+    loop (index, block) in function.blocks {
+        if block_rows.get(block.id.value) == None -> &block_rows.add(block.id.value, index).drop("checked absent above")
+    }
     gens := [[Bool]]{}
     kills := [[Bool]]{}
     successors := [[Int]]{}
@@ -64,40 +69,59 @@ fn x64_liveness(function: LIRFunction) -> X64Liveness Never! {
         &gens.push(gen)
         &kills.push(defined)
         targets := [Int]{}
-        loop target in lir_terminator_targets(block.terminator) -> &targets.push(lir_block_index(function, target.block))
+        loop target in lir_terminator_targets(block.terminator) -> &targets.push(block_rows.get(target.block.value) ?? -1)
         &successors.push(targets)
     }
     live_in := [[Bool]]{}
     live_out := [[Bool]]{}
+    predecessors := [[Int]]{}
     loop _ in function.blocks {
         &live_in.push(x64_falses(count))
         &live_out.push(x64_falses(count))
+        &predecessors.push([Int]{})
     }
-    changed := true
-    loop changed {
-        changed = false
-        index := function.blocks.len() - 1
-        loop index >= 0 {
-            out := x64_falses(count)
-            loop successor in successors[index] {
-                loop value in 0..<count { if live_in[successor][value] -> out[value] = true }
+    loop (index, targets) in successors {
+        loop successor in targets -> &predecessors[successor].push(index)
+    }
+    // A worklist (first every block in reverse order, then the predecessors
+    // of each block whose live-in set changed) reaches the same least fixed
+    // point as whole-CFG sweeps, without re-sweeping unchanged blocks.
+    pending := [Int]{}
+    queued := x64_falses(function.blocks.len())
+    seed := function.blocks.len() - 1
+    loop seed >= 0 {
+        &pending.push(seed)
+        queued[seed] = true
+        seed -= 1
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        block_index := pending[cursor]
+        cursor += 1
+        queued[block_index] = false
+        out := x64_falses(count)
+        loop successor in successors[block_index] {
+            loop value in 0..<count { if live_in[successor][value] -> out[value] = true }
+        }
+        incoming := x64_falses(count)
+        loop value in 0..<count -> incoming[value] = gens[block_index][value] || (out[value] && !kills[block_index][value])
+        live_out[block_index] = out
+        if incoming != live_in[block_index] {
+            live_in[block_index] = incoming
+            loop predecessor in predecessors[block_index] {
+                if !queued[predecessor] {
+                    queued[predecessor] = true
+                    &pending.push(predecessor)
+                }
             }
-            incoming := x64_falses(count)
-            loop value in 0..<count -> incoming[value] = gens[index][value] || (out[value] && !kills[index][value])
-            if out != live_out[index] || incoming != live_in[index] {
-                live_out[index] = out
-                live_in[index] = incoming
-                changed = true
-            }
-            index -= 1
         }
     }
     flat_in := [Bool]{}
     flat_out := [Bool]{}
-    loop index in 0..<function.blocks.len() {
+    loop row in 0..<function.blocks.len() {
         loop value in 0..<count {
-            &flat_in.push(live_in[index][value])
-            &flat_out.push(live_out[index][value])
+            &flat_in.push(live_in[row][value])
+            &flat_out.push(live_out[row][value])
         }
     }
     X64Liveness{live_in: flat_in, live_out: flat_out}
@@ -149,23 +173,25 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         position += 1
     }
 
+    // calls_below[p] counts call positions below p, so a value crosses a call
+    // when one lies strictly between its start and end.
+    is_call := x64_falses(position + 1)
+    loop call in calls -> is_call[call] = true
+    calls_below := [Int]{0}
+    loop at in 0..<(position + 1) -> &calls_below.push(if is_call[at] -> calls_below[at] + 1 else -> calls_below[at])
     crosses := [Bool]{}
     loop value in 0..<count {
-        crossing := false
-        loop call in calls { if starts[value] < call && call < ends[value] -> crossing = true }
-        &crosses.push(crossing)
+        &crosses.push(ends[value] > starts[value] + 1 && calls_below[ends[value]] - calls_below[starts[value] + 1] > 0)
     }
 
-    // Values in start order; ties keep value order.
+    // Values in start order; ties keep value order: a counting sort over the
+    // start positions (-1 for an unused value) replaces repeated minimum scans.
+    buckets := [[Int]]{}
+    loop _ in 0..<(position + 1) -> &buckets.push([Int]{})
+    loop value in 0..<count -> &buckets[starts[value] + 1].push(value)
     order := [Int]{}
-    placed := x64_falses(count)
-    loop _ in 0..<count {
-        next_value := -1
-        loop value in 0..<count {
-            if !placed[value] && (next_value < 0 || starts[value] < starts[next_value]) -> next_value = value
-        }
-        placed[next_value] = true
-        &order.push(next_value)
+    loop bucket in buckets {
+        loop value in bucket -> &order.push(value)
     }
 
     registers := [Int]{}

@@ -31,14 +31,41 @@ struct MIRInlineCallSite {
     pub type_args: [MIRType]
 }
 
+struct MIRInlineCallPosition { pub block: Int, pub instruction: Int }
+
+// Function rows never move during expansion. Candidate positions are rebuilt
+// only for changed bodies, keeping discovery in function/block/instruction order.
+struct MIRInlineIndex {
+    pub functions: [Int:Int]
+    pub eligible: [Int:Bool]
+}
+
 fn mir_pass_expand_inline_always(program: &MIRProgram) -> MIRInlineExpansionResult Never! {
+    functions := [Int:Int]{}
+    eligible := [Int:Bool]{}
+    loop (index, function) in program.functions {
+        if functions.get(function.id.value) == None {
+            &functions.add(function.id.value, index).drop("the first function row owns this id")
+            if function.is_inline_always || function.optimization.inline_always -> &eligible.add(function.id.value, true).drop("function ids are unique")
+        }
+    }
+    if eligible.len() == 0 -> return MIRInlineExpansionResult{expanded: 0, blocks_removed: 0, error: None}
+    index :: MIRInlineIndex{functions: functions, eligible: eligible}
+    pending := [[MIRInlineCallPosition]]{}
+    loop function in program.functions -> &pending.push(mir_pass_inline_candidates(function, index))
+    // Only callers with an initial candidate can gain cloned candidates.
+    callers := [Int]{}
+    loop (row, candidates) in pending {
+        if candidates.len() != 0 -> &callers.push(row)
+    }
     expanded := 0
     blocks_removed := 0
     loop {
-        site :: mir_pass_inline_next_call(program) ?? break
-        caller_index :: mir_pass_inline_function_index(program.functions, site.caller)
-        caller_option :: mir_pass_inline_find_function(program.functions, site.caller)
-        callee_option :: mir_pass_inline_find_function(program.functions, site.callee)
+        // Recheck blocked candidates after CFG changes, never ordinary calls.
+        site :: mir_pass_inline_next_call(program, index, pending, callers) ?? break
+        caller_index :: index.functions.get(site.caller.value) ?? -1
+        caller_option :: mir_pass_inline_find_function(program.functions, index, site.caller)
+        callee_option :: mir_pass_inline_find_function(program.functions, index, site.callee)
         if caller_index < 0 || caller_option == None || callee_option == None -> return MIRInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: Val(mir_pass_error(.LegalityVerification, .InvalidSchema, Val(site.caller), Span{start: 0, end: 0}, "#Inline(Always) call target is missing from MIR"))}
         caller :: caller_option ?? return MIRInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: Val(mir_pass_error(.LegalityVerification, .InvalidSchema, Val(site.caller), Span{start: 0, end: 0}, "#Inline(Always) caller is missing from MIR"))}
         callee :: callee_option ?? return MIRInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: Val(mir_pass_error(.LegalityVerification, .InvalidSchema, Val(site.caller), caller.span, "#Inline(Always) callee is missing from MIR"))}
@@ -46,35 +73,54 @@ fn mir_pass_expand_inline_always(program: &MIRProgram) -> MIRInlineExpansionResu
         if result.error != None -> return MIRInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed + result.blocks_removed, error: result.error}
         expanded += 1
         blocks_removed += result.blocks_removed
+        if result.blocks_removed > 0 {
+            // Non-returning expansion can prune blocks in any function.
+            loop (row, function) in program.functions -> pending[row] = mir_pass_inline_candidates(function, index)
+        } else {
+            pending[caller_index] = mir_pass_inline_candidates(program.functions[caller_index], index)
+        }
     }
     MIRInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: None}
 }
 
-fn mir_pass_inline_function_index(rows: [MIRFunction], id: MIRFunctionID) -> Int Never! {
-    loop (index, row) in rows { if row.id == id -> return index }
-    -1
+fn mir_pass_inline_candidates(caller: MIRFunction, index: MIRInlineIndex) -> [MIRInlineCallPosition] Never! {
+    pending := [MIRInlineCallPosition]{}
+    loop (block_index, block) in caller.blocks {
+        loop (instruction_index, instruction) in block.instructions {
+            if instruction.operation == {
+                .Call(callee, _, _) -> {
+                    id :: mir_pass_inline_callee_id(callee) ?? next
+                    if index.eligible.get(id.value) != None -> &pending.push(MIRInlineCallPosition{block: block_index, instruction: instruction_index})
+                }
+                else -> {}
+            }
+        }
+    }
+    pending
 }
 
-fn mir_pass_inline_next_call(program: MIRProgram) -> MIRInlineCallSite? {
-    loop caller in program.functions {
-        loop block in caller.blocks {
-            loop instruction in block.instructions {
-                if instruction.operation == {
-                    .Call(callee, args, type_args) -> {
-                        callee_id :: mir_pass_inline_callee_id(callee) ?? next
-                        function :: mir_pass_inline_find_function(program.functions, callee_id) ?? next
-                        if (function.is_inline_always || function.optimization.inline_always)
-                            && caller.id != callee_id
-                            && !mir_pass_inline_reaches_caller(program, function.id, caller.id)
-                            && !mir_pass_inline_callee_is_recursive(program, function)
-                            && function.capture_params.len() == 0
-                            && !(caller.generator == None && function.generator != None)
-                            && mir_pass_inline_call_site_can_expand(caller, function, instruction, args, type_args) {
-                            return Val(MIRInlineCallSite{caller: caller.id, block: block.id, instruction: instruction.id, callee: callee_id, args: args, type_args: type_args})
-                        }
+fn mir_pass_inline_next_call(program: MIRProgram, index: MIRInlineIndex, pending: [[MIRInlineCallPosition]], callers: [Int]) -> MIRInlineCallSite? {
+    loop caller_index in callers {
+        candidates :: pending[caller_index]
+        if candidates.len() == 0 -> next
+        caller :: program.functions[caller_index]
+        loop position in candidates {
+            block :: caller.blocks[position.block]
+            instruction :: block.instructions[position.instruction]
+            if instruction.operation == {
+                .Call(callee, args, type_args) -> {
+                    callee_id :: mir_pass_inline_callee_id(callee) ?? next
+                    function :: mir_pass_inline_find_function(program.functions, index, callee_id) ?? next
+                    if caller.id != callee_id
+                        && !mir_pass_inline_reaches_caller(program, index, function.id, caller.id)
+                        && !mir_pass_inline_callee_is_recursive(program, index, function)
+                        && function.capture_params.len() == 0
+                        && !(caller.generator == None && function.generator != None)
+                        && mir_pass_inline_call_site_can_expand(caller, function, instruction, args, type_args) {
+                        return Val(MIRInlineCallSite{caller: caller.id, block: block.id, instruction: instruction.id, callee: callee_id, args: args, type_args: type_args})
                     }
-                    else -> {}
                 }
+                else -> {}
             }
         }
     }
@@ -88,31 +134,30 @@ fn mir_pass_inline_callee_id(callee: MIRCallee) -> MIRFunctionID? {
     }
 }
 
-fn mir_pass_inline_find_function(rows: [MIRFunction], id: MIRFunctionID) -> MIRFunction? {
-    loop row in rows { if row.id == id -> return Val(row) }
-    None
+fn mir_pass_inline_find_function(rows: [MIRFunction], index: MIRInlineIndex, id: MIRFunctionID) -> MIRFunction? {
+    position :: index.functions.get(id.value) ?? return None
+    Val(rows[position])
 }
 
-fn mir_pass_inline_reaches_caller(program: MIRProgram, start: MIRFunctionID, caller: MIRFunctionID) -> Bool Never! {
+fn mir_pass_inline_reaches_caller(program: MIRProgram, index: MIRInlineIndex, start: MIRFunctionID, caller: MIRFunctionID) -> Bool Never! {
     if start == caller -> return true
     pending := [MIRFunctionID]{start}
-    visited := [MIRFunctionID]{}
+    visited := [Int:Bool]{}
     cursor := 0
     loop cursor < pending.len() {
         current := pending[cursor]
         cursor += 1
-        if mir_pass_function_id_seen(visited, current) -> next
-        &visited.push(current)
-        function :: mir_pass_inline_find_function(program.functions, current) ?? next
+        if visited.get(current.value) != None -> next
+        &visited.add(current.value, true).drop("checked absent above")
+        function :: mir_pass_inline_find_function(program.functions, index, current) ?? next
         loop block in function.blocks {
             loop instruction in block.instructions {
                 if instruction.operation == {
                     .Call(callee, _, _) -> {
                         target :: mir_pass_inline_callee_id(callee) ?? next
-                        target_function :: mir_pass_inline_find_function(program.functions, target) ?? next
-                        if target_function.is_inline_always || target_function.optimization.inline_always {
+                        if index.eligible.get(target.value) != None {
                             if target == caller -> return true
-                            if !mir_pass_function_id_seen(visited, target) -> &pending.push(target)
+                            if visited.get(target.value) == None -> &pending.push(target)
                         }
                     }
                     else -> {}
@@ -123,15 +168,14 @@ fn mir_pass_inline_reaches_caller(program: MIRProgram, start: MIRFunctionID, cal
     false
 }
 
-fn mir_pass_inline_callee_is_recursive(program: MIRProgram, callee: MIRFunction) -> Bool Never! {
+fn mir_pass_inline_callee_is_recursive(program: MIRProgram, index: MIRInlineIndex, callee: MIRFunction) -> Bool Never! {
     loop block in callee.blocks {
         loop instruction in block.instructions {
             if instruction.operation == {
                 .Call(target, _, _) -> {
                     target_id :: mir_pass_inline_callee_id(target) ?? next
-                    target_function :: mir_pass_inline_find_function(program.functions, target_id) ?? next
-                    if !(target_function.is_inline_always || target_function.optimization.inline_always) -> next
-                    if mir_pass_inline_reaches_caller(program, target_id, callee.id) -> return true
+                    if index.eligible.get(target_id.value) == None -> next
+                    if mir_pass_inline_reaches_caller(program, index, target_id, callee.id) -> return true
                 }
                 else -> {}
             }

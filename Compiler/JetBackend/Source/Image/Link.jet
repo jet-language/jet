@@ -48,17 +48,27 @@ pub fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunc
         &placed.push(function)
         &starts.push(runtime_offsets[index])
     }
+    // First start per function ID and per runtime symbol, so a relocation
+    // resolves by one map probe instead of a scan of every function.
+    function_starts := [Int:Int]{}
+    loop (index, function) in functions {
+        if function_starts.get(function.id.value) == None -> &function_starts.add(function.id.value, offsets[index]).drop("checked absent above")
+    }
+    runtime_starts := [String:Int]{}
+    loop (index, function) in runtime {
+        if runtime_starts.get(function.name) == None -> &runtime_starts.add(function.name, runtime_offsets[index]).drop("checked absent above")
+    }
     loop (index, function) in placed {
         loop reloc in function.relocs {
             at :: starts[index] + reloc.at
             target := -1
             if reloc.target == {
                 .Function(id) -> {
-                    loop (candidate_index, candidate) in functions { if target < 0 && candidate.id == id -> target = offsets[candidate_index] }
+                    target = function_starts.get(id.value) ?? -1
                     if target < 0 -> &errors.push("{function.name}: call to function {id.value}, which is not in the image")
                 }
                 .Runtime(symbol) -> {
-                    loop (candidate_index, candidate) in runtime { if target < 0 && candidate.name == symbol -> target = runtime_offsets[candidate_index] }
+                    target = runtime_starts.get(symbol) ?? -1
                     if target < 0 -> &errors.push("{function.name}: runtime symbol `{symbol}` is not in the image runtime")
                 }
                 .Data(id) -> {

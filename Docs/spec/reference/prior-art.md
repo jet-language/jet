@@ -460,6 +460,26 @@ Report: [mine-for-jet-2026-10-01-systems-langs](../../research/mine-for-jet-2026
 - https://skiplang.com
 - https://dev.epicgames.com/documentation/en-us/fortnite/verse-language-reference
 
+### Vale and Valen memory management (mined 2026-10-02)
+
+Report: [mine-for-jet-2026-10-02-vale-valen](../../research/mine-for-jet-2026-10-02-vale-valen.md).
+
+- https://www.youtube.com/watch?v=UavYVf0UEoc
+- https://verdagon.dev/blog/golden-spike-reviving-vale-valen
+- https://verdagon.dev/blog/group-borrowing
+- https://verdagon.dev/blog/generational-references
+- https://verdagon.dev/blog/hybrid-generational-memory
+- https://verdagon.dev/blog/zero-cost-memory-safety-regions-overview
+- https://verdagon.dev/blog/first-regions-prototype
+- https://verdagon.dev/blog/seamless-fearless-structured-concurrency
+- https://verdagon.dev/blog/higher-raii-uses-linear-types
+- https://verdagon.dev/blog/higher-raii-7drl
+- https://verdagon.dev/blog/linear-types-borrowing
+- https://verdagon.dev/grimoire/grimoire
+- https://verdagon.dev/blog/perfect-replayability-prototyped
+- https://verdagon.dev/blog/fearless-ffi
+- https://vale.dev/guide/references
+
 ## Developer experience (e14)
 
 Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths remain provenance records.

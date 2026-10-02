@@ -426,31 +426,130 @@ fn jet_eval_compiler_services_syntax_node(item: Item) -> TComptimeValue Never! {
     name := String?{None}
     span := Span{start: 0, end: 0}
     if item == {
-        .Func(value) -> { kind = "function"; name = Val(value.name); span = value.name_span }
-        .Struct(value) -> { kind = "struct"; name = Val(value.name); span = value.name_span }
-        .Enum(value) -> { kind = "enum"; name = Val(value.name); span = value.name_span }
-        .Distinct(value) -> { kind = "distinct"; name = Val(value.name); span = value.name_span }
-        .TypeAlias(value) -> { kind = "type_alias"; name = Val(value.name); span = value.name_span }
-        .UnitFamily(value) -> { kind = "unit_family"; name = Val(value.family); span = value.family_span }
-        .Trait(value) -> { kind = "trait"; name = Val(value.name); span = value.name_span }
-        .Tag(value) -> { kind = "tag"; name = Val(value.name); span = value.name_span }
-        .EffectDecl(value) -> { kind = "effect"; name = Val(value.name); span = value.name_span }
-        .Impl(value) -> { kind = "impl"; name = Val(value.type_name); span = value.type_span }
-        .Const(value) -> { kind = "const"; name = Val(value.name); span = value.name_span }
-        .Test(value) -> { kind = "test"; name = value.name; span = value.name_span }
-        .ExternRust(value) -> { kind = "extern_rust"; name = Val(value.crate_spec); span = value.span }
-        .Module(value) -> { kind = "module"; name = Val(value.name); span = value.name_span }
-        .CModule(value) -> { kind = "c_module"; name = Val(value.lib); span = value.path_span }
-        .CodeModule(value) -> { kind = "code_module"; name = Val(value.name); span = value.name_span }
-        .ErrorConv(value) -> { kind = "error_conversion"; name = Val("{value.from_ty} -> {value.to_ty}"); span = value.from_span }
-        .Migration(value) -> { kind = "migration"; name = Val(value.type_name); span = value.type_span }
-        .ProtocolDecl(value) -> { kind = "protocol"; name = Val(value.name); span = value.name_span }
-        .UserDerive(value) -> { kind = "derive"; name = Val(value.trait_name); span = value.trait_span }
-        .TemplateLoop(value) -> { kind = "template_loop"; span = value.span }
-        .GenericModule(value) -> { kind = "generic_module"; name = Val(value.name); span = value.name_span }
-        .ModuleAlias(value) -> { kind = "module_alias"; name = Val(value.name); span = value.name_span }
-        .MarkerDecl(value) -> { kind = "marker"; name = Val(value.name); span = value.name_span }
-        .FactDecl(value) -> { kind = "fact"; name = Val(value.name); span = value.name_span }
+        .Func(value) -> {
+            kind = "function"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .Struct(value) -> {
+            kind = "struct"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .Enum(value) -> {
+            kind = "enum"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .Distinct(value) -> {
+            kind = "distinct"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .TypeAlias(value) -> {
+            kind = "type_alias"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .UnitFamily(value) -> {
+            kind = "unit_family"
+            name = Val(value.family)
+            span = value.family_span
+        }
+        .Trait(value) -> {
+            kind = "trait"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .Tag(value) -> {
+            kind = "tag"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .EffectDecl(value) -> {
+            kind = "effect"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .Impl(value) -> {
+            kind = "impl"
+            name = Val(value.type_name)
+            span = value.type_span
+        }
+        .Const(value) -> {
+            kind = "const"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .Test(value) -> {
+            kind = "test"
+            name = value.name
+            span = value.name_span
+        }
+        .ExternRust(value) -> {
+            kind = "extern_rust"
+            name = Val(value.crate_spec)
+            span = value.span
+        }
+        .Module(value) -> {
+            kind = "module"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .CModule(value) -> {
+            kind = "c_module"
+            name = Val(value.lib)
+            span = value.path_span
+        }
+        .CodeModule(value) -> {
+            kind = "code_module"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .ErrorConv(value) -> {
+            kind = "error_conversion"
+            name = Val("{value.from_ty} -> {value.to_ty}")
+            span = value.from_span
+        }
+        .Migration(value) -> {
+            kind = "migration"
+            name = Val(value.type_name)
+            span = value.type_span
+        }
+        .ProtocolDecl(value) -> {
+            kind = "protocol"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .UserDerive(value) -> {
+            kind = "derive"
+            name = Val(value.trait_name)
+            span = value.trait_span
+        }
+        .TemplateLoop(value) -> {
+            kind = "template_loop"
+            span = value.span
+        }
+        .GenericModule(value) -> {
+            kind = "generic_module"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .ModuleAlias(value) -> {
+            kind = "module_alias"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .MarkerDecl(value) -> {
+            kind = "marker"
+            name = Val(value.name)
+            span = value.name_span
+        }
+        .FactDecl(value) -> {
+            kind = "fact"
+            name = Val(value.name)
+            span = value.name_span
+        }
     }
     TComptimeValue.Struct{type_name: "CompilerNode", fields: [TComptimeField]{
         TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},

@@ -116,8 +116,10 @@ struct LowerSlot {
 struct LowerModule {
     pub signatures: [LIRSignature]
     pub data: [LIRData]
-    pub data_text: [String]
-    pub mir_ids: [MIRFunctionID]
+    // Interned text -> its data id, and first program row per MIR function
+    // id, so interning and call lowering probe a map instead of scanning.
+    pub data_rows: [String:Int]
+    pub mir_rows: [Int:Int]
     pub mir_signatures: [LIRSignatureID]
     pub glue_base: Int
     pub glue: [LowerGlue]
@@ -160,15 +162,15 @@ pub fn lir_lower_program(program: MIRProgram) -> LIRLowering Never! {
     m := LowerModule{
         signatures: [LIRSignature]{},
         data: [LIRData]{},
-        data_text: [String]{},
-        mir_ids: [MIRFunctionID]{},
+        data_rows: [String:Int]{},
+        mir_rows: [Int:Int]{},
         mir_signatures: [LIRSignatureID]{},
         glue_base: program.functions.len(),
         glue: [LowerGlue]{},
         issues: [LIRLoweringIssue]{},
     }
-    loop function in program.functions {
-        &m.mir_ids.push(function.id)
+    loop (index, function) in program.functions {
+        if m.mir_rows.get(function.id.value) == None -> &m.mir_rows.add(function.id.value, index).drop("checked absent above")
         signature :: lower_function_signature(program, &m, function)
         &m.mir_signatures.push(signature)
     }
@@ -336,14 +338,12 @@ fn lower_function_signature(p: MIRProgram, m: &LowerModule, function: MIRFunctio
 }
 
 fn lower_data(m: &LowerModule, text: String) -> LIRDataID Never! {
-    loop (index, existing) in m.data_text {
-        if existing == text -> return LIRDataID{value: index}
-    }
+    if m.data_rows.get(text) == .Val(index) -> return LIRDataID{value: index}
     bytes := [U8]{}
     loop byte in text.bytes() -> &bytes.push(byte)
     id :: LIRDataID{value: m.data.len()}
     &m.data.push(LIRData{id: id, bytes: bytes, align: 1})
-    &m.data_text.push(~text)
+    &m.data_rows.add(~text, id.value).drop("checked absent above")
     id
 }
 
@@ -1696,10 +1696,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
 }
 
 fn lower_function_index(m: LowerModule, id: MIRFunctionID) -> Int Never! {
-    loop (index, candidate) in m.mir_ids {
-        if candidate == id -> return index
-    }
-    -1
+    m.mir_rows.get(id.value) ?? -1
 }
 
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_arg_count: Int) Never! {

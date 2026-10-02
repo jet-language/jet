@@ -859,6 +859,20 @@ impl CtBigInt {
         }
         CtBigInt { negative, limbs }
     }
+
+    fn from_i128(n: i128) -> Self {
+        if n == 0 {
+            return Self::from_int(0);
+        }
+        let negative = n < 0;
+        let mut v = n.unsigned_abs();
+        let mut limbs = Vec::new();
+        while v > 0 {
+            limbs.push((v % u128::from(CTBI_BASE)) as u32);
+            v /= u128::from(CTBI_BASE);
+        }
+        CtBigInt { negative, limbs }
+    }
     fn from_decimal_digits(digits: &[u8]) -> Self {
         if digits.is_empty() {
             return Self::from_int(0);
@@ -1474,15 +1488,26 @@ impl CtBigInt {
         Self::from_twos_complement(bits)
     }
 
+    // Operands that fit i128 combine in machine two's complement, which is
+    // the same infinite-width result; only wider values take the bit walk.
     pub fn bit_and(&self, other: &CtBigInt) -> CtBigInt {
+        if let (Some(left), Some(right)) = (self.try_i128(), other.try_i128()) {
+            return Self::from_i128(left & right);
+        }
         self.bitwise(other, |left, right| left & right)
     }
 
     pub fn bit_or(&self, other: &CtBigInt) -> CtBigInt {
+        if let (Some(left), Some(right)) = (self.try_i128(), other.try_i128()) {
+            return Self::from_i128(left | right);
+        }
         self.bitwise(other, |left, right| left | right)
     }
 
     pub fn bit_xor(&self, other: &CtBigInt) -> CtBigInt {
+        if let (Some(left), Some(right)) = (self.try_i128(), other.try_i128()) {
+            return Self::from_i128(left ^ right);
+        }
         self.bitwise(other, |left, right| left ^ right)
     }
 

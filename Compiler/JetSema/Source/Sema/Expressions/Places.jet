@@ -5,6 +5,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     IndexKind,
+    InternalTag,
     PlaceAccess,
     Span,
     Symbol,
@@ -14,11 +15,13 @@ use jet_foundation.[
     TExprKind,
     TFieldRef,
     TIndexKind,
+    TagMarker,
     TextEdit,
     Type,
     diagnostic_with_edit,
     expr_optional_method_call_as_call,
     expr_span,
+    is_compute_tensor_family,
     mir_boundary_head_carrier_module,
     symbol_id,
     tir_symbol_local,
@@ -84,14 +87,28 @@ fn sema_expression_move_mark_text(expr: Expr) -> String Never! {
     }
 }
 
+// Rust `note_exact_move`, after the place is typed: a Copy value simply
+// copies (any place, an element included); an element otherwise stays in its
+// collection (E0225); a read or write parameter owns nothing to give away
+// (E0201 at the mark). Pins are judged after the read, as Rust's move record
+// does.
 fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     mark_span :: Span{start: span.start, end: span.start + 1}
+    checked :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
     if value == .Index(_, _, _, _) {
         &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "remove `^` to copy the element"), TextEdit{span: mark_span, new_text: ""}))
         return None
     }
+    binding :: sema_ownership_binding_for_expr(&state, value, scopes)
+    if binding != None {
+        info :: binding
+        if sema_ownership_binding_is_borrowed_param(info) {
+            &diagnostics.push(sema_error("E0201", mark_span, "`{info.symbol.name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `~`, or accept it with the move marker `^`"))
+            return None
+        }
+    }
     if !sema_pin_check_move(&state, value, scopes, &diagnostics) -> return None
-    checked :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_ownership_consume_expression(&state, Expr.Place{value: value, access: PlaceAccess.Take, span: span}, scopes, "the move `^{sema_expression_move_mark_text(value)}`", &diagnostics) -> return None
     Val(checked)
 }
@@ -105,17 +122,20 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
     }
     checked :: sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     convention :: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
-    result_ty :: if checked.kind == {
-        .Slice(_, _, _, _, _) -> {
-            element :: if checked.ty == {
-                .List(item) -> item
-                .FixedList(item, _) -> item
-                else -> Type.Named{name: "Unit"}
+    // Rust `Expr::Place`: a list range is a `View`/`ViewMut` of its element,
+    // a compute tensor range views `Float`, any other ranged value (a
+    // `String`) keeps its own type.
+    element := Type?{None}
+    if checked.kind == .Slice(_, _, _, _, _) {
+        if checked.ty == {
+            .List(item) -> element = Val(item)
+            .FixedList(item, _) -> element = Val(item)
+            else -> {
+                if is_compute_tensor_family(checked.ty) -> element = Val(Type.Float)
             }
-            Type.Apply{name: if convention == AccessConvention.Write -> "ViewMut" else -> "View", args: [element]}
         }
-        else -> checked.ty
     }
+    result_ty :: if element == .Val(item) -> Type.Apply{name: if convention == AccessConvention.Write -> "ViewMut" else -> "View", args: [item]} else -> checked.ty
     result :: sema_tir_expr(result_ty, TExprKind.Borrow{place: checked, access: convention}, span)
     sema_expr_expected(result, expected, environment, &diagnostics)
 }
@@ -165,6 +185,23 @@ fn sema_expression_carrier_type_symbol(environment: SemaScopeEnvironment, name: 
     None
 }
 
+// Rust `field_type` for `.value`: an untagged `SharedGuard<T>` or a guard
+// tagged by its acquisition (`guard_read()` / `guard_edit()`) holds `T`. Only
+// the edit tag makes the held place editable when lowered.
+fn sema_expression_shared_guard_value(ty: Type) -> SemaCallMemoryGuard? {
+    marker := TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}
+    guard_type := ty
+    if ty == .Tagged(found, inner) {
+        if found != (TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}) && found != (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit}) -> return None
+        marker = found
+        guard_type = inner
+    }
+    if guard_type == .Apply(name, args) {
+        if name == "SharedGuard" && args.len() == 1 -> return Val(SemaCallMemoryGuard{value_type: args[0], marker: marker, editable: marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit})})
+    }
+    None
+}
+
 fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if base.ty == .Tuple(_) {
         tuple_field :: sema_expression_tuple_field(base, member, span, &diagnostics) ?? return None
@@ -173,6 +210,16 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         tuple_field_symbol :: Symbol{id: tuple_field_id, kind: SymbolKind.Field, name: member, module_name: "", owner: None, span: span, ty: Val(tuple_field.ty), visibility: 0}
         &context.name_references.push(SemaNameReferenceFact{span: span, symbol: tuple_field_symbol, kind: "field"})
         return sema_expr_expected(tuple_field, expected, environment, &diagnostics)
+    }
+    // D-SHAREDGUARD2=A: a guard's held value is a compiler-known place, not
+    // a stored struct field. The hidden tag records whether the place is
+    // editable while diagnostics show one public `SharedGuard<T>`.
+    if member == "value" {
+        guard :: sema_expression_shared_guard_value(base.ty)
+        if guard == .Val(held) {
+            value :: sema_tir_expr(held.value_type, TExprKind.SharedGuardValue{guard: base, editable: held.editable}, span)
+            return sema_expr_expected(value, expected, environment, &diagnostics)
+        }
     }
     owner_name :: if base.ty == {
         .Named(name) -> name

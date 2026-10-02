@@ -191,10 +191,7 @@ fn sema_ui_handle_typed_arg(arg: CallArg, ty: Type, environment: SemaScopeEnviro
 }
 
 fn sema_ui_handle_optional_arg(arg: CallArg, ty: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if arg.expr == {
-        .Absent(_) -> { return Val(sema_tir_expr(Type.Option{inner: ty}, TExprKind.Absent, arg.span)) }
-        else -> {}
-    }
+    if sema_expression_absent_none(arg.expr) -> return Val(sema_tir_expr(Type.Option{inner: ty}, TExprKind.Absent, arg.span))
     value :: sema_ui_handle_typed_arg(arg, ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     return Val(sema_tir_expr(Type.Option{inner: ty}, TExprKind.Present{value: value}, value.span))
 }
@@ -223,10 +220,7 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
         _ := sema_ui_handle_infer_args(bound, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    callback_absent :: if bound[3].expr == {
-        .Absent(_) -> true
-        else -> false
-    }
+    callback_absent :: sema_expression_absent_none(bound[3].expr)
     if !bound[3].flags.is_trailing_block || callback_absent {
         &diagnostics.push(sema_error("E0335", bound[3].span, "button callbacks use a trailing block", "the callback is the button's trailing closure, after its labeled metadata", "write `button(\"Save\") {{ save() }}`"))
         _ := sema_ui_handle_infer_args(bound, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -261,10 +255,7 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
     state_value :: sema_ui_handle_typed_arg(bound[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     ime_value :: sema_ui_handle_typed_arg(bound[1], Type.Named{name: "UIIMEMode"}, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "UINode"}
-    on_drop_absent :: if bound[2].expr == {
-        .Absent(_) -> true
-        else -> false
-    }
+    on_drop_absent :: sema_expression_absent_none(bound[2].expr)
     if on_drop_absent {
         value :: sema_call_core_tir(record, [TExpr]{state_value, ime_value}, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, &diagnostics)
         if value == None -> return SemaDirectSpecialCheck{handled: true, value: None}

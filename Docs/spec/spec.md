@@ -428,8 +428,11 @@ docs and fixtures use canonical syntax only.
 
 Structs and enums carry data; methods attach behavior. A struct literal is
 `Type{field: value}` or an expected-type-inferred `{field: value}`. Enum values
-use `Type.Variant`, and pattern tests use `==`. Optional values use `?T`,
-`Val(value)`, and `None`; `None` is not legal for a non-optional `T`. Generic
+use `Type.Variant`, and pattern tests use `==`. Optional values use `T?`,
+`Val(value)`, and `None`. `None` needs an expected optional type, such as a
+return, field, or argument type; `Val(value)` uses that type to check its
+payload, or infers the optional type from its payload when no type is expected.
+`None` is not legal for a non-optional `T`. Generic
 arguments use `Type<Args>`. Fresh hidden-state construction uses `Type.new(…)`.
 Expected-type elaboration permits `.new(…)` when a binding, return, field, or
 call argument determines exactly one receiver. Generic receiver arguments may
@@ -778,8 +781,11 @@ without writing a return annotation. Pin an entry to an application error with
 `fn run() !StoreError { ... }` when that distinction is part of the interface.
 (D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
 
-Construct the two sides with `Ok(value)` and `Err(error)`. Pattern tests use
-`.Ok(value)` and `.Err(error)`, for example `result == .Ok(n)`. A value of an
+Construct the two sides with `Ok(value)` and `Err(error)`. These are contextual
+calls: a user declaration named `Ok` or `Err` takes precedence. `Ok()` supplies
+the unit success value when the expected result has unit success. Leading-dot
+`.Ok(value)` and `.Err(error)` values use the expected result type; in pattern
+tests, they match the corresponding side, for example `result == .Ok(n)`. A value of an
 optional-success type such as `User? DBError!` has exactly three states, and
 its patterns name them directly: `.Val(user)`, `.None`, and `.Err(e)`. An
 else-less table over it must cover all three (E0307 names the missing state).
@@ -943,7 +949,8 @@ or materialize `~x` first.
 A named binding passed to a take parameter without `^` is E0209. Jet never hides a
 clone to make that call work. A literal, `~x`, or call result is a temporary and
 may enter a take parameter without another marker. `~x` is the one copy spelling;
-it creates an independent owned value. `.clone()` is not user-typable Jet syntax,
+it creates an independent owned value, including when `x` is a Bool or integer:
+it does not negate the value. `.clone()` is not user-typable Jet syntax,
 and the retired `copy x` word teaches E0991. Copying a value that Jet cannot
 duplicate, such as a function or trait value, is E0211. Copying a scalar is
 legal but redundant.

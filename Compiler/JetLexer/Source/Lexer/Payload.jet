@@ -49,15 +49,22 @@ fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
-fn append_byte(text: String, value: Int) -> String Never! {
-    byte :: U8{value & 255}
-    "{text}{String.from_bytes([U8]{byte}) ?? ""}"
-}
-
 fn strip_underscores(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if Int.from_u8(byte) != 95 -> &out.push(byte)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// Rust `lex_digits`: a decimal or unit-number spelling drops its `_`
+// separators and writes its exponent marker as `e`.
+fn decimal_number_spelling(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 95 -> next
+        &out.push(if code == 69 -> U8{101} else -> byte)
     }
     String.from_bytes(out) ?? ""
 }
@@ -111,17 +118,6 @@ fn parse_float_literal(text: String) -> Float? {
     Val(value)
 }
 
-fn text_ends_with(text: String, suffix: String) -> Bool Never! {
-    raw :: text.bytes()
-    tail :: suffix.bytes()
-    if tail.len() > raw.len() -> return false
-    offset :: raw.len() - tail.len()
-    loop i in 0..<tail.len() {
-        if raw[offset + i] != tail[i] -> return false
-    }
-    true
-}
-
 fn escape_value(value: Int) -> Int Never! {
     if value == {
         110 -> 10
@@ -157,7 +153,12 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return (raw_head: false, byte_head: false)
     before_open :: previous_code_index(facts, open)
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
-    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT && facts[before_open * 4 + 3] == 1 -> raw = true
+    // D-BOUND-RAW1=A: a typed head is a name whose first character is an
+    // ASCII capital, as Rust's lexer reads it; non-ASCII capitals do not count.
+    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT {
+        first :: byte_at(source, facts[before_open * 4 + 1])
+        if first >= 65 && first <= 90 -> raw = true
+    }
     byte := false
     if before_open >= 0 && kind_at(facts, before_open) == K_RBRACKET {
         before_close :: previous_code_index(facts, before_open)
@@ -191,6 +192,11 @@ fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int)
     segment_head := true
     loop cursor < limit {
         kind :: kind_at(facts, cursor)
+        // Rust's prelude scan drops comments before reading marker names.
+        if kind == K_LINE_COMMENT || kind == K_BLOCK_COMMENT {
+            cursor += 1
+            next
+        }
         if depth == 0 && segment_head && kind == K_IDENT && fact_text(source, facts, cursor) == "FFI" -> return true
         is_open_delimiter :: if kind == {
             K_LPAREN -> true
@@ -243,12 +249,16 @@ fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never
     cursor := previous_code_index(facts, function_index)
     loop cursor >= 0 {
         kind :: kind_at(facts, cursor)
-        is_pub_or_semi :: if kind == {
+        // Comments, `pub` and `;` between markers and `fn` are skipped, as in
+        // Rust's prelude filter.
+        is_skipped :: if kind == {
             K_PUB -> true
             K_SEMI -> true
+            K_LINE_COMMENT -> true
+            K_BLOCK_COMMENT -> true
             else -> false
         }
-        if is_pub_or_semi {
+        if is_skipped {
             cursor -= 1
             next
         }
@@ -348,14 +358,14 @@ fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allo
         kind :: kind_at(facts, index)
         start :: facts[index * 4 + 1]
         end :: facts[index * 4 + 2]
-        gap_diagnostic(source, facts, cursor, start, &diagnostics)
+        gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, &diagnostics)
         text :: slice_text(source, start, end)
         built :: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &diagnostics)
         if built.keep -> &tokens.push(Token{kind: kind, span: Span{start: start, end: end}, payload: built.payload})
         cursor = end
         index += 1
     }
-    gap_diagnostic(source, facts, cursor, source.len(), &diagnostics)
+    gap_diagnostic(source, facts, cursor, source.len(), config_surface, allow_reserved_identifiers, depth, &diagnostics)
     Lexed{tokens: tokens, diagnostics: diagnostics}
 }
 
@@ -468,6 +478,21 @@ fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int Never! {
     -1
 }
 
+// Literal text grows in byte buffers: rebuilding a String per scalar made a
+// long literal cost quadratic time. Only ASCII escape bytes are pushed one by
+// one (a lone byte >= 128 is no UTF-8 text); scalars are copied whole.
+fn push_ascii_byte(out: &[U8], value: Int) Never! {
+    if value >= 0 && value < 128 -> &out.push(U8{value})
+}
+
+fn push_text(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+
+fn text_from_bytes(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? ""
+}
+
 fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) Never! {
     &parts.push(StringPart{
         kind: STRING_PART_TEXT,
@@ -479,8 +504,8 @@ fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) Ne
 }
 
 fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, indent: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
-    decoded := ""
-    literal := ""
+    decoded := [U8]{}
+    literal := [U8]{}
     parts := [StringPart]{}
     interpolations := 0
     valid := true
@@ -495,24 +520,24 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                 stripped += 1
             }
             at_line_start = false
-            if literal_start == start && literal == "" -> literal_start = cursor
+            if literal_start == start && literal.len() == 0 -> literal_start = cursor
         }
         value :: byte_at(source, cursor)
         if value == 10 {
-            literal = "{literal}\n"
-            decoded = "{decoded}\n"
+            &literal.push(U8{10})
+            &decoded.push(U8{10})
             cursor += 1
             if triple -> at_line_start = true
             next
         }
         if value == 92 {
             if raw_head {
-                literal = append_byte(literal, 92)
-                decoded = append_byte(decoded, 92)
+                &literal.push(U8{92})
+                &decoded.push(U8{92})
                 if {
                     byte_at(source, cursor + 1) == 34 -> {
-                        literal = append_byte(literal, 34)
-                        decoded = append_byte(decoded, 34)
+                        &literal.push(U8{34})
+                        &decoded.push(U8{34})
                         cursor += 2
                     }
                     else -> {
@@ -526,9 +551,9 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                 high :: hex_value(byte_at(source, cursor + 2))
                 low :: hex_value(byte_at(source, cursor + 3))
                 if high >= 0 && low >= 0 && cursor + 3 < end {
-                    if literal != "" {
-                        append_text_part(&parts, literal_start, cursor, literal)
-                        literal = ""
+                    if literal.len() > 0 {
+                        append_text_part(&parts, literal_start, cursor, text_from_bytes(literal))
+                        literal = [U8]{}
                     }
                     &parts.push(StringPart{
                         kind: STRING_PART_BYTE,
@@ -556,34 +581,36 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                     add_diagnostic(&diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
                 }
                 else -> {
-                    literal = append_byte(literal, escaped)
-                    decoded = append_byte(decoded, escaped)
+                    push_ascii_byte(&literal, escaped)
+                    push_ascii_byte(&decoded, escaped)
                 }
             }
             cursor = escape_end
             next
         }
         if value == 123 && byte_at(source, cursor + 1) == 123 {
-            literal = append_byte(literal, 123)
-            decoded = append_byte(decoded, 123)
+            &literal.push(U8{123})
+            &decoded.push(U8{123})
             cursor += 2
             next
         }
         if value == 125 && byte_at(source, cursor + 1) == 125 {
-            literal = append_byte(literal, 125)
-            decoded = append_byte(decoded, 125)
+            &literal.push(U8{125})
+            &decoded.push(U8{125})
             cursor += 2
             next
         }
-        if value == 123 && text_ends_with(literal, "\\$") {
-            literal = append_byte(literal, 123)
-            decoded = append_byte(decoded, 123)
+        // A `\$` template payload (`\${…}`) is downstream text, copied byte
+        // for byte as Rust's lexer keeps it.
+        if value == 123 && literal.len() >= 2 && Int.from_u8(literal[literal.len() - 2]) == 92 && Int.from_u8(literal[literal.len() - 1]) == 36 {
+            &literal.push(U8{123})
+            &decoded.push(U8{123})
             cursor += 1
             nesting := 1
             loop cursor < end && nesting > 0 {
                 next_byte :: byte_at(source, cursor)
-                literal = append_byte(literal, next_byte)
-                decoded = append_byte(decoded, next_byte)
+                &literal.push(U8{next_byte & 255})
+                &decoded.push(U8{next_byte & 255})
                 if next_byte == 123 -> nesting += 1
                 if next_byte == 125 -> nesting -= 1
                 cursor += 1
@@ -609,9 +636,9 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                 literal_start = cursor
                 next
             }
-            if literal != "" {
-                append_text_part(&parts, literal_start, cursor, literal)
-                literal = ""
+            if literal.len() > 0 {
+                append_text_part(&parts, literal_start, cursor, text_from_bytes(literal))
+                literal = [U8]{}
             }
             expr_start := cursor + 1
             part_span := Span{start: cursor, end: close + 1}
@@ -631,12 +658,12 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
         }
         width :: utf8_width(source, cursor)
         scalar :: bytes_text(source, cursor, cursor + width)
-        literal = "{literal}{scalar}"
-        decoded = "{decoded}{scalar}"
+        push_text(&literal, scalar)
+        push_text(&decoded, scalar)
         cursor += width
     }
-    if literal != "" || parts.len() == 0 -> append_text_part(&parts, literal_start, end, literal)
-    (decoded: decoded, interpolations: interpolations, parts: parts, valid: valid)
+    if literal.len() > 0 || parts.len() == 0 -> append_text_part(&parts, literal_start, end, text_from_bytes(literal))
+    (decoded: text_from_bytes(decoded), interpolations: interpolations, parts: parts, valid: valid)
 }
 
 fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts: [StringPart]) Never! {
@@ -706,16 +733,9 @@ fn decode_string(source: [U8], facts: [Int], index: Int, start: Int, end: Int, c
 fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
     raw :: text.bytes()
     if raw.len() < 2 -> return ""
-    closed := Int.from_u8(raw[raw.len() - 1]) == 39
-    finish := raw.len()
-    if closed -> finish -= 1
     if Int.from_u8(raw[1]) != 92 {
-        if Int.from_u8(raw[1]) == 39 {
-            add_diagnostic(&diagnostics, "E0002", source_start, source_start + raw.len(), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
-            return "?"
-        }
         width :: utf8_width(raw, 1)
-        if 1 + width < finish || !closed {
+        if byte_at(raw, 1 + width) != 39 {
             span_end := source_start + 1 + width
             if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
             add_diagnostic(&diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
@@ -733,7 +753,7 @@ fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> S
         why :: "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
         add_diagnostic(&diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
     }
-    if !closed || byte_at(raw, escape_end) != 39 {
+    if byte_at(raw, escape_end) != 39 {
         span_end := source_start + escape_end
         if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
         add_diagnostic(&diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
@@ -779,13 +799,13 @@ fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, text: String, 
     }
     if is_float {
         payload := empty_payload(text)
-        payload.decoded = ~number_text
+        payload.decoded = decimal_number_spelling(number_text)
         payload.decimal = Val(parse_float_literal(number_text) ?? Float{0})
         payload.suffix = suffix
         return payload
     }
     payload := empty_payload(text)
-    payload.decoded = ~number_text
+    payload.decoded = if kind == K_UNIT_NUMBER -> decimal_number_spelling(number_text) else -> ~number_text
     payload.integer = Val(parse_integer_literal(number_text) ?? 0)
     payload.suffix = suffix
     payload
@@ -800,7 +820,7 @@ fn identifier_payload(source: [U8], start: Int, end: Int, text: String, allow_re
         add_diagnostic(&diagnostics, "E0003", start, end, "`{text}\"…\"` is not a Jet raw-string prefix", "backtick fences are the one raw ordinary-String spelling; `r` and `raw` are ordinary names", "write the text as ``…`` instead")
     }
     payload := empty_payload(text)
-    payload.decoded = retired_fact_respelling(source, start, end, text, &diagnostics) ?? text
+    payload.decoded = retired_fact_respelling(source, start, end, &diagnostics) ?? text
     payload
 }
 
@@ -834,47 +854,62 @@ fn retired_declaration_metadata(name: String) -> Bool Never! {
 // other `@name` after `.` (`self.@field`, `.@left`) or naming a declaration
 // (`fn @method`, `impl @type_name`) is a retired template name splice; it
 // teaches E0388 and reads as `$name`.
-fn retired_fact_respelling(source: [U8], start: Int, end: Int, text: String, diagnostics: &[Diagnostic]) -> String? {
-    if byte_at(source, start) != 64 -> return None
-    name :: String.from_bytes(source.slice(start + 1, end)) ?? ""
-    colon := end
+//
+// Precedence follows Rust's lexer: a fact member after `.`, declaration
+// metadata before `:` and `@irreversible` respell in place; otherwise a name
+// splice wins over the retired roots and subject queries.
+fn retired_fact_in_place(source: [U8], start: Int, name_end: Int, name: String) -> Bool Never! {
+    if name == "irreversible" -> return true
+    if byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 && retired_fact_member(name) -> return true
+    colon := name_end
     loop byte_at(source, colon) == 32 -> colon += 1
-    member :: byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 && retired_fact_member(name)
-    metadata :: retired_declaration_metadata(name) && byte_at(source, colon) == 58 && byte_at(source, colon + 1) != 58
-    empty_call :: byte_at(source, end) == 40 && byte_at(source, end + 1) == 41
-    package_member :: name == "build" && source_has_text(source, end, ".package") && !is_identifier_continue(source, end + 8)
-    edit_end := end
+    retired_declaration_metadata(name) && byte_at(source, colon) == 58 && byte_at(source, colon + 1) != 58
+}
+
+// The end of the identifier token for the prefix `@name` at `start`. A
+// respelled retired root consumes its legacy suffix, so `@build.package`
+// reads as one `$package` word and `@PHASE()` as one `$phase` word.
+fn retired_fact_end(source: [U8], start: Int, name_end: Int) -> Int {
+    name :: slice_text(source, start + 1, name_end)
+    suffix_end := name_end
+    if name == "build" && source_has_text(source, name_end, ".package") && !is_identifier_continue(source, name_end + 8) -> suffix_end = name_end + 8
+    if (name == "PHASE" || name == "PROGRAM" || name == "PACKAGE") && byte_at(source, name_end) == 40 && byte_at(source, name_end + 1) == 41 -> suffix_end = name_end + 2
+    if suffix_end == name_end || retired_fact_in_place(source, start, name_end, name) || retired_name_splice(source, start) -> return name_end
+    suffix_end
+}
+
+// `end` is the token end from `retired_fact_end`, past any legacy suffix.
+fn retired_fact_respelling(source: [U8], start: Int, end: Int, diagnostics: &[Diagnostic]) -> String? {
+    if byte_at(source, start) != 64 -> return None
+    name_end :: scan_identifier_end(source, start + 1)
+    name :: slice_text(source, start + 1, name_end)
+    word :: "@{name}"
     respelled := ""
     if {
-        member || metadata || name == "irreversible" -> {
+        retired_fact_in_place(source, start, name_end, name) -> {
             respelled = "${name}"
-        }
-        package_member -> {
-            respelled = "$package"
-            edit_end = end + 8
-        }
-        name == "build" -> {
-            respelled = "$build"
-        }
-        name == "PHASE" || name == "PROGRAM" || name == "PACKAGE" -> {
-            respelled = if name == "PHASE" -> "$phase" else -> if name == "PROGRAM" -> "$program" else -> "$package"
-            if empty_call -> edit_end = end + 2
-        }
-        name == "TYPE" || name == "FUNCTION" || name == "METHOD" || name == "CLOSURE" || name == "VALUE" -> {
-            add_diagnostic(&diagnostics, "E0003", start, end, "`{text}(…)` is retired", "compiler facts carry `$`; a fact is a `$` member of the thing it describes (D-META-ROOT3=A)", "read the fact on its subject, such as `T.$fields`, `f.$effects` or `value.$origin`")
-            return None
         }
         retired_name_splice(source, start) -> {
             splice :: "${name}"
-            span :: Span{start: start, end: end}
-            retired :: diagnostic_from_registry("E0388", Val(span), "`{text}` is retired; write `{splice}`", "a template splices a binding's name with the fact sigil `$`; prefix `@` now marks a live link (D-NAME-SPLICE1=B)", "replace `{text}` with `{splice}`")
+            span :: Span{start: start, end: name_end}
+            retired :: diagnostic_from_registry("E0388", Val(span), "`{word}` is retired; write `{splice}`", "a template splices a binding's name with the fact sigil `$`; prefix `@` now marks a live link (D-NAME-SPLICE1=B)", "replace `{word}` with `{splice}`")
             &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: splice}))
             return Val(splice)
         }
+        name == "build" -> {
+            respelled = if end > name_end -> "$package" else -> "$build"
+        }
+        name == "PHASE" || name == "PROGRAM" || name == "PACKAGE" -> {
+            respelled = if name == "PHASE" -> "$phase" else -> if name == "PROGRAM" -> "$program" else -> "$package"
+        }
+        name == "TYPE" || name == "FUNCTION" || name == "METHOD" || name == "CLOSURE" || name == "VALUE" -> {
+            add_diagnostic(&diagnostics, "E0003", start, name_end, "`{word}(…)` is retired", "compiler facts carry `$`; a fact is a `$` member of the thing it describes (D-META-ROOT3=A)", "read the fact on its subject, such as `T.$fields`, `f.$effects` or `value.$origin`")
+            return None
+        }
         else -> return None
     }
-    old :: String.from_bytes(source.slice(start, edit_end)) ?? text
-    span :: Span{start: start, end: edit_end}
+    old :: slice_text(source, start, end)
+    span :: Span{start: start, end: end}
     retired :: diagnostic_from_registry("E0003", Val(span), "`{old}` is retired; write `{respelled}`", "compiler facts and declaration metadata carry `$`; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)", "replace `{old}` with `{respelled}`")
     &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: respelled}))
     Val(respelled)
@@ -929,13 +964,13 @@ fn printable_character(source: [U8], start: Int, width: Int) -> String {
     scalar
 }
 
-fn raw_foreign_before_gap(source: [U8], facts: [Int], start: Int) -> Bool Never! {
+fn fact_index_at(facts: [Int], start: Int) -> Int Never! {
     index := 0
     loop index < facts.len() /% 4 && facts[index * 4 + 1] < start -> index += 1
-    raw_foreign_body_at(source, facts, index)
+    index
 }
 
-fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, diagnostics: &[Diagnostic]) {
+fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) {
     cursor := start
     loop cursor < end {
         if cursor == 0 && byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
@@ -949,16 +984,17 @@ fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, diagnostics:
         }
         value :: byte_at(source, cursor)
         if value == 35 && byte_at(source, cursor + 1) == 33 && byte_at(source, cursor + 2) == 47 {
-            add_diagnostic(&diagnostics, "E0042", cursor, cursor + 3, "a shebang is not a Jet token", "launch metadata is owned by the script entrypoint", "remove the shebang from Jet source")
+            add_diagnostic(&diagnostics, "E0042", cursor, cursor + 2, "a shebang line is only recognized at the very start of the file", "the operating system reads launch metadata only from byte 0; Jet does not treat another `#!` as a launch line", "move `#!...` to line 1, or delete it")
             loop cursor < end && byte_at(source, cursor) != 10 -> cursor += 1
             if cursor < end -> cursor += 1
             next
         }
         if value == 34 {
+            index :: fact_index_at(facts, cursor)
             triple := byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
             if triple {
                 if {
-                    raw_foreign_before_gap(source, facts, cursor) -> {
+                    raw_foreign_body_at(source, facts, index) -> {
                         add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "this raw foreign body never gets a closing `\"\"\"`", "a `#FFI` body preserves everything between its opening and closing `\"\"\"`", "add a closing `\"\"\"` after the foreign source")
                     }
                     else -> {
@@ -967,10 +1003,15 @@ fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, diagnostics:
                 }
                 return
             }
-            line_end := cursor
-            loop line_end < source.len() && byte_at(source, line_end) != 10 -> line_end += utf8_width(source, line_end)
-            add_diagnostic(&diagnostics, "E0002", cursor, line_end, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
-            cursor = line_end
+            // As in Rust's lexer, an unclosed string still reports what its
+            // body teaches (escapes, lone braces, holes) up to the line end;
+            // an unclosed `{` hole is then its one error, else the quote is.
+            modes :: string_head_modes(source, facts, index)
+            scanned :: scan_plain_string_end(source, cursor, modes.raw_head)
+            stop :: if scanned < 0 -> -scanned - 1 else -> scanned
+            body :: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, &diagnostics)
+            if body.valid -> add_diagnostic(&diagnostics, "E0002", cursor, stop, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
+            cursor = stop
             next
         }
         if value == 96 {
@@ -1033,7 +1074,7 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, 
         retired :: diagnostic_from_registry("E-FENCE-SPELLING", Val(span), "`{text}` is the retired fence spelling", "statement-expansion fences are spelled `<: … :>`; prefix `@` belongs to compile-time marks", "replace `{text}` with `{respelled}`")
         &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: new_text}))
     }
-    if kind == K_BLOCK_COMMENT && !text_ends_with(text, "*/") {
+    if kind == K_BLOCK_COMMENT && scan_block_comment_end(source, start) < 0 {
         add_diagnostic(&diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
     }
     payload := empty_payload(text)

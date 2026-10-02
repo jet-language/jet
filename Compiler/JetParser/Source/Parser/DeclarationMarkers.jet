@@ -72,7 +72,10 @@ fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
     parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
 }
 
-fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [String], required: Int) -> [Expr?]? {
+// Rust `marker_argument_bindings`: the argument bound to each named
+// parameter, positional ones first and labeled ones by name. None when the
+// arguments do not fit the parameter list; no diagnostic is reported here.
+fn parser_marker_bindings(marker: Marker, names: [String]) -> [Expr?]? {
     values := [Expr?]{}
     loop _ in 0..<names.len() -> &values.push(None)
     positional := 0
@@ -92,37 +95,30 @@ fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [
                     }
                     parameter_index += 1
                 }
-                if parameter < 0 {
-                    parser_marker_shape_error(&state, marker)
-                    return None
-                }
+                if parameter < 0 -> return None
             }
             else -> {
-                if saw_named {
-                    parser_marker_shape_error(&state, marker)
-                    return None
-                }
+                if saw_named -> return None
                 loop positional < values.len() && values[positional] != None -> positional += 1
-                if positional >= values.len() {
-                    parser_marker_shape_error(&state, marker)
-                    return None
-                }
+                if positional >= values.len() -> return None
                 parameter = positional
                 positional += 1
             }
         }
-        if values[parameter] != None {
-            parser_marker_shape_error(&state, marker)
-            return None
-        }
-        argument :: parser_marker_expression(marker, index) ?? {
-            parser_marker_shape_error(&state, marker)
-            return None
-        }
+        if values[parameter] != None -> return None
+        argument :: parser_marker_expression(marker, index) ?? return None
         values[parameter] = Val(argument)
         index += 1
     }
-    index = 0
+    Val(values)
+}
+
+fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [String], required: Int) -> [Expr?]? {
+    values :: parser_marker_bindings(marker, names) ?? {
+        parser_marker_shape_error(&state, marker)
+        return None
+    }
+    index := 0
     loop index < required {
         if values[index] == None {
             parser_marker_shape_error(&state, marker)
@@ -131,6 +127,29 @@ fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [
         index += 1
     }
     Val(values)
+}
+
+// Rust `marker_enum_variant`: the variant a marker argument names, written
+// `Name`, `Type.Name`, or `.Name`; empty for any other expression.
+fn parser_marker_enum_variant(value: Expr) -> String {
+    if value == {
+        .Ident(name, _) -> name
+        .Field(_, member, _) -> member
+        .EnumLit(_, variant, _, _, _, _) -> variant
+        else -> ""
+    }
+}
+
+// Rust `marker_ident_path`: `A.B.C` as written; None for any other shape.
+fn parser_marker_ident_path(value: Expr) -> String? {
+    if value == {
+        .Ident(name, _) -> Val(name)
+        .Field(base, member, _) -> {
+            prefix :: parser_marker_ident_path(base) ?? return None
+            Val("{prefix}.{member}")
+        }
+        else -> None
+    }
 }
 
 fn parser_job_metadata_error(state: &JetParserState, field: String, expected: String, span: Span) {

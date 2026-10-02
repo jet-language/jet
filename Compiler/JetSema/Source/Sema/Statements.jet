@@ -173,6 +173,7 @@ fn sema_stmt_tir_block_can_fall_through(statements: [TStmt]) -> Bool Never! {
                 return false
             }
             .Loop(label, body, _) -> return sema_stmt_tir_loop_body_has_break(body, label, true)
+            .Inline(body, _) -> return sema_stmt_tir_block_can_fall_through(body)
             else -> return true
         }
     }
@@ -296,6 +297,292 @@ pub fn sema_stmt_block_has_no_fallthrough(statements: [Stmt]) -> Bool Never! {
     }
 }
 
+// Rust `stmt_definitely_returns` (Diagnostics.rs:630-665): `return`, a
+// diverging `panic`/`todo` line, a loop that no `break` leaves, or a table
+// whose every path returns.
+fn sema_stmt_definitely_returns(statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Return(_, _) -> return true
+        .Expr(expr) -> return sema_stmt_refutable_expr_diverges(expr)
+        .Loop(body, _, _, _) -> return !sema_stmt_refutable_loop_body_can_break(body)
+        .While(cond, body, _, _, _) -> return sema_stmt_refutable_expr_is_true(cond) && !sema_stmt_refutable_loop_body_can_break(body)
+        .CountedLoop(_, cond, _, body, _, _, _) -> return sema_stmt_refutable_expr_is_true(cond) && !sema_stmt_refutable_loop_body_can_break(body)
+        .Switch(subject, arms, else_body, span) -> {
+            if arms.len() == 0 -> return false
+            loop arm in arms {
+                if !sema_stmt_block_definitely_returns(arm.body) -> return false
+            }
+            if else_body == .Val(body) -> return sema_stmt_block_definitely_returns(body)
+            return !sema_stmt_refutable_is_subjectless_guard(subject, span)
+        }
+        else -> return false
+    }
+}
+
+fn sema_stmt_block_definitely_returns(statements: [Stmt]) -> Bool Never! {
+    loop statement in statements {
+        if sema_stmt_definitely_returns(statement) -> return true
+    }
+    false
+}
+
+// The `value_tail_span` mark for a value block's last line: its value
+// expression, or the table that ends the block (its arms carry the value).
+fn sema_stmt_value_tail_marker(statements: [Stmt]) -> Span? {
+    seen := 0
+    loop last in statements {
+        seen += 1
+        if seen < statements.len() -> next
+        if last == {
+            .Expr(tail) -> return Val(expr_span(tail))
+            .Switch(_, _, _, span) -> return Val(span)
+            else -> return None
+        }
+    }
+    None
+}
+
+// Rust `check_value_tail` (CheckerCore/blocks.rs:256-350) for the end of a
+// value block: an empty block, or one whose last line is a statement that can
+// still reach the end, reports E0114. A value line and a table report their
+// own errors. False when E0114 was reported.
+pub fn sema_stmt_check_value_block_end(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, diagnostics: &[Diagnostic]) -> Bool {
+    if statements.len() == 0 {
+        &diagnostics.push(sema_stmt_missing_value(expected, None, function_name, block_span))
+        return false
+    }
+    seen := 0
+    loop last in statements {
+        seen += 1
+        if seen < statements.len() -> next
+        if last == {
+            .Expr(_) | .Return(_, _) | .Switch(_, _, _, _) -> return true
+            else -> {}
+        }
+        if !sema_stmt_tir_block_can_fall_through(checked) || sema_stmt_definitely_returns(last) -> return true
+        &diagnostics.push(sema_stmt_missing_value(expected, None, function_name, sema_compiler_index_stmt_span(last)))
+        return false
+    }
+    true
+}
+
+// Rust `report_missing_block_value_on_path` (CheckerCore/blocks.rs:358-393).
+fn sema_stmt_missing_value(expected: Type?, uncovered: String?, function_name: String, span: Span) -> Diagnostic {
+    expected_name :: sema_type_show(expected ?? Type.Named{name: "Unit"})
+    why :: "a block that promises {expected_name} must end with a value of that type, or leave through `return` on every path"
+    if uncovered == .Val(path) -> return sema_error("E0114", span, "when {path}, `{function_name}` reaches the end without a value", why, "add a last line that produces {expected_name} for that case, or turn the last guard into an `else`")
+    sema_error("E0114", span, "this block promises to produce {expected_name}, but its last line produces no value", why, "end the block with an expression that produces {expected_name}, or `return` a value on every path")
+}
+
+// Rust `uncovered_guard_path` (CheckerCore/blocks.rs:11-89): the case that
+// none of a value block's trailing `if cond -> return …` guards covers.
+fn sema_stmt_uncovered_guard_path(statements: [Stmt]) -> String? {
+    reversed := [Expr]{}
+    index := statements.len() - 1
+    loop index >= 0 {
+        guard_arms := [SwitchArm]?{None}
+        if statements[index] == .Switch(guard_subject, switch_arms, guard_else, guard_span) {
+            if guard_else == None && sema_stmt_refutable_is_subjectless_guard(guard_subject, guard_span) && switch_arms.len() > 0 -> guard_arms = Val(switch_arms)
+        }
+        arms :: guard_arms ?? break
+        loop arm in arms {
+            if !sema_stmt_block_definitely_returns(arm.body) -> return sema_stmt_guard_path(reversed)
+        }
+        arm_index := arms.len() - 1
+        loop arm_index >= 0 {
+            &reversed.push(arms[arm_index].cond)
+            arm_index -= 1
+        }
+        index -= 1
+    }
+    sema_stmt_guard_path(reversed)
+}
+
+fn sema_stmt_guard_path(reversed: [Expr]) -> String? {
+    if reversed.len() == 0 -> return None
+    conds := [Expr]{}
+    index := reversed.len() - 1
+    loop index >= 0 {
+        &conds.push(reversed[index])
+        index -= 1
+    }
+    // Guards that compare one name with one whole number from both sides
+    // (`n > 0`, `n < 0`) leave exactly that number.
+    point_name := ""
+    point_value := 0
+    has_point := false
+    below := false
+    above := false
+    single_point := true
+    loop cond in conds {
+        comparison := SemaGuardComparison?{None}
+        if cond == .Binary(op, left, right, _) {
+            if left == .Ident(name, _) && right == .Int(value, _, _, _) -> comparison = Val(SemaGuardComparison{op: op, name: name, value: value})
+            if left == .Int(value, _, _, _) && right == .Ident(name, _) {
+                flipped := op
+                if op == BinOp.Lt -> flipped = BinOp.Gt
+                if op == BinOp.Gt -> flipped = BinOp.Lt
+                comparison = Val(SemaGuardComparison{op: flipped, name: name, value: value})
+            }
+        }
+        found :: comparison ?? {
+            single_point = false
+            break
+        }
+        if has_point && (found.name != point_name || found.value != point_value) {
+            single_point = false
+            break
+        }
+        point_name = found.name
+        point_value = found.value
+        has_point = true
+        if {
+            found.op == BinOp.Lt -> below = true
+            found.op == BinOp.Gt -> above = true
+            found.op == BinOp.Ne -> {
+                below = true
+                above = true
+            }
+            else -> {
+                single_point = false
+                break
+            }
+        }
+    }
+    if has_point && single_point && below && above -> return Val("`{point_name}` is `{point_value}`")
+    texts := [String]{}
+    loop cond in conds {
+        text :: sema_stmt_guard_text(cond) ?? return None
+        &texts.push("`{text}`")
+    }
+    if texts.len() == 1 -> return Val("{texts[0]} is false")
+    Val("none of {texts.join(", ")} is true")
+}
+
+struct SemaGuardComparison {
+    op: BinOp
+    name: String
+    value: Int
+}
+
+// A guard condition as written. The reference quotes the source text; this
+// spells the same simple forms and gives up (the generic E0114) otherwise.
+fn sema_stmt_guard_text(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _) -> return Val(name)
+        .Int(value, _, _, raw) -> return Val(raw ?? "{value}")
+        .Bool(value, _) -> return Val(if value -> "true" else -> "false")
+        .Field(base, member, _) -> {
+            base_text :: sema_stmt_guard_text(base) ?? return None
+            return Val("{base_text}.{member}")
+        }
+        .Paren(inner, _) -> {
+            inner_text :: sema_stmt_guard_text(inner) ?? return None
+            return Val("({inner_text})")
+        }
+        .Unary(op, operand, _) -> {
+            operand_text :: sema_stmt_guard_text(operand) ?? return None
+            prefix :: if op == UnOp.Not -> "!" else -> "-"
+            return Val("{prefix}{operand_text}")
+        }
+        .Binary(op, left, right, _) -> {
+            symbol :: sema_stmt_guard_operator(op) ?? return None
+            left_text :: sema_stmt_guard_text(left) ?? return None
+            right_text :: sema_stmt_guard_text(right) ?? return None
+            return Val("{left_text} {symbol} {right_text}")
+        }
+        else -> return None
+    }
+}
+
+fn sema_stmt_guard_operator(op: BinOp) -> String? {
+    if op == {
+        .Eq -> return Val("==")
+        .Ne -> return Val("!=")
+        .Lt -> return Val("<")
+        .Gt -> return Val(">")
+        .Le -> return Val("<=")
+        .Ge -> return Val(">=")
+        .And -> return Val("&&")
+        .Or -> return Val("||")
+        .Add -> return Val("+")
+        .Sub -> return Val("-")
+        .Mul -> return Val("*")
+        .Div -> return Val("/")
+        else -> return None
+    }
+}
+
+// Rust `switch_arm_pattern` over every arm: each head is a structural pattern
+// test (text and byte patterns can always miss).
+fn sema_stmt_switch_all_patterns(arms: [SwitchArm]) -> Bool Never! {
+    if arms.len() == 0 -> return false
+    loop arm in arms {
+        if arm.cond == .PatternTest(_, pattern, _) {
+            if pattern == {
+                .StrMatch(_, _) | .BinMatch(_, _) -> return false
+                else -> {}
+            }
+        } else {
+            return false
+        }
+    }
+    true
+}
+
+fn sema_stmt_switch_has_text_or_bytes(arms: [SwitchArm]) -> Bool Never! {
+    loop arm in arms {
+        if arm.cond == .PatternTest(_, pattern, _) {
+            if pattern == {
+                .StrMatch(_, _) | .BinMatch(_, _) -> return true
+                else -> {}
+            }
+        }
+    }
+    false
+}
+
+// Rust `check_switch` (switches.rs:2277-2308) for a subject that is not a
+// plain name: its pattern and range heads test `it`. A place subject reads
+// the same value in every arm, so the heads read the place itself, as the
+// value form does; any other subject is checked once and bound to `it`.
+fn sema_stmt_check_subject_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+    subject_span :: expr_span(subject)
+    local :: Expr.Ident{name: "it", span: subject_span}
+    if sema_expression_if_subject_is_place(subject) -> return sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, subject), else_body, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+    sema_scope_enter(&scopes, &state, "if.subject@{span.start}")
+    carrier := false
+    loop arm in arms {
+        if sema_expression_if_condition_consumes_carrier(arm.cond) -> carrier = true
+    }
+    checked_subject :: if carrier -> sema_check_expression_carrier(subject, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(subject, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    init :: checked_subject ?? {
+        sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+        return SemaStatementResult{value: [TStmt]{}, complete: false}
+    }
+    owner :: sema_scope_local_owner_key(scopes)
+    id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, "it")
+    symbol :: Symbol{id: id, kind: SymbolKind.Local, name: "it", module_name: environment.module_identity, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
+    _ := sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, init.integer_bounds, false)
+    sema_ownership_declare_binding(&state, symbol, false)
+    it_local := tir_symbol_local("it", subject_span, id)
+    it_local.generated = true
+    it_local.integer_bounds = init.integer_bounds
+    checked :: sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, local), else_body, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+    sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+    if !checked.complete -> return checked
+    body := [TStmt]{TStmt.Let{local: it_local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: subject_span}}
+    loop statement in checked.value -> &body.push(statement)
+    SemaStatementResult{value: [TStmt]{TStmt.Inline{body: body, span: span}}, complete: true}
+}
+
+// Every arm head that tests the dispatch subject reads `replacement` instead.
+fn sema_stmt_rebind_switch_arms(arms: [SwitchArm], subject_span: Span, replacement: Expr) -> [SwitchArm] {
+    rebound := [SwitchArm]{}
+    loop arm in arms -> &rebound.push(SwitchArm{cond: sema_expression_if_replace_subject(arm.cond, subject_span, replacement), body: arm.body, span: arm.span})
+    rebound
+}
+
 // TStmt.If carries statement arms; value-producing if expressions need an
 // InlineBlock consumer and therefore stay incomplete in this Sema slice.
 
@@ -417,7 +704,18 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         .Ident(name, _) -> name == "__jet_multi_head_subject"
         else -> false
     }
-    if !(subject_is_true || multi_head) || arms.len() == 0 -> return SemaStatementResult{value: [TStmt]{}, complete: false}
+    // Rust `check_switch` (switches.rs:2277-2308): the arms of `if subject OP
+    // { … }` over a plain name test that name directly; any other subject is
+    // read once as the `it` the pattern heads test.
+    if !(subject_is_true || multi_head) {
+        if subject == {
+            .Ident(_, _) -> {}
+            else -> return sema_stmt_check_subject_switch(subject, arms, else_body, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+        }
+    }
+    // Rust `check_value_tail`: a table that ends a value block is that
+    // block's value, so each arm ends in a value line or leaves.
+    value_tail :: context.value_tail_span == (Val(span))
     // D-FLOWTYPE1=A: `if x == None -> a else -> b` over a stable Optional
     // reads as `if x == .Val(x) -> b else -> a`, so `b` holds the payload.
     // The guard is evaluated once at the same point; only the mutually
@@ -464,7 +762,12 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         branch_state := sema_ownership_state_snapshot(fallthrough_state)
         sema_scope_enter(&scopes, &branch_state, "if.arm@{arm.span.start}")
         sema_expression_declare_condition_bindings(arm_bindings, &scopes, &branch_state, true, &diagnostics)
+        if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arm.body)
         branch := sema_check_statements(arm.body, return_type, environment, &scopes, &branch_state, &tail_store, &context, &diagnostics, loop_depth)
+        if value_tail {
+            context.value_tail_span = Val(span)
+            if !sema_stmt_check_value_block_end(arm.body, branch.value, return_type, arm.span, context.function_name, &diagnostics) -> complete = false
+        }
         sema_single_use_leave_scope(&scopes, &branch_state, &diagnostics)
         &branch_hardware.push(sema_scope_hardware_facts(scopes))
         sema_scope_rollback(&scopes, branch_mark)
@@ -492,8 +795,13 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     if else_body != None {
         body :: else_body
         complement :: sema_stmt_else_presence_names(arms, scopes)
+        if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(body)
         checked_else :: if complement.len() == 0 -> sema_stmt_check_block(body, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, loop_depth)
         if !checked_else.complete -> complete = false
+        if value_tail {
+            context.value_tail_span = Val(span)
+            if !sema_stmt_check_value_block_end(body, checked_else.value, return_type, span, context.function_name, &diagnostics) -> complete = false
+        }
         else_result = Val(checked_else.value)
     }
     else_hardware :: sema_scope_hardware_facts(scopes)
@@ -524,6 +832,12 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     // A subjectless guard table proves no coverage: its arms test their own
     // subjects (Rust `check_switch` skips E0307 for subjectless guards).
     if else_body == None && !subjectless_guard {
+        // Rust `check_switch`: only an all-pattern table can prove that one
+        // arm always matches; a text or byte pattern is left to coverage.
+        if !multi_head && !sema_stmt_switch_all_patterns(arms) && !sema_stmt_switch_has_text_or_bytes(arms) {
+            &diagnostics.push(sema_error("E0003", span, "this `if` needs an `else` arm", "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)", "add `else -> {{ ... }}` after the last arm"))
+            return SemaStatementResult{value: [TStmt]{}, complete: false}
+        }
         checked_conditions := [TExpr]{}
         loop condition in conditions {
             checked :: condition ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -1033,26 +1347,6 @@ fn sema_stmt_for_in_method_pair_is_supported(method_kind: TForInMethod?) -> Bool
     method_kind == None
 }
 
-fn sema_stmt_for_in_call_has_source(expression: Expr, method_kind: TForInMethod?) -> Bool Never! {
-    if method_kind == (Val(TForInMethod.Chars)) || method_kind == (Val(TForInMethod.LinesFile)) || method_kind == (Val(TForInMethod.LinesStdin)) || method_kind == (Val(TForInMethod.LinesProcessStream)) {
-        if expression == {
-            .MethodCall(_, method, _, _, _, _, _, _, _, _) -> return method == "chars" || method == "lines"
-            else -> return false
-        }
-    }
-    false
-}
-fn sema_stmt_for_in_source_expr(expression: Expr, method_kind: TForInMethod?) -> Expr Never! {
-    if sema_stmt_for_in_call_has_source(expression, method_kind) {
-        if expression == {
-            .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> return receiver
-            else -> {}
-        }
-    }
-    ~expression
-}
-
-
 fn sema_stmt_for_in_item_type(collection_type: Type, method_kind: TForInMethod?, iterable_item_type: Type?) -> Type? {
     if iterable_item_type != None -> return iterable_item_type
     if method_kind == {
@@ -1420,6 +1714,13 @@ fn sema_stmt_binding_is_place_view(expr: Expr) -> Bool Never! {
         .Paren(value, _) -> sema_stmt_binding_is_place_view(value)
         else -> false
     }
+}
+
+// Rust `place_from_expr` on a range: `xs[a..b]` over a named place (through
+// fields and indexes) is the source of a read window.
+fn sema_stmt_is_bare_range_place(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Bool {
+    if expr == .Slice(_, _, _, _, _) -> return sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() > 0
+    false
 }
 
 fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -2291,7 +2592,11 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     if binding.init == .Lambda(lambda) && sema_ownership_last_use_expr(binding.init, binding.name) {
         &diagnostics.push(sema_error("E0804", lambda.span, "a lambda can't call itself as `{binding.name}`", "short functions stored in a binding can't recurse in v1", "write a named `fn` instead of assigning the lambda to `{binding.name}`"))
     }
+    sema_copy_site_check_borrowed_binding(binding, environment, scopes, context, &diagnostics)
     binding_expr := sema_stmt_install_binding_loop_label(binding.init, binding.name, binding.name_span)
+    // D-SHAPE-PLACE1=A (Rust `check_binding`): an immutable binding of a
+    // bare range place is a read window into its source, typed `View<T>`.
+    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, &state) -> binding_expr = Expr.Place{value: binding_expr, access: PlaceAccess.Read, span: expr_span(binding.init)}
     range_head :: sema_stmt_range_conversion_head(binding.init, environment, &scopes)
     previous_binding_initializer :: context.binding_initializer
     context.binding_initializer = true
@@ -3386,12 +3691,18 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
             if value == {
                 .Ok(_, _) -> return true
                 .Err(_, _) -> return failure_reachable
+                .EnumLit(owner, variant, _, args, dot, _) -> {
+                    if owner == "" && dot && args.len() == 1 && args[0] == .Positional(_) {
+                        if variant == "Ok" -> return true
+                        if variant == "Err" -> return failure_reachable
+                    }
+                }
                 else -> {}
             }
             if value == {
                 .Call(call) -> {
-                    if call.name == "Ok" -> return true
-                    if call.name == "Err" -> return failure_reachable
+                    if (call.name == "Ok" || failure_reachable) && sema_expression_contextual_result_call(call, Val(required), scopes) != None -> return true
+                    if failure_reachable && sema_call_default_err_candidate(call, Val(required), scopes) -> return true
                 }
                 else -> {}
             }
@@ -3399,6 +3710,12 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
         .Option(_) -> {
             if value == {
                 .Present(_, _) | .Absent(_) -> return true
+                .EnumLit(owner, variant, _, args, _, _) -> {
+                    if owner == "" {
+                        if variant == "None" && args.len() == 0 -> return true
+                        if variant == "Val" && args.len() == 1 && args[0] == .Positional(_) -> return true
+                    }
+                }
                 else -> {}
             }
         }
@@ -3417,6 +3734,12 @@ fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: Se
 // A returned value (a `return` or a value tail) with its ownership and view
 // obligations: the value moves out and its views must outlive the call.
 fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // D-SHAPE-PLACE1=A (Rust `check_return`): a bare range place is a read
+    // window at a named `View<T>` return boundary, acquired explicitly so
+    // the returned type stays a view instead of a materialized list.
+    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_is_bare_range_place(value, scopes, &state) {
+        return sema_stmt_check_returned_value(Expr.Place{value: value, access: PlaceAccess.Read, span: expr_span(value)}, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     checked :: sema_stmt_check_return_value(value, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     value_is_ident := if value == {
         .Ident(_, _) -> true
@@ -3425,9 +3748,20 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     string_view_return := sema_stmt_string_view_type(checked.ty) && (value_is_ident || sema_string_view_call_sources(value, scopes, &state).len() > 0)
     // Rust keeps checking the move after a refused `View<str>` source (E0120).
     view_valid := if string_view_return -> sema_string_view_record_return(value, scopes, &state, &context, &diagnostics) else -> sema_stmt_record_return_views(value, checked.ty, scopes, &state, &context, &diagnostics)
+    // A named `View<T>` boundary reads every bare place through a window
+    // (Rust wraps it before the audit), so only other returns are audited.
+    if return_type != None && !sema_stmt_return_is_view_boundary(return_type) -> sema_copy_site_check_borrowed_return(value, environment, scopes, context, &diagnostics)
     moved := (!string_view_return && !view_valid) || sema_stmt_move_direct(value, &state, scopes, "`return`", &diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
+}
+
+// The declared success type is `View<T>`, not the string view `View<str>`.
+fn sema_stmt_return_is_view_boundary(return_type: Type?) -> Bool Never! {
+    declared :: return_type ?? return false
+    success :: if declared == .Result(ok, _) -> ok else -> declared
+    if success == .Apply(name, _) -> return name == "View" && !sema_stmt_string_view_type(success)
+    false
 }
 
 // D-DISCARD1=A (owner ruling): with a written return type, a value that does
@@ -3458,7 +3792,7 @@ fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environme
         carrier :: sema_check_expression(value, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
         // here) is this body's own failure source.
-        if !sema_stmt_is_written_carrier(value) && sema_stmt_type_is_fallible_result(carrier.ty) -> context.failure_direct_source = true
+        if !sema_stmt_is_written_carrier(value, Val(required), scopes) && sema_stmt_type_is_fallible_result(carrier.ty) -> context.failure_direct_source = true
         return Val(carrier)
     }
     if !sema_stmt_return_is_carrier(return_type) {
@@ -3516,10 +3850,12 @@ fn sema_stmt_type_is_fallible_result(ty: Type) -> Bool Never! {
 }
 
 // An `Ok(…)` or `Err(…)` written at this site, through parentheses.
-fn sema_stmt_is_written_carrier(value: Expr) -> Bool Never! {
+fn sema_stmt_is_written_carrier(value: Expr, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
     if value == {
-        .Paren(inner, _) -> sema_stmt_is_written_carrier(inner)
+        .Paren(inner, _) -> sema_stmt_is_written_carrier(inner, expected, scopes)
         .Ok(_, _) | .Err(_, _) -> true
+        .Call(call) -> sema_expression_contextual_result_call(call, expected, scopes) != None || sema_call_default_err_candidate(call, expected, scopes)
+        .EnumLit(owner, variant, _, args, dot, _) -> owner == "" && dot && (variant == "Ok" || variant == "Err") && args.len() == 1 && args[0] == .Positional(_)
         else -> false
     }
 }
@@ -3613,6 +3949,19 @@ fn sema_stmt_mark_discarded_result(checked: TExpr, fact_start: Int, context: &Se
         index -= 1
     }
 }
+
+// The source spelling of a scoped statement form this checker does not
+// handle yet, for its incomplete reason.
+fn sema_stmt_scope_form_label(statement: Stmt) -> String Never! {
+    if statement == {
+        .Layout(_, _, _, _) -> "`layout`"
+        .ContextBlock(_, _, _) -> "`#Context`"
+        .Live(_, _) -> "`live`"
+        .AssumeDet(_, _, _, _) -> "`assume_deterministic`"
+        else -> "scoped statement"
+    }
+}
+
 pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
     // D-COMPILE-STACK1=A (E1403): a statement list is one source nesting level
     // below its owner, as each of its statements is in the Rust checker.
@@ -3776,10 +4125,17 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         }
                     }
                     .None -> {
+                        // Rust `check_switch`: a guard table that ends a value
+                        // block with no `else` can skip every arm (E0114).
+                        value_guard :: index + 1 == statements.len() && context.value_tail_span == (Val(span)) && else_body == None && sema_stmt_refutable_is_subjectless_guard(subject, span)
                         checked :: sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+                        if value_guard {
+                            &diagnostics.push(sema_stmt_missing_value(return_type, sema_stmt_uncovered_guard_path(statements), context.function_name, span))
+                            complete = false
+                        }
                         if {
-                            !checked.complete || checked.value.len() != 1 -> complete = false
-                            else -> &output.push(checked.value[0])
+                            !checked.complete -> complete = false
+                            else -> loop checked_statement in checked.value -> &output.push(checked_statement)
                         }
                     }
                 }
@@ -3830,7 +4186,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                     }
                 }
             }
-            .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> {
+            .For(var, var_span, var2, kind, body, span, arrow_body, label, _) -> {
                 if kind == {
                     .Range(start_expr, end_expr, step_expr, exclusive) -> {
                         start_value := sema_stmt_check_range_endpoint(start_expr, "start", environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3840,7 +4196,10 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                             stride :: step_expr
                             step_value = sema_stmt_check_range_stride(stride, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                         }
-                        valid := var2 == None && !arrow_body && auto_vectorization == None && start_value != None && end_value != None
+                        // Rust `check_stmt` (statements.rs:2467-2589): an arrow
+                        // body is only the body's spelling, and a second loop
+                        // name is not declared for a range.
+                        valid := start_value != None && end_value != None
                         if step_expr != None && step_value == None -> valid = false
                         range_var_type := Type.Int
                         if start_value == {
@@ -3923,7 +4282,6 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         if step_expr != None && step_value == None -> valid = false
                         range_source := sema_stmt_for_in_is_range(collection.ty)
                         method_kind := sema_stmt_for_in_method_kind(collection_expr, collection)
-                        source_expr := sema_stmt_for_in_source_expr(collection_expr, method_kind)
                         iterable_item_type := Type?{None}
                         if method_kind == None && !range_source {
                             iterable := sema_stmt_for_in_iterable_fact(environment, collection.ty)
@@ -3962,8 +4320,6 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         }
                         before := sema_ownership_state_snapshot(state)
                         sema_scope_enter(&scopes, &state, "for.in@{span.start}")
-                        source_places := sema_ownership_places_from_expr_in_state(source_expr, scopes, &state)
-                        if source_places.len() > 0 && !sema_ownership_open_reference_for_expr(&state, source_expr, AccessConvention.Read, expr_span(source_expr), scopes, &diagnostics) -> valid = false
                         label_name := String?{None}
                         if label != None {
                             named :: label
@@ -4121,7 +4477,9 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         if label != None -> sema_scope_pop_loop_label(&scopes)
                         sema_single_use_leave_scope(&scopes, &state, &diagnostics)
                         body_state := sema_ownership_state_snapshot(state)
-                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, before, body_state, true, environment, &diagnostics) -> loop_scope_valid = false
+                        // Rust `check_stmt` (statements.rs:233-266): a literal
+                        // `true` condition never skips the body, as `loop`.
+                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, before, body_state, !sema_stmt_refutable_expr_is_true(condition), environment, &diagnostics) -> loop_scope_valid = false
                         if {
                             !nested.complete || !loop_scope_valid -> complete = false
                             else -> &output.push(TStmt.While{label: label_name, condition: cond, body: nested.value, span: span})
@@ -4309,7 +4667,13 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             }
             .ScopeMember(name, _, args, args_span, body, dsl, _, span) -> {
                 checked := sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
-                if dsl -> complete = false
+                // Rust validates a declared text block's body by running its
+                // checked-text rule (`Bundle/Pipeline` declared text blocks);
+                // this checker does not run that validation yet.
+                if dsl {
+                    complete = false
+                    sema_check_unsupported(&context, "the checked text block `#{name}` is not validated by the self-hosted checker yet")
+                }
                 if checked == {
                     .Val(value) -> &output.push(value)
                     .None -> complete = false
@@ -4322,19 +4686,28 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         erased_state := sema_ownership_state_snapshot(state)
                         erased_mark :: sema_check_context_mark(&context)
                         checked :: sema_check_statements(body, return_type, environment, &scopes, &erased_state, &tail_store, &context, &diagnostics, loop_depth)
+                        erased_reasons := [String]{}
+                        loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> &erased_reasons.push(context.incomplete_reasons[reason_index])
                         sema_check_context_rollback(&context, erased_mark)
                         sema_scope_rollback(&scopes, erased_scope_mark)
                         if {
                             !checked.complete -> {
                                 complete = false
+                                loop reason in erased_reasons -> sema_check_unsupported(&context, reason)
                             }
                             marker.name == "DebugOnly" -> {
                                 &output.push(TStmt.DebugOnly{body: checked.value, span: span})
                             }
                         }
                     }
+                    // Rust checks any other switched marker's body as a plain
+                    // block (`Stmt::Switched` fallback).
                     else -> {
-                        complete = false
+                        nested :: sema_stmt_check_block(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "switched@{span.start}", loop_depth)
+                        if {
+                            !nested.complete -> complete = false
+                            else -> &output.push(TStmt.Region{body: nested.value, span: span})
+                        }
                     }
                 }
             }
@@ -4410,12 +4783,31 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                     }
                 }
             }
-            else -> complete = false
+            .TaskGroup(name, name_span, limit, body, span) -> {
+                checked := sema_taskgroup_check_statement(name, name_span, limit, body, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+                if checked == {
+                    .Val(value) -> &output.push(value)
+                    .None -> complete = false
+                }
+            }
+            .ComptimeIf(_, _, _, _, span, _) | .ComptimeSwitch(_, _, _, span) | .ComptimeBlock(_, _, span) -> {
+                complete = false
+                sema_check_unsupported(&context, "the statement-level `prep` form at offset {span.start} is not executed by the self-hosted checker yet")
+            }
+            .Layout(_, _, _, span) | .ContextBlock(_, _, span) | .Live(_, span) | .AssumeDet(_, _, _, span) -> {
+                complete = false
+                sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statement)} block at offset {span.start} is not supported by the self-hosted checker yet")
+            }
         }
         if statement == {
             .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) -> reachable = false
             .Loop(body, _, _, _) -> {
                 if !sema_stmt_refutable_loop_body_can_break(body) -> reachable = false
+            }
+            // Rust flow facts: a table whose every path leaves, or a literal
+            // `true` loop that nothing breaks, ends the reachable path too.
+            .Switch(_, _, _, _) | .While(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {
+                if sema_stmt_refutable_statement_exits(statement) -> reachable = false
             }
             .Impure(_, _, body, _) | .Shield(body, _) | .Region(_, _, body, _) | .AuthorityScope(_, _, _, body, _) -> {
                 if sema_stmt_refutable_block_exits(body) -> reachable = false

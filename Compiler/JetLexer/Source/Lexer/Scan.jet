@@ -133,6 +133,7 @@ fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Neve
     if word == {
         "true" -> K_TRUE
         "false" -> K_FALSE
+        "None" -> K_NULL
         "self" -> K_SELF
         "break" -> K_BREAK
         "return" -> K_RETURN
@@ -255,6 +256,23 @@ fn numeric_is_float(source: [U8], start: Int) -> Bool Never! {
     ascii_digit(after) || ((after == 43 || after == 45) && ascii_digit(byte_at(source, i + 2)))
 }
 
+// Whether the decimal digits in `start..end` (separators skipped) fit the
+// i64 token fast path.
+fn decimal_digits_fit_int(source: [U8], start: Int, end: Int) -> Bool Never! {
+    value := 0
+    i := start
+    loop i < end {
+        code :: byte_at(source, i)
+        i += 1
+        if code == 95 -> next
+        if !ascii_digit(code) -> return false
+        digit :: code - 48
+        if value > (9223372036854775807 - digit) /% 10 -> return false
+        value = value * 10 + digit
+    }
+    true
+}
+
 fn scan_plain_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
     i := start + 1
     loop i < source.len() {
@@ -363,7 +381,11 @@ fn scan_triple_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never
                 }
                 next
             }
-            if value == 123 && byte_at(source, i + 1) != 123 {
+            if value == 123 && byte_at(source, i + 1) == 123 {
+                i += 2
+                next
+            }
+            if value == 123 {
                 depth = 1
                 i += 1
                 next
@@ -475,6 +497,31 @@ fn scan_char_end(source: [U8], start: Int) -> Int Never! {
     if byte_at(source, i) == 39 -> i + 1 else -> source.len()
 }
 
+// The index after the nested `/* … */` comment opened at `start`. A comment
+// whose openers are not all closed runs to the source end and returns
+// `-(end + 1)`, so the payload pass can report it unclosed.
+fn scan_block_comment_end(source: [U8], start: Int) -> Int Never! {
+    i := start + 2
+    depth := 1
+    loop i < source.len() && depth > 0 {
+        if {
+            byte_at(source, i) == 47 && byte_at(source, i + 1) == 42 -> {
+                depth += 1
+                i += 2
+            }
+            byte_at(source, i) == 42 && byte_at(source, i + 1) == 47 -> {
+                depth -= 1
+                i += 2
+            }
+            else -> {
+                i += utf8_width(source, i)
+            }
+        }
+    }
+    if depth > 0 -> return -(i + 1)
+    i
+}
+
 pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
     facts := [Int]{}
     last_code := -1
@@ -509,23 +556,8 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if value == 47 && next1 == 42 {
-            i += 2
-            depth := 1
-            loop i < source.len() && depth > 0 {
-                if {
-                    byte_at(source, i) == 47 && byte_at(source, i + 1) == 42 -> {
-                        depth += 1
-                        i += 2
-                    }
-                    byte_at(source, i) == 42 && byte_at(source, i + 1) == 47 -> {
-                        depth -= 1
-                        i += 2
-                    }
-                    else -> {
-                        i += utf8_width(source, i)
-                    }
-                }
-            }
+            end :: scan_block_comment_end(source, start)
+            i = if end < 0 -> -end - 1 else -> end
             emit(&facts, K_BLOCK_COMMENT, start, i, false)
             next
         }
@@ -615,8 +647,11 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
                     marker_kind :: word_kind(source, i + 1, end, 0)
                     if {
                         marker_kind == K_IDENT -> {
-                            last_code = push_code(&facts, K_IDENT, start, end, false)
-                            i = end
+                            // A respelled retired root also takes its legacy
+                            // `()` or `.package` suffix (Payload).
+                            token_end :: retired_fact_end(source, start, end)
+                            last_code = push_code(&facts, K_IDENT, start, token_end, false)
+                            i = token_end
                         }
                         else -> {
                             last_code = push_code(&facts, K_AT, start, start + 1, false)
@@ -999,7 +1034,11 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             numeric_end :: scan_numeric_end(source, start)
             end :: scan_number_end(source, start)
             kind :: if {
-                end != numeric_end -> K_UNIT_NUMBER
+                end != numeric_end && (numeric_is_float(source, start) || decimal_digits_fit_int(source, start, numeric_end)) -> K_UNIT_NUMBER
+                // Rust `number`: a unit candidate whose digits overflow the
+                // i64 fast path falls back to an Int token over the whole
+                // spelling, suffix included.
+                end != numeric_end -> K_INT
                 numeric_is_float(source, start) -> K_FLOAT
                 else -> K_INT
             }

@@ -50,11 +50,11 @@ pub struct JetCodegenJobTestArtifacts {
     pub harnesses: [MIRHarnessPlan]
 }
 
-fn jet_codegen_artifact_function(reference: TFunctionRef, functions: [TFunc]) -> TFunc? {
+fn jet_codegen_artifact_function(reference: TFunctionRef, functions: JetCodegenFunctionIndex) -> TFunc? {
     jet_codegen_find_function_by_key(functions, reference.key, reference.module_identity)
 }
 
-fn jet_codegen_artifact_function_id(reference: TFunctionRef, functions: [TFunc]) -> MIRFunctionID? {
+fn jet_codegen_artifact_function_id(reference: TFunctionRef, functions: JetCodegenFunctionIndex) -> MIRFunctionID? {
     function :: jet_codegen_artifact_function(reference, functions) ?? return None
     Val(jet_codegen_function_id(function))
 }
@@ -167,7 +167,7 @@ fn jet_codegen_job_limits(limits: [StringMapEntry]) -> [MIRJobLimit] Never! {
     result
 }
 
-fn jet_codegen_lower_job_fact(row: TJobFact, functions: [TFunc], checked_functions: [MIRFunction]) -> MIRJob? {
+fn jet_codegen_lower_job_fact(row: TJobFact, functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction]) -> MIRJob? {
     reference :: row.function ?? return None
     function_id :: jet_codegen_artifact_function_id(reference, functions) ?? return None
     checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? panic("job target has no checked MIR signature")
@@ -208,7 +208,7 @@ fn jet_codegen_test_kind(kind: TTestKind) -> MIRTestKind Never! {
     if kind == {.Unit -> MIRTestKind.Unit else -> MIRTestKind.Property}
 }
 
-fn jet_codegen_lower_test_fact(row: TTestFact, functions: [TFunc], checked_functions: [MIRFunction]) -> MIRTestCase? {
+fn jet_codegen_lower_test_fact(row: TTestFact, functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction]) -> MIRTestCase? {
     function :: jet_codegen_artifact_function(row.function, functions) ?? return None
     function_id := jet_codegen_function_id(function)
     checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? panic("test target has no checked MIR signature")
@@ -282,7 +282,7 @@ fn jet_codegen_harness_kind(kind: THarnessKind) -> MIRHarnessKind Never! {
     }
 }
 
-fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact], lowered_tests: [MIRTestCase], functions: [TFunc], checked_functions: [MIRFunction]) -> MIRHarnessPlan Never! {
+fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact], lowered_tests: [MIRTestCase], functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction]) -> MIRHarnessPlan Never! {
     tests := [MIRTestID]{}
     loop key in row.tests {
         test_id :: jet_codegen_test_id_for_key(key, test_rows, lowered_tests) ?? next
@@ -354,17 +354,18 @@ fn jet_codegen_insert_harness(rows: &[MIRHarnessPlan], row: MIRHarnessPlan) Neve
 }
 
 pub fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
+    function_index :: jet_codegen_function_index(functions)
     lowered_jobs := [MIRJob]{}
     loop row in jobs {
-        if jet_codegen_lower_job_fact(row, functions, checked_functions) == .Val(lowered) -> jet_codegen_insert_job(&lowered_jobs, lowered)
+        if jet_codegen_lower_job_fact(row, function_index, checked_functions) == .Val(lowered) -> jet_codegen_insert_job(&lowered_jobs, lowered)
     }
     lowered_tests := [MIRTestCase]{}
     loop row in tests {
-        if jet_codegen_lower_test_fact(row, functions, checked_functions) == .Val(lowered) -> jet_codegen_insert_test(&lowered_tests, lowered)
+        if jet_codegen_lower_test_fact(row, function_index, checked_functions) == .Val(lowered) -> jet_codegen_insert_test(&lowered_tests, lowered)
     }
     lowered_harnesses := [MIRHarnessPlan]{}
     loop row in harnesses {
-        lowered := jet_codegen_lower_harness_fact(row, tests, lowered_tests, functions, checked_functions)
+        lowered := jet_codegen_lower_harness_fact(row, tests, lowered_tests, function_index, checked_functions)
         if lowered.tests.len() > 0 || lowered.output_checks.len() > 0 || lowered.coverage_points.len() > 0 -> jet_codegen_insert_harness(&lowered_harnesses, lowered)
     }
     JetCodegenJobTestArtifacts{jobs: lowered_jobs, tests: lowered_tests, harnesses: lowered_harnesses}

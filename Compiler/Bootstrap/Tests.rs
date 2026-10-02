@@ -20,6 +20,14 @@ const BOOTSTRAP_UNITS_RELATIVE: &str = ".cache/jet-luna/compiler-bootstrap/units
 /// Sema and Foundation units are over 100 MB of Rust each); full debuginfo
 /// would multiply its codegen memory.
 const BACKEND_UNIT_PROFILE: &str = "debug = \"line-tables-only\"\n";
+/// Dev-profile rows for the repository crate whose host code dominates a
+/// debug jetc0's run time: compiler-image restore and every
+/// `execution_identity()` re-encode, verify and re-digest the whole compiler
+/// MIR in jet-foundation (MIR image codec, `CanonicalWriter`), which at
+/// opt-level 0 with debug assertions (`MIR_VERIFICATION` follows
+/// `debug_assertions`) costs tens of minutes per run. Built once per change
+/// of the crate; the emitted unit crates keep the fast dev profile.
+const BACKEND_DEV_HOST_PROFILE: &str = "\n[profile.dev.package.jet-foundation]\nopt-level = 2\ndebug-assertions = false\n";
 /// Parallel rustc jobs (and codegen tokens) of a backend build. The
 /// stage-zero backend build runs inside the bootstrap test's memory cap, so
 /// at most this many unit or repository crates compile at once. Measured
@@ -399,6 +407,14 @@ fn __jet_bootstrap_harness_main() {
             "unknown bootstrap factory tier `{factory_tier_name}`: stage zero runs the compiler factory only as AOT"
         ),
     };
+    // JET_BOOTSTRAP_BATCH names a file of `source_root<TAB>entry<TAB>output<TAB>receipt`
+    // rows: one process compiles them in order, restoring the compiler image
+    // once. A panicking entry is reported between its `jet-bootstrap-batch:`
+    // begin/end lines on stderr and the batch goes on with the next row.
+    if let Ok(batch) = std::env::var("JET_BOOTSTRAP_BATCH") {
+        __jet_bootstrap_harness_batch(&mode, factory_tier, &batch);
+        return;
+    }
     let source_root = std::env::var("JET_BOOTSTRAP_SOURCE_ROOT")
         .unwrap_or_else(|error| panic!("bootstrap source root is unavailable: {error}"));
     let entry = std::env::var("JET_BOOTSTRAP_ENTRY")
@@ -407,9 +423,46 @@ fn __jet_bootstrap_harness_main() {
         .unwrap_or_else(|error| panic!("bootstrap output path is unavailable: {error}"));
     let receipt_path = std::env::var("JET_BOOTSTRAP_RECEIPT")
         .unwrap_or_else(|error| panic!("bootstrap receipt path is unavailable: {error}"));
+    __jet_bootstrap_harness_entry(&mode, factory_tier, &source_root, &entry, &output_path, &receipt_path);
+}
+
+#[doc(hidden)]
+fn __jet_bootstrap_harness_batch(mode: &str, factory_tier: crate::BootstrapFactoryTier, batch: &str) {
+    let rows = std::fs::read_to_string(batch)
+        .unwrap_or_else(|error| panic!("cannot read bootstrap batch `{batch}`: {error}"));
+    for (index, row) in rows.lines().enumerate() {
+        if row.is_empty() {
+            continue;
+        }
+        let fields: Vec<&str> = row.split('\t').collect();
+        let [source_root, entry, output_path, receipt_path] = fields.as_slice() else {
+            panic!("bootstrap batch row {index} is not source_root, entry, output and receipt: `{row}`");
+        };
+        eprintln!("jet-bootstrap-batch: begin {index} {source_root} {entry}");
+        let started = std::time::Instant::now();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            __jet_bootstrap_harness_entry(mode, factory_tier, source_root, entry, output_path, receipt_path)
+        }));
+        eprintln!(
+            "jet-bootstrap-batch: end {index} {} {}ms",
+            if outcome.is_ok() { "ok" } else { "panicked" },
+            started.elapsed().as_millis()
+        );
+    }
+}
+
+#[doc(hidden)]
+fn __jet_bootstrap_harness_entry(
+    mode: &str,
+    factory_tier: crate::BootstrapFactoryTier,
+    source_root: &str,
+    entry: &str,
+    output_path: &str,
+    receipt_path: &str,
+) {
     let lease = crate::compiler_bootstrap_host::open_authorized_sources(
-        std::path::Path::new(&source_root),
-        std::path::Path::new(&entry),
+        std::path::Path::new(source_root),
+        std::path::Path::new(entry),
     )
     .unwrap_or_else(|error| panic!("authorized bootstrap source snapshot failed: {error:?}"));
     if mode == "offset-projection" {
@@ -3649,7 +3702,7 @@ fn write_backend_project(
     // jet-jit needs) and starts from the repository lockfile, keeping every
     // dependency at the version the repository builds with.
     let manifest = format!(
-        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-jit = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n[patch.crates-io]\ncranelift-jit = {{ path = {:?} }}\n{unit_profiles}{release_profile}",
+        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-jit = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n[patch.crates-io]\ncranelift-jit = {{ path = {:?} }}\n{unit_profiles}{build_profile}",
         package_name,
         repo.display().to_string(),
         // The linked Host modules name these crates directly (codegen's native
@@ -3666,7 +3719,7 @@ fn write_backend_project(
         ffi_dependency = ffi_dependency,
         unit_dependencies = unit_dependencies,
         unit_profiles = unit_profiles,
-        release_profile = if profile.is_some() { BACKEND_RELEASE_PROFILE } else { "" },
+        build_profile = if profile.is_some() { BACKEND_RELEASE_PROFILE } else { BACKEND_DEV_HOST_PROFILE },
     );
     fs::copy(repo.join("Cargo.lock"), project.join("Cargo.lock")).unwrap_or_else(|error| {
         panic!("cannot seed backend lockfile in `{}`: {error}", project.display())
@@ -3705,7 +3758,13 @@ fn build_backend_artifact_with_native_library(
     command
         .current_dir(repo)
         .env("CARGO_TARGET_DIR", &target)
-        .env("CARGO_INCREMENTAL", "0")
+        // jet-env sets CARGO_INCREMENTAL from JET_CARGO_INCREMENTAL. Dev
+        // builds are incremental: a unit crate rebuilt only because a crate it
+        // depends on changed reuses its cached queries (measured on a 12.5 MB
+        // shard: 14 s instead of 48 s; a one-literal edit inside it 34 s; peak
+        // memory unchanged at about 2.8 GB). The release profile stays
+        // non-incremental, as its manifest profile says.
+        .env("JET_CARGO_INCREMENTAL", if profile.is_some() { "0" } else { "1" })
         .env("CARGO_BUILD_JOBS", if profile.is_some() { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS })
         .env("RUST_MIN_STACK", BACKEND_RUSTC_STACK)
         .env("JET_NO_SCCACHE", "1")

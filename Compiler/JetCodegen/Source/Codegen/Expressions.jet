@@ -451,6 +451,16 @@ fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, value: TExpr) ->
     }
 }
 
+// MIRRust lower_local_value: a string-view binding keeps its Jet `String`
+// type for dispatch, but its place carries the borrowed `View<str>` carrier;
+// a read takes that carrier so its slot holds the borrowed `&str`.
+fn jet_codegen_local_read_type(builder: JetCodegenBuilder, local: TLocal, ty: Type) -> Type Never! {
+    if ty != Type.String || local.persist_key != None || local.deref -> return ~ty
+    binding :: jet_codegen_find_binding_for_local(builder, local) ?? return ~ty
+    if binding.ty == .Apply(name, args) && name == "View" && args.len() == 1 && args[0] == (Type.Named{name: "str"}) -> return ~binding.ty
+    ~ty
+}
+
 
 fn jet_codegen_is_copy_type(ty: Type) -> Bool Never! {
     if ty == .Int | .Float | .Float32 | .Bool | .Char -> return true
@@ -1663,14 +1673,9 @@ fn jet_codegen_signature_call_args(builder: &JetCodegenBuilder, args: [TCallArg]
 }
 
 fn jet_codegen_function_id_for_name(builder: JetCodegenBuilder, name: String) -> MIRFunctionID Never! {
-    found := TFunc?{None}
-    loop function in builder.functions {
-        if function.key == name {
-            if found != None -> panic("checked named function key is ambiguous")
-            found = Val(function)
-        }
-    }
-    function :: found ?? panic("checked named function has no reachable TFunc")
+    row :: builder.function_index.first_by_key.get(name) ?? panic("checked named function has no reachable TFunc")
+    if builder.function_index.next_by_key[row] >= 0 -> panic("checked named function key is ambiguous")
+    function :: builder.function_index.rows[row]
     jet_codegen_function_id(function)
 }
 
@@ -2076,8 +2081,10 @@ fn jet_codegen_type_head_name(ty: Type) -> String? Never! {
 
 fn jet_codegen_method_function(builder: JetCodegenBuilder, method: TMethodRef) -> TFunc? {
     selected := TFunc?{None}
-    loop function in builder.functions {
-        if function.key != method.symbol.key -> next
+    row := builder.function_index.first_by_key.get(method.symbol.key) ?? -1
+    loop row >= 0 {
+        function :: builder.function_index.rows[row]
+        row = builder.function_index.next_by_key[row]
         if method.operator_identity != None {
             owner_type :: jet_codegen_method_owner_type(function.kind) ?? next
             trait_symbol :: method.trait_owner ?? next
@@ -2331,7 +2338,7 @@ fn jet_codegen_plain_named_function_value(builder: &JetCodegenBuilder, expressio
         else -> {}
     }
     carrier :: slot_return ?? return None
-    function :: jet_codegen_find_function(builder.functions, name) ?? return None
+    function :: jet_codegen_find_function(builder.function_index, name) ?? return None
     returned :: jet_codegen_plain_return(function) ?? return None
     if !jet_codegen_is_plain_call_return(returned, carrier) -> return None
     source_params := [String]{}
@@ -2427,7 +2434,7 @@ fn jet_codegen_expression_call_return_type(builder: JetCodegenBuilder, expressio
     if expression.kind == {
         .Call(callee, type_args, _) -> {
             if jet_codegen_find_checked_foreign_row(builder.modules, callee.key) != None -> return None
-            target :: jet_codegen_find_function(builder.functions, callee.key) ?? panic("checked call has no TFunc target")
+            target :: jet_codegen_find_function(builder.function_index, callee.key) ?? panic("checked call has no TFunc target")
             return Val(jet_codegen_executable_function_return_type(target, type_args))
         }
         .MethodCall(receiver, method, type_args, _) -> {
@@ -3290,7 +3297,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
         }
         .Typed(function_name, source, target) -> {
             if type_identity_key(source) != type_identity_key(source_error) -> panic("checked typed error conversion source disagrees with the operand carrier")
-            function :: jet_codegen_find_function(builder.functions, function_name) ?? panic("checked typed error conversion has no reachable TFunc")
+            function :: jet_codegen_find_function(builder.function_index, function_name) ?? panic("checked typed error conversion has no reachable TFunc")
             argument := jet_codegen_numeric_call_arg(error, span)
             argument.access = MIRAccess.Move
             // A conversion routine is `fn(Source) -> Target Never!`: its
@@ -4171,8 +4178,10 @@ fn jet_codegen_direct_display_function(builder: JetCodegenBuilder, value_type: T
     value_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, value_name, builder.generic_type_names)
     nominal_identity :: value_identity ?? return None
     selected := TFunc?{None}
-    loop function in builder.functions {
-        if function.name != "display" -> next
+    row := builder.function_index.first_by_name.get("display") ?? -1
+    loop row >= 0 {
+        function :: builder.function_index.rows[row]
+        row = builder.function_index.next_by_name[row]
         if function.kind == {
             .TraitMethod(_, convention, owner, trait_symbol, _) -> {
                 if convention == None || jet_codegen_symbol_name(builder, trait_symbol) != "Display" -> next
@@ -4392,8 +4401,10 @@ fn jet_codegen_close_function(builder: JetCodegenBuilder, receiver_type: Type) -
     }
     owner :: jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names) ?? panic("checked close receiver has no registered owner")
     selected := TFunc?{None}
-    loop function in builder.functions {
-        if function.name != "close" -> next
+    row := builder.function_index.first_by_name.get("close") ?? -1
+    loop row >= 0 {
+        function :: builder.function_index.rows[row]
+        row = builder.function_index.next_by_name[row]
         function_owner :: jet_codegen_method_owner_type(function.kind) ?? next
         function_owner_name :: jet_codegen_type_head_name(jet_codegen_unwrap_pattern_tags(function_owner)) ?? next
         identity :: jet_codegen_find_nominal_identity(builder.modules, function.module_identity, function_owner_name, [String]{}) ?? next
@@ -4415,8 +4426,10 @@ fn jet_codegen_scope_end_close_function(builder: JetCodegenBuilder, ty: Type) ->
         else -> return None
     }
     owner :: jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names) ?? return None
-    loop function in builder.functions {
-        if function.name != "close" -> next
+    row := builder.function_index.first_by_name.get("close") ?? -1
+    loop row >= 0 {
+        function :: builder.function_index.rows[row]
+        row = builder.function_index.next_by_name[row]
         close_owner := Type?{None}
         if function.kind == .TraitMethod(_, _, owner_type, trait_symbol, _) {
             if jet_codegen_symbol_name(builder, trait_symbol) == "Close" -> close_owner = Val(owner_type)
@@ -4540,7 +4553,8 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> MIR
         .EnumCtor(owner, variant, payload) -> jet_codegen_lower_enum_constructor(&builder, expression, owner, variant, payload)
         .Local(local) -> {
             local_place :: jet_codegen_lower_local_place(&builder, local)
-            jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.ReadPlace{place: local_place})
+            read_type :: jet_codegen_local_read_type(builder, local, expression.ty)
+            jet_codegen_emit_value(&builder, expression.span, read_type, MIROperation.ReadPlace{place: local_place})
         }
         .ConstRef(symbol) -> jet_codegen_lower_constant_reference(&builder, expression, symbol)
         .Field(receiver, field) -> jet_codegen_lower_field_expr(&builder, expression, receiver, field)
@@ -4623,7 +4637,7 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> MIR
                 lowered_args := jet_codegen_lower_foreign_call_args(&builder, args, foreign_row.params)
                 return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Foreign{id: foreign_id}, args: lowered_args, type_args: [MIRType]{}})
             }
-            target :: jet_codegen_find_function(builder.functions, callee.key) ?? panic("checked direct call has no TFunc target")
+            target :: jet_codegen_find_function(builder.function_index, callee.key) ?? panic("checked direct call has no TFunc target")
             jet_codegen_note_core_module(&builder, target.module_name)
             lowered_args := jet_codegen_lower_call_args(&builder, args, target.params)
             lowered_types := [MIRType]{}

@@ -913,7 +913,7 @@ fn jet_codegen_for_in_owns_source(builder: JetCodegenBuilder, source_kind: MIRLo
         .Chars -> return false
         .LinesFile | .LinesStdin | .LinesProcessStream | .ChannelReceiver | .EncodingReader(_) -> return true
         .Iterable(_, _, iter_symbol, _) -> {
-            function :: jet_codegen_find_function(builder.functions, iter_symbol) ?? panic("checked Iterable iter method has no reachable TFunc")
+            function :: jet_codegen_find_function(builder.function_index, iter_symbol) ?? panic("checked Iterable iter method has no reachable TFunc")
             if function.kind == {
                 .Method(convention, _) | .TraitMethod(_, convention, _, _, _) -> {
                     if convention == None -> panic("checked Iterable iter method has no receiver convention")
@@ -1388,7 +1388,7 @@ fn jet_codegen_index_hook_function(builder: JetCodegenBuilder, owner_type: Type,
         }
     }
     method_key :: exact_method_key ?? (fallback_method_key ?? panic("checked {trait_name} receiver has no registered {method_name} implementation"))
-    Val(jet_codegen_find_function(builder.functions, method_key) ?? panic("checked {trait_name}::{method_name} function is not reachable"))
+    Val(jet_codegen_find_function(builder.function_index, method_key) ?? panic("checked {trait_name}::{method_name} function is not reachable"))
 }
 
 fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, owner_type: Type, required_symbol: SymbolID?, trait_name: String, method_name: String) -> JetCodegenIndexHookTraitMethod Never! {
@@ -1824,7 +1824,7 @@ fn jet_codegen_is_unit_type(ty: Type) -> Bool Never! {
 }
 
 fn jet_codegen_transaction_method_expr(builder: JetCodegenBuilder, local: TLocal, owner: Type, method_ref: TMethodRef, args: [TCallArg], span: Span) -> TExpr Never! {
-    function :: jet_codegen_find_function(builder.functions, method_ref.symbol.key) ?? panic("checked Rollback::{method_ref.name} method has no reachable TFunc")
+    function :: jet_codegen_find_function(builder.function_index, method_ref.symbol.key) ?? panic("checked Rollback::{method_ref.name} method has no reachable TFunc")
     if function.key != method_ref.symbol.key -> panic("checked Rollback method SymbolId resolved to a different TFunc")
     return_type := function.ret ?? Type.Named{name: "Unit"}
     receiver := TExpr{ty: owner, kind: TExprKind.Local{local: local}, span: span, integer_bounds: None, cost: None}

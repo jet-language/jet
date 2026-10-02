@@ -38,6 +38,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     diagnostic_with_label,
     expr_span,
+    type_name,
 ]
 
 pub enum SemaOwnershipReferenceKind {
@@ -352,6 +353,74 @@ pub fn sema_ownership_type_is_copy(ty: Type) -> Bool Never! {
         .Named(name) -> name == "Unit" || name == "Never"
         else -> false
     }
+}
+
+// Rust `Type::is_scalar`: the by-value numeric and boolean leaves (and raw
+// pointers). Unlike Copy it excludes `Char`, carriers, tuples and units; the
+// borrowed-parameter binding and return audits key on exactly this set.
+pub fn sema_ownership_type_is_scalar(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .Float32 | .IntN(_, _) | .Quantity(_, _) -> true
+        .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_ownership_type_is_scalar(inner)
+        .Apply(name, args) -> name == "Ptr" && args.len() == 1
+        else -> false
+    }
+}
+
+// A read or write parameter: storage this function borrows and does not own
+// (Rust `param_conv` is `Read` or `Write`). Locals are owned even though
+// they are declared with read access.
+pub fn sema_ownership_binding_is_borrowed_param(binding: SemaScopeBinding) -> Bool Never! {
+    binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
+}
+
+// Rust `is_edit_shared_guard`: a binding holding a `guard_edit()` lease keeps
+// its acquisition-site write capability even when the binding is immutable.
+fn sema_ownership_binding_is_edit_shared_guard(binding: SemaScopeBinding) -> Bool Never! {
+    ty :: binding.symbol.ty ?? return false
+    if ty == .Tagged(marker, inner) {
+        if marker != (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit}) -> return false
+        if inner == .Apply(name, _) -> return name == "SharedGuard"
+    }
+    false
+}
+
+// Rust `place_reads_untagged_or_read_shared_guard`: a write that reaches a
+// `.value` held by an untagged or `guard_read()` SharedGuard. A write
+// parameter root keeps its caller-granted capability. The guard type is
+// known only for a binding root (`guard.value`), where every guard lives.
+fn sema_ownership_writes_read_shared_guard(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    output_path := [String]{}
+    root :: sema_ownership_named_view_root(expr, &output_path) ?? return false
+    root_index :: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
+    root_binding :: scopes.bindings[root_index]
+    if root_binding.symbol.kind == SymbolKind.Parameter && root_binding.access == AccessConvention.Write -> return false
+    sema_ownership_place_reads_read_shared_guard(expr, scopes)
+}
+
+fn sema_ownership_place_reads_read_shared_guard(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expr == {
+        .Field(base, member, _) -> {
+            if member == "value" && sema_ownership_expr_is_read_shared_guard(base, scopes) -> return true
+            sema_ownership_place_reads_read_shared_guard(base, scopes)
+        }
+        .Index(base, _, _, _) | .Paren(base, _) | .Place(base, _, _) -> sema_ownership_place_reads_read_shared_guard(base, scopes)
+        else -> false
+    }
+}
+
+fn sema_ownership_expr_is_read_shared_guard(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expr == .Ident(name, span) {
+        index :: sema_scope_resolve_index_at(scopes, name, span) ?? return false
+        ty :: scopes.bindings[index].symbol.ty ?? return false
+        if ty == .Apply(guard_name, _) -> return guard_name == "SharedGuard"
+        if ty == .Tagged(marker, _) -> return marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead})
+    }
+    false
+}
+
+fn sema_ownership_diag_read_shared_guard_write(span: Span) -> Diagnostic {
+    sema_error("E0205", span, "cannot edit through this read-only `SharedGuard` view", "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access", "keep the edit at the acquisition site, or pass the guard to a helper with the write-access marker `&`, such as `&guard: SharedGuard<T>`")
 }
 
 // Structural cloneability is known for the core value constructors.  A
@@ -1282,10 +1351,17 @@ pub fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Exp
     }
     binding :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return false
     info :: binding
-    if !has_view && !info.mutable && info.access != AccessConvention.Write {
-        if info.access == {
-            .Read -> &diagnostics.push(sema_error("E0205", span, "cannot edit through `{display.root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
-            else -> &diagnostics.push(sema_error("E0202", span, "cannot take a write window into `{display.root}`", "a write window can change its owner, so the owner must be mutable", "declare `{display.root}` as a mutable binding"))
+    if sema_ownership_writes_read_shared_guard(expr, scopes) {
+        &diagnostics.push(sema_ownership_diag_read_shared_guard_write(span))
+        return false
+    }
+    if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
+        // Rust `validate_write_place`: a parameter is E0205, a local E0202.
+        if info.symbol.kind == SymbolKind.Parameter {
+            param_type :: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
+            &diagnostics.push(sema_error("E0205", span, "cannot take a write window into `{display.root}`", "an unmarked parameter gives read access only; a write window needs the write-access marker `&`", "change the parameter to `{display.root}: &{param_type}` with the write-access marker `&`"))
+        } else {
+            &diagnostics.push(sema_error("E0202", span, "cannot take a write window into `{display.root}`", "a write window can change its owner, so the owner must be mutable", "declare `{display.root} := ...`"))
         }
         return false
     }
@@ -1584,14 +1660,53 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
     }
     binding :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return false
     info :: binding
-    if !has_view && !info.mutable && info.access != AccessConvention.Write {
+    guard_refused :: sema_ownership_writes_read_shared_guard(expr, scopes)
+    if guard_refused {
+        &diagnostics.push(sema_ownership_diag_read_shared_guard_write(expr_span(expr)))
+        // Rust `validate_shared_guard_lvalue` runs beside an assignment's own
+        // field or index capability check, so only an assignment goes on.
+        if action != "be assigned" -> return false
+    }
+    if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
+        if action == "be assigned" && sema_ownership_report_assignment_capability(expr, display.root, info, &diagnostics) -> return false
         if info.access == {
             .Read -> &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{display.root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
             else -> &diagnostics.push(sema_error("E0202", expr_span(expr), "cannot take a write window into `{display.root}`", "a write window can change its owner, so the owner must be mutable", "declare `{display.root}` as a mutable binding"))
         }
         return false
     }
-    true
+    !guard_refused
+}
+
+// Rust's assignment statement checks: a field write through an immutable
+// root is E0205 for a parameter and a local alike; an index write is E0205
+// only for a read parameter and E0202 for any other binding. False for a
+// target that is neither.
+fn sema_ownership_report_assignment_capability(expr: Expr, root: String, info: SemaScopeBinding, diagnostics: &[Diagnostic]) -> Bool {
+    param_type :: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
+    is_param :: info.symbol.kind == SymbolKind.Parameter
+    if expr == {
+        .Field(_, member, span) -> {
+            if root == "self" {
+                &diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `self` has read access only; the write-access marker `&` is required", "editing a field requires the write-access marker `&` on the owning place", "write the receiver with the write-access marker `&`: `&self` to grant write access"))
+            } else if is_param {
+                &diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `{root}` does not have the write-access marker `&`", "editing a field requires the write-access marker `&` on the owning place", "mark the parameter with the write-access marker `&`: `{root}: &{param_type}` to grant write access"))
+            } else {
+                &diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `{root}` does not have the write-access marker `&`", "editing a field requires the write-access marker `&` on the owning place", "declare it with `{root} := ...` to give it write access"))
+            }
+            true
+        }
+        .Index(_, _, span, _) -> {
+            what :: "cannot write to `{root}` — it does not have the write-access marker `&`"
+            if is_param && info.access == AccessConvention.Read {
+                &diagnostics.push(sema_error("E0205", span, what, "an unmarked parameter gives read access only; assigning into it needs the write-access marker `&`", "change the parameter to `{root}: &{param_type}` with the write-access marker `&`"))
+            } else {
+                &diagnostics.push(sema_error("E0202", span, what, "assigning into a collection edits it; the binding must be declared mutable", "declare `{root} := ...`"))
+            }
+            true
+        }
+        else -> false
+    }
 }
 
 // `action` is Rust's change wording for a pinned place (E0219), such as
@@ -1632,11 +1747,22 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
     if places.len() == 0 -> return true
     binding :: sema_ownership_binding_for_expr(&state, expr, scopes)
-    borrowed := sema_ownership_view_exists_for_expr(&state, expr, scopes)
     if binding != None {
         info :: binding
-        if info.access == AccessConvention.Read || info.access == AccessConvention.Write -> borrowed = true
+        // Rust moves only non-Copy values: every projection of a Copy root
+        // is Copy, so nothing moves and no move conflict exists. Rust
+        // `note_move_if_direct_ident`: an unmarked owning position moves a
+        // local only; a read or write parameter keeps its value (the binding
+        // and return audits report E0120 where it would have to copy).
+        if sema_ownership_type_is_copy(info.symbol.ty ?? Type.Named{name: "Unit"}) || (unmarked && sema_ownership_binding_is_borrowed_param(info)) {
+            loop place in places -> sema_ownership_note_place_reference(&state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
+            return true
+        }
     }
+    // Named windows keep ownership with their source. A borrowed parameter
+    // under an exact `^` mark is refused at the mark itself (E0201); a
+    // consuming call or receiver records its move like any owner.
+    borrowed :: sema_ownership_view_exists_for_expr(&state, expr, scopes)
     loop place in places {
         if !unmarked && sema_ownership_reject_partial_static_move(&state, place, expr, &diagnostics) -> return false
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
@@ -1741,6 +1867,10 @@ fn sema_ownership_call_diag_clone(callee: String, name: String, span: Span) -> D
     sema_error("E0209", span, "implicit clone of `{name}`", "`{callee}` expects to take ownership of this value", "write the move marker `^` (`^{name}`) if this is the last use, or copy first with `~{name}`")
 }
 
+fn sema_ownership_call_diag_not_copyable(callee: String, index: Int, name: String, span: Span) -> Diagnostic {
+    sema_error("E0201", span, "`{callee}` needs the move marker `^` here — this value can't be copied", "parameter {index + 1} takes ownership through the move marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied", "write the move marker `^` (`^{name}`) to move ownership to `{callee}`")
+}
+
 fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], initial_accesses: ^[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool) -> SemaOwnershipCheckResult {
     accesses := initial_accesses
     accepted := initial_accepted
@@ -1801,13 +1931,18 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
         mark_implicit_clone := false
         if decision == SemaCallConventionDecision.NeedsImplicitClone {
             if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) -> next
+            // Rust `check_take_arg_ownership`: a cloneable value is E0209, any
+            // other is E0201. A nominal `Clone` row is registry-owned and not
+            // visible here, so an unresolved nominal takes the cloneable
+            // diagnostic; both reject the unmarked owning argument.
             if {
-                sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? false -> {
+                sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? true -> {
                     mark_implicit_clone = true
                     &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
                 }
                 else -> {
-                    complete = false
+                    accepted = false
+                    &diagnostics.push(sema_ownership_call_diag_not_copyable(callee, index, sema_ownership_argument_name(arg), arg.span))
                 }
             }
         }

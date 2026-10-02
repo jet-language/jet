@@ -459,9 +459,6 @@ fn sema_effect_show(values: [String]) -> String Never! {
     values.join(", ")
 }
 
-fn sema_effect_span_same(left: Span, right: Span) -> Bool Never! {
-    left.start == right.start && left.end == right.end
-}
 
 fn sema_effect_span_contains(outer: Span, inner: Span) -> Bool Never! {
     outer.start <= inner.start && inner.end <= outer.end
@@ -648,14 +645,25 @@ fn sema_effect_replayable_diagnostic(node: SemaEffectNode, reached: [String]) ->
 // ────────────────────────────────────────────────────────────────────────────
 // Summary construction
 
-fn sema_effect_source_for(function: TFunc, sources: [SemaEffectFunctionSource]) -> SemaEffectFunctionSource? {
-    loop source in sources {
-        if source.key == function.key -> return Val(source)
+struct SemaEffectSourceIndex {
+    by_key: [String:Int]
+    by_name: [String:Int]
+}
+
+fn sema_effect_source_index(sources: [SemaEffectFunctionSource]) -> SemaEffectSourceIndex Never! {
+    index := SemaEffectSourceIndex{by_key: [String:Int]{}, by_name: [String:Int]{}}
+    loop (position, source) in sources {
+        if index.by_key.get(source.key) == None -> index.by_key[source.key] = position
+        if index.by_name.get(source.name) == None -> index.by_name[source.name] = position
     }
-    loop source in sources {
-        if source.name == function.name -> return Val(source)
+    index
+}
+
+fn sema_effect_source_for(function: TFunc, sources: [SemaEffectFunctionSource], index: SemaEffectSourceIndex) -> SemaEffectFunctionSource? {
+    position :: index.by_key.get(function.key) ?? {
+        index.by_name.get(function.name) ?? return None
     }
-    None
+    Val(sources[position])
 }
 
 fn sema_effect_node_add_direct(nodes: &[SemaEffectNode], node_index: Int, name: String, span: Span) Never! {
@@ -668,11 +676,8 @@ fn sema_effect_node_add_edge(nodes: &[SemaEffectNode], node_index: Int, edge: St
     sema_effect_set_add(&nodes[node_index].call_edges, edge)
 }
 
-fn sema_effect_node_index(nodes: [SemaEffectNode], key: String) -> Int? {
-    loop (index, node) in nodes {
-        if node.key == key -> return Val(index)
-    }
-    None
+fn sema_effect_node_index(node_by_key: [String:Int], key: String) -> Int? Never! {
+    node_by_key.get(key)
 }
 
 fn sema_effect_publish_diagnostics(all: &[Diagnostic], modules: &[SemaEffectModuleResult], module_index: Int, source_segments: [SemaSourceSegment], batch: [Diagnostic]) Never! {
@@ -818,9 +823,9 @@ pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, s
     )
 }
 
-fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
+fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: [String:Int], node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
     callee_key :: fact.callee.map((callee) -> callee.key) ?? ""
-    known_callee :: callee_key != "" && sema_effect_node_index(nodes, callee_key) != None
+    known_callee :: callee_key != "" && sema_effect_node_index(node_by_key, callee_key) != None
     if callee_key != "" -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
     if known_callee {
         executions :: sema_effect_memory_executions(nodes[node_index], fact.span)
@@ -855,14 +860,45 @@ fn sema_effect_record_memory_open(nodes: &[SemaEffectNode], node_index: Int, spa
     &nodes[node_index].memory_opens.push(SemaMemoryOpen{span: span, source: source, reason: reason})
 }
 
-fn sema_effect_find_fact(facts: [SemaCallSiteFact], caller_key: String, span: Span) -> SemaCallSiteFact? {
-    loop fact in facts {
-        if fact.caller_key == caller_key && sema_effect_span_same(fact.span, span) -> return Val(fact)
+// Indices store positions, not copied semantic facts. Caller buckets retain
+// source order, including equal-width interval ties; exact duplicates use the
+// first row just as the original search did.
+struct SemaEffectCallIndex {
+    facts: [SemaCallSiteFact]
+    exact: [String:Int]
+    caller_slots: [String:Int]
+    callers: [[Int]]
+    node_by_key: [String:Int]
+}
+
+fn sema_effect_fact_key(caller_key: String, span: Span) -> String Never! {
+    "{caller_key.len()}:{caller_key}:{span.start}:{span.end}"
+}
+
+fn sema_effect_call_index(facts: [SemaCallSiteFact], node_by_key: [String:Int]) -> SemaEffectCallIndex Never! {
+    index := SemaEffectCallIndex{facts: facts, exact: [String:Int]{}, caller_slots: [String:Int]{}, callers: [[Int]]{}, node_by_key: node_by_key}
+    loop (position, fact) in facts {
+        key :: sema_effect_fact_key(fact.caller_key, fact.span)
+        if index.exact.get(key) == None -> index.exact[key] = position
+        slot := index.caller_slots.get(fact.caller_key) ?? -1
+        if slot < 0 {
+            slot = index.callers.len()
+            index.caller_slots[fact.caller_key] = slot
+            &index.callers.push([Int]{})
+        }
+        &index.callers[slot].push(position)
     }
+    index
+}
+
+fn sema_effect_find_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> SemaCallSiteFact? {
+    exact :: sema_effect_find_exact_fact(index, caller_key, span)
+    if exact != None -> return exact
+    slot :: index.caller_slots.get(caller_key) ?? return None
     best := SemaCallSiteFact?{None}
     best_width := 2147483647
-    loop fact in facts {
-        if fact.caller_key != caller_key -> next
+    loop position in index.callers[slot] {
+        fact :: index.facts[position]
         if sema_effect_span_contains(fact.span, span) || sema_effect_span_contains(span, fact.span) {
             width :: fact.span.end - fact.span.start
             if width < best_width {
@@ -873,11 +909,10 @@ fn sema_effect_find_fact(facts: [SemaCallSiteFact], caller_key: String, span: Sp
     }
     best
 }
-fn sema_effect_find_exact_fact(facts: [SemaCallSiteFact], caller_key: String, span: Span) -> SemaCallSiteFact? {
-    loop fact in facts {
-        if fact.caller_key == caller_key && sema_effect_span_same(fact.span, span) -> return Val(fact)
-    }
-    None
+
+fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> SemaCallSiteFact? {
+    position :: index.exact.get(sema_effect_fact_key(caller_key, span)) ?? return None
+    Val(index.facts[position])
 }
 
 
@@ -926,7 +961,7 @@ fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: T
     }
 }
 
-fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr) Never! {
+fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_by_key: [String:Int], node_index: Int, expression: TExpr) Never! {
     callee_key :: if expression.kind == {
         .Call(callee, _, _) -> callee.key
         .MethodCall(_, method, _, _) -> method.symbol.key
@@ -934,7 +969,7 @@ fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_index: Int,
         else -> ""
     }
     if {
-        callee_key != "" && sema_effect_node_index(nodes, callee_key) != None -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
+        callee_key != "" && sema_effect_node_index(node_by_key, callee_key) != None -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
         else -> {
             nodes[node_index].maximal = true
             nodes[node_index].maximal_span = Val(expression.span)
@@ -965,7 +1000,7 @@ fn sema_effect_record_dispatch(nodes: &[SemaEffectNode], node_index: Int, expres
     }
 }
 
-fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller_key: String) {
+fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String) {
     if {
         sema_effect_is_call(expression) -> {
             fact :: sema_effect_find_fact(facts, caller_key, expression.span)
@@ -977,16 +1012,16 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
                         // the pure function reports E3403 instead of E3401.
                         &diagnostics.push(sema_error("E3403", expression.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine (D-PURE2).", "remove this call, or remove the enclosing function's explicit empty effect bound."))
                     } else {
-                        sema_effect_record_fact(&nodes, node_index, value, &diagnostics)
+                        sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
                         sema_effect_record_dispatch(&nodes, node_index, expression, value)
                     }
                 }
-                .None -> sema_effect_record_unresolved_call(&nodes, node_index, expression)
+                .None -> sema_effect_record_unresolved_call(&nodes, facts.node_by_key, node_index, expression)
             }
         }
         else -> {
             fact :: sema_effect_find_exact_fact(facts, caller_key, expression.span)
-            if fact == .Val(value) -> sema_effect_record_fact(&nodes, node_index, value, &diagnostics)
+            if fact == .Val(value) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
         }
     }
     if expression.kind == {
@@ -1039,18 +1074,18 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
     loop child in tir_expr_children(expression) -> sema_effect_walk_expr(&nodes, node_index, child, facts, &diagnostics, caller_key)
 }
 
-fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, facts: [SemaCallSiteFact], diagnostics: &[Diagnostic]) {
+fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic]) {
     loop statement in function.body {
         loop expression in tir_stmt_children(statement) -> sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, function.key)
     }
 }
 
-fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: [SemaCallSiteFact], caller_key: String, expression: TExpr, audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, expression: TExpr, audited: Bool, diagnostics: &[Diagnostic]) {
     if sema_effect_is_call(expression) {
         fact :: sema_effect_find_fact(facts, caller_key, expression.span)
         if fact == .Val(value) {
             if value.callee == .Val(callee) {
-                target_index :: sema_effect_node_index(nodes, callee.key)
+                target_index :: sema_effect_node_index(facts.node_by_key, callee.key)
                 if target_index == .Val(index) {
                     target :: nodes[index]
                     if target.is_unsafe -> sema_effect_require_unsafe_call(target.name, true, audited, expression.span, &diagnostics)
@@ -1075,7 +1110,7 @@ fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: [SemaCallSiteF
     loop child in tir_expr_children(expression) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, child, audited, &diagnostics)
 }
 
-fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: [SemaCallSiteFact], caller_key: String, condition: TIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, condition: TIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
     if condition == {
         .Plain(value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller_key, value, audited, &diagnostics)
         .And(left, right) -> {
@@ -1090,14 +1125,14 @@ fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: [SemaCall
     }
 }
 
-fn sema_effect_check_unsafe_contracts(nodes: &[SemaEffectNode], facts: [SemaCallSiteFact], caller_key: String, contracts: [TContract], audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_contracts(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, contracts: [TContract], audited: Bool, diagnostics: &[Diagnostic]) {
     loop contract in contracts {
         sema_effect_check_unsafe_expr(&nodes, facts, caller_key, contract.condition, audited, &diagnostics)
         sema_effect_check_unsafe_expr(&nodes, facts, caller_key, contract.message, audited, &diagnostics)
     }
 }
 
-fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: [SemaCallSiteFact], caller_key: String, statements: [TStmt], audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller_key: String, statements: [TStmt], audited: Bool, diagnostics: &[Diagnostic]) {
     loop statement in statements {
         if statement == {
             .Contract(contract) -> {
@@ -1321,29 +1356,39 @@ fn sema_effect_all_grantable() -> [String] Never! {
     sema_effect_grantable_roots()
 }
 
-fn sema_effect_solve(nodes: [SemaEffectNode]) -> [[String]] Never! {
+struct SemaEffectPending {
+    node: Int
+    name: String
+}
+
+// Propagate each newly reached effect to callers once. Set insertion keeps
+// the established root-rank/name order, so worklist order cannot change
+// published rows or diagnostics. Direct rows and call-site spans are untouched.
+fn sema_effect_solve(nodes: [SemaEffectNode], node_by_key: [String:Int]) -> [[String]] Never! {
     solved := [[String]]{}
-    loop node in nodes {
+    callers := (loop _ in nodes -> [Int]{})
+    pending := [SemaEffectPending]{}
+    loop (index, node) in nodes {
         row := node.direct
         if node.maximal -> sema_effect_set_union(&row, sema_effect_all_grantable())
+        loop edge in node.call_edges {
+            if edge == "__jet_panic__" {
+                sema_effect_set_add(&row, "Panic")
+                next
+            }
+            target :: sema_effect_node_index(node_by_key, edge) ?? next
+            &callers[target].push(index)
+        }
+        loop name in row -> &pending.push(SemaEffectPending{node: index, name: name})
         &solved.push(row)
     }
-    changed := true
-    round := 0
-    loop changed && round <= nodes.len() + 1 {
-        changed = false
-        loop (index, node) in nodes {
-            loop edge in node.call_edges {
-                if edge == "__jet_panic__" {
-                    if sema_effect_set_add(&solved[index], "Panic") -> changed = true
-                    next
-                }
-                target :: sema_effect_node_index(nodes, edge) ?? next
-                incoming :: ~solved[target]
-                if sema_effect_set_union(&solved[index], incoming) -> changed = true
-            }
+    cursor := 0
+    loop cursor < pending.len() {
+        incoming :: pending[cursor]
+        cursor += 1
+        loop caller in callers[incoming.node] {
+            if sema_effect_set_add(&solved[caller], incoming.name) -> &pending.push(SemaEffectPending{node: caller, name: incoming.name})
         }
-        round += 1
     }
     solved
 }
@@ -1362,13 +1407,13 @@ fn sema_effect_unbounded_dispatch_diagnostic(dispatch: TEffectSpan) -> Diagnosti
 
 // The first unbounded trait dispatch reachable from `index` through the call
 // graph, the function's own calls first.
-fn sema_effect_find_dispatch(nodes: [SemaEffectNode], index: Int, seen: &[Bool]) -> TEffectSpan? {
+fn sema_effect_find_dispatch(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, seen: &[Bool]) -> TEffectSpan? {
     if seen[index] -> return None
     seen[index] = true
     if nodes[index].dispatches.len() > 0 -> return Val(nodes[index].dispatches[0])
     loop edge in nodes[index].call_edges {
-        target :: sema_effect_node_index(nodes, edge) ?? next
-        found :: sema_effect_find_dispatch(nodes, target, &seen)
+        target :: sema_effect_node_index(node_by_key, edge) ?? next
+        found :: sema_effect_find_dispatch(nodes, node_by_key, target, &seen)
         if found != None -> return found
     }
     None
@@ -1382,13 +1427,13 @@ fn sema_effect_trait_bound_diagnostic(bound: SemaEffectTraitBound, over: [String
 }
 
 // D-EFF3: every impl of a bounded trait method stays within the trait's row.
-fn sema_effect_check_trait_bounds(module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], solved: [[String]], diagnostics: &[Diagnostic]) {
+fn sema_effect_check_trait_bounds(module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: [String:Int], solved: [[String]], diagnostics: &[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 -> return
     loop function in module_row.functions {
         if function.kind == {
             .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
-                node_index :: sema_effect_node_index(nodes, function.key) ?? next
-                source :: sema_effect_source_for(function, module_row.sources)
+                node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
+                source :: sema_effect_source_for(function, module_row.sources, source_index)
                 method :: source.map((value) -> value.name) ?? function.name
                 trait_name :: sema_effect_symbol_leaf(trait_symbol.key)
                 loop bound in module_row.trait_bounds {
@@ -1466,7 +1511,7 @@ fn sema_effect_arena_failure(finding: SemaMemoryFinding) -> SemaMemoryArena Neve
 // Rust `shortest_violation` for the unbounded facts: breadth-first search
 // gives the shortest call path to the first event of `kind` ("alloc" for
 // `!Mem.Alloc`, "rc" for `!Mem.Rc`) or to an open dispatch.
-fn sema_effect_memory_search(nodes: [SemaEffectNode], root: Int, kind: String) -> SemaMemoryFinding? {
+fn sema_effect_memory_search(nodes: [SemaEffectNode], node_by_key: [String:Int], root: Int, kind: String) -> SemaMemoryFinding? {
     queue := [Int]{root}
     paths := [[String]]{[String]{nodes[root].display_key}}
     seen := (loop _ in nodes -> false)
@@ -1483,7 +1528,7 @@ fn sema_effect_memory_search(nodes: [SemaEffectNode], root: Int, kind: String) -
         if nodes[index].memory_opens.len() > 0 -> return Val(SemaMemoryFinding{event: None, owner: index, open: Val(~nodes[index].memory_opens[0]), path: path, used: 0})
         edges := nodes[index].call_edges
         loop edge in edges {
-            target :: sema_effect_node_index(nodes, edge) ?? next
+            target :: sema_effect_node_index(node_by_key, edge) ?? next
             next_path := ~path
             &next_path.push(nodes[target].display_key)
             &queue.push(target)
@@ -1494,7 +1539,7 @@ fn sema_effect_memory_search(nodes: [SemaEffectNode], root: Int, kind: String) -
 }
 
 // Rust `may_reach_arena` over the known call graph.
-fn sema_effect_may_reach_arena(nodes: [SemaEffectNode], index: Int, visiting: &[Bool]) -> Bool {
+fn sema_effect_may_reach_arena(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, visiting: &[Bool]) -> Bool {
     if visiting[index] -> return true
     visiting[index] = true
     found := false
@@ -1503,8 +1548,8 @@ fn sema_effect_may_reach_arena(nodes: [SemaEffectNode], index: Int, visiting: &[
     }
     if !found {
         loop edge in nodes[index].call_edges {
-            target :: sema_effect_node_index(nodes, edge) ?? next
-            if sema_effect_may_reach_arena(nodes, target, &visiting) {
+            target :: sema_effect_node_index(node_by_key, edge) ?? next
+            if sema_effect_may_reach_arena(nodes, node_by_key, target, &visiting) {
                 found = true
                 break
             }
@@ -1516,15 +1561,15 @@ fn sema_effect_may_reach_arena(nodes: [SemaEffectNode], index: Int, visiting: &[
 
 // Rust `arena_bound`: the proven arena bytes `index` can reserve, with the
 // event that witnesses the total, or the finding that stops the proof.
-fn sema_effect_arena_bound(nodes: [SemaEffectNode], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
+fn sema_effect_arena_bound(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
     if visiting[index] -> return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, path, 0))
     visiting[index] = true
-    result :: sema_effect_arena_bound_inner(nodes, index, &visiting, path)
+    result :: sema_effect_arena_bound_inner(nodes, node_by_key, index, &visiting, path)
     visiting[index] = false
     result
 }
 
-fn sema_effect_arena_bound_inner(nodes: [SemaEffectNode], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
+fn sema_effect_arena_bound_inner(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
     node :: nodes[index]
     if node.memory_opens.len() > 0 -> return sema_effect_arena_failure(SemaMemoryFinding{event: None, owner: index, open: Val(~node.memory_opens[0]), path: path, used: 0})
     total := 0
@@ -1537,20 +1582,20 @@ fn sema_effect_arena_bound_inner(nodes: [SemaEffectNode], index: Int, visiting: 
         witness = Val(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: 0})
     }
     loop edge in node.call_edges {
-        target :: sema_effect_node_index(nodes, edge) ?? next
+        target :: sema_effect_node_index(node_by_key, edge) ?? next
         called := false
         loop call in node.memory_calls {
             if call.callee == edge -> called = true
         }
         if called -> next
         reach_visiting := (loop _ in nodes -> false)
-        if sema_effect_may_reach_arena(nodes, target, &reach_visiting) -> return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, path, total))
+        if sema_effect_may_reach_arena(nodes, node_by_key, target, &reach_visiting) -> return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, path, total))
     }
     loop call in sema_effect_memory_sorted_calls(node.memory_calls) {
-        target :: sema_effect_node_index(nodes, call.callee) ?? next
+        target :: sema_effect_node_index(node_by_key, call.callee) ?? next
         call_path := ~path
         &call_path.push(nodes[target].display_key)
-        proof :: sema_effect_arena_bound(nodes, target, &visiting, call_path)
+        proof :: sema_effect_arena_bound(nodes, node_by_key, target, &visiting, call_path)
         if proof.failure != None -> return proof
         if proof.bytes == 0 -> next
         executions :: call.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(call.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, call_path, total))
@@ -1578,13 +1623,13 @@ fn sema_effect_memory_violation(nodes: [SemaEffectNode], root: Int, denial: Effe
 // D-AUTHORITY-MEM1/2 (Rust `check_memory_facts`): a `-[!Mem.Alloc]>`,
 // `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial holds for every
 // function the root can reach (E0921).
-fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], root: Int, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: [String:Int], root: Int, diagnostics: &[Diagnostic]) {
     loop denial in nodes[root].memory_denials {
         fact :: sema_effect_memory_fact(denial.name) ?? next
         limit :: sema_effect_memory_bound(denial.name)
         if limit == .Val(bytes_limit) {
             visiting := (loop _ in nodes -> false)
-            proof :: sema_effect_arena_bound(nodes, root, &visiting, [String]{nodes[root].display_key})
+            proof :: sema_effect_arena_bound(nodes, node_by_key, root, &visiting, [String]{nodes[root].display_key})
             if proof.failure == .Val(failure) {
                 &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, failure))
                 next
@@ -1597,7 +1642,7 @@ fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], root: Int, diagnost
             next
         }
         kind :: if denial.name == "Mem.Rc" -> "rc" else -> "alloc"
-        found :: sema_effect_memory_search(nodes, root, kind) ?? next
+        found :: sema_effect_memory_search(nodes, node_by_key, root, kind) ?? next
         &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, false, found))
     }
 }
@@ -1675,7 +1720,7 @@ fn sema_effect_discarded_result_diagnostic(node: SemaEffectNode, span: Span) -> 
 }
 
 // D-EFF1: the part of `expression` inside `region` (a `#FX` block span).
-fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, region: Span, facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller_key: String) {
+fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String) {
     if sema_effect_span_contains(region, expression.span) {
         sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller_key)
         return
@@ -1687,7 +1732,7 @@ fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expre
 // D-EFF1 (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
 // its own sites, everything its callees reach, and every effect when it makes
 // an unknown call.
-fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owner: Int, function: TFunc, region: SemaEffectFxRegion, facts: [SemaCallSiteFact]) -> [String] {
+fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owner: Int, function: TFunc, region: SemaEffectFxRegion, facts: SemaEffectCallIndex) -> [String] {
     scratch := nodes
     region_node := nodes[owner]
     region_node.key = "{function.key}#FX@{region.span.start}"
@@ -1711,7 +1756,7 @@ fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owne
             sema_effect_set_add(&inferred, "Panic")
             next
         }
-        target :: sema_effect_node_index(nodes, edge) ?? next
+        target :: sema_effect_node_index(facts.node_by_key, edge) ?? next
         sema_effect_set_union(&inferred, solved[target])
     }
     inferred
@@ -1721,34 +1766,38 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
     results := [SemaEffectModuleResult]{}
+    source_indices :: loop module_row in inputs -> sema_effect_source_index(module_row.sources)
+    node_by_key := [String:Int]{}
     loop module_row in inputs -> &results.push(SemaEffectModuleResult{module_identity: module_row.module_identity, functions: module_row.functions, diagnostics: [Diagnostic]{}, complete: true})
     loop (module_index, module_row) in inputs {
         loop function in module_row.functions {
-            source := sema_effect_source_for(function, module_row.sources)
+            source := sema_effect_source_for(function, module_row.sources, source_indices[module_index])
             function_diagnostics := [Diagnostic]{}
+            if node_by_key.get(function.key) == None -> node_by_key[function.key] = nodes.len()
             &nodes.push(sema_effect_node_from_source(function, source, module_index, &function_diagnostics))
             sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, function_diagnostics)
         }
     }
+    fact_indices :: loop module_row in inputs -> sema_effect_call_index(module_row.call_facts, node_by_key)
 
     loop (module_index, module_row) in inputs {
         loop function in module_row.functions {
-            node_index :: sema_effect_node_index(nodes, function.key) ?? next
+            node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
             function_diagnostics := [Diagnostic]{}
-            sema_effect_collect_function(&nodes, node_index, function, module_row.call_facts, &function_diagnostics)
+            sema_effect_collect_function(&nodes, node_index, function, fact_indices[module_index], &function_diagnostics)
             audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
-            sema_effect_check_unsafe_statements_tir(&nodes, module_row.call_facts, function.key, function.body, audited, &function_diagnostics)
+            sema_effect_check_unsafe_statements_tir(&nodes, fact_indices[module_index], function.key, function.body, audited, &function_diagnostics)
             sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, function_diagnostics)
         }
     }
 
-    solved :: sema_effect_solve(nodes)
+    solved :: sema_effect_solve(nodes, node_by_key)
     loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
         dispatch := TEffectSpan?{None}
         if nodes[node_index].has_declared_row || nodes[node_index].is_pure {
             seen := (loop _ in nodes -> false)
-            dispatch = sema_effect_find_dispatch(nodes, node_index, &seen)
+            dispatch = sema_effect_find_dispatch(nodes, node_by_key, node_index, &seen)
         }
         if !sema_effect_check_node(nodes[node_index], solved[node_index], dispatch, &function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
@@ -1758,22 +1807,22 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
     }
     loop (module_index, module_row) in inputs {
         bound_diagnostics := [Diagnostic]{}
-        sema_effect_check_trait_bounds(module_row, nodes, solved, &bound_diagnostics)
+        sema_effect_check_trait_bounds(module_row, source_indices[module_index], nodes, node_by_key, solved, &bound_diagnostics)
         sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, bound_diagnostics)
     }
     loop node_index in 0..<nodes.len() {
         memory_diagnostics := [Diagnostic]{}
-        sema_effect_check_memory_denials(nodes, node_index, &memory_diagnostics)
+        sema_effect_check_memory_denials(nodes, node_by_key, node_index, &memory_diagnostics)
         sema_effect_publish_diagnostics(&diagnostics, &results, nodes[node_index].module_index, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
     }
     loop (module_index, module_row) in inputs {
         region_diagnostics := [Diagnostic]{}
         loop function in module_row.functions {
-            source :: sema_effect_source_for(function, module_row.sources) ?? next
+            source :: sema_effect_source_for(function, module_row.sources, source_indices[module_index]) ?? next
             if source.fx_regions.len() == 0 -> next
-            node_index :: sema_effect_node_index(nodes, function.key) ?? next
+            node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
             loop region in source.fx_regions {
-                inferred :: sema_effect_region_inferred(nodes, solved, node_index, function, region, module_row.call_facts)
+                inferred :: sema_effect_region_inferred(nodes, solved, node_index, function, region, fact_indices[module_index])
                 over :: sema_effect_uncovered(inferred, region.caps)
                 if over.len() > 0 -> &region_diagnostics.push(sema_effect_scope_diagnostic("FX", over, region.caps, region.caps_span))
             }
@@ -1785,7 +1834,7 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
         loop fact in module_row.call_facts {
             if !fact.discarded -> next
             callee :: fact.callee ?? next
-            node_index :: sema_effect_node_index(nodes, callee.key) ?? next
+            node_index :: sema_effect_node_index(node_by_key, callee.key) ?? next
             if !sema_effect_row_has_no_outcome(nodes[node_index], solved[node_index]) -> next
             &discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
         }
@@ -1795,7 +1844,7 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
         module_row := inputs[module_index]
         functions := module_row.functions
         loop function_index in 0..<functions.len() {
-            node_index :: sema_effect_node_index(nodes, functions[function_index].key) ?? next
+            node_index :: sema_effect_node_index(node_by_key, functions[function_index].key) ?? next
             functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
         results[module_index].functions = functions

@@ -113,15 +113,21 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     first_global :: symbols.len()
     &symbols.push(X64ObjectSymbol{name: "main", info: 0x12, section: ELF64_OBJECT_TEXT, value: offsets[0], size: functions[0].code.len()})
     imports := [String]{}
+    import_rows := [String:Int]{}
     relas := [X64ObjectRela]{}
     errors := [String]{}
+    // First offset per function ID, entry (index 0) excluded as before, so a
+    // call relocation is one map probe instead of a scan of every function.
+    function_starts := [Int:Int]{}
+    loop (index, function) in functions {
+        if index > 0 && function_starts.get(function.id.value) == None -> &function_starts.add(function.id.value, offsets[index]).drop("checked absent above")
+    }
     loop (index, function) in functions {
         loop reloc in function.relocs {
             at :: offsets[index] + reloc.at
             if reloc.target == {
                 .Function(id) -> {
-                    target := -1
-                    loop (candidate_index, candidate) in functions { if target < 0 && candidate_index > 0 && candidate.id == id -> target = offsets[candidate_index] }
+                    target :: function_starts.get(id.value) ?? -1
                     if target < 0 {
                         &errors.push("{function.name}: call to function {id.value}, which is not in the object")
                     } else {
@@ -129,11 +135,11 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
                     }
                 }
                 .Runtime(symbol) -> {
-                    found := -1
-                    loop (import_index, name) in imports { if found < 0 && name == symbol -> found = import_index }
+                    found := import_rows.get(symbol) ?? -1
                     if found < 0 {
                         found = imports.len()
                         &imports.push(symbol)
+                        &import_rows.add(symbol, found).drop("checked absent above")
                     }
                     &relas.push(X64ObjectRela{at: at, symbol: first_global + 1 + found, kind: ELF64_R_X86_64_PLT32, addend: -4})
                 }

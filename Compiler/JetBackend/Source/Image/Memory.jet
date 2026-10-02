@@ -60,13 +60,15 @@ pub fn x64_memory_image(program: LIRModule, entry: LIRFunctionID) -> X64MemoryIm
 
     // One import per runtime symbol the code calls, in first-use order.
     imports := [String]{}
+    import_rows := [String:Bool]{}
     loop function in compiled.functions {
         loop reloc in function.relocs {
             if reloc.target == {
                 .Runtime(symbol) -> {
-                    found := false
-                    loop name in imports { if name == symbol -> found = true }
-                    if !found -> &imports.push(symbol)
+                    if import_rows.get(symbol) == None {
+                        &import_rows.add(symbol, true).drop("checked absent above")
+                        &imports.push(symbol)
+                    }
                 }
                 else -> {}
             }
