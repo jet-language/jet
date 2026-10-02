@@ -50,9 +50,10 @@ fn jet_rust_emit_selected_artifact(ctx: &JetRustEmitContext) -> MIRArtifactPlan?
     selected
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::function_row
 fn jet_rust_emit_find_function(ctx: &JetRustEmitContext, id: MIRFunctionID) -> MIRFunction? {
-    loop function in jet_rust_emit_function_rows(ctx, id) {
-        if function.id == id -> return Val(function)
+    if jet_rust_emit_function_index(ctx, id) == .Val(function_index) {
+        if ctx.program.functions[function_index].id == id -> return Val(ctx.program.functions[function_index])
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR artifact references a missing function row", "entry, command, job, and export rows must resolve to one checked function", None)
     None

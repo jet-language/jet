@@ -100,7 +100,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::ResourceNew(arg)
             | TExprKind::Move(arg)
             | TExprKind::Deref(arg)
-            | TExprKind::Clone(arg)
+            | TExprKind::Clone(arg, _)
             | TExprKind::ExplicitCopy(arg)
             | TExprKind::MaterializeView(arg)
             | TExprKind::DistinctRaw(arg)
@@ -1425,6 +1425,20 @@ fn string_bytes_source(init: &TExpr) -> Option<TLocal> {
     }
     match &recv.kind {
         TExprKind::Local(local) => Some(local.clone()),
+        _ => None,
+    }
+}
+
+/// #4318 §4: the root name of a loop source that is a plain place, `xs` or
+/// `a.b.xs`, possibly under a sema-inserted share copy (`Expr::Copy` whose
+/// span is its operand's: it lowers to `TExprKind::Clone`, which the walk
+/// drops). A user `~` copy (span starts at the sigil, lowers to
+/// `ExplicitCopy`), a call, or an index is not a stable source.
+fn stable_loop_source_root(collection: &Expr) -> Option<&str> {
+    match collection {
+        Expr::Ident(name, _) => Some(name),
+        Expr::Copy(base, copy_span) if *copy_span == base.span() => stable_loop_source_root(base),
+        Expr::Field(base, _, _) | Expr::Paren(base, _) => stable_loop_source_root(base),
         _ => None,
     }
 }
@@ -2848,7 +2862,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 if matches!(&b.init, Expr::Ident(name, _) if env.is_borrowed(name)) {
                     init = TExpr {
                         ty: init.ty.clone(),
-                        kind: TExprKind::Clone(Box::new(init)),
+                        kind: TExprKind::Clone(Box::new(init), jet_foundation::MIR::MirCopyFact::Materialize),
                     };
                 }
                 let fallback = lower_refutable_fallback(fallback, cx, env);
@@ -4230,6 +4244,17 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             .as_ref()
                             .map(|t| cx.columnar_list_type(t).is_some())
                             .unwrap_or(false);
+                    // #4318 §4 stable loop source: a plain list loop over a place
+                    // (a local or parameter through fields) whose body never
+                    // mentions the source's root walks the list in place.
+                    let source_stable = method_kind.is_none()
+                        && step.is_none()
+                        && !by_value
+                        && !columnar
+                        && matches!(lowered_coll.ty.without_user_tags(), Type::List(_))
+                        && stable_loop_source_root(collection).is_some_and(|root| {
+                            !crate::Sema::block_free_var_reads(body).contains(root)
+                        });
                     let step = step.as_ref().map(|step| lower_expr(step, cx, env));
                     let label = label_name(label);
                     let var = var.clone();
@@ -4246,6 +4271,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             method_kind,
                             columnar,
                             by_value,
+                            source_stable,
                             body: lowered.pop().expect("for-in body was deferred"),
                         },
                     );

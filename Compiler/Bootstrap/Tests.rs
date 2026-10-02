@@ -535,10 +535,10 @@ fn __jet_bootstrap_harness_entry(
     }
 
     if mode == "optimizer-evidence" {
-        let compiler_image = crate::__jet_bootstrap_compiler_image()
-            .unwrap_or_else(|error| panic!("optimizer-evidence compiler image restore failed: {error}"));
+        let compiler_image = crate::__jet_bootstrap_compiler_image_envelope()
+            .unwrap_or_else(|error| panic!("optimizer-evidence compiler image envelope failed: {error}"));
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
-            compiler_image.header.artifact,
+            compiler_image.artifact,
         );
         let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
         let mut completion_owner =
@@ -958,10 +958,10 @@ fn __jet_bootstrap_harness_entry(
     }
     let (complete, source, callable_count, type_count, field_count, variant_count, reports, selected_tier, actual_tier) =
         if mode == "factory" {
-            let compiler_image = crate::__jet_bootstrap_compiler_image()
-                .unwrap_or_else(|error| panic!("factory compiler image restore failed: {error}"));
+            let compiler_image = crate::__jet_bootstrap_compiler_image_envelope()
+                .unwrap_or_else(|error| panic!("factory compiler image envelope failed: {error}"));
             let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
-                compiler_image.header.artifact,
+                compiler_image.artifact,
             );
             let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
             let mut completion_owner =
@@ -1009,10 +1009,10 @@ fn __jet_bootstrap_harness_entry(
                 result.actual_factory_tier,
             )
         } else if mode == "runner" {
-            let compiler_image = crate::__jet_bootstrap_compiler_image()
-                .unwrap_or_else(|error| panic!("stage-zero compiler image restore failed: {error}"));
+            let compiler_image = crate::__jet_bootstrap_compiler_image_envelope()
+                .unwrap_or_else(|error| panic!("stage-zero compiler image envelope failed: {error}"));
             let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
-                compiler_image.header.artifact,
+                compiler_image.artifact,
             );
             let config = crate::Codegen::MIRRust::MirRustConfig {
                 target: ::jet_foundation::Layout::TargetLayout::host(),
@@ -2373,7 +2373,7 @@ fn assert_evaluator_materialization_helpers_in_mir(mir: &jet_foundation::MIR::Mi
                     matches!(
                         &instruction.operation,
                         MirOperation::Copy {
-                            materialize_view: true,
+                            fact: jet_foundation::MIR::MirCopyFact::ViewMaterialize,
                             ..
                         }
                     )
@@ -2690,6 +2690,29 @@ fn main() {{
     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("generated.rs").display());
     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("Cargo.toml").display());
     println!("cargo:rerun-if-changed={{}}", manifest_dir.join("build.rs").display());
+    // The root build.rs watch set: SOURCE_ID hashes these roots and facts, so
+    // an incremental backend build must rerun this script when any changes.
+    for input in BuildIdentity::COMPILER_SOURCES {{
+        println!("cargo:rerun-if-changed={{}}", root.join(input).display());
+    }}
+    for key in [
+        "RUSTC",
+        "TARGET",
+        "HOST",
+        "PROFILE",
+        "OPT_LEVEL",
+        "DEBUG",
+        "CARGO_CFG_TARGET_FEATURE",
+        "CARGO_ENCODED_RUSTFLAGS",
+    ] {{
+        println!("cargo:rerun-if-env-changed={{key}}");
+    }}
+    for key in BuildIdentity::profile_override_keys() {{
+        println!("cargo:rerun-if-env-changed={{key}}");
+    }}
+    if let Some(spec) = BuildIdentity::target_spec_path() {{
+        println!("cargo:rerun-if-changed={{}}", spec.display());
+    }}
 {native_link_directives}}}
 "#,
         repo.display().to_string(),
@@ -2743,27 +2766,31 @@ struct BackendShard {
     cold: bool,
 }
 
-/// An emitted program split along its unit sections (MIRRust
-/// `EmissionUnits`): the exported `jet_runtime` crate, the unit crates in
-/// dependency order, and the main crate — everything outside the sections
-/// (Host/Runner glue, the embedded compiler image, the artifact main).
+/// An emitted program split into crates: the exported `jet_runtime` crate
+/// (its runtime/Core block), the crates of its unit sections (MIRRust
+/// `EmissionUnits`) in dependency order, and the main crate — everything
+/// outside the sections (Host/Runner glue, the embedded compiler image, the
+/// artifact main).
 struct BackendWorkspace {
     runtime_lib: String,
     units: Vec<BackendUnit>,
     main: String,
 }
 
-/// Split a unit-marked backend source into crates. Unit dependencies come
-/// from the names each unit's text actually uses (every program item is a
-/// unique `__jet_` symbol); units that name each other cyclically merge into
-/// one crate. `None` when the source has no unit sections.
+/// Split a backend source into crates, as `jet_store::runtime::prepare`
+/// splits a real build: the runtime/Core block always builds as its own
+/// crate, so programs with the same block share one built runtime. Unit
+/// dependencies come from the names each unit's text actually uses (every
+/// program item is a unique `__jet_` symbol); units that name each other
+/// cyclically merge into one crate. A source without unit sections has no
+/// unit crates. `None` when the source has no runtime block.
 fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
-    if !source.contains(UNIT_BEGIN_MARKER) {
+    let Some(split) = jet_store::runtime::split_runtime_crate(source)
+        .unwrap_or_else(|error| panic!("backend source: {error}"))
+    else {
+        assert!(!source.contains(UNIT_BEGIN_MARKER), "unit-split backend source has no runtime block");
         return None;
-    }
-    let split = jet_store::runtime::split_runtime_crate(source)
-        .unwrap_or_else(|error| panic!("unit-split backend source: {error}"))
-        .unwrap_or_else(|| panic!("unit-split backend source has no runtime block"));
+    };
     let mut sections: Vec<(String, String)> = Vec::new();
     let mut main = String::new();
     let mut open: Option<usize> = None;
@@ -3037,22 +3064,30 @@ fn strongly_connected_units(edges: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
 
 /// Write the runtime and unit crates under `units_root`; returns the main
 /// manifest's dependency rows for them. Every crate may name the FFI bridge,
-/// so each depends on it. Files are rewritten only when their bytes change,
-/// so cargo keeps unchanged crates built.
+/// so each depends on it. The runtime crate's directory is named by the
+/// digest of its source and bridge row, so programs that alternate between
+/// runtime/Core blocks (their runtime parts differ) each keep their built
+/// runtime instead of rewriting one directory. Files are rewritten only when
+/// their bytes change, so cargo keeps unchanged crates built.
 fn write_backend_workspace(
     units_root: &Path,
     workspace: &BackendWorkspace,
     ffi: Option<&BackendFfiCrate>,
 ) -> String {
     let ffi_dependency = ffi.map_or_else(String::new, BackendFfiCrate::dependency);
-    let runtime_dir = units_root.join("jet_runtime");
+    let runtime_digest = jet_foundation::SHA256::sha256_hex(
+        format!("{ffi_dependency}\0{}", workspace.runtime_lib).as_bytes(),
+    );
+    let runtime_dir_name = format!("jet_runtime_{}", &runtime_digest[..16]);
+    let runtime_dir = units_root.join(&runtime_dir_name);
     write_backend_crate(&runtime_dir, "jet_runtime", &[], &ffi_dependency, &workspace.runtime_lib);
     let mut dependencies = format!("jet_runtime = {{ path = {:?} }}\n", runtime_dir.display().to_string());
+    // Unit and shard crates name the runtime by its digest directory.
+    let unit_extra_dependencies = format!("jet_runtime = {{ path = \"../{runtime_dir_name}\" }}\n{ffi_dependency}");
     for unit in &workspace.units {
         let dir = units_root.join(&unit.crate_name);
-        let mut deps = vec!["jet_runtime".to_string()];
-        deps.extend(unit.deps.iter().cloned());
-        write_backend_crate(&dir, &unit.crate_name, &deps, &ffi_dependency, &unit.source);
+        let mut deps = unit.deps.clone();
+        write_backend_crate(&dir, &unit.crate_name, &deps, &unit_extra_dependencies, &unit.source);
         dependencies.push_str(&format!(
             "{} = {{ path = {:?} }}\n",
             unit.crate_name,
@@ -3061,7 +3096,7 @@ fn write_backend_workspace(
         deps.push(unit.crate_name.clone());
         for shard in &unit.shards {
             let dir = units_root.join(&shard.name);
-            write_backend_crate(&dir, &shard.name, &deps, &ffi_dependency, &shard.source);
+            write_backend_crate(&dir, &shard.name, &deps, &unit_extra_dependencies, &shard.source);
             dependencies.push_str(&format!("{} = {{ path = {:?} }}\n", shard.name, dir.display().to_string()));
         }
     }
@@ -3152,7 +3187,7 @@ fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
     if text.len() <= shard_bytes {
         return None;
     }
-    let mask = jet_store::runtime::rust_code_mask(text);
+    let mask = jet_foundation::RustSource::rust_code_mask(text);
     let (items, end) = masked_items(&mask);
     let mut facade = String::new();
     let mut uses = String::new();
@@ -3465,7 +3500,7 @@ fn delegated_method(
         &method[body..]
     );
     let function = replace_self_tokens(&function, self_type);
-    let moved = movable_function(&function, &jet_store::runtime::rust_code_mask(&function))?;
+    let moved = movable_function(&function, &jet_foundation::RustSource::rust_code_mask(&function))?;
     let call = format!("{{ {function_name}({}) }}", arguments.join(", "));
     Some((format!("{}{call}", &method[..body]), moved))
 }
@@ -3473,7 +3508,7 @@ fn delegated_method(
 /// `text` with its code tokens `self` renamed `__jet_self` and `Self`
 /// replaced by `self_type`.
 fn replace_self_tokens(text: &str, self_type: &str) -> String {
-    let code = jet_store::runtime::rust_code_mask(text);
+    let code = jet_foundation::RustSource::rust_code_mask(text);
     let bytes = code.as_bytes();
     let identifier = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
     let mut out = String::with_capacity(text.len());
@@ -3494,6 +3529,78 @@ fn replace_self_tokens(text: &str, self_type: &str) -> String {
     }
     out.push_str(&text[copied..]);
     out
+}
+
+/// The compiler-image envelope reader checks the archive prefix exactly as
+/// full restore does, without decoding the MIR payload or hashing the
+/// archive: it accepts a well-formed prefix in front of a payload and
+/// checksum that full restore rejects.
+#[test]
+fn compiler_image_envelope_reads_only_the_checked_prefix() {
+    use crate::compiler_bootstrap_compiler_image::{
+        read_compiler_image_envelope, restore_compiler_image, CompilerImageMetadataWriter,
+        FORMAT_VERSION, MAGIC,
+    };
+    use ::jet_foundation::MIR::{MirArtifactId, MirFunctionId, MIR_SCHEMA_VERSION};
+    let digest = [7u8; 32];
+    let archive = |schema: u16| {
+        let mut writer = CompilerImageMetadataWriter::new();
+        writer.write_raw(MAGIC);
+        writer.write_u16(FORMAT_VERSION);
+        writer.write_u16(schema);
+        writer.write_u64(11);
+        writer.write_u64(13);
+        writer.write_raw(&digest);
+        writer.write_bytes(b"identity").unwrap();
+        writer.write_bytes(b"not a MIR payload").unwrap();
+        writer.write_raw(&[0u8; 32]);
+        writer.finish()
+    };
+    let bytes = archive(MIR_SCHEMA_VERSION);
+    let envelope =
+        read_compiler_image_envelope(&bytes, digest, MirArtifactId(11), MirFunctionId(13))
+            .unwrap_or_else(|error| panic!("envelope rejected a well-formed prefix: {error}"));
+    assert_eq!(envelope.source_authority_digest, digest);
+    assert_eq!(envelope.artifact, MirArtifactId(11));
+    assert_eq!(envelope.entry_function, MirFunctionId(13));
+    let restored = restore_compiler_image(&bytes, digest, MirArtifactId(11), MirFunctionId(13));
+    assert_eq!(
+        restored.err().map(|error| error.0).as_deref(),
+        Some("compiler-image archive checksum mismatch"),
+    );
+    let envelope_error = |bytes: &[u8], expected_digest: [u8; 32], artifact: u64, entry: u64| {
+        read_compiler_image_envelope(
+            bytes,
+            expected_digest,
+            MirArtifactId(artifact),
+            MirFunctionId(entry),
+        )
+        .err()
+        .map(|error| error.0)
+    };
+    for (expected_digest, artifact, entry, message) in [
+        ([0u8; 32], 11, 13, "compiler-image source authority does not match the authorized source snapshot"),
+        (digest, 12, 13, "compiler-image artifact identity does not match the requested artifact"),
+        (digest, 11, 14, "compiler-image entry function does not match the requested entry"),
+    ] {
+        assert_eq!(
+            envelope_error(&bytes, expected_digest, artifact, entry).as_deref(),
+            Some(message),
+        );
+    }
+    let stale_schema = archive(MIR_SCHEMA_VERSION.wrapping_add(1));
+    assert!(envelope_error(&stale_schema, digest, 11, 13)
+        .is_some_and(|error| error.starts_with("compiler-image MIR schema ")));
+    let mut bad_magic = bytes.clone();
+    bad_magic[0] ^= 1;
+    assert_eq!(
+        envelope_error(&bad_magic, digest, 11, 13).as_deref(),
+        Some("invalid compiler-image magic"),
+    );
+    assert_eq!(
+        envelope_error(&bytes[..40], digest, 11, 13).as_deref(),
+        Some("truncated compiler-image archive"),
+    );
 }
 
 /// Unit sections become crates in dependency order: dependencies come from
@@ -3547,10 +3654,19 @@ fn backend_workspace_orders_units_and_merges_cycles() {
     assert!(!workspace.main.contains("__jet_alpha"));
 }
 
-/// A program without unit sections stays one crate.
+/// A program without unit sections still links its runtime/Core block as
+/// the separate `jet_runtime` crate (shared by every program with the same
+/// block); a source without a runtime block stays one crate.
 #[test]
-fn backend_workspace_needs_unit_sections() {
-    assert!(split_backend_workspace("// jet:cached-runtime-begin\nfn f() {}\n// jet:cached-runtime-end\nfn main() {}\n").is_none());
+fn backend_workspace_splits_runtime_without_unit_sections() {
+    let workspace = split_backend_workspace("// jet:cached-runtime-begin\nfn f() {}\n// jet:cached-runtime-end\nfn main() { f(); }\n")
+        .expect("runtime block split");
+    assert!(workspace.units.is_empty());
+    assert!(workspace.runtime_lib.contains("pub fn f()"));
+    assert!(workspace.main.contains("use jet_runtime::*;\n"));
+    assert!(workspace.main.ends_with("fn main() { f(); }\n"));
+    assert!(!workspace.main.contains("fn f()"));
+    assert!(split_backend_workspace("fn main() {}\n").is_none());
 }
 
 /// `shard_unit` packs cold code (cold-trait impl methods, constant tables,
@@ -3667,10 +3783,11 @@ fn write_backend_project(
     fs::write(&generated_path, source).unwrap_or_else(|error| {
         panic!("cannot write backend source `{}`: {error}", generated_path.display())
     });
-    // A unit-split program builds as a workspace: the runtime crate and one
-    // crate per unit live in a stable directory per artifact (outside the
-    // repository's cargo workspace), rewritten only when their bytes change,
-    // so unchanged crates stay built across runs.
+    // A program with a runtime block builds as a workspace: the runtime
+    // crate and one crate per unit live in a stable directory per artifact
+    // (outside the repository's cargo workspace), rewritten only when their
+    // bytes change, so unchanged crates stay built across runs and programs
+    // that share a runtime/Core block share its built crate.
     let (main_source, unit_dependencies, unit_profiles) = match split_backend_workspace(source) {
         Some(workspace) => {
             let units_root = home_path()

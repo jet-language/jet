@@ -180,7 +180,7 @@ fn derivation_record_id(record: DerivationRecord) -> String Never! {
     payload := derivation_optional_payload_json(record.payload, "")
     separator :: String.from_bytes([U8]{0}) ?? ""
     premises := record.premises.join(separator)
-    state := DerivationHashState{first: 0xcbf29ce484222325, second: 0x9e3779b185ebca87}
+    state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
     derivation_hash_frame(&state, record.subject)
     derivation_hash_frame(&state, record.claim)
     derivation_hash_frame(&state, record.producer)
@@ -195,7 +195,7 @@ fn derivation_record_id(record: DerivationRecord) -> String Never! {
     derivation_hash_hex(state)
 }
 
-pub struct DerivationHashState { pub first: Int, pub second: Int }
+pub struct DerivationHashState { pub first: U64, pub second: U64 }
 
 fn derivation_method_raw(method: MIRDerivationMethod) -> String Never! {
     if method == {
@@ -215,18 +215,18 @@ fn derivation_hash_frame(state: &DerivationHashState, value: String) Never! {
 }
 
 fn derivation_hash_byte(state: &DerivationHashState, byte: U8) Never! {
-    mask := 0xffffffffffffffff
-    value := Int.from_u8(byte)
-    state.first = ((state.first ^ value) * 0x100000001b3) & mask
-    rotated := ((state.first << 17) | (state.first >> 47)) & mask
-    state.second = ((state.second ^ rotated ^ value) * 0x9e3779b185ebca87) & mask
+    value :: U64.from_u8(byte)
+    state.first = (state.first ~| value).wrapping_mul(U64{0x100000001b3})
+    state.second = (state.second ~| state.first.rotate_left(17) ~| value).wrapping_mul(U64{0x9e3779b185ebca87})
 }
 
 fn derivation_hash_hex(state: DerivationHashState) -> String Never! {
     digits := "0123456789abcdef".bytes()
+    first :: Int.from_u64(state.first)
+    second :: Int.from_u64(state.second)
     output := [U8]{}
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(state.first >> shift) & 15])
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(state.second >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(first >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(second >> shift) & 15])
     String.from_bytes(output) ?? ""
 }
 

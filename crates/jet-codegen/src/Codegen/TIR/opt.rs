@@ -863,7 +863,7 @@ fn canonicalize_expr(expr: &mut TExpr) {
         | TExprKind::Move(operand)
         | TExprKind::Deref(operand)
         | TExprKind::RawOf(operand)
-        | TExprKind::Clone(operand)
+        | TExprKind::Clone(operand, _)
         | TExprKind::ExplicitCopy(operand)
         | TExprKind::MaterializeView(operand)
         | TExprKind::DistinctRaw(operand)

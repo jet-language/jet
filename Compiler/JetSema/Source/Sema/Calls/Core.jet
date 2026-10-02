@@ -28,6 +28,7 @@ use jet_foundation.[
     TExpr,
     TExprKind,
     TFailureCarrier,
+    TStmt,
     Type,
     core_call,
     core_call_accepts_arity,
@@ -559,7 +560,8 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     resolved_type_args :: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_call_core_check_type_constraints(signature, resolved_type_args, args, span, environment, &diagnostics) -> return None
     params := sema_call_core_parameter_records(signature, resolved_type_args, span, type_args.len() == 0)
-    checked_args :: sema_call_check_bound_arguments_owned(&state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, &local_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
+    pins := [TStmt]{}
+    checked_args :: sema_call_check_bound_arguments_owned(&state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, &local_args, environment, &scopes, &tail_store, &context, span, &pins, &diagnostics) ?? return None
     values :: loop argument in checked_args -> argument.value
     result_type :: sema_call_core_result_type(signature, resolved_type_args, values) ?? {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` did not resolve a result type", "the typed Core result rule must produce the value shape written into TIR", "complete the source typed return contract"))
@@ -568,7 +570,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     fallibility := sema_call_failure_carrier(Val(result_type))
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
     value :: sema_call_core_tir(canonical_record, values, span, resolved_type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
-    sema_expression_call_expected(value, expected, environment, context, &diagnostics)
+    sema_expression_call_expected(sema_call_with_binder_pins(^pins, ^value, span), expected, environment, context, &diagnostics)
 }
 
 // Resolve source exports before building a fixed Core call. The callee's

@@ -83,10 +83,10 @@ fn jet_codegen_trait_method_type_rows(method: MIRTraitMethod) -> [MIRType] Never
 // identity value so a merge never rescans the rows (mir.rs TypeInstances).
 struct JetCodegenTypeInstances {
     rows: [MIRType]
-    positions: [Int:Int]
+    positions: [U64:Int]
 }
 
-fn jet_codegen_push_type_instance(instances: &JetCodegenTypeInstances, identity: Int, instance: MIRType) Never! {
+fn jet_codegen_push_type_instance(instances: &JetCodegenTypeInstances, identity: U64, instance: MIRType) Never! {
     _ := &instances.positions.add(identity, instances.rows.len())
     &instances.rows.push(instance)
 }
@@ -132,7 +132,7 @@ fn jet_codegen_merge_type_instance(instances: &JetCodegenTypeInstances, instance
 
 // The rows in identity order (jet_codegen_sorted_order).
 fn jet_codegen_sorted_type_instances(instances: JetCodegenTypeInstances) -> [MIRType] Never! {
-    identities := [Int]{}
+    identities := [U64]{}
     loop instance in instances.rows {
         identity :: instance.identity ?? panic("checked MIR type instance has no canonical identity")
         &identities.push(identity.value)
@@ -145,8 +145,8 @@ fn jet_codegen_sorted_type_instances(instances: JetCodegenTypeInstances) -> [MIR
 // Inputs are completed lowered rows; constants are the runtime-only rows.
 // Pass top-level and nested functions separately, plus foreign rows, so their
 // signatures participate even when they do not appear in an instruction result.
-fn jet_codegen_collect_type_instances(types: [MIRTypeDef], functions: [MIRFunction], nested_functions: [MIRFunction], foreign: [MIRForeign], traits: [MIRTraitDef], impls: [MIRImplDef], constants: [MIRConstantDef]) -> [MIRType] Never! {
-    instances := JetCodegenTypeInstances{rows: [MIRType]{}, positions: [Int:Int]{}}
+pub fn jet_codegen_collect_type_instances(types: [MIRTypeDef], functions: [MIRFunction], nested_functions: [MIRFunction], foreign: [MIRForeign], traits: [MIRTraitDef], impls: [MIRImplDef], constants: [MIRConstantDef]) -> [MIRType] Never! {
+    instances := JetCodegenTypeInstances{rows: [MIRType]{}, positions: [U64:Int]{}}
     loop definition in types {
         declared := mir_type_with_identity(jet_codegen_lower_type(Type.Named{name: definition.key}), definition.id)
         jet_codegen_ensure_type_instance(&instances, declared)

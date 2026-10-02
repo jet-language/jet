@@ -14,21 +14,22 @@
 //
 // Flag states: 1 live, 2 not live, 3 unknown.
 
-fn jet_codegen_drop_flag_count_use(uses: &[Int:Int], value: MIRValueID) Never! {
+fn jet_codegen_drop_flag_count_use(uses: &[U64:Int], value: MIRValueID) Never! {
     _ := &uses.add(value.value, (uses.get(value.value) ?? 0) + 1)
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_drop_flags.rs::LowerCtx::resolve_drop_flags
 fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
     if builder.drop_live_all.len() == 0 -> return
     block_count :: builder.blocks.len()
-    block_index := [Int:Int]{}
+    block_index := [U64:Int]{}
     loop (block, row) in builder.blocks -> _ := &block_index.add(row.id.value, block)
-    place_row := [Int:Int]{}
+    place_row := [U64:Int]{}
     loop (index, row) in builder.places -> _ := &place_row.add(row.id.value, index)
 
     // Candidate flags: a whole-local place whose local has no other place.
-    flag_of_place := [Int:Int]{}
-    flag_of_local := [Int:Int]{}
+    flag_of_place := [U64:Int]{}
+    flag_of_local := [U64:Int]{}
     flag_count := 0
     loop record in builder.drop_live_all {
         if flag_of_place.get(record.live.value) != None -> next
@@ -54,8 +55,8 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
     }
 
     // Every mention of a flag is a constant-or-unknown write or a read.
-    constants := [Int:Bool]{}
-    read_values := [Int]{}
+    constants := [U64:Bool]{}
+    read_values := [U64]{}
     read_flags := [Int]{}
     read_blocks := [Int]{}
     loop (block, row) in builder.blocks {
@@ -89,7 +90,7 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
     }
 
     // A read must feed exactly one use: its own block's two-way Branch.
-    uses := [Int:Int]{}
+    uses := [U64:Int]{}
     loop row in builder.blocks {
         loop instruction in row.instructions {
             loop value in mir_operation_value_uses(instruction.operation) -> jet_codegen_drop_flag_count_use(&uses, value)
@@ -106,7 +107,7 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
             }
         }
     }
-    guard_read := [Int:Int]{}
+    guard_read := [Int:U64]{}
     guard_flag := [Int:Int]{}
     loop (row, result) in read_values {
         flag :: read_flags[row]
@@ -146,7 +147,7 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
         queued[entry] = true
         &pending.push(entry)
     }
-    read_state := [Int:Int]{}
+    read_state := [U64:Int]{}
     loop pending.len() > 0 {
         block :: &pending.pop() ?? { break }
         queued[block] = false
@@ -258,7 +259,7 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
         if is_dead -> any_dead = true
     }
     if !any_dead -> return
-    removed := [Int:Bool]{}
+    removed := [U64:Bool]{}
     released := [MIRValueID]{}
     loop block in 0..<block_count {
         kept := [MIRInstruction]{}
@@ -280,7 +281,7 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
         }
         builder.blocks[block].instructions = kept
     }
-    orphaned := [Int:Bool]{}
+    orphaned := [U64:Bool]{}
     loop value in released {
         left :: (uses.get(value.value) ?? 0) - 1
         _ := &uses.add(value.value, left)
@@ -318,6 +319,7 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
         if flag < 0 || !dead[flag] -> &places.push(row)
     }
     builder.places = places
+    jet_codegen_reindex_lowering_rows(&builder)
     records := [JetCodegenDropLive]{}
     loop record in builder.drop_live_all {
         flag :: flag_of_place.get(record.live.value) ?? -1

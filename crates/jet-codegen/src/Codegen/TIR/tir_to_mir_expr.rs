@@ -56,11 +56,14 @@ fn pin_inner_type(ty: &Type) -> Option<Type> {
     }
 }
 
-/// Whether `expr` names a place built only from a local or parameter and
-/// stored struct fields, so a field read can project it without copying.
+/// Whether `expr` names a place built only from a local or parameter, list
+/// or map elements, and stored struct fields, so a field read can project it
+/// without copying. `xs[i].f` reads `f` through one index-then-field place
+/// instead of copying the whole element and then its field.
 fn is_stored_field_chain(ctx: &mut LowerCtx, expr: &TExpr) -> bool {
     match &expr.kind {
         TExprKind::Local(_) => pin_inner_type(&expr.ty).is_none(),
+        TExprKind::Index { .. } => pin_inner_type(&expr.ty).is_none(),
         TExprKind::Field { recv, field, .. } => {
             pin_inner_type(&recv.ty).is_none()
                 && is_stored_field_chain(ctx, recv)
@@ -962,6 +965,12 @@ pub(super) fn lower_receiver_place(
                 persist_key: None,
             });
             Some(ctx.project_deref_place(id, place.ty.clone(), ctx.span())?)
+        }
+        // A read-only alias (a read window, a walked list's item) names
+        // another value's slot; a consuming use takes the value path, which
+        // copies, instead of moving the slot out of its owner.
+        TExprKind::Local(local) if access == MirAccess::Move && ctx.local_is_read_alias(local) => {
+            return Ok(None);
         }
         TExprKind::Local(local) => Some(lower_local_place(ctx, local, access)?),
         // An element of a list, map, or pool is never moved out of its
@@ -1872,7 +1881,7 @@ pub(super) fn lower_expr(
                     Some(expr.ty.clone()),
                     MirOperation::Copy {
                         value,
-                        materialize_view: false,
+                        fact: jet_foundation::MIR::MirCopyFact::Materialize,
                     },
                 )
             } else {
@@ -2703,7 +2712,7 @@ pub(super) fn lower_expr(
             // place base (under at most a compiler-inserted clone) is read in
             // place rather than copied whole before slicing.
             let list_base = match &base.kind {
-                TExprKind::Clone(inner) => &**inner,
+                TExprKind::Clone(inner, _) => &**inner,
                 _ => &**base,
             };
             let place = if matches!(list_base.ty.without_user_tags(), Type::List(_)) {
@@ -2738,14 +2747,22 @@ pub(super) fn lower_expr(
                 },
             )
         }
-        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
+        TExprKind::Clone(inner, fact) => {
+            let value = ctx.lower_child(inner)?;
+            ctx.emit(
+                "copy",
+                Some(expr.ty.clone()),
+                MirOperation::Copy { value, fact: *fact },
+            )
+        }
+        TExprKind::ExplicitCopy(inner) => {
             let value = ctx.lower_child(inner)?;
             ctx.emit(
                 "copy",
                 Some(expr.ty.clone()),
                 MirOperation::Copy {
                     value,
-                    materialize_view: false,
+                    fact: jet_foundation::MIR::MirCopyFact::Explicit,
                 },
             )
         }
@@ -2756,7 +2773,7 @@ pub(super) fn lower_expr(
                 Some(expr.ty.clone()),
                 MirOperation::Copy {
                     value,
-                    materialize_view: true,
+                    fact: jet_foundation::MIR::MirCopyFact::ViewMaterialize,
                 },
             )
         }
@@ -7215,7 +7232,7 @@ fn lower_cloned_value(
             Some(value.ty.clone()),
             MirOperation::Copy {
                 value: value_id,
-                materialize_view: false,
+                fact: jet_foundation::MIR::MirCopyFact::Materialize,
             },
         )?
     } else {
@@ -9659,7 +9676,7 @@ fn lower_numeric_method(
                 Some(expr.ty.clone()),
                 MirOperation::Copy {
                     value: receiver,
-                    materialize_view: false,
+                    fact: jet_foundation::MIR::MirCopyFact::Materialize,
                 },
             );
         }
@@ -10486,6 +10503,7 @@ fn lower_container_encode(
             method_kind: None,
             columnar: false,
             by_value: false,
+            source_stable: false,
             body: vec![super::TStmt::ExprStmt(TExpr {
                 ty: Type::Named("Unit".to_string()),
                 kind: TExprKind::BuiltinMethod {

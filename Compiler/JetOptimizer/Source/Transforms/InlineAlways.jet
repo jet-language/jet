@@ -36,13 +36,13 @@ struct MIRInlineCallPosition { pub block: Int, pub instruction: Int }
 // Function rows never move during expansion. Candidate positions are rebuilt
 // only for changed bodies, keeping discovery in function/block/instruction order.
 struct MIRInlineIndex {
-    pub functions: [Int:Int]
-    pub eligible: [Int:Bool]
+    pub functions: [U64:Int]
+    pub eligible: [U64:Bool]
 }
 
 fn mir_pass_expand_inline_always(program: &MIRProgram) -> MIRInlineExpansionResult Never! {
-    functions := [Int:Int]{}
-    eligible := [Int:Bool]{}
+    functions := [U64:Int]{}
+    eligible := [U64:Bool]{}
     loop (index, function) in program.functions {
         if functions.get(function.id.value) == None {
             &functions.add(function.id.value, index).drop("the first function row owns this id")
@@ -142,7 +142,7 @@ fn mir_pass_inline_find_function(rows: [MIRFunction], index: MIRInlineIndex, id:
 fn mir_pass_inline_reaches_caller(program: MIRProgram, index: MIRInlineIndex, start: MIRFunctionID, caller: MIRFunctionID) -> Bool Never! {
     if start == caller -> return true
     pending := [MIRFunctionID]{start}
-    visited := [Int:Bool]{}
+    visited := [U64:Bool]{}
     cursor := 0
     loop cursor < pending.len() {
         current := pending[cursor]
@@ -201,9 +201,9 @@ fn mir_pass_inline_one_call(
     plan :: plan_result.plan ?? return MIRInlineOneCallResult{blocks_removed: 0, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) body contains an operation that cannot be remapped safely"))}
 
     original := program.functions[caller_index].blocks[block_index]
-    prefix := original.instructions[0..instruction_index]
+    prefix := original.instructions[0..<instruction_index]
     loop adapter in plan.adapter_instructions -> &prefix.push(adapter)
-    suffix :: if plan.returns -> original.instructions[instruction_index + 1..original.instructions.len()] else -> [MIRInstruction]{}
+    suffix :: if plan.returns -> original.instructions[instruction_index + 1..<original.instructions.len()] else -> [MIRInstruction]{}
     continuation_instructions := [MIRInstruction]{}
     if plan.returns {
         if call_instruction.result != None {

@@ -12,6 +12,7 @@ use jet_foundation.[
     TClosureOp,
     TExpr,
     TExprKind,
+    TListRemoveMode,
     Type,
     expr_span,
     sema_collection_is_map,
@@ -54,13 +55,17 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
     }
 }
 
+// Rust builtin-method argument inference (builtin_methods.rs): every argument is inferred under its
+// contract parameter type, so leading-dot variants and anonymous records
+// (`&rows.push(.Ready)`, `&map.add(key, {x: 1})`) take their type from it.
 fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked := if {
         callback -> {
-            sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
+            // An open callback result is adopted here and checked below.
+            sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         else -> {
-            sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_check_expression(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
     value :: checked ?? return None
@@ -134,6 +139,21 @@ fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallPa
     return params
 }
 
+// Rust builtin_methods.rs D-LISTREMOVE1/F: a literal `RemoveBy` selector of a
+// two-argument `remove` fixes the removal mode before argument inference, so
+// `.Slot` takes an Int position and `.Val` an element; any other selector
+// stays a run-time choice.
+fn sema_call_collections_literal_remove_mode(method: String, args: [CallArg]) -> TListRemoveMode? {
+    if method != "remove" || args.len() != 2 -> return None
+    return if args[1].expr == {
+        .EnumLit(_, variant, _, _, _, _) -> if {
+            variant == "Slot" -> Val(TListRemoveMode.Slot)
+            variant == "Val" -> Val(TListRemoveMode.Value)
+            else -> None
+        }
+        else -> None
+    }
+}
 
 pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
@@ -176,6 +196,7 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
         }
     }
     typed := [TExpr]{}
+    literal_remove_mode := sema_call_collections_literal_remove_mode(method, updated_args)
     required_types := [Type]{}
     seed := Type?{None}
     callback_return := Type?{None}
@@ -190,6 +211,7 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
+        if index == 0 && literal_remove_mode == (Val(TListRemoveMode.Slot)) -> required = Type.Int
         value :: if {
             seed_argument -> {
                 sema_check_expression(updated_args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -231,12 +253,14 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     }
     tuple_struct := sema_call_collections_tuple_struct(result_type)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
-    operation := sema_collection_method_operation(contract, updated_args.len(), line, callback_return, callback_mutable, comparator, tuple_struct)
+    operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator, tuple_struct)
     ownership := sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := sema_collection_method_effect_row(contract, span)
     if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
 
+    // A literal selector is fixed in the removal mode, so the route takes the item alone.
+    if literal_remove_mode != None -> _ := &typed.pop()
     value := if operation == {
         .Builtin(builtin) -> sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: builtin, args: typed}, span)
         .Closure(closure) -> sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: closure, args: typed}, span)

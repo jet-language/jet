@@ -128,16 +128,17 @@ A violation stops the affected work until it is fixed at the root.
   Spelling or organization may flex only where that helps users. Keep the
   beginner surface small and safe, and expose expert control only by explicit
   opt-in. A new mechanism needs approved Tower scope or owner approval.
-- **I9 — One meaning across tiers.** AOT, the Cranelift JIT (`jet run` and
-  `jet dev`), the interpreter and deopt path, and web (where applicable) give
-  every language feature and Core API one executable meaning. That meaning
-  lives in the embedded Prelude and the ratified CoreLib. AOT emission, JIT
-  hosts, and the interpreter only marshal values and call the same Prelude
-  symbols; they never re-encode validation, defaults, policy, or error meaning.
-  Never mark a feature AOT-only, add a `tests/jit_gaps.txt` entry, or defer
-  with "JIT later". Prove AOT and default `jet run`, plus the interpreter and
-  web once the surface reaches them. An owner-ratified exception must name the
-  tier it excludes.
+- **I9 — One meaning across tiers.** Every language feature and Core API has
+  one executable meaning on every tier: the Jet code generator's levels (O0
+  for `jet run`, `jet dev`, and compile-time code; O1 for `jet build`; O2 for
+  `--release`) and web where applicable. That meaning lives in the embedded
+  Prelude and the ratified CoreLib, compiled once into the one shared runtime
+  (D-EXEC1). Code generators and hosts only marshal values and call the same
+  runtime symbols; they never re-encode validation, defaults, policy, or error
+  meaning. Never mark a feature as working on one level only, or defer it to a
+  later level. Until D-EXEC1's retirement step lands, the Cranelift JIT and the
+  interpreter still serve `jet run` and must keep that same meaning; do not
+  extend them. An owner-ratified exception must name the tier it excludes.
 
 ## Performance gate
 

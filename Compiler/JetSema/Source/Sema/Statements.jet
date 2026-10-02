@@ -138,7 +138,7 @@ fn sema_stmt_tir_loop_body_has_break(statements: [TStmt], label: String?, allow_
                 }
                 if else_body == .Val(else_statements) && sema_stmt_tir_loop_body_has_break(else_statements, label, allow_unlabeled) -> return true
             }
-            .Loop(_, _, _) | .While(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _) -> {}
+            .Loop(_, _, _) | .While(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) -> {}
             .Inline(body, _) | .DebugOnly(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .ScopeMember(_, body, _) -> {
                 if sema_stmt_tir_loop_body_has_break(body, label, allow_unlabeled) -> return true
             }
@@ -180,6 +180,9 @@ fn sema_stmt_tir_block_can_fall_through(statements: [TStmt]) -> Bool Never! {
     true
 }
 
+// Rust `stream_element_type` reads the declared return type. The scope holds
+// the effective return, where a plain `Stream<T>` became
+// `Stream<T> Err!` (`sema_effective_return_type`), so that carrier is unwrapped.
 fn sema_stmt_stream_element_type(return_type: Type?) -> Type? {
     resolved :: return_type ?? return None
     if resolved == {
@@ -187,6 +190,9 @@ fn sema_stmt_stream_element_type(return_type: Type?) -> Type? {
             if name == "Stream" && args.len() == 1 {
                 return Val(args[0])
             }
+        }
+        .Result(ok, err) -> {
+            if err == (Type.Named{name: "Err"}) -> return sema_stmt_stream_element_type(Val(ok))
         }
         else -> {}
     }
@@ -1112,6 +1118,46 @@ fn sema_stmt_for_in_driven_root(expression: Expr) -> String? {
     }
 }
 
+// #4318 §4 stable loop source: the root name of a source that is a plain
+// place, `xs` or `a.b.xs`. A user `~` copy, a call, or an index is not one.
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::stable_loop_source_root
+fn sema_stmt_for_in_stable_root(expression: Expr) -> String? {
+    if expression == {
+        .Ident(name, _) -> return Val(name)
+        .Field(base, _, _) | .Paren(base, _) -> return sema_stmt_for_in_stable_root(base)
+        else -> return None
+    }
+}
+
+// The definition key of a stable source's root, or None when the source is
+// not a place or a write loan on the root is active at loop entry (a write
+// window or mutating capture can change it without naming it in the body).
+fn sema_stmt_for_in_stable_root_key(expression: Expr, scopes: SemaScopeTable, state: SemaOwnershipState) -> String? {
+    root :: sema_stmt_for_in_stable_root(expression) ?? return None
+    index :: sema_scope_resolve_index(scopes, root) ?? return None
+    key :: scopes.bindings[index].symbol.id.key
+    loop loan in state.loans {
+        if loan.place.root_key == key && loan.access == AccessConvention.Write -> return None
+    }
+    Val(key)
+}
+
+// True when a reference the loop body added (from `references_before` on)
+// names the definition `key`: any read, write, or move of the root.
+fn sema_stmt_for_in_body_mentions(state: SemaOwnershipState, references_before: Int, key: String) -> Bool Never! {
+    loop index in references_before..<state.references.len() {
+        if state.references[index].def_key == key -> return true
+    }
+    false
+}
+
+fn sema_stmt_for_in_stable_list(collection_type: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(collection_type) == {
+        .List(_) -> true
+        else -> false
+    }
+}
+
 // Rust `collection_changed_in_loop` / `collection_changed_by_method_in_loop`
 // (E0507): a change to a collection an active loop is reading. `operation`
 // is `` `name.method()` `` or `a mutation of `name``.
@@ -1311,7 +1357,10 @@ fn sema_stmt_for_in_range_zero(span: Span) -> TExpr Never! {
 // `ty` is None when the loop source failed its own check: the loop name
 // stays in scope untyped, so reads of it in the body check to nothing and add
 // no follow-on report (the same poison as `sema_stmt_declare_unchecked_binding`).
-fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> Bool {
+// The returned local carries the declared symbol, so lowering binds the loop
+// name under the identity every body read resolves by. None when the name
+// could not be declared (reported here).
+fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> TLocal? {
     owner := sema_scope_local_owner_key(scopes)
     symbol := Symbol{
         id: symbol_id(SymbolKind.Local, environment.module_identity, owner, name),
@@ -1325,10 +1374,10 @@ fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, en
     }
     if !sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, None, false) {
         &diagnostics.push(sema_already_defined(name, name_span))
-        return false
+        return None
     }
     if ty != None -> sema_ownership_declare_binding(&state, symbol, false)
-    true
+    Val(tir_symbol_local(name, name_span, symbol.id))
 }
 
 fn sema_stmt_for_in_pair_types(collection_type: Type, item_type: Type) -> SemaForInPairTypes? {
@@ -2853,7 +2902,18 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     required :: binding.symbol.ty ?? Type.Named{name: "Unit"}
     expected := Type?{None}
     if op == None -> expected = Val(required)
-    checked :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // Rust CheckerCore/statements.rs `Stmt::Assign` feeds the place type into
+    // the RHS for compound updates too, so `price *= 2.0` with `price: Float`
+    // reads the literal as Float rather than exact Decimal.
+    if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) -> expected = Val(required)
+    checked_value :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked := checked_value
+    // A compound operand widens into the place's numeric type first
+    // (`total += byte`), as Rust `widen_numeric_expr` does after inference.
+    if op != None && sema_stmt_compound_widens(checked.ty, required) {
+        widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+        checked = sema_expr_numeric_literal_conversion(checked, required, checked.span, widen_line, &diagnostics) ?? return None
+    }
     if op == None && sema_copy_site_check_assignment(expr, environment, scopes, context, &diagnostics) -> return None
     // D-UNINIT-SENTINEL2: a plain `name = …` gives a `Type{ uninit }`
     // binding its value; a compound update reads it first (E0420).
@@ -2882,6 +2942,16 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     // A new value has no `#Track` origin (Rust `clear_origin`).
     scopes.bindings[index].origin = None
     Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
+}
+
+// Rust `source != target && source.numeric_widening_to(target).is_some()`.
+// The port helper reports a contained fixed-width range as `Val(true)` and an
+// uncontained one as `Val(false)`, so ranged pairs widen only on `Val(true)`.
+fn sema_stmt_compound_widens(source: Type, target: Type) -> Bool {
+    if type_identity_equal(source, target) -> return false
+    widening :: sema_expr_numeric_widening_to(source, target)
+    if sema_expr_integer_range_for_type(source) != None && sema_expr_integer_range_for_type(target) != None -> return widening == (Val(true))
+    widening != None
 }
 
 fn sema_stmt_transaction_expr_root(expr: Expr) -> String? {
@@ -3201,7 +3271,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
             }
             sema_stmt_tir_statements_touch_shared(else_body)
         }
-        .ForIn(_, _, _, source, collection, step, _, _, _, body, _) -> {
+        .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
             if sema_stmt_tir_expr_touches_shared(source) || sema_stmt_tir_expr_touches_shared(collection) -> return true
             if step != None {
                 nested :: step
@@ -3539,7 +3609,14 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     }
     expected := Type?{None}
     if op == None -> expected = Val(place.ty)
-    checked :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // Same compound contract as `sema_stmt_check_local_assignment`.
+    if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(place.ty)) -> expected = Val(place.ty)
+    checked_value :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked := checked_value
+    if op != None && sema_stmt_compound_widens(checked.ty, place.ty) {
+        widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+        checked = sema_expr_numeric_literal_conversion(checked, place.ty, checked.span, widen_line, &diagnostics) ?? return None
+    }
     if op == None && sema_copy_site_check_assignment(expr, environment, scopes, context, &diagnostics) -> return None
     tir_op := TBinaryOp?{None}
     if op != None {
@@ -4319,6 +4396,9 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                             valid = false
                         }
                         before := sema_ownership_state_snapshot(state)
+                        // #4318 §4: the source's root, resolved before the loop
+                        // names can shadow it.
+                        stable_root_key := sema_stmt_for_in_stable_root_key(collection_expr, scopes, state)
                         sema_scope_enter(&scopes, &state, "for.in@{span.start}")
                         label_name := String?{None}
                         if label != None {
@@ -4328,13 +4408,10 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         }
                         first_type := item_type
                         second_type := Type?{None}
-                        variable_two := String?{None}
                         if var2 != None && pair_types != None {
                             pair :: pair_types ?? SemaForInPairTypes{first: item_type, second: item_type}
                             first_type = pair.first
                             second_type = Val(pair.second)
-                            second_name :: var2
-                            variable_two = Val(second_name.name)
                         }
                         source_checked := collection_value != None
                         first_local_type := Type?{None}
@@ -4343,10 +4420,13 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                             first_local_type = Val(first_type)
                             second_local_type = Val(second_type ?? item_type)
                         }
-                        if !sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, environment, &scopes, &state, &diagnostics) -> valid = false
+                        first_local :: sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, environment, &scopes, &state, &diagnostics)
+                        if first_local == None -> valid = false
+                        variable_two := TLocal?{None}
                         if var2 != None && (second_type != None || !source_checked) {
                             second_name :: var2
-                            if !sema_stmt_for_in_decl_loop_local(second_name.name, second_name.span, second_local_type, environment, &scopes, &state, &diagnostics) -> valid = false
+                            variable_two = sema_stmt_for_in_decl_loop_local(second_name.name, second_name.span, second_local_type, environment, &scopes, &state, &diagnostics)
+                            if variable_two == None -> valid = false
                         }
                         loop_frame_index := context.loop_value_frames.len()
                         sema_loop_value_push_frame(&context, label_name)
@@ -4354,7 +4434,9 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         context.arrow_loop_body = arrow_body
                         iter_borrowed_depth := context.iter_borrowed.len()
                         if sema_stmt_for_in_driven_root(collection_expr) == .Val(driven) -> &context.iter_borrowed.push(driven)
+                        references_before := state.references.len()
                         nested := sema_check_statements(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth + 1)
+                        source_stable := stable_root_key != None && !sema_stmt_for_in_body_mentions(state, references_before, stable_root_key ?? "")
                         loop context.iter_borrowed.len() > iter_borrowed_depth -> _ := &context.iter_borrowed.pop()
                         context.arrow_loop_body = previous_arrow_loop_body
                         if !nested.complete -> valid = false
@@ -4373,17 +4455,19 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         if {
                             !valid -> complete = false
                             else -> {
+                                variable :: first_local ?? panic("checked loop name has no declared local")
                                 if {
                                     range_source -> {
                                         zero_start := sema_stmt_for_in_range_zero(span)
                                         zero_end := sema_stmt_for_in_range_zero(span)
-                                        &output.push(TStmt.Range{label: label_name, variable: var, source: Val(collection), start: zero_start, end: zero_end, step: step_value, exclusive: false, vectorization: None, body: nested.value, span: span})
+                                        &output.push(TStmt.Range{label: label_name, variable: variable, source: Val(collection), start: zero_start, end: zero_end, step: step_value, exclusive: false, vectorization: None, body: nested.value, span: span})
                                     }
                                     else -> {
                                         source_value := sema_stmt_for_in_source(collection_expr, collection, method_kind)
                                         columnar := var2 == None && method_kind == None && sema_stmt_for_in_columnar_list_type(collection.ty) && sema_stmt_for_in_columnar(environment, item_type)
                                         by_value := sema_stmt_for_in_by_value(collection.ty, item_type)
-                                        &output.push(TStmt.ForIn{label: label_name, variable: var, variable_two: variable_two, source: source_value, collection: collection, step: step_value, method_kind: method_kind, columnar: columnar, by_value: by_value, body: nested.value, span: span})
+                                        stable := source_stable && method_kind == None && step_value == None && !by_value && !columnar && sema_stmt_for_in_stable_list(collection.ty)
+                                        &output.push(TStmt.ForIn{label: label_name, variable: variable, variable_two: variable_two, source: source_value, collection: collection, step: step_value, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: stable, body: nested.value, span: span})
                                     }
                                 }
                             }

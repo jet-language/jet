@@ -57,6 +57,7 @@ use jet_foundation.[
     mir_semantic_op_prelude_calls,
     mir_semantic_op_type_uses,
     mir_semantic_op_value_uses,
+    mir_copy_fact_name,
     mir_symbol_name,
     mir_terminator_targets,
     mir_terminator_value_uses,
@@ -65,49 +66,58 @@ use jet_foundation.[
     mir_type_is_integer,
     mir_type_is_numeric,
     mir_type_same_checked_type,
+    mir_view_copy_kind,
 ]
 
 // Program-wide rows stay fixed during one validation. Their identities are
 // indexed once, so each operation reference is a keyed lookup, not a scan.
 struct MIRPassLegalityTables {
     prelude_calls: [MIRPreludeCall]
-    prelude_positions: [Int:Int]
+    prelude_positions: [U64:Int]
+    prelude_purity: [U64:Bool]
     prelude_failure: String?
     core_calls: [MIRCoreCall]
-    core_positions: [Int:Int]
-    functions: [Int:Bool]
-    types: [Int:Bool]
-    fields: [Int:Bool]
-    source_files: [Int:Bool]
-    foreign: [Int:Bool]
-    callbacks: [Int:Bool]
-    traits: [Int:Bool]
-    trait_methods: [Int:Bool]
+    core_positions: [U64:Int]
+    functions: [U64:Bool]
+    types: [U64:Bool]
+    fields: [U64:Bool]
+    source_files: [U64:Bool]
+    foreign: [U64:Bool]
+    callbacks: [U64:Bool]
+    traits: [U64:Bool]
+    trait_methods: [U64:Bool]
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::verify_mir_legality
 fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
-    prelude_positions := [Int:Int]{}
+    prelude_positions := [U64:Int]{}
     loop (position, row) in program.prelude_calls {
         if prelude_positions.get(row.id.value) == None -> &prelude_positions.add(row.id.value, position).drop("checked absent above")
     }
-    core_positions := [Int:Int]{}
+    core_positions := [U64:Int]{}
     loop (position, row) in program.core_calls {
         if core_positions.get(row.id.value) == None -> &core_positions.add(row.id.value, position).drop("checked absent above")
     }
-    functions := [Int:Bool]{}
+    functions := [U64:Bool]{}
     loop row in program.functions -> &functions.add(row.id.value, true).drop("an identity may repeat")
-    types := [Int:Bool]{}
+    types := [U64:Bool]{}
     loop row in program.types -> &types.add(row.id.value, true).drop("an identity may repeat")
-    fields := [Int:Bool]{}
+    // Rust `verify_mir_legality`: canonical type instances (intrinsic
+    // nominals such as `Fraction`, applied generics) are known types too.
+    loop row in program.type_instances {
+        identity :: row.identity ?? next
+        &types.add(identity.value, true).drop("an identity may repeat")
+    }
+    fields := [U64:Bool]{}
     loop row in program.fields -> &fields.add(row.id.value, true).drop("an identity may repeat")
-    source_files := [Int:Bool]{}
+    source_files := [U64:Bool]{}
     loop row in program.source_files -> &source_files.add(row.id.value, true).drop("an identity may repeat")
-    foreign := [Int:Bool]{}
+    foreign := [U64:Bool]{}
     loop row in program.foreign -> &foreign.add(row.id.value, true).drop("an identity may repeat")
-    callbacks := [Int:Bool]{}
+    callbacks := [U64:Bool]{}
     loop row in program.callbacks -> &callbacks.add(row.id.value, true).drop("an identity may repeat")
-    traits := [Int:Bool]{}
-    trait_methods := [Int:Bool]{}
+    traits := [U64:Bool]{}
+    trait_methods := [U64:Bool]{}
     loop row in program.traits {
         &traits.add(row.id.value, true).drop("an identity may repeat")
         loop method in row.methods -> &trait_methods.add(method.id.value, true).drop("an identity may repeat")
@@ -115,6 +125,7 @@ fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
     MIRPassLegalityTables{
         prelude_calls: program.prelude_calls,
         prelude_positions: prelude_positions,
+        prelude_purity: mir_pass_prelude_purity(program.prelude_calls),
         prelude_failure: mir_pass_validate_prelude_rows(program.prelude_calls),
         core_calls: program.core_calls,
         core_positions: core_positions,
@@ -132,7 +143,7 @@ fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
 fn mir_pass_validate_program(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
     if program.schema_version != MIR_SCHEMA_VERSION -> return Val(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
     tables :: mir_pass_legality_tables(program)
-    seen_functions := [Int:Bool]{}
+    seen_functions := [U64:Bool]{}
     loop function in program.functions {
         if function.id.value == 0 -> return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))
         if seen_functions.get(function.id.value) != None -> return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function identity is duplicated"))
@@ -143,6 +154,7 @@ fn mir_pass_validate_program(program: MIRProgram, pass: MIROptimizationPassID) -
     None
 }
 
+// Rust: crates/jet-foundation/src/MIR.rs::validate_function
 fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID, tables: MIRPassLegalityTables) -> MIROptimizationError? {
     if function.span.start > function.span.end -> return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function span is inverted"))
     if function.blocks.len() == 0 -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), function.span, "MIR function has no basic blocks"))
@@ -150,10 +162,10 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
 
     // Every identity set and definition row is keyed, so each check is a
     // map probe instead of a scan of the rows seen so far.
-    seen_blocks := [Int:Bool]{}
-    seen_operations := [Int:Bool]{}
-    definition_rows := [Int:MIRPassDefinition]{}
-    result_types := [Int:MIRType]{}
+    seen_blocks := [U64:Bool]{}
+    seen_operations := [U64:Bool]{}
+    definition_rows := [U64:MIRPassDefinition]{}
+    result_types := [U64:MIRType]{}
     loop block in function.blocks {
         if block.id.value == 0 -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block has a zero stable identity"))
         if seen_blocks.get(block.id.value) != None -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block identity is duplicated"))
@@ -185,7 +197,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
         if value.id.value == 0 -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), value.span, "MIR value metadata has a zero stable identity"))
         if !mir_pass_definition_exists(definitions, value.id) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), value.span, "MIR value metadata has no defining instruction"))
     }
-    metadata_seen := [Int:Bool]{}
+    metadata_seen := [U64:Bool]{}
     loop value in function.values {
         if metadata_seen.get(value.id.value) != None -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), value.span, "MIR value metadata is duplicated"))
         &metadata_seen.add(value.id.value, true).drop("checked absent above")
@@ -197,6 +209,9 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
 
     predecessors :: mir_pass_predecessor_map(function)
     loop block in function.blocks {
+        block_predecessors := [U64:Bool]{}
+        block_sources :: predecessors.get(block.id.value) ?? [MIRBlockID]{}
+        loop predecessor in block_sources -> &block_predecessors.add(predecessor.value, true).drop("predecessor membership is idempotent")
         loop target in mir_terminator_targets(block.terminator) {
             if seen_blocks.get(target.value) == None -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR terminator targets a missing block"))
         }
@@ -215,7 +230,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
             if instruction.operation == {
                 .Phi(incoming) -> {
                     loop row in incoming {
-                        if seen_blocks.get(row.block.value) == None || !mir_pass_block_id_seen(predecessors.get(block.id.value) ?? [MIRBlockID]{}, row.block) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), instruction.span, "MIR phi incoming edge is not a predecessor"))
+                        if seen_blocks.get(row.block.value) == None || block_predecessors.get(row.block.value) == None -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), instruction.span, "MIR phi incoming edge is not a predecessor"))
                         if !mir_pass_definition_exists(definitions, row.value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), instruction.span, "MIR phi reads an undefined SSA value"))
                     }
                 }
@@ -345,10 +360,35 @@ fn mir_pass_validate_function_legality(
     }
     drop_failure := mir_pass_validate_drops(function, definitions)
     if drop_failure != None -> return drop_failure
+    copy_failure := mir_pass_validate_copy_facts(function, definitions)
+    if copy_failure != None -> return copy_failure
     move_failure := mir_pass_validate_moves(function, definitions)
     if move_failure != None -> return move_failure
     host_failure := mir_pass_validate_host_callbacks(function, tables)
     if host_failure != None -> return host_failure
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::verify_copy_facts
+// #4318: every MIR Copy names the sema fact that made it, and the fact must
+// fit the operand: a `Scalar` copy reads a Copy-ABI value, a view
+// materialization reads a view with a canonical copy kernel. (A second
+// consuming use of one value is rejected by mir_pass_validate_moves.)
+fn mir_pass_validate_copy_facts(function: MIRFunction, definitions: MIRPassDefinitions) -> String? {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Copy(value, fact) {
+                ty :: mir_pass_value_type(function, definitions, value) ?? next
+                ownership :: mir_pass_value_ownership(function, definitions, value) ?? next
+                admitted :: if fact == {
+                    .Scalar -> ownership.mode == .Copy
+                    .ViewMaterialize -> mir_view_copy_kind(ty) != None
+                    else -> true
+                }
+                if !admitted -> return Val("copy of v{value.value} has fact `{mir_copy_fact_name(fact)}` its type does not admit")
+            }
+        }
+    }
     None
 }
 
@@ -496,7 +536,7 @@ fn mir_pass_validate_panic_context(context: MIRPanicContext, function: MIRFuncti
 }
 
 fn mir_pass_validate_prelude_rows(rows: [MIRPreludeCall]) -> String? {
-    seen := [Int:Bool]{}
+    seen := [U64:Bool]{}
     loop row in rows {
         if row.id.value == 0 || seen.get(row.id.value) != None -> return Val("Prelude route identity is missing or duplicated")
         &seen.add(row.id.value, true).drop("checked absent above")
@@ -587,9 +627,9 @@ fn mir_pass_prelude(tables: MIRPassLegalityTables, id: MIRPreludeCallID) -> MIRP
     Val(tables.prelude_calls[position])
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::prelude_call_is_pure
 fn mir_pass_legality_prelude_is_pure(tables: MIRPassLegalityTables, id: MIRPreludeCallID) -> Bool Never! {
-    row :: mir_pass_prelude(tables, id) ?? return false
-    row.effect_kind == None && row.abi != .Effect && row.fallibility == .Infallible
+    tables.prelude_purity.get(id.value) ?? false
 }
 
 fn mir_pass_append_optional_place(places: &[MIRPlaceID], optional: MIRPlaceID?) Never! {
@@ -1533,12 +1573,12 @@ fn mir_pass_validate_moves(
     definitions: MIRPassDefinitions,
 ) -> String? {
     reachable :: mir_pass_reachable(function)
-    reachable_rows := [Int:Bool]{}
+    reachable_rows := [U64:Bool]{}
     loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
     dominators :: mir_pass_dominators(function)
     // A value is consumed at most once (checked below), so one event per value.
-    consumed := [Int:MIRPassMoveEvent]{}
-    moved_places := [Int:Bool]{}
+    consumed := [U64:MIRPassMoveEvent]{}
+    moved_places := [U64:Bool]{}
     loop block in function.blocks {
         if reachable_rows.get(block.id.value) != None {
             index := 0

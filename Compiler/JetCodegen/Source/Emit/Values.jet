@@ -29,6 +29,7 @@ use jet_foundation.[
     MIRTypeKind,
     MIRValueID,
     mir_measure_expression,
+    mir_operation_place_uses,
     mir_operation_value_uses,
     mir_terminator_value_uses,
     mir_type_from_kind,
@@ -118,11 +119,11 @@ fn jet_rust_emit_value_mode(ctx: JetRustEmitContext, function: MIRFunction, valu
 
 // The lookup rows of one function body (MIRRust FunctionIndex::new), built
 // once when the function is printed.
-fn jet_rust_emit_body_index(function: MIRFunction, shared_locals: [Int:Bool]) -> JetRustEmitBodyIndex Never! {
-    definition_blocks := [Int:Int]{}
-    definition_positions := [Int:Int]{}
-    block_positions := [Int:Int]{}
-    branch_bases := [Int:Int]{}
+fn jet_rust_emit_body_index(function: MIRFunction, shared_locals: [U64:Bool]) -> JetRustEmitBodyIndex Never! {
+    definition_blocks := [U64:Int]{}
+    definition_positions := [U64:Int]{}
+    block_positions := [U64:Int]{}
+    branch_bases := [U64:Int]{}
     ordinal := 0
     loop (block_position, block) in function.blocks {
         if block_positions.get(block.id.value) == None {
@@ -139,7 +140,7 @@ fn jet_rust_emit_body_index(function: MIRFunction, shared_locals: [Int:Bool]) ->
             }
         }
     }
-    value_rows := [Int:Int]{}
+    value_rows := [U64:Int]{}
     loop (position, row) in function.values {
         if value_rows.get(row.id.value) == None -> _ := &value_rows.add(row.id.value, position)
     }
@@ -150,8 +151,8 @@ fn jet_rust_emit_body_index(function: MIRFunction, shared_locals: [Int:Bool]) ->
 // non-Send closure lives in one shared cell. The closure environment keeps a
 // handle to the cell and borrows it mutably only for each call, so writes land
 // on the owner and the owner's later reads need no frame-long `&mut`.
-fn jet_rust_emit_shared_capture_locals(ctx: JetRustEmitContext, function: MIRFunction) -> [Int:Bool] Never! {
-    shared := [Int:Bool]{}
+fn jet_rust_emit_shared_capture_locals(ctx: JetRustEmitContext, function: MIRFunction) -> [U64:Bool] Never! {
+    shared := [U64:Bool]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.operation == .Closure(target_id, captures, _) {
@@ -556,6 +557,7 @@ fn jet_rust_emit_partial_projection_only(ctx: &JetRustEmitContext, function: MIR
 // cannot change while the function runs, or from an owned local that nothing
 // changes or releases between the read and any use of the value
 // (jet_rust_emit_stable_local_read; MIRRust immutable_read_place).
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::immutable_read_place
 fn jet_rust_emit_immutable_read_place(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> MIRPlaceID? {
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
     read := MIRPlaceID?{None}
@@ -567,11 +569,11 @@ fn jet_rust_emit_immutable_read_place(ctx: &JetRustEmitContext, function: MIRFun
             if projection == {
                 .Field(field, _) -> {
                     owner :: jet_rust_emit_partial_owner(&ctx, field) ?? return None
-                    if jet_rust_emit_partial_field_boxed(&ctx, owner, field) -> return None
+                    // A recursive (boxed) field is read through its box in place.
                     // MIRRust native_host_field_type: a native carrier's field
                     // read widens its host scalar, so it is never borrowed raw.
-                    loop definition in jet_rust_emit_type_rows(ctx, owner) {
-                        if definition.id == owner && jet_rust_emit_has_native_type_projection(definition.key) -> return None
+                    if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
+                        if ctx.program.types[definition_index].id == owner && jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key) -> return None
                     }
                 }
                 .Payload(_, _) -> {}
@@ -612,7 +614,7 @@ fn jet_rust_emit_stable_local_read(ctx: JetRustEmitContext, function: MIRFunctio
     if ctx.body_index.function != (Val(function.id)) -> return false
     read_block :: ctx.body_index.definition_blocks.get(value.value) ?? return false
     read_position :: ctx.body_index.definition_positions.get(value.value) ?? return false
-    rooted := [Int:Bool]{}
+    rooted := [U64:Bool]{}
     loop row in function.places {
         if row.base == .Local(owner) {
             // The value records whether the place projects from the local.
@@ -621,7 +623,7 @@ fn jet_rust_emit_stable_local_read(ctx: JetRustEmitContext, function: MIRFunctio
     }
     // Two passes: a write borrow's definition may sit in a block listed
     // after one of its uses.
-    borrows := [Int:Bool]{}
+    borrows := [U64:Bool]{}
     written := [Int:Bool]{}
     first_write := -1
     loop _ in 0..<2 {
@@ -696,7 +698,7 @@ fn jet_rust_emit_stable_local_read(ctx: JetRustEmitContext, function: MIRFunctio
 // whether they project, and whose write borrows are `borrows`): 0 not at all,
 // 1 it may change or release it, 2 the local escapes place-based tracking (a
 // partial move, whose later reads go through partial-move slots).
-fn jet_rust_emit_local_touch(ctx: JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction, local: MIRLocalID, rooted: [Int:Bool], borrows: [Int:Bool]) -> Int Never! {
+fn jet_rust_emit_local_touch(ctx: JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction, local: MIRLocalID, rooted: [U64:Bool], borrows: [U64:Bool]) -> Int Never! {
     touched := false
     if instruction.operation == {
         .ReadPlace(place) -> {
@@ -750,7 +752,7 @@ fn jet_rust_emit_local_touch(ctx: JetRustEmitContext, function: MIRFunction, ins
     if touched -> 1 else -> 0
 }
 
-fn jet_rust_emit_args_write_local(args: [MIRCallArg], rooted: [Int:Bool]) -> Bool Never! {
+fn jet_rust_emit_args_write_local(args: [MIRCallArg], rooted: [U64:Bool]) -> Bool Never! {
     loop arg in args {
         if arg.access != MIRAccess.Read && arg.place == .Val(place) {
             if rooted.get(place.value) != None -> return true
@@ -780,11 +782,41 @@ fn jet_rust_emit_builtin_place_receiver(operation: MIROperation, value: MIRValue
     }
 }
 
+// A consumer that renders every use of `value` through
+// jet_rust_emit_borrowed_value_reference: an index base, and the receiver or
+// arguments a builtin route borrows (jet_rust_emit_builtin_method_values). Over a
+// `ReadPlace` that reference names the place itself, so the consumer never reads
+// the value slot (MIRRust borrowed_operation_use, direct_borrow_only).
+fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunction, operation: MIROperation, value: MIRValueID) -> Bool Never! {
+    if operation == {
+        .Index(_, base, index, _, access, _, _) -> return base == value && index != value && access != MIRAccess.Move
+        .Semantic(semantic) -> {
+            if semantic == {
+                .BuiltinMethod(call, receiver, receiver_place, args, _) -> {
+                    if receiver_place != None && receiver == value -> return false
+                    row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return false
+                    mask :: row.signature.borrow_mask
+                    if mask.len() != args.len() + 1 -> return false
+                    if receiver == value && !mask[0] -> return false
+                    loop (index, arg) in args {
+                        if arg != value -> next
+                        if !mask[index + 1] || jet_rust_emit_builtin_native_int_arg(row, index, true, jet_rust_emit_value_type(ctx, function, arg)) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+}
+
 // D-MEM-COPYSEM1: true when `value` reads a stable place and every consumer
 // only inspects it (variant tests, payload reads, comparisons of non-scalar
 // operands, a borrowing slice), so the copy is never emitted. A read or
-// address that only feeds builtin routes writing through the same place is
-// never emitted either (MIRRust direct_borrow_only).
+// address that only feeds consumers borrowing the place itself (builtin routes
+// writing through it, index bases, borrowed builtin operands) is never emitted
+// either (MIRRust direct_borrow_only).
 fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
     address := false
@@ -796,14 +828,27 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
         }
         else -> return false
     }
+    // A place projecting from the value's own slot reads that slot, so an
+    // instruction naming such a place is a use the value-use walk does not see.
+    slot_places := [U64:Bool]{}
+    loop row in function.places {
+        if row.base == .Temporary(base) {
+            if base == value -> _ := &slot_places.add(row.id.value, true)
+        }
+    }
     used := false
     place_receivers_only := true
     loop block in function.blocks {
         if mir_terminator_value_uses(block.terminator).contains(value) -> return false
         loop user in block.instructions {
+            if slot_places.len() > 0 {
+                loop place in mir_operation_place_uses(user.operation) {
+                    if slot_places.get(place.value) != None -> return false
+                }
+            }
             if !mir_operation_value_uses(user.operation).contains(value) -> next
             used = true
-            if jet_rust_emit_builtin_place_receiver(user.operation, value) -> next
+            if jet_rust_emit_builtin_place_receiver(user.operation, value) || jet_rust_emit_place_borrowing_use(&ctx, function, user.operation, value) -> next
             place_receivers_only = false
             inspects :: if user.operation == {
                 .EnumIs(subject, _, _) -> subject == value
@@ -1004,6 +1049,7 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MIRTy
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::partial_move_node
 fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MIRFunction, base: MIRPlaceBase, prefix: [MIRFieldID], owner: MIRTypeID, field: MIRField) -> String Never! {
     parent := jet_rust_emit_partial_node_type(function, base, prefix)
     if parent == None {
@@ -1016,11 +1062,10 @@ fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MIRFunct
     }
     generic_params := [MIRGenericParam]{}
     found_owner := false
-    loop definition in jet_rust_emit_type_rows(ctx, owner) {
-        if definition.id == owner {
-            generic_params = definition.generic_params
+    if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
+        if ctx.program.types[definition_index].id == owner {
+            generic_params = ctx.program.types[definition_index].generic_params
             found_owner = true
-            break
         }
     }
     if found_owner {
@@ -1298,12 +1343,13 @@ fn jet_rust_emit_partial_owner(ctx: &JetRustEmitContext, field: MIRFieldID) -> M
     None
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::boxed_field
 fn jet_rust_emit_partial_field_boxed(ctx: &JetRustEmitContext, owner: MIRTypeID, field: MIRFieldID) -> Bool Never! {
     field_name := ""
     loop row in jet_rust_emit_field_rows(ctx, field) { if row.id == field -> field_name = row.field.name }
-    loop definition in jet_rust_emit_type_rows(ctx, owner) {
-        if definition.id == owner {
-            loop edge in definition.boxed_edges {
+    if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
+        if ctx.program.types[definition_index].id == owner {
+            loop edge in ctx.program.types[definition_index].boxed_edges {
                 if edge == field_name || edge.ends_with(".{field_name}") -> return true
             }
         }
@@ -1312,12 +1358,13 @@ fn jet_rust_emit_partial_field_boxed(ctx: &JetRustEmitContext, owner: MIRTypeID,
 }
 
 // MIRRust boxed_field: the field's owner declaration boxes it as a recursive edge.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::boxed_field
 fn jet_rust_emit_field_boxed(ctx: &JetRustEmitContext, field: MIRFieldID) -> Bool Never! {
     loop row in jet_rust_emit_field_rows(ctx, field) {
         if row.id == field {
-            loop definition in jet_rust_emit_type_rows(ctx, row.owner) {
-                if definition.id == row.owner {
-                    loop edge in definition.boxed_edges { if edge == row.field.name -> return true }
+            if jet_rust_emit_type_index(ctx, row.owner) == .Val(definition_index) {
+                if ctx.program.types[definition_index].id == row.owner {
+                    loop edge in ctx.program.types[definition_index].boxed_edges { if edge == row.field.name -> return true }
                 }
             }
             return false
@@ -1442,6 +1489,7 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
 // exactly as the value-level field read does, including a payload projected
 // out of that slot (`limits.max_total_bytes` matched as `.Val(max)`). The
 // type to widen: the slot's declared type, or the projected payload's.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::native_host_field_type
 fn jet_rust_emit_native_place_int_type(ctx: &JetRustEmitContext, function: MIRFunction, id: MIRPlaceID) -> MIRType? {
     loop place in function.places {
         if place.id != id -> next
@@ -1457,8 +1505,8 @@ fn jet_rust_emit_native_place_int_type(ctx: &JetRustEmitContext, function: MIRFu
         if place.projections[index] == .Field(field, _) {
             loop row in jet_rust_emit_field_rows(ctx, field) {
                 if row.id != field -> next
-                loop definition in jet_rust_emit_type_rows(ctx, row.owner) {
-                    if definition.id == row.owner && jet_rust_emit_has_native_type_projection(definition.key) {
+                if jet_rust_emit_type_index(ctx, row.owner) == .Val(definition_index) {
+                    if ctx.program.types[definition_index].id == row.owner && jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key) {
                         if index == place.projections.len() - 1 -> return Val(row.field.ty)
                         return Val(place.ty)
                     }

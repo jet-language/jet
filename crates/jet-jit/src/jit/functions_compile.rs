@@ -5395,12 +5395,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 self.observe_live_place(builder, *place)?;
                 None
             }
-            MirOperation::Copy {
-                value,
-                materialize_view,
-            } => {
+            MirOperation::Copy { value, fact } => {
                 let ty = self.mir_value_type(*value)?;
-                if *materialize_view {
+                if *fact == jet_foundation::MIR::MirCopyFact::ViewMaterialize {
                     let target_ty = instruction
                         .result
                         .map(|result| self.mir_value_type(result))

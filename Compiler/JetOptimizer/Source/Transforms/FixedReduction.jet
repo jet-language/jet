@@ -462,9 +462,9 @@ fn mir_pass_fixed_reduction_rewrite(
     seed_fact :: mir_pass_find_value(function.values, fixed.seed) ?? return None
     if seed_fact.ownership.mode != .Copy || accumulator_read_value != reduction.seed || !mir_pass_fixed_reduction_body_supported(function, analysis, program.prelude_calls, induction_model, shape, reduction, addition_value_id, addition_instruction) -> return None
 
-    used_values := [Int]{}
-    used_operations := [Int]{}
-    used_places := [Int]{}
+    used_values := [U64]{}
+    used_operations := [U64]{}
+    used_places := [U64]{}
     loop value in function.values -> &used_values.push(value.id.value)
     loop block in function.blocks {
         loop instruction in block.instructions {
@@ -722,7 +722,7 @@ fn mir_pass_fixed_block_index(blocks: [MIRBasicBlock], target: MIRBlockID) -> In
     -1
 }
 
-fn mir_pass_fixed_reduction_new_id(used: &[Int], namespace: String, identity: String) -> Int Never! {
+fn mir_pass_fixed_reduction_new_id(used: &[U64], namespace: String, identity: String) -> U64 Never! {
     salt := 0
     loop {
         candidate :: stable_id(namespace, "{identity}:{salt}")
@@ -732,7 +732,7 @@ fn mir_pass_fixed_reduction_new_id(used: &[Int], namespace: String, identity: St
         }
         salt += 1
     }
-    0
+    U64{0}
 }
 
 fn mir_pass_fixed_reduction_projection(projection: MIRProjection, induction_values: [MIRValueID], lane: MIRValueID) -> MIRProjection Never! {
@@ -746,8 +746,8 @@ fn mir_pass_fixed_reduction_projection(projection: MIRProjection, induction_valu
 }
 
 fn mir_pass_fixed_reduction_add(
-    used_values: &[Int],
-    used_operations: &[Int],
+    used_values: &[U64],
+    used_operations: &[U64],
     value_facts: &[MIRValueFact],
     instructions: &[MIRInstruction],
     source_operations: &[MIROpID],

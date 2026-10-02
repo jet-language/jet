@@ -48,6 +48,40 @@ impl<T> JetPersistCell<T> {
         *self.guard() = Some(value);
     }
 }
+
+/// The value slot of a read of a folded aggregate constant: the constant is
+/// one per-thread value built once, so a read borrows it in place and only an
+/// owned use or a write copies it (a uniquely held value is moved, not
+/// copied). The slot keeps the `Option` slot API (`as_ref`, `as_mut`, `take`)
+/// its readers use.
+pub struct JetSharedSlot<T>(Option<std::rc::Rc<T>>);
+
+impl<T: Clone> JetSharedSlot<T> {
+    pub const fn empty() -> Self {
+        Self(None)
+    }
+
+    pub fn new(value: std::rc::Rc<T>) -> Self {
+        Self(Some(value))
+    }
+
+    pub fn as_ref(&self) -> Option<&T> {
+        self.0.as_deref()
+    }
+
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        self.0.as_mut().map(std::rc::Rc::make_mut)
+    }
+
+    pub fn take(&mut self) -> Option<T> {
+        self.0.take().map(std::rc::Rc::unwrap_or_clone)
+    }
+
+    /// Ends this read without copying the shared rows.
+    pub fn release(&mut self) {
+        self.0 = None;
+    }
+}
 impl JetShow for (String, jet_foundation::Numeric::JetInt) {
     fn jet_show(&self) -> String {
         jet_foundation::StructuralDebug::jet_debug_record(

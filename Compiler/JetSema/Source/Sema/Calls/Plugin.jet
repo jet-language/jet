@@ -18,6 +18,7 @@ use jet_foundation.[
     THandleOp,
     TTypeDef,
     Type,
+    tir_call_arg_copy_fact,
     type_name,
 ]
 
@@ -220,7 +221,7 @@ pub fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method
         loop index in 0..<typed.values.len() {
             if typed.slots[index] == slot {
                 value := typed.values[index]
-                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
+                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, value.span)
                 &values.push(value)
                 found = true
                 break

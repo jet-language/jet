@@ -156,11 +156,16 @@ struct FxBuilder {
     pub locals: [MIRLocal]
     pub places: [MIRPlace]
     pub params: [MIRParam]
-    pub next: Int
+    pub next: U64
 }
 
 fn fx_builder() -> FxBuilder Never! {
-    FxBuilder{values: [MIRValueFact]{}, blocks: [MIRBasicBlock]{}, current: [MIRInstruction]{}, locals: [MIRLocal]{}, places: [MIRPlace]{}, params: [MIRParam]{}, next: 0}
+    FxBuilder{values: [MIRValueFact]{}, blocks: [MIRBasicBlock]{}, current: [MIRInstruction]{}, locals: [MIRLocal]{}, places: [MIRPlace]{}, params: [MIRParam]{}, next: U64{0}}
+}
+
+// A dense fixture id word: `base` plus a row count.
+fn fx_word(base: U64, count: Int) -> U64 Never! {
+    base + (U64.from_int(count) ?? U64{0})
 }
 
 fn fx_value(b: &FxBuilder, ty: MIRType, ownership: MIROwnership, operation: MIROperation) -> MIRValueID Never! {
@@ -184,14 +189,14 @@ fn fx_do(b: &FxBuilder, operation: MIROperation) Never! {
     &b.current.push(MIRInstruction{id: MIROpID{value: b.next}, span: fx_span(), source_line: None, result: None, ty: None, operation: operation})
 }
 
-fn fx_block(b: &FxBuilder, id: Int, terminator: MIRTerminator) Never! {
+fn fx_block(b: &FxBuilder, id: U64, terminator: MIRTerminator) Never! {
     &b.blocks.push(MIRBasicBlock{id: MIRBlockID{value: id}, span: fx_span(), instructions: b.current, terminator: terminator})
     b.current = [MIRInstruction]{}
 }
 
 fn fx_local(b: &FxBuilder, name: String, ty: MIRType, ownership: MIROwnership) -> MIRPlaceID Never! {
-    local :: MIRLocalID{value: 300 + b.locals.len()}
-    place :: MIRPlaceID{value: 500 + b.places.len()}
+    local :: MIRLocalID{value: fx_word(U64{300}, b.locals.len())}
+    place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
     &b.locals.push(MIRLocal{id: local, name: name, span: fx_span(), ty: ty, place: place, mutable: true, ownership: ownership, is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
     &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: MIRPlaceBase.Local{local: local}, projections: [MIRProjection]{}, access: MIRAccess.Write, persist_key: None})
     place
@@ -203,7 +208,7 @@ fn fx_field_place(b: &FxBuilder, root: MIRPlaceID, field: String, ty: MIRType) -
     loop row in b.places {
         if row.id == root -> base = row.base
     }
-    place :: MIRPlaceID{value: 500 + b.places.len()}
+    place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
     &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: base, projections: [MIRProjection]{MIRProjection.Field{field: mir_field_id(field), span: fx_span()}}, access: MIRAccess.Read, persist_key: None})
     place
 }

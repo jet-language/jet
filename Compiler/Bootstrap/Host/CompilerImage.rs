@@ -7,12 +7,13 @@
 
 use crate::compiler_bootstrap_host::AuthorizedSourceSnapshot;
 use jet_foundation::MIR::{
-    MirAccess, MirArtifactId, MirArtifactTarget, MirExecutionIdentity, MirFunctionForm,
-    MirFunctionId, MirFunctionKind, MirOwnershipMode, MirProgram, MIR_SCHEMA_VERSION,
+    MirAccess, MirArtifactId, MirArtifactTarget, MirExecutionIdentity, MirFunction,
+    MirFunctionForm, MirFunctionId, MirFunctionKind, MirOwnershipMode, MirProgram,
+    MIR_SCHEMA_VERSION,
 };
 
-const MAGIC: &[u8; 8] = b"JETCIMG\0";
-const FORMAT_VERSION: u16 = 3;
+pub(crate) const MAGIC: &[u8; 8] = b"JETCIMG\0";
+pub(crate) const FORMAT_VERSION: u16 = 3;
 const CHECKSUM_BYTES: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,9 +35,18 @@ struct EncodedCompilerImageHeader {
     entry_function: MirFunctionId,
 }
 
-pub(crate) struct RestoredCompilerImage<SourceProgram> {
+/// Envelope fields read from the archive prefix without decoding the MIR
+/// payload: what callers that only select the compiler artifact or compare
+/// source authority need.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompilerImageEnvelope {
+    pub(crate) source_authority_digest: [u8; 32],
+    pub(crate) artifact: MirArtifactId,
+    pub(crate) entry_function: MirFunctionId,
+}
+
+pub(crate) struct RestoredCompilerImage {
     pub(crate) header: CompilerImageHeader,
-    pub(crate) source_program: SourceProgram,
     pub(crate) program: MirProgram,
 }
 
@@ -208,6 +218,39 @@ pub(crate) fn archive_compiler_image<SourceProgram>(
     encode_archive(&header, &payload)
 }
 
+/// Read the envelope of one private compiler image for the exact source
+/// authority, artifact, and checked factory root selected by the caller.
+///
+/// Only the fixed-size prefix is read: magic, format, MIR schema, artifact,
+/// entry, and source authority are checked exactly as
+/// `restore_compiler_image` checks them, so the returned fields equal the
+/// caller's expectations. The archive checksum, execution identity, and
+/// factory root are verified when the program itself is restored; no MIR is
+/// decoded or digested here.
+pub(crate) fn read_compiler_image_envelope(
+    bytes: &[u8],
+    expected_source_authority_digest: [u8; 32],
+    expected_artifact: MirArtifactId,
+    expected_entry_function: MirFunctionId,
+) -> Result<CompilerImageEnvelope, CompilerImageError> {
+    if bytes.len() < MAGIC.len() + 2 + 2 + 8 + 8 + 32 + 8 + 8 + CHECKSUM_BYTES {
+        return Err(CompilerImageError("truncated compiler-image archive".into()));
+    }
+    let mut reader = CompilerImageMetadataReader::new(bytes);
+    let raw_header = decode_envelope_prefix(&mut reader)?;
+    check_envelope(
+        &raw_header,
+        expected_source_authority_digest,
+        expected_artifact,
+        expected_entry_function,
+    )?;
+    Ok(CompilerImageEnvelope {
+        source_authority_digest: raw_header.source_authority_digest,
+        artifact: raw_header.artifact,
+        entry_function: raw_header.entry_function,
+    })
+}
+
 /// Restore one private compiler image for the exact source authority, artifact,
 /// and checked factory root selected by the caller.
 ///
@@ -215,15 +258,50 @@ pub(crate) fn archive_compiler_image<SourceProgram>(
 /// checked when it was archived, and its SHA-256 checksum covers every byte,
 /// so restore verifies the checksum (linear in the bytes) and the factory
 /// root, takes the program digest from the optimizer seal, and never
-/// re-verifies, re-encodes or re-digests the whole compiler program.
-pub(crate) fn restore_compiler_image<SourceProgram>(
+/// re-verifies, re-encodes or re-digests the whole compiler program. The
+/// Source-typed projection of the program is not built here: the one reader
+/// that needs it converts it for the duration of its use.
+pub(crate) fn restore_compiler_image(
     bytes: &[u8],
     expected_source_authority_digest: [u8; 32],
     expected_artifact: MirArtifactId,
     expected_entry_function: MirFunctionId,
-    native_to_source: impl FnOnce(&MirProgram) -> Result<SourceProgram, String>,
-) -> Result<RestoredCompilerImage<SourceProgram>, CompilerImageError> {
+) -> Result<RestoredCompilerImage, CompilerImageError> {
     let (raw_header, payload, identity_bytes) = decode_archive(bytes)?;
+    check_envelope(
+        &raw_header,
+        expected_source_authority_digest,
+        expected_artifact,
+        expected_entry_function,
+    )?;
+    let program =
+        jet_foundation::MIR::mir_program_from_image_bytes(payload).map_err(CompilerImageError)?;
+    check_factory_root(&program, expected_artifact, expected_entry_function)?;
+    let identity = program
+        .sealed_execution_identity(Some(expected_artifact))
+        .map_err(|error| CompilerImageError(format!("invalid compiler-image identity: {error}")))?;
+    if encode_identity(&identity)? != identity_bytes {
+        return Err(CompilerImageError(
+            "compiler-image execution identity does not match its MIR payload".into(),
+        ));
+    }
+    let header = CompilerImageHeader {
+        format_version: raw_header.format_version,
+        mir_schema_version: raw_header.mir_schema_version,
+        source_authority_digest: raw_header.source_authority_digest,
+        artifact: raw_header.artifact,
+        entry_function: raw_header.entry_function,
+        identity,
+    };
+    Ok(RestoredCompilerImage { header, program })
+}
+
+fn check_envelope(
+    raw_header: &EncodedCompilerImageHeader,
+    expected_source_authority_digest: [u8; 32],
+    expected_artifact: MirArtifactId,
+    expected_entry_function: MirFunctionId,
+) -> Result<(), CompilerImageError> {
     if raw_header.mir_schema_version != MIR_SCHEMA_VERSION {
         return Err(CompilerImageError(format!(
             "compiler-image MIR schema {} does not match current schema {}",
@@ -245,31 +323,94 @@ pub(crate) fn restore_compiler_image<SourceProgram>(
             "compiler-image entry function does not match the requested entry".into(),
         ));
     }
-    let program =
-        jet_foundation::MIR::mir_program_from_image_bytes(payload).map_err(CompilerImageError)?;
-    check_factory_root(&program, expected_artifact, expected_entry_function)?;
-    let identity = program
-        .sealed_execution_identity(Some(expected_artifact))
-        .map_err(|error| CompilerImageError(format!("invalid compiler-image identity: {error}")))?;
-    if encode_identity(&identity)? != identity_bytes {
-        return Err(CompilerImageError(
-            "compiler-image execution identity does not match its MIR payload".into(),
-        ));
+    Ok(())
+}
+
+/// The compiler program with every row and every function signature but no
+/// function bodies (blocks, locals, values, places, scopes and drops are
+/// empty). Host type-shape queries read only nominal, field, Core-owner and
+/// handle rows, so they answer identically on this projection, while its
+/// Source conversion skips the bodies that make up most of the program.
+pub(crate) fn compiler_image_signature_program(program: &MirProgram) -> MirProgram {
+    MirProgram {
+        cffi: program.cffi.clone(),
+        schema_version: program.schema_version,
+        package_identity: program.package_identity.clone(),
+        facts: program.facts.clone(),
+        names: program.names.clone(),
+        modules: program.modules.clone(),
+        imports: program.imports.clone(),
+        types: program.types.clone(),
+        traits: program.traits.clone(),
+        core_owners: program.core_owners.clone(),
+        impls: program.impls.clone(),
+        constants: program.constants.clone(),
+        fields: program.fields.clone(),
+        source_files: program.source_files.clone(),
+        functions: program.functions.iter().map(function_signature).collect(),
+        foreign: program.foreign.clone(),
+        links: program.links.clone(),
+        callbacks: program.callbacks.clone(),
+        handles: program.handles.clone(),
+        jobs: program.jobs.clone(),
+        tests: program.tests.clone(),
+        harnesses: program.harnesses.clone(),
+        artifacts: program.artifacts.clone(),
+        core_calls: program.core_calls.clone(),
+        prelude_calls: program.prelude_calls.clone(),
+        type_instances: program.type_instances.clone(),
+        codec_migrations: program.codec_migrations.clone(),
+        unreachable: program.unreachable.clone(),
     }
-    let source_program = native_to_source(&program).map_err(CompilerImageError)?;
-    let header = CompilerImageHeader {
-        format_version: raw_header.format_version,
-        mir_schema_version: raw_header.mir_schema_version,
-        source_authority_digest: raw_header.source_authority_digest,
-        artifact: raw_header.artifact,
-        entry_function: raw_header.entry_function,
-        identity,
-    };
-    Ok(RestoredCompilerImage {
-        header,
-        source_program,
-        program,
-    })
+}
+
+fn function_signature(function: &MirFunction) -> MirFunction {
+    MirFunction {
+        id: function.id,
+        module_id: function.module_id,
+        source_file: function.source_file,
+        key: function.key.clone(),
+        module: function.module.clone(),
+        name: function.name.clone(),
+        span: function.span.clone(),
+        kind: function.kind,
+        form: function.form.clone(),
+        visibility: function.visibility,
+        target_applicability: function.target_applicability.clone(),
+        web_bucket: function.web_bucket.clone(),
+        web_marker: function.web_marker.clone(),
+        generic_params: function.generic_params.clone(),
+        capture_params: function.capture_params.clone(),
+        params: function.params.clone(),
+        declared_return: function.declared_return.clone(),
+        return_type: function.return_type.clone(),
+        failure: function.failure.clone(),
+        effects: function.effects.clone(),
+        captures: function.captures.clone(),
+        generator: function.generator.clone(),
+        optimization: function.optimization.clone(),
+        is_unsafe: function.is_unsafe,
+        unsafe_gate: function.unsafe_gate.clone(),
+        is_pure: function.is_pure,
+        memo_bound: function.memo_bound,
+        is_reactive: function.is_reactive,
+        reactive_upgrades: function.reactive_upgrades.clone(),
+        is_inline: function.is_inline,
+        is_inline_always: function.is_inline_always,
+        is_scalar: function.is_scalar,
+        kernel_proof: function.kernel_proof.clone(),
+        gc_return: function.gc_return,
+        return_view_provenance: function.return_view_provenance.clone(),
+        web_param_reconstructions: function.web_param_reconstructions.clone(),
+        blocks: Vec::new(),
+        entry: function.entry,
+        locals: Vec::new(),
+        values: Vec::new(),
+        places: Vec::new(),
+        scopes: Vec::new(),
+        drops: Vec::new(),
+        foreign_language: function.foreign_language.clone(),
+    }
 }
 
 fn check_factory_root(
@@ -463,6 +604,24 @@ fn decode_archive(
         ));
     }
     let mut reader = CompilerImageMetadataReader::new(&bytes[..content_end]);
+    let header = decode_envelope_prefix(&mut reader)?;
+    let identity_len = reader.read_len().map_err(CompilerImageError)?;
+    let identity = reader
+        .read_raw(identity_len)
+        .map_err(CompilerImageError)?
+        .to_vec();
+    let payload_len = reader.read_len().map_err(CompilerImageError)?;
+    let payload = reader
+        .read_raw(payload_len)
+        .map_err(CompilerImageError)?;
+    reader.finish().map_err(CompilerImageError)?;
+    Ok((header, payload, identity))
+}
+
+/// Decode the fixed-size archive prefix (magic through source authority).
+fn decode_envelope_prefix(
+    reader: &mut CompilerImageMetadataReader<'_>,
+) -> Result<EncodedCompilerImageHeader, CompilerImageError> {
     if reader.read_raw(MAGIC.len()).map_err(CompilerImageError)? != MAGIC {
         return Err(CompilerImageError("invalid compiler-image magic".into()));
     }
@@ -485,27 +644,13 @@ fn decode_archive(
         .map_err(CompilerImageError)?
         .try_into()
         .map_err(|_| CompilerImageError("invalid compiler-image authority digest".into()))?;
-    let identity_len = reader.read_len().map_err(CompilerImageError)?;
-    let identity = reader
-        .read_raw(identity_len)
-        .map_err(CompilerImageError)?
-        .to_vec();
-    let payload_len = reader.read_len().map_err(CompilerImageError)?;
-    let payload = reader
-        .read_raw(payload_len)
-        .map_err(CompilerImageError)?;
-    reader.finish().map_err(CompilerImageError)?;
-    Ok((
-        EncodedCompilerImageHeader {
-            format_version,
-            mir_schema_version,
-            source_authority_digest,
-            artifact,
-            entry_function,
-        },
-        payload,
-        identity,
-    ))
+    Ok(EncodedCompilerImageHeader {
+        format_version,
+        mir_schema_version,
+        source_authority_digest,
+        artifact,
+        entry_function,
+    })
 }
 
 fn encode_identity(identity: &MirExecutionIdentity) -> Result<Vec<u8>, CompilerImageError> {

@@ -44,6 +44,7 @@ use jet_foundation.[
     mir_type_is_scalar,
     mir_type_layout,
     mir_type_same_checked_type,
+    core_enum_variants,
 ]
 
 fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
@@ -183,23 +184,24 @@ fn jet_rust_emit_c_abi_nominal_name(definition: MIRTypeDef, kind: String) -> Str
     jet_rust_emit_generated_path("__jet_c_abi_{kind}::{definition.key}")
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::c_abi_record_def
 fn jet_rust_emit_c_abi_record_definition(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
     if ty.kind == {
         .Apply(name, args) -> {
             if name.name == "Ptr" || args.len() != 0 -> return None
-            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
-                if definition.id == name.id {
-                    if definition.generic_params.len() != 0 || definition.layout == None -> return None
-                    layout :: definition.layout ?? return None
+            if jet_rust_emit_type_index(ctx, name.id) == .Val(definition_index) {
+                if ctx.program.types[definition_index].id == name.id {
+                    if ctx.program.types[definition_index].generic_params.len() != 0 || ctx.program.types[definition_index].layout == None -> return None
+                    layout :: ctx.program.types[definition_index].layout ?? return None
                     if layout == {
                         .C | .CAligned(_, _) -> {}
                         .Columnar -> return None
                     }
-                    if definition.kind == {
+                    if ctx.program.types[definition_index].kind == {
                         .Struct(fields, _) -> {
                             physical_field := false
                             loop field in fields { if !field.computed -> physical_field = true }
-                            if physical_field -> return Val(definition)
+                            if physical_field -> return Val(ctx.program.types[definition_index])
                         }
                         else -> {}
                     }
@@ -212,21 +214,21 @@ fn jet_rust_emit_c_abi_record_definition(ctx: &JetRustEmitContext, ty: MIRType) 
     None
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::c_abi_enum_def
 fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
     if ty.kind == {
         .Apply(name, args) -> {
             if args.len() != 0 -> return None
-            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
-                if definition.id != name.id -> next
-                if definition.generic_params.len() != 0 || definition.c_layout_tag == None || definition.enum_layout == None -> return None
-                if definition.layout == None -> return None
-                layout :: definition.layout ?? return None
+            if jet_rust_emit_type_index(ctx, name.id) == .Val(definition_index) {
+                if ctx.program.types[definition_index].generic_params.len() != 0 || ctx.program.types[definition_index].c_layout_tag == None || ctx.program.types[definition_index].enum_layout == None -> return None
+                if ctx.program.types[definition_index].layout == None -> return None
+                layout :: ctx.program.types[definition_index].layout ?? return None
                 if layout != MIRStructLayout.C -> return None
-                if definition.kind == {
+                if ctx.program.types[definition_index].kind == {
                     .Enum(variants, _) -> {
                         if variants.len() == 0 -> return None
-                        enum_tag :: definition.c_layout_tag ?? return None
-                        facts :: definition.enum_layout ?? return None
+                        enum_tag :: ctx.program.types[definition_index].c_layout_tag ?? return None
+                        facts :: ctx.program.types[definition_index].enum_layout ?? return None
                         if facts.bytes == None || facts.fields.len() != variants.len() -> return None
                         bytes :: facts.bytes ?? ByteLayout{size: 0, alignment: 0, stride: 0}
                         if bytes.size <= 0 || bytes.alignment <= 0 || bytes.stride != bytes.size -> return None
@@ -267,7 +269,7 @@ fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) ->
                             bytes.size <= payload_offset -> return None
                             else -> {}
                         }
-                        return Val(definition)
+                        return Val(ctx.program.types[definition_index])
                     }
                     else -> return None
                 }
@@ -540,19 +542,20 @@ fn jet_rust_emit_send_function_type(ctx: &JetRustEmitContext, params: [MIRType],
     "std::sync::Arc<dyn Fn({rendered.join(", ")}) -> {result} + Send + Sync + 'static>"
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::generic_params_for_type
 fn jet_rust_emit_type_application_generic_params(ctx: &JetRustEmitContext, source: MIRType) -> [MIRGenericParam] Never! {
     if source.kind == {
         .Apply(name, args) -> {
-            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
-                if definition.id == name.id {
-                    if definition.generic_params.len() != args.len() -> return [MIRGenericParam]{}
+            if jet_rust_emit_type_index(ctx, name.id) == .Val(definition_index) {
+                if ctx.program.types[definition_index].id == name.id {
+                    if ctx.program.types[definition_index].generic_params.len() != args.len() -> return [MIRGenericParam]{}
                     parameters := [MIRGenericParam]{}
                     index := 0
                     loop index < args.len() {
                         if args[index].kind == {
                             .Apply(argument_name, argument_args) -> {
                                 if argument_args.len() == 0 && !argument_name.name.contains("::") {
-                                    declared := definition.generic_params[index]
+                                    declared := ctx.program.types[definition_index].generic_params[index]
                                     parameters = jet_rust_emit_merge_generic_params(parameters, [MIRGenericParam]{MIRGenericParam{name: argument_name.name, bounds: declared.bounds}})
                                 }
                             }
@@ -990,6 +993,7 @@ fn jet_rust_emit_handle_for_definition(ctx: &JetRustEmitContext, definition: MIR
     None
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_handle_type
 fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycle, lines: &[String]) Never! {
     if handle.payload.library == "core.process" -> return
     name :: jet_rust_emit_type(&ctx, handle.ty)
@@ -1019,8 +1023,8 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
     }
     close_function := MIRFunctionID?{None}
     if handle.close == .Val(candidate) {
-        loop function in jet_rust_emit_function_rows(ctx, candidate) {
-            if function.id == candidate && jet_rust_emit_function_target_enabled(ctx.config, function) -> close_function = Val(candidate)
+        if jet_rust_emit_function_index(ctx, candidate) == .Val(function_index) {
+            if ctx.program.functions[function_index].id == candidate && jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_index]) -> close_function = Val(candidate)
         }
     }
     if close_foreign == None && close_function == None -> return
@@ -1033,8 +1037,8 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
         close_function != None -> {
         close := jet_rust_emit_function_name(&ctx, close_function_id)
         needs_unsafe := false
-        loop function in jet_rust_emit_function_rows(ctx, close_function_id) {
-            if function.id == close_function_id -> needs_unsafe = function.is_unsafe
+        if jet_rust_emit_function_index(ctx, close_function_id) == .Val(function_index) {
+            if ctx.program.functions[function_index].id == close_function_id -> needs_unsafe = ctx.program.functions[function_index].is_unsafe
         }
         &lines.push("            let __jet_handle = {name}::from_raw(__jet_raw as *mut core::ffi::c_void);")
         if {
@@ -1067,6 +1071,7 @@ fn jet_rust_emit_derived_impl_matches_type(implementation: MIRImplDef, definitio
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::validate_derived_trait
 fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MIRTypeDef, trait_id: MIRTraitID, trait_name: String) Never! {
     trait_definition := MIRTraitDef?{None}
     trait_key := ""
@@ -1105,8 +1110,8 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
         if method.default != None -> next
         implemented := false
         loop function_id in impl_row.methods {
-            loop function in jet_rust_emit_function_rows(ctx, function_id) {
-                if function.id == function_id && function.name == method.name -> implemented = true
+            if jet_rust_emit_function_index(ctx, function_id) == .Val(function_index) {
+                if ctx.program.functions[function_index].id == function_id && ctx.program.functions[function_index].name == method.name -> implemented = true
             }
         }
         if !implemented -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derived implementation omits a required method", method.name, Val(impl_row.span))
@@ -1271,10 +1276,52 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
     &lines.push("}}")
 }
 
-// MIRRust runtime_declares_type: compiler builtins and handles are declared once
-// by the cached runtime, never per program.
+// tir_to_mir_types COMPILER_OWNED_ENUMS / COMPILER_OWNED_CORE_RECORDS /
+// COMPILER_OWNED_MATH_RECORDS / COMPILER_OWNED_GEOMETRY_RECORDS: the leaves
+// whose rows the cached runtime or Prelude declares once.
+JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
+    "Overflow", "FailurePolicy", "HookPolicy", "HookOutcome", "HookDecision", "DispatchState", "Ordering", "RemoveBy", "TaskFailure", "TaskOutcome",
+    "TaskStatus", "DeliveryState", "IOError", "Key", "IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode", "DurationUnit", "FontStyle",
+    "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataTree", "DataEvent",
+    "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDnsError", "NetError",
+    "NetShutdown", "WatchDomain", "WatchKind", "NetReadyInterest", "WsError",
+} }
+JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
+    "IOContext", "NetErrorDetail", "AsyncPolicy", "CSVRow", "DataLineOptions", "DataLimits", "DataSourceIdentity", "DataAuthority", "DataError", "EncodingCause",
+    "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "Claims", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
+    "WebTablePage", "WebVirtualPlan", "MemoStats", "GameScene", "GameFrame", "GameAssets", "GameInputMap", "GameInputSnapshot", "GameBackend", "GameReplay",
+    "GameImage", "GameSound", "TestSuite", "TestComparison", "ProcessReceipt", "ProcessPlan", "ProcessChild", "TerminalSize", "TerminalPolicy", "Address",
+    "Message", "Attachment", "RecipientReport", "SendReport", "Limits", "Mailer", "Envelope", "DKIMConfig", "SMTPConfig", "XMLCanonical",
+    "Size", "UINode", "JSONWriter", "JSONReader", "JSONLWriter", "JSONLReader", "DirEntry", "WalkEntry", "TempDir", "TempFile",
+    "FileLock", "WatchEvent", "Stat", "DataColumn", "DataStatus", "FontFace", "Glyph", "GlyphRun", "UIFileFilter", "UIFSGrant",
+    "UIGrantedPath", "UIFileDialogRequest", "UIFileDialogSelection", "UIClipboardText", "UIClipboardWrite", "UITextRange", "UIIMEComposition", "UIIMEEvent", "UIDragEvent", "UIShortcut",
+    "UIShortcutBinding", "UIAccessibility", "TypeInfo", "LayoutInfo", "LayoutField", "MarkerInfo", "MarkerArgInfo", "StateInfo", "StateRef", "TransitionInfo",
+    "FactInfo", "FactValue", "MeasureInfo", "ExactnessInfo", "LayoutFact", "ClassificationInfo", "NominalInfo", "ObligationParamInfo", "ObligationInfo", "SendabilityInfo",
+    "MovednessInfo", "ViewProvenanceInfo", "AttributionInfo", "OriginInfo", "UnitScaleProvenanceInfo", "MaturityInfo", "DimensionInfo", "DimensionAxis", "FunctionInfo", "ArithmeticOperationInfo",
+    "PackageInfo", "EffectInfo", "MethodInfo", "FieldInfo", "TypeParamInfo", "SourceSpan", "TLSPeerIdentity", "TLSCertificate", "ModGrant",
+    "F32x4", "F64x2", "Vec2", "Vec3", "Vec4",
+    "Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint", "ScreenDelta", "WorldDelta", "ViewDelta",
+    "CameraDelta", "DeviceDelta", "Ray2", "Transform", "Transform2",
+    "Measurement", "Err", "VJPRun", "Group", "DataJoin", "DataSnapshot", "DataPivotCell", "DataSummary", "FieldError", "AllocError",
+    "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "Range",
+} }
+
+// tir_to_mir_types is_compiler_owned_type: a registered compiler-owned enum or
+// Core runtime record/carrier, classified by its Core source leaf.
+fn jet_rust_emit_compiler_owned_type(key: String) -> Bool Never! {
+    leaf :: jet_rust_emit_core_source_type_leaf(key)
+    if JET_RUST_EMIT_COMPILER_OWNED_ENUMS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_RECORDS.contains(leaf) -> return true
+    if core_enum_variants(leaf) != None && (!key.starts_with("<corelib>/") || jet_rust_emit_core_rust_type_name(key) != None) -> return true
+    if jet_rust_emit_core_email_type_name(leaf) != None || jet_rust_emit_core_crypto_rust_type_name(leaf) != None -> return true
+    if (jet_rust_emit_core_rust_type_name(leaf) ?? "") == "JetMappedFile" -> return true
+    key.starts_with("<corelib>/Core/files::Core/files/files.jet::") && (leaf == "FileReader" || leaf == "FileWriter" || leaf == "FileScope")
+}
+
+// MIRRust runtime_declares_type: handles and compiler-owned rows (`Ordering`,
+// default `Err`, Core runtime records) are declared once by the cached
+// runtime, never per program.
 fn jet_rust_emit_runtime_declares_type(ctx: &JetRustEmitContext, definition: MIRTypeDef) -> Bool Never! {
-    definition.compiler_builtin != None || jet_rust_emit_handle_for_definition(&ctx, definition) != None
+    definition.compiler_builtin != None || jet_rust_emit_handle_for_definition(&ctx, definition) != None || jet_rust_emit_compiler_owned_type(definition.key)
 }
 
 // MIRRust declares_type_def: type rows whose Rust declaration this artifact
@@ -1415,14 +1462,15 @@ fn jet_rust_emit_named_field(ctx: &JetRustEmitContext, owner: String, raw: Strin
     "__jet_missing_field_{jet_rust_emit_sanitize(raw)}"
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::shape_name_map
 fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MIRType, projection: String, member: String) -> String Never! {
     identity :: target.identity ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR shape adapter target has no canonical type identity", "checked shape adapters must retain the target struct identity", None)
         return "&[]"
     }
-    loop definition in jet_rust_emit_type_rows(ctx, identity) {
-        if definition.id == identity {
-            if definition.kind == {
+    if jet_rust_emit_type_index(ctx, identity) == .Val(definition_index) {
+        if ctx.program.types[definition_index].id == identity {
+            if ctx.program.types[definition_index].kind == {
                 .Struct(fields, _) -> {
                     pairs := [String]{}
                     loop field in fields {

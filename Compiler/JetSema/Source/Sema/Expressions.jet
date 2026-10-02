@@ -17,6 +17,7 @@ use jet_foundation.[
     Func,
     IntegerWidth,
     Measure,
+    MIRCopyFact,
     OperatorMarker,
     ParamZone,
     QuantityKind,
@@ -490,19 +491,42 @@ fn sema_expr_operator_rhs_matches(rhs: Type?, expected: Type) -> Bool Never! {
     type_identity_equal(rhs, expected)
 }
 
+fn sema_expr_operator_row_name(name: String) -> String Never! {
+    parts :: name.split("::").to_list()
+    parts[parts.len() - 1]
+}
+
 fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, receiver_type: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [SemaExprOperatorResolution] Never! {
     candidates := [SemaExprOperatorResolution]{}
-    receiver_name :: sema_expr_type_base_name(receiver_type) ?? return candidates
+    receiver_name := sema_expr_type_base_name(receiver_type) ?? ""
+    if receiver_name == "" {
+        // D-OPMIX1: a built-in scalar receiver reaches its `impl Int.Mul(Price)`
+        // hooks through the impl rows registered under the scalar's name.
+        scalar_name :: type_name(receiver_type)
+        if sema_registration_builtin_scalar(scalar_name) != (Val(receiver_type)) -> return candidates
+        receiver_name = scalar_name
+    }
     caller_module := environment.module_identity
     if scopes.frames.len() > 0 -> caller_module = scopes.frames[0].owner
     caller_package := environment.package_identity
     // Only the nominals and impls registered under the receiver's base name,
     // in the module/row order of the whole-graph scans these rows replace.
+    // The rows are keyed by the declared spelling (`Vec2`); a resolved
+    // receiver carries its canonical identity (`module::Vec2`), so the row key
+    // is the canonical leaf. Owner inference below still checks the identity.
+    receiver_canonical :: receiver_name.contains("::")
+    receiver_name = sema_expr_operator_row_name(receiver_name)
     nominal_rows :: graph.nominal_rows.get(receiver_name) ?? [SemaRegistrationRowRef]{}
     loop nominal_row in nominal_rows {
         module_index :: nominal_row.module_index
         nominal :: graph.modules[module_index].nominals[nominal_row.row]
-        owner_inference :: sema_infer_registered_nominal(nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
+        // A resolved receiver carries the canonical identity (`module::Vec2`)
+        // while the registered row keeps the declared spelling; infer such a
+        // receiver against the declaration resolved in its own module.
+        owner_module :: graph.modules[module_index].module_identity
+        inference_nominal := nominal
+        if receiver_canonical -> inference_nominal.ty = sema_type_resolve_declared(graph, nominal.ty, owner_module)
+        owner_inference :: sema_infer_registered_nominal(inference_nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
         if !owner_inference.complete || !owner_inference.compatible -> next
         owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
         loop implementation in graph.modules[module_index].impls {
@@ -536,7 +560,9 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                         loop block in definition.trait_impls {
                             if block.trait_name != trait_name -> next
                             if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-                            block_rhs := block.operator_rhs ?? owner_type
+                            // The authored right-hand type resolves in the owner's
+                            // module, like the impl rows below.
+                            block_rhs := sema_type_resolve_declared(graph, block.operator_rhs ?? nominal.ty, owner_module)
                             block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
                             if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
                             trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
@@ -565,7 +591,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                         loop block in definition.trait_impls {
                             if block.trait_name != trait_name -> next
                             if require_commutative && block.operator_marker != (Val(OperatorMarker.Commutative)) -> next
-                            block_rhs := block.operator_rhs ?? owner_type
+                            block_rhs := sema_type_resolve_declared(graph, block.operator_rhs ?? nominal.ty, owner_module)
                             block_rhs = sema_inference_substitute_type_bindings(block_rhs, owner_inference.substitutions)
                             if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) -> next
                             trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
@@ -603,7 +629,12 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
         if implementation.trait_name != (Val(trait_name)) -> next
         if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> next
         owner_type := implementation.target_type
-        implementation_rhs := implementation.operator_rhs ?? owner_type
+        // The leaf row key admits same-named owners of other modules; only an
+        // impl whose resolved target is the receiver's own type applies.
+        if sema_expr_type_base_name(sema_type_resolve_declared(graph, owner_type, implementation.source_module_identity)) != sema_expr_type_base_name(sema_type_resolve_declared(graph, receiver_type, caller_module)) -> next
+        // The authored right-hand type resolves in the impl's module, like the
+        // canonical operand type it is matched against (D-OPMIX1 `Int.Mul(Price)`).
+        implementation_rhs := sema_type_resolve_declared(graph, implementation.operator_rhs ?? owner_type, implementation.source_module_identity)
         if !sema_expr_operator_rhs_matches(Val(implementation_rhs), rhs_type) -> next
         trait_symbol := implementation.trait_symbol
         if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
@@ -1279,7 +1310,7 @@ fn sema_expr_distinct_facts(ty: Type, environment: SemaScopeEnvironment, scopes:
         .Named(value) -> name = value
         else -> return None
     }
-    owner := sema_expression_type_symbol(&scopes, name) ?? return None
+    owner := sema_expression_type_symbol(&scopes, environment, name) ?? return None
     declaration := sema_scope_resolve_declaration(environment, owner.id) ?? return None
     definition := DistinctDef?{None}
     if declaration == {
@@ -1985,6 +2016,17 @@ fn sema_expr_call_callee(value: TExpr) -> SymbolID? {
     if value.kind == {
         .Call(symbol, _, _) -> return Val(symbol)
         .MethodCall(_, method, _, _) -> return Val(method.symbol)
+        // A call behind its generated argument pins keeps its callee.
+        .InlineBlock(body) -> {
+            if body.len() == 0 -> return None
+            loop index in 0..<body.len() - 1 {
+                if body[index] == .Let(local, _, _, _, _, _) && local.generated -> next
+                if body[index] == .Contract(_) -> next
+                return None
+            }
+            if body[body.len() - 1] == .ExprStmt(tail, _) -> return sema_expr_call_callee(tail)
+            return None
+        }
         else -> None
     }
 }
@@ -2194,6 +2236,16 @@ fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver
     false
 }
 
+// Rust `funcs.get(name)`: some declared function (local or imported) has
+// this name in any frame, even when a nearer binding shadows it.
+fn sema_expr_declared_function_named(scopes: SemaScopeTable, name: String) -> Bool Never! {
+    slot :: scopes.name_slots.get(name) ?? return false
+    loop index in scopes.name_positions[slot] {
+        if scopes.bindings[index].symbol.kind == SymbolKind.Function -> return true
+    }
+    false
+}
+
 fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_expression_zip_family_name(call.name) && sema_scope_resolve_index(scopes, call.name) == None {
         return sema_expression_zip_free_call(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2208,6 +2260,18 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     if special.handled -> return special.value
     ambient := sema_call_try_ambient_prelude(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if ambient.handled -> return ambient.value
+    // Rust `infer_call` callable-binding route (`direct_calls.rs`): only when
+    // no declared function has the name (`funcs.get(name).is_none()`), a
+    // parameter or local whose type is a function is called as a value.
+    callable_index := sema_scope_resolve_index(scopes, call.name)
+    if callable_index == .Val(index) && !sema_expr_declared_function_named(scopes, call.name) {
+        callable :: scopes.bindings[index].symbol
+        if callable.kind != SymbolKind.Function && callable.ty == .Val(callable_ty) && sema_call_type_is_function(callable_ty) {
+            value_end := call.name_span.end
+            if call.args.len() > 0 -> value_end = expr_span(call.args[call.args.len() - 1].expr).end
+            return sema_expr_check_indirect_call(Expr.Ident{name: call.name, span: call.name_span}, call.args, Span{start: call.name_span.start, end: value_end}, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+    }
     if sema_call_default_err_candidate(call, expected, scopes) {
         scopes.ownership_call_depth += 1
         checked_default := sema_call_check_default_err(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2504,7 +2568,10 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
     }
 
     owner :: if receiver == {.Ident(name, _) -> name else -> ""}
-    if owner != "" && sema_expr_canonical_type_binding(owner, scopes) {
+    // Rust `core_type_known`: a prelude core type (`Reader`, `DataTree`, …)
+    // needs no `use`, so an unbound owner reaches the reserved constructors
+    // too; each route matches only its own owner names.
+    if owner != "" && (sema_scope_resolve_index(scopes, owner) == None || sema_expr_canonical_type_binding(owner, scopes)) {
         stream := sema_call_try_stream_handle_static(owner, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if stream.handled -> return stream
         time := sema_call_try_time_static_method(owner, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2673,6 +2740,21 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     context.allow_string_view_read = previous_string_view_read
     scopes.ownership_call_depth -= 1
     receiver_value :: receiver_checked ?? return None
+    // D-CALLVALUE1=B: `.call(...)` on a function-typed receiver is the builtin
+    // call projection, checked exactly like calling the value directly
+    // (mirrors Rust CheckerInfer/calls/method_calls.rs METHOD_CALL on Type::Fn).
+    receiver_signature :: sema_call_resolved_type(receiver_value.ty, environment)
+    if method == "call" && sema_call_type_is_function(receiver_signature) {
+        call_end := method_span.end
+        if args.len() > 0 -> call_end = expr_span(args[args.len() - 1].expr).end
+        scopes.ownership_call_depth += 1
+        projected := sema_call_value_checked_from_type(&state, receiver, receiver_value, receiver_signature, args, Span{start: expr_span(receiver).start, end: call_end}, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, &diagnostics)
+        scopes.ownership_call_depth -= 1
+        projected_value :: projected ?? return None
+        &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: projected_value.return_view_facts})
+        if !sema_expr_record_call_fact(environment, &scopes, &context, method_span, projected_value, &diagnostics) -> return None
+        return Val(projected_value.value)
+    }
     take_pattern := sema_expr_check_take_pattern_method(receiver, receiver_value, method, args, method_span, expected, environment, &scopes, &state, &diagnostics)
     if take_pattern.handled -> return take_pattern.value
     zip := sema_expression_zip_method(receiver, receiver_value, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3111,7 +3193,7 @@ pub fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, e
     if sema_copy_memory_operation(facts) != None && effect_name == None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     result_kind := TExprKind.ExplicitCopy{value: checked}
     if facts.lowering == {
-        .Clone -> result_kind = TExprKind.Clone{value: checked}
+        .Clone -> result_kind = TExprKind.Clone{value: checked, fact: MIRCopyFact.Explicit}
         .MaterializeView -> result_kind = TExprKind.MaterializeView{value: checked}
         else -> {}
     }

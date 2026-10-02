@@ -12,7 +12,6 @@ use jet_foundation.[
     MIRPanicLoc,
     MIRPhiIncoming,
     MIRPlaceID,
-    MIRPreludeCallID,
     MIRSourceFile,
     MIRTerminator,
     MIRType,
@@ -72,43 +71,29 @@ fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MIRFun
     MIRPanicLoc{file: function.source_file, line: line, column: 0}
 }
 
+// Rust: none (Jet-only pass)
 fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
-    used_as_ratio := false
-    loop block in function.blocks {
-        loop instruction in block.instructions {
-            if instruction.operation == {
-                .Convert(_, parameters, _, conversion) -> {
-                    call :: if conversion == {
-                        .Prelude(route, _, _) -> Val(route)
-                        else -> MIRPreludeCallID?{None}
-                    }
-                    if call == .Val(route_id) {
-                        route_member := ""
-                        loop route in ctx.program.prelude_calls {
-                            if route.id == route_id -> route_member = route.member
-                        }
-                        if route_member.starts_with("conversion_") {
-                            loop (index, parameter) in parameters {
-                                if index < 4 && parameter == value -> used_as_ratio = true
-                            }
-                        }
-                    }
-                }
-                else -> {}
-            }
-            if mir_operation_value_uses(instruction.operation).contains(value) {
-                allowed := false
+    if ctx.unit_ratio_function != Val(function.id) {
+        allowed_at := [U64:Int]{}
+        candidate_values := [MIRValueID]{}
+        blocked := [U64:Bool]{}
+        ordinal := 0
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                // A value in the first four parameters is allowed even when
+                // another operand of this same instruction repeats that value.
                 if instruction.operation == {
                     .Convert(_, parameters, _, conversion) -> {
                         if conversion == {
                             .Prelude(call, _, _) -> {
-                                route_member := ""
-                                loop route in ctx.program.prelude_calls {
-                                    if route.id == call -> route_member = route.member
-                                }
-                                if route_member.starts_with("conversion_") {
-                                    loop index in 0..<parameters.len() {
-                                        if index < 4 && parameters[index] == value -> allowed = true
+                                if ctx.prelude_call_last.get(jet_rust_emit_id_key(call.value)) == .Val(position) {
+                                    if ctx.program.prelude_calls[position].member.starts_with("conversion_") {
+                                        loop index in 0..<parameters.len() {
+                                            if index >= 4 -> break
+                                            parameter :: parameters[index]
+                                            if allowed_at.get(parameter.value) == None -> &candidate_values.push(parameter)
+                                            &allowed_at.add(parameter.value, ordinal).drop("the latest allowed instruction replaces the prior one")
+                                        }
                                     }
                                 }
                             }
@@ -117,11 +102,20 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MIR
                     }
                     else -> {}
                 }
-                if !allowed -> return false
+                loop used in mir_operation_value_uses(instruction.operation) {
+                    if allowed_at.get(used.value) != Val(ordinal) -> &blocked.add(used.value, true).drop("disallowed uses are idempotent")
+                }
+                ordinal += 1
             }
         }
+        ratio_parameters := [U64:Bool]{}
+        loop candidate in candidate_values {
+            if blocked.get(candidate.value) == None -> &ratio_parameters.add(candidate.value, true).drop("candidate values are unique")
+        }
+        ctx.unit_ratio_parameters = ratio_parameters
+        ctx.unit_ratio_function = Val(function.id)
     }
-    used_as_ratio
+    ctx.unit_ratio_parameters.get(value.value) ?? false
 }
 
 fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction) -> [String] Never! {
@@ -154,6 +148,16 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
             &lines.push("{jet_rust_emit_place_write(&ctx, function, place, transferred)};")
             if jet_rust_emit_persist_value_update(&ctx, function, place) == .Val(update) -> &lines.push("{update};")
             return lines
+        }
+        // MIRRust: a read of a shared constant holds the shared value; its
+        // readers borrow it in place (`JetSharedSlot`).
+        .Global(name) -> {
+            if instruction.result == .Val(value) {
+                if jet_rust_emit_shared_constant_accessor(&ctx, name) == .Val(accessor) {
+                    &lines.push("{jet_rust_emit_value_slot(value)} = {accessor};")
+                    return lines
+                }
+            }
         }
         .InitializeUninit(place) -> {
             loop row in function.places {
@@ -200,10 +204,10 @@ struct JetRustEmitCFGPlan {
     pub structured: Bool
     pub phis: Bool
     // Block id value -> true when the block's phi reads the predecessor.
-    pub phi_targets: [Int:Bool]
+    pub phi_targets: [U64:Bool]
     pub entry: Int
     // MIR block id value -> position in `function.blocks`.
-    pub positions: [Int:Int]
+    pub positions: [U64:Int]
     // Reverse postorder number per position; -1 for an unreachable block.
     pub order: [Int]
     pub headers: [Bool]
@@ -276,8 +280,8 @@ fn jet_rust_emit_phi_is_trivial(incoming: [MIRPhiIncoming]) -> Bool Never! {
     incoming.len() > 0
 }
 
-fn jet_rust_emit_phi_targets(function: MIRFunction) -> [Int:Bool] Never! {
-    targets := [Int:Bool]{}
+fn jet_rust_emit_phi_targets(function: MIRFunction) -> [U64:Bool] Never! {
+    targets := [U64:Bool]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.operation == {
@@ -292,7 +296,7 @@ fn jet_rust_emit_phi_targets(function: MIRFunction) -> [Int:Bool] Never! {
 }
 
 fn jet_rust_emit_cfg_plan(function: MIRFunction) -> JetRustEmitCFGPlan Never! {
-    positions := [Int:Int]{}
+    positions := [U64:Int]{}
     loop (position, block) in function.blocks -> &positions.add(block.id.value, position).drop("checked MIR block ids are unique")
     entry :: positions.get(function.entry.value) ?? -1
     states :: jet_rust_emit_debug_only_block_states(function)
@@ -506,8 +510,8 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MIRFunction, mo
     if handle.close == .Val(close_id) {
         close :: jet_rust_emit_function_name(&ctx, close_id)
         needs_unsafe := false
-        loop candidate in jet_rust_emit_function_rows(ctx, close_id) {
-            if candidate.id == close_id -> needs_unsafe = candidate.is_unsafe
+        if jet_rust_emit_function_index(ctx, close_id) == .Val(candidate_index) {
+            if ctx.program.functions[candidate_index].id == close_id -> needs_unsafe = ctx.program.functions[candidate_index].is_unsafe
         }
         call :: if needs_unsafe -> "unsafe {{ {close}(__jet_handle) }}" else -> "{close}(__jet_handle)"
         return "{{ let __jet_handle = {moved}; let _ = {call}; () }}"
@@ -659,8 +663,8 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
     }
 }
 
-fn jet_rust_emit_debug_only_block_states(function: MIRFunction) -> [Int:Bool] Never! {
-    states := [Int:Bool]{}
+fn jet_rust_emit_debug_only_block_states(function: MIRFunction) -> [U64:Bool] Never! {
+    states := [U64:Bool]{}
     &states.add(function.entry.value, false).drop("the entry block starts outside debug-only scopes")
     pending := [MIRBlockID]{function.entry}
     loop pending.len() > 0 {

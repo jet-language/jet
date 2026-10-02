@@ -657,7 +657,7 @@ fn regex_find_all_counts_chain_preserves_receiver_result() {
         .expect("counts binding should lower as a let");
     fn strip_ownership(expr: &TExpr) -> &TExpr {
         match &expr.kind {
-            TExprKind::Clone(inner)
+            TExprKind::Clone(inner, _)
             | TExprKind::ExplicitCopy(inner)
             | TExprKind::MaterializeView(inner) => strip_ownership(inner),
             _ => expr,
@@ -1755,6 +1755,143 @@ fn mir_lowers_default_err_return() {
         );
         super::lower_checked_mir_program_for(&bundle, request)
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
+    });
+}
+/// #4318 §4: lower `src`, returning per-function loop-cursor counts and the
+/// `.clone()` count of the emitted Rust (runtime and types left out).
+fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
+    let bundle = checked_bundle(src);
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+    );
+    let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, request)
+        .unwrap_or_else(|err| panic!("stable loop probe failed to lower: {err:?}"));
+    mir.validate()
+        .unwrap_or_else(|err| panic!("stable loop probe failed validation: {err}"));
+    let cursors = mir
+        .functions
+        .iter()
+        .map(|function| {
+            let count = function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .filter(|instruction| {
+                    matches!(
+                        instruction.operation,
+                        jet_foundation::MIR::MirOperation::LoopIterInit { .. }
+                    )
+                })
+                .count();
+            (function.name.clone(), count)
+        })
+        .collect();
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.emit_types = false;
+    execution.emit_runtime = false;
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution,
+        },
+    );
+    (cursors, non_scalar_clone_count(&rust))
+}
+
+/// `.clone()` calls in emitted Rust whose receiver is not a scalar: index
+/// arithmetic clones `JetInt` values and bools, which are not the copies a
+/// loop-source probe measures (the list snapshot).
+fn non_scalar_clone_count(rust: &str) -> usize {
+    let mut scalars = std::collections::HashSet::new();
+    for line in rust.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("let ") else {
+            continue;
+        };
+        let rest = rest.strip_prefix("mut ").unwrap_or(rest);
+        let Some((name, ty)) = rest.split_once(':') else {
+            continue;
+        };
+        let ty = ty.trim_start();
+        if ty.contains("JetInt") || ty.starts_with("bool") || ty.starts_with("Option<bool>") {
+            scalars.insert(name.trim());
+        }
+    }
+    rust.match_indices(".clone()")
+        .filter(|(at, _)| {
+            let prefix = &rust[..*at];
+            let prefix = prefix
+                .strip_suffix(".as_ref().expect(\"MIR local\")")
+                .or_else(|| prefix.strip_suffix(".as_ref().expect(\"MIR value\")"))
+                .unwrap_or(prefix);
+            let start = prefix
+                .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .map_or(0, |index| index + 1);
+            !scalars.contains(&prefix[start..])
+        })
+        .count()
+}
+
+#[test]
+fn mir_walks_stable_loop_sources_in_place() {
+    // #4318 §4: a loop whose body never mentions its source walks the list
+    // in place (no cursor, no snapshot copy); the same loop whose body does
+    // mention the source keeps the snapshot. Each pair of programs differs
+    // only in where the `_ := <source>.len()` statement sits, so the emitted
+    // copy counts compare the loop lowering alone. The source is a `:=`
+    // binding, which `fold_pure_calls` leaves alone, so its length is not a
+    // folded constant. A field source (`bag.names`, which sema wraps in a
+    // share copy) walks the same way as a local.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let program = |setup: &str, source: &str, inside: &str, after: &str| {
+            format!(
+                "\
+struct Bag {{
+    names: [String]
+}}
+fn make_names(count: Int) -> [String] {{
+    names := [String]{{}}
+    loop i in 0..count {{
+        &names.push(\"name\")
+    }}
+    return names
+}}
+fn run() {{
+    {setup}
+    n := 0
+    loop name in {source} {{
+        n = n + name.len()
+        {inside}
+    }}
+    {after}
+    print(n)
+}}
+"
+            )
+        };
+        for (setup, source) in [
+            ("names := make_names(3)", "names"),
+            ("bag := Bag{names: make_names(3)}", "bag.names"),
+        ] {
+            let mention = format!("_ := {source}.len()");
+            let (stable_cursors, stable_clones) =
+                stable_loop_probe(&program(setup, source, "", &mention));
+            let (snapshot_cursors, snapshot_clones) =
+                stable_loop_probe(&program(setup, source, &mention, ""));
+            eprintln!(
+                "stable loop source `{source}`: non-scalar .clone() {snapshot_clones} (body mentions source) -> {stable_clones} (stable); cursors {snapshot_cursors:?} -> {stable_cursors:?}"
+            );
+            assert_eq!(stable_cursors.get("run"), Some(&0), "`{source}`: {stable_cursors:?}");
+            assert_eq!(snapshot_cursors.get("run"), Some(&1), "`{source}`: {snapshot_cursors:?}");
+            assert!(
+                stable_clones < snapshot_clones,
+                "`{source}`: stable walk emitted {stable_clones} clones, snapshot {snapshot_clones}"
+            );
+        }
     });
 }
 #[test]

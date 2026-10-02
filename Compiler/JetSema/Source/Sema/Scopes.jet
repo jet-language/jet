@@ -256,8 +256,12 @@ pub struct SemaScopeLoopLabel {
     pub name: String
 }
 
+// `last_reads` maps each queried name to the index of the last statement that
+// reads it (-1: none), filled on the first query so later live-after queries
+// are O(1) instead of rewalking the remaining statements.
 pub struct SemaStatementTailBody {
     pub statements: [Stmt]
+    pub last_reads: [String:Int]
 }
 
 pub struct SemaStatementTailStore {
@@ -275,7 +279,7 @@ pub fn sema_statement_tail_store_init() -> SemaStatementTailStore Never! {
 
 pub fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statements: [Stmt]) -> Int Never! {
     body_id := store.bodies.len()
-    &store.bodies.push(SemaStatementTailBody{statements: statements})
+    &store.bodies.push(SemaStatementTailBody{statements: statements, last_reads: [String:Int]{}})
     body_id
 }
 
@@ -340,6 +344,9 @@ pub struct SemaScopeEnvironment {
     pub fixed_length_write_params: [String]{[String]{}}
     // D-DBG1=A: the module's `debug(…)` call texts, from the parser.
     pub debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
+    // The enclosing named callable being checked; panic and propagation
+    // locations name it (Rust `capture_panic_loc` `fn_name`).
+    pub function_name: String{""}
 }
  
 pub struct SemaCheckContext {
@@ -440,6 +447,14 @@ pub struct SemaCheckContext {
 
  
 
+pub struct SemaScopeModulePolicy {
+    pub unit_explicit_units: Bool
+    pub copies_explicit: Bool
+    // Split the exact span key into scalar indexes, without formatting it.
+    pub function_unit_starts: [Int:Int]
+    pub function_unit_ends: [[Int:Bool]]
+}
+
 pub struct SemaScopeTable {
     pub frames: [SemaScopeFrame]
     pub bindings: [SemaScopeBinding]
@@ -465,6 +480,11 @@ pub struct SemaScopeTable {
     // D-MEM-COPYSEM1: `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
     pub copies_explicit: Bool{false}
+    // Derived from the immutable graph installed by seed_unit_policy.
+    // Function rollback leaves this memo intact; snapshots may rebuild it.
+    // A new graph/module setup reseeds it, including each staging version.
+    pub policy_modules: [String:Int]{[String:Int]{}}
+    pub policy_rows: [SemaScopeModulePolicy]{[SemaScopeModulePolicy]{}}
     // Rollback support (sema_scope_mark / sema_scope_rollback): while a mark
     // is open, an in-place edit of an existing binding first records the old
     // row here, so a rollback restores the table without a whole-table copy.
@@ -493,7 +513,9 @@ pub struct SemaScopeHardwareFacts {
     pub pending: [SemaHardwareDMATransferFact]
 }
 
-pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
+// The environment owns the registration graph it is given: callers hand over
+// one copy rather than a read value the constructor would copy again.
+pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
         registration_graph: graph,
         module_identity: module_identity,
@@ -507,6 +529,24 @@ pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identit
         generic_params: [TGenericParam]{},
         comptime_body_values: [SemaComptimeBodyValue]{},
     }
+}
+
+// One environment serves every module of a graph pass: the registration
+// graph, checked types and write-parameter facts stay, and the module's own
+// source facts replace the previous module's.
+pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_row: SemaRegistrationModule, comptime_body_values: [SemaComptimeBodyValue]) Never! {
+    environment.module_identity = module_row.module_identity
+    environment.package_identity = module_row.package_identity
+    environment.module_name = module_row.module_name
+    environment.source_file = module_row.source_file
+    environment.source_origin = module_row.source_origin
+    environment.source_segments = module_row.source_segments
+    environment.declarations = [SemaScopeDeclaration]{}
+    environment.generic_params = [TGenericParam]{}
+    environment.comptime_body_values = comptime_body_values
+    environment.else_arms = module_row.program.else_arms
+    environment.debug_sites = module_row.program.debug_sites
+    environment.function_name = ""
 }
 
 pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolID, edge: String) -> Bool Never! {
@@ -1183,27 +1223,58 @@ pub fn sema_scope_require_knowledge_gate(table: &SemaScopeTable, plane: SemaKnow
     false
 }
 
-pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) Never! {
-    table.unit_explicit_units = false
-    module_index :: sema_registration_module_index(graph, module_identity) ?? return
-    package_identity :: graph.modules[module_index].package_identity
-    loop declaration_module in graph.modules {
-        if declaration_module.package_identity != package_identity -> next
-        loop declaration in declaration_module.program.policy_declarations {
-            if declaration.key != PolicyKey.ExplicitUnits -> next
-            if declaration.scope == PolicyScope.Package || (declaration.scope == PolicyScope.Module && declaration_module.module_identity == module_identity) {
-                table.unit_explicit_units = true
+// Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
+pub fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) -> Int Never! {
+    if table.policy_modules.get(module_identity) == .Val(position) -> return position
+    policy := SemaScopeModulePolicy{
+        unit_explicit_units: false,
+        copies_explicit: false,
+        function_unit_starts: [Int:Int]{},
+        function_unit_ends: [[Int:Bool]]{},
+    }
+    if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+        package_identity :: graph.modules[module_index].package_identity
+        loop declaration in graph.modules[module_index].program.policy_declarations {
+            if declaration.key != PolicyKey.ExplicitUnits || declaration.scope != PolicyScope.Function -> next
+            target :: declaration.target ?? next
+            slot := policy.function_unit_starts.get(target.start) ?? -1
+            if slot < 0 {
+                slot = policy.function_unit_ends.len()
+                &policy.function_unit_starts.add(target.start, slot).drop("a new function span start has no slot")
+                &policy.function_unit_ends.push([Int:Bool]{})
+            }
+            &policy.function_unit_ends[slot].add(target.end, true).drop("function unit policy membership")
+        }
+        loop declaration_index in 0..<graph.modules.len() {
+            if graph.modules[declaration_index].package_identity != package_identity -> next
+            loop declaration in graph.modules[declaration_index].program.policy_declarations {
+                if declaration.scope != PolicyScope.Package && !(declaration.scope == PolicyScope.Module && graph.modules[declaration_index].module_identity == module_identity) -> next
+                if declaration.key == PolicyKey.ExplicitUnits -> policy.unit_explicit_units = true
+                if sema_string_view_copies_declaration(declaration) -> policy.copies_explicit = true
             }
         }
     }
+    position :: table.policy_rows.len()
+    &table.policy_modules.add(module_identity, position).drop("a new policy module has no row")
+    &table.policy_rows.push(policy)
+    position
 }
 
+// Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
+pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) Never! {
+    // Module installation is the graph-lifetime boundary, not a function check.
+    table.policy_modules = [String:Int]{}
+    table.policy_rows = [SemaScopeModulePolicy]{}
+    position :: sema_scope_module_policy(&table, graph, module_identity)
+    table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
+}
+
+// Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
 pub fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) Never! {
-    sema_scope_seed_unit_policy(&table, graph, module_identity)
-    module_index :: sema_registration_module_index(graph, module_identity) ?? return
-    declaration_module :: graph.modules[module_index]
-    loop declaration in declaration_module.program.policy_declarations {
-        if declaration.key == PolicyKey.ExplicitUnits && declaration.scope == PolicyScope.Function && declaration.target == .Val(target) && target.start == function_span.start && target.end == function_span.end -> table.unit_explicit_units = true
+    position :: sema_scope_module_policy(&table, graph, module_identity)
+    table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
+    if table.policy_rows[position].function_unit_starts.get(function_span.start) == .Val(slot) {
+        if table.policy_rows[position].function_unit_ends[slot].get(function_span.end) ?? false -> table.unit_explicit_units = true
     }
 }
 

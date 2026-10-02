@@ -63,7 +63,6 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
         ));
     }
 
-    let source_program = symbols.type_symbol("MIRProgram")?;
     let source_binding_type = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
     let source_binding_identity = "::jet_jit::SourceResources::SourceNativeBindingIdentity";
     let resource_handle = "::jet_jit::SourceResources::SourceResourceHandle";
@@ -84,7 +83,6 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
          struct __JetBootstrapNativeAdapterRoot {{
              bindings: ::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,
              program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
-             source_program: ::std::sync::Arc<{source_program}>,
              machine_abi_shape: crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,\n\
              shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
              completion_scope: ::jet_jit::SourceExecutionCompletionScopeWeak,\n\
@@ -210,7 +208,6 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  resources: ::jet_jit::SourceResources::SourceResourceLease,\n\
                  bindings: ::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,\n\
                  program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\
-                 source_program: ::std::sync::Arc<{source_program}>,\n\
                  machine_abi_shape: crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,\n\
                  shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
                  completion_scope: ::jet_jit::SourceExecutionCompletionScope,\n\
@@ -227,7 +224,6 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  let root = ::std::sync::Arc::new(__JetBootstrapNativeAdapterRoot {{\n\
                      bindings,\n\
                      program,\n\
-                     source_program,\n\
                      machine_abi_shape,\n\
                      shared_payload_shapes,\n\
                      completion_scope: completion_scope.downgrade(),\n\

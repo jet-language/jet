@@ -768,7 +768,22 @@ pub fn mir_rust_aot_metadata(
 /// The runtime and Core block for one artifact (gated by
 /// `config.execution.emit_runtime`): decided by build facts only, never by user
 /// source, so `jet_store::runtime::prepare` links it as the `jet_runtime` rlib.
+/// Its Prelude sources' test-only items are left out: generated programs are
+/// never built with `--test`, so they would only be written, hashed and parsed.
+/// The cache identities (`cached_runtime_fingerprint`, the Core closure
+/// fingerprint) hash the Prelude text before this deterministic removal.
 fn emit_runtime_block(
+    emitter: &RustEmitter<'_>,
+    program: &MirProgram,
+    config: &MirRustConfig<'_>,
+    out: &mut String,
+) {
+    let mut block = String::new();
+    push_runtime_block(emitter, program, config, &mut block);
+    out.push_str(&jet_foundation::RustSource::strip_test_items(&block));
+}
+
+fn push_runtime_block(
     emitter: &RustEmitter<'_>,
     program: &MirProgram,
     config: &MirRustConfig<'_>,
@@ -969,8 +984,24 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 );
             }
         }
+        // Card #4258: a constant whose every read was copied into its use
+        // sites (TIR→MIR `inline_known_constant_reads`) needs no accessor;
+        // storage cells and every constant still read through `Global` keep
+        // their item.
+        let global_reads = program
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::Global { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
         for constant in &program.constants {
-            if emitter.module_selected(constant.module) {
+            if emitter.module_selected(constant.module)
+                && (constant.is_storage || global_reads.contains(constant.key.as_str()))
+            {
                 let unit = units
                     .as_ref()
                     .map(|units| units.module_unit(constant.module, constant.span.start));
@@ -1862,6 +1893,7 @@ fn pure_slot_expression(expression: &str) -> bool {
     numbered_slot_access(expression, "__jet_l_", ".as_ref().expect(\"MIR local\").clone()")
         || numbered_slot_access(expression, "__jet_l_", ".take().expect(\"MIR local\")")
         || numbered_slot_access(expression, "(__jet_v_", ".as_ref().expect(\"MIR value\")).clone()")
+        || numbered_slot_access(expression, "*__jet_v_", ".as_ref().expect(\"MIR value\")")
         || numbered_slot_access(expression, "__jet_v_", ".take().expect(\"MIR value\")")
         || expression.strip_suffix(".clone()").is_some_and(field_read_place)
 }
@@ -2059,8 +2091,9 @@ fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
             continue;
         }
         let read = format!("({name}.as_ref().expect(\"MIR value\")).clone()");
+        let scalar = format!("(*{name}.as_ref().expect(\"MIR value\"))");
         let take = format!("{name}.take().expect(\"MIR value\")");
-        let Some(form) = [read, take].into_iter().find(|form| line.matches(form.as_str()).count() == 1) else {
+        let Some(form) = [read, scalar, take].into_iter().find(|form| line.matches(form.as_str()).count() == 1) else {
             continue;
         };
         let at = line.find(form.as_str()).expect("form occurs once");
@@ -2113,6 +2146,145 @@ fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
         if !removed {
             out.push_str(line);
         }
+    }
+}
+
+/// `JET_COPY_TAGS=1`: tag every emitted value clone with its copy fact
+/// (`/*copy:<fact>*/`, `unbacked` when no MIR copy fact backs it) for
+/// Tools/agent/copy-ratchet.mjs (#4318). Inert when unset.
+fn copy_tags_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("JET_COPY_TAGS").is_some_and(|value| value == "1"))
+}
+
+/// A Rust type whose values copy, so an owned read names the binding.
+fn copy_scalar_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "bool" | "char" | "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
+            | "u8" | "u16" | "u32" | "u64" | "u128" | "usize"
+    )
+}
+
+/// Turns block-local value slots into plain `let` bindings. `out[slots_start
+/// ..]` holds the function's slot declarations and body. A slot declared at
+/// its single definition (`let mut slot: Option<T> = Some(E);`, see
+/// `localize_value_slots`) whose every other mention is a shared read
+/// (`slot.as_ref().expect("MIR value")`) is never taken, written through or
+/// re-initialized, so it becomes `let slot: T = E;`: an owned read names a
+/// Copy scalar directly and clones any other type, and a borrow is `&slot`.
+fn unwrap_value_slots(out: &mut String, slots_start: usize) {
+    const BORROW: &str = ".as_ref().expect(\"MIR value\")";
+    let body = &out[slots_start..];
+    // Per slot: (mentions, shared-read mentions), counted in one pass.
+    let mut mentions: std::collections::HashMap<u64, (usize, usize)> = std::collections::HashMap::new();
+    let mut plain: std::collections::HashMap<u64, bool> = std::collections::HashMap::new();
+    let mut definitions: Vec<(u64, bool)> = Vec::new();
+    for line in body.split_inclusive('\n') {
+        for_each_value_mention(line, |_, at, id| {
+            let digits = line[at + "__jet_v_".len()..].bytes().take_while(u8::is_ascii_digit).count();
+            let entry = mentions.entry(id).or_default();
+            entry.0 += 1;
+            if line[at + "__jet_v_".len() + digits..].starts_with(BORROW) {
+                entry.1 += 1;
+            }
+        });
+        let Some((indent, id, _, false)) = slot_definition(line) else {
+            continue;
+        };
+        let Some(ty) = line[indent..]
+            .strip_prefix(&format!("let mut __jet_v_{id}: Option<"))
+            .and_then(|rest| rest.find("> = Some(").map(|end| &rest[..end]))
+        else {
+            continue;
+        };
+        definitions.push((id, copy_scalar_type(ty)));
+    }
+    for (id, copy) in definitions {
+        if mentions.get(&id).is_some_and(|(all, borrows)| *all == borrows + 1) {
+            plain.insert(id, copy);
+        }
+    }
+    if plain.is_empty() {
+        return;
+    }
+    let mut rebuilt = String::with_capacity(out.len() - slots_start);
+    for original in out[slots_start..].split_inclusive('\n') {
+        // A plain slot's definition becomes a plain `let`; its expression can
+        // itself read other plain slots, so the rewritten line still gets the
+        // read replacements below.
+        let mut line = original.to_string();
+        if let Some((indent, id, expression, false)) = slot_definition(original) {
+            if plain.contains_key(&id) {
+                let rest = &original[indent + format!("let mut __jet_v_{id}: Option<").len()..];
+                let ty = &rest[..rest.find("> = Some(").expect("checked slot definition")];
+                line = format!("{}let __jet_v_{id}: {ty} = {expression};\n", &original[..indent]);
+            }
+        }
+        let mut ids = Vec::new();
+        for_each_value_mention(&line, |_, _, id| {
+            if plain.contains_key(&id) && !ids.contains(&id) {
+                ids.push(id);
+            }
+        });
+        if ids.is_empty() {
+            rebuilt.push_str(&line);
+            continue;
+        }
+        for id in ids {
+            let borrow = format!("__jet_v_{id}.as_ref().expect(\"MIR value\")");
+            let read = if plain[&id] {
+                format!("__jet_v_{id}")
+            } else {
+                format!("__jet_v_{id}.clone()")
+            };
+            line = line
+                .replace(&format!("({borrow}).clone()"), &read)
+                .replace(&format!("(*{borrow})"), &format!("__jet_v_{id}"))
+                .replace(&borrow, &format!("(&__jet_v_{id})"));
+        }
+        rebuilt.push_str(&line);
+    }
+    out.truncate(slots_start);
+    out.push_str(&rebuilt);
+}
+
+#[cfg(test)]
+mod unwrap_value_slot_tests {
+    use super::unwrap_value_slots;
+
+    #[test]
+    fn read_only_block_slots_become_plain_lets() {
+        let mut out = [
+            "    let mut __jet_v_1: Option<String> = None;\n",
+            "  let mut __jet_v_2: Option<bool> = Some(f());\n",
+            "  if (__jet_v_2.as_ref().expect(\"MIR value\")).clone() {\n",
+            "  let mut __jet_v_5: Option<bool> = Some(!(__jet_v_2.as_ref().expect(\"MIR value\")).clone());\n",
+            "  m((__jet_v_5.as_ref().expect(\"MIR value\")).clone());\n",
+            "   let mut __jet_v_3: Option<String> = Some(g());\n",
+            "   h(__jet_v_3.as_ref().expect(\"MIR value\"), (__jet_v_3.as_ref().expect(\"MIR value\")).clone());\n",
+            "   let mut __jet_v_4: Option<String> = Some(g());\n",
+            "   k(__jet_v_4.take().expect(\"MIR value\"));\n",
+            "   __jet_v_1 = Some(g());\n",
+            "  }\n",
+        ]
+        .concat();
+        unwrap_value_slots(&mut out, 0);
+        let expected = [
+            "    let mut __jet_v_1: Option<String> = None;\n",
+            "  let __jet_v_2: bool = f();\n",
+            "  if __jet_v_2 {\n",
+            "  let __jet_v_5: bool = !__jet_v_2;\n",
+            "  m(__jet_v_5);\n",
+            "   let __jet_v_3: String = g();\n",
+            "   h((&__jet_v_3), __jet_v_3.clone());\n",
+            "   let mut __jet_v_4: Option<String> = Some(g());\n",
+            "   k(__jet_v_4.take().expect(\"MIR value\"));\n",
+            "   __jet_v_1 = Some(g());\n",
+            "  }\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
     }
 }
 
@@ -2255,16 +2427,16 @@ fn compact_function_text(out: &mut String, start: usize) {
     }
 }
 
-/// A folded list constant whose rows exceed this many bytes of Rust is cached.
+/// A folded list constant whose rows exceed this many bytes of Rust is built
+/// by row-chunk helpers.
 const CACHED_CONSTANT_BYTES: usize = 16 * 1024;
 /// Upper bound on the rows one cached-constant chunk helper pushes.
 const CONSTANT_CHUNK_BYTES: usize = 64 * 1024;
 
-/// Emits a large folded list constant as a per-thread cache that row-chunk
-/// helpers of at most `CONSTANT_CHUNK_BYTES` fill once; the accessor clones
-/// the cached rows. No emitted function then holds the whole table, and a
-/// read no longer rebuilds every row from code.
-fn emit_cached_list_constant(out: &mut String, visibility: &str, name: &str, ty: &str, rows: &[String]) {
+/// The initializer of a large folded list constant: row-chunk helpers of at
+/// most `CONSTANT_CHUNK_BYTES` each fill the rows, so no emitted function
+/// holds the whole table. The helpers are written to `out`.
+fn emit_list_constant_chunks(out: &mut String, name: &str, ty: &str, rows: &[String]) -> String {
     let mut chunks: Vec<&[String]> = Vec::new();
     let mut start = 0;
     let mut bytes = 0;
@@ -2284,16 +2456,37 @@ fn emit_cached_list_constant(out: &mut String, visibility: &str, name: &str, ty:
         }
         let _ = writeln!(out, "}}\n");
     }
-    let _ = writeln!(out, "thread_local! {{");
-    let _ = writeln!(out, "    static {name}_ROWS: {ty} = {{");
-    let _ = writeln!(out, "        let mut rows: {ty} = Vec::with_capacity({});", rows.len());
+    let mut init = format!("{{\n        let mut rows: {ty} = Vec::with_capacity({});\n", rows.len());
     for index in 0..chunks.len() {
-        let _ = writeln!(out, "        {name}_rows_{index}(&mut rows);");
+        let _ = writeln!(init, "        {name}_rows_{index}(&mut rows);");
     }
-    let _ = writeln!(out, "        rows\n    }};\n}}\n");
+    init.push_str("        rows\n    }");
+    init
+}
+
+/// Emits a folded aggregate constant as one per-thread value built once, at
+/// its first read. `NAME_shared()` hands a read that value itself (a
+/// `JetSharedSlot`, which readers borrow in place), and only the owned
+/// accessor `NAME()` copies it.
+fn emit_shared_constant(
+    out: &mut String,
+    root: &str,
+    visibility: &str,
+    name: &str,
+    ty: &str,
+    init: &str,
+) {
     let _ = writeln!(
         out,
-        "#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_ROWS.with(|rows| rows.clone()) }}\n"
+        "thread_local! {{\n    static {name}_SHARED: std::rc::Rc<{ty}> = std::rc::Rc::new({init});\n}}\n"
+    );
+    let _ = writeln!(
+        out,
+        "#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_SHARED.with(|value| (**value).clone()) }}\n"
+    );
+    let _ = writeln!(
+        out,
+        "#[inline]\n{visibility}fn {name}_shared() -> {root}JetSharedSlot<{ty}> {{ {name}_SHARED.with(|value| {root}JetSharedSlot::new(std::rc::Rc::clone(value))) }}\n"
     );
 }
 
@@ -3591,7 +3784,7 @@ impl<'a> RustEmitter<'a> {
                     format!(
                         "{root}jet_test_timeout_enter({}, ({}).ns)",
                         scope_id.0,
-                        self.value_read(*duration)
+                        self.value_owned(*duration)
                     )
                 }
                 _ => format!("/* MIR scope enter {} */", scope_id.0),
@@ -6410,31 +6603,29 @@ impl<'a> RustEmitter<'a> {
         let name = mangle_path(&constant.key);
         let visibility = self.visibility(constant.visibility);
         let ty = self.rust_type(&constant.ty);
-        // A large folded list is cached and built by row chunks; a smaller
-        // one keeps the inline `vec![..]` accessor from the same rows.
-        let rows = match (constant.ty.kind(), &constant.value) {
-            (MirTypeKind::List(inner), MirConstant::List(values))
-                if !constant.is_storage && !self.is_no_os() =>
-            {
-                Some(
-                    values
+        // D-MEM-COPYSEM1: a folded aggregate is one per-thread value built
+        // once; reads borrow it (`NAME_shared`). A large list is filled by
+        // row chunks, a smaller one by the inline `vec![..]` of the same rows.
+        let root = &self.config.root_prefix;
+        if self.shared_constant(constant) {
+            let init = match (constant.ty.kind(), &constant.value) {
+                (MirTypeKind::List(inner), MirConstant::List(values)) => {
+                    let rows = values
                         .iter()
                         .map(|value| self.constant_for_type(value, inner))
-                        .collect::<Vec<_>>(),
-                )
-            }
-            _ => None,
-        };
-        if let Some(rows) = &rows {
-            if rows.iter().map(String::len).sum::<usize>() > CACHED_CONSTANT_BYTES {
-                emit_cached_list_constant(out, visibility, &name, &ty, rows);
-                return;
-            }
+                        .collect::<Vec<_>>();
+                    if rows.iter().map(String::len).sum::<usize>() > CACHED_CONSTANT_BYTES {
+                        emit_list_constant_chunks(out, &name, &ty, &rows)
+                    } else {
+                        format!("vec![{}]", rows.join(", "))
+                    }
+                }
+                _ => self.constant_for_type(&constant.value, &constant.ty),
+            };
+            emit_shared_constant(out, root, visibility, &name, &ty, &init);
+            return;
         }
-        let value = match rows {
-            Some(rows) => format!("vec![{}]", rows.join(", ")),
-            None => self.constant_for_type(&constant.value, &constant.ty),
-        };
+        let value = self.constant_for_type(&constant.value, &constant.ty);
         if constant.is_storage {
             let cell = format!("{}JetPersistCell", self.config.root_prefix);
             if matches!(constant.ty.kind(), MirTypeKind::Int) {
@@ -6458,6 +6649,51 @@ impl<'a> RustEmitter<'a> {
                 "#[inline]\n{visibility}fn {name}() -> {ty} {{ {value} }}\n"
             );
         }
+    }
+
+    /// D-MEM-COPYSEM1: a folded aggregate constant (text, list, map, option,
+    /// result, tuple, or nominal value) on a hosted target is one shared
+    /// per-thread value; a read holds it in a `JetSharedSlot` and borrows it
+    /// in place, and only an owned use copies it. Scalars stay plain values.
+    fn shared_constant(&self, constant: &MirConstantDef) -> bool {
+        !constant.is_storage
+            && !self.is_no_os()
+            && matches!(
+                constant.ty.kind(),
+                MirTypeKind::String
+                    | MirTypeKind::List(_)
+                    | MirTypeKind::Map { .. }
+                    | MirTypeKind::Option(_)
+                    | MirTypeKind::Result { .. }
+                    | MirTypeKind::Tuple(_)
+                    | MirTypeKind::Apply { .. }
+            )
+    }
+
+    /// The shared-value accessor a `Global` read of `name` stores in its
+    /// value slot, when `name` is a shared constant.
+    fn shared_constant_accessor(&self, name: &str) -> Option<String> {
+        let constant = self
+            .program
+            .constants
+            .iter()
+            .find(|constant| constant.key.as_str() == name)?;
+        self.shared_constant(constant).then(|| {
+            format!(
+                "{}{}_shared()",
+                self.config.root_prefix,
+                mangle_path(&constant.key)
+            )
+        })
+    }
+
+    /// Whether `value` is a `Global` read of a shared constant, whose slot
+    /// is a `JetSharedSlot`.
+    fn shared_constant_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        matches!(
+            self.value_definition(function, value),
+            Some(MirOperation::Global { name }) if self.shared_constant_accessor(name).is_some()
+        )
     }
 
     fn global_expression(&self, name: &str) -> String {
@@ -13283,6 +13519,7 @@ impl<'a> RustEmitter<'a> {
             let localizable = self.localizable_value_slots(function);
             let declarations_end = localize_value_slots(out, slots_start, slots_end, &localizable);
             fold_value_slots(out, slots_start, declarations_end);
+            unwrap_value_slots(out, slots_start);
         }
         compact_function_text(out, slots_start);
         if generator {
@@ -13654,11 +13891,8 @@ impl<'a> RustEmitter<'a> {
                 MirOperation::ReadPlace(place) => cursor_place == Some(*place),
                 MirOperation::LoopRangeValue { cursor: source, .. }
                 | MirOperation::LoopIterValue { cursor: source, .. } => *source == cursor,
-                MirOperation::Copy {
-                    value,
-                    materialize_view,
-                } => {
-                    if *materialize_view {
+                MirOperation::Copy { value, fact } => {
+                    if *fact == MirCopyFact::ViewMaterialize {
                         false
                     } else {
                         matches(emitter, function, *value, cursor, cursor_place, seen)
@@ -13919,8 +14153,8 @@ impl<'a> RustEmitter<'a> {
         indent: usize,
     ) -> Option<String> {
         let pad = " ".repeat(indent);
-        let start_expr = self.value_read(start);
-        let end_expr = self.value_read(end);
+        let start_expr = self.value_owned(start);
+        let end_expr = self.value_owned(end);
         let function_key = format!("{:?}", function.key);
         let loop_header = vector.loop_header.0 as u32;
         let source_start = vector.span.start;
@@ -14355,11 +14589,8 @@ impl<'a> RustEmitter<'a> {
                 index_expr,
                 column_context,
             )?,
-            MirOperation::Copy {
-                value,
-                materialize_view,
-            } => {
-                if *materialize_view {
+            MirOperation::Copy { value, fact } => {
+                if *fact == MirCopyFact::ViewMaterialize {
                     return None;
                 }
                 self.acceleration_value_expr(
@@ -14399,7 +14630,7 @@ impl<'a> RustEmitter<'a> {
             {
                 format!(
                     "({})[(({} ) as usize)].clone()",
-                    self.value_read(*base),
+                    self.value_borrow(*base),
                     index_expr
                 )
             }
@@ -14479,14 +14710,14 @@ impl<'a> RustEmitter<'a> {
                 } else {
                     format!(
                         "({}).column({column_index})[(({} ) as usize)].clone().jet_col_{}()",
-                        self.value_read(*base),
+                        self.value_borrow(*base),
                         index_expr,
                         self.field_name(*column)
                     )
                 }
             }
-            MirOperation::Parameter { .. } => self.value_read(value),
-            MirOperation::Capture { .. } => self.value_read(value),
+            MirOperation::Parameter { .. } => self.value_owned(value),
+            MirOperation::Capture { .. } => self.value_owned(value),
             MirOperation::Global { name } => self.global_expression(name),
             _ => return None,
         };
@@ -14544,7 +14775,7 @@ impl<'a> RustEmitter<'a> {
                     let column = access.column_index?;
                     return Some(format!(
                         "({}).column({column})[(({} ) as usize)].clone().jet_col_{}()",
-                        self.value_read(*collection),
+                        self.value_borrow(*collection),
                         index_expr,
                         self.field_name(field)
                     ));
@@ -14552,7 +14783,7 @@ impl<'a> RustEmitter<'a> {
             }
             return Some(format!(
                 "({})[(({} ) as usize)].{}.clone()",
-                self.value_read(*collection),
+                self.value_borrow(*collection),
                 index_expr,
                 self.field_name(field)
             ));
@@ -14884,8 +15115,8 @@ impl<'a> RustEmitter<'a> {
                 self.field_name(field)
             );
         }
-        let start = self.value_read(start);
-        let end = self.value_read(end);
+        let start = self.value_owned(start);
+        let end = self.value_owned(end);
         let _ = writeln!(out, "{pad}let __jet_vec_start = {start};");
         let _ = writeln!(out, "{pad}let mut __jet_vec_index = __jet_vec_start;");
         let _ = writeln!(out, "{pad}let __jet_vec_end = {end};");
@@ -15298,11 +15529,8 @@ impl<'a> RustEmitter<'a> {
             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
                 self.vector_place_load(function, *place, fact, index_name, loop_places, width)
             }
-            MirOperation::Copy {
-                value,
-                materialize_view,
-            } => {
-                if *materialize_view {
+            MirOperation::Copy { value, fact: copy_fact } => {
+                if *copy_fact == MirCopyFact::ViewMaterialize {
                     None
                 } else {
                     self.vector_value_expr(
@@ -15400,7 +15628,7 @@ impl<'a> RustEmitter<'a> {
                 } else {
                     Some(format!(
                         "core::array::from_fn(|lane| ({}) .column({column_index})[{index}].clone().jet_col_{}())",
-                        self.value_read(*base),
+                        self.value_borrow(*base),
                         self.field_name(*column)
                     ))
                 }
@@ -15597,7 +15825,7 @@ impl<'a> RustEmitter<'a> {
         let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
         Some(format!(
             "core::array::from_fn(|lane| ({}[{index}].clone()))",
-            self.value_read(base)
+            self.value_borrow(base)
         ))
     }
 
@@ -15642,14 +15870,14 @@ impl<'a> RustEmitter<'a> {
                 }
                 return Some(format!(
                     "core::array::from_fn(|lane| ({}) .column({column})[{index}].clone().jet_col_{}())",
-                    self.value_read(*collection),
+                    self.value_borrow(*collection),
                     self.field_name(field)
                 ));
             }
             let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
             return Some(format!(
                 "core::array::from_fn(|lane| ({}[{index}].{}).clone())",
-                self.value_read(*collection),
+                self.value_borrow(*collection),
                 self.field_name(field)
             ));
         }
@@ -15831,7 +16059,7 @@ impl<'a> RustEmitter<'a> {
                 MirOperation::ReadPlace(place) => Some(self.place_read(function, *place)),
                 _ => None,
             })
-            .unwrap_or_else(|| self.value_read(value))
+            .unwrap_or_else(|| self.value_owned(value))
     }
 
     fn vector_array_name(&self, value: MirValueId) -> String {
@@ -16107,9 +16335,8 @@ impl<'a> RustEmitter<'a> {
         };
         let row = self.place_row(function, *place)?;
         let in_place = row.projections.iter().all(|projection| match projection {
-            MirProjection::Field { field, .. } => {
-                !self.boxed_field(*field) && self.native_host_field_type(*field).is_none()
-            }
+            // A recursive (boxed) field is read through its box in place.
+            MirProjection::Field { field, .. } => self.native_host_field_type(*field).is_none(),
             MirProjection::Payload { .. } => true,
             MirProjection::Index { kind, .. } => *kind == MirIndexKind::List,
             MirProjection::Deref { .. } | MirProjection::Range { .. } => false,
@@ -16690,7 +16917,7 @@ impl<'a> RustEmitter<'a> {
             MirOwnershipMode::Copy
             | MirOwnershipMode::Shared
             | MirOwnershipMode::ReadBorrow
-            | MirOwnershipMode::WriteBorrow => self.value_read(value),
+            | MirOwnershipMode::WriteBorrow => self.value_owned(value),
         }
     }
 
@@ -16809,17 +17036,21 @@ impl<'a> RustEmitter<'a> {
         facts
     }
 
-    /// The by-value read of `value`: a take when it is the value's only use
-    /// in its own block, otherwise a copy.
-    fn value_consume(&self, function: &MirFunction, value: MirValueId) -> String {
-        if self
-            .move_facts
+    /// Whether `value` is read once, in its own block (`MoveFacts::single_use`),
+    /// so that read may take it.
+    fn value_single_use(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.move_facts
             .get(&function.id)
             .is_some_and(|facts| facts.single_use.contains(&value))
-        {
+    }
+
+    /// The by-value read of `value`: a take when it is the value's only use
+    /// in its own block, otherwise an owned read (`value_owned`).
+    fn value_consume(&self, function: &MirFunction, value: MirValueId) -> String {
+        if self.value_single_use(function, value) {
             self.value_move(value)
         } else {
-            self.value_read(value)
+            self.value_owned(value)
         }
     }
 
@@ -17378,6 +17609,15 @@ impl<'a> RustEmitter<'a> {
                 continue;
             }
             let ty = self.rust_local_type(ty);
+            if self.shared_constant_value(function, *value) {
+                let root = &self.config.root_prefix;
+                let _ = writeln!(
+                    out,
+                    "    let mut {}: {root}JetSharedSlot<{ty}> = {root}JetSharedSlot::empty();",
+                    value_slot(*value)
+                );
+                continue;
+            }
             let _ = writeln!(
                 out,
                 "    let mut {}: Option<{ty}> = None;",
@@ -17497,7 +17737,7 @@ impl<'a> RustEmitter<'a> {
                 return self.prelude_call_args_exact(call, &args);
             }
             let index = if matches!(kind, MirIndexKind::Map) {
-                self.value_read(*index)
+                self.value_owned(*index)
             } else {
                 self.index_operand(function, *index, *location)
             };
@@ -17753,6 +17993,22 @@ impl<'a> RustEmitter<'a> {
             }
         }
         match &instruction.operation {
+            // A read of a shared constant holds the shared value; its readers
+            // borrow it in place (`JetSharedSlot`).
+            MirOperation::Global { name }
+                if instruction
+                    .result
+                    .is_some_and(|value| self.shared_constant_value(function, value)) =>
+            {
+                let accessor = self
+                    .shared_constant_accessor(name)
+                    .expect("checked shared constant");
+                let _ = writeln!(
+                    out,
+                    "{pad}{} = {accessor};",
+                    value_slot(instruction.result.expect("checked Global result"))
+                );
+            }
             MirOperation::InitializeUninit { place } => {
                 let _ = writeln!(
                     out,
@@ -17848,7 +18104,7 @@ impl<'a> RustEmitter<'a> {
                 self.emit_drops(function, &MirDropEdge::Normal, out, indent);
                 if self.coverage_for(function) {
                     let id = self.coverage_branch_id(function, block.id, 0);
-                    let _ = writeln!(out, "{pad}if {} {{", self.value_read(*condition));
+                    let _ = writeln!(out, "{pad}if {} {{", self.value_owned(*condition));
                     let _ = writeln!(
                         out,
                         "{pad}    {}jet_cov_branch({}, {}, true);",
@@ -17870,7 +18126,7 @@ impl<'a> RustEmitter<'a> {
                 } else {
                     // The taken arm diverges, so the other edge follows the
                     // `if`; an edge printed in place stays at this depth.
-                    let condition = self.value_read(*condition);
+                    let condition = self.value_owned(*condition);
                     let (condition, nested, follow) = if self
                         .edge_inlines(block.id, *then_target)
                         && !self.edge_inlines(block.id, *else_target)
@@ -17988,7 +18244,7 @@ impl<'a> RustEmitter<'a> {
         let mut first = true;
         for arm in arms {
             let keyword = if first { "if" } else { "else if" };
-            let _ = writeln!(out, "{pad}{keyword} {} {{", self.value_read(arm.condition));
+            let _ = writeln!(out, "{pad}{keyword} {} {{", self.value_owned(arm.condition));
             self.set_pc(block, arm.target, out, indent + 4);
             let _ = writeln!(out, "{pad}}}");
             first = false;
@@ -18013,7 +18269,7 @@ impl<'a> RustEmitter<'a> {
             return;
         };
         let id = self.coverage_branch_id(function, block, arm);
-        let _ = writeln!(out, "{pad}if {} {{", self.value_read(switch_arm.condition));
+        let _ = writeln!(out, "{pad}if {} {{", self.value_owned(switch_arm.condition));
         let _ = writeln!(
             out,
             "{pad}    {}jet_cov_branch({}, {}, true);",
@@ -18198,12 +18454,9 @@ impl<'a> RustEmitter<'a> {
             MirOperation::WritePlace { .. }
             | MirOperation::ReplacePlace { .. } => "()".to_string(),
             MirOperation::InitializeUninit { .. } => "()".to_string(),
-            MirOperation::Copy {
-                value,
-                materialize_view,
-            } => {
+            MirOperation::Copy { value, fact } => {
                 let value_ty = self.value_type(function, *value);
-                if *materialize_view {
+                if *fact == MirCopyFact::ViewMaterialize {
                     let kind = mir_view_copy_kind(value_ty).unwrap_or_else(|| {
                         panic!(
                             "MIR view materialization source `{}` has no canonical copy kernel",
@@ -18220,22 +18473,22 @@ impl<'a> RustEmitter<'a> {
                             );
                         }
                     }
-                    format!("{}({})", kind.symbol(), self.value_read(*value))
+                    format!("{}({})", kind.symbol(), self.value_copy(*value, *fact))
                 } else if is_allocator_result_type(value_ty) {
                     self.value_move(*value)
-                } else if matches!(value_ty.kind(), MirTypeKind::Int) {
-                    self.value_read(*value)
-                } else if self.history_binding(*value).is_none()
+                } else if !matches!(value_ty.kind(), MirTypeKind::Int)
+                    && self.history_binding(*value).is_none()
                     && matches!(
                         self.value_ownership(*value).mode,
                         MirOwnershipMode::Owned | MirOwnershipMode::Move
                     )
+                    && self.value_single_use(function, *value)
                 {
                     // D-MEM-COPYSEM1: an owned source read only by this copy
-                    // (`value_consume`) is dead after it, so the copy takes it.
-                    self.value_consume(function, *value)
+                    // is dead after it, so the copy takes it.
+                    self.value_move(*value)
                 } else {
-                    self.value_copy(*value)
+                    self.value_copy(*value, *fact)
                 }
             }
             MirOperation::Move { value } => self.value_move(*value),
@@ -18303,9 +18556,9 @@ impl<'a> RustEmitter<'a> {
             MirOperation::Slice { call, base, start, end, range, location } => self.slice(function, *call, *base, *start, *end, *range, *location),
             MirOperation::Range { start, end, exclusive } => format!(
                 "{}{}{}",
-                self.native_int_argument(self.value_read(*start), None),
+                self.native_int_argument(self.value_owned(*start), None),
                 if *exclusive { ".." } else { "..=" },
-                self.native_int_argument(self.value_read(*end), None),
+                self.native_int_argument(self.value_owned(*end), None),
             ),
             MirOperation::Field { base, field } => self.history_field_expression(function, *base, *field),
             MirOperation::Struct { type_id, fields } => {
@@ -18378,7 +18631,7 @@ impl<'a> RustEmitter<'a> {
                 self.closure(function, *target, captures, facts, result)
             }
             MirOperation::PtrFromAddr { addr, element } => {
-                let address = self.value_read(*addr);
+                let address = self.value_owned(*addr);
                 let address = if matches!(self.value_type(function, *addr).kind(), MirTypeKind::Int) {
                     self.native_int_argument(address, location.as_ref())
                 } else {
@@ -18396,7 +18649,7 @@ impl<'a> RustEmitter<'a> {
                         _ => self.value_slot_reference(*value, false),
                     }
                 } else {
-                    self.value_read(*value)
+                    self.value_owned(*value)
                 };
                 if is_shared_guard_type(self.value_type(function, *value)) {
                     format!(
@@ -19822,9 +20075,11 @@ impl<'a> RustEmitter<'a> {
                     && (matches!(self.value_type(function, right).kind(), MirTypeKind::String)
                         || is_string_view_type(self.value_type(function, right)))
                 {
-                    let left = self.value_read(left);
+                    // The concatenation consumes its left operand: a take at
+                    // its single use, otherwise an owned read.
+                    let left = self.value_consume(function, left);
                     let right = if is_string_view_type(self.value_type(function, right)) {
-                        self.value_read(right)
+                        self.value_owned(right)
                     } else {
                         self.value_slot_reference(right, false)
                     };
@@ -19878,7 +20133,7 @@ impl<'a> RustEmitter<'a> {
                             if op == MirBinaryOp::Compare {
                                 self.value_slot_reference(value, false)
                             } else {
-                                self.value_read(value)
+                                self.value_owned(value)
                             }
                         };
                         self.binary(op, operand(left), operand(right))
@@ -19910,7 +20165,7 @@ impl<'a> RustEmitter<'a> {
                         {
                             self.value_slot_reference(value, false)
                         } else {
-                            self.value_read(value)
+                            self.value_owned(value)
                         }
                     })
                     .collect::<Vec<_>>();
@@ -19991,7 +20246,7 @@ impl<'a> RustEmitter<'a> {
         right: MirValueId,
         location: &Option<jet_foundation::MIR::MirPanicLoc>,
     ) -> String {
-        let mut args = vec![self.value_read(left), self.value_read(right)];
+        let mut args = vec![self.value_owned(left), self.value_owned(right)];
         let extras = location
             .as_ref()
             .map(|location| {
@@ -20086,15 +20341,15 @@ impl<'a> RustEmitter<'a> {
                     [] => "jet_foundation::Outcome::jet_require_message(None)".to_string(),
                     [message] => {
                         if self.portable_require_abi() {
-                            self.value_read(*message)
+                            self.value_owned(*message)
                         } else {
-                            format!("&({})", self.value_read(*message))
+                            self.value_borrow(*message)
                         }
                     }
                     _ => panic!("MIR require expects only an optional diagnostic message"),
                 };
                 vec![
-                    self.value_read(condition),
+                    self.value_owned(condition),
                     message,
                     file,
                     line,
@@ -20113,16 +20368,16 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR require_eq expects exactly two diagnostic values");
                 };
                 vec![
-                    self.value_read(condition),
+                    self.value_owned(condition),
                     if self.portable_require_abi() {
-                        self.value_read(*left)
+                        self.value_owned(*left)
                     } else {
-                        format!("&({}).jet_debug()", self.value_read(*left))
+                        format!("&({}).jet_debug()", self.value_borrow(*left))
                     },
                     if self.portable_require_abi() {
-                        self.value_read(*right)
+                        self.value_owned(*right)
                     } else {
-                        format!("&({}).jet_debug()", self.value_read(*right))
+                        format!("&({}).jet_debug()", self.value_borrow(*right))
                     },
                     file,
                     line,
@@ -20148,9 +20403,9 @@ impl<'a> RustEmitter<'a> {
                     column,
                     caret,
                     if self.portable_require_abi() {
-                        self.value_read(*message)
+                        self.value_owned(*message)
                     } else {
-                        format!("&({})", self.value_read(*message))
+                        self.value_borrow(*message)
                     },
                     locals,
                 ]
@@ -20399,10 +20654,12 @@ impl<'a> RustEmitter<'a> {
                     let _ = write!(out, " __jet_string.push_str({value:?});");
                 }
                 MirStringPart::Value(value) => {
+                    // An interpolation hole is shown, never consumed: it
+                    // borrows its value (`jet_show(&self)`).
                     let _ = write!(
                         out,
                         " __jet_string.push_str(&({}).jet_show());",
-                        self.value_read(*value)
+                        self.value_borrow(*value)
                     );
                 }
             }
@@ -20412,7 +20669,7 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn project_members(&self, base: MirValueId, members: &[MirFieldId]) -> String {
-        let mut expression = self.value_read(base);
+        let mut expression = self.value_owned(base);
         for member in members {
             expression = self
                 .native_http_headers_fields_projection(&expression, *member)
@@ -20477,7 +20734,7 @@ impl<'a> RustEmitter<'a> {
                 let borrow_mask = self.callable_borrow_mask(self.value_type(function, *value));
                 self.call_symbol_for_function(
                     function,
-                    self.value_read(*value),
+                    self.value_owned(*value),
                     args,
                     type_args,
                     Some(&borrow_mask),
@@ -22259,7 +22516,7 @@ impl<'a> RustEmitter<'a> {
         );
         let target = format!(
             "({}).iter().map(|value| {}jet_std::jet_int_owned_to_i64(value).expect(\"checked autodiff target index\")).collect::<Vec<_>>()",
-            self.value_read(args.last().unwrap().value),
+            self.value_borrow(args.last().unwrap().value),
             self.config.root_prefix,
         );
         let kind = match member {
@@ -23095,7 +23352,7 @@ impl<'a> RustEmitter<'a> {
             MirAccess::Move => panic!("MIR index move has no checked Prelude route"),
         };
         let index = if matches!(kind, jet_foundation::MIR::MirIndexKind::Map) {
-            format!("&({})", self.value_read(index))
+            self.value_borrow(index)
         } else {
             self.index_operand(function, index, location)
         };
@@ -23131,7 +23388,7 @@ impl<'a> RustEmitter<'a> {
                         location.line
                     );
                 }
-                _ => return self.value_read(index),
+                _ => return self.value_owned(index),
             }
         }
     }
@@ -23208,21 +23465,21 @@ impl<'a> RustEmitter<'a> {
         let base = if row.signature.borrow_mask.first().copied().unwrap_or(false) {
             self.borrowed_value_reference(function, base, MirAccess::Read)
         } else {
-            self.value_read(base)
+            self.value_owned(base)
         };
         let args = match range {
             Some(range) => {
                 let range = if row.signature.borrow_mask.get(1).copied().unwrap_or(false) {
-                    format!("&({})", self.value_read(range))
+                    self.value_borrow(range)
                 } else {
-                    self.value_read(range)
+                    self.value_owned(range)
                 };
                 vec![base, range, file, line]
             }
             None => vec![
                 base,
-                self.native_int_argument(self.value_read(start), Some(&location)),
-                self.native_int_argument(self.value_read(end), Some(&location)),
+                self.native_int_argument(self.value_owned(start), Some(&location)),
+                self.native_int_argument(self.value_owned(end), Some(&location)),
                 file,
                 line,
             ],
@@ -23457,7 +23714,7 @@ impl<'a> RustEmitter<'a> {
             }
             MirConversion::NumericCast => {
                 let source = self.value_type(function, value);
-                let value = self.value_read(value);
+                let value = self.value_owned(value);
                 if matches!(source.kind(), MirTypeKind::Int) {
                     if matches!(target.kind(), MirTypeKind::Int) {
                         return value;
@@ -23533,11 +23790,11 @@ impl<'a> RustEmitter<'a> {
                     )
                 } else {
                     let mut args = Vec::with_capacity(parameters.len() + 3);
-                    args.push(self.value_read(value));
+                    args.push(self.value_owned(value));
                     args.extend(
                         parameters
                             .iter()
-                            .map(|parameter| self.value_read(*parameter)),
+                            .map(|parameter| self.value_owned(*parameter)),
                     );
                     let extras = vec![
                         format!("{:?}", self.source_file_path(location.file)),
@@ -23586,7 +23843,7 @@ impl<'a> RustEmitter<'a> {
         let input = if adapter.is_some() {
             self.value_slot_reference(value, false)
         } else {
-            self.value_read(value)
+            self.value_owned(value)
         };
         let mut args = match member {
             "checked_widen" => {
@@ -23653,7 +23910,7 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         parameters
             .get(index)
-            .map(|parameter| self.value_read(*parameter))
+            .map(|parameter| self.value_owned(*parameter))
             .unwrap_or_else(|| {
                 panic!("MIR numeric conversion {member:?} is missing parameter {index}")
             })
@@ -23731,7 +23988,7 @@ impl<'a> RustEmitter<'a> {
         target: &MirType,
     ) -> String {
         let source = self.value_type(function, value);
-        let value = self.value_read(value);
+        let value = self.value_owned(value);
         let target_distinct = self.is_distinct_type(target);
         let source_distinct = self.is_distinct_type(source);
         match (source_distinct, target_distinct) {
@@ -23826,8 +24083,30 @@ impl<'a> RustEmitter<'a> {
         let byte_loop = !by_value
             && matches!(source_kind, MirLoopSourceKind::Plain)
             && self.byte_loop_collection(function, collection);
-        let collection = if by_value {
+        let shared_slice = !by_value
+            && !byte_loop
+            && matches!(self.value_type(function, collection).kind(), MirTypeKind::List(_))
+            && self.shared_constant_value(function, collection);
+        // D-MEM-COPYSEM1: a read loop whose collection value is read only here
+        // already holds its own copy, so the cursor takes that copy by value
+        // rather than copying the whole collection a second time.
+        let consumed = !by_value
+            && !byte_loop
+            && !shared_slice
+            && matches!(
+                self.value_type(function, collection).kind(),
+                MirTypeKind::List(_) | MirTypeKind::Map { .. }
+            )
+            && self
+                .move_facts
+                .get(&function.id)
+                .is_some_and(|facts| facts.single_use.contains(&collection));
+        let collection = if by_value || consumed {
             self.value_move(collection)
+        } else if shared_slice {
+            // A loop over a shared list constant walks a borrowed slice; the
+            // shared value itself is never made unique.
+            format!("&mut ({}).as_slice()", self.value_slot_reference(collection, false))
         } else {
             self.value_borrow_mut(collection)
         };
@@ -23851,7 +24130,7 @@ impl<'a> RustEmitter<'a> {
                 collection,
                 step,
                 has_step,
-                by_value.to_string(),
+                (by_value || consumed).to_string(),
                 self.loop_source_kind(source_kind),
             ],
         )
@@ -24579,11 +24858,11 @@ impl<'a> RustEmitter<'a> {
                     )
                 })
                 .collect::<Vec<_>>();
-            return self.fn_value_call(self.value_read(callee), &invocation_args);
+            return self.fn_value_call(self.value_owned(callee), &invocation_args);
         }
         self.call_symbol_for_function(
             function,
-            self.value_read(callee),
+            self.value_owned(callee),
             args,
             type_args,
             Some(&borrow_mask),
@@ -24678,16 +24957,33 @@ impl<'a> RustEmitter<'a> {
             )
     }
     fn call_arg(&self, arg: &MirCallArg, borrowed: bool) -> String {
+        let copied = arg.implicit_clone || arg.shared_auto_clone;
+        let transformed = arg.authority_boundary
+            || arg.widen_fixed_to_list
+            || arg.widen_to_union.is_some()
+            || arg.box_as_trait.is_some()
+            || arg.fn_coercion.as_ref().is_some_and(|coercion| !coercion.already_boxed);
+        if borrowed && arg.access == MirAccess::Read && !transformed && !copied {
+            // A borrowed parameter reads the argument in place: no copy.
+            return self.value_borrow(arg.value);
+        }
         let mut value = match arg.access {
-            MirAccess::Read => self.value_read(arg.value),
+            // The call-site copy fact sema recorded (implicit or shared clone).
+            MirAccess::Read | MirAccess::Write if copied => {
+                let fact = if arg.shared_auto_clone {
+                    MirCopyFact::Share
+                } else {
+                    MirCopyFact::Materialize
+                };
+                self.value_copy(arg.value, fact.for_ownership(self.value_ownership(arg.value).mode))
+            }
+            MirAccess::Read => self.value_owned(arg.value),
             MirAccess::Write => self.value_borrow_mut(arg.value),
+            // A moved argument is already the callee's own value.
             MirAccess::Move => self.value_move(arg.value),
         };
         if arg.authority_boundary {
             value = format!("jet_authority_to_wire(&({value}))");
-        }
-        if arg.implicit_clone || arg.shared_auto_clone {
-            value = format!("({value}).clone()");
         }
         if arg.widen_fixed_to_list {
             value = format!("({value}).to_vec()");
@@ -25045,7 +25341,7 @@ impl<'a> RustEmitter<'a> {
                         {
                             self.place_read(function, *place)
                         }
-                        _ => self.value_read(arg.value),
+                        _ => self.value_owned(arg.value),
                     }
                 } else {
                     self.call_arg_for_function_with_literal(function, arg, borrowed, allow_literal)
@@ -25624,6 +25920,10 @@ impl<'a> RustEmitter<'a> {
             .is_some_and(|(_, access)| access != MirAccess::Move)
         {
             return "()".to_string();
+        }
+        if self.shared_constant_value(function, value) {
+            // Dropping a shared-constant read ends the borrow; it never copies.
+            return format!("{{ {}.release(); () }}", value_slot(value));
         }
         if matches!(kind, MirDropKind::ForeignHandle) {
             let ty = self.value_type(function, value);
@@ -26347,7 +26647,7 @@ impl<'a> RustEmitter<'a> {
                 self.plugin_encode_value_expr(
                     descriptor,
                     self.value_type(function, *value),
-                    &self.value_read(*value),
+                    &self.value_owned(*value),
                     0,
                 )
             })
@@ -26357,7 +26657,7 @@ impl<'a> RustEmitter<'a> {
         let call = self.prelude_call_args_exact(
             call,
             &[
-                format!("({}).handle", self.value_read(handle)),
+                format!("({}).handle", self.value_owned(handle)),
                 format!("{export_name:?}"),
                 "&__jet_plugin_params_wire".to_string(),
             ],
@@ -26410,7 +26710,7 @@ impl<'a> RustEmitter<'a> {
         field: MirFieldId,
     ) -> String {
         if let Some(projected) =
-            self.native_http_headers_fields_projection(&self.value_read(base), field)
+            self.native_http_headers_fields_projection(&self.value_owned(base), field)
         {
             return projected;
         }
@@ -26421,28 +26721,29 @@ impl<'a> RustEmitter<'a> {
             } else {
                 format!("(*({reference})).clone()")
             }
-        } else if self.boxed_field(field) {
-            if self.history_runtime_metadata_enabled() {
-                format!(
-                    "({}).{}.as_ref().clone()",
-                    self.value_slot_reference(base, false),
-                    field_name
-                )
+        } else if let Some(place) = self.elided_shared_guard_base(function, base) {
+            // The guard deref (or guard field) feeding this read is a borrow
+            // projection that is never stored in its value slot; read the
+            // field through the guard's own place instead of that empty slot.
+            if self.boxed_field(field) {
+                format!("({place}).{field_name}.as_ref().clone()")
             } else {
-                format!(
-                    "({}).{}.as_ref().clone()",
-                    self.value_read(base),
-                    field_name
-                )
+                format!("({place}).{field_name}.clone()")
             }
-        } else if self.history_runtime_metadata_enabled() {
+        } else if self.boxed_field(field) {
+            // Borrow the base slot and copy only the projected field; never
+            // clone the whole aggregate to read one of its fields.
+            format!(
+                "({}).{}.as_ref().clone()",
+                self.value_slot_reference(base, false),
+                field_name
+            )
+        } else {
             format!(
                 "({}).{}.clone()",
                 self.value_slot_reference(base, false),
                 field_name
             )
-        } else {
-            format!("({}).{}", self.value_read(base), field_name)
         };
         let ty = self.value_type(function, base);
         if ty.nominal_name() == Some("WebFormFieldSpec")
@@ -26482,6 +26783,16 @@ impl<'a> RustEmitter<'a> {
             Some(owner) => self.history_source_field_value(owner, &field_name, value),
             None => value,
         }
+    }
+
+    /// A shared-guard deref or guard field whose instruction is elided as a
+    /// direct borrow projection (see the `direct_borrow_projection` skip):
+    /// its value slot is never assigned, so readers use the guard place.
+    fn elided_shared_guard_base(&self, function: &MirFunction, base: MirValueId) -> Option<String> {
+        if !self.shared_guard_borrow_origin(function, base) || !self.direct_borrow_only(function, base) {
+            return None;
+        }
+        self.shared_guard_borrow_place(function, base, MirAccess::Read)
     }
 
     fn history_struct_field_value(
@@ -26726,21 +27037,25 @@ impl<'a> RustEmitter<'a> {
             MirSemanticOp::MathBuiltin { call, args, .. }
             | MirSemanticOp::PreciseBuiltin { call, args, .. } => self.prelude_values(*call, args),
             MirSemanticOp::Print { call, value } => {
-                let value_expr = self.value_read(*value);
-                let value_expr = if matches!(
-                    self.value_type(function, *value).kind(),
-                    MirTypeKind::String
-                ) {
-                    value_expr
-                } else {
-                    format!("({value_expr}).jet_show()")
-                };
-                if matches!(
+                let test_print = matches!(
                     self.artifact.kind,
                     MirArtifactKind::TestExecutable
                         | MirArtifactKind::FuzzExecutable
                         | MirArtifactKind::TestOverride
+                );
+                // Printing only reads its value: it borrows it. A test print
+                // takes a String, so it consumes the value at its single use.
+                let value_expr = if !matches!(
+                    self.value_type(function, *value).kind(),
+                    MirTypeKind::String
                 ) {
+                    format!("({}).jet_show()", self.value_borrow(*value))
+                } else if test_print {
+                    self.value_consume(function, *value)
+                } else {
+                    format!("*{}", self.value_borrow(*value))
+                };
+                if test_print {
                     format!("jet_test_print({value_expr})")
                 } else {
                     format!(
@@ -26754,7 +27069,7 @@ impl<'a> RustEmitter<'a> {
             }
             MirSemanticOp::AmbientInput { call, prompt } => {
                 let prompt = prompt
-                    .map(|value| format!("Some(&({}))", self.value_read(value)))
+                    .map(|value| format!("Some({})", self.value_borrow(value)))
                     .unwrap_or_else(|| "None".to_string());
                 self.prelude_call_args(*call, &[prompt])
             }
@@ -26781,7 +27096,7 @@ impl<'a> RustEmitter<'a> {
             MirSemanticOp::LayoutLiteral { inner } => format!(
                 "{}jet_layout::LinExpr::from_const(({}) as f64)",
                 self.config.root_prefix,
-                self.value_read(*inner)
+                self.value_owned(*inner)
             ),
             MirSemanticOp::StructLiteral {
                 type_id,
@@ -26811,7 +27126,7 @@ impl<'a> RustEmitter<'a> {
                         format!(
                             "jet_reflect_field_new({:?}.to_string(), jet_reflect_value_from_field(&({}), {:?}, {:?}))",
                             field.name,
-                            self.value_read(field.value),
+                            format!("*{}", self.value_borrow(field.value)),
                             field.type_name,
                             field.path,
                         )
@@ -26822,7 +27137,7 @@ impl<'a> RustEmitter<'a> {
                     "jet_reflect_value_finish({:?}.to_string(), {:?}.to_string(), {}, vec![{}])",
                     type_name,
                     path,
-                    self.value_read(*display),
+                    self.value_owned(*display),
                     fields,
                 )
             }
@@ -26914,7 +27229,7 @@ impl<'a> RustEmitter<'a> {
                     self.prelude_symbol(*call),
                     self.borrowed_value_reference(function, *guard, MirAccess::Read),
                     self.value_slot_reference(*condition, false),
-                    self.value_read(*predicate)
+                    self.value_owned(*predicate)
                 )
             }
             MirSemanticOp::ConditionNotify {
@@ -27027,15 +27342,15 @@ impl<'a> RustEmitter<'a> {
                 let emitted = self.prelude_call_args(
                     *call,
                     &[
-                        self.value_read(*function),
+                        self.value_owned(*function),
                         "left".to_string(),
                         "right".to_string(),
                     ],
                 );
                 format!(
                     "match ({}, {}) {{ (Ok(left), Ok(right)) => {emitted}, _ => Err({}JetAbsent) }}",
-                    self.value_read(*left),
-                    self.value_read(*right),
+                    self.value_owned(*left),
+                    self.value_owned(*right),
                     self.config.root_prefix
                 )
             }
@@ -27350,7 +27665,7 @@ impl<'a> RustEmitter<'a> {
             }
             MirSemanticOp::PolicyFunction { policy, values } => format!(
                 "{}({})",
-                self.value_read(*policy),
+                self.value_owned(*policy),
                 values
                     .iter()
                     .map(|value| self.value_move(*value))
@@ -27359,7 +27674,7 @@ impl<'a> RustEmitter<'a> {
             ),
             MirSemanticOp::InterruptFunction { interrupt, values } => format!(
                 "{}({})",
-                self.value_read(*interrupt),
+                self.value_owned(*interrupt),
                 values
                     .iter()
                     .map(|value| self.value_move(*value))
@@ -27408,7 +27723,7 @@ impl<'a> RustEmitter<'a> {
         format!(
             "{}(&({}), |__jet_report| __jet_report.{}.clone())",
             self.prelude_symbol(call),
-            self.value_read(receiver),
+            format!("*{}", self.value_borrow(receiver)),
             self.field_name(field)
         )
     }
@@ -27417,23 +27732,23 @@ impl<'a> RustEmitter<'a> {
         let db_value = format!("{}jet_std::DBValue", self.config.root_prefix);
         let ty = self.value_type(function, value);
         if ty.nominal_name() == Some(jet_foundation::Syntax::TYPE_DB_VALUE) {
-            return self.value_read(value);
+            return self.value_owned(value);
         }
         match ty.kind() {
             MirTypeKind::Int => format!(
                 "{db_value}::Int({}jet_std::jet_int_owned_to_i64(&({})).expect(\"SQL Int exceeds i64 wire range\"))",
                 self.config.root_prefix,
-                self.value_read(value)
+                format!("*{}", self.value_borrow(value))
             ),
             MirTypeKind::IntN { .. } => {
-                format!("{db_value}::Int(({}) as i64)", self.value_read(value))
+                format!("{db_value}::Int(({}) as i64)", self.value_owned(value))
             }
             MirTypeKind::Float | MirTypeKind::Float32 => {
-                format!("{db_value}::Float(({}) as f64)", self.value_read(value))
+                format!("{db_value}::Float(({}) as f64)", self.value_owned(value))
             }
-            MirTypeKind::Bool => format!("{db_value}::Bool({})", self.value_read(value)),
+            MirTypeKind::Bool => format!("{db_value}::Bool({})", self.value_owned(value)),
             MirTypeKind::String => {
-                format!("{db_value}::Text({})", self.value_read(value))
+                format!("{db_value}::Text({})", self.value_owned(value))
             }
             MirTypeKind::List(inner)
                 if matches!(
@@ -27444,7 +27759,7 @@ impl<'a> RustEmitter<'a> {
                     }
                 ) =>
             {
-                format!("{db_value}::Blob({})", self.value_read(value))
+                format!("{db_value}::Blob({})", self.value_owned(value))
             }
             MirTypeKind::Char
             | MirTypeKind::List(_)
@@ -27463,7 +27778,7 @@ impl<'a> RustEmitter<'a> {
             | MirTypeKind::Quantity { .. }
             | MirTypeKind::Union(_)
             | MirTypeKind::Measure(_) => {
-                format!("{db_value}::Text(({}).jet_show())", self.value_read(value))
+                format!("{db_value}::Text(({}).jet_show())", self.value_borrow(value))
             }
         }
     }
@@ -27498,11 +27813,10 @@ impl<'a> RustEmitter<'a> {
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
-                    let rendered = self.value_read(*value);
                     if trusted_html.get(index).copied().unwrap_or(false) {
-                        format!("({rendered})")
+                        format!("({})", self.value_owned(*value))
                     } else {
-                        format!("({rendered}).jet_show()")
+                        format!("({}).jet_show()", self.value_borrow(*value))
                     }
                 })
                 .collect::<Vec<_>>(),
@@ -27511,7 +27825,7 @@ impl<'a> RustEmitter<'a> {
             | jet_foundation::Syntax::TypedHeadKind::Path
             | jet_foundation::Syntax::TypedHeadKind::DateTime => holes
                 .iter()
-                .map(|value| format!("({}).jet_show()", self.value_read(*value)))
+                .map(|value| format!("({}).jet_show()", self.value_borrow(*value)))
                 .collect::<Vec<_>>(),
         };
         let hole_expr = format!("vec![{}]", hole_array.join(", "));
@@ -27558,12 +27872,12 @@ impl<'a> RustEmitter<'a> {
         kind: MirGcEditKind,
         site: jet_foundation::MIR::MirGcEditSiteId,
     ) -> String {
-        let root = format!("&({})", self.value_read(root));
+        let root = self.value_borrow(root);
         let edge_values = format!(
             "&[{}]",
             edges
                 .iter()
-                .map(|value| self.value_read(*value))
+                .map(|value| self.value_owned(*value))
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -27580,11 +27894,11 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR GC remove edit carries edge operands");
                 }
                 let index = index.unwrap_or_else(|| panic!("MIR GC remove edit has no index"));
-                vec![root, self.value_read(index), edit]
+                vec![root, self.value_owned(index), edit]
             }
             MirGcEditKind::InsertIndex => {
                 let index = index.unwrap_or_else(|| panic!("MIR GC insert edit has no index"));
-                vec![root, self.value_read(index), edge_values, edit]
+                vec![root, self.value_owned(index), edge_values, edit]
             }
             MirGcEditKind::Prepend | MirGcEditKind::Additive => {
                 if index.is_some() {
@@ -27745,7 +28059,7 @@ impl<'a> RustEmitter<'a> {
                         values.len()
                     );
                 }
-                args.push(format!("&({})", self.value_read(values[0])));
+                args.push(self.value_borrow(values[0]));
                 args.push(self.value_move(closure));
             }
             MirCoreClosureKind::OnInterrupt => {
@@ -27848,7 +28162,7 @@ impl<'a> RustEmitter<'a> {
                         values.len()
                     );
                 }
-                args.push(format!("&({})", self.value_read(values[0])));
+                args.push(self.value_borrow(values[0]));
                 args.push(self.value_move(values[1]));
                 args.push(self.native_callback_adapter(function, closure, 0));
             }
@@ -27862,7 +28176,7 @@ impl<'a> RustEmitter<'a> {
                         values.len()
                     );
                 }
-                args.push(format!("&({})", self.value_read(values[0])));
+                args.push(self.value_borrow(values[0]));
                 args.push(self.value_move(values[1]));
                 args.push(self.value_move(values[2]));
                 args.push(self.native_callback_adapter(function, closure, 0));
@@ -27877,7 +28191,7 @@ impl<'a> RustEmitter<'a> {
                         values.len()
                     );
                 }
-                args.push(format!("&({})", self.value_read(values[0])));
+                args.push(self.value_borrow(values[0]));
                 args.push(self.value_move(values[1]));
                 args.push(self.native_callback_adapter(function, closure, 1));
             }
@@ -27918,7 +28232,7 @@ impl<'a> RustEmitter<'a> {
                 {
                     self.value_slot_reference(*value, false)
                 } else {
-                    self.value_read(*value)
+                    self.value_owned(*value)
                 }
             })
             .collect::<Vec<_>>()
@@ -28089,7 +28403,7 @@ impl<'a> RustEmitter<'a> {
             let line = format!("{line}u32");
             let (symbol, arguments) = match args {
                 [range] => {
-                    let range = self.value_read(*range);
+                    let range = self.value_owned(*range);
                     let symbol = if row.member == "view_mut_new" {
                         self.prelude_symbol(call)
                             .replace("jet_view_mut_new", "jet_view_mut_new_range")
@@ -28100,8 +28414,8 @@ impl<'a> RustEmitter<'a> {
                     (symbol, format!("{receiver}, &({range}), {file}, {line}"))
                 }
                 [start, end] => {
-                    let start = self.value_read(*start);
-                    let end = self.value_read(*end);
+                    let start = self.value_owned(*start);
+                    let end = self.value_owned(*end);
                     (
                         self.prelude_symbol(call),
                         format!("{receiver}, {start}, {end}, {file}, {line}"),
@@ -28491,7 +28805,7 @@ impl<'a> RustEmitter<'a> {
                         self.local_storage(function, *local)
                     );
                 }
-                MirPlaceBase::Temporary(value) => return self.value_read(*value),
+                MirPlaceBase::Temporary(value) => return self.value_owned(*value),
                 MirPlaceBase::Static(name) => {
                     return format!("({}{}).get()", self.config.root_prefix, mangle_path(name));
                 }
@@ -28617,7 +28931,7 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn move_index_projection(&self, kind: MirIndexKind, base: String, index: MirValueId) -> String {
-        let index = self.value_read(index);
+        let index = self.value_owned(index);
         match kind {
             MirIndexKind::List | MirIndexKind::FixedListProof => format!(
                 "jet_list_remove_slot(&mut ({base}), {index}).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning list index move failed\"))"
@@ -28837,9 +29151,9 @@ impl<'a> RustEmitter<'a> {
                     ..
                 } => {
                     let index = if *kind == MirIndexKind::Map && !mutable {
-                        format!("&({})", self.value_read(*index))
+                        self.value_borrow(*index)
                     } else if *kind == MirIndexKind::Map {
-                        self.value_read(*index)
+                        self.value_owned(*index)
                     } else {
                         self.index_operand(function, *index, *location)
                     };
@@ -28896,7 +29210,7 @@ impl<'a> RustEmitter<'a> {
                     expression = format!(
                         "*{}{symbol}({borrow} ({expression}), &({}), {:?}, {}u32)",
                         self.config.root_prefix,
-                        self.value_read(*range),
+                        self.value_owned(*range),
                         self.source_file_path(location.file),
                         location.line
                     );
@@ -29165,18 +29479,78 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn value_read(&self, value: MirValueId) -> String {
-        format!("({}).clone()", self.value_slot_reference(value, false))
+    /// #4318: a shared reference to the value (its slot, or the place a
+    /// history binding names). Inspecting and borrowing consumers read
+    /// through it; nothing is copied.
+    fn value_borrow(&self, value: MirValueId) -> String {
+        self.value_slot_reference(value, false)
     }
 
-    fn value_copy(&self, value: MirValueId) -> String {
-        self.value_read(value)
+    /// #4318: the copy of a MIR `Copy{fact}` operand, and the only printer
+    /// of a value clone. A value whose Rust carrier is `Copy` is read
+    /// bitwise; any other value clones.
+    fn value_copy(&self, value: MirValueId, fact: MirCopyFact) -> String {
+        self.copy_text(value, fact.as_str())
+    }
+
+    /// An owned read of a value the consumer keeps no hold of in MIR. A
+    /// Copy-type value is a `Scalar` copy (the type decides it); any other
+    /// value is a copy no MIR `Copy{fact}` backs yet (#4318 remaining), tagged
+    /// `unbacked` so Tools/agent/copy-ratchet.mjs counts it.
+    fn value_owned(&self, value: MirValueId) -> String {
+        let scalar = self.history_current_function.get().is_some_and(|id| {
+            let function = self.function_row(id);
+            self.function_index(function)
+                .values
+                .get(&value)
+                .is_some_and(|row| function.values[*row].3.mode == MirOwnershipMode::Copy)
+        });
+        if scalar {
+            self.value_copy(value, MirCopyFact::Scalar)
+        } else {
+            self.copy_text(value, "unbacked")
+        }
+    }
+
+    fn copy_text(&self, value: MirValueId, tag: &str) -> String {
+        let borrow = self.value_borrow(value);
+        let bitwise = self.history_current_function.get().is_some_and(|id| {
+            self.rust_copy_carrier(self.value_type(self.function_row(id), value))
+        });
+        if bitwise {
+            format!("(*{borrow})")
+        } else if copy_tags_enabled() {
+            format!("({borrow}).clone()/*copy:{tag}*/")
+        } else {
+            format!("({borrow}).clone()")
+        }
+    }
+
+    /// Whether `ty`'s Rust carrier (`rust_type`) is a `Copy` primitive.
+    fn rust_copy_carrier(&self, ty: &MirType) -> bool {
+        let ty = if ty.identity.is_some() { self.canonical_type(ty) } else { ty };
+        match ty.kind() {
+            MirTypeKind::Bool
+            | MirTypeKind::Char
+            | MirTypeKind::Float
+            | MirTypeKind::Float32
+            | MirTypeKind::Measure(_) => true,
+            MirTypeKind::IntN { bits, .. } => matches!(bits, 8 | 16 | 32 | 64 | 128),
+            MirTypeKind::Tagged {
+                marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+                ..
+            } => false,
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.rust_copy_carrier(base),
+            _ => false,
+        }
     }
 
     fn value_move(&self, value: MirValueId) -> String {
         if let Some((base, access)) = self.history_binding(value) {
             if access != MirAccess::Move {
-                return self.value_read(value);
+                return self.value_owned(value);
             }
             return self.move_base(
                 self.function_row(

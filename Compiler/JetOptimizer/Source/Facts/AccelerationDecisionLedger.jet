@@ -123,12 +123,10 @@ fn mir_pass_decision_row(
     }
 }
 
-fn mir_pass_decision_insert(rows: &[MIRDecisionRow], fact: MIRDecisionRow) Never! {
-    loop row in rows {
-        if row.id == fact.id {
-            return
-        }
-    }
+// Rust: none (Jet-only pass)
+fn mir_pass_decision_insert(rows: &[MIRDecisionRow], seen: &[U64:Bool], fact: MIRDecisionRow) Never! {
+    if seen.get(fact.id) != None -> return
+    &seen.add(fact.id, true).drop("checked absent above")
     &rows.push(fact)
 }
 
@@ -173,15 +171,17 @@ fn mir_pass_derive_decision_rows(program: &MIRProgram) -> Int Never! {
     count
 }
 
-fn mir_pass_function_decision_rows(program: MIRProgram, function: MIRFunction, first_function: Bool, call_counts: [Int:Int]) -> [MIRDecisionRow] Never! {
+// Rust: crates/jet-foundation/src/MIROptimization.rs::decision_ledger_rows
+fn mir_pass_function_decision_rows(program: MIRProgram, function: MIRFunction, first_function: Bool, call_counts: [U64:Int]) -> [MIRDecisionRow] Never! {
     rows := [MIRDecisionRow]{}
+    seen := [U64:Bool]{}
     function_name :: "{function.module_name}::{function.name}"
     if function.is_inline_always || function.optimization.inline_always {
         remaining :: call_counts.get(function.id.value) ?? 0
         disposition :: if remaining == 0 -> MIRDecisionDisposition.Accepted else -> MIRDecisionDisposition.Rejected
         reason :: if remaining == 0 -> "all statically resolved calls were expanded" else -> "statically resolved calls remain in canonical MIR"
         row :: mir_pass_decision_row(.Inline, disposition, Val(function.id), function_name, function.span, "inline-always", reason, "source-mir-optimizer", "remaining-calls={remaining}")
-        mir_pass_decision_insert(&rows, row)
+        mir_pass_decision_insert(&rows, &seen, row)
     }
     if first_function {
         loop unreachable in program.unreachable {
@@ -192,7 +192,7 @@ fn mir_pass_function_decision_rows(program: MIRProgram, function: MIRFunction, f
                 .SemanticIndexOnly -> "semanticindexonly"
             }
             row :: mir_pass_decision_row(.Unreachable, MIRDecisionDisposition.Selected, None, "", unreachable.span, unreachable.construct, reason, "tir.erasure", "static-control-flow-fact")
-            mir_pass_decision_insert(&rows, row)
+            mir_pass_decision_insert(&rows, &seen, row)
         }
     }
     loop loop_fact in function.optimization.loop_facts {
@@ -207,26 +207,26 @@ fn mir_pass_function_decision_rows(program: MIRProgram, function: MIRFunction, f
             .Unknown -> "the compiler has no bounded copy-cost fact"
         }
         copy_row :: mir_pass_decision_row(.Copy, copy_disposition, Val(function.id), function_name, loop_fact.span, "loop-copy-cost", copy_reason, "mir.loop-facts", "static-cost-fact")
-        mir_pass_decision_insert(&rows, copy_row)
+        mir_pass_decision_insert(&rows, &seen, copy_row)
 
         disposition :: mir_pass_decision_disposition(loop_fact.decision)
         trip_count :: loop_fact.trip_count.map(value -> "{value}") ?? "unknown"
         evidence :: "header={loop_fact.header.value};trip-count={trip_count}"
         row :: mir_pass_decision_row(.Parallel, disposition, Val(function.id), function_name, loop_fact.span, "canonical-loop", mir_pass_rejection_reason(loop_fact.decision), "source-mir-optimizer", evidence)
-        mir_pass_decision_insert(&rows, row)
+        mir_pass_decision_insert(&rows, &seen, row)
     }
     loop vector in function.optimization.vector_facts {
         disposition :: mir_pass_decision_disposition(vector.decision)
         evidence :: "accesses={vector.accesses.len()};alias-free={vector.no_aliasing};no-early-exit={vector.no_early_exit};effect-free={vector.effect_free_body}"
         row :: mir_pass_decision_row(.Vectorize, disposition, Val(function.id), function_name, vector.span, mir_pass_vector_rule_name(vector.rule), mir_pass_rejection_reason(vector.decision), "source-mir-optimizer", evidence)
-        mir_pass_decision_insert(&rows, row)
+        mir_pass_decision_insert(&rows, &seen, row)
     }
     loop bounds in function.optimization.bounds_facts {
         disposition :: if bounds.proven -> MIRDecisionDisposition.Accepted else -> MIRDecisionDisposition.Rejected
         reason :: if bounds.proven -> "bounds proof preserves the checked access failure edge" else -> "bounds cannot be proven for this access"
         evidence :: "operation={bounds.operation.value};kind={mir_pass_index_kind_name(bounds.kind)}"
         row :: mir_pass_decision_row(.Bounds, disposition, Val(function.id), function_name, bounds.span, "bounds-check", reason, "source-mir-optimizer", evidence)
-        mir_pass_decision_insert(&rows, row)
+        mir_pass_decision_insert(&rows, &seen, row)
     }
     rows
 }
@@ -252,8 +252,8 @@ fn mir_pass_index_kind_name(kind: MIRIndexKind) -> String Never! {
 }
 
 // Statically resolved calls per callee function id (MIRFunctionID.value).
-fn mir_pass_count_calls_by_function(program: MIRProgram) -> [Int:Int] Never! {
-    counts := [Int:Int]{}
+fn mir_pass_count_calls_by_function(program: MIRProgram) -> [U64:Int] Never! {
+    counts := [U64:Int]{}
     loop function in program.functions {
         loop block in function.blocks {
             loop instruction in block.instructions {
@@ -281,14 +281,11 @@ fn mir_pass_sort_decision_rows_for_program(program: &MIRProgram) Never! {
     }
 }
 
+// Rust: none (Jet-only pass)
 fn mir_pass_sort_decision_rows(rows: &[MIRDecisionRow]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && current.id < rows[cursor - 1].id {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
-    }
+    ids := [U64]{}
+    loop index in 0..<rows.len() -> &ids.push(rows[index].id)
+    sorted := [MIRDecisionRow]{}
+    loop position in mir_pass_id_order(ids) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }

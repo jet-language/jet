@@ -15,7 +15,6 @@ use jet_foundation.[
     Marker,
     PolicyDeclaration,
     PolicyKey,
-    PolicyScope,
     Span,
     SymbolKind,
     TBuiltinOp,
@@ -59,19 +58,12 @@ fn sema_string_view_copies_marker(marker: Marker) -> Bool Never! {
 
 // Rust `copies_explicit`: a package or module `copies: .Explicit`
 // declaration, or the function's own `#Policy(copies: .Explicit)` marker.
+// Rust: crates/jet-sema/src/Sema/mod.rs::Checker::copies_explicit
 pub fn sema_string_view_apply_copies_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, markers: [Marker]) Never! {
-    table.copies_explicit = false
+    position :: sema_scope_module_policy(&table, graph, module_identity)
+    table.copies_explicit = table.policy_rows[position].copies_explicit
     loop marker in markers {
         if sema_string_view_copies_marker(marker) -> table.copies_explicit = true
-    }
-    module_index :: sema_registration_module_index(graph, module_identity) ?? return
-    package_identity :: graph.modules[module_index].package_identity
-    loop declaration_module in graph.modules {
-        if declaration_module.package_identity != package_identity -> next
-        loop declaration in declaration_module.program.policy_declarations {
-            if !sema_string_view_copies_declaration(declaration) -> next
-            if declaration.scope == PolicyScope.Package || (declaration.scope == PolicyScope.Module && declaration_module.module_identity == module_identity) -> table.copies_explicit = true
-        }
     }
 }
 

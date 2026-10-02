@@ -5,6 +5,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FunctionDefaultRef,
+    MIRCopyFact,
     ParamZone,
     Span,
     StrPart,
@@ -13,6 +14,7 @@ use jet_foundation.[
     TFailureCarrier,
     THandleOp,
     THostCall,
+    TTypedTextForm,
     Type,
     type_name,
 ]
@@ -192,13 +194,25 @@ pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: 
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             if name == "DBValue" -> return sema_data_try_dbvalue_accessor(receiver, receiver_value, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            // D-TYPEDSQL-SINK1=A: `.template()`/`.params()` project the checked
+            // `SQL` value (the Rust reference's TypedText SQLTemplate/SQLParams).
             if name == "SQL" && (method == "template" || method == "params") {
                 if args.len() != 0 -> sema_data_arity_diagnostic(method, 0, args.len(), span, &diagnostics)
                 if type_args.len() != 0 -> sema_data_check_explicit_type_args(method, type_args, 0, span, &diagnostics)
                 sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                 if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
                 ret := if method == "template" -> Type.String else -> Type.List{element: sema_data_value_type()}
-                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(sema_tir_expr(ret, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{}}}, span), expected, environment, &diagnostics)}
+                form :: if method == "template" -> TTypedTextForm.SQLTemplate else -> TTypedTextForm.SQLParams
+                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(sema_tir_expr(ret, TExprKind.HostCall{call: THostCall.TypedText{kind: form, argument: receiver_value}}, span), expected, environment, &diagnostics)}
+            }
+            // D-TYPEDTEXT1=D: `.text()` reads the escaped HTML as a String copy
+            // (the Rust reference's `HTML.text` route).
+            if name == "HTML" && method == "text" {
+                if args.len() != 0 -> sema_data_arity_diagnostic(method, 0, args.len(), span, &diagnostics)
+                if type_args.len() != 0 -> sema_data_check_explicit_type_args(method, type_args, 0, span, &diagnostics)
+                sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(sema_tir_expr(Type.String, TExprKind.Clone{value: receiver_value, fact: MIRCopyFact.Materialize}, span), expected, environment, &diagnostics)}
             }
             if name == "RealtimeStream" {
                 ret := if {
@@ -329,6 +343,21 @@ fn sema_data_dbvalue_payload_live_after(ty: Type, argument: Expr, tail_store: &S
         .Ident(name, _) -> { return sema_ownership_name_live_after(name, &tail_store, &context) }
         else -> { return false }
     }
+}
+
+// D-TYPEDTEXT1=D: `HTML.raw("…")` is the audited escape from a runtime
+// String into checked HTML. `HTML` names the type here; the caller routes
+// only an owner no local value shadows (the Rust reference's typed-text raw).
+pub fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if owner != "HTML" || method != "raw" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0103", span, "`HTML.raw()` takes exactly one argument", "`.raw()` wraps one already-audited `String` as the escape hatch", "write `HTML.raw(text)`"))
+        sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    text :: sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_expr(Type.Named{name: "HTML"}, TExprKind.HostCall{call: THostCall.TypedText{kind: TTypedTextForm.HTMLRaw, argument: text}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
 pub fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

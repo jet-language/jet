@@ -119,7 +119,7 @@ struct LowerModule {
     // Interned text -> its data id, and first program row per MIR function
     // id, so interning and call lowering probe a map instead of scanning.
     pub data_rows: [String:Int]
-    pub mir_rows: [Int:Int]
+    pub mir_rows: [U64:Int]
     pub mir_signatures: [LIRSignatureID]
     pub glue_base: Int
     pub glue: [LowerGlue]
@@ -130,14 +130,14 @@ struct LowerModule {
 struct LowerContext {
     pub mir: MIRFunction
     pub result: LowerRepr
-    pub fact_index: [String:Int]
-    pub block_index: [String:Int]
+    pub fact_index: [U64:Int]
+    pub block_index: [U64:Int]
     pub slots: [LowerSlot]
-    pub place_slots: [String:Int]
+    pub place_slots: [U64:Int]
     // MIR value read or moved out of a root place -> its slot.
-    pub read_slots: [String:Int]
+    pub read_slots: [U64:Int]
     // MIR value a parameter or temporary place stands for -> its slot.
-    pub defined_slots: [String:Int]
+    pub defined_slots: [U64:Int]
     pub order: [Int]
     pub lir_blocks: [LIRBlockID]
     pub split_entry: Bool
@@ -148,8 +148,8 @@ struct LowerFunction {
     pub name: String
     pub builder: LIRFunctionBuilder
     // MIR value -> LIR value index; MIR values carried by no LIR value are in `absent`.
-    pub values: [String:Int]
-    pub absent: [String:Bool]
+    pub values: [U64:Int]
+    pub absent: [U64:Bool]
     pub params: [LIRValueID?]
     pub current: [LIRValueID?]
     pub mir_block: MIRBlockID
@@ -163,7 +163,7 @@ pub fn lir_lower_program(program: MIRProgram) -> LIRLowering Never! {
         signatures: [LIRSignature]{},
         data: [LIRData]{},
         data_rows: [String:Int]{},
-        mir_rows: [Int:Int]{},
+        mir_rows: [U64:Int]{},
         mir_signatures: [LIRSignatureID]{},
         glue_base: program.functions.len(),
         glue: [LowerGlue]{},
@@ -420,20 +420,13 @@ fn lower_target(block: LIRBlockID, args: [LIRValueID]) -> LIRJumpTarget Never! {
     LIRJumpTarget{block: block, args: ~args}
 }
 
-// Map key for a MIR id. Ids are u64 hashes, often >= 2^63, and an Int-keyed
-// map misses equal big-integer keys computed separately (#4142), so maps are
-// keyed by the decimal text.
-fn lower_key(id: Int) -> String Never! {
-    "{id}"
-}
-
 fn lower_value_type(c: LowerContext, value: MIRValueID) -> MIRType? {
-    index :: c.fact_index.get(lower_key(value.value)) ?? return None
+    index :: c.fact_index.get(value.value) ?? return None
     Val(c.mir.values[index].ty)
 }
 
 fn lower_value_owned(c: LowerContext, value: MIRValueID) -> Bool Never! {
-    index :: c.fact_index.get(lower_key(value.value)) ?? return false
+    index :: c.fact_index.get(value.value) ?? return false
     lower_is_owned(c.mir.values[index].ownership)
 }
 
@@ -444,23 +437,23 @@ fn lower_set_slot(f: &LowerFunction, slot: Int, value: LIRValueID?) Never! {
 }
 
 fn lower_define(c: LowerContext, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID) Never! {
-    _ := &f.values.add(lower_key(value.value), lowered.value)
-    slot :: c.defined_slots.get(lower_key(value.value)) ?? return
+    _ := &f.values.add(value.value, lowered.value)
+    slot :: c.defined_slots.get(value.value) ?? return
     lower_set_slot(&f, slot, Val(lowered))
 }
 
 fn lower_define_absent(f: &LowerFunction, value: MIRValueID) Never! {
-    _ := &f.absent.add(lower_key(value.value), true)
+    _ := &f.absent.add(value.value, true)
 }
 
 fn lower_is_absent(f: LowerFunction, value: MIRValueID) -> Bool Never! {
-    if f.absent.get(lower_key(value.value)) == .Val(_) -> return true
+    if f.absent.get(value.value) == .Val(_) -> return true
     false
 }
 
 // The LIR value carrying `value`; reports and returns None when it has none.
 fn lower_use(m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIRValueID? {
-    if f.values.get(lower_key(value.value)) == .Val(index) -> return Val(LIRValueID{value: index})
+    if f.values.get(value.value) == .Val(index) -> return Val(LIRValueID{value: index})
     if !lower_is_absent(f, value) -> lower_fail(&m, &f, "MIR value {value.value} is used before it is lowered")
     None
 }
@@ -564,8 +557,8 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
     LowerFunction{
         name: ~name,
         builder: lir_builder(id, name, signature),
-        values: [String:Int]{},
-        absent: [String:Bool]{},
+        values: [U64:Int]{},
+        absent: [U64:Bool]{},
         params: [LIRValueID?]{},
         current: [LIRValueID?]{},
         mir_block: entry,
@@ -603,19 +596,19 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         lower_fail(&m, &f, "return {reason} is not lowered at O0 yet")
         return None
     }
-    fact_index := [String:Int]{}
-    loop (index, fact) in function.values -> _ := &fact_index.add(lower_key(fact.id.value), index)
-    block_index := [String:Int]{}
-    loop (index, block) in function.blocks -> _ := &block_index.add(lower_key(block.id.value), index)
-    entry :: block_index.get(lower_key(function.entry.value)) ?? {
+    fact_index := [U64:Int]{}
+    loop (index, fact) in function.values -> _ := &fact_index.add(fact.id.value, index)
+    block_index := [U64:Int]{}
+    loop (index, block) in function.blocks -> _ := &block_index.add(block.id.value, index)
+    entry :: block_index.get(function.entry.value) ?? {
         lower_fail(&m, &f, "entry block b{function.entry.value} is missing")
         return None
     }
 
     // Root places become slots; projected places name the slot of their root.
     slots := [LowerSlot]{}
-    place_slots := [String:Int]{}
-    defined_slots := [String:Int]{}
+    place_slots := [U64:Int]{}
+    defined_slots := [U64:Int]{}
     loop place in function.places {
         if place.base == .Static(_) -> next
         slot := -1
@@ -641,13 +634,13 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                     }
                 }
                 .Parameter(value) | .Temporary(value) -> {
-                    index :: fact_index.get(lower_key(value.value)) ?? {
+                    index :: fact_index.get(value.value) ?? {
                         lower_fail(&m, &f, "place {place.id.value} names value {value.value} without a fact")
                         return None
                     }
                     ty = function.values[index].ty
                     ownership = function.values[index].ownership
-                    _ := &defined_slots.add(lower_key(value.value), slots.len())
+                    _ := &defined_slots.add(value.value, slots.len())
                 }
                 .Capture(_) -> {
                     lower_fail(&m, &f, "captured places are not lowered at O0 yet")
@@ -663,9 +656,9 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             slot = slots.len()
             &slots.push(LowerSlot{base: place.base, ty: ty, ownership: ownership, carried: lower_repr_layout(repr) != None})
         }
-        _ := &place_slots.add(lower_key(place.id.value), slot)
+        _ := &place_slots.add(place.id.value, slot)
     }
-    read_slots := [String:Int]{}
+    read_slots := [U64:Int]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             result_value :: instruction.result ?? next
@@ -673,7 +666,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                 .ReadPlace(place) | .MovePlace(place) -> {
                     if lower_place_row(function, place) == .Val(row) {
                         if row.projections.len() == 0 {
-                            if place_slots.get(lower_key(place.value)) == .Val(slot) -> _ := &read_slots.add(lower_key(result_value.value), slot)
+                            if place_slots.get(place.value) == .Val(slot) -> _ := &read_slots.add(result_value.value, slot)
                         }
                     }
                 }
@@ -688,7 +681,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         targets := [Int]{}
         if lower_block_returns(block) {
             loop target in mir_terminator_targets(block.terminator) {
-                position :: block_index.get(lower_key(target.value)) ?? {
+                position :: block_index.get(target.value) ?? {
                     lower_fail(&m, &f, "block b{block.id.value} jumps to missing block b{target.value}")
                     return None
                 }
@@ -805,7 +798,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         entry_id :: LIRBlockID{value: 0}
         lower_start(&f, entry_id, entry_params)
         loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
-        f.mir_block = MIRBlockID{value: -1}
+        f.mir_block = MIRBlockID{value: U64.MAX}
         edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
         lower_seal(&f, LIRTerminator.Jump{target: edge})
     }
@@ -819,8 +812,8 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // The slot a dropped value empties: the slot it was read or moved out of, or
 // the parameter or temporary slot it stands for.
 fn lower_slot_of_value(c: LowerContext, value: MIRValueID) -> Int? {
-    if c.read_slots.get(lower_key(value.value)) == .Val(slot) -> return Val(slot)
-    c.defined_slots.get(lower_key(value.value))
+    if c.read_slots.get(value.value) == .Val(slot) -> return Val(slot)
+    c.defined_slots.get(value.value)
 }
 
 // Every carried slot holds a value on every edge, so blocks need no
@@ -884,7 +877,7 @@ fn lower_carries(p: MIRProgram, c: LowerContext, instruction: MIRInstruction) ->
 // Arguments for the edge from the MIR block being lowered to `target`: its
 // phis' incoming values from this block, then every carried slot.
 fn lower_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, target: MIRBlockID) -> LIRJumpTarget? {
-    position :: c.block_index.get(lower_key(target.value)) ?? return None
+    position :: c.block_index.get(target.value) ?? return None
     source :: ~f.mir_block
     args := [LIRValueID]{}
     loop instruction in c.mir.blocks[position].instructions {
@@ -1149,7 +1142,7 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID, moving: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
-    slot :: c.place_slots.get(lower_key(place.value)) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if lower_repr(p, row.ty) == .Absent -> return lower_alias_absent(&f, instruction)
     held :: ~f.current[slot]
     root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
@@ -1166,7 +1159,7 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID, value: MIRValueID, replace: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
-    slot :: c.place_slots.get(lower_key(place.value)) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if lower_is_absent(f, value) -> return
     lowered :: lower_use(&m, &f, value) ?? return
     held :: ~f.current[slot]
@@ -1388,7 +1381,7 @@ fn lower_result_box(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // Arithmetic.
 
 // Inline-integer test: a word is an inline Int when bits 63 and 62 agree,
-// i.e. when `value ^ (value << 1)` is non-negative. `values` are or-ed first.
+// i.e. when `value ~| (value << 1)` is non-negative. `values` are or-ed first.
 fn lower_inline_test(f: &LowerFunction, values: [LIRValueID]) -> LIRValueID Never! {
     one :: lower_const(&f, 1)
     combined := LIRValueID{value: -1}
@@ -1749,7 +1742,7 @@ struct LowerGlueShape {
 
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
-    f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: -1})
+    f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
     boxed :: lower_pointer(&f)
     entry :: lower_new_block(&f)
     lower_start(&f, entry, [LIRValueID]{boxed})
@@ -1820,7 +1813,7 @@ fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source
 // (runtime clone for handles, clone glue for nested boxes).
 fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    f := lower_new_function(glue.id, "clone.{glue.key}", signature, MIRBlockID{value: -1})
+    f := lower_new_function(glue.id, "clone.{glue.key}", signature, MIRBlockID{value: U64.MAX})
     source :: lower_pointer(&f)
     entry :: lower_new_block(&f)
     lower_start(&f, entry, [LIRValueID]{source})

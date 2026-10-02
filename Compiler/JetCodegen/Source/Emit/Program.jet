@@ -52,25 +52,26 @@ fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MIRFo
     false
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::impl_selected_for_target
 fn jet_rust_emit_impl_target_enabled(ctx: &JetRustEmitContext, implementation: MIRImplDef) -> Bool Never! {
     if !jet_rust_emit_target_enabled(ctx.config, implementation.target_applicability) -> return false
     if ctx.config.target != "web" || ctx.config.web_bucket == None -> return true
     loop method_id in implementation.methods {
-        loop function in jet_rust_emit_function_rows(ctx, method_id) {
-            if function.id == method_id && jet_rust_emit_function_target_enabled(ctx.config, function) -> return true
+        if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
+            if ctx.program.functions[function_index].id == method_id && jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_index]) -> return true
         }
     }
     false
 }
 
 fn jet_rust_emit_validate_function(ctx: &JetRustEmitContext, function: MIRFunction) Never! {
+    block_ids := [U64:Bool]{}
+    loop block in function.blocks -> block_ids[block.id.value] = true
     found_entry := false
     loop block in function.blocks {
         if block.id == function.entry -> found_entry = true
         loop target in mir_terminator_targets(block.terminator) {
-            found := false
-            loop candidate in function.blocks { if candidate.id == target -> found = true }
-            if !found -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR terminator targets a missing block", "checked CFG edges must resolve before source emission", Val(block.span))
+            if block_ids.get(target.value) == None -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR terminator targets a missing block", "checked CFG edges must resolve before source emission", Val(block.span))
         }
     }
     if !found_entry -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR function entry block is missing", "each checked function must have one block matching its entry identity", Val(function.span))
@@ -177,19 +178,26 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
 
 // MIRRust emit_constant_def: a storage constant is one persistent cell (an
 // exact Int defers its heap-backed initializer to the first read); a folded
-// constant is an inline function because heap-backed carriers are not Rust
-// const expressions. A folded list over 16 KB of rows is cached instead.
+// scalar is an inline function because heap-backed carriers are not Rust const
+// expressions. A folded aggregate is one per-thread value built once; reads
+// borrow it (`NAME_shared`). A large list is filled by row chunks, a smaller
+// one by the inline `vec![..]` of the same rows.
 fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRConstantDef) -> String Never! {
     visibility :: jet_rust_emit_visibility(definition.visibility)
     name :: jet_rust_emit_generated_path(definition.key)
     ty :: jet_rust_emit_type(&ctx, definition.ty)
-    listed :: if definition.ty.kind == {
-        .List(_) -> !definition.is_storage && !jet_rust_emit_is_no_os(&ctx)
-        else -> false
-    }
-    if listed {
-        if definition.value == {
-            .List(values) -> {
+    root :: ~ctx.config.root_prefix
+    if jet_rust_emit_shared_constant(jet_rust_emit_is_no_os(&ctx), definition) {
+        chunks := [String]{}
+        init := ""
+        listed := if definition.ty.kind == {
+            .List(_) -> true
+            else -> false
+        }
+        if listed {
+            listed = false
+            if definition.value == .List(values) {
+                listed = true
                 element :: jet_rust_emit_constant_inner_type(definition.ty, 0)
                 rows := [String]{}
                 bytes := 0
@@ -198,57 +206,64 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRCo
                     bytes += row.bytes().len()
                     &rows.push(row)
                 }
-                if bytes > 16 * 1024 -> return jet_rust_emit_cached_list_constant(visibility, name, ty, rows)
-                return "#[inline]\n{visibility}fn {name}() -> {ty} {{ vec![{rows.join(", ")}] }}"
+                init = if bytes > 16 * 1024 -> jet_rust_emit_list_constant_chunks(name, ty, rows, &chunks) else -> "vec![{rows.join(", ")}]"
             }
-            else -> {}
         }
+        if !listed -> init = jet_rust_emit_constant(&ctx, definition.value, definition.ty)
+        &chunks.push("thread_local! {{\n    static {name}_SHARED: std::rc::Rc<{ty}> = std::rc::Rc::new({init});\n}}\n")
+        &chunks.push("#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_SHARED.with(|value| (**value).clone()) }}\n")
+        &chunks.push("#[inline]\n{visibility}fn {name}_shared() -> {root}JetSharedSlot<{ty}> {{ {name}_SHARED.with(|value| {root}JetSharedSlot::new(std::rc::Rc::clone(value))) }}")
+        return chunks.join("\n")
     }
     value :: jet_rust_emit_constant(&ctx, definition.value, definition.ty)
     if definition.is_storage {
-        cell :: "{ctx.config.root_prefix}JetPersistCell"
+        cell :: "{root}JetPersistCell"
         if definition.ty.kind == MIRTypeKind.Int -> return "{visibility}static {name}: std::sync::LazyLock<{cell}<{ty}>> = std::sync::LazyLock::new(|| {cell}::new({value}));"
         return "{visibility}static {name}: {cell}<{ty}> = {cell}::new({value});"
     }
     "#[inline]\n{visibility}fn {name}() -> {ty} {{ {value} }}"
 }
 
-// MIRRust emit_cached_list_constant: a per-thread cache that row-chunk helpers
-// of at most 64 KB each fill once; the accessor clones the cached rows. No
-// emitted function then holds the whole table, and a read no longer rebuilds
-// every row from code.
-fn jet_rust_emit_cached_list_constant(visibility: String, name: String, ty: String, rows: [String]) -> String Never! {
+// MIRRust shared_constant (D-MEM-COPYSEM1): a folded aggregate constant (text,
+// list, map, option, result, tuple, or nominal value) on a hosted target is one
+// shared per-thread value; a read holds it in a `JetSharedSlot` and borrows it
+// in place, and only an owned use copies it. Scalars stay plain values.
+fn jet_rust_emit_shared_constant(no_os: Bool, definition: MIRConstantDef) -> Bool Never! {
+    if definition.is_storage || no_os -> return false
+    if definition.ty.kind == {
+        .String | .List(_) | .Map(_, _) | .Option(_) | .Result(_, _) | .Tuple(_) | .Apply(_, _) -> true
+        else -> false
+    }
+}
+
+// MIRRust emit_list_constant_chunks: the initializer of a large folded list
+// constant. Row-chunk helpers of at most 64 KB each fill the rows, so no
+// emitted function holds the whole table; the helpers go to `chunks`.
+fn jet_rust_emit_list_constant_chunks(name: String, ty: String, rows: [String], chunks: &[String]) -> String Never! {
     lines := [String]{}
-    chunks := 0
+    count := 0
     start := 0
     bytes := 0
     loop (index, row) in rows {
         width :: row.bytes().len()
         if index > start && bytes + width > 64 * 1024 {
-            &lines.push("}}")
-            &lines.push("")
-            chunks += 1
+            &lines.push("}}\n")
+            count += 1
             start = index
             bytes = 0
         }
-        if index == start -> &lines.push("fn {name}_rows_{chunks}(rows: &mut {ty}) {{")
+        if index == start -> &lines.push("fn {name}_rows_{count}(rows: &mut {ty}) {{")
         bytes += width
         &lines.push("    rows.push({row});")
     }
-    &lines.push("}}")
-    &lines.push("")
-    chunks += 1
-    &lines.push("thread_local! {{")
-    &lines.push("    static {name}_ROWS: {ty} = {{")
-    &lines.push("        let mut rows: {ty} = Vec::with_capacity({rows.len()});")
-    loop index in 0..<chunks -> &lines.push("        {name}_rows_{index}(&mut rows);")
-    &lines.push("        rows")
-    &lines.push("    }};")
-    &lines.push("}}")
-    &lines.push("")
-    &lines.push("#[inline]")
-    &lines.push("{visibility}fn {name}() -> {ty} {{ {name}_ROWS.with(|rows| rows.clone()) }}")
-    lines.join("\n")
+    &lines.push("}}\n")
+    count += 1
+    &chunks.push(lines.join("\n"))
+    init := [String]{"{{", "        let mut rows: {ty} = Vec::with_capacity({rows.len()});"}
+    loop index in 0..<count -> &init.push("        {name}_rows_{index}(&mut rows);")
+    &init.push("        rows")
+    &init.push("    }}")
+    init.join("\n")
 }
 
 // The emitted text is the user-item suffix of the artifact: the host prepends
@@ -313,8 +328,21 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             &lines.push("")
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
         }
+        // Card #4258: a constant whose every read was copied into its use
+        // sites (jet_codegen_constant_copies_into_uses) needs no accessor;
+        // storage cells and every constant still read through `Global` keep
+        // their item.
+        global_reads := [String:Bool]{}
+        loop function in ctx.program.functions {
+            loop block in function.blocks {
+                loop instruction in block.instructions {
+                    if instruction.operation == .Global(name) -> global_reads[name] = true
+                }
+            }
+        }
         loop constant in ctx.program.constants {
             if !all_selected && selected.get(jet_rust_emit_id_key(constant.module_id.value)) == None -> next
+            if !constant.is_storage && global_reads.get(constant.key) == None -> next
             start :: lines.len()
             &lines.push(jet_rust_emit_constant_definition(&ctx, constant))
             &lines.push("")

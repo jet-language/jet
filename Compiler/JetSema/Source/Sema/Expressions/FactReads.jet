@@ -16,6 +16,7 @@ use jet_foundation.[
     Span,
     StructDef,
     Symbol,
+    SymbolID,
     SymbolKind,
     TAppliedRule,
     TAppliedRuleArgumentMenu,
@@ -31,10 +32,12 @@ use jet_foundation.[
     TPatternBindingFact,
     TPatternShape,
     TStrPart,
+    TextEdit,
     Type,
     UnitScaleProvenance,
     ViewProvenance,
     ViewSourcePath,
+    diagnostic_with_edit,
     symbol_id,
     type_name,
 ]
@@ -144,23 +147,80 @@ pub fn sema_fact_enum_variants(enum_name: String) -> [String]? {
     }
 }
 
-// The fact-enum menu for `ty`, unless a declared enum of that name is in scope
-// (the compiler's own sources declare a `ParamZone`).
+// Rust `builtin_type_registry` (Bundle.rs): the compiler-owned runtime enums
+// every module sees without a declaration. `<=>` and `compare` produce an
+// `Ordering`; checked removals select by `RemoveBy`. They share the closed
+// menu checks below, but they are runtime values, so codegen never folds them.
+pub fn sema_compiler_enum_variants(enum_name: String) -> [String]? {
+    if {
+        enum_name == "Ordering" -> Val([String]{"Less", "Equal", "Greater"})
+        enum_name == "RemoveBy" -> Val([String]{"Val", "Slot"})
+        else -> None
+    }
+}
+
+// The fact-enum or compiler-owned enum menu for `ty`, unless a declared enum
+// of that name is in scope (the compiler's own sources declare a `ParamZone`).
+// The registered compiler-owned `Ordering`/`RemoveBy` nominals keep this menu.
 fn sema_fact_enum_menu(ty: Type, environment: SemaScopeEnvironment) -> [String]? {
     name := ""
     if sema_expr_unwrap_tag(ty) == {
         .Named(value) -> name = value
         else -> return None
     }
-    variants :: sema_fact_enum_variants(name) ?? return None
+    found := sema_fact_enum_variants(name)
+    if found == None -> found = sema_compiler_enum_variants(name)
+    variants :: found ?? return None
     if environment.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal(graph, Type.Named{name: name}, environment.module_identity) != None -> return None
+        declared :: sema_type_resolve_nominal(graph, Type.Named{name: name}, environment.module_identity)
+        if declared == .Val(nominal) {
+            if !nominal.compiler_owned -> return None
+        }
     }
     Val(variants)
 }
 
 fn sema_fact_enum_unknown_variant(owner: String, variant: String, variants: [String], span: Span) -> Diagnostic {
     sema_error("E0302", span, "`{owner}` has no variant `{variant}`", "`{owner}` is a closed compiler fact menu: {variants.join(", ")}", "use one of the listed variants")
+}
+
+// Rust `suggest_field`: the one nearest candidate within two edits, never the
+// refused name itself, and none when two candidates tie.
+fn sema_suggest_field(name: String, candidates: [String]) -> String? {
+    best := ""
+    best_distance := 3
+    ambiguous := false
+    loop candidate in candidates {
+        distance :: sema_taint_edit_distance(name, candidate)
+        if distance == 0 || distance > 2 -> next
+        if {
+            distance < best_distance -> {
+                best = candidate
+                best_distance = distance
+                ambiguous = false
+            }
+            distance == best_distance && best != candidate -> {
+                ambiguous = true
+            }
+        }
+    }
+    if best == "" || ambiguous -> None else -> Val(best)
+}
+
+// Rust `check_enum_lit` E0304: an enum literal names a variant the enum lacks.
+fn sema_enum_unknown_variant(display_type_name: String, variant: String, variants: [String], span: Span, variant_span: Span?) -> Diagnostic {
+    suggestion :: sema_suggest_field(variant, variants)
+    fix :: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "check the variant name"
+    diagnostic :: sema_error("E0304", span, "`{display_type_name}` has no variant `{variant}`", "enum literals must name a variant on the type", fix)
+    if suggestion == .Val(candidate) {
+        if variant_span == .Val(edit_span) -> return diagnostic_with_edit(diagnostic, TextEdit{span: edit_span, new_text: candidate})
+    }
+    diagnostic
+}
+
+// Rust `check_enum_lit` E0303: a unit variant written with a payload.
+fn sema_enum_unit_payload(display_type_name: String, variant: String, span: Span) -> Diagnostic {
+    sema_error("E0303", span, "variant `{variant}` takes no payload", "unit variants are written without parentheses", "write `{display_type_name}.{variant}` with no `(...)`")
 }
 
 // D-FACT-ENUM-TIR: `EXACTNESS.kind == .Approximate` tests a compiler fact enum
@@ -170,14 +230,27 @@ pub fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot
     variants :: sema_fact_enum_menu(subject_ty, environment) ?? return None
     shape :: TPatternShape.Variant{variant: variant, bindings: [TPatternBinding]{}, leading_dot: leading_dot, span: span}
     complete := true
+    compiler_enum :: sema_fact_enum_variants(type_name(subject_ty)) == None
     if !variants.contains(variant) {
-        &diagnostics.push(sema_fact_enum_unknown_variant(type_name(subject_ty), variant, variants, span))
+        // Rust `validate_pattern`: a compiler-owned runtime enum (`Ordering`,
+        // `RemoveBy`) reports like any declared enum.
+        diagnostic :: if compiler_enum -> sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{type_name(subject_ty)}`", "pattern tests must name a variant on the value's enum type", "check the variant spelling") else -> sema_fact_enum_unknown_variant(type_name(subject_ty), variant, variants, span)
+        &diagnostics.push(diagnostic)
         complete = false
     } else if slots.len() != 0 {
-        &diagnostics.push(sema_error("E0306", span, "pattern `{variant}` expects no bindings", "compiler fact enum variants carry no payload", "match `.{variant}` without bindings"))
+        diagnostic :: if compiler_enum -> sema_error("E0306", span, "pattern `{variant}` expects 0 bindings, got {slots.len()}", "each payload field needs its own binding name", "write `{variant}()") else -> sema_error("E0306", span, "pattern `{variant}` expects no bindings", "compiler fact enum variants carry no payload", "match `.{variant}` without bindings")
+        &diagnostics.push(diagnostic)
         complete = false
     }
-    Val(SemaPatternValidation{shape: shape, enum_type: None, bindings: [TPatternBindingFact]{}, complete: complete})
+    // A runtime compiler enum tests against its registered compiler-owned
+    // nominal, so codegen lowers the test like any declared enum's.
+    enum_type := SymbolID?{None}
+    if compiler_enum {
+        if environment.registration_graph == .Val(graph) {
+            if sema_registration_compiler_builtin_nominal(graph, type_name(sema_expr_unwrap_tag(subject_ty))) == .Val(owner) -> enum_type = Val(owner.symbol.id)
+        }
+    }
+    Val(SemaPatternValidation{shape: shape, enum_type: enum_type, bindings: [TPatternBindingFact]{}, complete: complete})
 }
 
 // A payload-free variant of a compiler fact enum (`.Approximate` where an
@@ -185,12 +258,15 @@ pub fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot
 pub fn sema_fact_enum_literal(enum_name: String, variant: String, args: [EnumLitArg], span: Span, variant_span: Span?, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
     ty :: Type.Named{name: enum_name}
     variants :: sema_fact_enum_menu(ty, environment) ?? return sema_fact_read_unhandled()
+    compiler_enum :: sema_fact_enum_variants(enum_name) == None
     if !variants.contains(variant) {
-        &diagnostics.push(sema_fact_enum_unknown_variant(enum_name, variant, variants, variant_span ?? span))
+        diagnostic :: if compiler_enum -> sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span) else -> sema_fact_enum_unknown_variant(enum_name, variant, variants, variant_span ?? span)
+        &diagnostics.push(diagnostic)
         return sema_fact_read_failed()
     }
     if args.len() != 0 {
-        &diagnostics.push(sema_error("E0104", span, "`{enum_name}.{variant}` takes no payload", "compiler fact enum variants carry no payload", "write `.{variant}` without arguments"))
+        diagnostic :: if compiler_enum -> sema_enum_unit_payload(enum_name, variant, span) else -> sema_error("E0104", span, "`{enum_name}.{variant}` takes no payload", "compiler fact enum variants carry no payload", "write `.{variant}` without arguments")
+        &diagnostics.push(diagnostic)
         return sema_fact_read_failed()
     }
     value :: sema_tir_expr(ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)

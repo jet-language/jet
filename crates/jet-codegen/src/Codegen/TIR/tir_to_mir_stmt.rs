@@ -592,6 +592,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             method_kind,
             columnar,
             by_value,
+            source_stable,
             body,
         } => lower_for_in(
             ctx,
@@ -604,6 +605,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             method_kind.as_ref(),
             *by_value,
             *columnar,
+            *source_stable,
             body,
         ),
 
@@ -819,7 +821,7 @@ fn maybe_copy(
             Some(ty.clone()),
             MirOperation::Copy {
                 value,
-                materialize_view: false,
+                fact: jet_foundation::MIR::MirCopyFact::Materialize,
             },
         )
     } else {
@@ -1910,13 +1912,17 @@ fn lower_range_loop(
     }
     Ok(())
 }
-/// D-MEM-COPYSEM1: a plain `loop item in list` over a read parameter's list
-/// walks the list in place. The loop becomes an index range over the list's
-/// length whose item is a read-only alias of its slot, so neither the list
-/// nor any item is copied. The parameter cannot change while the loop runs,
-/// so every alias reads exactly what the copied item would hold. A columnar
-/// list (D-SOA1) stores one column per field, so its slots are not places an
-/// alias can name; it keeps the gathered-record iteration.
+/// D-MEM-COPYSEM1: a plain `loop item in list` (or `loop (index, item) in
+/// list`) over a read parameter's list walks the list in place. The loop
+/// becomes an index range over the list's length whose item is a read-only
+/// alias of its slot, so neither the list nor any item is copied; the
+/// two-name form binds the range index itself as `index`. The parameter
+/// cannot change while the loop runs, so every alias reads exactly what the
+/// copied item would hold. #4318 §4: a stable source (sema proved the body
+/// never mentions its root) walks the same way when it is rooted at a local
+/// or any parameter. A columnar list (D-SOA1) stores one column per field,
+/// so its slots are not places an alias can name; it keeps the
+/// gathered-record iteration.
 fn read_list_walk(
     ctx: &mut LowerCtx,
     label: Option<&str>,
@@ -1927,23 +1933,29 @@ fn read_list_walk(
     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
     by_value: bool,
     columnar: bool,
+    source_stable: bool,
     body: &[TStmt],
 ) -> Result<Option<TStmt>, LowerError> {
-    if method_kind.is_some() || var2.is_some() || step.is_some() || by_value || columnar {
+    if method_kind.is_some() || step.is_some() || by_value || columnar {
         return Ok(None);
     }
     let Type::List(element) = collection.ty.without_user_tags() else {
         return Ok(None);
     };
     let element = (**element).clone();
-    if ctx.read_window_place(collection)?.is_none() {
+    if ctx.read_window_place(collection)?.is_none()
+        && !(source_stable && ctx.stable_source_place(collection)?.is_some())
+    {
         return Ok(None);
     }
     let list = match &collection.kind {
-        TExprKind::Clone(inner) => (**inner).clone(),
+        TExprKind::Clone(inner, _) => (**inner).clone(),
         _ => collection.clone(),
     };
-    let index_name = format!("__jet_read_walk_{}", ctx.span().start);
+    let (index_name, item_name) = match var2 {
+        Some(item_name) => (var.to_string(), item_name),
+        None => (format!("__jet_read_walk_{}", ctx.span().start), var),
+    };
     let index = TExpr {
         ty: Type::Int,
         kind: TExprKind::Local(TLocal::user(index_name.clone())),
@@ -1966,7 +1978,7 @@ fn read_list_walk(
     };
     let mut walk_body = Vec::with_capacity(body.len() + 1);
     walk_body.push(TStmt::Let {
-        name: var.to_string(),
+        name: item_name.to_string(),
         kw: "let",
         let_ty: TLetTy::Inferred,
         init: item,
@@ -2008,10 +2020,21 @@ fn lower_for_in(
     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
     by_value: bool,
     columnar: bool,
+    source_stable: bool,
     body: &[TStmt],
 ) -> Result<(), LowerError> {
     if let Some(walk) = read_list_walk(
-        ctx, label, var, var2, collection, step, method_kind, by_value, columnar, body,
+        ctx,
+        label,
+        var,
+        var2,
+        collection,
+        step,
+        method_kind,
+        by_value,
+        columnar,
+        source_stable,
+        body,
     )? {
         return lower_stmt(ctx, &walk);
     }
@@ -2077,7 +2100,9 @@ fn lower_for_in(
         {
             lower_expr(ctx, source)?
         }
-        (TExprKind::Local(local), true) => {
+        // A read-only alias names another value's slot: the cursor reads (and
+        // so copies) it instead of moving the slot out of its owner.
+        (TExprKind::Local(local), true) if !ctx.local_is_read_alias(local) => {
             let place = ctx.place_for_local(local, MirAccess::Move)?;
             ctx.emit(
                 "for-in.source-move",
@@ -2334,7 +2359,7 @@ fn lower_enum_match(
             Some(scrutinee.ty.clone()),
             MirOperation::Copy {
                 value: subject,
-                materialize_view: false,
+                fact: jet_foundation::MIR::MirCopyFact::Materialize,
             },
         )?;
     }
@@ -2913,7 +2938,9 @@ fn lower_transaction(
                 Some(snapshot_ty.clone()),
                 MirOperation::Copy {
                     value,
-                    materialize_view: false,
+                    // The rollback snapshot owns the state the scope goes on
+                    // to change.
+                    fact: jet_foundation::MIR::MirCopyFact::Materialize,
                 },
             )?;
             (copied, snapshot_ty)

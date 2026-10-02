@@ -38,6 +38,7 @@ use jet_foundation.[
     expr_span,
     jet_target_layout_atomic_scalar_type,
     symbol_id,
+    tir_call_arg_copy_fact,
     type_identity_equal,
     type_name,
 ]
@@ -204,7 +205,7 @@ fn sema_call_static_registered_targets(graph: SemaRegistrationGraph, nominal: Se
 fn sema_call_static_local_target(owner_symbol: Symbol, owner_name: String, declared_owner: Type, owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], function: Func, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaStaticMethodTarget? {
     if function.params.len() > 0 && function.params[0].name == "self" -> return None
     method_id :: symbol_id(SymbolKind.Function, environment.module_identity, owner_name, function.name)
-    signature :: sema_function_symbol_type(function, method_id, environment.source_file, environment.source_origin, environment.source_segments)
+    signature :: sema_function_symbol_type(function, false, method_id, environment.source_file, environment.source_origin, environment.source_segments)
     visibility :: if function.is_pub -> 2 else -> if function.is_package_pub -> 1 else -> 0
     method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_name: environment.module_identity, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
     target := sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, span, &diagnostics) ?? return None
@@ -561,7 +562,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     loop index in 0..<values.len() {
-        if ownership_args[index].flags.implicit_clone || ownership_args[index].flags.shared_auto_clone -> values[index] = sema_tir_expr(values[index].ty, TExprKind.Clone{value: values[index]}, values[index].span)
+        if ownership_args[index].flags.implicit_clone || ownership_args[index].flags.shared_auto_clone -> values[index] = sema_tir_expr(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(ownership_args[index].flags.shared_auto_clone)}, values[index].span)
     }
 
     if expected == .Val(expected_type) {
@@ -742,7 +743,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
     value := argument
-    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
+    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
     success :: Type.Named{name: display_name}
     row :: numeric_row ?? {
         constructed :: sema_tir_expr(success, TExprKind.DistinctCtor{owner: owner.id, argument: value, base: facts.base}, span)

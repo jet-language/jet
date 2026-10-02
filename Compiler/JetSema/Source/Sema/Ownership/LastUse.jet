@@ -214,18 +214,28 @@ fn sema_ownership_last_use_statements(statements: [Stmt], name: String) -> Bool 
     false
 }
 
+// Rust: jet-sema CheckerCore/blocks.rs Checker::is_name_live_after (same
+// answer: some enclosing tail frame reads `name` at or after its start). The
+// last reading statement of each body is computed once per name and reused,
+// instead of rewalking every remaining statement on each query.
 pub fn sema_ownership_name_live_after(name: String, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     frame_index := context.lambda_statement_tails.len() - 1
     loop frame_index >= 0 {
-        // The tail body is read in place: binding it copied the whole
-        // remaining body once per queried name.
         body_id :: context.lambda_statement_tails[frame_index].body_id
-        index := context.lambda_statement_tails[frame_index].start_index
-        loop index < tail_store.bodies[body_id].statements.len() {
-            if sema_ownership_last_use_statement(tail_store.bodies[body_id].statements[index], name) -> return true
-            index += 1
-        }
+        if sema_ownership_tail_last_read(&tail_store, body_id, name) >= context.lambda_statement_tails[frame_index].start_index -> return true
         frame_index -= 1
     }
     false
+}
+
+fn sema_ownership_tail_last_read(tail_store: &SemaStatementTailStore, body_id: Int, name: String) -> Int Never! {
+    if tail_store.bodies[body_id].last_reads.get(name) == .Val(known) -> return known
+    // The body is read in place: binding it would copy the whole body.
+    index := tail_store.bodies[body_id].statements.len() - 1
+    loop index >= 0 {
+        if sema_ownership_last_use_statement(tail_store.bodies[body_id].statements[index], name) -> break
+        index -= 1
+    }
+    tail_store.bodies[body_id].last_reads[name] = index
+    index
 }

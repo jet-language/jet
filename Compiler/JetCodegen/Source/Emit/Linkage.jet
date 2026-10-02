@@ -9,7 +9,6 @@ use jet_foundation.[
     MIRFunction,
     MIRFunctionForm,
     MIRLinkArtifactKind,
-    MIRLinkUnit,
     MIRLinkUnitID,
     MIRPreludeCallID,
     MIRType,
@@ -72,31 +71,32 @@ fn jet_rust_emit_period_anchor_impls(ctx: &JetRustEmitContext, lines: &[String])
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_link_closure
 fn jet_rust_emit_link_closure(ctx: &JetRustEmitContext, lines: &[String]) Never! {
     artifact :: jet_rust_emit_selected_artifact(&ctx) ?? return
-    seen := [Int]{}
-    loop link in artifact.links -> jet_rust_emit_link_unit(&ctx, link, &seen, &lines)
+    positions := [U64:Int]{}
+    // The former scan selected the last row for duplicate identities.
+    loop position in 0..<ctx.program.links.len() -> positions[ctx.program.links[position].id.value] = position
+    seen := [U64:Bool]{}
+    loop link in artifact.links -> jet_rust_emit_link_unit(&ctx, link, positions, &seen, &lines)
 }
 
-fn jet_rust_emit_link_unit(ctx: &JetRustEmitContext, id: MIRLinkUnitID, seen: &[Int], lines: &[String]) Never! {
-    if seen.contains(id.value) -> return
-    &seen.push(id.value)
-    found := MIRLinkUnit?{None}
-    loop candidate in ctx.program.links {
-        if candidate.id == id -> found = Val(candidate)
-    }
-    link :: found ?? {
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_link_unit
+fn jet_rust_emit_link_unit(ctx: &JetRustEmitContext, id: MIRLinkUnitID, positions: [U64:Int], seen: &[U64:Bool], lines: &[String]) Never! {
+    if seen.get(id.value) ?? false -> return
+    seen[id.value] = true
+    position :: positions.get(id.value) ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR link unit identity has no row", "every artifact link unit resolves to one checked link row", None)
         return
     }
-    if !jet_rust_emit_target_enabled(ctx.config, link.target_applicability) {
+    if !jet_rust_emit_target_enabled(ctx.config, ctx.program.links[position].target_applicability) {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedTarget, "E0003", "MIR link unit is not applicable to the selected artifact target", "artifact link closures contain only units admitted for the artifact target", None)
         return
     }
-    loop dependency in link.link_closure -> jet_rust_emit_link_unit(&ctx, dependency, &seen, &lines)
-    &lines.push("// jet-mir-link-unit: id={link.id.value} crate={link.crate_spec} cache={link.cache_identity}")
-    loop directory in link.dependency_dirs -> &lines.push("// jet-mir-link-search-path: {directory}")
-    loop link_artifact in link.artifacts {
+    loop dependency in ctx.program.links[position].link_closure -> jet_rust_emit_link_unit(&ctx, dependency, positions, &seen, &lines)
+    &lines.push("// jet-mir-link-unit: id={ctx.program.links[position].id.value} crate={ctx.program.links[position].crate_spec} cache={ctx.program.links[position].cache_identity}")
+    loop directory in ctx.program.links[position].dependency_dirs -> &lines.push("// jet-mir-link-search-path: {directory}")
+    loop link_artifact in ctx.program.links[position].artifacts {
         if link_artifact.kind == MIRLinkArtifactKind.GeneratedSource {
             &lines.push("// jet-mir-generated-link-source: {link_artifact.path}")
         } else {
@@ -105,60 +105,61 @@ fn jet_rust_emit_link_unit(ctx: &JetRustEmitContext, id: MIRLinkUnitID, seen: &[
     }
 }
 
-fn jet_rust_emit_insert_sorted(values: [Int], value: Int) -> [Int] Never! {
-    out := [Int]{}
-    placed := false
-    loop existing in values {
-        if existing == value -> return ~values
-        if !placed && existing > value {
-            &out.push(value)
-            placed = true
-        }
-        &out.push(existing)
-    }
-    if !placed -> &out.push(value)
-    out
-}
-
-// CCallback operations in selected functions, in callback identity order.
-fn jet_rust_emit_callback_ids(ctx: &JetRustEmitContext) -> [Int] Never! {
-    ids := [Int]{}
-    loop function in ctx.program.functions {
-        if !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
-        loop block in function.blocks {
-            loop instruction in block.instructions {
-                if instruction.operation == {
-                    .Semantic(semantic) -> {
-                        if semantic == {
-                            .CCallback(_, callback, _) -> ids = jet_rust_emit_insert_sorted(ids, callback.value)
-                            else -> {}
-                        }
-                    }
-                    else -> {}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::callback_ids
+fn jet_rust_emit_sort_callback_ids(values: [U64]) -> [U64] Never! {
+    sorted := ~values
+    width := 1
+    loop width < sorted.len() {
+        merged := [U64]{}
+        start := 0
+        loop start < sorted.len() {
+            middle :: if start + width < sorted.len() -> start + width else -> sorted.len()
+            end :: if start + 2 * width < sorted.len() -> start + 2 * width else -> sorted.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && sorted[left] <= sorted[right]) {
+                    &merged.push(sorted[left])
+                    left += 1
+                } else {
+                    &merged.push(sorted[right])
+                    right += 1
                 }
             }
+            start = end
         }
+        sorted = merged
+        width = width * 2
     }
-    ids
+    sorted
 }
 
-// The single boundary Prelude route every CCallback of one adapter uses.
-fn jet_rust_emit_callback_boundary_symbol(ctx: &JetRustEmitContext, callback_id: Int) -> String Never! {
-    route := MIRPreludeCallID?{None}
-    loop function in ctx.program.functions {
-        if !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
-        loop block in function.blocks {
+struct JetRustEmitCallbackIndex {
+    ids: [U64]
+    routes: [U64:MIRPreludeCallID]
+    // Function position of the first conflicting occurrence, diagnosed only
+    // when the old boundary-symbol lookup would have been reached.
+    conflicts: [U64:Int]
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::callback_ids
+fn jet_rust_emit_callback_index(ctx: &JetRustEmitContext) -> JetRustEmitCallbackIndex Never! {
+    ids := [U64]{}
+    routes := [U64:MIRPreludeCallID]{}
+    conflicts := [U64:Int]{}
+    loop function_position in 0..<ctx.program.functions.len() {
+        if !jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_position]) -> next
+        loop block in ctx.program.functions[function_position].blocks {
             loop instruction in block.instructions {
                 if instruction.operation == {
                     .Semantic(semantic) -> {
                         if semantic == {
                             .CCallback(call, callback, _) -> {
-                                if callback.value == callback_id {
-                                    if route == .Val(previous) && previous != call {
-                                        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback uses multiple boundary Prelude routes", "one callback adapter crosses the host boundary through one checked Prelude route", Val(function.span))
-                                        return "unreachable!"
-                                    }
-                                    route = Val(call)
+                                if routes.get(callback.value) == .Val(previous) {
+                                    if previous != call && conflicts.get(callback.value) == None -> conflicts[callback.value] = function_position
+                                } else {
+                                    routes[callback.value] = call
+                                    &ids.push(callback.value)
                                 }
                             }
                             else -> {}
@@ -169,7 +170,25 @@ fn jet_rust_emit_callback_boundary_symbol(ctx: &JetRustEmitContext, callback_id:
             }
         }
     }
-    call :: route ?? {
+    JetRustEmitCallbackIndex{ids: jet_rust_emit_sort_callback_ids(ids), routes: routes, conflicts: conflicts}
+}
+
+// CCallback operations in selected functions, in callback identity order.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::callback_ids
+fn jet_rust_emit_callback_ids(ctx: &JetRustEmitContext) -> [U64] Never! {
+    index :: jet_rust_emit_callback_index(&ctx)
+    index.ids
+}
+
+// The single boundary Prelude route every CCallback of one adapter uses.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::callback_boundary_symbol
+fn jet_rust_emit_callback_boundary_symbol(ctx: &JetRustEmitContext, callback_id: U64, index: JetRustEmitCallbackIndex) -> String Never! {
+    if index.conflicts.get(callback_id) == .Val(function_position) {
+        span :: ~ctx.program.functions[function_position].span
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback uses multiple boundary Prelude routes", "one callback adapter crosses the host boundary through one checked Prelude route", Val(span))
+        return "unreachable!"
+    }
+    call :: index.routes.get(callback_id) ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback has no boundary Prelude route", "callback trampolines call through the checked boundary route of their CCallback operation", None)
         return "unreachable!"
     }
@@ -192,33 +211,36 @@ fn jet_rust_emit_callback_return_agrees(target: MIRFunction, callback: MIRCallba
     callback.return_type == None
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_callback_trampolines
 fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]) Never! {
     root :: ~ctx.config.root_prefix
-    symbols := [String]{}
-    loop callback_id in jet_rust_emit_callback_ids(&ctx) {
-        found := MIRCallbackAdapter?{None}
-        loop candidate in ctx.program.callbacks {
-            if candidate.id.value == callback_id -> found = Val(candidate)
-        }
-        callback :: found ?? {
+    index :: jet_rust_emit_callback_index(&ctx)
+    positions := [U64:Int]{}
+    // The former scan selected the last adapter for duplicate identities.
+    loop position in 0..<ctx.program.callbacks.len() -> positions[ctx.program.callbacks[position].id.value] = position
+    symbols := [String:Bool]{}
+    loop callback_id in index.ids {
+        position :: positions.get(callback_id) ?? {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback identity has no adapter row", "every CCallback operation names one checked callback adapter", None)
             return
         }
-        if callback.symbol.len() == 0 || symbols.contains(callback.symbol) {
+        callback :: ~ctx.program.callbacks[position]
+        if callback.symbol.len() == 0 || (symbols.get(callback.symbol) ?? false) {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback symbol is empty or emitted more than once", "each callback adapter exports one unique non-empty symbol", None)
             return
         }
-        &symbols.push(callback.symbol)
-        target :: jet_rust_emit_find_function(&ctx, callback.function) ?? {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback target function has no row", "callback adapters target one checked function", None)
+        symbols[callback.symbol] = true
+        target_position :: jet_rust_emit_function_index(ctx, callback.function) ?? {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR artifact references a missing function row", "entry, command, job, and export rows must resolve to one checked function", None)
             return
         }
-        if target.form != MIRFunctionForm.TopLevel || (!callback.managed && target.capture_params.len() > 0) || !jet_rust_emit_function_target_enabled(ctx.config, target) {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback target is not a selected capture-free top-level callable", "callback trampolines call selected top-level functions whose captures the adapter can represent", Val(target.span))
+        target_span :: ~ctx.program.functions[target_position].span
+        if ctx.program.functions[target_position].form != MIRFunctionForm.TopLevel || (!callback.managed && ctx.program.functions[target_position].capture_params.len() > 0) || !jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[target_position]) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback target is not a selected capture-free top-level callable", "callback trampolines call selected top-level functions whose captures the adapter can represent", Val(target_span))
             return
         }
-        if !jet_rust_emit_callback_params_agree(target, callback) || !jet_rust_emit_callback_return_agrees(target, callback) {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback adapter signature disagrees with its target function", "callback adapters preserve the target's checked parameter and return types", Val(target.span))
+        if !jet_rust_emit_callback_params_agree(ctx.program.functions[target_position], callback) || !jet_rust_emit_callback_return_agrees(ctx.program.functions[target_position], callback) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback adapter signature disagrees with its target function", "callback adapters preserve the target's checked parameter and return types", Val(target_span))
             return
         }
         abi :: jet_rust_emit_foreign_abi(callback.abi)
@@ -233,11 +255,11 @@ fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]
                 }
             }
             event :: payload ?? {
-                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed MIR callback target does not take exactly one FfiCallbackEvent<T>", "managed callbacks carry one checked event payload", Val(target.span))
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed MIR callback target does not take exactly one FfiCallbackEvent<T>", "managed callbacks carry one checked event payload", Val(target_span))
                 return
             }
-            if callback.return_type != None || !mir_type_is_unit(target.return_type) {
-                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed MIR callback must return Unit", "managed callback events have no host-visible result", Val(target.span))
+            if callback.return_type != None || !mir_type_is_unit(ctx.program.functions[target_position].return_type) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "managed MIR callback must return Unit", "managed callback events have no host-visible result", Val(target_span))
                 return
             }
             &lines.push("#[no_mangle]")
@@ -254,8 +276,8 @@ fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]
         }
         ret :: if callback.return_type == .Val(ty) -> " -> {jet_rust_emit_type(&ctx, ty)}" else -> ""
         direct :: "{jet_rust_emit_function_name(&ctx, callback.function)}({args.join(", ")})"
-        target_call :: if target.is_unsafe -> "unsafe {{ {direct} }}" else -> direct
-        boundary :: jet_rust_emit_callback_boundary_symbol(&ctx, callback_id)
+        target_call :: if ctx.program.functions[target_position].is_unsafe -> "unsafe {{ {direct} }}" else -> direct
+        boundary :: jet_rust_emit_callback_boundary_symbol(&ctx, callback_id, index)
         &lines.push("#[no_mangle]")
         &lines.push("pub extern \"{abi}\" fn {callback.symbol}({params.join(", ")}){ret} {{ {boundary}(|| {target_call}) }}")
         &lines.push("")

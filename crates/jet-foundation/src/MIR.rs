@@ -5513,6 +5513,46 @@ impl MirLoopSourceKind {
     }
 }
 
+/// #4318: why a MIR `Copy` duplicates its operand. Every copy carries the
+/// sema decision that made it; lowering and backends never print a clone
+/// without one (`verify_mir_legality` checks the fact against the type).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MirCopyFact {
+    /// The programmer wrote `~x`.
+    Explicit,
+    /// D-MEM-COPYSEM1: an owning destination filled from a value its scope keeps.
+    Materialize,
+    /// D-COPY-DEFAULT1: an unmarked non-last use of an owned value, or a
+    /// shared-reference retain.
+    Share,
+    /// The operand's type is Copy: a bitwise read.
+    Scalar,
+    /// A read view entering an owning slot (`to_vec`/`to_string` kernel).
+    ViewMaterialize,
+}
+
+impl MirCopyFact {
+    /// Stable wire name (canonical payloads, digests, emitted copy tags).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::Materialize => "materialize",
+            Self::Share => "share",
+            Self::Scalar => "scalar",
+            Self::ViewMaterialize => "view_materialize",
+        }
+    }
+
+    /// An implicit copy (materialize or share) of a Copy-ABI value is a
+    /// bitwise read; the user's `~` and view materialization keep their fact.
+    pub fn for_ownership(self, mode: MirOwnershipMode) -> Self {
+        match self {
+            Self::Materialize | Self::Share if mode == MirOwnershipMode::Copy => Self::Scalar,
+            fact => fact,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MirOperation {
 
@@ -5530,7 +5570,7 @@ pub enum MirOperation {
     InitializeUninit { place: MirPlaceId },
     Copy {
         value: MirValueId,
-        materialize_view: bool,
+        fact: MirCopyFact,
     },
     /// Checked concrete-to-single-trait coercion. The source value is moved
     /// into the target trait object; `target` is the canonical `MirTypeId`
@@ -7203,9 +7243,7 @@ fn canonical_instruction(instruction: &MirInstruction) -> String {
 }
 fn operation_copy_materialization(operation: &MirOperation) -> String {
     match operation {
-        MirOperation::Copy {
-            materialize_view, ..
-        } => format!(",\"materialize_view\":{}", materialize_view),
+        MirOperation::Copy { fact, .. } => format!(",\"copy_fact\":\"{}\"", fact.as_str()),
         MirOperation::TraitBox { target, .. } => {
             format!(",\"trait_box_target\":\"{}\"", target.0)
         }

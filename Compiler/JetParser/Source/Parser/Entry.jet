@@ -6,6 +6,7 @@ use jet_foundation.[
     DiagnosticFixSafety,
     Expr,
     ImportDecl,
+    Item,
     Marker,
     ParseResult,
     Program,
@@ -45,6 +46,7 @@ use jet_lexer.[
     TOKEN_KW_TAG,
     TOKEN_KW_TRAIT,
     TOKEN_KW_USE,
+    TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
     TOKEN_RBRACKET,
@@ -109,47 +111,109 @@ fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Dia
     program.else_arms = state.else_arms
     loop declaration in state.block_policy_declarations -> &program.policy_declarations.push(declaration)
     program.fenced_statements = prepared.fenced_statements
-    program.used_import_names = parser_used_import_names(state.tokens, program.imports)
+    program.used_import_names = parser_used_import_names(state.tokens, program.imports, program.items)
     program.debug_sites = parser_debug_trace_sites(state.tokens, source)
     ParseResult{program: program, diagnostics: state.diagnostics}
 }
 
 // L0103 (D-LINT-UNUSED1): an import's local name is read when the file spells
 // it outside every import declaration, interpolations included. The module
-// root of a member import (`b` in `use b.[f]`) reads that name as well.
-fn parser_used_import_names(tokens: [Token], imports: [ImportDecl]) -> [String] Never! {
-    candidates := [String]{}
+// root of a member import (`b` in `use b.[f]`) reads that name as well. A
+// body-less `module name` is the file import the loader binds for it (D-MOD1).
+// Rust: none (Jet-only pass)
+fn parser_used_import_names(tokens: [Token], imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
+    candidates := [String:Bool]{}
     used := [String]{}
+    used_names := [String:Bool]{}
+    import_spans := [Span]{}
     loop declaration in imports {
+        &import_spans.push(declaration.span)
         if declaration.kind == {
             .Unqualified(module_alias, _, items, _, _) -> {
-                if !used.contains(module_alias) -> &used.push(module_alias)
+                if used_names.get(module_alias) == None {
+                    &used_names.add(module_alias, true).drop("checked absent above")
+                    &used.push(module_alias)
+                }
                 loop item in items {
                     parts :: item.original.split(".").to_list()
-                    &candidates.push(item.alias ?? parts[parts.len() - 1])
+                    &candidates.add(item.alias ?? parts[parts.len() - 1], true).drop("candidate names may repeat")
                 }
             }
-            else -> &candidates.push(declaration.alias)
+            else -> &candidates.add(declaration.alias, true).drop("candidate names may repeat")
         }
     }
-    parser_collect_used_import_names(tokens, imports, candidates, &used)
+    loop item in program_items {
+        if item == .CodeModule(definition) {
+            if definition.body != None -> next
+            &import_spans.push(definition.span)
+            &candidates.add(definition.name, true).drop("candidate names may repeat")
+        }
+    }
+    if candidates.len() == 0 -> return used
+    indexed_spans :: parser_import_span_index(import_spans)
+    parser_collect_used_import_names(tokens, indexed_spans, candidates, &used_names, &used)
     used
 }
 
-fn parser_collect_used_import_names(tokens: [Token], imports: [ImportDecl], candidates: [String], used: &[String]) Never! {
-    loop token in tokens {
-        if token.kind == TOKEN_IDENT && candidates.contains(token.payload.decoded) && !used.contains(token.payload.decoded) {
-            inside_import := false
-            loop declaration in imports {
-                if token.span.start >= declaration.span.start && token.span.end <= declaration.span.end {
-                    inside_import = true
-                    break
+// Rust: none (Jet-only pass)
+fn parser_import_span_index(spans: [Span]) -> [Span] Never! {
+    order := [Int]{}
+    loop index in 0..<spans.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && spans[order[left]].start <= spans[order[right]].start) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
                 }
             }
-            if !inside_import -> &used.push(token.payload.decoded)
+            start = end
+        }
+        order = merged
+        width *= 2
+    }
+    indexed := [Span]{}
+    loop position in order {
+        span :: spans[position]
+        // Prefix maximum ends preserve containment even for overlapping spans.
+        end :: if indexed.len() > 0 && indexed[indexed.len() - 1].end > span.end -> indexed[indexed.len() - 1].end else -> span.end
+        &indexed.push(Span{start: span.start, end: end})
+    }
+    indexed
+}
+
+// Rust: none (Jet-only pass)
+fn parser_inside_import_span(indexed_spans: [Span], span: Span) -> Bool Never! {
+    low := 0
+    high := indexed_spans.len()
+    loop low < high {
+        middle :: low + (high - low) /% 2
+        if indexed_spans[middle].start <= span.start -> low = middle + 1 else -> high = middle
+    }
+    low > 0 && span.end <= indexed_spans[low - 1].end
+}
+
+// Rust: none (Jet-only pass)
+fn parser_collect_used_import_names(tokens: [Token], indexed_spans: [Span], candidates: [String:Bool], used_names: &[String:Bool], used: &[String]) Never! {
+    loop token in tokens {
+        if token.kind == TOKEN_IDENT && candidates.get(token.payload.decoded) != None && used_names.get(token.payload.decoded) == None {
+            if !parser_inside_import_span(indexed_spans, token.span) {
+                &used_names.add(token.payload.decoded, true).drop("checked absent above")
+                &used.push(token.payload.decoded)
+            }
         }
         loop part in token.payload.string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_used_import_names(part.tokens, imports, candidates, &used)
+            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_used_import_names(part.tokens, indexed_spans, candidates, &used_names, &used)
         }
     }
 }
@@ -164,7 +228,18 @@ fn parser_debug_trace_sites(tokens: [Token], source: [U8]) -> [DebugTraceSite] N
     sites
 }
 
+// Rust: none (Jet-only pass)
 fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[DebugTraceSite]) Never! {
+    closes := [Int]{}
+    opens := [Int]{}
+    loop index in 0..<tokens.len() {
+        &closes.push(-1)
+        if tokens[index].kind == TOKEN_LPAREN -> &opens.push(index)
+        if tokens[index].kind == TOKEN_RPAREN && opens.len() > 0 {
+            open :: &opens.pop() ?? -1
+            closes[open] = index
+        }
+    }
     loop index in 0..<tokens.len() {
         token :: tokens[index]
         loop part in token.payload.string_parts {
@@ -172,19 +247,7 @@ fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[Debu
         }
         if token.kind != TOKEN_IDENT || token.payload.decoded != "debug" || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
         open :: index + 1
-        depth := 0
-        close := -1
-        loop cursor in open..<tokens.len() {
-            kind :: tokens[cursor].kind
-            if kind == TOKEN_LPAREN -> depth += 1
-            if kind == TOKEN_RPAREN {
-                depth -= 1
-                if depth == 0 {
-                    close = cursor
-                    break
-                }
-            }
-        }
+        close :: closes[open]
         if close < 0 -> next
         last := close - 1
         if last > open && tokens[last].kind == TOKEN_COMMA -> last -= 1
@@ -236,6 +299,27 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                         }
                     }
                 }
+            }
+            // D-MODULE-BIND1 (Rust `module_binding_def`): the binding parser
+            // reads one named module binding; a destructuring head or a failed
+            // binding reports and resynchronizes at the next item.
+            parser_module_binding_ahead(&state) -> {
+                start :: parser_current(&state).span
+                destructuring :: parser_kind_at(&state, 1) == TOKEN_LBRACE
+                errors_before :: state.diagnostics.len()
+                statement :: if destructuring -> parser_parse_statement(&state) else -> parser_parse_binding_statement(&state)
+                item :: parser_module_binding_item(statement, start, parser_previous_end(state))
+                if destructuring {
+                    parser_add_error_code(&state, "E0003", start, "module globals bind one name at a time", "a module binding is a named value available to every function in the file", "write `name :: value` or `name := value`")
+                    parser_sync_top(&state)
+                } else if state.diagnostics.len() > errors_before {
+                    parser_sync_top(&state)
+                } else if item == .Val(value) {
+                    &program.items.push(value)
+                } else {
+                    parser_sync_top(&state)
+                }
+                if state.position == before -> parser_bump(&state)
             }
             else -> {
                 // Rust resynchronizes a failed script line like a block line

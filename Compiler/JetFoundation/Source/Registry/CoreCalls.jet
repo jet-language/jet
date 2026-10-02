@@ -545,7 +545,11 @@ pub fn core_receiver_method(receiver_type: String, member: String) -> CoreCallRe
 }
 
 pub fn core_marker_application(module_name: String, member: String) -> CoreMarkerApplication? {
-    loop row in CORE_CALLS {
+    core_marker_application_in(CORE_CALLS, module_name, member)
+}
+
+fn core_marker_application_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreMarkerApplication? {
+    loop row in rows {
         if row.module_name == module_name && row.receiver_types.len() == 0 {
             if row.marker == .Val(marker) {
                 if marker.member == member -> return Val(marker)

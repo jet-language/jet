@@ -1,6 +1,5 @@
-// Iterative dead pure MIR value elimination; effectful or owned values survive.
+// Worklist dead pure MIR value elimination; effectful or owned values survive.
 use jet_foundation.[
-    MIRBasicBlock,
     MIRConversion,
     MIRFunction,
     MIRInstruction,
@@ -12,64 +11,103 @@ use jet_foundation.[
     MIRType,
     MIRValueFact,
     MIRValueID,
+    mir_operation_value_uses,
 ]
 
-struct MIRPassDeadSweep {
-    pub blocks: [MIRBasicBlock]
-    pub removed: Int
+struct MIRPassDeadDefinition {
+    pub block: Int
+    pub instruction: Int
+    pub slot: Int
+    pub next: Int
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::eliminate_dead_pure_values
 fn mir_pass_eliminate_dead_pure(program: &MIRProgram) -> Int Never! {
+    purity :: mir_pass_prelude_purity(program.prelude_calls)
     removed_total := 0
     loop function_index in 0..<program.functions.len() {
-        changed := true
-        loop changed {
-            sweep :: mir_pass_dead_pure_sweep(program.functions[function_index], program.prelude_calls)
-            changed = sweep.removed > 0
-            removed_total += sweep.removed
-            program.functions[function_index].blocks = sweep.blocks
-            if changed {
-                kept_values :: mir_pass_defined_values(program.functions[function_index])
-                program.functions[function_index].values = kept_values
-            }
-        }
+        function_window := &program.functions[function_index]
+        removed_total += mir_pass_dead_pure_function(&function_window, purity)
     }
     removed_total
 }
 
-fn mir_pass_dead_pure_sweep(function: MIRFunction, prelude_calls: [MIRPreludeCall]) -> MIRPassDeadSweep Never! {
-    // Counts and value metadata are keyed once per sweep; a value without a
-    // metadata row is never removable, whatever its count.
-    uses :: mir_pass_value_use_counts(function)
-    value_rows := [Int:Int]{}
-    loop (position, value) in function.values {
-        if value_rows.get(value.id.value) == None -> &value_rows.add(value.id.value, position).drop("checked absent above")
+// Rust: crates/jet-foundation/src/MIROptimization.rs::eliminate_dead_pure_values
+fn mir_pass_dead_pure_function(function: &MIRFunction, purity: [U64:Bool]) -> Int Never! {
+    uses := mir_pass_value_use_counts(function)
+    value_rows := [U64:Int]{}
+    loop position in 0..<function.values.len() {
+        id :: function.values[position].id.value
+        if value_rows.get(id) == None -> &value_rows.add(id, position).drop("checked absent above")
+    }
+    // Each result heads a linked list so duplicate definitions retain the old
+    // all-zero-use-definitions behaviour without repeatedly copying buckets.
+    heads := [U64:Int]{}
+    definitions := [MIRPassDeadDefinition]{}
+    removed_slots := [Bool]{}
+    worklist := [U64]{}
+    loop block_index in 0..<function.blocks.len() {
+        loop instruction_index in 0..<function.blocks[block_index].instructions.len() {
+            slot :: removed_slots.len()
+            &removed_slots.push(false)
+            result :: function.blocks[block_index].instructions[instruction_index].result ?? next
+            position :: value_rows.get(result.value) ?? next
+            if !mir_pass_removable_dead(function.blocks[block_index].instructions[instruction_index].operation, function.blocks[block_index].instructions[instruction_index].ty, function.values[position].ownership, purity) -> next
+            previous :: heads.get(result.value) ?? -1
+            definition :: definitions.len()
+            &definitions.push(MIRPassDeadDefinition{block: block_index, instruction: instruction_index, slot: slot, next: previous})
+            &heads.add(result.value, definition).drop("the head replaces the prior head")
+            if previous == -1 && (uses.get(result.value) ?? 0) == 0 -> &worklist.push(result.value)
+        }
     }
     removed := 0
-    kept_blocks := [MIRBasicBlock]{}
-    loop block in function.blocks {
-        kept_instructions := [MIRInstruction]{}
-        loop instruction in block.instructions {
-            removable := false
-            if instruction.result == .Val(result) {
-                if (uses.get(result.value) ?? 0) == 0 {
-                    if value_rows.get(result.value) == .Val(position) {
-                        removable = mir_pass_removable_dead(instruction.operation, instruction.ty, function.values[position].ownership, prelude_calls)
-                    }
-                }
+    cursor := 0
+    loop cursor < worklist.len() {
+        result :: worklist[cursor]
+        cursor += 1
+        definition := heads.get(result) ?? -1
+        loop definition >= 0 {
+            row :: definitions[definition]
+            removed_slots[row.slot] = true
+            removed += 1
+            // Removable operations have only direct value operands. Place,
+            // scope and terminator uses stay rooted in the initial census.
+            loop used in mir_operation_value_uses(function.blocks[row.block].instructions[row.instruction].operation) {
+                count :: uses.get(used.value) ?? 0
+                &uses.add(used.value, count - 1).drop("the count replaces the prior count")
+                if count == 1 && heads.get(used.value) != None -> &worklist.push(used.value)
             }
-            if {
-                removable -> removed += 1
-                else -> &kept_instructions.push(instruction)
-            }
+            definition = row.next
         }
-        &kept_blocks.push(MIRBasicBlock{id: block.id, span: block.span, instructions: kept_instructions, terminator: block.terminator})
     }
-    MIRPassDeadSweep{blocks: kept_blocks, removed: removed}
+    if removed == 0 -> return 0
+    slot := 0
+    loop block_index in 0..<function.blocks.len() {
+        kept_instructions := [MIRInstruction]{}
+        loop instruction_index in 0..<function.blocks[block_index].instructions.len() {
+            if !removed_slots[slot] -> &kept_instructions.push(function.blocks[block_index].instructions[instruction_index])
+            slot += 1
+        }
+        function.blocks[block_index].instructions = kept_instructions
+    }
+    kept_values :: mir_pass_defined_values(function)
+    function.values = kept_values
+    removed
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::prelude_call_is_pure
+fn mir_pass_prelude_purity(rows: [MIRPreludeCall]) -> [U64:Bool] Never! {
+    purity := [U64:Bool]{}
+    loop row in rows {
+        if purity.get(row.id.value) == None {
+            &purity.add(row.id.value, row.effect_kind == None && row.abi != .Effect && row.fallibility == .Infallible).drop("checked absent above")
+        }
+    }
+    purity
 }
 
 fn mir_pass_defined_values(function: MIRFunction) -> [MIRValueFact] Never! {
-    defined := [Int:Bool]{}
+    defined := [U64:Bool]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.result == .Val(result) -> &defined.add(result.value, true).drop("a result may repeat")
@@ -87,7 +125,8 @@ fn mir_pass_find_value(values: [MIRValueFact], value: MIRValueID) -> MIRValueFac
     None
 }
 
-fn mir_pass_removable_dead(operation: MIROperation, ty: MIRType?, ownership: MIROwnership, prelude_calls: [MIRPreludeCall]) -> Bool Never! {
+// Rust: crates/jet-foundation/src/MIROptimization.rs::removable_dead_operation
+fn mir_pass_removable_dead(operation: MIROperation, ty: MIRType?, ownership: MIROwnership, purity: [U64:Bool]) -> Bool Never! {
     if ownership.mode != .Copy || ownership.drop != .NoDrop -> return false
     if operation == {
         .Constant(constant) -> {
@@ -100,12 +139,12 @@ fn mir_pass_removable_dead(operation: MIROperation, ty: MIRType?, ownership: MIR
         .Binary(op, dispatch, _, _, _) -> {
             pure_dispatch :: if dispatch == {
                 .Primitive -> true
-                .Prelude(call, _) -> mir_pass_prelude_is_pure(prelude_calls, call)
+                .Prelude(call, _) -> purity.get(call.value) ?? false
             }
             pure_dispatch && (op == .Eq || op == .Ne || op == .Lt || op == .Gt || op == .Le || op == .Ge || op == .BitAnd || op == .BitOr || op == .BitXor || op == .And || op == .Or)
         }
         .Phi(_) -> true
-        .Convert(_, _, _, conversion) -> mir_pass_conversion_is_pure(conversion, prelude_calls)
+        .Convert(_, _, _, conversion) -> mir_pass_conversion_is_pure(conversion, purity)
         else -> false
     }
 }
@@ -117,9 +156,10 @@ fn mir_pass_prelude_is_pure(rows: [MIRPreludeCall], id: MIRPreludeCallID) -> Boo
     false
 }
 
-fn mir_pass_conversion_is_pure(conversion: MIRConversion, rows: [MIRPreludeCall]) -> Bool Never! {
+// Rust: crates/jet-foundation/src/MIROptimization.rs::conversion_is_pure
+fn mir_pass_conversion_is_pure(conversion: MIRConversion, purity: [U64:Bool]) -> Bool Never! {
     if conversion == {
         .Transparent | .NumericCast | .SendFn -> true
-        .Prelude(call, _, fallibility) -> fallibility == .Infallible && mir_pass_prelude_is_pure(rows, call)
+        .Prelude(call, _, fallibility) -> fallibility == .Infallible && (purity.get(call.value) ?? false)
     }
 }

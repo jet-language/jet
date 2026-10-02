@@ -5,6 +5,7 @@ use jet_foundation.[
     MIRCallSignature,
     MIRCallee,
     MIRConstant,
+    MIRCopyFact,
     MIRDBQueryMetadata,
     MIRDBTableFact,
     MIREnumArg,
@@ -29,6 +30,7 @@ use jet_foundation.[
     TExprKind,
     TFunc,
     THandleOp,
+    TLocal,
     TMapEntry,
     TStmt,
     Type,
@@ -63,7 +65,7 @@ fn jet_codegen_data_enum_arg(builder: &JetCodegenBuilder, argument: TExpr?, clon
     if argument == None -> return [MIREnumArg]{}
     value_expr :: argument
     value := jet_codegen_lower_expr(&builder, value_expr)
-    if clone_arg -> value = jet_codegen_emit_value(&builder, value_expr.span, value_expr.ty, MIROperation.Copy{value: value, materialize_view: false})
+    if clone_arg -> value = jet_codegen_emit_value(&builder, value_expr.span, value_expr.ty, MIROperation.Copy{value: value, fact: MIRCopyFact.Materialize})
     [MIREnumArg]{MIREnumArg{field: None, value: value, boxed: false}}
 }
 fn jet_codegen_lower_data_enum(builder: &JetCodegenBuilder, expression: TExpr, owner: String, variant: String, argument: TExpr?, clone_arg: Bool) -> MIRValueID {
@@ -239,16 +241,14 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
     _ := jet_codegen_emit(&builder, expression.span, None, MIROperation.WritePlace{place: output_place, value: empty})
 
     loop_body := [TStmt]{}
-    variable := "encode_item_{source_value.value}"
-    variable_two := String?{None}
+    variable := tir_user_local("encode_item_{source_value.value}", expression.span)
+    variable_two := TLocal?{None}
     encoded_value := if {
         map -> {
-            key_name := "encode_key_{source_value.value}"
-            value_name := "encode_value_{source_value.value}"
-            variable = key_name
-            variable_two = Val(value_name)
-            key_local := tir_user_local(key_name, expression.span)
-            item_local := tir_user_local(value_name, expression.span)
+            key_local := tir_user_local("encode_key_{source_value.value}", expression.span)
+            item_local := tir_user_local("encode_value_{source_value.value}", expression.span)
+            variable = key_local
+            variable_two = Val(item_local)
             key_expr := jet_codegen_data_expr(Type.String, expression.span, TExprKind.Local{local: key_local})
             item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: item_local})
             jet_codegen_data_expr(
@@ -257,8 +257,7 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
                 TExprKind.Tuple{values: [TExpr]{key_expr, jet_codegen_data_encode_node(item_expr)}},
             )
         } else -> {
-            item_local := tir_user_local(variable, expression.span)
-            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: item_local})
+            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: variable})
             jet_codegen_data_encode_node(item_expr)
         }
     }
@@ -271,7 +270,7 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
     &loop_body.push(TStmt.ExprStmt{value: push_expr, span: expression.span})
     jet_codegen_lower_statement(
         &builder,
-        TStmt.ForIn{label: None, variable: variable, variable_two: variable_two, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, body: loop_body, span: expression.span},
+        TStmt.ForIn{label: None, variable: variable, variable_two: variable_two, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: loop_body, span: expression.span},
     )
 
     output_place = jet_codegen_lower_local_place(&builder, output_local)
@@ -292,6 +291,7 @@ fn jet_codegen_data_union_enum_name(members: [Type]) -> String Never! {
     "__JetUnion_{tags.join("_")}"
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_serde_encode / lower_datatree_decode
 fn jet_codegen_data_codec_function(builder: JetCodegenBuilder, ty: Type, codec: String, method_name: String) -> TFunc? {
     owner_type := if ty == {
         .Union(members) -> Type.Named{name: jet_codegen_data_union_enum_name(members)}
@@ -305,30 +305,23 @@ fn jet_codegen_data_codec_function(builder: JetCodegenBuilder, ty: Type, codec: 
     owner_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
     if owner_identity == None -> return None
     identity :: owner_identity ?? return None
-    target_identity_key := String?{None}
-    loop semantic_module in builder.modules {
-        if semantic_module.module_identity != identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != identity.name -> next
-            if target_identity_key != None -> panic("ambiguous checked Serde {codec} owner identity")
-            target_identity_key = Val(nominal.identity_key)
-        }
-    }
-    target_key :: target_identity_key ?? return None
+    owner_key :: jet_codegen_qualified_function_key(identity.module_identity, identity.name)
+    owner_row :: builder.owners.hooks.nominal_by_owner.get(owner_key) ?? return None
+    if builder.owners.hooks.nominal_rows[owner_row].next_owner >= 0 -> panic("ambiguous checked Serde {codec} owner identity")
+    module_index :: builder.owners.hooks.nominal_rows[owner_row].module_index
+    nominal_index :: builder.owners.hooks.nominal_rows[owner_row].nominal_index
+    target_key :: builder.modules[module_index].nominals[nominal_index].identity_key
     selected := TFunc?{None}
-    loop semantic_module in builder.modules {
-        loop implementation in semantic_module.impls {
-            trait_symbol :: implementation.trait_symbol ?? next
-            if trait_symbol.name != codec || implementation.target_identity_key != target_key -> next
-            loop method in implementation.methods {
-                if method.symbol.name != method_name -> next
-                if selected != None -> panic("ambiguous checked Serde {codec} implementation")
-                selected = Val(
-                    jet_codegen_find_function(builder.function_index, method.symbol.id.key)
-                        ?? panic("checked Serde {codec}::{method_name} method is not reachable")
-                )
-            }
-        }
+    key :: jet_codegen_hook_method_key(target_key, codec, method_name)
+    row := builder.owners.hooks.exact_methods.get(key) ?? -1
+    loop row >= 0 {
+        if selected != None -> panic("ambiguous checked Serde {codec} implementation")
+        candidate :: builder.owners.hooks.implementation_rows[row]
+        selected = Val(
+            jet_codegen_find_function(builder.function_index, builder.modules[candidate.module_index].impls[candidate.implementation_index].methods[candidate.method_index].symbol.id.key)
+                ?? panic("checked Serde {codec}::{method_name} method is not reachable")
+        )
+        row = candidate.next_exact
     }
     selected
 }

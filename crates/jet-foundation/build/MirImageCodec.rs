@@ -1073,9 +1073,13 @@ fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>, interned: &[&str]) 
         .ok_or_else(|| "missing root MirProgram".to_string())?;
     let encode_root = function_name("encode", &root.key);
     let decode_root = function_name("decode", &root.key);
+    // The writer validates before encoding; the reader only decodes. Its
+    // callers bind the bytes to an integrity seal (the compiler-image
+    // checksum) or validate again when they re-encode, so restore does not
+    // re-run whole-program validation.
     writeln!(
         out,
-        "pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut interner = MirProgramImageInterner::default();\n    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\n    {encode_root}(value, &mut writer)?;\n    let body = writer.finish();\n    mir_image_assemble(interner, body)\n}}\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    let (tables, cursor) = mir_image_read_tables(bytes)?;\n    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    value.validate().map_err(|error| format!(\"invalid restored MIR image: {{error}}\"))?;\n    Ok(value)\n}}\n"
+        "pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut interner = MirProgramImageInterner::default();\n    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\n    {encode_root}(value, &mut writer)?;\n    let body = writer.finish();\n    mir_image_assemble(interner, body)\n}}\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    let (tables, cursor) = mir_image_read_tables(bytes)?;\n    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    Ok(value)\n}}\n"
     )
     .map_err(|error| error.to_string())?;
     Ok(out)

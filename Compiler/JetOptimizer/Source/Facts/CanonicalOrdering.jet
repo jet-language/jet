@@ -155,118 +155,142 @@ fn mir_pass_import_before(left: MIRImport, right: MIRImport) -> Bool Never! {
     if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.module_id.value < right.module_id.value
 }
 
-fn mir_pass_sort_functions(rows: &[MIRFunction]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && mir_pass_function_before(current, rows[cursor - 1]) {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
+// Stable row order by (primary, secondary, text), ascending. Rows with equal
+// keys keep their input order, the order the former insertion sorts gave;
+// a merge sort of scalar positions moves each (possibly deep) row only once.
+fn mir_pass_canonical_order(primary: [U64], secondary: [U64], text: [String]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<primary.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && !mir_pass_order_before(primary, secondary, text, order[right], order[left])) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
         }
-        rows[cursor] = current
+        order = merged
+        width = width * 2
     }
+    order
 }
 
-fn mir_pass_function_before(left: MIRFunction, right: MIRFunction) -> Bool Never! {
-    if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
+fn mir_pass_order_before(primary: [U64], secondary: [U64], text: [String], left: Int, right: Int) -> Bool Never! {
+    if primary[left] != primary[right] -> return primary[left] < primary[right]
+    if secondary[left] != secondary[right] -> return secondary[left] < secondary[right]
+    text[left] < text[right]
+}
+
+fn mir_pass_sort_functions(rows: &[MIRFunction]) Never! {
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(0)
+        &text.push(rows[index].key)
+    }
+    sorted := [MIRFunction]{}
+    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_type_defs(rows: &[MIRTypeDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && mir_pass_type_def_before(current, rows[cursor - 1]) {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(0)
+        &text.push(rows[index].key)
     }
-}
-
-fn mir_pass_type_def_before(left: MIRTypeDef, right: MIRTypeDef) -> Bool Never! {
-    if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
+    sorted := [MIRTypeDef]{}
+    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_traits(rows: &[MIRTraitDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && mir_pass_trait_before(current, rows[cursor - 1]) {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(0)
+        &text.push(rows[index].key)
     }
-}
-
-fn mir_pass_trait_before(left: MIRTraitDef, right: MIRTraitDef) -> Bool Never! {
-    if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
+    sorted := [MIRTraitDef]{}
+    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_impls(rows: &[MIRImplDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && mir_pass_impl_before(current, rows[cursor - 1]) {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(0)
+        &text.push(rows[index].key)
     }
-}
-
-fn mir_pass_impl_before(left: MIRImplDef, right: MIRImplDef) -> Bool Never! {
-    if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
+    sorted := [MIRImplDef]{}
+    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_constants(rows: &[MIRConstantDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && mir_pass_constant_before(current, rows[cursor - 1]) {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(0)
+        &text.push(rows[index].key)
     }
+    sorted := [MIRConstantDef]{}
+    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
-fn mir_pass_constant_before(left: MIRConstantDef, right: MIRConstantDef) -> Bool Never! {
-    if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.key < right.key
-}
-
+// Instances without an identity sort first (-1); the canonical key breaks
+// ties and is built once per row rather than once per comparison.
 fn mir_pass_sort_type_instances(rows: &[MIRType]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && mir_pass_type_instance_before(current, rows[cursor - 1]) {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(if rows[index].identity == None -> U64{0} else -> U64{1})
+        &secondary.push(rows[index].identity.map(value -> value.value) ?? U64{0})
+        &text.push(mir_type_canonical_key(rows[index]))
     }
-}
-
-fn mir_pass_type_instance_before(left: MIRType, right: MIRType) -> Bool Never! {
-    left_id :: left.identity.map(value -> value.value) ?? -1
-    right_id :: right.identity.map(value -> value.value) ?? -1
-    if left_id != right_id -> left_id < right_id else -> mir_type_canonical_key(left) < mir_type_canonical_key(right)
+    sorted := [MIRType]{}
+    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_fields(rows: &[MIRFieldRow]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && mir_pass_field_before(current, rows[cursor - 1]) {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(rows[index].owner.value)
+        &text.push("")
     }
-}
-
-fn mir_pass_field_before(left: MIRFieldRow, right: MIRFieldRow) -> Bool Never! {
-    if left.id.value != right.id.value -> left.id.value < right.id.value else -> left.owner.value < right.owner.value
+    sorted := [MIRFieldRow]{}
+    loop position in mir_pass_canonical_order(primary, secondary, text) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_source_files(rows: &[MIRSourceFile]) Never! {
@@ -541,16 +565,23 @@ fn mir_pass_sort_link_ids(rows: &[MIRLinkUnitID]) Never! {
     }
 }
 
-fn mir_pass_sort_blocks(rows: &[MIRBasicBlock]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && current.id.value < rows[cursor - 1].id.value {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
+// Stable row order by id alone (mir_pass_canonical_order).
+fn mir_pass_id_order(ids: [U64]) -> [Int] Never! {
+    secondary := [U64]{}
+    text := [String]{}
+    loop _ in ids {
+        &secondary.push(0)
+        &text.push("")
     }
+    mir_pass_canonical_order(ids, secondary, text)
+}
+
+fn mir_pass_sort_blocks(rows: &[MIRBasicBlock]) Never! {
+    ids := [U64]{}
+    loop index in 0..<rows.len() -> &ids.push(rows[index].id.value)
+    sorted := [MIRBasicBlock]{}
+    loop position in mir_pass_id_order(ids) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_captures(rows: &[MIRCaptureParam]) Never! {
@@ -570,51 +601,35 @@ fn mir_pass_capture_before(left: MIRCaptureParam, right: MIRCaptureParam) -> Boo
 }
 
 fn mir_pass_sort_values(rows: &[MIRValueFact]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && current.id.value < rows[cursor - 1].id.value {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
-    }
+    ids := [U64]{}
+    loop index in 0..<rows.len() -> &ids.push(rows[index].id.value)
+    sorted := [MIRValueFact]{}
+    loop position in mir_pass_id_order(ids) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_locals(rows: &[MIRLocal]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && current.id.value < rows[cursor - 1].id.value {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
-    }
+    ids := [U64]{}
+    loop index in 0..<rows.len() -> &ids.push(rows[index].id.value)
+    sorted := [MIRLocal]{}
+    loop position in mir_pass_id_order(ids) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_places(rows: &[MIRPlace]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && current.id.value < rows[cursor - 1].id.value {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
-    }
+    ids := [U64]{}
+    loop index in 0..<rows.len() -> &ids.push(rows[index].id.value)
+    sorted := [MIRPlace]{}
+    loop position in mir_pass_id_order(ids) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_scopes(rows: &[MIRScope]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && current.id.value < rows[cursor - 1].id.value {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
-    }
+    ids := [U64]{}
+    loop index in 0..<rows.len() -> &ids.push(rows[index].id.value)
+    sorted := [MIRScope]{}
+    loop position in mir_pass_id_order(ids) -> &sorted.push(rows[position])
+    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
 }
 
 fn mir_pass_sort_drops(rows: &[MIRDropAction]) Never! {

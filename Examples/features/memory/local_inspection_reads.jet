@@ -70,6 +70,36 @@ fn ordered(words: [String]) -> Int {
     count
 }
 
+struct Segment {
+    starts: [Int]
+    names: [String]
+    label: String
+}
+
+// Indexing, lengths, and comparisons of an owned local's fields read the
+// fields in place; a write between two reads is still seen by the later one.
+fn field_reads(n: Int) -> String {
+    segment := Segment{starts: [Int]{0, 3, n}, names: [String]{"a", "l"}, label: "l"}
+    total := 0
+    loop i in 0..<segment.starts.len() -> total += segment.starts[i]
+    same :: segment.names[1] == segment.label
+    before :: "{segment.starts[2]}"
+    segment.starts[2] = 7
+    segment.label = "m"
+    "{total} {same} {segment.names[1] == segment.label} {before} {segment.starts[2]} {segment.starts == segment.starts}"
+}
+
+// The same reads through a loop item that aliases a list element.
+fn segment_sum(segments: [Segment]) -> Int {
+    total := 0
+    loop segment in segments {
+        if segment.starts.len() == 0 || segment.starts[0] != 0 -> total += 100
+        loop i in 0..<segment.starts.len() -> total += segment.starts[i]
+        if segment.names[0] == segment.label -> total += 1000
+    }
+    total
+}
+
 fn run() {
     print(describe(0))
     print(describe(1))
@@ -81,4 +111,6 @@ fn run() {
     print(kept_after_reset(3))
     print(kept_after_reset(0))
     print(ordered([String]{"a", "b", "b", "a", "c"}))
+    print(field_reads(5))
+    print(segment_sum([Segment]{Segment{starts: [Int]{0, 3, 5}, names: [String]{"a", "l"}, label: "l"}, Segment{starts: [Int]{1}, names: [String]{"x"}, label: "x"}}))
 }

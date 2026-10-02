@@ -19,19 +19,23 @@ fn jet_eval_format_find_display_debug_row(
     if member != "display" && member != "debug" {
         return None
     }
-    loop row in machine.program.prelude_calls {
-        if row.module_name != "core.text.fmt" {
+    loop index in 0..<machine.program.prelude_calls.len() {
+        if machine.program.prelude_calls[index].module_name != "core.text.fmt" {
             next
         }
-        symbol := mir_symbol_name(row.symbol)
-        if member == "display" && row.member == "display" && symbol == "jet_fmt_display" && row.signature.arity == 1 && row.signature.max_arity == 1 && row.signature.borrow_mask.len() == 1 && row.signature.borrow_mask[0] == true {
-            return Val(row)
-        }
-        if member == "debug" && row.member == "debug" && symbol == "jet_fmt_debug" && row.signature.arity == 1 && row.signature.max_arity == 1 && row.signature.borrow_mask.len() == 1 && row.signature.borrow_mask[0] == true {
-            return Val(row)
+        if jet_eval_format_display_debug_row_matches(machine.program.prelude_calls[index], member) {
+            return Val(machine.program.prelude_calls[index])
         }
     }
     None
+}
+
+fn jet_eval_format_display_debug_row_matches(row: MIRPreludeCall, member: String) -> Bool {
+    symbol := mir_symbol_name(row.symbol)
+    if member == "display" && row.member == "display" && symbol == "jet_fmt_display" && row.signature.arity == 1 && row.signature.max_arity == 1 && row.signature.borrow_mask.len() == 1 && row.signature.borrow_mask[0] == true {
+        return true
+    }
+    member == "debug" && row.member == "debug" && symbol == "jet_fmt_debug" && row.signature.arity == 1 && row.signature.max_arity == 1 && row.signature.borrow_mask.len() == 1 && row.signature.borrow_mask[0] == true
 }
 
 fn jet_eval_format_find_source_row(

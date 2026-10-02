@@ -109,22 +109,24 @@ fn jet_codegen_last_use_in_window(windows: [String:[Int]], block: Int, index: In
     false
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::LowerCtx::last_use_instruction
 fn jet_codegen_last_use_instruction(builder: &JetCodegenBuilder, span: Span, role: String, ty: MIRType?, ownership: MIROwnership, operation: MIROperation) -> MIRInstruction Never! {
     identity := jet_codegen_identity(&builder, "operation", span, role, "")
     result := MIRValueID?{None}
     if ty == .Val(value_type) {
         value := MIRValueID{value: stable_id("mir-value", identity)}
-        &builder.values.push(MIRValueFact{id: value, ty: value_type, span: span, ownership: ownership})
+        jet_codegen_push_value(&builder, MIRValueFact{id: value, ty: value_type, span: span, ownership: ownership})
         result = Val(value)
     }
     MIRInstruction{id: MIROpID{value: stable_id("mir-op", identity)}, span: span, source_line: None, result: result, ty: ty, operation: operation}
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::LowerCtx::move_last_uses
 fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     block_count :: builder.blocks.len()
-    block_index := [Int:Int]{}
-    def_block := [Int:Int]{}
-    def_index := [Int:Int]{}
+    block_index := [U64:Int]{}
+    def_block := [U64:Int]{}
+    def_index := [U64:Int]{}
     loop (block, row) in builder.blocks {
         _ := &block_index.add(row.id.value, block)
         loop (index, instruction) in row.instructions {
@@ -134,9 +136,9 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
             }
         }
     }
-    value_row := [Int:Int]{}
+    value_row := [U64:Int]{}
     loop (index, fact) in builder.values -> _ := &value_row.add(fact.id.value, index)
-    place_row := [Int:Int]{}
+    place_row := [U64:Int]{}
     loop (index, row) in builder.places -> _ := &place_row.add(row.id.value, index)
 
     // Owned locals and owned (`^`) parameters: a whole place with a drop flag
@@ -145,7 +147,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     candidates := [JetCodegenLastUseCandidate]{}
     rejected := [Bool]{}
     root_candidate := [String:Int]{}
-    flag_candidate := [Int:Int]{}
+    flag_candidate := [U64:Int]{}
     loop record in builder.drop_live_all {
         if place_row.get(record.place.value) == None -> next
         row_index :: place_row.get(record.place.value) ?? panic("checked last-use row is missing")
@@ -169,7 +171,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
         &candidates.push(JetCodegenLastUseCandidate{local: true, place: record.place, flag: record.live, value: MIRValueID{value: 0}})
         &rejected.push(false)
     }
-    place_candidate := [Int:Int]{}
+    place_candidate := [U64:Int]{}
     loop row in builder.places {
         root_key := String?{None}
         if row.base == {
@@ -182,7 +184,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     }
     // Locals an operation names by identity (a parameter's local row names
     // the parameter's own place).
-    local_candidate := [Int:Int]{}
+    local_candidate := [U64:Int]{}
     loop local in builder.locals {
         if place_candidate.get(local.place.value) == .Val(candidate) {
             if local_candidate.get(local.id.value) == None -> _ := &local_candidate.add(local.id.value, candidate)
@@ -207,10 +209,10 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     // to every use of the copy. Uses in the copy's own block form a read
     // window that no other read of the local may move out of; any other use
     // counts as a use of the local where it occurs.
-    copy_candidate := [Int:Int]{}
-    copy_block := [Int:Int]{}
-    copy_index := [Int:Int]{}
-    copy_order := [Int]{}
+    copy_candidate := [U64:Int]{}
+    copy_block := [U64:Int]{}
+    copy_index := [U64:Int]{}
+    copy_order := [U64]{}
     loop (block, row) in builder.blocks {
         loop (index, instruction) in row.instructions {
             if instruction.operation == .ReadPlace(place) {
@@ -225,14 +227,14 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
             }
         }
     }
-    copy_end := [Int:Int]{}
+    copy_end := [U64:Int]{}
 
     // Enum subjects: every use is an EnumIs or an EnumPayload of one
     // variant, and the payloads (each index once) sit in one block after
     // every EnumIs of that block.
     enum_uses := [JetCodegenLastUseEnumUse]{}
-    enum_subject := [Int]{}
-    other_uses := [Int:Bool]{}
+    enum_subject := [U64]{}
+    other_uses := [U64:Bool]{}
     loop (block, row) in builder.blocks {
         loop (index, instruction) in row.instructions {
             if instruction.operation == {
@@ -254,8 +256,8 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     loop row in builder.places {
         if row.base == .Temporary(value) -> _ := &other_uses.add(value.value, true)
     }
-    uses_by_subject := [Int:[Int]]{}
-    subject_order := [Int]{}
+    uses_by_subject := [U64:[Int]]{}
+    subject_order := [U64]{}
     loop (row, subject) in enum_subject {
         rows := uses_by_subject.get(subject) ?? {
             &subject_order.push(subject)
@@ -264,7 +266,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
         &rows.push(row)
         _ := &uses_by_subject.add(subject, rows)
     }
-    subject_candidate := [Int:Int]{}
+    subject_candidate := [U64:Int]{}
     groups := [JetCodegenLastUseGroup]{}
     loop subject in subject_order {
         if other_uses.get(subject) != None -> next
@@ -377,8 +379,8 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     // Borrows of a candidate local: a borrowed result of an operation on one
     // of its places. A borrow may only feed operations in its own block that
     // derive no further borrow; its uses then count as uses of the local.
-    borrow_candidate := [Int:Int]{}
-    borrow_block := [Int:Int]{}
+    borrow_candidate := [U64:Int]{}
+    borrow_block := [U64:Int]{}
     loop (block, row) in builder.blocks {
         loop instruction in row.instructions {
             loop place in jet_codegen_last_use_places(instruction.operation) {
@@ -492,45 +494,49 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
         }
     }
 
-    // Backward liveness to a fixed point over flat block x candidate rows.
-    generated := [Bool]{}
-    killed := [Bool]{}
-    live_in := [Bool]{}
-    live_out := [Bool]{}
-    loop filler in 0..<(block_count * count) {
-        &generated.push(false)
-        &killed.push(false)
-        &live_in.push(false)
-        &live_out.push(false)
-    }
+    // Each live-in candidate propagates to predecessors once. Sparse rows
+    // and candidate deltas reach the same least fixed point without rescans.
+    killed := [[Int:Bool]]{}
+    live_in := [[Int:Bool]]{}
+    live_out := [[Int:Bool]]{}
+    live_delta := [[Int]]{}
+    delta_cursor := [Int]{}
+    pending := [Int]{}
+    queued := [Bool]{}
     loop block in 0..<block_count {
-        base :: block * count
+        &killed.push([Int:Bool]{})
+        &live_in.push([Int:Bool]{})
+        &live_out.push([Int:Bool]{})
+        &live_delta.push([Int]{})
+        &delta_cursor.push(0)
+        // Pop the initial blocks in reverse physical order.
+        &pending.push(block)
+        &queued.push(true)
         loop event_index in event_start[block]..<event_start[block + 1] {
             event :: events[event_index]
             if event.kill {
-                killed[base + event.candidate] = true
-            } else if !killed[base + event.candidate] {
-                generated[base + event.candidate] = true
+                _ := &killed[block].add(event.candidate, true)
+            } else if killed[block].get(event.candidate) == None && live_in[block].get(event.candidate) == None {
+                _ := &live_in[block].add(event.candidate, true)
+                &live_delta[block].push(event.candidate)
             }
         }
     }
-    changed := true
-    loop changed {
-        changed = false
-        block := block_count
-        loop block > 0 {
-            block -= 1
-            base :: block * count
-            loop candidate in 0..<count {
-                live_after := false
-                loop target in successors[block] {
-                    if live_in[target * count + candidate] -> live_after = true
-                }
-                live_out[base + candidate] = live_after
-                live_before :: generated[base + candidate] || (live_after && !killed[base + candidate])
-                if live_before != live_in[base + candidate] {
-                    live_in[base + candidate] = live_before
-                    changed = true
+    loop pending.len() > 0 {
+        block :: &pending.pop() ?? { break }
+        queued[block] = false
+        loop delta_cursor[block] < live_delta[block].len() {
+            candidate := live_delta[block][delta_cursor[block]]
+            delta_cursor[block] = delta_cursor[block] + 1
+            loop pred in predecessors[block] {
+                if live_out[pred].get(candidate) != None -> next
+                _ := &live_out[pred].add(candidate, true)
+                if killed[pred].get(candidate) != None || live_in[pred].get(candidate) != None -> next
+                _ := &live_in[pred].add(candidate, true)
+                &live_delta[pred].push(candidate)
+                if !queued[pred] {
+                    queued[pred] = true
+                    &pending.push(pred)
                 }
             }
         }
@@ -543,32 +549,30 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder) Never! {
     moved_groups := [Int]{}
     loop block in 0..<block_count {
         if !reachable[block] -> next
-        base :: block * count
-        live := [Bool]{}
-        loop candidate in 0..<count -> &live.push(live_out[base + candidate])
+        // The fixed point is complete; consume this live-out row in place.
         cursor := event_start[block + 1]
         instructions :: builder.blocks[block].instructions
         index := instructions.len()
         loop cursor > event_start[block] && events[cursor - 1].index >= index {
             cursor -= 1
-            live[events[cursor].candidate] = !events[cursor].kill
+            _ := &live_out[block].add(events[cursor].candidate, !events[cursor].kill)
         }
         loop index > 0 {
             index -= 1
             if instructions[index].operation == .ReadPlace(place) {
                 if place_candidate.get(place.value) == .Val(candidate) {
-                    if candidates[candidate].local && candidates[candidate].place == place && !rejected[candidate] && !live[candidate] && !jet_codegen_last_use_in_window(read_windows, block, index, candidate) {
+                    if candidates[candidate].local && candidates[candidate].place == place && !rejected[candidate] && !(live_out[block].get(candidate) ?? false) && !jet_codegen_last_use_in_window(read_windows, block, index, candidate) {
                         _ := &conversions.add("{block}:{index}", candidate)
                     }
                 }
             }
             if group_end.get("{block}:{index}") == .Val(group_index) {
                 candidate :: groups[group_index].candidate
-                if !rejected[candidate] && !live[candidate] -> &moved_groups.push(group_index)
+                if !rejected[candidate] && !(live_out[block].get(candidate) ?? false) -> &moved_groups.push(group_index)
             }
             loop cursor > event_start[block] && events[cursor - 1].index >= index {
                 cursor -= 1
-                live[events[cursor].candidate] = !events[cursor].kill
+                _ := &live_out[block].add(events[cursor].candidate, !events[cursor].kill)
             }
         }
     }

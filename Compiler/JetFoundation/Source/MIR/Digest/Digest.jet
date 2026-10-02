@@ -2,8 +2,9 @@
 //
 // The writer is deliberately kept beside MIR rather than in an optimizer
 // consumer.  It frames every scalar and row explicitly, and all collection
-// order is established by the canonical row sorters below.  The public digest
-// seam is added only after the complete schema row set is assembled.
+// order is established by the canonical sorters below. Program and function
+// tables use stable O(n log n) scalar-position ordering: rows are read in place,
+// and equal keys retain input order without shifting owned records.
 
 use core.math as math
 
@@ -13,22 +14,22 @@ use core.math as math
 struct MIRCanonicalWriter {
     pub bytes: [U8]
     pub hashing: Bool
-    pub lanes: [Int]
+    pub lanes: [U64]
 }
 
 fn mir_digest_writer() -> MIRCanonicalWriter Never! {
-    MIRCanonicalWriter{bytes: [U8]{}, hashing: false, lanes: [Int]{}}
+    MIRCanonicalWriter{bytes: [U8]{}, hashing: false, lanes: [U64]{}}
 }
 
 fn mir_digest_hash_writer() -> MIRCanonicalWriter Never! {
-    MIRCanonicalWriter{bytes: [U8]{}, hashing: true, lanes: [Int]{0xcbf29ce484222325, 0x84222325cbf29ce4, 0x9e3779b185ebca87, 0xd6e8feb86659fd93}}
+    MIRCanonicalWriter{bytes: [U8]{}, hashing: true, lanes: [U64]{U64{0xcbf29ce484222325}, U64{0x84222325cbf29ce4}, U64{0x9e3779b185ebca87}, U64{0xd6e8feb86659fd93}}}
 }
 
 fn mir_digest_u8(writer: &MIRCanonicalWriter, value: U8) Never! {
     if writer.hashing {
-        byte :: Int.from_u8(value)
+        byte :: U64.from_u8(value)
         loop index in 0..<writer.lanes.len() {
-            writer.lanes[index] = mir_digest_wrap64((writer.lanes[index] ^ byte) * 0x100000001b3)
+            writer.lanes[index] = (writer.lanes[index] ~| byte).wrapping_mul(U64{0x100000001b3})
         }
     } else {
         &writer.bytes.push(value)
@@ -40,14 +41,23 @@ fn mir_digest_u16(writer: &MIRCanonicalWriter, value: Int) Never! {
     mir_digest_u8(&writer, U8{(value >> 8) & 255})
 }
 
-fn mir_digest_u64(writer: &MIRCanonicalWriter, value: Int) Never! {
+// One little-endian 64-bit word: MIR ids, id lists and literal codes.
+fn mir_digest_u64(writer: &MIRCanonicalWriter, value: U64) Never! {
+    loop index in 0..<8 {
+        mir_digest_u8(&writer, U8.from_u64((value >> (8 * index)) & U64{255}) ?? U8{0})
+    }
+}
+
+// An exact `Int` as its low 64 bits, two's complement, in the same frame as
+// `mir_digest_u64`.
+fn mir_digest_int(writer: &MIRCanonicalWriter, value: Int) Never! {
     loop index in 0..<8 {
         mir_digest_u8(&writer, U8{(value >> (8 * index)) & 255})
     }
 }
 
 fn mir_digest_len(writer: &MIRCanonicalWriter, value: Int) Never! {
-    mir_digest_u64(&writer, value)
+    mir_digest_int(&writer, value)
 }
 
 fn mir_digest_bool(writer: &MIRCanonicalWriter, value: Bool) Never! {
@@ -74,12 +84,22 @@ fn mir_digest_span(writer: &MIRCanonicalWriter, span: Span) Never! {
     mir_digest_len(&writer, span.end)
 }
 
+fn mir_digest_option_u64(writer: &MIRCanonicalWriter, value: U64?) Never! {
+    if value == {
+        None -> mir_digest_bool(&writer, false)
+        Val(word) -> {
+            mir_digest_bool(&writer, true)
+            mir_digest_u64(&writer, word)
+        }
+    }
+}
+
 fn mir_digest_option_int(writer: &MIRCanonicalWriter, value: Int?) Never! {
     if value == {
         None -> mir_digest_bool(&writer, false)
         Val(number) -> {
             mir_digest_bool(&writer, true)
-            mir_digest_u64(&writer, number)
+            mir_digest_int(&writer, number)
         }
     }
 }
@@ -104,23 +124,25 @@ fn mir_digest_option_type(writer: &MIRCanonicalWriter, value: MIRType?) Never! {
     }
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::CanonicalWriter::debug
 fn mir_digest_debug_quote(value: String) -> String Never! {
-    out := "\""
+    parts := [String]{"\""}
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
         if code == {
-            34 -> out = "{out}\\\""
-            92 -> out = "{out}\\\\"
-            10 -> out = "{out}\\n"
-            13 -> out = "{out}\\r"
-            9 -> out = "{out}\\t"
+            34 -> &parts.push("\\\"")
+            92 -> &parts.push("\\\\")
+            10 -> &parts.push("\\n")
+            13 -> &parts.push("\\r")
+            9 -> &parts.push("\\t")
             else -> {
-                if code < 32 || code == 127 -> out = "{out}\\u{{{code}}}"
-                else -> out = "{out}{String.from_bytes([byte]) ?? ""}"
+                if code < 32 || code == 127 -> &parts.push("\\u{{{code}}}")
+                else -> &parts.push(String.from_bytes([byte]) ?? "")
             }
         }
     }
-    "{out}\""
+    &parts.push("\"")
+    parts.join("")
 }
 
 fn mir_digest_debug_bool(value: Bool) -> String Never! { if value -> "true" else -> "false" }
@@ -143,6 +165,11 @@ fn mir_digest_debug_bool_list(values: [Bool]) -> String Never! {
 fn mir_digest_debug_int_option(value: Int?) -> String Never! {
     number :: value ?? return "None"
     "Some({number})"
+}
+
+fn mir_digest_debug_u64_option(value: U64?) -> String Never! {
+    word :: value ?? return "None"
+    "Some({word})"
 }
 
 fn mir_digest_access_debug(value: MIRAccess) -> String Never! {
@@ -438,13 +465,13 @@ fn mir_digest_type_kind(writer: &MIRCanonicalWriter, value: MIRTypeKind) Never! 
         .IntN(signed, bits) -> {
             mir_digest_tag(&writer, "int-n")
             mir_digest_bool(&writer, signed)
-            mir_digest_u64(&writer, bits)
+            mir_digest_int(&writer, bits)
         }
         .InlineRange(base, lo, hi) -> {
             mir_digest_tag(&writer, "inline-range")
             mir_digest_type(&writer, base)
-            mir_digest_u64(&writer, lo)
-            mir_digest_u64(&writer, hi)
+            mir_digest_int(&writer, lo)
+            mir_digest_int(&writer, hi)
         }
         .Float32 -> mir_digest_tag(&writer, "float32")
         .Tagged(marker, inner) -> {
@@ -471,7 +498,7 @@ fn mir_digest_type_kind(writer: &MIRCanonicalWriter, value: MIRTypeKind) Never! 
 
 fn mir_digest_type(writer: &MIRCanonicalWriter, value: MIRType) Never! {
     mir_digest_tag(&writer, "mir-type")
-    mir_digest_option_int(&writer, value.identity.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.identity.map(row -> row.value))
     mir_digest_type_kind(&writer, value.kind)
     mir_digest_string(&writer, mir_digest_layout_debug(value.layout))
 }
@@ -592,14 +619,14 @@ fn mir_digest_debug_u8_list(value: [U8]) -> String Never! {
 
 fn mir_digest_panic_location(writer: &MIRCanonicalWriter, value: MIRPanicLoc) Never! {
     mir_digest_u64(&writer, value.file.value)
-    mir_digest_u64(&writer, value.line)
-    mir_digest_u64(&writer, value.column)
+    mir_digest_int(&writer, value.line)
+    mir_digest_int(&writer, value.column)
 }
 
 fn mir_digest_panic_context(writer: &MIRCanonicalWriter, value: MIRPanicContext) Never! {
     mir_digest_string(&writer, value.function)
     mir_digest_string(&writer, value.source_line)
-    mir_digest_u64(&writer, value.caret)
+    mir_digest_int(&writer, value.caret)
     mir_digest_len(&writer, value.locals.len())
     loop local in value.locals {
         mir_digest_string(&writer, local.name)
@@ -611,7 +638,7 @@ fn mir_digest_call_args(writer: &MIRCanonicalWriter, args: [MIRCallArg]) Never! 
     mir_digest_len(&writer, args.len())
     loop arg in args {
         mir_digest_u64(&writer, arg.value.value)
-        mir_digest_option_int(&writer, arg.place.map(row -> row.value))
+        mir_digest_option_u64(&writer, arg.place.map(row -> row.value))
         mir_digest_string(&writer, mir_digest_access_debug(arg.access))
         mir_digest_span(&writer, arg.span)
         mir_digest_option_string(&writer, arg.label)
@@ -639,7 +666,7 @@ fn mir_digest_call_args(writer: &MIRCanonicalWriter, args: [MIRCallArg]) Never! 
                 mir_digest_string(&writer, coercion.variant)
             }
         }
-        mir_digest_option_int(&writer, arg.box_as_trait.map(row -> row.value))
+        mir_digest_option_u64(&writer, arg.box_as_trait.map(row -> row.value))
     }
 }
 
@@ -691,8 +718,8 @@ fn mir_digest_text_hole_kind(writer: &MIRCanonicalWriter, value: MIRTextHoleKind
         .Bool -> mir_digest_u64(&writer, 4)
         .InlineRange(lo, hi) -> {
             mir_digest_u64(&writer, 5)
-            mir_digest_u64(&writer, lo)
-            mir_digest_u64(&writer, hi)
+            mir_digest_int(&writer, lo)
+            mir_digest_int(&writer, hi)
         }
     }
 }
@@ -725,7 +752,7 @@ fn mir_digest_binary_pattern_parts(writer: &MIRCanonicalWriter, values: [MIRBina
             }
             .Bits(width, ty, little, span) -> {
                 mir_digest_tag(&writer, "bits")
-                mir_digest_u64(&writer, Int.from_u8(width))
+                mir_digest_int(&writer, Int.from_u8(width))
                 mir_digest_u64(&writer, ty.value)
                 mir_digest_bool(&writer, little)
                 mir_digest_span(&writer, span)
@@ -874,10 +901,10 @@ fn mir_digest_core_closure(writer: &MIRCanonicalWriter, value: MIRCoreClosureKin
             mir_digest_bool(&writer, playground)
             mir_digest_string(&writer, source_file)
             mir_digest_span(&writer, source_span)
-            mir_digest_u64(&writer, source_start_line)
-            mir_digest_u64(&writer, source_start_column)
-            mir_digest_u64(&writer, source_end_line)
-            mir_digest_u64(&writer, source_end_column)
+            mir_digest_int(&writer, source_start_line)
+            mir_digest_int(&writer, source_start_column)
+            mir_digest_int(&writer, source_end_line)
+            mir_digest_int(&writer, source_end_column)
             mir_digest_string(&writer, build_id)
             mir_digest_string(&writer, revision)
         }
@@ -933,13 +960,13 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
         .AmbientInput(call, prompt) -> {
             mir_digest_tag(&writer, "ambient-input")
             mir_digest_u64(&writer, call.value)
-            mir_digest_option_int(&writer, prompt.map(row -> row.value))
+            mir_digest_option_u64(&writer, prompt.map(row -> row.value))
         }
         .RequireStop(call, kind, condition, location, context, values, always_stops) -> {
             mir_digest_tag(&writer, "require-stop")
             mir_digest_u64(&writer, call.value)
             mir_digest_require_kind(&writer, kind)
-            mir_digest_option_int(&writer, condition.map(row -> row.value))
+            mir_digest_option_u64(&writer, condition.map(row -> row.value))
             mir_digest_panic_location(&writer, location)
             mir_digest_panic_context(&writer, context)
             mir_digest_values(&writer, values)
@@ -965,7 +992,7 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
                 mir_digest_u64(&writer, field.value.value)
             }
             mir_digest_struct_extra(&writer, extra)
-            mir_digest_option_int(&writer, trait_coercion.map(row -> row.value))
+            mir_digest_option_u64(&writer, trait_coercion.map(row -> row.value))
             mir_digest_len(&writer, boxed_fields.len())
             loop field in boxed_fields -> mir_digest_u64(&writer, field.value)
         }
@@ -985,7 +1012,7 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
         .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> {
             mir_digest_tag(&writer, "cell-guard-project")
             mir_digest_u64(&writer, map_call.value)
-            mir_digest_option_int(&writer, split_call.map(row -> row.value))
+            mir_digest_option_u64(&writer, split_call.map(row -> row.value))
             mir_digest_u64(&writer, guard.value)
             mir_digest_field_paths(&writer, paths)
             mir_digest_bool(&writer, editable)
@@ -1063,14 +1090,14 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
             mir_digest_tag(&writer, "hardware-call")
             mir_digest_u64(&writer, call.value)
             mir_digest_hardware_op(&writer, op)
-            mir_digest_option_int(&writer, receiver.map(row -> row.value))
+            mir_digest_option_u64(&writer, receiver.map(row -> row.value))
             mir_digest_call_args(&writer, args)
         }
         .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> {
             mir_digest_tag(&writer, "builtin-method")
             mir_digest_u64(&writer, call.value)
             mir_digest_u64(&writer, receiver.value)
-            mir_digest_option_int(&writer, receiver_place.map(row -> row.value))
+            mir_digest_option_u64(&writer, receiver_place.map(row -> row.value))
             mir_digest_values(&writer, args)
             if aggregate_fields == {
                 .Val(aggregate_fields_value) -> {
@@ -1191,7 +1218,7 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
             mir_digest_u64(&writer, call.value)
             mir_digest_core_closure(&writer, kind)
             mir_digest_values(&writer, values)
-            mir_digest_option_int(&writer, closure.map(row -> row.value))
+            mir_digest_option_u64(&writer, closure.map(row -> row.value))
             mir_digest_u64(&writer, site.value)
             mir_digest_string(&writer, label)
         }
@@ -1230,7 +1257,7 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
             mir_digest_u64(&writer, root.value)
             mir_digest_values(&writer, edges)
             mir_digest_u64(&writer, edit.value)
-            mir_digest_option_int(&writer, index.map(row -> row.value))
+            mir_digest_option_u64(&writer, index.map(row -> row.value))
             mir_digest_gc_edit(&writer, kind)
             mir_digest_u64(&writer, site.value)
         }
@@ -1326,10 +1353,10 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
             mir_digest_u64(&writer, value.value)
             mir_digest_u64(&writer, target.value)
         }
-        .Copy(value, materialize_view) -> {
+        .Copy(value, fact) -> {
             mir_digest_tag(&writer, "copy")
             mir_digest_u64(&writer, value.value)
-            mir_digest_bool(&writer, materialize_view)
+            mir_digest_tag(&writer, mir_copy_fact_name(fact))
         }
         .Move(value) -> {
             mir_digest_tag(&writer, "move")
@@ -1359,7 +1386,7 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
         .BuildList(values, trait_coercion) -> {
             mir_digest_tag(&writer, "build-list")
             mir_digest_values(&writer, values)
-            mir_digest_option_int(&writer, trait_coercion.map(row -> row.value))
+            mir_digest_option_u64(&writer, trait_coercion.map(row -> row.value))
         }
         .BuildMap(entries) -> {
             mir_digest_tag(&writer, "build-map")
@@ -1430,7 +1457,7 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
             mir_digest_u64(&writer, base.value)
             mir_digest_u64(&writer, start.value)
             mir_digest_u64(&writer, end.value)
-            mir_digest_option_int(&writer, range.map(row -> row.value))
+            mir_digest_option_u64(&writer, range.map(row -> row.value))
             mir_digest_panic_location(&writer, location)
         }
         .Range(start, end, exclusive) -> {
@@ -1462,7 +1489,7 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
             mir_digest_string(&writer, variant)
             mir_digest_len(&writer, args.len())
             loop arg in args {
-                mir_digest_option_int(&writer, arg.field.map(row -> row.value))
+                mir_digest_option_u64(&writer, arg.field.map(row -> row.value))
                 mir_digest_u64(&writer, arg.value.value)
                 mir_digest_bool(&writer, arg.boxed)
             }
@@ -1569,7 +1596,7 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
             mir_digest_u64(&writer, call.value)
             mir_digest_u64(&writer, start.value)
             mir_digest_u64(&writer, end.value)
-            mir_digest_option_int(&writer, step.map(row -> row.value))
+            mir_digest_option_u64(&writer, step.map(row -> row.value))
             mir_digest_bool(&writer, exclusive)
         }
         .LoopRangeHasNext(call, cursor) -> {
@@ -1591,7 +1618,7 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
             mir_digest_tag(&writer, "loop-iter-init")
             mir_digest_u64(&writer, call.value)
             mir_digest_u64(&writer, collection.value)
-            mir_digest_option_int(&writer, step.map(row -> row.value))
+            mir_digest_option_u64(&writer, step.map(row -> row.value))
             mir_digest_bool(&writer, by_value)
             mir_digest_loop_source_kind(&writer, source_kind)
         }
@@ -1799,7 +1826,7 @@ fn mir_digest_data_plan_physical_debug(value: MIRDataPlanPhysicalOperator) -> St
 }
 
 fn mir_digest_data_plan(writer: &MIRCanonicalWriter, value: MIRDataPlan) Never! {
-    mir_digest_u64(&writer, value.schema_version)
+    mir_digest_int(&writer, value.schema_version)
     mir_digest_string(&writer, mir_digest_data_plan_source_debug(value.source))
     mir_digest_len(&writer, value.logical.len())
     loop node in value.logical {
@@ -1843,12 +1870,12 @@ fn mir_digest_constant(writer: &MIRCanonicalWriter, constant: MIRConstant) {
     if constant == {
         .Int(amount, width, spelling) -> {
             mir_digest_tag(&writer, "int")
-            mir_digest_u64(&writer, amount)
+            mir_digest_int(&writer, amount)
             if width == {
                 .Val(row) -> {
                 mir_digest_bool(&writer, true)
                 mir_digest_bool(&writer, row.signed)
-                mir_digest_u64(&writer, row.bits)
+                mir_digest_int(&writer, row.bits)
             }
             else -> {
                 mir_digest_bool(&writer, false)
@@ -1858,7 +1885,7 @@ fn mir_digest_constant(writer: &MIRCanonicalWriter, constant: MIRConstant) {
         }
         .Float(amount, f32, spelling) -> {
             mir_digest_tag(&writer, "float")
-            mir_digest_u64(&writer, math.to_bits(amount))
+            mir_digest_int(&writer, math.to_bits(amount))
             mir_digest_bool(&writer, f32)
             mir_digest_option_string(&writer, spelling)
         }
@@ -1868,7 +1895,7 @@ fn mir_digest_constant(writer: &MIRCanonicalWriter, constant: MIRConstant) {
         }
         .Char(value) -> {
             mir_digest_tag(&writer, "char")
-            mir_digest_u64(&writer, value)
+            mir_digest_int(&writer, value)
         }
         .String(value) -> {
             mir_digest_tag(&writer, "string")
@@ -1939,7 +1966,7 @@ fn mir_digest_const_key(writer: &MIRCanonicalWriter, key: MIRConstKey) Never! {
     if key == {
         .Int(amount) -> {
             mir_digest_tag(&writer, "int")
-            mir_digest_u64(&writer, amount)
+            mir_digest_int(&writer, amount)
         }
         .String(text) -> {
             mir_digest_tag(&writer, "string")
@@ -1951,7 +1978,7 @@ fn mir_digest_const_key(writer: &MIRCanonicalWriter, key: MIRConstKey) Never! {
         }
         .Char(value) -> {
             mir_digest_tag(&writer, "char")
-            mir_digest_u64(&writer, value)
+            mir_digest_int(&writer, value)
         }
         .Tuple(values) -> {
             mir_digest_tag(&writer, "tuple")
@@ -2029,7 +2056,7 @@ fn mir_digest_access_code(value: MIRAccess) -> Int Never! {
 
 fn mir_digest_access_optional(writer: &MIRCanonicalWriter, value: MIRAccess?) Never! {
     if value == {
-        .Val(access) -> mir_digest_u64(&writer, mir_digest_access_code(access))
+        .Val(access) -> mir_digest_int(&writer, mir_digest_access_code(access))
         else -> mir_digest_u64(&writer, 0)
     }
 }
@@ -2053,7 +2080,7 @@ fn mir_digest_struct_layout(writer: &MIRCanonicalWriter, value: MIRStructLayout?
             .Columnar -> mir_digest_u64(&writer, 2)
             .CAligned(alignment, target) -> {
                 mir_digest_u64(&writer, 3)
-                mir_digest_u64(&writer, alignment)
+                mir_digest_int(&writer, alignment)
                 mir_digest_bool(&writer, target)
             }
         }
@@ -2079,7 +2106,7 @@ fn mir_digest_c_enum_tag(writer: &MIRCanonicalWriter, value: MIRCEnumTag?) Never
             .U64 -> 8
             .I64 -> 9
         }
-        mir_digest_u64(&writer, code)
+        mir_digest_int(&writer, code)
     }
     else -> {
         mir_digest_bool(&writer, false)
@@ -2094,9 +2121,9 @@ fn mir_digest_layout_facts(writer: &MIRCanonicalWriter, value: LayoutFacts?) Nev
         if facts.bytes == {
             .Val(bytes) -> {
             mir_digest_bool(&writer, true)
-            mir_digest_u64(&writer, bytes.size)
-            mir_digest_u64(&writer, bytes.alignment)
-            mir_digest_u64(&writer, bytes.stride)
+            mir_digest_int(&writer, bytes.size)
+            mir_digest_int(&writer, bytes.alignment)
+            mir_digest_int(&writer, bytes.stride)
         }
         else -> {
             mir_digest_bool(&writer, false)
@@ -2121,8 +2148,8 @@ fn mir_digest_layout_alignment(writer: &MIRCanonicalWriter, value: MIRLayoutAlig
     if value == {
         .Val(row) -> {
         mir_digest_bool(&writer, true)
-        mir_digest_u64(&writer, row.requested_alignment)
-        mir_digest_u64(&writer, row.effective_alignment)
+        mir_digest_int(&writer, row.requested_alignment)
+        mir_digest_int(&writer, row.effective_alignment)
         mir_digest_bool(&writer, row.target_mode)
         mir_digest_string(&writer, row.target_profile)
         mir_digest_string(&writer, row.fact_identity)
@@ -2159,7 +2186,7 @@ fn mir_digest_serde_attribute_kind(value: MIRSerdeAttributeKind) -> Int Never! {
 fn mir_digest_serde_attributes(writer: &MIRCanonicalWriter, values: [MIRSerdeAttribute]) Never! {
     mir_digest_len(&writer, values.len())
     loop value in values {
-        mir_digest_u64(&writer, mir_digest_serde_attribute_kind(value.kind))
+        mir_digest_int(&writer, mir_digest_serde_attribute_kind(value.kind))
         mir_digest_option_string(&writer, value.value)
     }
 }
@@ -2231,7 +2258,7 @@ fn mir_digest_type_def_kind(writer: &MIRCanonicalWriter, value: MIRTypeDefKind) 
             mir_digest_tag(&writer, "struct")
             mir_digest_len(&writer, fields.len())
             loop field in fields -> mir_digest_field(&writer, field)
-            mir_digest_string(&writer, mir_digest_debug_int_list(methods.map(row -> row.value)))
+            mir_digest_string(&writer, mir_digest_debug_u64_list(methods.map(row -> row.value)))
         }
         .Enum(variants, methods) -> {
             mir_digest_tag(&writer, "enum")
@@ -2243,7 +2270,7 @@ fn mir_digest_type_def_kind(writer: &MIRCanonicalWriter, value: MIRTypeDefKind) 
                 mir_digest_variant_payload(&writer, variant.payload)
                 mir_digest_option_int(&writer, variant.discriminant)
             }
-            mir_digest_string(&writer, mir_digest_debug_int_list(methods.map(row -> row.value)))
+            mir_digest_string(&writer, mir_digest_debug_u64_list(methods.map(row -> row.value)))
         }
         .Distinct(base, range) -> {
             mir_digest_tag(&writer, "distinct")
@@ -2303,7 +2330,7 @@ fn mir_digest_cli_input(writer: &MIRCanonicalWriter, value: MIRCLIInput) {
     mir_digest_string(&writer, value.name)
     mir_digest_string(&writer, value.label)
     mir_digest_type(&writer, value.ty)
-    mir_digest_u64(&writer, mir_digest_param_zone_code(value.zone))
+    mir_digest_int(&writer, mir_digest_param_zone_code(value.zone))
     mir_digest_option_string(&writer, value.short)
     mir_digest_option_string(&writer, value.env)
     mir_digest_string(&writer, value.help)
@@ -2312,7 +2339,7 @@ fn mir_digest_cli_input(writer: &MIRCanonicalWriter, value: MIRCLIInput) {
         .Flag -> mir_digest_tag(&writer, "flag")
         .Value(kind, optional, default) -> {
             mir_digest_tag(&writer, "value")
-            mir_digest_u64(&writer, mir_digest_cli_value_kind(kind))
+            mir_digest_int(&writer, mir_digest_cli_value_kind(kind))
             mir_digest_bool(&writer, optional)
             if default == {
                 .Val(default_value) -> {
@@ -2344,13 +2371,14 @@ fn mir_digest_cli_entry(writer: &MIRCanonicalWriter, value: MIRCLIEntry) {
         mir_digest_string(&writer, command.name)
         mir_digest_option_string(&writer, command.description)
         mir_digest_u64(&writer, command.function.value)
-        mir_digest_option_int(&writer, command.receiver.map(row -> row.value))
+        mir_digest_option_u64(&writer, command.receiver.map(row -> row.value))
         mir_digest_len(&writer, command.inputs.len())
         loop input in command.inputs -> mir_digest_cli_input(&writer, input)
     }
     mir_digest_bool(&writer, value.standard)
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_module
 fn mir_digest_module(writer: &MIRCanonicalWriter, value: MIRModule) Never! {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_string(&writer, value.key)
@@ -2358,17 +2386,17 @@ fn mir_digest_module(writer: &MIRCanonicalWriter, value: MIRModule) Never! {
     mir_digest_string(&writer, value.path)
     mir_digest_u64(&writer, value.source_file.value)
     imports := value.imports.map(row -> row.value)
-    mir_digest_sort_ints(&imports)
     mir_digest_len(&writer, imports.len())
-    loop id in imports -> mir_digest_u64(&writer, id)
+    loop position in mir_digest_sort_ids(imports) -> mir_digest_u64(&writer, imports[position])
     mir_digest_len(&writer, value.item_order.len())
     loop item in value.item_order -> mir_digest_item_ref(&writer, item)
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_import
 fn mir_digest_import(writer: &MIRCanonicalWriter, value: MIRImport) Never! {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_u64(&writer, value.module_id.value)
-    mir_digest_u64(&writer, mir_digest_visibility_code(value.visibility))
+    mir_digest_int(&writer, mir_digest_visibility_code(value.visibility))
     mir_digest_string(&writer, value.alias)
     mir_digest_span(&writer, value.span)
     if value.kind == {
@@ -2383,13 +2411,11 @@ fn mir_digest_import(writer: &MIRCanonicalWriter, value: MIRImport) Never! {
         .Unqualified(module_id, items) -> {
             mir_digest_tag(&writer, "unqualified")
             mir_digest_u64(&writer, module_id.value)
-            sorted_items := items
-            mir_digest_sort_import_items(&sorted_items)
-            mir_digest_len(&writer, sorted_items.len())
-            loop item in sorted_items {
-                mir_digest_string(&writer, item.original)
-                mir_digest_string(&writer, item.local)
-                mir_digest_item_ref(&writer, item.item)
+            mir_digest_len(&writer, items.len())
+            loop position in mir_digest_sort_import_items(items) {
+                mir_digest_string(&writer, items[position].original)
+                mir_digest_string(&writer, items[position].local)
+                mir_digest_item_ref(&writer, items[position].item)
             }
         }
     }
@@ -2430,7 +2456,7 @@ fn mir_digest_type_def(writer: &MIRCanonicalWriter, value: MIRTypeDef) {
             mir_digest_bool(&writer, false)
         }
     }
-    mir_digest_u64(&writer, mir_digest_ownership_mode_code(value.ownership))
+    mir_digest_int(&writer, mir_digest_ownership_mode_code(value.ownership))
     mir_digest_len(&writer, value.boxed_edges.len())
     loop edge in value.boxed_edges -> mir_digest_string(&writer, edge)
     if value.compiler_builtin == {
@@ -2446,10 +2472,10 @@ fn mir_digest_type_def(writer: &MIRCanonicalWriter, value: MIRTypeDef) {
 fn mir_digest_core_owner(writer: &MIRCanonicalWriter, value: MIRCoreOwner) Never! {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_u64(&writer, value.nominal_id.value)
-    mir_digest_option_int(&writer, value.module_id.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.module_id.map(row -> row.value))
     mir_digest_string(&writer, value.key)
     mir_digest_string(&writer, value.name)
-    mir_digest_u64(&writer, mir_digest_ownership_mode_code(value.ownership))
+    mir_digest_int(&writer, mir_digest_ownership_mode_code(value.ownership))
 }
 
 fn mir_digest_trait_method(writer: &MIRCanonicalWriter, value: MIRTraitMethod) Never! {
@@ -2465,27 +2491,27 @@ fn mir_digest_trait_method(writer: &MIRCanonicalWriter, value: MIRTraitMethod) N
     mir_digest_string(&writer, mir_digest_effects_debug(value.effects))
     mir_digest_bool(&writer, value.is_pure)
     mir_digest_string(&writer, mir_digest_view_provenance_option_debug(value.return_view_provenance))
-    mir_digest_option_int(&writer, value.default.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.default.map(row -> row.value))
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_trait_def
 fn mir_digest_trait_def(writer: &MIRCanonicalWriter, value: MIRTraitDef) Never! {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_u64(&writer, value.module_id.value)
     mir_digest_string(&writer, value.key)
     mir_digest_string(&writer, value.name)
     mir_digest_span(&writer, value.span)
-    mir_digest_u64(&writer, mir_digest_visibility_code(value.visibility))
+    mir_digest_int(&writer, mir_digest_visibility_code(value.visibility))
     mir_digest_len(&writer, value.associated_types.len())
     loop associated in value.associated_types {
         mir_digest_string(&writer, associated.name)
         mir_digest_span(&writer, associated.span)
     }
-    methods := value.methods
-    mir_digest_sort_trait_methods(&methods)
-    mir_digest_len(&writer, methods.len())
-    loop method in methods -> mir_digest_trait_method(&writer, method)
+    mir_digest_len(&writer, value.methods.len())
+    loop position in mir_digest_sort_trait_methods(value.methods) -> mir_digest_trait_method(&writer, value.methods[position])
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_impl_def
 fn mir_digest_impl_def(writer: &MIRCanonicalWriter, value: MIRImplDef) Never! {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_u64(&writer, value.module_id.value)
@@ -2502,19 +2528,16 @@ fn mir_digest_impl_def(writer: &MIRCanonicalWriter, value: MIRImplDef) Never! {
         mir_digest_bool(&writer, false)
     }
 }
-    associated_types := value.associated_types
-    mir_digest_sort_associated_types(&associated_types)
-    mir_digest_len(&writer, associated_types.len())
-    loop associated in associated_types {
-        mir_digest_string(&writer, associated.name)
-        mir_digest_type(&writer, associated.ty)
-        mir_digest_span(&writer, associated.span)
+    mir_digest_len(&writer, value.associated_types.len())
+    loop position in mir_digest_sort_associated_types(value.associated_types) {
+        mir_digest_string(&writer, value.associated_types[position].name)
+        mir_digest_type(&writer, value.associated_types[position].ty)
+        mir_digest_span(&writer, value.associated_types[position].span)
     }
     methods := value.methods.map(row -> row.value)
-    mir_digest_sort_ints(&methods)
     mir_digest_len(&writer, methods.len())
-    loop method in methods -> mir_digest_u64(&writer, method)
-    mir_digest_option_int(&writer, value.delegation.map(row -> row.value))
+    loop position in mir_digest_sort_ids(methods) -> mir_digest_u64(&writer, methods[position])
+    mir_digest_option_u64(&writer, value.delegation.map(row -> row.value))
     mir_digest_bool(&writer, value.compiler_generated)
     mir_digest_serde_codec(&writer, value.serde)
     if value.operator_rhs == {
@@ -2544,12 +2567,12 @@ fn mir_digest_constant_def(writer: &MIRCanonicalWriter, value: MIRConstantDef) {
     mir_digest_string(&writer, value.key)
     mir_digest_string(&writer, value.name)
     mir_digest_span(&writer, value.span)
-    mir_digest_u64(&writer, mir_digest_visibility_code(value.visibility))
+    mir_digest_int(&writer, mir_digest_visibility_code(value.visibility))
     mir_digest_type(&writer, value.ty)
     mir_digest_constant(&writer, value.value)
 }
 
-fn mir_digest_debug_int_list(values: [Int]) -> String Never! {
+fn mir_digest_debug_u64_list(values: [U64]) -> String Never! {
     rendered :: loop value in values -> "{value}"
     "[{rendered.join(", ")}]"
 }
@@ -2559,18 +2582,14 @@ fn mir_digest_integer_range_debug(value: MIRIntegerRange?) -> String Never! {
     "Some(MirIntegerRange {{ lo: {row.lo}, hi: {row.hi} }})"
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::CanonicalWriter::debug
 fn mir_digest_effects_debug(value: MIREffectFacts) -> String Never! {
-    direct := value.direct
-    mir_digest_sort_strings(&direct)
-    solved := value.solved
-    mir_digest_sort_strings(&solved)
-    call_edges := value.call_edges
-    mir_digest_sort_strings(&call_edges)
-    direct_spans := value.direct_spans
-    mir_digest_sort_named_spans(&direct_spans)
+    direct :: loop position in mir_digest_sort_strings(value.direct) -> value.direct[position]
+    solved :: loop position in mir_digest_sort_strings(value.solved) -> value.solved[position]
+    call_edges :: loop position in mir_digest_sort_strings(value.call_edges) -> value.call_edges[position]
     rendered_spans := [String]{}
-    loop row in direct_spans {
-        &rendered_spans.push("{mir_digest_debug_quote(row.name)}: Span {{ start: {row.span.start}, end: {row.span.end} }}")
+    loop position in mir_digest_sort_named_spans(value.direct_spans) {
+        &rendered_spans.push("{mir_digest_debug_quote(value.direct_spans[position].name)}: Span {{ start: {value.direct_spans[position].span.start}, end: {value.direct_spans[position].span.end} }}")
     }
     "MirEffectFacts {{ direct: {mir_digest_debug_string_list(direct)}, solved: {mir_digest_debug_string_list(solved)}, call_edges: {mir_digest_debug_string_list(call_edges)}, maximal: {mir_digest_debug_bool(value.maximal)}, direct_spans: {{{rendered_spans.join(", ")}}} }}"
 }
@@ -2618,6 +2637,7 @@ fn mir_digest_handle_ownership(value: MIRHandleOwnership) -> Int Never! {
     }
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_link_unit
 fn mir_digest_link_unit(writer: &MIRCanonicalWriter, value: MIRLinkUnit) Never! {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_string(&writer, value.crate_spec)
@@ -2625,15 +2645,14 @@ fn mir_digest_link_unit(writer: &MIRCanonicalWriter, value: MIRLinkUnit) Never! 
     mir_digest_target_applicability(&writer, value.target_applicability)
     mir_digest_len(&writer, value.artifacts.len())
     loop artifact in value.artifacts {
-        mir_digest_u64(&writer, mir_digest_link_artifact_kind(artifact.kind))
+        mir_digest_int(&writer, mir_digest_link_artifact_kind(artifact.kind))
         mir_digest_string(&writer, artifact.path)
     }
     mir_digest_len(&writer, value.dependency_dirs.len())
     loop path in value.dependency_dirs -> mir_digest_string(&writer, path)
     closure := value.link_closure.map(row -> row.value)
-    mir_digest_sort_ints(&closure)
     mir_digest_len(&writer, closure.len())
-    loop unit in closure -> mir_digest_u64(&writer, unit)
+    loop position in mir_digest_sort_ids(closure) -> mir_digest_u64(&writer, closure[position])
 }
 
 fn mir_digest_callback(writer: &MIRCanonicalWriter, value: MIRCallbackAdapter) Never! {
@@ -2649,13 +2668,13 @@ fn mir_digest_callback(writer: &MIRCanonicalWriter, value: MIRCallbackAdapter) N
 fn mir_digest_handle(writer: &MIRCanonicalWriter, value: MIRHandleLifecycle) Never! {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_type(&writer, value.ty)
-    mir_digest_u64(&writer, mir_digest_handle_ownership(value.ownership))
+    mir_digest_int(&writer, mir_digest_handle_ownership(value.ownership))
     mir_digest_string(&writer, value.payload.library)
     mir_digest_string(&writer, value.payload.typedef_name)
     mir_digest_string(&writer, value.payload.close)
-    mir_digest_option_int(&writer, value.close.map(row -> row.value))
-    mir_digest_option_int(&writer, value.close_foreign.map(row -> row.value))
-    mir_digest_option_int(&writer, value.undo.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.close.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.close_foreign.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.undo.map(row -> row.value))
     mir_digest_bool(&writer, value.send)
     mir_digest_bool(&writer, value.sync)
 }
@@ -2730,14 +2749,14 @@ fn mir_digest_db_metadata_debug(value: MIRDBQueryMetadata?) -> String Never! {
 
 fn mir_digest_prelude_call(writer: &MIRCanonicalWriter, value: MIRPreludeCall) Never! {
     mir_digest_u64(&writer, value.id.value)
-    mir_digest_u64(&writer, mir_digest_prelude_family(value.family))
+    mir_digest_int(&writer, mir_digest_prelude_family(value.family))
     mir_digest_string(&writer, value.module_name)
     mir_digest_string(&writer, value.member)
     mir_digest_symbol(&writer, value.symbol)
     mir_digest_string(&writer, mir_digest_call_signature_debug(value.signature))
     mir_digest_string(&writer, mir_digest_core_effect_debug(value.effect_kind))
     mir_digest_call_fallibility(&writer, value.fallibility)
-    mir_digest_u64(&writer, mir_digest_prelude_abi(value.abi))
+    mir_digest_int(&writer, mir_digest_prelude_abi(value.abi))
     mir_digest_authority(&writer, value.authority)
     mir_digest_string(&writer, mir_digest_db_metadata_debug(value.db_metadata))
 }
@@ -2794,7 +2813,7 @@ fn mir_digest_core_pure_route(writer: &MIRCanonicalWriter, value: CoreCallPureRo
         .Net -> 16
         .Crypto -> 17
     }
-    mir_digest_u64(&writer, code)
+    mir_digest_int(&writer, code)
 }
 
 fn mir_digest_core_interpreter_route(writer: &MIRCanonicalWriter, value: CoreCallInterpreterRoute) Never! {
@@ -2843,7 +2862,7 @@ fn mir_digest_core_call(writer: &MIRCanonicalWriter, value: MIRCoreCall) Never! 
     mir_digest_core_pure_route(&writer, value.pure_route)
     mir_digest_core_interpreter_route(&writer, value.interpreter_route)
     mir_digest_core_symbol(&writer, value.symbol)
-    mir_digest_u64(&writer, value.coverage_bits)
+    mir_digest_int(&writer, value.coverage_bits)
     mir_digest_bool(&writer, value.aot_direct)
     mir_digest_bool(&writer, value.jit_direct)
     mir_digest_option_string(&writer, value.jit_symbol)
@@ -2864,15 +2883,15 @@ fn mir_digest_foreign(writer: &MIRCanonicalWriter, value: MIRForeign) Never! {
     mir_digest_bool(&writer, value.bridge_eligible)
     mir_digest_option_type(&writer, value.return_type)
     mir_digest_foreign_abi(&writer, value.foreign_abi)
-    mir_digest_u64(&writer, mir_digest_foreign_language(value.foreign_language))
+    mir_digest_int(&writer, mir_digest_foreign_language(value.foreign_language))
     mir_digest_target_applicability(&writer, value.target_applicability)
     mir_digest_string(&writer, mir_digest_effects_debug(value.effects))
-    mir_digest_option_int(&writer, value.link.map(row -> row.value))
-    mir_digest_option_int(&writer, value.callback.map(row -> row.value))
-    mir_digest_option_int(&writer, value.handle.map(row -> row.value))
-    mir_digest_option_int(&writer, value.close_function.map(row -> row.value))
-    mir_digest_option_int(&writer, value.close_foreign.map(row -> row.value))
-    mir_digest_option_int(&writer, value.undo_function.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.link.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.callback.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.handle.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.close_function.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.close_foreign.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.undo_function.map(row -> row.value))
 }
 
 fn mir_digest_runtime_part(value: MIRRuntimePartID) -> Int Never! {
@@ -2949,7 +2968,7 @@ fn mir_digest_runtime_order(value: MIRRuntimePartID) -> Int Never! {
 
 fn mir_digest_runtime_parts(writer: &MIRCanonicalWriter, values: [MIRRuntimePartID]) Never! {
     mir_digest_len(&writer, values.len())
-    loop value in values -> mir_digest_u64(&writer, mir_digest_runtime_part(value))
+    loop value in values -> mir_digest_int(&writer, mir_digest_runtime_part(value))
 }
 
 fn mir_digest_register_width(value: MIRRegisterWidth) -> String Never! {
@@ -3022,6 +3041,7 @@ fn mir_digest_sort_hardware_setups(values: &[MIRHardwareSetup]) Never! {
     }
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_hardware_setups
 fn mir_digest_hardware_setup(writer: &MIRCanonicalWriter, values: [MIRHardwareSetup]) Never! {
     sorted := values
     mir_digest_sort_hardware_setups(&sorted)
@@ -3041,10 +3061,8 @@ fn mir_digest_hardware_setup(writer: &MIRCanonicalWriter, values: [MIRHardwareSe
                 mir_digest_string(&writer, interrupt)
                 mir_digest_u16(&writer, vector)
                 mir_digest_string(&writer, handler)
-                sorted_effects := effects
-                mir_digest_sort_strings(&sorted_effects)
-                mir_digest_len(&writer, sorted_effects.len())
-                loop effect_name in sorted_effects -> mir_digest_string(&writer, effect_name)
+                mir_digest_len(&writer, effects.len())
+                loop position in mir_digest_sort_strings(effects) -> mir_digest_string(&writer, effects[position])
             }
         }
     }
@@ -3089,22 +3107,23 @@ fn mir_digest_harness_kind(value: MIRHarnessKind) -> Int Never! {
     }
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_job
 fn mir_digest_job(writer: &MIRCanonicalWriter, value: MIRJob) {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_u64(&writer, value.function.value)
     mir_digest_string(&writer, value.name)
-    mir_digest_u64(&writer, mir_digest_job_scope(value.scope))
+    mir_digest_int(&writer, mir_digest_job_scope(value.scope))
     if value.schedule == {
         .Val(schedule) -> {
         if schedule == {
             .Duration(nanos) -> {
                 mir_digest_tag(&writer, "duration")
-                mir_digest_u64(&writer, nanos)
+                mir_digest_int(&writer, nanos)
             }
             .WallClockTime(hour, minute) -> {
                 mir_digest_tag(&writer, "wall-clock")
-                mir_digest_u64(&writer, hour)
-                mir_digest_u64(&writer, minute)
+                mir_digest_int(&writer, hour)
+                mir_digest_int(&writer, minute)
             }
         }
     }
@@ -3114,10 +3133,10 @@ fn mir_digest_job(writer: &MIRCanonicalWriter, value: MIRJob) {
 }
     mir_digest_len(&writer, value.inputs.len())
     loop input in value.inputs -> mir_digest_cli_input(&writer, input)
-    mir_digest_u64(&writer, mir_digest_job_dispatch(value.dispatch))
+    mir_digest_int(&writer, mir_digest_job_dispatch(value.dispatch))
     mir_digest_len(&writer, value.after.len())
     loop dependency in value.after -> mir_digest_string(&writer, dependency)
-    mir_digest_u64(&writer, value.parallel)
+    mir_digest_int(&writer, value.parallel)
     mir_digest_len(&writer, value.packages.len())
     loop package in value.packages -> mir_digest_string(&writer, package)
     mir_digest_option_string(&writer, value.working_directory)
@@ -3142,13 +3161,11 @@ fn mir_digest_job(writer: &MIRCanonicalWriter, value: MIRJob) {
         mir_digest_tag(&writer, "no-skip")
     }
 }
-    mir_digest_u64(&writer, mir_digest_job_cache(value.cache))
-    limits := value.limits
-    mir_digest_sort_job_limits(&limits)
-    mir_digest_len(&writer, limits.len())
-    loop limit in limits {
-        mir_digest_string(&writer, limit.name)
-        mir_digest_string(&writer, limit.value)
+    mir_digest_int(&writer, mir_digest_job_cache(value.cache))
+    mir_digest_len(&writer, value.limits.len())
+    loop position in mir_digest_sort_job_limits(value.limits) {
+        mir_digest_string(&writer, value.limits[position].name)
+        mir_digest_string(&writer, value.limits[position].value)
     }
 }
 
@@ -3157,9 +3174,9 @@ fn mir_digest_test(writer: &MIRCanonicalWriter, value: MIRTestCase) Never! {
     mir_digest_u64(&writer, value.function.value)
     mir_digest_string(&writer, value.name)
     mir_digest_span(&writer, value.span)
-    mir_digest_u64(&writer, mir_digest_test_kind(value.kind))
+    mir_digest_int(&writer, mir_digest_test_kind(value.kind))
     mir_digest_bool(&writer, value.contract_generated)
-    mir_digest_option_int(&writer, value.eligibility.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.eligibility.map(row -> row.value))
     mir_digest_len(&writer, value.parameters.len())
     loop param in value.parameters -> mir_digest_param(&writer, param)
     mir_digest_len(&writer, value.faults.len())
@@ -3168,30 +3185,26 @@ fn mir_digest_test(writer: &MIRCanonicalWriter, value: MIRTestCase) Never! {
     mir_digest_option_string(&writer, value.generation_unavailable_reason)
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_harness
 fn mir_digest_harness(writer: &MIRCanonicalWriter, value: MIRHarnessPlan) Never! {
     mir_digest_u64(&writer, value.id.value)
-    mir_digest_u64(&writer, mir_digest_harness_kind(value.kind))
+    mir_digest_int(&writer, mir_digest_harness_kind(value.kind))
     tests := value.tests.map(row -> row.value)
-    mir_digest_sort_ints(&tests)
     mir_digest_len(&writer, tests.len())
-    loop test in tests -> mir_digest_u64(&writer, test)
-    output_checks := value.output_checks
-    mir_digest_sort_output_checks(&output_checks)
-    mir_digest_len(&writer, output_checks.len())
-    loop check in output_checks {
-        mir_digest_u64(&writer, check.id.value)
-        mir_digest_string(&writer, check.name)
-        mir_digest_u64(&writer, check.function.value)
+    loop position in mir_digest_sort_ids(tests) -> mir_digest_u64(&writer, tests[position])
+    mir_digest_len(&writer, value.output_checks.len())
+    loop position in mir_digest_sort_output_checks(value.output_checks) {
+        mir_digest_u64(&writer, value.output_checks[position].id.value)
+        mir_digest_string(&writer, value.output_checks[position].name)
+        mir_digest_u64(&writer, value.output_checks[position].function.value)
     }
-    mir_digest_option_int(&writer, value.selected_test.map(row -> row.value))
-    coverage_points := value.coverage_points
-    mir_digest_sort_coverage_points(&coverage_points)
-    mir_digest_len(&writer, coverage_points.len())
-    loop point in coverage_points {
-        mir_digest_u64(&writer, point.id.value)
-        mir_digest_u64(&writer, point.function.value)
-        mir_digest_u64(&writer, point.block.value)
-        mir_digest_span(&writer, point.span)
+    mir_digest_option_u64(&writer, value.selected_test.map(row -> row.value))
+    mir_digest_len(&writer, value.coverage_points.len())
+    loop position in mir_digest_sort_coverage_points(value.coverage_points) {
+        mir_digest_u64(&writer, value.coverage_points[position].id.value)
+        mir_digest_u64(&writer, value.coverage_points[position].function.value)
+        mir_digest_u64(&writer, value.coverage_points[position].block.value)
+        mir_digest_span(&writer, value.coverage_points[position].span)
     }
     mir_digest_bool(&writer, value.command_override)
 }
@@ -3247,8 +3260,8 @@ fn mir_digest_entry_output(value: MIREntryOutput) -> Int Never! {
 }
 
 fn mir_digest_entry_spec(writer: &MIRCanonicalWriter, value: MIREntrySpec) {
-    mir_digest_u64(&writer, mir_digest_entry_kind(value.kind))
-    mir_digest_option_int(&writer, value.function.map(row -> row.value))
+    mir_digest_int(&writer, mir_digest_entry_kind(value.kind))
+    mir_digest_option_u64(&writer, value.function.map(row -> row.value))
     if value.cli == {
         .Val(cli) -> {
         mir_digest_bool(&writer, true)
@@ -3258,7 +3271,7 @@ fn mir_digest_entry_spec(writer: &MIRCanonicalWriter, value: MIREntrySpec) {
         mir_digest_bool(&writer, false)
     }
 }
-    mir_digest_u64(&writer, mir_digest_entry_output(value.output))
+    mir_digest_int(&writer, mir_digest_entry_output(value.output))
     mir_digest_bool(&writer, value.initialize_environment)
     mir_digest_bool(&writer, value.initialize_gc)
     mir_digest_bool(&writer, value.serves_until_stopped)
@@ -3271,29 +3284,25 @@ fn mir_digest_export(writer: &MIRCanonicalWriter, value: MIRExport) Never! {
     mir_digest_foreign_abi(&writer, value.abi)
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_artifact
 fn mir_digest_artifact(writer: &MIRCanonicalWriter, value: MIRArtifactPlan) {
     mir_digest_u64(&writer, value.id.value)
-    mir_digest_u64(&writer, mir_digest_artifact_kind(value.kind))
+    mir_digest_int(&writer, mir_digest_artifact_kind(value.kind))
     mir_digest_string(&writer, value.name)
-    mir_digest_u64(&writer, mir_digest_artifact_target(value.target))
-    mir_digest_u64(&writer, mir_digest_artifact_mode(value.mode))
+    mir_digest_int(&writer, mir_digest_artifact_target(value.target))
+    mir_digest_int(&writer, mir_digest_artifact_mode(value.mode))
     modules := value.modules.map(row -> row.value)
-    mir_digest_sort_ints(&modules)
     mir_digest_len(&writer, modules.len())
-    loop module_id in modules -> mir_digest_u64(&writer, module_id)
+    loop position in mir_digest_sort_ids(modules) -> mir_digest_u64(&writer, modules[position])
     links := value.links.map(row -> row.value)
-    mir_digest_sort_ints(&links)
     mir_digest_len(&writer, links.len())
-    loop link in links -> mir_digest_u64(&writer, link)
+    loop position in mir_digest_sort_ids(links) -> mir_digest_u64(&writer, links[position])
     jobs := value.jobs.map(row -> row.value)
-    mir_digest_sort_ints(&jobs)
     mir_digest_len(&writer, jobs.len())
-    loop job in jobs -> mir_digest_u64(&writer, job)
+    loop position in mir_digest_sort_ids(jobs) -> mir_digest_u64(&writer, jobs[position])
     mir_digest_runtime_parts(&writer, value.runtime_parts)
-    exports := value.exports
-    mir_digest_sort_exports(&exports)
-    mir_digest_len(&writer, exports.len())
-    loop export in exports -> mir_digest_export(&writer, export)
+    mir_digest_len(&writer, value.exports.len())
+    loop position in mir_digest_sort_exports(value.exports) -> mir_digest_export(&writer, value.exports[position])
     mir_digest_string(&writer, value.provider_identity)
     mir_digest_string(&writer, value.closure_identity)
     mir_digest_string(&writer, value.artifact_identity)
@@ -3306,7 +3315,7 @@ fn mir_digest_artifact(writer: &MIRCanonicalWriter, value: MIRArtifactPlan) {
         mir_digest_bool(&writer, false)
     }
 }
-    mir_digest_option_int(&writer, value.harness.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.harness.map(row -> row.value))
 }
 
 fn mir_digest_erasure_reason(value: MIRErasureReason) -> Int Never! {
@@ -3377,7 +3386,7 @@ fn mir_digest_unsafe_gate_debug(value: MIRUnsafeGate?) -> String Never! {
 
 fn mir_digest_scope_debug(value: MIRScope) -> String Never! {
     facts :: loop fact in value.facts -> "MirScopeFact {{ key: {mir_digest_debug_quote(fact.key)}, value: {mir_digest_debug_quote(fact.value)} }}"
-    "MirScope {{ id: MirScopeId {{ value: {value.id.value} }}, kind: {mir_digest_scope_kind_debug(value.kind)}, span: {value.span.start}..{value.span.end}, name: {mir_digest_debug_option_string(value.name)}, deadline: {mir_digest_debug_int_option(value.deadline.map(row -> row.value))}, facts: [{facts.join(", ")}] }}"
+    "MirScope {{ id: MirScopeId {{ value: {value.id.value} }}, kind: {mir_digest_scope_kind_debug(value.kind)}, span: {value.span.start}..{value.span.end}, name: {mir_digest_debug_option_string(value.name)}, deadline: {mir_digest_debug_u64_option(value.deadline.map(row -> row.value))}, facts: [{facts.join(", ")}] }}"
 }
 
 fn mir_digest_scope_kind_debug(value: MIRScopeKind) -> String Never! {
@@ -3444,10 +3453,10 @@ fn mir_digest_projection(writer: &MIRCanonicalWriter, value: MIRProjection) Neve
         }
         .Index(kind, index, call, write_call, location, context, span) -> {
             mir_digest_tag(&writer, "index")
-            mir_digest_u64(&writer, mir_digest_index_kind_code(kind))
+            mir_digest_int(&writer, mir_digest_index_kind_code(kind))
             mir_digest_u64(&writer, index.value)
             mir_digest_u64(&writer, call.value)
-            mir_digest_option_int(&writer, write_call.map(row -> row.value))
+            mir_digest_option_u64(&writer, write_call.map(row -> row.value))
             mir_digest_string(&writer, mir_digest_panic_location_debug(location))
             mir_digest_string(&writer, mir_digest_panic_context_debug(context ?? MIRPanicContext{function: "", source_line: "", caret: 0, locals: [MIRPanicLocal]{}}))
             mir_digest_span(&writer, span)
@@ -3460,12 +3469,12 @@ fn mir_digest_projection(writer: &MIRCanonicalWriter, value: MIRProjection) Neve
             mir_digest_tag(&writer, "payload")
             if kind == {
                 .Option -> mir_digest_u64(&writer, 1)
-                .Result(ok) -> mir_digest_u64(&writer, if ok -> 3 else -> 2)
+                .Result(ok) -> mir_digest_int(&writer, if ok -> 3 else -> 2)
                 .Enum(owner, variant, index) -> {
                     mir_digest_u64(&writer, 4)
                     mir_digest_u64(&writer, owner.value)
                     mir_digest_string(&writer, variant)
-                    mir_digest_u64(&writer, index)
+                    mir_digest_int(&writer, index)
                 }
             }
             mir_digest_span(&writer, span)
@@ -3523,9 +3532,9 @@ fn mir_digest_terminator_debug(terminator: MIRTerminator) -> String Never! {
             rendered :: loop arm in arms -> "MirSwitchArm {{ condition: MirValueId {{ value: {arm.condition.value} }}, target: MirBlockId {{ value: {arm.target.value} }}, span: {arm.span.start}..{arm.span.end} }}"
             "Switch(MirValueId({subject.value}), [{rendered.join(", ")}], MirBlockId({otherwise.value}))"
         }
-        .Return(value) -> "Return({mir_digest_debug_int_option(value.map(row -> row.value))})"
+        .Return(value) -> "Return({mir_digest_debug_u64_option(value.map(row -> row.value))})"
         .Yield(value, resume) -> "Yield(MirValueId({value.value}), MirBlockId({resume.value}))"
-        .Break(target, value) -> "Break(MirBlockId({target.value}), {mir_digest_debug_int_option(value.map(row -> row.value))})"
+        .Break(target, value) -> "Break(MirBlockId({target.value}), {mir_digest_debug_u64_option(value.map(row -> row.value))})"
         .Continue(target) -> "Continue(MirBlockId({target.value}))"
         .Unreachable(reason) -> "Unreachable({mir_digest_debug_quote(reason)})"
     }
@@ -3564,7 +3573,7 @@ fn mir_digest_optimization_rejection_debug(value: MIROptimizationRejection) -> S
 }
 
 fn mir_digest_loop_facts_debug(values: [MIRLoopFact]) -> String Never! {
-    rendered :: loop value in values -> "MirLoopFact {{ header: {value.header.value}, body: {mir_digest_debug_int_option(value.body.map(row -> row.value))}, exit: {mir_digest_debug_int_option(value.exit.map(row -> row.value))}, form: {mir_digest_loop_form_debug(value.form)}, trip_count: {mir_digest_debug_int_option(value.trip_count)}, copy_cost: {mir_digest_copy_cost_debug(value.copy_cost)}, canonical: {mir_digest_debug_bool(value.canonical)}, span: {value.span.start}..{value.span.end}, decision: {mir_digest_optimization_decision_debug(value.decision)} }}"
+    rendered :: loop value in values -> "MirLoopFact {{ header: {value.header.value}, body: {mir_digest_debug_u64_option(value.body.map(row -> row.value))}, exit: {mir_digest_debug_u64_option(value.exit.map(row -> row.value))}, form: {mir_digest_loop_form_debug(value.form)}, trip_count: {mir_digest_debug_int_option(value.trip_count)}, copy_cost: {mir_digest_copy_cost_debug(value.copy_cost)}, canonical: {mir_digest_debug_bool(value.canonical)}, span: {value.span.start}..{value.span.end}, decision: {mir_digest_optimization_decision_debug(value.decision)} }}"
     "[{rendered.join(", ")}]"
 }
 
@@ -3599,20 +3608,20 @@ fn mir_digest_vector_access_debug(value: MIRVectorAccess) -> String Never! {
         .Place(id) -> "Place({id.value})"
         .Value(id) -> "Value({id.value})"
     }
-    "MirVectorAccess {{ root: {root}, field: {mir_digest_debug_int_option(value.field.map(row -> row.value))}, layout: {mir_digest_vector_layout(value.layout)}, column_index: {mir_digest_debug_int_option(value.column_index)} }}"
+    "MirVectorAccess {{ root: {root}, field: {mir_digest_debug_u64_option(value.field.map(row -> row.value))}, layout: {mir_digest_vector_layout(value.layout)}, column_index: {mir_digest_debug_int_option(value.column_index)} }}"
 }
 
 fn mir_digest_bounds_facts_debug(values: [MIRBoundsFact]) -> String Never! {
-    rendered :: loop value in values -> "MirBoundsFact {{ operation: {value.operation.value}, place: {mir_digest_debug_int_option(value.place.map(row -> row.value))}, index: {mir_digest_debug_int_option(value.index.map(row -> row.value))}, kind: {mir_digest_index_debug(value.kind)}, proven: {mir_digest_debug_bool(value.proven)}, elided: {mir_digest_debug_bool(value.elided)}, failure_preserved: {mir_digest_debug_bool(value.failure_preserved)}, span: {value.span.start}..{value.span.end} }}"
+    rendered :: loop value in values -> "MirBoundsFact {{ operation: {value.operation.value}, place: {mir_digest_debug_u64_option(value.place.map(row -> row.value))}, index: {mir_digest_debug_u64_option(value.index.map(row -> row.value))}, kind: {mir_digest_index_debug(value.kind)}, proven: {mir_digest_debug_bool(value.proven)}, elided: {mir_digest_debug_bool(value.elided)}, failure_preserved: {mir_digest_debug_bool(value.failure_preserved)}, span: {value.span.start}..{value.span.end} }}"
     "[{rendered.join(", ")}]"
 }
 
 fn mir_digest_vector_fact(writer: &MIRCanonicalWriter, value: MIRVectorFact) Never! {
     mir_digest_u64(&writer, value.loop_header.value)
-    mir_digest_option_int(&writer, value.cursor.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.cursor.map(row -> row.value))
     mir_digest_len(&writer, value.body_blocks.len())
     loop block in value.body_blocks -> mir_digest_u64(&writer, block.value)
-    mir_digest_option_int(&writer, value.advance_block.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.advance_block.map(row -> row.value))
     mir_digest_tag(&writer, mir_digest_vector_rule(value.rule))
     mir_digest_len(&writer, value.accesses.len())
     loop access in value.accesses {
@@ -3626,7 +3635,7 @@ fn mir_digest_vector_fact(writer: &MIRCanonicalWriter, value: MIRVectorFact) Nev
                 mir_digest_u64(&writer, root_value.value)
             }
         }
-        mir_digest_option_int(&writer, access.field.map(row -> row.value))
+        mir_digest_option_u64(&writer, access.field.map(row -> row.value))
         mir_digest_tag(&writer, mir_digest_vector_layout(access.layout))
         mir_digest_option_int(&writer, access.column_index)
     }
@@ -3644,12 +3653,12 @@ fn mir_digest_vector_fact(writer: &MIRCanonicalWriter, value: MIRVectorFact) Nev
         mir_digest_u64(&writer, reduction.accumulator.value)
         mir_digest_u64(&writer, reduction.addend.value)
         mir_digest_u64(&writer, reduction.seed.value)
-        mir_digest_option_int(&writer, reduction.condition.map(row -> row.value))
+        mir_digest_option_u64(&writer, reduction.condition.map(row -> row.value))
         mir_digest_len(&writer, reduction.source_operations.len())
         loop operation in reduction.source_operations -> mir_digest_u64(&writer, operation.value)
         mir_digest_u64(&writer, reduction.exit.value)
-        mir_digest_u64(&writer, reduction.order.lanes)
-        mir_digest_u64(&writer, reduction.order.seed_lane)
+        mir_digest_int(&writer, reduction.order.lanes)
+        mir_digest_int(&writer, reduction.order.seed_lane)
         mir_digest_tag(&writer, "adjacent-pairs-then-root")
     }
     else -> {
@@ -3712,11 +3721,12 @@ fn mir_digest_instruction(writer: &MIRCanonicalWriter, value: MIRInstruction) {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_span(&writer, value.span)
     mir_digest_string(&writer, mir_digest_debug_int_option(value.source_line))
-    mir_digest_option_int(&writer, value.result.map(row -> row.value))
+    mir_digest_option_u64(&writer, value.result.map(row -> row.value))
     mir_digest_option_type(&writer, value.ty)
     mir_digest_operation(&writer, value.operation)
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
 fn mir_digest_function(writer: &MIRCanonicalWriter, value: MIRFunction) {
     mir_digest_u64(&writer, value.id.value)
     mir_digest_u64(&writer, value.module_id.value)
@@ -3732,10 +3742,8 @@ fn mir_digest_function(writer: &MIRCanonicalWriter, value: MIRFunction) {
     mir_digest_string(&writer, mir_digest_web_bucket_debug(value.web_bucket))
     mir_digest_string(&writer, mir_digest_web_marker_debug(value.web_marker))
     mir_digest_generic_params(&writer, value.generic_params)
-    captures := value.capture_params
-    mir_digest_sort_captures(&captures)
-    mir_digest_len(&writer, captures.len())
-    loop capture in captures -> mir_digest_capture_param(&writer, capture)
+    mir_digest_len(&writer, value.capture_params.len())
+    loop position in mir_digest_sort_captures(value.capture_params) -> mir_digest_capture_param(&writer, value.capture_params[position])
     mir_digest_len(&writer, value.params.len())
     loop param in value.params -> mir_digest_param(&writer, param)
     mir_digest_option_type(&writer, value.declared_return)
@@ -3767,39 +3775,29 @@ fn mir_digest_function(writer: &MIRCanonicalWriter, value: MIRFunction) {
     mir_digest_string(&writer, mir_digest_view_provenance_option_debug(value.return_view_provenance))
     mir_digest_len(&writer, value.web_param_reconstructions.len())
     loop reconstruction in value.web_param_reconstructions -> mir_digest_web_param_reconstruction(&writer, reconstruction)
-    blocks := value.blocks
-    mir_digest_sort_blocks(&blocks)
-    mir_digest_len(&writer, blocks.len())
-    loop block in blocks {
-        mir_digest_u64(&writer, block.id.value)
-        mir_digest_span(&writer, block.span)
-        mir_digest_len(&writer, block.instructions.len())
-        loop instruction in block.instructions -> mir_digest_instruction(&writer, instruction)
-        mir_digest_string(&writer, mir_digest_terminator_debug(block.terminator))
+    mir_digest_len(&writer, value.blocks.len())
+    loop position in mir_digest_sort_blocks(value.blocks) {
+        mir_digest_u64(&writer, value.blocks[position].id.value)
+        mir_digest_span(&writer, value.blocks[position].span)
+        mir_digest_len(&writer, value.blocks[position].instructions.len())
+        loop instruction in value.blocks[position].instructions -> mir_digest_instruction(&writer, instruction)
+        mir_digest_string(&writer, mir_digest_terminator_debug(value.blocks[position].terminator))
     }
-    locals := value.locals
-    mir_digest_sort_locals(&locals)
-    mir_digest_len(&writer, locals.len())
-    loop local in locals -> mir_digest_local(&writer, local)
-    values := value.values
-    mir_digest_sort_value_facts(&values)
-    mir_digest_len(&writer, values.len())
-    loop fact in values {
-        mir_digest_u64(&writer, fact.id.value)
-        mir_digest_type(&writer, fact.ty)
-        mir_digest_span(&writer, fact.span)
-        mir_digest_string(&writer, mir_digest_ownership_debug(fact.ownership))
+    mir_digest_len(&writer, value.locals.len())
+    loop position in mir_digest_sort_locals(value.locals) -> mir_digest_local(&writer, value.locals[position])
+    mir_digest_len(&writer, value.values.len())
+    loop position in mir_digest_sort_value_facts(value.values) {
+        mir_digest_u64(&writer, value.values[position].id.value)
+        mir_digest_type(&writer, value.values[position].ty)
+        mir_digest_span(&writer, value.values[position].span)
+        mir_digest_string(&writer, mir_digest_ownership_debug(value.values[position].ownership))
     }
-    places := value.places
-    mir_digest_sort_places(&places)
-    mir_digest_len(&writer, places.len())
-    loop place in places -> mir_digest_place(&writer, place)
-    scopes := value.scopes
-    mir_digest_sort_scopes(&scopes)
-    mir_digest_string(&writer, mir_digest_debug_string_list(scopes.map(row -> mir_digest_scope_debug(row))))
-    drops := value.drops
-    mir_digest_sort_drops(&drops)
-    mir_digest_string(&writer, mir_digest_debug_string_list(drops.map(row -> "{row.place.value}:{row.span.start}:{row.span.end}")))
+    mir_digest_len(&writer, value.places.len())
+    loop position in mir_digest_sort_places(value.places) -> mir_digest_place(&writer, value.places[position])
+    scopes :: loop position in mir_digest_sort_scopes(value.scopes) -> mir_digest_scope_debug(value.scopes[position])
+    mir_digest_string(&writer, mir_digest_debug_string_list(scopes))
+    drops :: loop position in mir_digest_sort_drops(value.drops) -> "{value.drops[position].place.value}:{value.drops[position].span.start}:{value.drops[position].span.end}"
+    mir_digest_string(&writer, mir_digest_debug_string_list(drops))
 }
 
 fn mir_digest_register_access_mode(value: MIRTargetRegisterAccessMode) -> String Never! {
@@ -3960,14 +3958,14 @@ fn mir_digest_target_hardware_facts(writer: &MIRCanonicalWriter, value: MIRTarge
     mir_digest_len(&writer, blocks.len())
     loop block in blocks {
         mir_digest_string(&writer, block.name)
-        mir_digest_u64(&writer, block.base)
-        mir_digest_u64(&writer, block.size.bytes)
+        mir_digest_int(&writer, block.base)
+        mir_digest_int(&writer, block.size.bytes)
         registers := block.registers
         mir_digest_sort_target_registers(&registers)
         mir_digest_len(&writer, registers.len())
         loop register in registers {
             mir_digest_string(&writer, register.name)
-            mir_digest_u64(&writer, register.offset)
+            mir_digest_int(&writer, register.offset)
             mir_digest_string(&writer, mir_digest_register_width(register.width))
             mir_digest_string(&writer, mir_digest_register_access_mode(register.access))
             mir_digest_bool(&writer, register.volatile)
@@ -4221,313 +4219,314 @@ fn mir_digest_app_graph(writer: &MIRCanonicalWriter, value: MIRAppGraph?) Never!
 }
 }
 
-fn mir_digest_sort_modules(rows: &[MIRModule]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+// Stable scalar positions: equal keys retain their original input order.
+fn mir_digest_order(primary: [U64], secondary: [U64], tertiary: [U64], text: [String], other_text: [String], text_first: Bool) -> [Int] Never! {
+    count :: if primary.len() > 0 -> primary.len() else -> text.len()
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    width := 1
+    loop width < count {
+        merged := [Int]{}
+        start := 0
+        loop start < count {
+            middle :: if start + width < count -> start + width else -> count
+            end :: if start + 2 * width < count -> start + 2 * width else -> count
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && !mir_digest_order_before(primary, secondary, tertiary, text, other_text, text_first, order[right], order[left])) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
         }
-        rows[cursor + 1] = current
+        order = merged
+        width = width * 2
     }
+    order
 }
 
-fn mir_digest_sort_imports(rows: &[MIRImport]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].module_id.value > current.module_id.value)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_order_before(primary: [U64], secondary: [U64], tertiary: [U64], text: [String], other_text: [String], text_first: Bool, left: Int, right: Int) -> Bool Never! {
+    if text_first && text.len() > 0 && text[left] != text[right] -> return text[left] < text[right]
+    if primary.len() > 0 && primary[left] != primary[right] -> return primary[left] < primary[right]
+    if secondary.len() > 0 && secondary[left] != secondary[right] -> return secondary[left] < secondary[right]
+    if tertiary.len() > 0 && tertiary[left] != tertiary[right] -> return tertiary[left] < tertiary[right]
+    if !text_first && text.len() > 0 && text[left] != text[right] -> return text[left] < text[right]
+    other_text.len() > 0 && other_text[left] < other_text[right]
 }
 
-fn mir_digest_sort_type_defs(rows: &[MIRTypeDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_modules(rows: [MIRModule]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_core_owners(rows: &[MIRCoreOwner]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_imports(rows: [MIRImport]) -> [Int] Never! {
+    primary := [U64]{}
+    secondary := [U64]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(rows[index].module_id.value)
     }
+    mir_digest_order(primary, secondary, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_traits(rows: &[MIRTraitDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_type_defs(rows: [MIRTypeDef]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_impls(rows: &[MIRImplDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_core_owners(rows: [MIRCoreOwner]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_constants(rows: &[MIRConstantDef]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_traits(rows: [MIRTraitDef]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_functions(rows: &[MIRFunction]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_impls(rows: [MIRImplDef]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_fields(rows: &[MIRFieldRow]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].owner.value > current.owner.value)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_constants(rows: [MIRConstantDef]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_source_files(rows: &[MIRSourceFile]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].path > current.path)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_functions(rows: [MIRFunction]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_foreign(rows: &[MIRForeign]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_fields(rows: [MIRFieldRow]) -> [Int] Never! {
+    primary := [U64]{}
+    secondary := [U64]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(rows[index].owner.value)
     }
+    mir_digest_order(primary, secondary, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_links(rows: &[MIRLinkUnit]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].crate_spec > current.crate_spec)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_source_files(rows: [MIRSourceFile]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].path)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_callbacks(rows: &[MIRCallbackAdapter]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].symbol > current.symbol)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_foreign(rows: [MIRForeign]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_handles(rows: &[MIRHandleLifecycle]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_links(rows: [MIRLinkUnit]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].crate_spec)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_job_limits(rows: &[MIRJobLimit]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].name > current.name || (rows[cursor].name == current.name && rows[cursor].value > current.value)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_callbacks(rows: [MIRCallbackAdapter]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].symbol)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_jobs(rows: &[MIRJob]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_handles(rows: [MIRHandleLifecycle]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_tests(rows: &[MIRTestCase]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_job
+fn mir_digest_sort_job_limits(rows: [MIRJobLimit]) -> [Int] Never! {
+    text := [String]{}
+    other_text := [String]{}
+    loop index in 0..<rows.len() {
+        &text.push(rows[index].name)
+        &other_text.push(rows[index].value)
     }
+    mir_digest_order([U64]{}, [U64]{}, [U64]{}, text, other_text, false)
 }
 
-fn mir_digest_sort_harnesses(rows: &[MIRHarnessPlan]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_jobs(rows: [MIRJob]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].name)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_artifacts(rows: &[MIRArtifactPlan]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_tests(rows: [MIRTestCase]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].name)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_core_calls(rows: &[MIRCoreCall]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].key > current.key)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_harnesses(rows: [MIRHarnessPlan]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && (rows[cursor].module_name > current.module_name || (rows[cursor].module_name == current.module_name && rows[cursor].member > current.member)))) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_artifacts(rows: [MIRArtifactPlan]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].name)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_type_instances(rows: &[MIRType]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        current_id :: current.identity.map(row -> row.value) ?? -1
-        cursor := index - 1
-        prior_id := rows[cursor].identity.map(row -> row.value) ?? -1
-        loop cursor >= 0 && prior_id > current_id {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-            if cursor >= 0 -> prior_id = rows[cursor].identity.map(row -> row.value) ?? -1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_core_calls(rows: [MIRCoreCall]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].key)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_unreachable(rows: &[MIRUnreachable]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].span.start > current.span.start || (rows[cursor].span.start == current.span.start && (rows[cursor].span.end > current.span.end || (rows[cursor].span.end == current.span.end && rows[cursor].construct > current.construct)))) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_prelude_calls(rows: [MIRPreludeCall]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    other_text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].module_name)
+        &other_text.push(rows[index].member)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, other_text, false)
 }
 
-fn mir_digest_sort_strings(values: &[String]) Never! {
-    loop index in 1..<values.len() {
-        current := values[index]
-        cursor := index - 1
-        loop cursor >= 0 && values[cursor] > current {
-            values[cursor + 1] = values[cursor]
-            cursor -= 1
-        }
-        values[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_type_instances(rows: [MIRType]) -> [Int] Never! {
+    // `None` sorts before every identity, as `Option<u64>` does.
+    present := [U64]{}
+    identity := [U64]{}
+    loop index in 0..<rows.len() {
+        &present.push(if rows[index].identity == None -> U64{0} else -> U64{1})
+        &identity.push(rows[index].identity.map(row -> row.value) ?? U64{0})
     }
+    mir_digest_order(present, identity, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_runtime_parts(values: &[MIRRuntimePartID]) Never! {
-    loop index in 1..<values.len() {
-        current := values[index]
-        cursor := index - 1
-        loop cursor >= 0 && mir_digest_runtime_order(values[cursor]) > mir_digest_runtime_order(current) {
-            values[cursor + 1] = values[cursor]
-            cursor -= 1
-        }
-        values[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
+fn mir_digest_sort_unreachable(rows: [MIRUnreachable]) -> [Int] Never! {
+    primary := [U64]{}
+    secondary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(mir_digest_order_key(rows[index].span.start))
+        &secondary.push(mir_digest_order_key(rows[index].span.end))
+        &text.push(rows[index].construct)
     }
+    mir_digest_order(primary, secondary, [U64]{}, text, [String]{}, false)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_effects
+fn mir_digest_sort_strings(values: [String]) -> [Int] Never! {
+    mir_digest_order([U64]{}, [U64]{}, [U64]{}, values, [String]{}, false)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_runtime_parts
+fn mir_digest_sort_runtime_parts(values: [MIRRuntimePartID]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<values.len() -> &primary.push(mir_digest_order_key(mir_digest_runtime_order(values[index])))
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
 fn mir_digest_unreachable(writer: &MIRCanonicalWriter, value: MIRUnreachable) Never! {
     mir_digest_string(&writer, value.construct)
     mir_digest_span(&writer, value.span)
-    mir_digest_u64(&writer, mir_digest_erasure_reason(value.reason))
+    mir_digest_int(&writer, mir_digest_erasure_reason(value.reason))
 }
 
 fn mir_program_bytes_internal(program: MIRProgram) -> [U8] {
@@ -4536,26 +4535,25 @@ fn mir_program_bytes_internal(program: MIRProgram) -> [U8] {
     writer.bytes
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
 fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
     mir_digest_tag(&writer, "mir")
     mir_digest_u16(&writer, program.schema_version)
     mir_digest_string(&writer, program.package_identity)
-    facts := program.facts
-    mir_digest_string(&writer, facts.project_root)
-    mir_digest_string(&writer, facts.edition)
-    runtime_parts := facts.runtime_parts
-    mir_digest_sort_runtime_parts(&runtime_parts)
-    mir_digest_runtime_parts(&writer, runtime_parts)
-    mir_digest_string(&writer, facts.active_os)
-    mir_digest_string(&writer, facts.inferred_layer)
-    mir_digest_string(&writer, facts.allocator)
-    target_triple :: facts.target_dossier.machine.map(row -> row.triple) ?? ""
-    dossier_bytes :: mir_digest_target_dossier_bytes(facts.target_dossier, target_triple)
+    mir_digest_string(&writer, program.facts.project_root)
+    mir_digest_string(&writer, program.facts.edition)
+    mir_digest_len(&writer, program.facts.runtime_parts.len())
+    loop position in mir_digest_sort_runtime_parts(program.facts.runtime_parts) -> mir_digest_int(&writer, mir_digest_runtime_part(program.facts.runtime_parts[position]))
+    mir_digest_string(&writer, program.facts.active_os)
+    mir_digest_string(&writer, program.facts.inferred_layer)
+    mir_digest_string(&writer, program.facts.allocator)
+    target_triple :: program.facts.target_dossier.machine.map(row -> row.triple) ?? ""
+    dossier_bytes :: mir_digest_target_dossier_bytes(program.facts.target_dossier, target_triple)
     mir_digest_bytes(&writer, dossier_bytes)
-    mir_digest_app_graph(&writer, facts.web_app)
-    mir_digest_hardware_setup(&writer, facts.hardware_setups)
-    mir_digest_string(&writer, facts.hardware_profile_id)
-    if facts.hardware_profile == {
+    mir_digest_app_graph(&writer, program.facts.web_app)
+    mir_digest_hardware_setup(&writer, program.facts.hardware_setups)
+    mir_digest_string(&writer, program.facts.hardware_profile_id)
+    if program.facts.hardware_profile == {
         .Val(hardware_profile) -> {
         mir_digest_bool(&writer, true)
         mir_digest_target_hardware_facts(&writer, hardware_profile)
@@ -4564,112 +4562,62 @@ fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
         mir_digest_bool(&writer, false)
     }
 }
-    mir_digest_target_hardware_use(&writer, facts.hardware_use)
-    capabilities := facts.hardware_capabilities
-    mir_digest_sort_strings(&capabilities)
-    mir_digest_len(&writer, capabilities.len())
-    loop capability in capabilities -> mir_digest_string(&writer, capability)
+    mir_digest_target_hardware_use(&writer, program.facts.hardware_use)
+    mir_digest_len(&writer, program.facts.hardware_capabilities.len())
+    loop position in mir_digest_sort_strings(program.facts.hardware_capabilities) -> mir_digest_string(&writer, program.facts.hardware_capabilities[position])
 
-    modules := program.modules
-    mir_digest_sort_modules(&modules)
-    mir_digest_len(&writer, modules.len())
-    loop row in modules -> mir_digest_module(&writer, row)
-    imports := program.imports
-    mir_digest_sort_imports(&imports)
-    mir_digest_len(&writer, imports.len())
-    loop row in imports -> mir_digest_import(&writer, row)
-    types := program.types
-    mir_digest_sort_type_defs(&types)
-    mir_digest_len(&writer, types.len())
-    loop row in types -> mir_digest_type_def(&writer, row)
-    core_owners := program.core_owners
-    mir_digest_sort_core_owners(&core_owners)
-    mir_digest_len(&writer, core_owners.len())
-    loop row in core_owners -> mir_digest_core_owner(&writer, row)
-    traits := program.traits
-    mir_digest_sort_traits(&traits)
-    mir_digest_len(&writer, traits.len())
-    loop row in traits -> mir_digest_trait_def(&writer, row)
-    impls := program.impls
-    mir_digest_sort_impls(&impls)
-    mir_digest_len(&writer, impls.len())
-    loop row in impls -> mir_digest_impl_def(&writer, row)
-    constants := program.constants
-    mir_digest_sort_constants(&constants)
-    mir_digest_len(&writer, constants.len())
-    loop row in constants -> mir_digest_constant_def(&writer, row)
-    fields := program.fields
-    mir_digest_sort_fields(&fields)
-    mir_digest_len(&writer, fields.len())
-    loop row in fields {
-        mir_digest_u64(&writer, row.id.value)
-        mir_digest_u64(&writer, row.owner.value)
-        mir_digest_field(&writer, row.field)
+    mir_digest_len(&writer, program.modules.len())
+    loop position in mir_digest_sort_modules(program.modules) -> mir_digest_module(&writer, program.modules[position])
+    mir_digest_len(&writer, program.imports.len())
+    loop position in mir_digest_sort_imports(program.imports) -> mir_digest_import(&writer, program.imports[position])
+    mir_digest_len(&writer, program.types.len())
+    loop position in mir_digest_sort_type_defs(program.types) -> mir_digest_type_def(&writer, program.types[position])
+    mir_digest_len(&writer, program.core_owners.len())
+    loop position in mir_digest_sort_core_owners(program.core_owners) -> mir_digest_core_owner(&writer, program.core_owners[position])
+    mir_digest_len(&writer, program.traits.len())
+    loop position in mir_digest_sort_traits(program.traits) -> mir_digest_trait_def(&writer, program.traits[position])
+    mir_digest_len(&writer, program.impls.len())
+    loop position in mir_digest_sort_impls(program.impls) -> mir_digest_impl_def(&writer, program.impls[position])
+    mir_digest_len(&writer, program.constants.len())
+    loop position in mir_digest_sort_constants(program.constants) -> mir_digest_constant_def(&writer, program.constants[position])
+    mir_digest_len(&writer, program.fields.len())
+    loop position in mir_digest_sort_fields(program.fields) {
+        mir_digest_u64(&writer, program.fields[position].id.value)
+        mir_digest_u64(&writer, program.fields[position].owner.value)
+        mir_digest_field(&writer, program.fields[position].field)
     }
-    source_files := program.source_files
-    mir_digest_sort_source_files(&source_files)
-    mir_digest_len(&writer, source_files.len())
-    loop row in source_files {
-        mir_digest_u64(&writer, row.id.value)
-        mir_digest_string(&writer, row.path)
-        mir_digest_string(&writer, row.source)
+    mir_digest_len(&writer, program.source_files.len())
+    loop position in mir_digest_sort_source_files(program.source_files) {
+        mir_digest_u64(&writer, program.source_files[position].id.value)
+        mir_digest_string(&writer, program.source_files[position].path)
+        mir_digest_string(&writer, program.source_files[position].source)
     }
-    functions := program.functions
-    mir_digest_sort_functions(&functions)
-    mir_digest_len(&writer, functions.len())
-    loop row in functions -> mir_digest_function(&writer, row)
-    foreign := program.foreign
-    mir_digest_sort_foreign(&foreign)
-    mir_digest_len(&writer, foreign.len())
-    loop row in foreign -> mir_digest_foreign(&writer, row)
-    links := program.links
-    mir_digest_sort_links(&links)
-    mir_digest_len(&writer, links.len())
-    loop row in links -> mir_digest_link_unit(&writer, row)
-    callbacks := program.callbacks
-    mir_digest_sort_callbacks(&callbacks)
-    mir_digest_len(&writer, callbacks.len())
-    loop row in callbacks -> mir_digest_callback(&writer, row)
-    handles := program.handles
-    mir_digest_sort_handles(&handles)
-    mir_digest_len(&writer, handles.len())
-    loop row in handles -> mir_digest_handle(&writer, row)
-    jobs := program.jobs
-    mir_digest_sort_jobs(&jobs)
-    mir_digest_len(&writer, jobs.len())
-    loop row in jobs -> mir_digest_job(&writer, row)
-    tests := program.tests
-    mir_digest_sort_tests(&tests)
-    mir_digest_len(&writer, tests.len())
-    loop row in tests -> mir_digest_test(&writer, row)
-    harnesses := program.harnesses
-    mir_digest_sort_harnesses(&harnesses)
-    mir_digest_len(&writer, harnesses.len())
-    loop row in harnesses -> mir_digest_harness(&writer, row)
-    artifacts := program.artifacts
-    mir_digest_sort_artifacts(&artifacts)
-    mir_digest_len(&writer, artifacts.len())
-    loop row in artifacts -> mir_digest_artifact(&writer, row)
-    core_calls := program.core_calls
-    mir_digest_sort_core_calls(&core_calls)
-    mir_digest_len(&writer, core_calls.len())
-    loop row in core_calls -> mir_digest_core_call(&writer, row)
-    prelude_calls := program.prelude_calls
-    mir_digest_sort_prelude_calls(&prelude_calls)
-    mir_digest_len(&writer, prelude_calls.len())
-    loop row in prelude_calls -> mir_digest_prelude_call(&writer, row)
-    type_instances := program.type_instances
-    mir_digest_sort_type_instances(&type_instances)
-    mir_digest_len(&writer, type_instances.len())
-    loop row in type_instances -> mir_digest_type(&writer, row)
-    unreachable := program.unreachable
-    mir_digest_sort_unreachable(&unreachable)
-    mir_digest_len(&writer, unreachable.len())
-    loop row in unreachable -> mir_digest_unreachable(&writer, row)
-}
-
-fn mir_digest_wrap64(value: Int) -> Int Never! {
-    value & 0xffffffffffffffff
+    mir_digest_len(&writer, program.functions.len())
+    loop position in mir_digest_sort_functions(program.functions) -> mir_digest_function(&writer, program.functions[position])
+    mir_digest_len(&writer, program.foreign.len())
+    loop position in mir_digest_sort_foreign(program.foreign) -> mir_digest_foreign(&writer, program.foreign[position])
+    mir_digest_len(&writer, program.links.len())
+    loop position in mir_digest_sort_links(program.links) -> mir_digest_link_unit(&writer, program.links[position])
+    mir_digest_len(&writer, program.callbacks.len())
+    loop position in mir_digest_sort_callbacks(program.callbacks) -> mir_digest_callback(&writer, program.callbacks[position])
+    mir_digest_len(&writer, program.handles.len())
+    loop position in mir_digest_sort_handles(program.handles) -> mir_digest_handle(&writer, program.handles[position])
+    mir_digest_len(&writer, program.jobs.len())
+    loop position in mir_digest_sort_jobs(program.jobs) -> mir_digest_job(&writer, program.jobs[position])
+    mir_digest_len(&writer, program.tests.len())
+    loop position in mir_digest_sort_tests(program.tests) -> mir_digest_test(&writer, program.tests[position])
+    mir_digest_len(&writer, program.harnesses.len())
+    loop position in mir_digest_sort_harnesses(program.harnesses) -> mir_digest_harness(&writer, program.harnesses[position])
+    mir_digest_len(&writer, program.artifacts.len())
+    loop position in mir_digest_sort_artifacts(program.artifacts) -> mir_digest_artifact(&writer, program.artifacts[position])
+    mir_digest_len(&writer, program.core_calls.len())
+    loop position in mir_digest_sort_core_calls(program.core_calls) -> mir_digest_core_call(&writer, program.core_calls[position])
+    mir_digest_len(&writer, program.prelude_calls.len())
+    loop position in mir_digest_sort_prelude_calls(program.prelude_calls) -> mir_digest_prelude_call(&writer, program.prelude_calls[position])
+    mir_digest_len(&writer, program.type_instances.len())
+    loop position in mir_digest_sort_type_instances(program.type_instances) -> mir_digest_type(&writer, program.type_instances[position])
+    mir_digest_len(&writer, program.unreachable.len())
+    loop position in mir_digest_sort_unreachable(program.unreachable) -> mir_digest_unreachable(&writer, program.unreachable[position])
 }
 
 fn mir_digest_hex_digit(value: Int) -> String Never! {
@@ -4694,7 +4642,8 @@ pub fn mir_program_digest(program: MIRProgram) -> String {
     writer := mir_digest_hash_writer()
     mir_program_write(&writer, program)
     output := [U8]{}
-    loop hash in writer.lanes {
+    loop lane in writer.lanes {
+        hash :: Int.from_u64(lane)
         loop index in 0..<8 {
             &output.push(U8{(hash >> (8 * index)) & 255})
         }
@@ -4702,182 +4651,151 @@ pub fn mir_program_digest(program: MIRProgram) -> String {
     mir_digest_hex(output)
 }
 
-fn mir_digest_sort_ints(values: &[Int]) Never! {
-    loop index in 1..<values.len() {
-        current := values[index]
-        cursor := index - 1
-        loop cursor >= 0 && values[cursor] > current {
-            values[cursor + 1] = values[cursor]
-            cursor -= 1
-        }
-        values[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_module
+fn mir_digest_sort_ids(values: [U64]) -> [Int] Never! {
+    mir_digest_order(values, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_import_items(rows: &[MIRImportItem]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].local > current.local || (rows[cursor].local == current.local && rows[cursor].original > current.original)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Non-negative `Int` sort keys (span offsets, slots, runtime ranks) share the
+// word-keyed sorter with ids.
+fn mir_digest_order_key(value: Int) -> U64 Never! {
+    U64.from_int(value) ?? U64{0}
 }
 
-fn mir_digest_sort_blocks(rows: &[MIRBasicBlock]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_import
+fn mir_digest_sort_import_items(rows: [MIRImportItem]) -> [Int] Never! {
+    text := [String]{}
+    other_text := [String]{}
+    loop index in 0..<rows.len() {
+        &text.push(rows[index].local)
+        &other_text.push(rows[index].original)
     }
+    mir_digest_order([U64]{}, [U64]{}, [U64]{}, text, other_text, false)
 }
 
-fn mir_digest_sort_captures(rows: &[MIRCaptureParam]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].slot > current.slot || (rows[cursor].slot == current.slot && rows[cursor].name > current.name)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
+fn mir_digest_sort_blocks(rows: [MIRBasicBlock]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_value_facts(rows: &[MIRValueFact]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
+fn mir_digest_sort_captures(rows: [MIRCaptureParam]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(mir_digest_order_key(rows[index].slot))
+        &text.push(rows[index].name)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_locals(rows: &[MIRLocal]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
+fn mir_digest_sort_value_facts(rows: [MIRValueFact]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_places(rows: &[MIRPlace]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
+fn mir_digest_sort_locals(rows: [MIRLocal]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_scopes(rows: &[MIRScope]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && rows[cursor].id.value > current.id.value {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
+fn mir_digest_sort_places(rows: [MIRPlace]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_drops(rows: &[MIRDropAction]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].place.value > current.place.value || (rows[cursor].place.value == current.place.value && (rows[cursor].span.start > current.span.start || (rows[cursor].span.start == current.span.start && rows[cursor].span.end > current.span.end)))) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
-    }
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
+fn mir_digest_sort_scopes(rows: [MIRScope]) -> [Int] Never! {
+    primary := [U64]{}
+    loop index in 0..<rows.len() -> &primary.push(rows[index].id.value)
+    mir_digest_order(primary, [U64]{}, [U64]{}, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_trait_methods(rows: &[MIRTraitMethod]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_function
+fn mir_digest_sort_drops(rows: [MIRDropAction]) -> [Int] Never! {
+    primary := [U64]{}
+    secondary := [U64]{}
+    tertiary := [U64]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].place.value)
+        &secondary.push(mir_digest_order_key(rows[index].span.start))
+        &tertiary.push(mir_digest_order_key(rows[index].span.end))
     }
+    mir_digest_order(primary, secondary, tertiary, [String]{}, [String]{}, false)
 }
 
-fn mir_digest_sort_associated_types(rows: &[MIRAssociatedTypeValue]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].name > current.name || (rows[cursor].name == current.name && rows[cursor].span.start > current.span.start)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_trait_def
+fn mir_digest_sort_trait_methods(rows: [MIRTraitMethod]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].name)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_exports(rows: &[MIRExport]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].symbol > current.symbol || (rows[cursor].symbol == current.symbol && rows[cursor].function.value > current.function.value)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_impl_def
+fn mir_digest_sort_associated_types(rows: [MIRAssociatedTypeValue]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(mir_digest_order_key(rows[index].span.start))
+        &text.push(rows[index].name)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, true)
 }
 
-fn mir_digest_sort_output_checks(rows: &[MIROutputCheck]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && rows[cursor].name > current.name)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_artifact
+fn mir_digest_sort_exports(rows: [MIRExport]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].function.value)
+        &text.push(rows[index].symbol)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, true)
 }
 
-fn mir_digest_sort_coverage_points(rows: &[MIRCoveragePoint]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].id.value > current.id.value || (rows[cursor].id.value == current.id.value && (rows[cursor].function.value > current.function.value || (rows[cursor].function.value == current.function.value && rows[cursor].block.value > current.block.value)))) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_harness
+fn mir_digest_sort_output_checks(rows: [MIROutputCheck]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &text.push(rows[index].name)
     }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, false)
 }
 
-fn mir_digest_sort_named_spans(rows: &[MIRNamedSpan]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index - 1
-        loop cursor >= 0 && (rows[cursor].name > current.name || (rows[cursor].name == current.name && rows[cursor].span.start > current.span.start)) {
-            rows[cursor + 1] = rows[cursor]
-            cursor -= 1
-        }
-        rows[cursor + 1] = current
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_harness
+fn mir_digest_sort_coverage_points(rows: [MIRCoveragePoint]) -> [Int] Never! {
+    primary := [U64]{}
+    secondary := [U64]{}
+    tertiary := [U64]{}
+    loop index in 0..<rows.len() {
+        &primary.push(rows[index].id.value)
+        &secondary.push(rows[index].function.value)
+        &tertiary.push(rows[index].block.value)
     }
+    mir_digest_order(primary, secondary, tertiary, [String]{}, [String]{}, false)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::encode_effects
+fn mir_digest_sort_named_spans(rows: [MIRNamedSpan]) -> [Int] Never! {
+    primary := [U64]{}
+    text := [String]{}
+    loop index in 0..<rows.len() {
+        &primary.push(mir_digest_order_key(rows[index].span.start))
+        &text.push(rows[index].name)
+    }
+    mir_digest_order(primary, [U64]{}, [U64]{}, text, [String]{}, true)
 }

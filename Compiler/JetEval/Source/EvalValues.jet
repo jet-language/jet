@@ -45,7 +45,9 @@ use jet_foundation.[
     TComptimeMapEntry,
     TComptimeReport,
     TComptimeValue,
+    Type,
     diagnostic_from_registry,
+    mir_type_display_name,
     stable_id,
 ]
 use jet_sema.[
@@ -552,9 +554,9 @@ pub struct JetEvalFrame {
     pub predecessor: MIRBlockID?
     pub params: [JetEvalRuntimeValue]
     pub captures: [JetEvalRuntimeValue]
-    pub values: [Int:JetEvalRuntimeValue]
-    pub borrowed_values: [Int:Bool]
-    pub locals: [Int:JetEvalRuntimeValue]
+    pub values: [U64:JetEvalRuntimeValue]
+    pub borrowed_values: [U64:Bool]
+    pub locals: [U64:JetEvalRuntimeValue]
     pub scopes: [MIRScopeID]
     pub entry_accesses: [MIRAccess]
     pub entry_shared_loans: [JetEvalSharedEntryLoan]
@@ -646,6 +648,9 @@ pub struct JetEvalRuntimeSession {
 
 struct JetEvalMachine {
     pub program: MIRProgram
+    // Row positions in `program`, built with the machine (see
+    // jet_eval_program_rows); `program` is never re-ordered afterwards.
+    pub rows: JetEvalProgramRows
     pub config: JetEvalConfig
     pub registry: JetEvalRegistry
     // Session-unique machine identity; child tasks and native callbacks get
@@ -662,6 +667,132 @@ struct JetEvalMachine {
     pub exit_code: Int?
     pub failure: JetEvalError?
     pub internal_problem: JetEvalInternalProblem?
+}
+
+// Row positions in a checked program, built once per machine (and once per
+// program-only host-shape query) so evaluator lookups probe a map and borrow
+// the row instead of scanning, and copying, whole program tables. Id maps keep
+// the first row per id value; list maps keep every row in program order.
+struct JetEvalProgramRows {
+    pub functions: [U64:Int]
+    pub fields: [U64:Int]
+    pub types: [U64:Int]
+    pub traits: [U64:Int]
+    pub handles: [U64:Int]
+    pub foreign: [U64:Int]
+    pub modules: [U64:Int]
+    pub source_files: [U64:Int]
+    pub core_calls: [U64:Int]
+    pub prelude_calls: [U64:Int]
+    pub constants: [String:Int]
+    // Rows of program.type_instances per identity value.
+    pub type_instances: [U64:[Int]]
+    // Rows of program.impls per implemented trait id value.
+    pub impls_by_trait: [U64:[Int]]
+    // Rows of program.core_owners per nominal id value and per owner id value.
+    pub core_owners_by_nominal: [U64:[Int]]
+    pub core_owners_by_id: [U64:[Int]]
+}
+
+fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
+    functions := [U64:Int]{}
+    loop index in 0..<program.functions.len() {
+        key :: program.functions[index].id.value
+        if functions.get(key) == None -> functions[key] = index
+    }
+    fields := [U64:Int]{}
+    loop index in 0..<program.fields.len() {
+        key :: program.fields[index].id.value
+        if fields.get(key) == None -> fields[key] = index
+    }
+    types := [U64:Int]{}
+    loop index in 0..<program.types.len() {
+        key :: program.types[index].id.value
+        if types.get(key) == None -> types[key] = index
+    }
+    traits := [U64:Int]{}
+    loop index in 0..<program.traits.len() {
+        key :: program.traits[index].id.value
+        if traits.get(key) == None -> traits[key] = index
+    }
+    handles := [U64:Int]{}
+    loop index in 0..<program.handles.len() {
+        key :: program.handles[index].id.value
+        if handles.get(key) == None -> handles[key] = index
+    }
+    foreign := [U64:Int]{}
+    loop index in 0..<program.foreign.len() {
+        key :: program.foreign[index].id.value
+        if foreign.get(key) == None -> foreign[key] = index
+    }
+    modules := [U64:Int]{}
+    loop index in 0..<program.modules.len() {
+        key :: program.modules[index].id.value
+        if modules.get(key) == None -> modules[key] = index
+    }
+    source_files := [U64:Int]{}
+    loop index in 0..<program.source_files.len() {
+        key :: program.source_files[index].id.value
+        if source_files.get(key) == None -> source_files[key] = index
+    }
+    core_calls := [U64:Int]{}
+    loop index in 0..<program.core_calls.len() {
+        key :: program.core_calls[index].id.value
+        if core_calls.get(key) == None -> core_calls[key] = index
+    }
+    prelude_calls := [U64:Int]{}
+    loop index in 0..<program.prelude_calls.len() {
+        key :: program.prelude_calls[index].id.value
+        if prelude_calls.get(key) == None -> prelude_calls[key] = index
+    }
+    constants := [String:Int]{}
+    loop index in 0..<program.constants.len() {
+        key :: program.constants[index].key
+        if constants.get(key) == None -> constants[key] = index
+    }
+    type_instances := [U64:[Int]]{}
+    loop index in 0..<program.type_instances.len() {
+        identity :: program.type_instances[index].identity ?? next
+        rows := type_instances.get(identity.value) ?? [Int]{}
+        &rows.push(index)
+        type_instances[identity.value] = rows
+    }
+    impls_by_trait := [U64:[Int]]{}
+    loop index in 0..<program.impls.len() {
+        trait_ref :: program.impls[index].trait_ref ?? next
+        rows := impls_by_trait.get(trait_ref.id.value) ?? [Int]{}
+        &rows.push(index)
+        impls_by_trait[trait_ref.id.value] = rows
+    }
+    core_owners_by_nominal := [U64:[Int]]{}
+    core_owners_by_id := [U64:[Int]]{}
+    loop index in 0..<program.core_owners.len() {
+        nominal :: program.core_owners[index].nominal_id.value
+        nominal_rows := core_owners_by_nominal.get(nominal) ?? [Int]{}
+        &nominal_rows.push(index)
+        core_owners_by_nominal[nominal] = nominal_rows
+        id :: program.core_owners[index].id.value
+        id_rows := core_owners_by_id.get(id) ?? [Int]{}
+        &id_rows.push(index)
+        core_owners_by_id[id] = id_rows
+    }
+    JetEvalProgramRows{
+        functions: functions,
+        fields: fields,
+        types: types,
+        traits: traits,
+        handles: handles,
+        foreign: foreign,
+        modules: modules,
+        source_files: source_files,
+        core_calls: core_calls,
+        prelude_calls: prelude_calls,
+        constants: constants,
+        type_instances: type_instances,
+        impls_by_trait: impls_by_trait,
+        core_owners_by_nominal: core_owners_by_nominal,
+        core_owners_by_id: core_owners_by_id,
+    }
 }
 
 
@@ -1572,10 +1703,9 @@ fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Spa
             }
             return Val(data)
         }
-        .Absent(_) -> {
-            jet_eval_unsupported(&machine, span, "materializing an absent failure carrier")
-            return None
-        }
+        // Rust ServicesLite `MirRuntimeValue::Absent` serialization: a clean
+        // absence names its element type by display name.
+        .Absent(element) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: mir_type_display_name(element)}}})
         .Result(ok, nested) -> {
             data :: jet_eval_data(nested, &machine, span) ?? return None
             if ok -> return Val(TComptimeValue.Present{value: data})
@@ -1797,7 +1927,16 @@ fn jet_eval_constant_data(constant: MIRConstant, machine: &JetEvalMachine, span:
             inner :: jet_eval_constant_data(value, &machine, span) ?? return None
             return Val(TComptimeValue.Present{value: inner})
         }
-        .Failed(_) -> {}
+        // Rust `mir_constant_to_value`: nested failed carriers are data too.
+        .Failed(report) -> {
+            if report == {
+                .Clean(element) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: mir_type_display_name(element)}}})
+                .Told(value) -> {
+                    inner :: jet_eval_constant_data(value, &machine, span) ?? return None
+                    return Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: inner}})
+                }
+            }
+        }
     }
     jet_eval_compiler_fail(&machine, span, "MIR constant conversion reached an invalid report")
     None

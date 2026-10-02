@@ -19,6 +19,7 @@ use jet_foundation.[
     TagMarker,
     Type,
     expr_span,
+    tir_call_arg_copy_fact,
     type_identity_equal,
     type_name,
 ]
@@ -60,7 +61,7 @@ fn sema_call_shared_owner_param(name: String, convention: AccessConvention, ty: 
 }
 
 fn sema_call_shared_owner_owned_arg(value: TExpr, argument: CallArg) -> TExpr Never! {
-    if argument.flags.implicit_clone || argument.flags.shared_auto_clone -> return sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
+    if argument.flags.implicit_clone || argument.flags.shared_auto_clone -> return sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(argument.flags.shared_auto_clone)}, value.span)
     ~value
 }
 

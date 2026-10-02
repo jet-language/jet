@@ -2,6 +2,7 @@
 use jet_foundation.[
     MIRAccess,
     MIRConstant,
+    MIRCopyFact,
     MIRIndexKind,
     MIROperation,
     MIRPanicContext,
@@ -44,7 +45,7 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal
             }
             .None -> {
                 projected := jet_codegen_emit_value(&builder, span, field_type, MIROperation.Field{base: subject, field: field_id})
-                jet_codegen_emit_value(&builder, span, field_type, MIROperation.Copy{value: projected, materialize_view: false})
+                jet_codegen_emit_value(&builder, span, field_type, MIROperation.Copy{value: projected, fact: MIRCopyFact.Materialize})
             }
         }
         destination := jet_codegen_bind_local(&builder, binding.local, field_type, binding.local.mutable, None, None, false)

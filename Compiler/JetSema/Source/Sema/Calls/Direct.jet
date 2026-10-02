@@ -11,6 +11,7 @@ use jet_foundation.[
     Expr,
     ExprField,
     FunctionDefaultRef,
+    MIRCopyFact,
     Span,
     StrPart,
     SymbolKind,
@@ -221,7 +222,7 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     traced := checked
     if !sema_call_is_scalar(checked.ty) {
         if checked.kind == {
-            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_expr(checked.ty, TExprKind.Clone{value: checked}, checked.span)
+            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_expr(checked.ty, TExprKind.Clone{value: checked, fact: MIRCopyFact.Materialize}, checked.span)
             else -> {}
         }
     }
@@ -842,7 +843,8 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         resolved_binding = resolved
     }
     abi :: sema_call_direct_target_abi(candidate, environment)
-    lowered := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    pins := [TStmt]{}
+    lowered := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, &scopes, &tail_store, &context, call.name_span, &pins, &diagnostics) ?? return None
     result_type_raw :: sema_call_signature_return(candidate.signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment)
     contract_bindings := [TStmt]{}
@@ -854,7 +856,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         contract_nodes = checked_contract.contracts
     }
     call_value :: sema_tir_expr(result_type, TExprKind.Call{callee: candidate.symbol.id, type_args: candidate.type_args, args: lowered}, call.name_span)
-    value :: if {
+    contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
@@ -863,6 +865,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         }
         else -> call_value
     }
+    value :: sema_call_with_binder_pins(^pins, ^contracted, call.name_span)
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return None
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)

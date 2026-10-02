@@ -3,6 +3,7 @@ use jet_foundation.[
     AccessConvention,
     CallArg,
     Diagnostic,
+    EnumLitArg,
     Expr,
     IndexKind,
     InternalTag,
@@ -14,6 +15,7 @@ use jet_foundation.[
     TExpr,
     TExprKind,
     TFieldRef,
+    TGenericParam,
     TIndexKind,
     TagMarker,
     TextEdit,
@@ -202,6 +204,17 @@ fn sema_expression_shared_guard_value(ty: Type) -> SemaCallMemoryGuard? {
     None
 }
 
+// Rust `owner_type_for_reader`: a field's declared type names types as its
+// owning module sees them, so it resolves there (the owner's type parameters
+// stay parameters) before the owner's type arguments are substituted.
+fn sema_expression_field_owner_type(environment: SemaScopeEnvironment, owner_module: String, declared: Type, generic_names: [String]) -> Type Never! {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return ~declared
+    if owner_module == "" -> return ~declared
+    generics :: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
+    sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
+}
+
 fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if base.ty == .Tuple(_) {
         tuple_field :: sema_expression_tuple_field(base, member, span, &diagnostics) ?? return None
@@ -231,7 +244,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         else -> [Type]{}
     }
     if owner_name != "" {
-        owner := sema_expression_type_symbol(&scopes, owner_name)
+        owner := sema_expression_type_symbol(&scopes, environment, owner_name)
         if owner == None -> owner = sema_expression_carrier_type_symbol(environment, owner_name)
         if owner == .Val(owner_symbol) {
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner_symbol, kind: "type"})
@@ -241,7 +254,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
                     names :: loop param in struct_def.type_params -> param.name
                     loop field in struct_def.fields {
                         if field.name == member {
-                            field_ty :: sema_inference_substitute_type(field.ty, names, owner_args)
+                            field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner_symbol.module_name, field.ty, names), names, owner_args)
                             field_id :: symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
                             field_symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
                             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
@@ -290,6 +303,11 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     }
     // Rust reports the E0220 owner read at the member name.
     member_span :: Span{start: span.end - member.len(), end: span.end}
+    // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
+    // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the variant.
+    if sema_expression_enum_variant_path(base, member, environment, &scopes) == .Val(path) {
+        return sema_expression_enum_literal(path.enum_name, [Type]{}, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if !sema_ownership_check_owner_read(&state, Expr.Field{base: base, member: member, span: member_span}, scopes, &diagnostics) -> return None
     // The base is checked once, for real. When it is a shared handle, that
     // check is rolled back and the locked-read rewrite is checked instead.

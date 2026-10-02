@@ -65,17 +65,17 @@ struct MIRPassLoopReduction {
 // constants and dominators. Built once per function with a loop test instead
 // of once (or several times) per loop.
 struct MIRPassLoopAnalysis {
-    pub positions: [Int:Int]
+    pub positions: [U64:Int]
     pub predecessors: [[Int]]
-    pub places: [Int:Int]
-    pub definitions: [Int:MIRInstruction]
-    pub constants: [Int:MIRConstant]
+    pub places: [U64:Int]
+    pub definitions: [U64:MIRInstruction]
+    pub constants: [U64:MIRConstant]
     pub dominators: MIRPassDominance
 }
 
 fn mir_pass_loop_analysis(function: MIRFunction) -> MIRPassLoopAnalysis Never! {
-    positions := [Int:Int]{}
-    definitions := [Int:MIRInstruction]{}
+    positions := [U64:Int]{}
+    definitions := [U64:MIRInstruction]{}
     predecessors := [[Int]]{}
     loop (position, block) in function.blocks {
         if positions.get(block.id.value) == None -> &positions.add(block.id.value, position).drop("checked absent above")
@@ -429,7 +429,7 @@ fn mir_pass_range_trip_count(start: Int, end: Int, step: Int, exclusive: Bool) -
     Val(trip)
 }
 
-fn mir_pass_reaches_block(function: MIRFunction, positions: [Int:Int], start: MIRBlockID, target: MIRBlockID) -> Bool Never! {
+fn mir_pass_reaches_block(function: MIRFunction, positions: [U64:Int], start: MIRBlockID, target: MIRBlockID) -> Bool Never! {
     seen := [Bool]{}
     loop _ in function.blocks -> &seen.push(false)
     pending := [MIRBlockID]{start}
@@ -508,7 +508,7 @@ fn mir_pass_loop_advance_block(function: MIRFunction, analysis: MIRPassLoopAnaly
 }
 
 fn mir_pass_loop_has_early_exit(function: MIRFunction, analysis: MIRPassLoopAnalysis, body: [MIRBlockID], header: MIRBlockID) -> Bool Never! {
-    members := [Int:Bool]{}
+    members := [U64:Bool]{}
     loop block_id in body -> &members.add(block_id.value, true).drop("a block id may repeat")
     loop block_id in body {
         block :: mir_pass_loop_block(function, analysis, block_id) ?? return true

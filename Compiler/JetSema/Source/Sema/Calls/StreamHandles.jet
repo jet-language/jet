@@ -21,6 +21,7 @@ use jet_foundation.[
     TMethodRef,
     Type,
     symbol_id,
+    tir_call_arg_copy_fact,
 ]
 
 struct SemaStreamHandleSpec {
@@ -285,7 +286,7 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
     }
     if !ownership.accepted || !ownership.complete -> return None
     loop index in 0..<values.len() {
-        if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> values[index] = sema_tir_expr(values[index].ty, TExprKind.Clone{value: values[index]}, values[index].span)
+        if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> values[index] = sema_tir_expr(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, values[index].span)
     }
     Val(values)
 }

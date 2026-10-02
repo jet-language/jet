@@ -6618,6 +6618,139 @@ fn persist_binding_codegen_uses_safe_prelude_cell() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-MEM-COPYSEM1: a read of a folded list constant borrows its one shared
+/// table (`JetSharedSlot`); passing it to a read parameter, indexing it or
+/// taking its length never copies the rows.
+#[test]
+fn list_constant_reads_borrow_the_shared_table() {
+    let dir = std::env::temp_dir().join(format!("jet_shared_constant_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("table.jet");
+    let rows = (0..400)
+        .map(|index| {
+            format!(
+                "    Row{{code: \"E{index:04}\", meaning: \"meaning number {index} padded so the table is large\"}},"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let src = [
+        "struct Row {\n    code: String\n    meaning: String\n}\n\nROWS :: prep { [Row]{\n",
+        rows.as_str(),
+        "\n} }\n\nfn find_in(rows: [Row], code: String) -> Bool {\n    loop row in rows {\n        if row.code == code -> return true\n    }\n    false\n}\n\nfn run() {\n    if find_in(ROWS, \"E0399\") -> print(ROWS[3].meaning)\n    print(\"{ROWS.len()}\")\n}\n",
+    ]
+    .concat();
+    fs::write(&path, &src).unwrap();
+    let shown = path.to_string_lossy().to_string();
+    let rust = jet::compile_with_path(&src, &shown)
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected fixture:\n{}",
+                jet::render_diagnostics(&shown, &src, &diags)
+            )
+        })
+        .rust;
+    assert!(
+        rust.contains("JetSharedSlot::new(std::rc::Rc::clone(value))"),
+        "a list constant must hand reads its shared value:\n{rust}"
+    );
+    assert!(
+        rust.contains("JetSharedSlot::empty()"),
+        "a read of a list constant must hold the shared table, not a copy:\n{rust}"
+    );
+    assert!(
+        rust.contains("ROWS_shared();"),
+        "each read of a list constant must take the shared value, not a copy:\n{rust}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// The body of the emitted Jet function whose mangled name ends with `name`.
+fn emitted_body<'a>(rust: &'a str, name: &str) -> &'a str {
+    let start = rust
+        .find(&format!("{name}(__jet_"))
+        .unwrap_or_else(|| panic!("`{name}` was not emitted:\n{rust}"));
+    let rest = &rust[start..];
+    &rest[..rest.find("\n}\n").expect("emitted function has a closing brace")]
+}
+
+fn emitted_rust(file: &str, src: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("jet_{file}_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{file}.jet"));
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().to_string();
+    let rust = jet::compile_with_path(src, &shown)
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected fixture:\n{}",
+                jet::render_diagnostics(&shown, src, &diags)
+            )
+        })
+        .rust;
+    let _ = fs::remove_dir_all(&dir);
+    rust
+}
+
+/// An indexed field read (`g.mods[i].id`) lowers to one index-then-field place
+/// read, and a field read of a value slot borrows the slot: neither copies the
+/// whole element (`M` owns a large `big` list) to reach one field.
+#[test]
+fn indexed_field_read_never_copies_the_element() {
+    let src = "struct M {\n    id: String\n    big: [String]\n}\n\nstruct G {\n    mods: [M]\n}\n\nfn find_mod(g: G, id: String) -> Int? {\n    loop i in 0..<g.mods.len() {\n        if g.mods[i].id == id -> return Val(i)\n    }\n    None\n}\n\nfn make(id: String) -> M {\n    M{id: id, big: [String]{\"x\"}}\n}\n\nfn made_id(id: String) -> String {\n    make(id).id\n}\n\nfn run() {\n    g :: G{mods: [M]{M{id: \"a\", big: [String]{\"x\"}}, M{id: \"b\", big: [String]{\"y\"}}}}\n    print(find_mod(g, \"b\") ?? -1)\n    print(made_id(\"c\"))\n}\n";
+    let rust = emitted_rust("index_field", src);
+    let find = emitted_body(&rust, "find_umod");
+    assert!(
+        find.contains("u32)).__jet_id"),
+        "`g.mods[i].id` must read `id` through the element place:\n{find}"
+    );
+    assert!(
+        !find.lines().any(|line| line.contains("jet_index_vec_ref(") && line.contains("u32)).clone()")),
+        "`g.mods[i].id` must not copy the whole element:\n{find}"
+    );
+    assert!(
+        !find.contains(".clone()).__jet_"),
+        "a field read must not copy its whole receiver:\n{find}"
+    );
+    let made = emitted_body(&rust, "made_uid");
+    assert!(
+        !made.contains(".clone()).__jet_id"),
+        "`make(id).id` must borrow the result slot and copy only `id`:\n{made}"
+    );
+}
+
+/// #4318: a Copy-ABI value (`Bool`) is read bitwise (`(*slot)` or the plain
+/// slot), never through `.clone()`: branch conditions copy no slot.
+#[test]
+fn bool_branch_conditions_never_clone_their_slot() {
+    let src = "fn count_hits(flags: [Bool], limit: Int) -> Int {\n    hits := 0\n    loop i in 0..<flags.len() {\n        if flags[i] && i < limit -> hits += 1\n    }\n    hits\n}\n\nfn run() {\n    print(count_hits([Bool]{true, false, true}, 2))\n}\n";
+    let rust = emitted_rust("bool_branch", src);
+    let body = emitted_body(&rust, "count_uhits");
+    assert!(body.contains("if "), "`count_hits` must branch:\n{body}");
+    assert!(
+        !body.contains(".clone() {"),
+        "a Bool branch condition must be read bitwise, not cloned:\n{body}"
+    );
+}
+
+/// #4318: an interpolation hole is shown, never consumed, so it borrows its
+/// value (`jet_show(&self)`) instead of cloning it first.
+#[test]
+fn interpolation_holes_borrow_their_values() {
+    let src = "fn greet(name: String, n: Int) -> String {\n    \"hi {name}, you are {n}\"\n}\n\nfn run() {\n    print(greet(\"ann\", 3))\n}\n";
+    let rust = emitted_rust("interpolation_borrow", src);
+    let body = emitted_body(&rust, "greet");
+    assert_eq!(
+        body.matches(".jet_show()").count(),
+        2,
+        "both holes of `greet` must be shown:\n{body}"
+    );
+    assert!(
+        !body.contains(".clone()).jet_show()") && !body.contains(".clone().jet_show()"),
+        "an interpolation hole must borrow its value, not clone it:\n{body}"
+    );
+}
+
 /// D-PERSIST1: `#Persist` module bindings survive a real hot reload when the
 /// shape is compatible; an incompatible shape reset reports the exact reason
 /// and reseeds from the new initializer. Shared store is consulted by both

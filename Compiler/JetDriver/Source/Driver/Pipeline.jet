@@ -3,6 +3,7 @@ use jet_foundation.[
     AccessConvention,
     DIAGNOSTIC_ERROR,
     Diagnostic,
+    ImportedItem,
     MIRAccess,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
@@ -68,6 +69,7 @@ use jet_foundation.[
     TFunc,
     TTypeDef,
     TTypeDefKind,
+    core_module_export,
     diagnostic_with_source_mapping,
     jet_ring_prelude_closure_layer,
     jet_ring_runtime_parts_for_used_core,
@@ -102,6 +104,7 @@ use jet_sema.[
     SemaComptimeItemSource,
     SemaComptimeItemValue,
     SemaForeignProviderInput,
+    SemaFunctionMemoryPlan,
     SemaGraphModuleResult,
     SemaGraphResult,
     SemaRegistrationForeignHandleFacts,
@@ -122,6 +125,7 @@ use jet_sema.[
     sema_comptime_graph_with_values,
     sema_comptime_modules_with_values,
     sema_finalize_registration_graph,
+    sema_function_memory_plan_from_graph,
     sema_hardware_use_merge,
     sema_hardware_use_snapshot,
     sema_name_build_facts,
@@ -135,6 +139,7 @@ use jet_codegen.[
     JetRustEmitConfig,
     JetRustEmitManifest,
     JetWebEmitConfig,
+    jet_codegen_collect_type_instances,
     jet_codegen_reachable_core_functions,
     jet_codegen_sorted_order,
     jet_rust_emit_program,
@@ -655,6 +660,120 @@ fn jet_driver_mir_visibility(visibility: Int) -> MIRVisibility Never! {
     MIRVisibility.Private
 }
 
+// Rust `artifact_plan.rs` `core_import_module_path`: a Core `.[…]` list
+// (`use core.mem`, `use core.encoding.[json]`) names Core namespaces, which
+// have no checked source-module row, so the edge stays a path import instead
+// of a member list. Mixed targets keep the written prefix.
+fn jet_driver_core_import_module_path(module_alias: String, members: [ImportedItem]) -> String? Never! {
+    if module_alias != "core" && !module_alias.starts_with("core.") -> return None
+    target := String?{None}
+    loop member in members {
+        module_path :: jet_driver_core_list_module(module_alias, member.original) ?? return None
+        if target == .Val(existing) {
+            if existing != module_path -> return Val(~module_alias)
+        }
+        target = Val(module_path)
+    }
+    Val(target ?? ~module_alias)
+}
+
+// The Core module one list member selects (Rust `core_list_path`): the member
+// itself when it names a Core module, otherwise the longest known Core module
+// prefix that leaves a non-empty item path.
+fn jet_driver_core_list_module(prefix: String, member: String) -> String? Never! {
+    full :: "{prefix}.{member}"
+    if core_module_export(full) != None -> return Val(full)
+    parts :: full.split(".").to_list()
+    split := parts.len() - 1
+    loop split >= 1 {
+        module_parts := [String]{}
+        loop index in 0..<split -> &module_parts.push(parts[index])
+        item_parts := [String]{}
+        loop index in split..<parts.len() -> &item_parts.push(parts[index])
+        module_path :: module_parts.join(".")
+        if core_module_export(module_path) != None && item_parts.join(".") != "" -> return Val(module_path)
+        split -= 1
+    }
+    None
+}
+
+// The member rows of one checked unqualified import, each naming its
+// canonical lowered MIR declaration.
+fn jet_driver_mir_import_items(
+    load: JetDriverLoadResult,
+    import: SemaRegistrationImport,
+    lowered: JetCodegenFunctions,
+    diagnostics: &[Diagnostic],
+) -> [MIRImportItem]? {
+    items := [MIRImportItem]{}
+    loop binding in import.bindings {
+        item := MIRItemRef?{None}
+        if binding.symbol.kind == {
+            SymbolKind.Function -> {
+                function_id := jet_driver_find_lowered_function_id(lowered.functions, binding.symbol.id.key)
+                if function_id == None {
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported function has no matching lowered MIR function", "import bindings preserve canonical target symbol identities", "retain the exact checked function key through code generation"))
+                    return None
+                }
+                function_value :: function_id ?? return None
+                item = Val(MIRItemRef.Function{id: function_value})
+            }
+            SymbolKind.Type -> {
+                type_id := jet_driver_find_lowered_type_id(lowered.types, binding.symbol.id.key)
+                if type_id == None {
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported type has no matching lowered MIR type", "type import bindings preserve canonical target symbol identities", "retain the exact checked type key through code generation"))
+                    return None
+                }
+                type_value :: type_id ?? return None
+                item = Val(MIRItemRef.Type{id: type_value})
+            }
+            SymbolKind.Trait -> {
+                trait_id := jet_driver_find_lowered_trait_id(lowered.traits, binding.symbol.id.key)
+                if trait_id == None {
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported trait has no matching lowered MIR trait", "trait import bindings preserve canonical target symbol identities", "retain the exact checked trait key through code generation"))
+                    return None
+                }
+                trait_value :: trait_id ?? return None
+                item = Val(MIRItemRef.Trait{id: trait_value})
+            }
+            SymbolKind.Constant -> {
+                constant_id := jet_driver_find_lowered_constant_id(lowered.constants, binding.symbol.id.key)
+                if constant_id == None {
+                    comptime_only := false
+                    if binding.declaration == {
+                        Val(declaration) -> {
+                            if declaration == {
+                                .Const(definition) -> comptime_only = definition.is_comptime
+                                else -> {}
+                            }
+                        }
+                        else -> {}
+                    }
+                    if comptime_only -> next
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported runtime constant has no matching lowered MIR constant", "runtime import bindings preserve canonical target constant identities", "retain the lowered constant row or erase only a checked compile-time-only import"))
+                    return None
+                }
+                constant_value :: constant_id ?? return None
+                item = Val(MIRItemRef.Constant{id: constant_value})
+            }
+            else -> {
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "the checked import refers to an item kind that MIR lowering does not support", "the backend-neutral import graph lowers canonical type, trait, function, and constant identities", "add a canonical MIR item reference before lowering this import kind"))
+                return None
+            }
+        }
+        resolved_item :: item ?? {
+            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "a checked import binding has no MIR item identity", "every retained import binding names one canonical lowered MIR declaration", "retain the exact lowered item identity"))
+            return None
+        }
+        &items.push(MIRImportItem{
+            original: binding.original,
+            local: binding.local,
+            item: resolved_item,
+        })
+    }
+    items
+}
+
 fn jet_driver_mir_import(
     load: JetDriverLoadResult,
     import: SemaRegistrationImport,
@@ -665,74 +784,13 @@ fn jet_driver_mir_import(
     if import.declaration.kind == {
         .File(path, _) -> kind = Val(MIRImportKind.File{path: path})
         .Module(name, _) -> kind = Val(MIRImportKind.Module{path: name})
-        .Unqualified(_, _, _, _, _) -> {
-            items := [MIRImportItem]{}
-            loop binding in import.bindings {
-                item := MIRItemRef?{None}
-                if binding.symbol.kind == {
-                    SymbolKind.Function -> {
-                        function_id := jet_driver_find_lowered_function_id(lowered.functions, binding.symbol.id.key)
-                        if function_id == None {
-                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported function has no matching lowered MIR function", "import bindings preserve canonical target symbol identities", "retain the exact checked function key through code generation"))
-                            return None
-                        }
-                        function_value :: function_id ?? return None
-                        item = Val(MIRItemRef.Function{id: function_value})
-                    }
-                    SymbolKind.Type -> {
-                        type_id := jet_driver_find_lowered_type_id(lowered.types, binding.symbol.id.key)
-                        if type_id == None {
-                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported type has no matching lowered MIR type", "type import bindings preserve canonical target symbol identities", "retain the exact checked type key through code generation"))
-                            return None
-                        }
-                        type_value :: type_id ?? return None
-                        item = Val(MIRItemRef.Type{id: type_value})
-                    }
-                    SymbolKind.Trait -> {
-                        trait_id := jet_driver_find_lowered_trait_id(lowered.traits, binding.symbol.id.key)
-                        if trait_id == None {
-                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported trait has no matching lowered MIR trait", "trait import bindings preserve canonical target symbol identities", "retain the exact checked trait key through code generation"))
-                            return None
-                        }
-                        trait_value :: trait_id ?? return None
-                        item = Val(MIRItemRef.Trait{id: trait_value})
-                    }
-                    SymbolKind.Constant -> {
-                        constant_id := jet_driver_find_lowered_constant_id(lowered.constants, binding.symbol.id.key)
-                        if constant_id == None {
-                            comptime_only := false
-                            if binding.declaration == {
-                                Val(declaration) -> {
-                                    if declaration == {
-                                        .Const(definition) -> comptime_only = definition.is_comptime
-                                        else -> {}
-                                    }
-                                }
-                                else -> {}
-                            }
-                            if comptime_only -> next
-                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported runtime constant has no matching lowered MIR constant", "runtime import bindings preserve canonical target constant identities", "retain the lowered constant row or erase only a checked compile-time-only import"))
-                            return None
-                        }
-                        constant_value :: constant_id ?? return None
-                        item = Val(MIRItemRef.Constant{id: constant_value})
-                    }
-                    else -> {
-                        &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "the checked import refers to an item kind that MIR lowering does not support", "the backend-neutral import graph lowers canonical type, trait, function, and constant identities", "add a canonical MIR item reference before lowering this import kind"))
-                        return None
-                    }
-                }
-                resolved_item :: item ?? {
-                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "a checked import binding has no MIR item identity", "every retained import binding names one canonical lowered MIR declaration", "retain the exact lowered item identity"))
-                    return None
-                }
-                &items.push(MIRImportItem{
-                    original: binding.original,
-                    local: binding.local,
-                    item: resolved_item,
-                })
+        .Unqualified(module_alias, _, members, _, _) -> {
+            core_path :: jet_driver_core_import_module_path(module_alias, members)
+            if core_path == .Val(path) -> kind = Val(MIRImportKind.Module{path: path})
+            if core_path == None {
+                items :: jet_driver_mir_import_items(load, import, lowered, &diagnostics) ?? return None
+                kind = Val(MIRImportKind.Unqualified{module_id: mir_module_id(import.target_module_identity), items: items})
             }
-            kind = Val(MIRImportKind.Unqualified{module_id: mir_module_id(import.target_module_identity), items: items})
         }
     }
     resolved_kind :: kind ?? return None
@@ -1147,6 +1205,8 @@ struct JetDriverComptimeFunctionClosure {
     functions: [TFunc]
     waiting_dependencies: [String]
     complete: Bool
+    // Each incomplete reachable function's recorded causes, keyed by function.
+    incomplete_reasons: [String]{[String]{}}
 }
 
 struct JetDriverComptimeWaitRow {
@@ -1173,6 +1233,7 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 
 fn jet_driver_comptime_function_closure(
     graph: SemaRegistrationGraph,
+    memory_plan: SemaFunctionMemoryPlan,
     values: [SemaComptimeItemValue],
     checked_functions: &[SemaComptimeFunctionResult],
     request: SemaComptimeItemRequest,
@@ -1193,6 +1254,7 @@ fn jet_driver_comptime_function_closure(
     functions := [TFunc]{}
     waiting := [String]{}
     complete := true
+    incomplete_reasons := [String]{}
     cursor := 0
     loop cursor < queue.len() {
         current := queue[cursor]
@@ -1203,11 +1265,13 @@ fn jet_driver_comptime_function_closure(
         }
         if already_processed -> next
         &processed.push(current)
-        checked := sema_check_comptime_function(graph, values, checked_functions, current.module_identity, current.function_key)
+        checked := sema_check_comptime_function(graph, memory_plan, values, checked_functions, current.module_identity, current.function_key)
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(&waiting, dependency)
         if {
             !checked.complete || jet_driver_has_errors(checked.diagnostics) -> {
                 loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
+                if checked.incomplete_reasons.len() == 0 && checked.waiting_dependencies.len() == 0 && !jet_driver_has_errors(checked.diagnostics) -> &incomplete_reasons.push("{current.function_key}: incomplete (no recorded cause)")
+                loop reason in checked.incomplete_reasons -> &incomplete_reasons.push("{current.function_key}: {reason}")
                 complete = false
             }
             else -> {
@@ -1233,13 +1297,13 @@ fn jet_driver_comptime_function_closure(
                     complete = false
                 }
                 else -> {
-                    owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: false}
+                    owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: false, incomplete_reasons: incomplete_reasons}
                     jet_driver_comptime_function_ref_add(&queue, owner_identity, function_key)
                 }
             }
         }
     }
-    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete}
+    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete_reasons: incomplete_reasons}
 }
 
 // The temporary interpreter MIR lowers only the checked comptime function
@@ -1424,7 +1488,7 @@ fn jet_driver_assemble_mir(
     loop function in lowered.nested_functions -> &all_functions.push(function)
     // Next-equal chains preserve the old pairwise diagnostic order without
     // visiting unrelated functions. Duplicate-heavy input costs only its output.
-    id_heads := [Int:Int]{}
+    id_heads := [U64:Int]{}
     key_heads := [String:Int]{}
     next_id := (loop _ in all_functions -> -1)
     next_key := (loop _ in all_functions -> -1)
@@ -1525,8 +1589,8 @@ fn jet_driver_assemble_mir(
             jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Constant{id: definition.id})
             assigned_constants += 1
         }
-        positions := [Int]{}
-        loop row in ordered_items -> &positions.push(row.position)
+        positions := [U64]{}
+        loop row in ordered_items -> &positions.push(U64.from_int(row.position) ?? U64{0})
         item_order := [MIRItemRef]{}
         loop row_index in jet_codegen_sorted_order(positions, [String]{}) -> &item_order.push(ordered_items[row_index].item)
         &modules.push(MIRModule{
@@ -1575,7 +1639,9 @@ fn jet_driver_assemble_mir(
         handles: foreign_artifacts.handles,
         core_calls: lowered.core_calls,
         prelude_calls: lowered.prelude_calls,
-        type_instances: [MIRType]{},
+        // Rust mir.rs `lower_program`: every canonical type the lowered rows
+        // name, so legality, emission and evaluation see one instance table.
+        type_instances: jet_codegen_collect_type_instances(lowered.types, lowered.functions, lowered.nested_functions, foreign_artifacts.foreign, lowered.traits, lowered.impls, lowered.constants),
         codec_migrations: [String:MIRSchemaMigrationPlan]{},
         unreachable: [MIRUnreachable]{},
     })
@@ -1650,6 +1716,9 @@ fn jet_driver_run_comptime(
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeRunResult {
     values := ~initial_values
+    // The memory plan reads only function declarations, which staged values
+    // never change, so every on-demand function check shares this one.
+    memory_plan :: sema_function_memory_plan_from_graph(graph)
     checked_functions := ~initial_functions
     trace := jet_driver_empty_compile_trace()
     pending := stage.sources
@@ -1679,7 +1748,7 @@ fn jet_driver_run_comptime(
             }
             if !checked_item.complete {
                 result := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-                if diagnostics.len() == 0 {
+                if !jet_driver_has_errors(diagnostics) {
                     result.internal_problem = Val("comptime item checking did not return a complete typed value or dependency wait set")
                 }
                 return result
@@ -1688,12 +1757,14 @@ fn jet_driver_run_comptime(
                 &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
-            closure := jet_driver_comptime_function_closure(graph, values, &checked_functions, comptime_request, &diagnostics)
+            closure := jet_driver_comptime_function_closure(graph, memory_plan, values, &checked_functions, comptime_request, &diagnostics)
             if jet_driver_has_errors(diagnostics) -> return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             if !closure.complete && closure.waiting_dependencies.len() == 0 {
                 result := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-                if diagnostics.len() == 0 {
-                    result.internal_problem = Val("comptime function checking did not return a complete body or dependency wait set")
+                if !jet_driver_has_errors(diagnostics) {
+                    problem := "comptime function checking did not return a complete body or dependency wait set"
+                    loop reason in closure.incomplete_reasons -> problem = "{problem}\n  {reason}"
+                    result.internal_problem = Val(problem)
                 }
                 return result
             }
@@ -2231,7 +2302,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     if !comptime_stage.complete || comptime_stage.modules.len() != registration_module_count || jet_driver_has_errors(comptime_stage.diagnostics) {
         loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
-        if load.diagnostics.len() == 0 {
+        if !jet_driver_has_errors(load.diagnostics) {
             result.internal_problem = Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({comptime_stage.modules.len()} of {registration_module_count} modules checked)", comptime_stage.modules))
         }
         return result
@@ -2261,7 +2332,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
             comptime_run.internal_problem != None -> {
                 result.internal_problem = comptime_run.internal_problem
             }
-            load.diagnostics.len() == 0 -> {
+            !jet_driver_has_errors(load.diagnostics) -> {
                 result.internal_problem = Val("comptime execution did not complete with a value, control result, or user diagnostic")
             }
         }
@@ -2271,7 +2342,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     if checked_graph.modules.len() != registration_module_count {
         loop diagnostic in checked_graph.diagnostics -> &load.diagnostics.push(diagnostic)
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
-        if load.diagnostics.len() == 0 {
+        if !jet_driver_has_errors(load.diagnostics) {
             result.internal_problem = Val("semantic finalization did not return every registered module")
         }
         return result
@@ -2300,7 +2371,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
             body_run.internal_problem != None -> {
                 result.internal_problem = body_run.internal_problem
             }
-            load.diagnostics.len() == 0 -> {
+            !jet_driver_has_errors(load.diagnostics) -> {
                 result.internal_problem = Val(jet_driver_incomplete_graph_problem("semantic body rechecking did not return a complete resolved package graph", body_run.graph.modules))
             }
         }
@@ -2329,7 +2400,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
     if !validation.complete {
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Comptime), false, trace)
         result.internal_problem = validation.internal_problem
-        if result.internal_problem == None && load.diagnostics.len() == 0 -> result.internal_problem = Val("checked text evaluation did not return a complete validation or diagnostic")
+        if result.internal_problem == None && !jet_driver_has_errors(load.diagnostics) -> result.internal_problem = Val("checked text evaluation did not return a complete validation or diagnostic")
         return result
     }
     checked_graph = validation.graph

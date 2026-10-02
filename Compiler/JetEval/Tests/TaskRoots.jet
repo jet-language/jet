@@ -166,13 +166,13 @@ fn jet_eval_task_roots_fixture_shared_field(value: JetEvalRuntimeValue, name: St
 
 fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: String, span: Span) -> MIRType? {
     found := None
-    loop candidate in machine.program.type_instances {
-        if candidate.kind == .Apply(_, _) && mir_type_display_name(candidate) == name {
+    loop index in 0..<machine.program.type_instances.len() {
+        if machine.program.type_instances[index].kind == .Apply(_, _) && mir_type_display_name(machine.program.type_instances[index]) == name {
             if found != None {
                 jet_eval_compiler_fail(&machine, span, "TaskRoots fixture nominal type is ambiguous in the checked program")
                 return None
             }
-            found = Val(candidate)
+            found = Val(machine.program.type_instances[index])
         }
     }
     found
@@ -924,7 +924,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MIRF
 
     // A writeback to a checked address adopts and installs exactly one weak
     // alias; retiring the replacement discharges that alias once.
-    address_function := jet_eval_find_function(failure_child.program, callback) ?? return false
+    address_function := jet_eval_find_function(failure_child, callback) ?? return false
     address_value_id :: MIRValueID{value: stable_id("mir-value", "task-root-writeback-address")}
     address_place :: MIRPlace{
         id: MIRPlaceID{value: stable_id("mir-place", "task-root-writeback-address")},
@@ -1011,7 +1011,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MIRF
 
     // A Write address may still target a read-only/unsupported place. Its
     // replacement remains owned until the place accepts it.
-    writeback_function := jet_eval_find_function(failure_child.program, callback) ?? return false
+    writeback_function := jet_eval_find_function(failure_child, callback) ?? return false
     writeback_place :: MIRPlace{
         id: MIRPlaceID{value: stable_id("mir-place", "task-root-writeback-reject")},
         span: span,

@@ -1,5 +1,5 @@
-# Minimal CI: prove the workspace compiles. The full gate suite runs locally
-# through Tools/agent/verify-full.sh until the hosted lanes are reinstated.
+# Hosted CI checks compilation and the cheap source-coverage ratchet. The full
+# gate suite runs locally through Tools/agent/verify-full.sh.
 name: CI
 
 on:
@@ -16,6 +16,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Core source coverage ratchet
+        run: |
+          node --test Tools/agent/core-coverage-census.test.mjs
+          node Tools/agent/core-coverage-census.mjs --check
       - name: Install Nix
         uses: cachix/install-nix-action@v27
         with:

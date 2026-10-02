@@ -5,8 +5,9 @@ mod tir_support;
 use jet_foundation::MIR::{
     canonical_operation_identity, canonical_operation_payload, mir_program_digest,
     mir_view_copy_element_type, mir_view_copy_kind, MirArtifactBuildMode, MirArtifactKind,
-    MirArtifactRequest, MirArtifactTarget, MirNominalRef, MirOperation, MirOptimizationPolicy,
-    MirProgram, MirTagMarker, MirType, MirTypeId, MirTypeKind, MirViewCopyKind, MirValueId,
+    MirArtifactRequest, MirArtifactTarget, MirCopyFact, MirNominalRef, MirOperation,
+    MirOptimizationPolicy, MirProgram, MirTagMarker, MirType, MirTypeId, MirTypeKind,
+    MirViewCopyKind, MirValueId,
 };
 
 fn apply_type(name: &str, args: Vec<MirType>) -> MirType {
@@ -125,20 +126,20 @@ fn canonical_view_copy_kind_preserves_string_and_nested_shapes() {
 }
 
 #[test]
-fn copy_marker_changes_canonical_payload_and_identity() {
+fn copy_fact_changes_canonical_payload_and_identity() {
     let ordinary = MirOperation::Copy {
         value: MirValueId(7),
-        materialize_view: false,
+        fact: MirCopyFact::Materialize,
     };
     let materialized = MirOperation::Copy {
         value: MirValueId(7),
-        materialize_view: true,
+        fact: MirCopyFact::ViewMaterialize,
     };
     let ordinary_payload = canonical_operation_payload(&ordinary);
     let materialized_payload = canonical_operation_payload(&materialized);
     assert_ne!(ordinary_payload, materialized_payload);
-    assert!(ordinary_payload.contains("\"materialize_view\":false"));
-    assert!(materialized_payload.contains("\"materialize_view\":true"));
+    assert!(ordinary_payload.contains("\"copy_fact\":\"materialize\""));
+    assert!(materialized_payload.contains("\"copy_fact\":\"view_materialize\""));
     assert_ne!(
         canonical_operation_identity(&ordinary),
         canonical_operation_identity(&materialized)
@@ -156,7 +157,7 @@ fn optimization_and_digest_preserve_materialization_marker() {
                 matches!(
                     &instruction.operation,
                     MirOperation::Copy {
-                        materialize_view: true,
+                        fact: MirCopyFact::ViewMaterialize,
                         ..
                     }
                 )
@@ -169,12 +170,9 @@ fn optimization_and_digest_preserve_materialization_marker() {
     for function in &mut flipped.functions {
         for block in &mut function.blocks {
             for instruction in &mut block.instructions {
-                if let MirOperation::Copy {
-                    materialize_view, ..
-                } = &mut instruction.operation
-                {
-                    if *materialize_view {
-                        *materialize_view = false;
+                if let MirOperation::Copy { fact, .. } = &mut instruction.operation {
+                    if *fact == MirCopyFact::ViewMaterialize {
+                        *fact = MirCopyFact::Materialize;
                         changed = true;
                     }
                 }
@@ -198,7 +196,7 @@ fn checked_source_windows_lower_to_marked_mir() {
             matches!(
                 &instruction.operation,
                 MirOperation::Copy {
-                    materialize_view: true,
+                    fact: MirCopyFact::ViewMaterialize,
                     ..
                 }
             )

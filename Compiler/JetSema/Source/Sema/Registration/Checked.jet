@@ -18,6 +18,7 @@ use jet_foundation.[
     Field,
     Func,
     ImplDef,
+    InlineAsmContract,
     Item,
     LayoutFacts,
     Marker,
@@ -629,6 +630,9 @@ pub struct SemaCheckedForeignFunction {
     pub close_function_key: String?
     pub close_foreign_key: String?
     pub undo_function_key: String?
+    // The target-checked operand contract of an `#FFI(asm)` body (Rust
+    // `check_inline_asm` stores it on the function); None for every other row.
+    pub asm_contract: InlineAsmContract?
 }
 
 fn sema_checked_foreign_key(module_identity: String, name: String) -> String Never! {
@@ -1157,10 +1161,10 @@ fn sema_checked_foreign_first_library(module_row: SemaRegistrationModule, regist
     true
 }
 
-fn sema_checked_inline_ffi_scalar(ty: Type, asm: Bool) -> Bool Never! {
+// Rust `inline_ffi_scalar`: the scalar values every inline foreign binder accepts.
+fn sema_checked_inline_ffi_scalar(ty: Type) -> Bool Never! {
     if ty == {
-        .Int -> true
-        .Float | .Float32 | .Bool -> !asm
+        .Int | .Float | .Float32 | .Bool -> true
         .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
         .InlineRange(_, _, _) -> true
         .Named(name) -> name == "Unit"
@@ -1168,16 +1172,21 @@ fn sema_checked_inline_ffi_scalar(ty: Type, asm: Bool) -> Bool Never! {
     }
 }
 
-fn sema_checked_inline_has_core_mem(module_row: SemaRegistrationModule) -> Bool Never! {
-    loop declaration in module_row.program.imports {
-        if declaration.kind == {
-            .Module(name, _) | .Unqualified(name, _, _, _, _) -> {
-                if name == "core.mem" -> return true
-            }
-            else -> {}
-        }
+// Rust `inline_asm_integer`: the general-purpose register values of the
+// assembly binder.
+fn sema_checked_inline_asm_integer(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int -> true
+        .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
+        .InlineRange(_, _, _) -> true
+        else -> false
     }
-    false
+}
+
+// Rust `inline_asm_integer_or_void`: an assembly result register or no result.
+fn sema_checked_inline_asm_integer_or_void(ty: Type) -> Bool Never! {
+    if ty == .Named(name) -> return name == "Unit"
+    sema_checked_inline_asm_integer(ty)
 }
 
 fn sema_checked_inline_validation(module_row: SemaRegistrationModule, registered: SemaRegistrationFunction, diagnostics: &[Diagnostic]) -> Bool {
@@ -1186,27 +1195,39 @@ fn sema_checked_inline_validation(module_row: SemaRegistrationModule, registered
     if language == {
         "c" | "cpp" | "asm" -> {}
         else -> {
-            &diagnostics.push(sema_error("E3220", inline.lang_span, "no inline foreign binder for `{inline.lang}` yet", "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor)", "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`"))
+            &diagnostics.push(sema_error("E3220", inline.lang_span, "no inline foreign binder for `{inline.lang}` yet", "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards", "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`"))
             return false
         }
     }
     if !registered.declaration.is_unsafe {
-        &diagnostics.push(sema_error("E3215", inline.marker_span, "`#FFI({inline.lang})` needs an `#Unsafe(\"reason\")` gate", "`{inline.lang}` is an unsafe foreign language, so Jet requires an explicit safety justification", "add the `#Unsafe(\"…\")` gate before the inline foreign function"))
+        &diagnostics.push(sema_error("E3215", inline.marker_span, "`#FFI({inline.lang})` needs an `#Unsafe(\"reason\")` gate", "`{inline.lang}` is an unsafe foreign language — an inline `{inline.lang}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)", "add the gate: `#Unsafe(\"…\") #FFI({inline.lang}) fn …`"))
         return false
     }
-    asm :: language == "asm"
     scalar_valid := registered.declaration.type_params.len() == 0
     loop parameter in registered.declaration.params {
-        if !sema_checked_inline_ffi_scalar(parameter.ty, asm) -> scalar_valid = false
+        if !sema_checked_inline_ffi_scalar(parameter.ty) -> scalar_valid = false
     }
     if registered.declaration.return_type == .Val(return_type) {
-        if !sema_checked_inline_ffi_scalar(return_type, asm) -> scalar_valid = false
+        if !sema_checked_inline_ffi_scalar(return_type) -> scalar_valid = false
     }
     if !scalar_valid {
-        &diagnostics.push(sema_error("E3222", registered.declaration.name_span, "`#FFI({inline.lang})` has a signature its binder can't represent", "inline foreign contracts are ABI boundaries; this systems tier accepts concrete scalar values only", "replace generic, collection, String, callback, or user-defined values with an explicit scalar ABI contract"))
+        &diagnostics.push(sema_error("E3222", registered.declaration.name_span, "`#FFI({inline.lang})` has a signature its binder can't represent", "inline foreign contracts are ABI boundaries; this systems tier accepts concrete integer, float, and Bool values only", "replace generic, collection, String, callback, or user-defined values with an explicit scalar ABI contract"))
         return false
     }
-    if asm && !sema_checked_inline_has_core_mem(module_row) {
+    if language != "asm" -> return true
+    // Rust `check_inline_asm`: the register binder takes integers only.
+    asm_valid := true
+    loop parameter in registered.declaration.params {
+        if !sema_checked_inline_asm_integer(parameter.ty) -> asm_valid = false
+    }
+    if registered.declaration.return_type == .Val(return_type) {
+        if !sema_checked_inline_asm_integer_or_void(return_type) -> asm_valid = false
+    }
+    if !asm_valid {
+        &diagnostics.push(sema_error("E3222", registered.declaration.name_span, "`#FFI(asm)` has a signature its register binder can't represent", "the audited assembly bridge uses general-purpose integer registers; floats and Bool need explicit conversion in Jet before the boundary", "use Int or I8/I16/I32/I64/U8/U16/U32/U64 parameters and return values"))
+        return false
+    }
+    if !sema_function_header_inline_has_core_mem(module_row) {
         &diagnostics.push(sema_error("E3102", inline.marker_span, "inline assembly is part of the low-level memory tier", "assembly can read registers and memory outside Jet's safe value model, so discovery requires the explicit `core.mem` opt-in", "add `use core.mem` at the top of this file"))
         return false
     }
@@ -1393,6 +1414,7 @@ fn sema_checked_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegist
         close_function_key: close_key,
         close_foreign_key: sema_checked_foreign_close_foreign_key(module_row, registered, scoped_providers),
         undo_function_key: undo_key,
+        asm_contract: None,
     }
 }
 
@@ -1402,9 +1424,10 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
     if !sema_checked_inline_validation(module_row, registered, &diagnostics) -> return None
     if !sema_checked_inline_undo(graph, module_row, registered, &diagnostics) -> return None
     // Rust `check_inline_asm`: an assembly body's operand contract (E3223) for
-    // the selected target.
-    if sema_checked_ascii_lower(inline.lang) == "asm" && sema_inline_assembly_contract(registered.declaration, graph.target_machine.triple, &diagnostics) == None -> return None
+    // the selected target, kept on the checked row for the wrapper generator.
     language :: sema_checked_ascii_lower(inline.lang)
+    asm_contract :: if language == "asm" -> sema_inline_assembly_contract(registered.declaration, graph.target_machine.triple, &diagnostics) else -> None
+    if language == "asm" && asm_contract == None -> return None
     wrapper :: "jet_ffi_{registered.declaration.name}"
     module_identity :: module_row.module_identity
     SemaCheckedForeignFunction{
@@ -1435,6 +1458,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
         close_function_key: None,
         close_foreign_key: None,
         undo_function_key: None,
+        asm_contract: asm_contract,
     }
 }
 
@@ -2057,7 +2081,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     type_kind :: kind ?? return None
     TTypeDef{
         module_identity: module_row.module_identity,
-        key: sema_checked_module_key(module_row, name),
+        key: if sema_registration_is_compiler_owned_enum(nominal) -> name else -> sema_checked_module_key(module_row, name),
         name: name,
         span: sema_checked_item_span(definition),
         public: nominal.symbol.visibility >= 2,

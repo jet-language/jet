@@ -305,7 +305,7 @@ impl SliceInputs<'_> {
                 self.reproduce(initial, site, slice)
                     .then_some(MirOperation::Copy {
                         value: initial,
-                        materialize_view: false,
+                        fact: jet_foundation::MIR::MirCopyFact::Materialize,
                     })
             }
             MirOperation::Closure {

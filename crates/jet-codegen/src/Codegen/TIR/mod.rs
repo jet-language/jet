@@ -7449,6 +7449,12 @@ pub enum TStmt {
         /// iterate it directly BY VALUE; the shared Stream Prelude owns the
         /// producer task and cancellation at the consumer's wait boundary.
         by_value: bool,
+        /// #4318 §4 stable loop source: the source is a place (a local or
+        /// parameter through field, payload and list-index projections) and the
+        /// body never mentions any name the source reads, so nothing can change
+        /// it while the loop runs. Lowering then walks it in place
+        /// (`read_list_walk`) instead of iterating a snapshot copy.
+        source_stable: bool,
         body: Vec<TStmt>,
     },
     /// c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picked the
@@ -9138,7 +9144,7 @@ fn collect_cost_expr_with_state_and_context(
         | TExprKind::Err(arg, _)
         | TExprKind::Deref(arg)
         | TExprKind::RawOf(arg)
-        | TExprKind::Clone(arg)
+        | TExprKind::Clone(arg, _)
         | TExprKind::ExplicitCopy(arg)
         | TExprKind::MaterializeView(arg) => {
             collect_cost_expr(arg, function, expr_span, loop_depth, sites);
@@ -11490,6 +11496,17 @@ pub(crate) fn allocator_constructor_owner<'a>(
     valid.then_some(owner)
 }
 
+/// #4318: the copy fact of a call argument sema marked for copying: a
+/// shared-reference retain is a share; an owning parameter filled from a
+/// value the caller keeps materializes (D-MEM-COPYSEM1).
+pub(crate) fn call_arg_copy_fact(arc_clone: bool) -> jet_foundation::MIR::MirCopyFact {
+    if arc_clone {
+        jet_foundation::MIR::MirCopyFact::Share
+    } else {
+        jet_foundation::MIR::MirCopyFact::Materialize
+    }
+}
+
 #[derive(Clone)]
 pub enum TExprKind {
     /// Integer literal with its D-SG9 width (`None` = default `Int`/i64). The
@@ -11896,8 +11913,9 @@ pub enum TExprKind {
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
     /// or borrowed value. This is ordinary sharing/cloning semantics. The
     /// user-written `~` copy has its own `ExplicitCopy` node so a Tensor does not
-    /// silently turn compiler-inserted clones into deep storage copies.
-    Clone(Box<TExpr>),
+    /// silently turn compiler-inserted clones into deep storage copies. The
+    /// fact (#4318) is the sema decision behind the copy; MIR keeps it on `Copy`.
+    Clone(Box<TExpr>, jet_foundation::MIR::MirCopyFact),
     /// D-MEM1/D-CAP2: the explicit Jet `~` copy signal. Backends route Tensor
     /// values through the shared Prelude copy operation; non-Tensor values keep
     /// their ordinary clone/materialization semantics.

@@ -1140,11 +1140,11 @@ pub fn jet_eval_shared_runtime_host_carrier_from_root(
         else -> None
     } ?? return None
     create_row := MIRPreludeCall?{None}
-    loop candidate in program.prelude_calls {
-        if candidate.module_name == "core.host"
-            && candidate.member == "Shared.get"
-            && jet_eval_shared_runtime_host_row_valid(candidate) {
-            create_row = Val(candidate)
+    loop index in 0..<program.prelude_calls.len() {
+        if program.prelude_calls[index].module_name == "core.host"
+            && program.prelude_calls[index].member == "Shared.get"
+            && jet_eval_shared_runtime_host_row_valid(program.prelude_calls[index]) {
+            create_row = Val(program.prelude_calls[index])
             break
         }
     }

@@ -381,7 +381,9 @@ pub(super) fn lower_if_let_subject(
         let ty = subj.ty.clone();
         TExpr {
             ty,
-            kind: TExprKind::Clone(Box::new(subj)),
+            // A borrowed subject's payload bindings own copies of what the
+            // borrowed place keeps.
+            kind: TExprKind::Clone(Box::new(subj), jet_foundation::MIR::MirCopyFact::Materialize),
         }
     } else {
         subj
@@ -718,7 +720,7 @@ fn lower_if_cond_atom(
                         .and_then(|ts| ts.into_iter().next());
                     let cloned_subj = TExpr {
                         ty: subj.ty.clone(),
-                        kind: TExprKind::Clone(Box::new(subj)),
+                        kind: TExprKind::Clone(Box::new(subj), jet_foundation::MIR::MirCopyFact::Materialize),
                     };
                     return (
                         TIfCond::IfLet {
@@ -732,7 +734,7 @@ fn lower_if_cond_atom(
             } else if bindings.len() == 1 && matches!(bindings.first(), Some(PatSlot::Wildcard)) {
                 let cloned_subj = TExpr {
                     ty: subj.ty.clone(),
-                    kind: TExprKind::Clone(Box::new(subj)),
+                    kind: TExprKind::Clone(Box::new(subj), jet_foundation::MIR::MirCopyFact::Materialize),
                 };
                 return (
                     TIfCond::IfLet {
@@ -973,12 +975,10 @@ fn lower_if_cond_atom(
                     let_ty: crate::Codegen::TIR::TLetTy::plain(fty.clone()),
                     init: TExpr {
                         ty: fty.clone(),
-                        kind: TExprKind::Clone(Box::new(struct_pattern_field_expr(
-                            local_expr(),
-                            field,
-                            fty,
-                            cx,
-                        ))),
+                        kind: TExprKind::Clone(
+                            Box::new(struct_pattern_field_expr(local_expr(), field, fty, cx)),
+                            jet_foundation::MIR::MirCopyFact::Materialize,
+                        ),
                     },
                     gc_promotion: None,
                     gc_transferred: false,
@@ -2138,14 +2138,17 @@ fn lower_struct_pattern_bindings(
             let_ty: crate::Codegen::TIR::TLetTy::plain(fty.clone()),
             init: TExpr {
                 ty: fty.clone(),
-                kind: TExprKind::Clone(Box::new(TExpr {
-                    ty: fty,
-                    kind: TExprKind::HostCall(Box::new(
-                        crate::Codegen::TIR::THostCall::SwitchSubjectField {
-                            field: field.clone(),
-                        },
-                    )),
-                })),
+                kind: TExprKind::Clone(
+                    Box::new(TExpr {
+                        ty: fty,
+                        kind: TExprKind::HostCall(Box::new(
+                            crate::Codegen::TIR::THostCall::SwitchSubjectField {
+                                field: field.clone(),
+                            },
+                        )),
+                    }),
+                    jet_foundation::MIR::MirCopyFact::Materialize,
+                ),
             },
             gc_promotion: None,
             gc_transferred: false,

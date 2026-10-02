@@ -13,6 +13,7 @@ use jet_foundation.[
     MIRCallArg,
     MIRCallee,
     MIRConstant,
+    MIRCopyFact,
     MIRDropKind,
     MIREnumArg,
     MIRField,
@@ -71,7 +72,7 @@ fn lf_value_typed(planted: Bool) -> MIRProgram Never! {
     b := fx_builder()
     one :: fx_int_const(&b, 1)
     source :: if planted -> MIRValueID{value: 999} else -> one
-    _ := fx_copy(&b, fx_int(), MIROperation.Copy{value: source, materialize_view: false})
+    _ := fx_copy(&b, fx_int(), MIROperation.Copy{value: source, fact: MIRCopyFact.Materialize})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     lf_single(b)
 }

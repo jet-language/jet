@@ -16,7 +16,7 @@ use crate::MIR::{
     MirBlockId, MirBoundsFact, MirCallbackAdapter, MirCallee, MirCallFallibility, MirCliDefault,
     MirDominators,
     MirCliInput, MirCliInputShape, MirCliValueKind, MirConstant, MirConstantDef, MirConstKey,
-    MirConstReport, MirConversion, MirCopyCost, MirDropAction, MirDropEdge, MirDropKind,
+    MirConstReport, MirConversion, MirCopyCost, MirCopyFact, MirDropAction, MirDropEdge, MirDropKind,
     MirEntrySpec,
     MirEnumArg, MirFailureCarrier, MirFieldId, MirForeign, MirFunction, MirFunctionId,
     MirFusionFact, MirHandleLifecycle, MirHardwareOp, MirHardwareSetup, MirHarnessPlan,
@@ -101,6 +101,8 @@ pub enum MirLegalityError {
     InvalidCoreCall { call: u64, key: String },
     InvalidPreludeCall { call: u64, member: String },
     InvalidFact { function: MirFunctionId, span: Span },
+    /// #4318: a `Copy` whose fact disagrees with its operand's type.
+    InvalidCopyFact { function: MirFunctionId, value: MirValueId, fact: MirCopyFact, span: Span },
 }
 
 impl fmt::Display for MirLegalityError {
@@ -125,6 +127,7 @@ impl fmt::Display for MirLegalityError {
             Self::InvalidCoreCall { call, key } => write!(f, "Core call {key:?} has invalid metadata for {call}"),
             Self::InvalidPreludeCall { call, member } => write!(f, "Prelude call {member:?} has invalid metadata for {call}"),
             Self::InvalidFact { function, span } => write!(f, "function {function:?} has an invalid optimization fact at {}..{}", span.start, span.end),
+            Self::InvalidCopyFact { function, value, fact, span } => write!(f, "function {function:?} copies {value:?} with fact `{}` its type does not admit at {}..{}", fact.as_str(), span.start, span.end),
         }
     }
 }
@@ -1415,6 +1418,7 @@ fn verify_function(
     }
     verify_host_borrow_callback_uses(function, &prelude_calls)?;
     verify_drops(function, &block_ids, &place_map)?;
+    verify_copy_facts(function, &defs)?;
     verify_moves_and_borrows(function, &defs, &dominators, &reachable, &place_map)?;
     verify_facts(function, &block_ids, &instruction_ids, &defs)?;
     Ok(())
@@ -4290,6 +4294,40 @@ fn verify_moves_and_borrows(
     Ok(())
 }
 
+/// #4318: every MIR `Copy` names the sema fact that made it, and the fact
+/// must fit the operand: a `Scalar` copy reads a Copy-ABI value, a view
+/// materialization reads a view with a canonical copy kernel. (A second
+/// consuming use of one value is `InvalidMove`, `verify_moves_and_borrows`.)
+fn verify_copy_facts(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+) -> Result<(), MirLegalityError> {
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let MirOperation::Copy { value, fact } = &instruction.operation else {
+                continue;
+            };
+            let Some((_, _, ty, ownership)) = defs.get(value) else {
+                continue;
+            };
+            let admitted = match fact {
+                MirCopyFact::Scalar => ownership.mode == MirOwnershipMode::Copy,
+                MirCopyFact::ViewMaterialize => crate::MIR::mir_view_copy_kind(ty).is_some(),
+                MirCopyFact::Explicit | MirCopyFact::Materialize | MirCopyFact::Share => true,
+            };
+            if !admitted {
+                return Err(MirLegalityError::InvalidCopyFact {
+                    function: function.id,
+                    value: *value,
+                    fact: *fact,
+                    span: instruction.span,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn verify_drops(
     function: &MirFunction,
     block_ids: &HashSet<MirBlockId>,
@@ -5331,7 +5369,12 @@ fn inline_call(
                 ty: Some(argument_type.clone()),
                 operation: MirOperation::Copy {
                     value: argument.value,
-                    materialize_view: false,
+                    fact: if argument.shared_auto_clone {
+                        MirCopyFact::Share
+                    } else {
+                        MirCopyFact::Materialize
+                    }
+                    .for_ownership(argument_ownership.mode),
                 },
             });
             value
@@ -5978,12 +6021,9 @@ fn inline_operation(
         MirOperation::InitializeUninit { place } => MirOperation::InitializeUninit {
             place: inline_place(ids, *place),
         },
-        MirOperation::Copy {
-            value,
-            materialize_view,
-        } => MirOperation::Copy {
+        MirOperation::Copy { value, fact } => MirOperation::Copy {
             value: inline_value(ids, *value),
-            materialize_view: *materialize_view,
+            fact: *fact,
         },
         MirOperation::Move { value } => MirOperation::Move {
             value: inline_value(ids, *value),
@@ -12639,13 +12679,10 @@ impl CanonicalWriter {
                 self.bool(*by_value);
                 encode_loop_source_kind(self, source_kind);
             }
-            MirOperation::Copy {
-                value,
-                materialize_view,
-            } => {
+            MirOperation::Copy { value, fact } => {
                 self.tag("copy");
                 self.u64(value.0);
-                self.bool(*materialize_view);
+                self.tag(fact.as_str());
             }
             MirOperation::TraitBox { value, target } => {
                 self.tag("trait-box");
@@ -15976,6 +16013,65 @@ mod ownership_guard_tests {
         function.blocks[3].instructions = write_flag(40, FLAG, true);
         function.blocks[3].terminator = MirTerminator::Jump { target: MirBlockId(1) };
         rejects_second_move(&function);
+    }
+
+    fn verify_copies(function: &MirFunction) -> Result<(), MirLegalityError> {
+        let defs = function.blocks.iter().flat_map(|block| {
+            block.instructions.iter().enumerate().filter_map(move |(index, instruction)| {
+                let ty = instruction.ty.clone()?;
+                let ownership = if ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned };
+                Some((instruction.result?, (block.id, index, ty, ownership)))
+            })
+        }).collect();
+        verify_copy_facts(function, &defs)
+    }
+
+    fn with_copy(source: u64, fact: MirCopyFact, kind: MirTypeKind) -> MirFunction {
+        let mut function = cleanup_function(false);
+        function.blocks[0].instructions.push(instruction(
+            18,
+            MirOperation::Copy { value: MirValueId(source), fact },
+            Some(kind),
+        ));
+        function
+    }
+
+    /// #4318: a copy's fact must fit its operand; a `Scalar` copy of an owned
+    /// String or a view materialization of a Bool is an internal error.
+    #[test]
+    fn copy_fact_must_fit_the_operand_type() {
+        assert!(verify_copies(&with_copy(10, MirCopyFact::Scalar, MirTypeKind::Bool)).is_ok());
+        assert!(verify_copies(&with_copy(12, MirCopyFact::Materialize, MirTypeKind::String)).is_ok());
+        assert!(verify_copies(&with_copy(12, MirCopyFact::ViewMaterialize, MirTypeKind::String)).is_ok());
+        assert!(matches!(
+            verify_copies(&with_copy(12, MirCopyFact::Scalar, MirTypeKind::String)),
+            Err(MirLegalityError::InvalidCopyFact { value: MirValueId(12), fact: MirCopyFact::Scalar, .. })
+        ));
+        assert!(matches!(
+            verify_copies(&with_copy(10, MirCopyFact::ViewMaterialize, MirTypeKind::Bool)),
+            Err(MirLegalityError::InvalidCopyFact { value: MirValueId(10), fact: MirCopyFact::ViewMaterialize, .. })
+        ));
+    }
+
+    /// #4318: two consuming uses of one non-Copy value would need a hidden
+    /// copy; the verifier rejects the second instead.
+    #[test]
+    fn second_consuming_use_of_an_owned_value_is_rejected() {
+        let mut function = cleanup_function(false);
+        function.blocks[0].instructions.extend([
+            instruction(18, MirOperation::Move { value: MirValueId(12) }, Some(MirTypeKind::String)),
+            instruction(19, MirOperation::Move { value: MirValueId(12) }, Some(MirTypeKind::String)),
+        ]);
+        assert!(matches!(
+            verify(&function),
+            Err(MirLegalityError::InvalidMove { value: MirValueId(12), .. })
+        ));
+        let mut copied = cleanup_function(false);
+        copied.blocks[0].instructions.extend([
+            instruction(18, MirOperation::Copy { value: MirValueId(12), fact: MirCopyFact::Share }, Some(MirTypeKind::String)),
+            instruction(19, MirOperation::Move { value: MirValueId(12) }, Some(MirTypeKind::String)),
+        ]);
+        assert!(matches!(verify(&copied), Ok(())));
     }
 
     #[test]

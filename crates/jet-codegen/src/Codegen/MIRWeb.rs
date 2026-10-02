@@ -2498,12 +2498,9 @@ fn js_operation_expression(
             let transferred = js_value_transfer_expression(program, function, *id)?;
             js_write_place_expression(program, function, *place, &transferred)?
         }
-        MirOperation::Copy {
-            value: id,
-            materialize_view,
-        } => {
+        MirOperation::Copy { value: id, fact } => {
             let ty = mir_function_value_type(function, *id)?;
-            if *materialize_view {
+            if *fact == jet_foundation::MIR::MirCopyFact::ViewMaterialize {
                 let kind = mir_view_copy_kind(ty).ok_or_else(|| MirWebError::InvalidMir {
                     message: format!(
                         "MIR view materialization source `{}` has no canonical copy kernel",

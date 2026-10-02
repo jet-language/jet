@@ -18,7 +18,7 @@ use crate::Devtools::{
 
 use jet_foundation::Devtools::{
     JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventSink, JetDevtoolsEventSinkGuard,
-    JetDevtoolsFreshnessFact, JetDevtoolsLifecycleState, JetDevtoolsSelection,
+    JetDevtoolsFreshnessFact, JetDevtoolsSelection,
     JetDevtoolsSourceIdentityFact, JetDevtoolsTimeCursor, JET_DEVTOOLS_MAX_ENVELOPE_BYTES,
     JET_DEVTOOLS_MAX_TEXT_BYTES,
 };

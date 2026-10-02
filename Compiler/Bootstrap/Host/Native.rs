@@ -2062,7 +2062,15 @@ pub fn __jet_bootstrap_compile_with_native(
             .and_then(|function| function.params.first())
             .map(|parameter| &parameter.ty)
             .ok_or_else(|| "checked Source Machine parameter disappeared".to_string())?;
-        let mut __jet_shape_program = __jet_compiler_image.source_program.as_ref().clone();
+        // The Source projection exists only for these host-shape queries,
+        // which read type, field, Core-owner and handle rows: it is converted
+        // from the body-free signature program and dropped below, so the image
+        // keeps only the native program resident.
+        let mut __jet_shape_program = crate::__jet_bootstrap_mir_program_from_host(
+            &crate::compiler_bootstrap_compiler_image::compiler_image_signature_program(
+                __jet_compiler_image.program.as_ref(),
+            ),
+        )?;
         let mut __jet_shape_for = |checked_type: &::jet_foundation::MIR::MirType|
             -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {
             let mut __jet_shape_type = __jet_bootstrap_type_from_host(checked_type)?;
@@ -2087,7 +2095,6 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_root_lease,
             __jet_bindings,
             __jet_compiler_image.program.clone(),
-            __jet_compiler_image.source_program.clone(),
             __jet_machine_abi_shape,
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),

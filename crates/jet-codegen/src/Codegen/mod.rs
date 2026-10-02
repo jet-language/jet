@@ -1019,9 +1019,14 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push('\n');
 }
 
+// Compiler-owned runtime enums (`tir_to_mir_types::is_compiler_owned_type`):
+// MIR emission names them by their mangled key and never declares them per
+// program, so the cached runtime owns both declarations.
 const ORDERING_ENUM: &str = concat!(
     "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n",
     "pub enum __jet_Ordering { __jet_Less, __jet_Equal, __jet_Greater }\n\n",
+    "#[derive(Clone, Copy, Debug, PartialEq, Eq)]\n",
+    "pub enum __jet_RemoveBy { __jet_Val, __jet_Slot }\n\n",
 );
 const COMPARABLE_TRAIT: &str =
     "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";

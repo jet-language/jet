@@ -111,10 +111,10 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 if !sema_loop_value_rewrite_collecting_statements(&updated_body, local, item_type, environment, &diagnostics) -> return false
                 statements[index] = TStmt.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: vectorization, body: updated_body, span: span}
             }
-            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> {
+            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_rewrite_collecting_statements(&updated_body, local, item_type, environment, &diagnostics) -> return false
-                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, body: updated_body, span: span}
+                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: source_stable, body: updated_body, span: span}
             }
             .While(label, condition, body, span) -> {
                 updated_body := body
@@ -298,10 +298,10 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 if !sema_loop_value_widen_result_breaks_in(&updated_body, root_label, result_type, false, environment, &diagnostics) -> return false
                 statements[index] = TStmt.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: vectorization, body: updated_body, span: span}
             }
-            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> {
+            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_widen_result_breaks_in(&updated_body, root_label, result_type, false, environment, &diagnostics) -> return false
-                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, body: updated_body, span: span}
+                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: source_stable, body: updated_body, span: span}
             }
             .While(label, condition, body, span) -> {
                 updated_body := body

@@ -6713,10 +6713,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
-            MirOperation::Copy {
-                value,
-                materialize_view,
-            } => {
+            MirOperation::Copy { value, fact } => {
                 let source_ty = self.value_type(frame_index, *value, span)?.clone();
                 let mut value = self.value(frame_index, *value, span)?;
                 if let RuntimeValue::Address(address) = &value {
@@ -6724,7 +6721,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     require_address_access(&address, MirAccess::Read, span)?;
                     value = self.read_place(address.frame, address.place, span)?;
                 }
-                if *materialize_view {
+                if *fact == jet_foundation::MIR::MirCopyFact::ViewMaterialize {
                     let RuntimeValue::Data(data) = value else {
                         return Err(mir_error_at(
                             "MIR view materialization received a non-data runtime value",

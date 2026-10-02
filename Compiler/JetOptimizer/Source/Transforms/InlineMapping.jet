@@ -18,6 +18,7 @@ use jet_foundation.[
     MIRCallee,
     MIRCaptureOperand,
     MIRConstant,
+    MIRCopyFact,
     MIRConversion,
     MIRDataPlan,
     MIRDataPlanCallable,
@@ -70,6 +71,7 @@ use jet_foundation.[
     TypeTupleField,
     mir_call_metadata_is_variadic,
     mir_copy_ownership,
+    mir_copy_fact_for_ownership,
     mir_type_from_kind,
     mir_type_id,
     mir_type_is_unit,
@@ -79,7 +81,7 @@ use jet_foundation.[
     type_identity_key,
 ]
 
-struct MIRInlineIDMap { pub source: Int, pub target: Int }
+struct MIRInlineIDMap { pub source: U64, pub target: U64 }
 
 struct MIRInlineValueMap { pub source: MIRValueID, pub target: MIRValueID, pub parameter: Bool }
 
@@ -127,12 +129,12 @@ fn mir_pass_inline_plan(
     }
     identity :: "caller={caller.id.value}:call={call_instruction.id.value}:callee={callee.id.value}"
     maps := MIRInlineMaps{values: [MIRInlineValueMap]{}, blocks: [MIRInlineIDMap]{}, places: [MIRInlinePlaceMap]{}, locals: [MIRInlineIDMap]{}, scopes: [MIRInlineIDMap]{}, operations: [MIRInlineIDMap]{}}
-    used_values := [Int]{}
-    used_blocks := [Int]{}
-    used_places := [Int]{}
-    used_locals := [Int]{}
-    used_scopes := [Int]{}
-    used_operations := [Int]{}
+    used_values := [U64]{}
+    used_blocks := [U64]{}
+    used_places := [U64]{}
+    used_locals := [U64]{}
+    used_scopes := [U64]{}
+    used_operations := [U64]{}
     loop value in caller.values -> &used_values.push(value.id.value)
     loop block in caller.blocks {
         &used_blocks.push(block.id.value)
@@ -172,7 +174,8 @@ fn mir_pass_inline_plan(
                 ownership.moved = false
                 ownership.last_use = false
                 &adapter_values.push(MIRValueFact{id: cloned, ty: argument_fact.ty, span: argument_fact.span, ownership: ownership})
-                &adapters.push(MIRInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(cloned), ty: Val(argument_fact.ty), operation: MIROperation.Copy{value: argument.value, materialize_view: false}})
+                fact :: mir_copy_fact_for_ownership(if argument.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, argument_fact.ownership.mode)
+                &adapters.push(MIRInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(cloned), ty: Val(argument_fact.ty), operation: MIROperation.Copy{value: argument.value, fact: fact}})
                 cloned
             }
             mir_pass_inline_call_arg_consumes(argument) -> {
@@ -369,20 +372,20 @@ fn mir_pass_inline_call_arg_consumes(argument: MIRCallArg) -> Bool Never! {
     if argument.implicit_clone || argument.shared_auto_clone || argument.widen_fixed_to_list -> false else -> argument.access == .Move || argument.owned_last_use
 }
 
-fn mir_pass_inline_fresh_id(used: &[Int], namespace: String, identity: String) -> Int Never! {
+fn mir_pass_inline_fresh_id(used: &[U64], namespace: String, identity: String) -> U64 Never! {
     salt := 0
     loop {
-        candidate :: stable_id(namespace, "{identity}:{salt}")
-        if candidate != 0 && !mir_pass_inline_int_seen(used, candidate) {
+        candidate :: stable_id(namespace, "{identity}:salt={salt}")
+        if !mir_pass_inline_int_seen(used, candidate) {
             &used.push(candidate)
             return candidate
         }
         salt += 1
     }
-    0
+    U64{0}
 }
 
-fn mir_pass_inline_int_seen(rows: [Int], value: Int) -> Bool Never! {
+fn mir_pass_inline_int_seen(rows: [U64], value: U64) -> Bool Never! {
     loop row in rows { if row == value -> return true }
     false
 }
@@ -406,7 +409,7 @@ fn mir_pass_inline_optional_value(maps: MIRInlineMaps, value: MIRValueID?) -> MI
     Val(mir_pass_inline_value(maps, present))
 }
 
-fn mir_pass_inline_id_target(rows: [MIRInlineIDMap], source: Int) -> Int Never! {
+fn mir_pass_inline_id_target(rows: [MIRInlineIDMap], source: U64) -> U64 Never! {
     loop row in rows { if row.source == source -> return row.target }
     source
 }
@@ -754,7 +757,7 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
         .WritePlace(place, value) -> Val(MIROperation.WritePlace{place: mir_pass_inline_place(maps, place), value: mir_pass_inline_value(maps, value)})
         .ReplacePlace(place, value) -> Val(MIROperation.ReplacePlace{place: mir_pass_inline_place(maps, place), value: mir_pass_inline_value(maps, value)})
         .InitializeUninit(place) -> Val(MIROperation.InitializeUninit{place: mir_pass_inline_place(maps, place)})
-        .Copy(value, materialize_view) -> Val(MIROperation.Copy{value: mir_pass_inline_value(maps, value), materialize_view: materialize_view})
+        .Copy(value, fact) -> Val(MIROperation.Copy{value: mir_pass_inline_value(maps, value), fact: fact})
         .Move(value) -> Val(MIROperation.Move{value: mir_pass_inline_value(maps, value)})
         .Constant(value) -> Val(MIROperation.Constant{value: value})
         .Unary(op, value) -> Val(MIROperation.Unary{op: op, value: mir_pass_inline_value(maps, value)})

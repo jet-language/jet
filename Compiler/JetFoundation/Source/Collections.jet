@@ -620,9 +620,14 @@ pub fn sema_collection_is_set(receiver: Type) -> Bool Never! {
 // The one lookup: the checked row for this receiver and method, with its
 // receiver-specific access and callback positions resolved.
 pub fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
+    sema_collection_method_contract_in(COLLECTION_OPERATIONS, receiver, method)
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn sema_collection_method_contract_in(rows: [CollectionOperationRow], receiver: Type, method: String) -> SemaCollectionMethodContract? {
     kind :: sema_collection_kind(receiver) ?? return None
     family := sema_collection_family(kind)
-    loop row in COLLECTION_OPERATIONS {
+    loop row in rows {
         if row.name == method && row.status != CollectionStatus.Proposed && collection_receivers_accept(row.receivers, family) {
             callbacks := [Int]{}
             seeds := [Int]{}
@@ -817,14 +822,16 @@ fn sema_collection_filtered(filtered: Type, callback: Type) -> Type? {
     Val(filtered)
 }
 
-pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
+// `literal_remove_mode` is the removal mode a literal `RemoveBy` selector fixed;
+// only a run-time selector keeps the dynamic two-kernel removal.
+pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
     element := sema_collection_kind_element(contract.kind)
     is_view := sema_collection_family(contract.kind) == CollectionReceivers.View
     is_float := element == Type.Float || element == Type.Float32
     is_f32 := element == Type.Float32
     callback :: callback_return ?? Type.Named{name: "Unit"}
     fallible := if callback == {.Result(_, _) -> true else -> false}
-    remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> TListRemoveMode.Dynamic
+    remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
     if contract.row.op == {
         .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op}
         .Closure(op) -> SemaCollectionOperation.Closure{operation: op}

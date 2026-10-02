@@ -1938,7 +1938,7 @@ fn string_bytes_receiver_is_owned(receiver: &TExpr, cx: &Cx) -> bool {
     }
     match &receiver.kind {
         TExprKind::StrLit(_)
-        | TExprKind::Clone(_)
+        | TExprKind::Clone(..)
         | TExprKind::ExplicitCopy(_)
         | TExprKind::MaterializeView(_) => true,
         TExprKind::Call { name, .. } => {
@@ -2023,7 +2023,7 @@ fn lower_builtin_arg(
     let resource_take = matches!(&value.kind, TExprKind::ResourceTake(_));
     let already_owned = matches!(
         &value.kind,
-        TExprKind::Clone(_)
+        TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)
             | TExprKind::ResourceTake(_)
@@ -2038,7 +2038,7 @@ fn lower_builtin_arg(
         env.note_clone(&ty);
         value = TExpr {
             ty,
-            kind: TExprKind::Clone(Box::new(value)),
+            kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
         };
     }
     value
@@ -5201,7 +5201,7 @@ fn lower_method_call_impl(
             let recv = lower_expr(receiver, cx, env);
             return TExpr {
                 ty: Type::String,
-                kind: TExprKind::Clone(Box::new(recv)),
+                kind: TExprKind::Clone(Box::new(recv), jet_foundation::MIR::MirCopyFact::Materialize),
             };
         });
     }

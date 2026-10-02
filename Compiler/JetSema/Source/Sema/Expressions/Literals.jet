@@ -824,7 +824,7 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment) -> B
 
 // D-CAPBUNDLE1: the bundle markers of a distinct type named in this scope.
 fn sema_expression_distinct_bundles(name: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> [String]? {
-    owner :: sema_expression_type_symbol(&scopes, name) ?? return None
+    owner :: sema_expression_type_symbol(&scopes, environment, name) ?? return None
     declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
     if declaration == .Distinct(definition) {
         derives :: loop marker in definition.derives -> marker.name

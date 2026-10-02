@@ -12,12 +12,20 @@ use jet_foundation.[
     Expr,
     FunctionDefaultRef,
     Span,
+    Symbol,
     SymbolID,
+    SymbolKind,
     TCallArg,
     TExpr,
+    TExprKind,
+    TLetTy,
+    TStmt,
     Type,
     ast_empty_call_arg_flags,
     expr_span,
+    symbol_id,
+    tir_call_arg_copy_fact,
+    tir_symbol_local,
     type_identity_equal,
 ]
 
@@ -25,6 +33,12 @@ struct SemaCallTypedArguments {
     pub values: [TExpr]
     pub slots: [Int]
     pub required_types: [Type]
+    // Each argument's written position (`-1` for a default). When a default
+    // reads an earlier parameter, every argument is pinned in
+    // `binder_ref_<site>_<slot>` in the Rust reference's source order.
+    pub source_indices: [Int]
+    pub pin_arguments: Bool{false}
+    pub binder_site: Int{0}
 }
 
 fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment) -> Type Never! {
@@ -286,6 +300,9 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
     values := [TExpr]{}
     slots := [Int]{}
     required_types := [Type]{}
+    source_indices := [Int]{}
+    pin_arguments := false
+    binder_site := 0
     loop index in 0..<args.len() {
         slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
@@ -300,7 +317,20 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             &diagnostics.push(sema_call_convention_diagnostic(callee, parameter, args[index], decision))
             return None
         }
+        // Rust CallBinder `rewrite` + `register_binder_refs`: a default names
+        // earlier parameters through their declaration-slot temporaries, so
+        // they shadow any caller binding of the same name.
+        binder_refs :: args[index].flags.binder_refs
+        binder_start :: context.name_references.len()
+        binder_keys :: if binder_refs.len() > 0 -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, &scopes, &state, expr_span(args[index].expr)) else -> [String]{}
         checked_argument :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if binder_refs.len() > 0 {
+            sema_scope_leave(&scopes, &state)
+            if sema_call_binder_refs_read(binder_keys, binder_start, context) {
+                pin_arguments = true
+                binder_site = args[index].flags.binder_site ?? span.start
+            }
+        }
         value :: checked_argument ?? return None
         compatible :: sema_call_type_assignable(required_declared, value.ty, environment) ?? return None
         if !compatible {
@@ -310,8 +340,100 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         &values.push(value)
         &slots.push(slot)
         &required_types.push(required)
+        &source_indices.push(args[index].flags.source_index ?? -1)
     }
-    Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types})
+    Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: source_indices, pin_arguments: pin_arguments, binder_site: binder_site})
+}
+
+fn sema_call_binder_ref_symbol(environment: SemaScopeEnvironment, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
+    id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, "binder_ref_{site}_{slot}")
+    Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+}
+
+// Opens the default's own frame with each earlier parameter bound to its slot
+// temporary; the caller leaves it after checking the default. A placeholder
+// enters ownership only when the default reads it, so an unread one is no
+// unused binding. `span` is the default expression, so every read follows it.
+fn sema_call_enter_binder_refs(refs: [BinderRef], site: Int, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, span: Span) -> [String] Never! {
+    owner :: sema_scope_function_owner_key(scopes)
+    _ := sema_scope_enter(&scopes, &state, owner)
+    keys := [String]{}
+    loop reference in refs {
+        symbol :: sema_call_binder_ref_symbol(environment, owner, site, reference.slot, reference.name, reference.ty, span)
+        _ := sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, None, false)
+        &keys.push(symbol.id.key)
+    }
+    keys
+}
+
+fn sema_call_binder_refs_read(keys: [String], start: Int, context: SemaCheckContext) -> Bool Never! {
+    loop index in start..<context.name_references.len() {
+        if keys.contains(context.name_references[index].symbol.id.key) -> return true
+    }
+    false
+}
+
+// Rust `source_arg_order` + `bind_arg_temporaries`: once a default reads an
+// earlier parameter, every supplied argument is evaluated into
+// `binder_ref_<site>_<slot>` in written order, then every default in
+// declaration order, so a default reads the value already passed and runs
+// after every supplied argument. The receiver stays in the call, as in the
+// reference. Borrowed arguments are pinned as borrows so a default can read
+// them too.
+fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: &[TCallArg], environment: SemaScopeEnvironment, scopes: SemaScopeTable, span: Span) -> [TStmt] Never! {
+    bindings := [TStmt]{}
+    if !typed.pin_arguments -> return bindings
+    owner :: sema_scope_function_owner_key(scopes)
+    order := [Int]{}
+    loop written in 0..<typed.source_indices.len() {
+        loop index in 0..<typed.source_indices.len() {
+            if typed.source_indices[index] == written -> &order.push(index)
+        }
+    }
+    loop index in 0..<typed.source_indices.len() {
+        if typed.source_indices[index] < 0 -> &order.push(index)
+    }
+    loop index in order {
+        slot :: typed.slots[index]
+        // A variadic slot spread over several arguments has no single slot
+        // temporary; those arguments stay in the call.
+        shared_slot := false
+        loop other in 0..<typed.slots.len() {
+            if other != index && typed.slots[other] == slot -> shared_slot = true
+        }
+        if shared_slot -> next
+        original :: ~lowered[index].value
+        ty :: original.ty
+        init := original
+        if lowered[index].clone || lowered[index].arc_clone {
+            init = sema_tir_expr(ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, original.span)
+            lowered[index].clone = false
+            lowered[index].arc_clone = false
+        }
+        borrowed :: lowered[index].borrow || lowered[index].mut_borrow
+        if borrowed {
+            access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
+            init = sema_tir_expr(ty, TExprKind.Borrow{place: init, access: access}, original.span)
+        }
+        symbol :: sema_call_binder_ref_symbol(environment, owner, typed.binder_site, slot, params[slot].name, ty, span)
+        local := tir_symbol_local("binder_ref_{typed.binder_site}_{slot}", span, symbol.id)
+        local.generated = true
+        local.mutable = lowered[index].mut_borrow
+        local.deref = borrowed
+        local_value :: sema_tir_expr(ty, TExprKind.Local{local: local}, original.span)
+        lowered[index].value = if params[slot].convention == AccessConvention.Move -> sema_tir_expr(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+        &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
+    }
+    bindings
+}
+
+// Places the binder pins before the call they feed.
+fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) -> TExpr Never! {
+    if pins.len() == 0 -> return call_value
+    ty :: ~call_value.ty
+    body := pins
+    &body.push(TStmt.ExprStmt{value: call_value, span: span})
+    sema_tir_expr(ty, TExprKind.InlineBlock{body: body}, span)
 }
 
 fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
@@ -358,15 +480,22 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
 
 pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, &args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
+    if typed.pin_arguments {
+        &diagnostics.push(sema_error("E0906", span, "a default argument of `{callee}` reads an earlier parameter on a call route that cannot pin it", "a default that names an earlier parameter reads that slot's already-passed value", "pass this argument explicitly"))
+        return None
+    }
     Val(sema_call_lower_bound_arguments(typed, params, &args, environment))
 }
 
 // This path runs Ownership after expression typing and before lowering. The
 // ownership hook may mark implicit_clone on the source arg, so lowering must
-// happen only after it accepts and completes.
-pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
+// happen only after it accepts and completes. `pins` receives the
+// declaration-slot temporaries the caller places before its call.
+pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, pins: &[TStmt], diagnostics: &[Diagnostic]) -> [TCallArg]? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
-    Val(sema_call_lower_bound_arguments(typed, params, &args, environment))
+    lowered := sema_call_lower_bound_arguments(typed, params, &args, environment)
+    loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span) -> &pins.push(pin)
+    Val(lowered)
 }

@@ -51,6 +51,8 @@ use jet_foundation.[
 ]
 use jet_sema.[
     SemaGraphModuleResult,
+    SemaRegistrationNominal,
+    sema_registration_is_compiler_owned_enum,
 ]
 
 struct JetCodegenNominalIdentity {
@@ -69,6 +71,14 @@ fn jet_codegen_is_type_parameter(names: [String], name: String) -> Bool Never! {
 
 fn jet_codegen_qualified_type_key(module_identity: String, name: String) -> String Never! {
     if module_identity == "" -> name else -> "{module_identity}::{name}"
+}
+
+// The canonical MIR type key of a registered nominal. Compiler-owned runtime
+// enums (`Ordering`, `RemoveBy`) keep the bare shared spelling, like Rust's
+// compiler-owned MIR rows, so every module's values name one type.
+fn jet_codegen_nominal_type_key(module_identity: String, nominal: SemaRegistrationNominal) -> String Never! {
+    if sema_registration_is_compiler_owned_enum(nominal) -> return nominal.symbol.name
+    jet_codegen_qualified_type_key(module_identity, nominal.symbol.name)
 }
 
 fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> MIRTraitRef? {
@@ -231,25 +241,27 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     if jet_codegen_is_type_parameter(generic_names, name) -> return None
     loop semantic_module in modules {
         if semantic_module.module_identity == current_module_identity {
-            loop nominal in semantic_module.nominals {
-                if nominal.symbol.name == name {
-                    key :: jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name)
-                    return Val(JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal.symbol.name, key: key, qualified_name: key})
-                }
+            if semantic_module.nominal_positions.get(name) == .Val(position) {
+                nominal_name :: semantic_module.nominals[position].symbol.name
+                key :: jet_codegen_nominal_type_key(semantic_module.module_identity, semantic_module.nominals[position])
+                return Val(JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal_name, key: key, qualified_name: key})
             }
         }
     }
-    // A lookup that misses the current module visits every nominal of every
-    // module, so the qualified key is built only for nominals whose leaf
-    // `name` ends with (both accepted spellings end with the leaf).
+    // A lookup that misses the current module asks every module for the two
+    // accepted spellings: the bare leaf and the module-qualified key.
     found := JetCodegenNominalIdentity?{None}
     loop semantic_module in modules {
-        loop nominal in semantic_module.nominals {
-            if !name.ends_with(nominal.symbol.name) -> next
-            qualified_name :: jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name)
-            if (name == nominal.symbol.name && jet_codegen_leaf_claims_bare_name(semantic_module.module_name, name)) || name == qualified_name {
-                candidate := JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal.symbol.name, key: qualified_name, qualified_name: qualified_name}
-                found = jet_codegen_merge_nominal_identity(found, candidate)
+        if semantic_module.nominal_positions.get(name) == .Val(position) {
+            found = jet_codegen_merge_nominal_spelling(found, semantic_module, position, name)
+        }
+        if semantic_module.module_identity != "" {
+            prefix :: "{semantic_module.module_identity}::"
+            if name.starts_with(prefix) {
+                leaf :: jet_codegen_type_key_leaf(name, prefix)
+                if semantic_module.nominal_positions.get(leaf) == .Val(position) {
+                    found = jet_codegen_merge_nominal_spelling(found, semantic_module, position, name)
+                }
             }
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
@@ -261,6 +273,22 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
         }
     }
     found
+}
+
+// Merges the nominal at `position` when `name` spells it: by its bare leaf
+// (when the leaf may claim the bare name) or by its module-qualified key.
+fn jet_codegen_merge_nominal_spelling(found: JetCodegenNominalIdentity?, semantic_module: SemaGraphModuleResult, position: Int, name: String) -> JetCodegenNominalIdentity? {
+    nominal_name :: semantic_module.nominals[position].symbol.name
+    qualified_name :: jet_codegen_nominal_type_key(semantic_module.module_identity, semantic_module.nominals[position])
+    if (name == nominal_name && jet_codegen_leaf_claims_bare_name(semantic_module.module_name, name)) || name == qualified_name {
+        return jet_codegen_merge_nominal_identity(found, JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal_name, key: qualified_name, qualified_name: qualified_name})
+    }
+    ~found
+}
+
+fn jet_codegen_type_key_leaf(name: String, prefix: String) -> String Never! {
+    bytes :: name.bytes()
+    String.from_bytes(~(bytes[prefix.bytes().len()..<bytes.len()])) ?? ""
 }
 
 // A bare built-in boundary spelling (`Path`, `URL`, `DateTime`) names only its
@@ -662,7 +690,7 @@ fn jet_codegen_mir_field_id(field: JetCodegenResolvedField) -> MIRFieldID Never!
 fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolID) -> MIRTypeID Never! {
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key == symbol.key -> return mir_type_id(jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name))
+            if nominal.symbol.id.key == symbol.key -> return mir_type_id(jet_codegen_nominal_type_key(semantic_module.module_identity, nominal))
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
             candidate :: jet_codegen_core_owner_identity(owner, semantic_module)

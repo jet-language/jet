@@ -83,7 +83,8 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         resolved :: sema_call_materialize_defaults(params, binding, &checked_args, resolved_defaults, span, &diagnostics) ?? return None
         resolved_binding = resolved
     }
-    lowered := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
+    pins := [TStmt]{}
+    lowered := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, &scopes, &tail_store, &context, span, &pins, &diagnostics) ?? return None
     result_type_raw :: sema_call_signature_return(resolved_signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment)
     contract_bindings := [TStmt]{}
@@ -99,7 +100,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         }
     }
     call_value :: sema_tir_expr(result_type, TExprKind.IndirectCall{callee: callee_value, type_args: [Type]{}, args: lowered, signature: resolved_signature}, span)
-    value :: if {
+    contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
@@ -108,6 +109,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         }
         else -> call_value
     }
+    value :: sema_call_with_binder_pins(^pins, ^contracted, span)
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return None
     facts :: sema_call_facts(resolved_signature, [Type]{}, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, &state, span)

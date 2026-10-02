@@ -96,7 +96,7 @@ means the Bool class.
 | `ReadPlace(p)`, `MovePlace{p}` | Place exists; result is the place type. |
 | `WritePlace{p, v}`, `ReplacePlace{p, v}` | Place exists; `v` is compatible with the place type; no result. |
 | `InitializeUninit{p}` | Place exists; no result. |
-| `Copy{v}`, `Move{v}`, `AttachTag{v}` | Result is the type of `v`. |
+| `Copy{v, fact}`, `Move{v}`, `AttachTag{v}` | Result is the type of `v`. (MIR legality, not lint, checks `fact` against `v`: `scalar` needs a Copy-ABI value, `view_materialize` a view with a copy kernel; #4318.) |
 | `TraitBox{v, target}` | Has a result. |
 | `Constant(c)` | Int → integer, Float → float, Bool → Bool, Char → Char, String → String, Unit → unit, for a result whose type is not nominal. |
 | `Unary{Neg, v}` | `v` is numeric; result is `v`'s type. |

@@ -17,6 +17,7 @@ use jet_foundation.[
     THandleOp,
     Type,
     TypeTupleField,
+    tir_call_arg_copy_fact,
     type_identity_equal,
     type_tuple_struct_name,
 ]
@@ -153,7 +154,7 @@ fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, arg
     ownership := sema_ownership_check_method_call(&state, "send", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := payload
-    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
+    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(updated_args[0].flags.shared_auto_clone)}, value.span)
     sema_function_reactive_note_channel(&context, updated_args[0].expr, payload_ty)
     lowered := [TExpr]{value}
     tir := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)

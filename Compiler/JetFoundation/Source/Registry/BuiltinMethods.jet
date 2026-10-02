@@ -385,7 +385,12 @@ fn builtin_method_receiver_accepts(family: BuiltinMethodReceiver, receiver: Type
 
 // The one lookup: the row for this receiver, method and argument count.
 pub fn builtin_method_row(receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
-    loop row in BUILTIN_METHOD_ROWS {
+    builtin_method_row_in(BUILTIN_METHOD_ROWS, receiver, method, argument_count)
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn builtin_method_row_in(rows: [BuiltinMethodRow], receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
+    loop row in rows {
         if row.name == method && row.parameters.len() == argument_count && builtin_method_receiver_accepts(row.receiver, receiver) -> return Val(row)
     }
     None

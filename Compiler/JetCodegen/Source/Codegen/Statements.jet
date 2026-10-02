@@ -17,6 +17,7 @@ use jet_foundation.[
     MIRCallSignature,
     MIRCallee,
     MIRConstant,
+    MIRCopyFact,
     MIRConversion,
     MIRDropKind,
     MIRFieldID,
@@ -116,6 +117,7 @@ use jet_foundation.[
     type_is_unit_callable_return,
 ]
 use jet_sema.[
+    SemaGraphModuleResult,
     SemaRegistrationNominalKind,
 ]
 
@@ -473,7 +475,7 @@ fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, subject: TExpr, 
     // A read window tests the parameter's own place, which nothing can change
     // during the match: no copy is needed to keep the subject stable.
     if clone_subject && jet_codegen_read_window_of(builder, subject_value) == None {
-        subject_value = jet_codegen_emit_value(&builder, span, subject.ty, MIROperation.Copy{value: subject_value, materialize_view: false})
+        subject_value = jet_codegen_emit_value(&builder, span, subject.ty, MIROperation.Copy{value: subject_value, fact: MIRCopyFact.Materialize})
         // The copy tests the same place, so its payload bindings still alias it.
         if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: subject_value, place: place})
     }
@@ -604,7 +606,7 @@ fn jet_codegen_loop_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID
 }
 
 fn jet_codegen_sort_loop_block_ids(blocks: &[MIRBlockID]) Never! {
-    keys := [Int]{}
+    keys := [U64]{}
     loop block in blocks -> &keys.push(block.value)
     sorted := [MIRBlockID]{}
     loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(blocks[position])
@@ -614,7 +616,7 @@ fn jet_codegen_sort_loop_block_ids(blocks: &[MIRBlockID]) Never! {
 fn jet_codegen_loop_body_blocks(builder: JetCodegenBuilder, header: MIRBlockID, body: MIRBlockID, exit: MIRBlockID, advance: MIRBlockID?) -> [MIRBlockID] Never! {
     pending := [MIRBlockID]{body}
     region := [MIRBlockID]{}
-    in_region := [Int:Bool]{}
+    in_region := [U64:Bool]{}
     index := 0
     loop index < pending.len() {
         candidate := pending[index]
@@ -961,24 +963,33 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, ty: Type, membe
     }
 }
 
-// D-MEM-COPYSEM1: a plain `loop item in list` over a read parameter's list
-// walks the list in place: an index runs over the list's length and the item
-// is a read-only alias of its slot, so neither the list nor any item is
-// copied. The parameter cannot change while the loop runs, so every alias
-// reads exactly what the copied item would hold. False (nothing emitted)
-// when `collection` is not such a list. A columnar list (D-SOA1) stores one
-// column per field, so its slots are not places an alias can name; the caller
-// keeps the gathered-record iteration for it.
-fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: String, collection: TExpr, body: [TStmt], span: Span) -> Bool {
+// D-MEM-COPYSEM1: a plain `loop item in list` (or `loop (index, item) in
+// list`) over a read parameter's list walks the list in place: an index runs
+// over the list's length and the item is a read-only alias of its slot, so
+// neither the list nor any item is copied; the two-name form binds that index
+// as `index`. The parameter cannot change while the loop runs, so every alias
+// reads exactly what the copied item would hold. #4318 §4: a stable source
+// (sema proved the body never mentions its root) walks the same way when it is
+// rooted at a local or any parameter. False (nothing emitted) when
+// `collection` is not such a list. A columnar list (D-SOA1) stores one column
+// per field, so its slots are not places an alias can name; the caller keeps
+// the gathered-record iteration for it.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs::read_list_walk
+fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, source_stable: Bool, body: [TStmt], span: Span) -> Bool {
     listed := Type?{None}
     if jet_codegen_builtin_untag(collection.ty) == .List(inner) -> listed = Val(inner)
     element :: listed ?? return false
-    if jet_codegen_read_window_place(&builder, collection) == None -> return false
-    length_expr := TExpr{ty: Type.Int, kind: TExprKind.BuiltinMethod{receiver: collection, operation: TBuiltinOp.LenList, args: [TExpr]{}}, span: span, integer_bounds: None, cost: None}
+    if jet_codegen_read_window_place(&builder, collection) == None && !(source_stable && jet_codegen_stable_source_place(&builder, collection) != None) -> return false
+    // The walk reads the list's own slots, so a compiler copy of the source
+    // (a share of a later-used local) is never made.
+    list := collection
+    if collection.kind == .Clone(inner, _) -> list = inner
+    length_expr := TExpr{ty: Type.Int, kind: TExprKind.BuiltinMethod{receiver: list, operation: TBuiltinOp.LenList, args: [TExpr]{}}, span: span, integer_bounds: None, cost: None}
     loop_scope_depth := builder.scope_depth
     jet_codegen_enter_lexical(&builder)
     length := jet_codegen_lower_expr(&builder, length_expr)
-    index_local := tir_user_local("read_walk_index_{span.start}", span)
+    index_local := if variable_two == None -> tir_user_local("read_walk_index_{span.start}", span) else -> variable
+    item_local := variable_two ?? variable
     index_place := jet_codegen_bind_local(&builder, index_local, Type.Int, true, None, None, false)
     zero := jet_codegen_emit_value(&builder, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
     _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: index_place, value: zero})
@@ -995,8 +1006,8 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     jet_codegen_switch_block(&builder, body_block)
     index_expr := TExpr{ty: Type.Int, kind: TExprKind.Local{local: index_local}, span: span, integer_bounds: None, cost: None}
     location := jet_codegen_assignment_panic_location(&builder, span, false)
-    item_place := jet_codegen_index_place(&builder, collection, index_expr, TIndexKind.List, element, MIRAccess.Read, location, span)
-    _ := jet_codegen_bind_local_alias(&builder, tir_user_local(variable, span), element, item_place, false)
+    item_place := jet_codegen_index_place(&builder, list, index_expr, TIndexKind.List, element, MIRAccess.Read, location, span)
+    _ := jet_codegen_bind_local_alias(&builder, item_local, element, item_place, false)
     jet_codegen_lower_block(&builder, body)
     if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: advance_block})
     jet_codegen_switch_block(&builder, advance_block)
@@ -1011,8 +1022,8 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     true
 }
 
-fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: String, variable_two: String?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span) {
-    if method_kind == None && variable_two == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, label, variable, collection, body, span) -> return
+fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span) {
+    if method_kind == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, label, variable, variable_two, collection, source_stable, body, span) -> return
     iter_init_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_init", "jet_loop_iter_init", 5, [Bool]{false, false, false, false, false})
     iter_has_next_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_has_next", "jet_loop_iter_has_next", 1, [Bool]{true})
     iter_value_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_value", "jet_loop_iter_value", 1, [Bool]{true})
@@ -1048,8 +1059,11 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variabl
     source_expression := if method_kind != None -> source else -> collection
     source_value := if source_expression.kind == {
         .Local(local) -> if {
-            owns_source && !indexed_pair && source_kind != MIRLoopSourceKind.ChannelReceiver -> {
+            // A read-only alias names another value's slot: the cursor reads
+            // (and so copies) it instead of moving the slot out of its owner.
+            owns_source && !indexed_pair && source_kind != MIRLoopSourceKind.ChannelReceiver && !jet_codegen_local_is_read_alias(builder, local) -> {
                 place := jet_codegen_lower_local_place(&builder, local)
+                jet_codegen_retain_place_access(&builder, place, MIRAccess.Move)
                 jet_codegen_emit_value(&builder, source_expression.span, source_expression.ty, MIROperation.MovePlace{place: place})
             } else -> jet_codegen_lower_expr(&builder, source_expression)
         }
@@ -1089,14 +1103,9 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variabl
             }
         }
     }
-    first_local := tir_user_local(variable, span)
-    first_place := jet_codegen_bind_local(&builder, first_local, first_type, false, None, None, false)
+    first_place := jet_codegen_bind_local(&builder, variable, first_type, false, None, None, false)
     second_place := MIRPlaceID?{None}
-    if variable_two != None {
-        second_name :: variable_two
-        second_local := tir_user_local(second_name, span)
-        second_place = Val(jet_codegen_bind_local(&builder, second_local, second_type, false, None, None, false))
-    }
+    if variable_two == .Val(second_local) -> second_place = Val(jet_codegen_bind_local(&builder, second_local, second_type, false, None, None, false))
     condition_block := jet_codegen_new_block(&builder, span, "for-in-condition")
     body_block := jet_codegen_new_block(&builder, span, "for-in-body")
     advance_block := jet_codegen_new_block(&builder, span, "for-in-advance")
@@ -1189,8 +1198,9 @@ fn jet_codegen_assignment_destination_is_string_view(builder: JetCodegenBuilder,
 fn jet_codegen_assignment_value(builder: &JetCodegenBuilder, value: TExpr, clone_value: Bool, destination_is_view: Bool, span: Span) -> MIRValueID {
     lowered := jet_codegen_lower_expr(&builder, value)
     if !clone_value -> return lowered
-    materialize_view := jet_codegen_is_string_view_value(builder, value) && !destination_is_view
-    jet_codegen_emit_value(&builder, span, value.ty, MIROperation.Copy{value: lowered, materialize_view: materialize_view})
+    fact := MIRCopyFact.Materialize
+    if jet_codegen_is_string_view_value(builder, value) && !destination_is_view -> fact = MIRCopyFact.ViewMaterialize
+    jet_codegen_emit_value(&builder, span, value.ty, MIROperation.Copy{value: lowered, fact: fact})
 }
 
 fn jet_codegen_lower_index_assign(builder: &JetCodegenBuilder, uninit: Bool, base: TExpr, index: TExpr, is_map: Bool, value: TExpr, span: Span) {
@@ -1211,6 +1221,7 @@ fn jet_codegen_lower_index_assign(builder: &JetCodegenBuilder, uninit: Bool, bas
     _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: right})
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::is_core_file_owner
 fn jet_codegen_is_core_file_owner_type(builder: JetCodegenBuilder, ty: Type) -> Bool Never! {
     name := if ty == {
         .Named(value) | .Apply(value, _) -> value
@@ -1225,10 +1236,8 @@ fn jet_codegen_is_core_file_owner_type(builder: JetCodegenBuilder, ty: Type) -> 
     identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, name, builder.generic_type_names)
     if identity == None -> return false
     owner :: identity ?? return false
-    loop semantic_module in builder.modules {
-        if semantic_module.module_identity == owner.module_identity -> return semantic_module.module_name == "core.files"
-    }
-    false
+    module_index :: builder.owners.hooks.module_positions.get(owner.module_identity) ?? return false
+    builder.modules[module_index].module_name == "core.files"
 }
 
 fn jet_codegen_is_shared_guard_mir_type(ty: MIRType) -> Bool Never! {
@@ -1323,12 +1332,145 @@ fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, base: TExp
     index := 0
     loop index < places.len() {
         lane_value := right_values[index]
-        if clone_value || index + 1 < lanes.len() -> lane_value = jet_codegen_emit_value(&builder, span, right_type, MIROperation.Copy{value: lane_value, materialize_view: false})
+        if clone_value || index + 1 < lanes.len() -> lane_value = jet_codegen_emit_value(&builder, span, right_type, MIROperation.Copy{value: lane_value, fact: MIRCopyFact.Materialize})
         _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: places[index], value: lane_value})
         index += 1
     }
 }
 
+
+// Scalar row chains retain catalog order and duplicate candidates without
+// copying owning nominal, impl, or trait declaration records at each query.
+pub struct JetCodegenHookNominalRow {
+    pub module_index: Int
+    pub nominal_index: Int
+    pub next_owner: Int
+    pub next_trait: Int
+}
+
+pub struct JetCodegenHookImplMethodRow {
+    pub module_index: Int
+    pub implementation_index: Int
+    pub method_index: Int
+    pub next_exact: Int
+    pub next_fallback: Int
+}
+
+pub struct JetCodegenHookTraitMethodRow {
+    pub module_index: Int
+    pub definition_index: Int
+    pub method_index: Int
+    pub next: Int
+}
+
+pub struct JetCodegenHookIndex {
+    pub module_positions: [String:Int]
+    pub nominal_rows: [JetCodegenHookNominalRow]
+    pub nominal_by_owner: [String:Int]
+    pub traits_by_name: [String:Int]
+    pub implementation_rows: [JetCodegenHookImplMethodRow]
+    pub exact_methods: [String:Int]
+    pub fallback_methods: [String:Int]
+    pub trait_method_rows: [JetCodegenHookTraitMethodRow]
+    pub trait_methods: [String:Int]
+}
+
+// Rust: none (Jet-only pass)
+fn jet_codegen_hook_method_key(owner: String, trait_name: String, method_name: String) -> String Never! {
+    jet_codegen_qualified_function_key(owner, jet_codegen_qualified_function_key(trait_name, method_name))
+}
+
+// Rust: none (Jet-only pass)
+fn jet_codegen_hook_index(modules: [SemaGraphModuleResult]) -> JetCodegenHookIndex Never! {
+    module_positions := [String:Int]{}
+    nominal_rows := [JetCodegenHookNominalRow]{}
+    nominal_by_owner := [String:Int]{}
+    traits_by_name := [String:Int]{}
+    implementation_rows := [JetCodegenHookImplMethodRow]{}
+    exact_methods := [String:Int]{}
+    fallback_methods := [String:Int]{}
+    trait_method_rows := [JetCodegenHookTraitMethodRow]{}
+    trait_methods := [String:Int]{}
+    module_index := modules.len() - 1
+    loop module_index >= 0 {
+        module_identity :: modules[module_index].module_identity
+        module_positions[module_identity] = module_index
+        nominal_index := modules[module_index].nominals.len() - 1
+        loop nominal_index >= 0 {
+            name :: modules[module_index].nominals[nominal_index].symbol.name
+            owner_key :: jet_codegen_qualified_function_key(module_identity, name)
+            is_trait := modules[module_index].nominals[nominal_index].kind == SemaRegistrationNominalKind.Trait
+            row := nominal_rows.len()
+            &nominal_rows.push(JetCodegenHookNominalRow{
+                module_index: module_index,
+                nominal_index: nominal_index,
+                next_owner: nominal_by_owner.get(owner_key) ?? -1,
+                next_trait: if is_trait -> traits_by_name.get(name) ?? -1 else -> -1,
+            })
+            nominal_by_owner[owner_key] = row
+            if is_trait -> traits_by_name[name] = row
+            nominal_index -= 1
+        }
+        implementation_index := modules[module_index].impls.len() - 1
+        loop implementation_index >= 0 {
+            if modules[module_index].impls[implementation_index].trait_symbol == .Val(trait_symbol) {
+                method_index := modules[module_index].impls[implementation_index].methods.len() - 1
+                loop method_index >= 0 {
+                    method_name :: modules[module_index].impls[implementation_index].methods[method_index].symbol.name
+                    exact_key :: jet_codegen_hook_method_key(modules[module_index].impls[implementation_index].target_identity_key, trait_symbol.name, method_name)
+                    fallback_key := String?{None}
+                    if modules[module_index].impls[implementation_index].target_module_identity == .Val(target_module) {
+                        owner_key :: jet_codegen_qualified_function_key(target_module, modules[module_index].impls[implementation_index].target_type_name)
+                        fallback_key = Val(jet_codegen_hook_method_key(owner_key, trait_symbol.name, method_name))
+                    }
+                    row := implementation_rows.len()
+                    &implementation_rows.push(JetCodegenHookImplMethodRow{
+                        module_index: module_index,
+                        implementation_index: implementation_index,
+                        method_index: method_index,
+                        next_exact: exact_methods.get(exact_key) ?? -1,
+                        next_fallback: if fallback_key == .Val(key) -> fallback_methods.get(key) ?? -1 else -> -1,
+                    })
+                    exact_methods[exact_key] = row
+                    if fallback_key == .Val(key) -> fallback_methods[key] = row
+                    method_index -= 1
+                }
+            }
+            implementation_index -= 1
+        }
+        definition_index := modules[module_index].declarations.traits.len() - 1
+        loop definition_index >= 0 {
+            trait_name :: modules[module_index].declarations.traits[definition_index].name
+            method_index := modules[module_index].declarations.traits[definition_index].methods.len() - 1
+            loop method_index >= 0 {
+                method_name :: modules[module_index].declarations.traits[definition_index].methods[method_index].name
+                key :: jet_codegen_hook_method_key("{module_index}", trait_name, method_name)
+                row := trait_method_rows.len()
+                &trait_method_rows.push(JetCodegenHookTraitMethodRow{
+                    module_index: module_index,
+                    definition_index: definition_index,
+                    method_index: method_index,
+                    next: trait_methods.get(key) ?? -1,
+                })
+                trait_methods[key] = row
+                method_index -= 1
+            }
+            definition_index -= 1
+        }
+        module_index -= 1
+    }
+    JetCodegenHookIndex{
+        module_positions: module_positions,
+        nominal_rows: nominal_rows,
+        nominal_by_owner: nominal_by_owner,
+        traits_by_name: traits_by_name,
+        implementation_rows: implementation_rows,
+        exact_methods: exact_methods,
+        fallback_methods: fallback_methods,
+        trait_method_rows: trait_method_rows,
+        trait_methods: trait_methods,
+    }
+}
 
 struct JetCodegenIndexHookTraitMethod {
     pub symbol: SymbolID
@@ -1345,6 +1487,7 @@ fn jet_codegen_index_hook_owner_name(ty: Type) -> String? {
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_index_hook
 fn jet_codegen_index_hook_function(builder: JetCodegenBuilder, owner_type: Type, trait_name: String, method_name: String) -> TFunc? {
     owner_name_option := jet_codegen_index_hook_owner_name(owner_type)
     if owner_name_option == None -> return None
@@ -1353,44 +1496,37 @@ fn jet_codegen_index_hook_function(builder: JetCodegenBuilder, owner_type: Type,
     owner_identity_option := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
     if owner_identity_option == None -> return None
     owner_identity :: owner_identity_option ?? return None
-    owner_identity_key := String?{None}
-    loop semantic_module in builder.modules {
-        if semantic_module.module_identity != owner_identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name == owner_identity.name {
-                if owner_identity_key != None -> panic("ambiguous checked {trait_name} receiver identity")
-                owner_identity_key = Val(nominal.identity_key)
-            }
-        }
-    }
-    target_identity_key :: owner_identity_key ?? panic("checked {trait_name} receiver identity disappeared")
+    owner_key :: jet_codegen_qualified_function_key(owner_identity.module_identity, owner_identity.name)
+    owner_row :: builder.owners.hooks.nominal_by_owner.get(owner_key) ?? panic("checked {trait_name} receiver identity disappeared")
+    if builder.owners.hooks.nominal_rows[owner_row].next_owner >= 0 -> panic("ambiguous checked {trait_name} receiver identity")
+    module_index :: builder.owners.hooks.nominal_rows[owner_row].module_index
+    nominal_index :: builder.owners.hooks.nominal_rows[owner_row].nominal_index
+    target_identity_key :: builder.modules[module_index].nominals[nominal_index].identity_key
     exact_method_key := String?{None}
     fallback_method_key := String?{None}
-    loop semantic_module in builder.modules {
-        loop implementation in semantic_module.impls {
-            trait_symbol :: implementation.trait_symbol ?? next
-            if trait_symbol.name != trait_name -> next
-            exact := implementation.target_identity_key == target_identity_key
-            fallback := implementation.target_module_identity == (Val(owner_identity.module_identity)) && implementation.target_type_name == owner_identity.name
-            if !exact && !fallback -> next
-            loop method in implementation.methods {
-                if method.symbol.name != method_name -> next
-                if {
-                    exact -> {
-                        if exact_method_key != None -> panic("ambiguous checked {trait_name}::{method_name} implementation")
-                        exact_method_key = Val(method.symbol.id.key)
-                    } else -> {
-                        if fallback_method_key != None -> panic("ambiguous checked {trait_name}::{method_name} implementation")
-                        fallback_method_key = Val(method.symbol.id.key)
-                    }
-                }
-            }
+    exact_key :: jet_codegen_hook_method_key(target_identity_key, trait_name, method_name)
+    row := builder.owners.hooks.exact_methods.get(exact_key) ?? -1
+    loop row >= 0 {
+        if exact_method_key != None -> panic("ambiguous checked {trait_name}::{method_name} implementation")
+        candidate :: builder.owners.hooks.implementation_rows[row]
+        exact_method_key = Val(builder.modules[candidate.module_index].impls[candidate.implementation_index].methods[candidate.method_index].symbol.id.key)
+        row = candidate.next_exact
+    }
+    fallback_key :: jet_codegen_hook_method_key(owner_key, trait_name, method_name)
+    row = builder.owners.hooks.fallback_methods.get(fallback_key) ?? -1
+    loop row >= 0 {
+        candidate :: builder.owners.hooks.implementation_rows[row]
+        if builder.modules[candidate.module_index].impls[candidate.implementation_index].target_identity_key != target_identity_key {
+            if fallback_method_key != None -> panic("ambiguous checked {trait_name}::{method_name} implementation")
+            fallback_method_key = Val(builder.modules[candidate.module_index].impls[candidate.implementation_index].methods[candidate.method_index].symbol.id.key)
         }
+        row = candidate.next_fallback
     }
     method_key :: exact_method_key ?? (fallback_method_key ?? panic("checked {trait_name} receiver has no registered {method_name} implementation"))
     Val(jet_codegen_find_function(builder.function_index, method_key) ?? panic("checked {trait_name}::{method_name} function is not reachable"))
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::trait_method_identity
 fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, owner_type: Type, required_symbol: SymbolID?, trait_name: String, method_name: String) -> JetCodegenIndexHookTraitMethod Never! {
     owner_name := jet_codegen_index_hook_owner_name(owner_type) ?? ""
     concrete_owner := owner_name != "" && !builder.generic_type_names.contains(owner_name)
@@ -1411,25 +1547,30 @@ fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, owner_type: T
         required_key = symbol.key
     }
     selected := JetCodegenIndexHookTraitMethod?{None}
-    loop semantic_module in builder.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.kind != SemaRegistrationNominalKind.Trait || nominal.symbol.name != trait_name -> next
-            if {
-                required_symbol != None -> {
-                    if nominal.symbol.id.key != required_key -> next
-                }
-                !trait_object_bound && !concrete_owner && !bound_symbols.contains(nominal.symbol.id.key) -> {
-                    next
-                }
+    row := builder.owners.hooks.traits_by_name.get(trait_name) ?? -1
+    loop row >= 0 {
+        candidate :: builder.owners.hooks.nominal_rows[row]
+        row = candidate.next_trait
+        symbol :: builder.modules[candidate.module_index].nominals[candidate.nominal_index].symbol.id
+        if {
+            required_symbol != None -> {
+                if symbol.key != required_key -> next
             }
-            loop definition in semantic_module.declarations.traits {
-                if definition.name != trait_name -> next
-                loop method in definition.methods {
-                    if method.name != method_name -> next
-                    if selected != None -> panic("ambiguous checked {trait_name}::{method_name} trait identity")
-                    selected = Val(JetCodegenIndexHookTraitMethod{symbol: nominal.symbol.id, trait_key: definition.key, method: method})
-                }
+            !trait_object_bound && !concrete_owner && !bound_symbols.contains(symbol.key) -> {
+                next
             }
+        }
+        key :: jet_codegen_hook_method_key("{candidate.module_index}", trait_name, method_name)
+        method_row := builder.owners.hooks.trait_methods.get(key) ?? -1
+        loop method_row >= 0 {
+            if selected != None -> panic("ambiguous checked {trait_name}::{method_name} trait identity")
+            method_candidate :: builder.owners.hooks.trait_method_rows[method_row]
+            selected = Val(JetCodegenIndexHookTraitMethod{
+                symbol: symbol,
+                trait_key: builder.modules[method_candidate.module_index].declarations.traits[method_candidate.definition_index].key,
+                method: builder.modules[method_candidate.module_index].declarations.traits[method_candidate.definition_index].methods[method_candidate.method_index],
+            })
+            method_row = method_candidate.next
         }
     }
     selected ?? panic("checked {trait_name} receiver has no checked {trait_name} bound or trait method")
@@ -1854,7 +1995,8 @@ fn jet_codegen_transaction_save_snapshot(builder: &JetCodegenBuilder, scope: MIR
             }
         } else -> {
             value := jet_codegen_emit_value(&builder, span, snapshot_type, MIROperation.ReadPlace{place: target_place})
-            snapshot_value = jet_codegen_emit_value(&builder, span, snapshot_type, MIROperation.Copy{value: value, materialize_view: false})
+            // The rollback snapshot owns the state the scope goes on to change.
+            snapshot_value = jet_codegen_emit_value(&builder, span, snapshot_type, MIROperation.Copy{value: value, fact: MIRCopyFact.Materialize})
         }
     }
     saved_name := "jet_txn_snapshot_{scope.value}_{index}"
@@ -2151,7 +2293,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
         .Impure(body, span) -> jet_codegen_lower_scoped(&builder, MIRScopeKind.Impure, None, body, span)
         .Reactive(executable, span) -> {
             function_identity := "{builder.function.key}|{builder.function.source_file}|{builder.function.source_span.start}|{builder.function.source_span.end}"
-            site := stable_id("mir-site", "{function_identity}:reactive:{span.start}:{span.end}")
+            site := Int.from_u64(stable_id("mir-site", "{function_identity}:reactive:{span.start}:{span.end}"))
             expression := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.CoreClosureCall{kind: TCoreClosureKind.ReactiveEffect{executable: executable, site: site}}, span: span, integer_bounds: None, cost: None}
             _ := jet_codegen_lower_expr(&builder, expression)
         }
@@ -2192,8 +2334,8 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
         }
         .CountedLoop(label, init, condition, step, vectorization, body, span) -> jet_codegen_lower_counted_loop(&builder, label, init, condition, step, vectorization, body, span)
         .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> jet_codegen_lower_range_loop(&builder, label, local, None, start, end, step, exclusive, vectorization, body, span)
-        .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> jet_codegen_lower_range_loop(&builder, label, tir_user_local(variable, span), source, start, end, step, exclusive, vectorization, body, span)
-        .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> jet_codegen_lower_for_in(&builder, label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span)
+        .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> jet_codegen_lower_range_loop(&builder, label, variable, source, start, end, step, exclusive, vectorization, body, span)
+        .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span) -> jet_codegen_lower_for_in(&builder, label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span)
         .Loop(label, body, span) -> {
             body_block := jet_codegen_new_block(&builder, span, "loop-body")
             exit_block := jet_codegen_new_block(&builder, span, "loop-exit")
@@ -2231,7 +2373,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
             _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, scope_depth)
         }
         .Reactive(executable, span) -> {
-            site := stable_id("mir-site", "{builder.function.key}|reactive|{span.start}:{span.end}")
+            site := Int.from_u64(stable_id("mir-site", "{builder.function.key}|reactive|{span.start}:{span.end}"))
             value := TExpr{
                 ty: Type.Named{name: "Unit"},
                 kind: TExprKind.CoreClosureCall{kind: TCoreClosureKind.ReactiveEffect{executable: executable, site: site}},
@@ -2286,7 +2428,7 @@ fn jet_codegen_lower_fallback_panic(builder: &JetCodegenBuilder, expression: TEx
         &locals.push(MIRPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
-    context := MIRPanicContext{function: location.function, source_line: location.source_line, caret: location.caret, locals: locals}
+    context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
     jet_codegen_emit_explicit_stop_cleanups(&builder)
     _ := jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: call, kind: MIRRequireKind.Panic, condition: None, location: panic_location, context: context, values: [MIRValueID]{value}, always_stops: true}})
     jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "checked fallback panic"})
@@ -2667,7 +2809,7 @@ fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, expression: TExpr, nam
         &locals.push(MIRPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
-    context := MIRPanicContext{function: location.function, source_line: location.source_line, caret: location.caret, locals: locals}
+    context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
     jet_codegen_emit_explicit_stop_cleanups(&builder)
     _ := jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: stop_call, kind: MIRRequireKind.Require, condition: Val(condition), location: panic_location, context: context, values: [MIRValueID]{shown}, always_stops: true}})
     jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "environment update failure"})
@@ -2878,7 +3020,9 @@ fn jet_codegen_lower_require_stop(builder: &JetCodegenBuilder, expression: TExpr
         &locals.push(MIRPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
-    context := MIRPanicContext{function: location.function, source_line: location.source_line, caret: location.caret, locals: locals}
+    // The enclosing function names the report (Rust `capture_panic_loc`
+    // `fn_name`); checked TIR locations do not carry it.
+    context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
     if condition == .Val(condition_value) && !always_stops {
         return jet_codegen_lower_conditional_stop(&builder, expression.span, expression.ty, call, operation, condition_value, panic_location, context, values, "require-stop")
     }

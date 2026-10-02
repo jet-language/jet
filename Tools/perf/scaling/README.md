@@ -1,0 +1,40 @@
+# Compiler scaling gate (Tower #4319)
+
+Dependency-free Node tools; GNU time measures the complete compiler process tree.
+Default Jet: `~/.cache/jet-test-scratch/jet-release-night12/jet`.
+Default time: `/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time`.
+
+```sh
+node Tools/perf/scaling/generate.mjs functions 32 /tmp/new-functions
+~/.cache/jet-luna/laneS.sh node --test Tools/perf/scaling/scaling.test.mjs
+~/.cache/jet-luna/laneB.sh 8 node Tools/perf/scaling/harness.mjs --repeats 3 --work-dir ~/.cache/jet-test-scratch/sol/SolScaleGate --receipt /tmp/scaling.json
+```
+
+Axes: `functions` (N helpers), `declarations` (N structs/enums/generic aliases),
+`depth` (N nested additions), `modules` (N imported files), `match-arms` (N value
+arms plus a fixed fallback), `string-literals` (N bytes), `interpolation` (N
+holes), `fan-in` (N call sites into one shared helper, two fixed definitions),
+and `generics` (N distinct fixed-array type instantiations, fixed generic body).
+Only the selected dimension scales; necessary consuming statements also scale.
+Modules contain only a constant, not additional function/type definitions.
+Generated programs have a runnable entry; no runtime timing is included.
+The generator refuses to overwrite source files; use a new output directory.
+`trait-facts-fix.json` records the module allocation evidence and dual-compiler fix spec.
+Default ladders: 256/512/1024; modules 64/128/256 (8 GiB memory cap), depth
+16/32/64, match arms 48/96/192 (nesting limits), literal bytes 1/2/4 MiB.
+Check and build each measure N=1 plus their ladder, three fresh runs per point.
+Ratios are marginal: `(metric(upper)-metric(1))/(metric(lower)-metric(1))`.
+Receipts keep commands, hashes, samples/logs, raw medians and marginal ratios.
+Exit 1: ratio >2.2, compile/counter failure, or an unmeasurable non-positive
+marginal baseline (noise); exit 2: invalid invocation. No warm build cache reuse.
+
+`--n BASE` replaces every selected ladder; repeat `--axis NAME` to select axes.
+Templates run in a shell, with shell-quoted `{jet}`, `{source}`, `{dir}`, `{out}`,
+`{axis}`, `{n}` placeholders; e.g. `--command 'jetc0=/path/jetc0 {source}'`.
+Repeat `--command`; `--jet`, `--time`, `--threshold`, `--receipt` replace defaults.
+`--overrides FILE` accepts an axis table, e.g.
+`{"depth":{"bound":3,"reason":"Documented algorithm and issue reference"}}`.
+There are no built-in exemptions; every override requires a reason and bound.
+`JET_PHASE_COUNTERS {"phase":"parse","visits":42,"bytes_copied":64}` lines on
+stdout/stderr are summed by phase/key; nested numeric objects also work.
+Counter ratios gate independently; no counter lines means timing/RSS-only data.

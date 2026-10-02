@@ -5,6 +5,7 @@ use jet_foundation.[
     MIRAccess,
     MIRCallArg,
     MIRConversion,
+    MIRCopyFact,
     MIRCoreCall,
     MIRCoreCallID,
     MIREnumArg,
@@ -301,12 +302,12 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MIRFunction, operatio
             value :: if count != None -> "Array({count ?? 0}).fill(undefined)" else -> "undefined"
             jet_web_js_write_place(&ctx, function, place, value)
         }
-        .Copy(value, materialize_view) -> {
+        .Copy(value, fact) -> {
             source :: jet_web_find_value_type(function, value) ?? {
                 jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Copy source type is missing", "checked value facts must cover every copy operation", Val(function.span))
                 return "undefined"
             }
-            if materialize_view -> "jet_view_copy({jet_web_js_value(value)})" else -> jet_web_js_copy(&ctx, source, jet_web_js_value(value))
+            if fact == MIRCopyFact.ViewMaterialize -> "jet_view_copy({jet_web_js_value(value)})" else -> jet_web_js_copy(&ctx, source, jet_web_js_value(value))
         }
         .Move(value) -> jet_web_js_move(value)
         .Convert(value, parameters, target, conversion) -> jet_web_js_conversion(&ctx, value, parameters, target, conversion)

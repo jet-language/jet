@@ -16,9 +16,10 @@ fn mir_pass_derive_bounds(program: &MIRProgram) -> Int Never! {
     total
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::derive_bounds_facts
 fn mir_pass_function_bounds_facts(function: MIRFunction) -> [MIRBoundsFact] Never! {
     facts := [MIRBoundsFact]{}
-    place_rows := [Int:Int]{}
+    place_rows := [U64:Int]{}
     loop (position, place) in function.places {
         if place_rows.get(place.id.value) == None -> &place_rows.add(place.id.value, position).drop("checked absent above")
     }
@@ -27,7 +28,7 @@ fn mir_pass_function_bounds_facts(function: MIRFunction) -> [MIRBoundsFact] Neve
             if instruction.operation == {
                 .Index(_, _, index, kind, _, _, _) -> {
                     fact :: MIRBoundsFact{operation: instruction.id, place: None, index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: instruction.span}
-                    mir_pass_bounds_insert(&facts, fact)
+                    &facts.push(fact)
                 }
                 else -> {}
             }
@@ -38,7 +39,7 @@ fn mir_pass_function_bounds_facts(function: MIRFunction) -> [MIRBoundsFact] Neve
                     if projection == {
                         .Index(kind, index, _, _, _, _, span) -> {
                             fact :: MIRBoundsFact{operation: instruction.id, place: Val(place_id), index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: span}
-                            mir_pass_bounds_insert(&facts, fact)
+                            &facts.push(fact)
                         }
                         else -> {}
                     }
@@ -46,27 +47,55 @@ fn mir_pass_function_bounds_facts(function: MIRFunction) -> [MIRBoundsFact] Neve
             }
         }
     }
-    facts
+    sorted := [MIRBoundsFact]{}
+    loop position in mir_pass_bounds_order(facts) -> &sorted.push(facts[position])
+    sorted
 }
 
-fn mir_pass_bounds_insert(rows: &[MIRBoundsFact], fact: MIRBoundsFact) Never! {
-    &rows.push(fact)
-    index := rows.len() - 1
-    loop index > 0 && mir_pass_bounds_before(rows[index], rows[index - 1]) {
-        previous := rows[index - 1]
-        rows[index - 1] = rows[index]
-        rows[index] = previous
-        index -= 1
+// Rust: crates/jet-foundation/src/MIROptimization.rs::derive_bounds_facts
+fn mir_pass_bounds_order(rows: [MIRBoundsFact]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<rows.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                // Equal keys take the left position, preserving traversal order.
+                if right >= end || (left < middle && !mir_pass_bounds_before(rows, order[right], order[left])) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width = width * 2
     }
+    order
 }
 
-fn mir_pass_bounds_before(left: MIRBoundsFact, right: MIRBoundsFact) -> Bool Never! {
-    if left.operation.value != right.operation.value -> return left.operation.value < right.operation.value
-    left_place :: left.place.map(value -> value.value) ?? -1
-    right_place :: right.place.map(value -> value.value) ?? -1
-    if left_place != right_place -> return left_place < right_place
-    left_index :: left.index.map(value -> value.value) ?? -1
-    right_index :: right.index.map(value -> value.value) ?? -1
-    left_index < right_index
+// Rust: crates/jet-foundation/src/MIROptimization.rs::derive_bounds_facts
+fn mir_pass_bounds_before(rows: [MIRBoundsFact], left: Int, right: Int) -> Bool Never! {
+    if rows[left].operation.value != rows[right].operation.value -> return rows[left].operation.value < rows[right].operation.value
+    left_place :: rows[left].place.map(value -> value.value)
+    right_place :: rows[right].place.map(value -> value.value)
+    if left_place != right_place -> return mir_pass_option_word_before(left_place, right_place)
+    mir_pass_option_word_before(rows[left].index.map(value -> value.value), rows[right].index.map(value -> value.value))
+}
+
+// `Option<u64>` order: `None` before every word.
+fn mir_pass_option_word_before(left: U64?, right: U64?) -> Bool Never! {
+    left_word :: left ?? return right != None
+    right_word :: right ?? return false
+    left_word < right_word
 }
 

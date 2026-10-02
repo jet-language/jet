@@ -345,13 +345,20 @@ fn jet_rust_emit_hardware_register_checked(ctx: &JetRustEmitContext, function: M
     "unreachable!(\"unknown hardware register\")"
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::hardware_call
 fn jet_rust_emit_hardware_call(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, op: MIRHardwareOp, receiver: MIRValueID?, args: [MIRCallArg]) -> String Never! {
     root :: ~ctx.config.root_prefix
-    loop row in ctx.program.prelude_calls {
-        if row.id != call -> next
-        if args.len() < row.signature.arity || args.len() > row.signature.max_arity || row.signature.borrow_mask.contains(true) {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware route ABI disagrees with its operation", "hardware routes take owned arguments within their checked arity", Val(function.span))
-            return "unreachable!(\"hardware route ABI\")"
+    key :: jet_rust_emit_id_key(call.value)
+    if ctx.prelude_call_first.get(key) == .Val(first) {
+        last :: ctx.prelude_call_last.get(key) ?? first
+        // Canonical ids have one row. Retain all matching-row ABI checks if
+        // duplicate ids reach emission, without scanning the route-table prefix.
+        loop position in first..<(last + 1) {
+            if ctx.program.prelude_calls[position].id != call -> next
+            if args.len() < ctx.program.prelude_calls[position].signature.arity || args.len() > ctx.program.prelude_calls[position].signature.max_arity || ctx.program.prelude_calls[position].signature.borrow_mask.contains(true) {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware route ABI disagrees with its operation", "hardware routes take owned arguments within their checked arity", Val(function.span))
+                return "unreachable!(\"hardware route ABI\")"
+            }
         }
     }
     if op == {

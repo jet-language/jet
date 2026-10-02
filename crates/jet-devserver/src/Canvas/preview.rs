@@ -381,14 +381,6 @@ impl CanvasPreviewAuthority {
         }
         Ok(narrowed)
     }
-
-    fn covers(&self, other: &Self) -> bool {
-        (!self.loopback_only || other.loopback_only)
-            && other
-                .capabilities
-                .iter()
-                .all(|capability| self.allows_capability(capability))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

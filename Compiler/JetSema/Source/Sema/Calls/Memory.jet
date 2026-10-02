@@ -23,6 +23,7 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     measure_literal_value,
+    tir_call_arg_copy_fact,
 ]
 
 fn sema_call_memory_allocator_name(ty: Type) -> String? {
@@ -245,7 +246,7 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
     ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Write, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     stored := payload
-    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> stored = sema_tir_expr(payload.ty, TExprKind.Clone{value: payload}, payload.span)
+    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> stored = sema_tir_expr(payload.ty, TExprKind.Clone{value: payload, fact: tir_call_arg_copy_fact(updated_args[0].flags.shared_auto_clone)}, payload.span)
     view := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: payload.ty}
     result := if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view
     operation := if method == "try_alloc" -> THandleOp.AllocTryAlloc else -> THandleOp.AllocAlloc

@@ -3,7 +3,7 @@
 // with the semantic checker or the legality verifier: it re-derives every
 // operand and result type from the operation, every call from the callee row
 // named by ID, every enum and struct shape from its declaration, ownership
-// from one forward dataflow over flat bit rows, and effect rows from the
+// from one forward dataflow over sparse bit sets, and effect rows from the
 // callee's solved row. The optimizer pipeline runs it once after the last
 // pass, and after every pass when full verification is on; a failure is an
 // internal compiler error that names the pass and the rule.
@@ -88,11 +88,12 @@ pub fn mir_lint_error_text(error: MIRLintError) -> String Never! {
 }
 
 // Check every function of `program` against the MIR Lint rules.
+// Rust: none (Jet-only pass)
 pub fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
     if program.functions.len() == 0 -> return None
     ctx := mir_lint_context(mir_lint_index(program), program.functions[0])
-    loop (position, function) in program.functions {
-        if position > 0 -> mir_lint_enter(&ctx, function)
+    loop position in 0..<program.functions.len() {
+        if position > 0 -> mir_lint_enter(&ctx, program.functions[position])
         failure :: mir_lint_function(ctx)
         if failure == .Val(error) -> return Val(error)
     }
@@ -162,6 +163,7 @@ struct MIRLintIndex {
     pub transparent: [String:Bool]
 }
 
+// Rust: none (Jet-only pass)
 fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
     functions := [String:Int]{}
     signatures := [MIRLintSignature]{}
@@ -171,25 +173,25 @@ fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
     type_vars := [String:Bool]{}
     transparent := [String:Bool]{}
     _ := &type_vars.add("Self", true)
-    loop (position, function) in program.functions {
-        _ := &functions.add(mir_lint_key(function.id.value), position)
-        &signatures.push(MIRLintSignature{key: ~function.key, params: ~function.params, return_type: ~function.return_type, solved_effects: ~function.effects.solved, capture_count: function.capture_params.len()})
-        loop param in function.generic_params -> _ := &type_vars.add(~param.name, true)
+    loop position in 0..<program.functions.len() {
+        _ := &functions.add(mir_lint_key(program.functions[position].id.value), position)
+        &signatures.push(MIRLintSignature{key: ~program.functions[position].key, params: ~program.functions[position].params, return_type: ~program.functions[position].return_type, solved_effects: ~program.functions[position].effects.solved, capture_count: program.functions[position].capture_params.len()})
+        loop param in program.functions[position].generic_params -> _ := &type_vars.add(~param.name, true)
     }
-    loop (position, definition) in program.types {
-        _ := &types.add(mir_lint_key(definition.id.value), position)
-        loop param in definition.generic_params -> _ := &type_vars.add(~param.name, true)
-        row := MIRLintTypeRow{name: ~definition.name, fields: None, variants: None}
-        if definition.kind == {
+    loop position in 0..<program.types.len() {
+        _ := &types.add(mir_lint_key(program.types[position].id.value), position)
+        loop param in program.types[position].generic_params -> _ := &type_vars.add(~param.name, true)
+        row := MIRLintTypeRow{name: ~program.types[position].name, fields: None, variants: None}
+        if program.types[position].kind == {
             .Struct(declared, _) -> {
                 loop field in declared -> _ := &fields.add(mir_lint_key(field.id.value), ~field)
                 row.fields = Val(~declared)
             }
             .Enum(variants, _) -> row.variants = Val(~variants)
             else -> {
-                _ := &transparent.add(~definition.name, true)
-                _ := &transparent.add(~definition.key, true)
-                _ := &transparent.add(mir_lint_leaf(definition.name), true)
+                _ := &transparent.add(~program.types[position].name, true)
+                _ := &transparent.add(~program.types[position].key, true)
+                _ := &transparent.add(mir_lint_leaf(program.types[position].name), true)
             }
         }
         &type_rows.push(row)
@@ -201,10 +203,8 @@ fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
     MIRLintIndex{functions: functions, signatures: signatures, types: types, type_rows: type_rows, fields: fields, type_vars: type_vars, transparent: transparent}
 }
 
-// Table key of a stable MIR ID. IDs are unsigned 64-bit hashes, so they are
-// keyed by their decimal text: an Int map does not find a key at or above
-// 2^63 that was computed separately from the stored one.
-fn mir_lint_key(id: Int) -> String Never! {
+// Table key of a stable MIR ID (a U64 word), as its decimal text.
+fn mir_lint_key(id: U64) -> String Never! {
     "{id}"
 }
 
@@ -1391,8 +1391,8 @@ fn mir_lint_path_prefix(prefix: String, path: String) -> Bool Never! {
     path == prefix || path.starts_with("{prefix}/")
 }
 
-// Dense layout of one ownership state: consumed values, moved paths, then the
-// known-true and known-false bits of guard slots and edge-crossing values.
+// Bit identities for sparse ownership states: consumed values, moved paths,
+// then known-true and known-false guards and edge-crossing values.
 struct MIRLintOwnership {
     pub value_bits: [String:Int]
     pub value_count: Int
@@ -1410,7 +1410,6 @@ struct MIRLintOwnership {
     pub slot_count: Int
     pub crossing: [String:Int]
     pub crossing_count: Int
-    pub width: Int
 }
 
 fn mir_lint_slot_bit(layout: MIRLintOwnership, slot: Int, truth: Bool) -> Int Never! {
@@ -1424,6 +1423,7 @@ fn mir_lint_crossing_bit(layout: MIRLintOwnership, crossing: Int, truth: Bool) -
 }
 
 // The bit layout, or None when nothing is ever consumed or moved.
+// Rust: none (Jet-only pass)
 fn mir_lint_ownership_layout(ctx: MIRLintContext) -> MIRLintOwnership? Never! {
     function :: ctx.function
     value_bits := [String:Int]{}
@@ -1519,7 +1519,6 @@ fn mir_lint_ownership_layout(ctx: MIRLintContext) -> MIRLintOwnership? Never! {
             }
         }
     }
-    width :: value_count + path_keys.len() + 2 * slot_count + 2 * crossing_count
     Val(MIRLintOwnership{
         value_bits: value_bits,
         value_count: value_count,
@@ -1532,7 +1531,6 @@ fn mir_lint_ownership_layout(ctx: MIRLintContext) -> MIRLintOwnership? Never! {
         slot_count: slot_count,
         crossing: crossing,
         crossing_count: crossing_count,
-        width: width,
     })
 }
 
@@ -1542,19 +1540,71 @@ struct MIRLintStep {
     pub failure: MIRLintError?
 }
 
-// `ownership.move`: a forward must-dataflow over bit rows. A bit is set only
-// when the value or place is moved on every path to the point; the meet is
-// the bitwise AND of the incoming rows.
+// Only set bits are stored. Positions make clearing a bit a swap-and-pop;
+// cleared entries retain -1, never a live position, in the lookup map.
+struct MIRLintState {
+    pub bits: [Int]
+    pub positions: [Int:Int]
+}
+
+// Rust: none (Jet-only pass)
+fn mir_lint_state_has(state: MIRLintState, bit: Int) -> Bool Never! {
+    (state.positions.get(bit) ?? -1) >= 0
+}
+
+// Rust: none (Jet-only pass)
+fn mir_lint_state_set(state: &MIRLintState, bit: Int, present: Bool) Never! {
+    position :: state.positions.get(bit) ?? -1
+    if present {
+        if position < 0 {
+            _ := &state.positions.add(bit, state.bits.len())
+            &state.bits.push(bit)
+        }
+    } else if position >= 0 {
+        last :: ~state.bits[state.bits.len() - 1]
+        state.bits[position] = last
+        _ := &state.positions.add(last, position)
+        _ := &state.bits.pop()
+        _ := &state.positions.add(bit, -1)
+    }
+}
+
+// Copy only live bits, not cleared lookup entries or the entire bit universe.
+// Rust: none (Jet-only pass)
+fn mir_lint_state_copy(state: MIRLintState) -> MIRLintState Never! {
+    result := MIRLintState{bits: [Int]{}, positions: [Int:Int]{}}
+    loop bit in state.bits -> mir_lint_state_set(&result, bit, true)
+    result
+}
+
+// Rust: none (Jet-only pass)
+fn mir_lint_state_meet(state: &MIRLintState, incoming: MIRLintState) -> Bool Never! {
+    changed := false
+    position := 0
+    loop position < state.bits.len() {
+        bit :: ~state.bits[position]
+        if mir_lint_state_has(incoming, bit) {
+            position += 1
+        } else {
+            mir_lint_state_set(&state, bit, false)
+            changed = true
+        }
+    }
+    changed
+}
+
+// `ownership.move`: a forward must-dataflow over sparse set bits. A bit is
+// set only when moved/known on every incoming path; the meet is intersection.
+// Rust: none (Jet-only pass)
 fn mir_lint_ownership(ctx: MIRLintContext) -> MIRLintError? Never! {
     layout :: mir_lint_ownership_layout(ctx) ?? return None
     function :: ctx.function
-    width :: layout.width
     count :: function.blocks.len()
-    states := [Bool]{}
-    loop _ in 0..<(count * width) -> &states.push(false)
+    states := [MIRLintState]{}
     reached := [Bool]{}
     queued := [Bool]{}
     loop _ in 0..<count {
+        &states.push(MIRLintState{bits: [Int]{}, positions: [Int:Int]{}})
         &reached.push(false)
         &queued.push(false)
     }
@@ -1574,31 +1624,21 @@ fn mir_lint_ownership(ctx: MIRLintContext) -> MIRLintError? Never! {
             &work.push(position)
         }
     }
-    current := [Bool]{}
-    loop _ in 0..<width -> &current.push(false)
     head := 0
     loop head < work.len() {
         position :: ~work[head]
         head += 1
         queued[position] = false
-        loop bit in 0..<width -> current[bit] = states[position * width + bit]
+        current := mir_lint_state_copy(states[position])
         step :: mir_lint_transfer(ctx, layout, function.blocks[position], &current, false)
         loop target in step.successors {
             target_position :: ctx.blocks.get(mir_lint_key(target.value)) ?? next
-            base :: target_position * width
             changed := false
             if {
-                reached[target_position] -> {
-                    loop bit in 0..<width {
-                        if states[base + bit] && !current[bit] {
-                            states[base + bit] = false
-                            changed = true
-                        }
-                    }
-                }
+                reached[target_position] -> changed = mir_lint_state_meet(&states[target_position], current)
                 else -> {
                     reached[target_position] = true
-                    loop bit in 0..<width -> states[base + bit] = current[bit]
+                    states[target_position] = mir_lint_state_copy(current)
                     changed = true
                 }
             }
@@ -1608,10 +1648,11 @@ fn mir_lint_ownership(ctx: MIRLintContext) -> MIRLintError? Never! {
             }
         }
     }
-    loop (position, block) in function.blocks {
+    // Preserve physical block order and each transfer's first-error order.
+    loop position in 0..<count {
         if !reached[position] -> next
-        loop bit in 0..<width -> current[bit] = states[position * width + bit]
-        step :: mir_lint_transfer(ctx, layout, block, &current, true)
+        current := mir_lint_state_copy(states[position])
+        step :: mir_lint_transfer(ctx, layout, function.blocks[position], &current, true)
         if step.failure != None -> return step.failure
     }
     None
@@ -1619,19 +1660,21 @@ fn mir_lint_ownership(ctx: MIRLintContext) -> MIRLintError? Never! {
 
 // The known truth of a Bool value: a fact from this block, else a crossing
 // bit. 1 is true, 2 is false, 0 is unknown.
-fn mir_lint_known(layout: MIRLintOwnership, state: [Bool], facts: [String:Int], value: MIRValueID) -> Int Never! {
+// Rust: none (Jet-only pass)
+fn mir_lint_known(layout: MIRLintOwnership, state: MIRLintState, facts: [String:Int], value: MIRValueID) -> Int Never! {
     local :: facts.get(mir_lint_key(value.value)) ?? -1
     if local >= 0 -> return local
     crossing :: layout.crossing.get(mir_lint_key(value.value)) ?? return 0
-    if state[mir_lint_crossing_bit(layout, crossing, true)] -> return 1
-    if state[mir_lint_crossing_bit(layout, crossing, false)] -> return 2
+    if mir_lint_state_has(state, mir_lint_crossing_bit(layout, crossing, true)) -> return 1
+    if mir_lint_state_has(state, mir_lint_crossing_bit(layout, crossing, false)) -> return 2
     0
 }
 
-fn mir_lint_moved_failure(ctx: MIRLintContext, layout: MIRLintOwnership, state: [Bool], values: [MIRValueID], span: Span) -> MIRLintError? Never! {
+// Rust: none (Jet-only pass)
+fn mir_lint_moved_failure(ctx: MIRLintContext, layout: MIRLintOwnership, state: MIRLintState, values: [MIRValueID], span: Span) -> MIRLintError? Never! {
     loop value in values {
         bit :: layout.value_bits.get(mir_lint_key(value.value)) ?? next
-        if state[bit] -> return mir_lint_fail(ctx, .OwnershipMove, span, "value {value.value} is used after it was moved")
+        if mir_lint_state_has(state, bit) -> return mir_lint_fail(ctx, .OwnershipMove, span, "value {value.value} is used after it was moved")
     }
     None
 }
@@ -1652,7 +1695,8 @@ fn mir_lint_bool_constant(constant: MIRConstant) -> Int Never! {
 }
 
 // Apply one block to `state`; with `check`, report the first violation.
-fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBasicBlock, state: &[Bool], check: Bool) -> MIRLintStep Never! {
+// Rust: none (Jet-only pass)
+fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBasicBlock, state: &MIRLintState, check: Bool) -> MIRLintStep Never! {
     rule :: MIRLintRule.OwnershipMove
     facts := [String:Int]{}
     guards :: layout.slot_count > 0
@@ -1677,13 +1721,13 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
                 position :: ctx.places.get(mir_lint_key(row.place.value)) ?? next
                 blocked :: if row.usage == .Reinitialize -> layout.ancestors[position] else -> layout.overlapping[position]
                 loop bit in blocked {
-                    if state[layout.value_count + bit] -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "place {row.place.value} is used after it was moved")}
+                    if mir_lint_state_has(state, layout.value_count + bit) -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "place {row.place.value} is used after it was moved")}
                 }
             }
         }
         // A definition starts the value's life, even on a loop's next turn.
         if instruction.result == .Val(defined) {
-            if layout.value_bits.get(mir_lint_key(defined.value)) == .Val(bit) -> state[bit] = false
+            if layout.value_bits.get(mir_lint_key(defined.value)) == .Val(bit) -> mir_lint_state_set(&state, bit, false)
         }
         loop value in mir_lint_consumed(operation) {
             bit :: layout.value_bits.get(mir_lint_key(value.value)) ?? next
@@ -1691,18 +1735,18 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
                 row :: ctx.values.get(mir_lint_key(value.value)) ?? next
                 mode :: ctx.function.values[row].ownership.mode
                 if mode == .Copy || mode == .ReadBorrow || mode == .WriteBorrow -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed but not owned")}
-                if state[bit] -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed twice")}
+                if mir_lint_state_has(state, bit) -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed twice")}
             }
-            state[bit] = true
+            mir_lint_state_set(&state, bit, true)
         }
         loop row in place_rows {
             position :: ctx.places.get(mir_lint_key(row.place.value)) ?? next
             if row.usage == .Move {
                 bit :: layout.moved[position]
-                if bit >= 0 -> state[layout.value_count + bit] = true
+                if bit >= 0 -> mir_lint_state_set(&state, layout.value_count + bit, true)
             }
             if row.usage == .Reinitialize {
-                loop bit in layout.reinitialized[position] -> state[layout.value_count + bit] = false
+                loop bit in layout.reinitialized[position] -> mir_lint_state_set(&state, layout.value_count + bit, false)
             }
         }
         if !guards -> next
@@ -1713,8 +1757,8 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
                 position :: ctx.places.get(mir_lint_key(place.value)) ?? -1
                 if position >= 0 && layout.slots[position] >= 0 {
                     slot :: layout.slots[position]
-                    if state[mir_lint_slot_bit(layout, slot, true)] -> truth = 1
-                    if state[mir_lint_slot_bit(layout, slot, false)] -> truth = 2
+                    if mir_lint_state_has(state, mir_lint_slot_bit(layout, slot, true)) -> truth = 1
+                    if mir_lint_state_has(state, mir_lint_slot_bit(layout, slot, false)) -> truth = 2
                 }
                 truth
             }
@@ -1728,8 +1772,8 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
         if instruction.result == .Val(result) {
             _ := &facts.add(mir_lint_key(result.value), known)
             if layout.crossing.get(mir_lint_key(result.value)) == .Val(crossing) {
-                state[mir_lint_crossing_bit(layout, crossing, true)] = known == 1
-                state[mir_lint_crossing_bit(layout, crossing, false)] = known == 2
+                mir_lint_state_set(&state, mir_lint_crossing_bit(layout, crossing, true), known == 1)
+                mir_lint_state_set(&state, mir_lint_crossing_bit(layout, crossing, false), known == 2)
             }
         }
         written_place := MIRPlaceID?{None}
@@ -1746,8 +1790,8 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
             position :: ctx.places.get(mir_lint_key(place.value)) ?? next
             slot :: layout.slots[position]
             if slot >= 0 {
-                state[mir_lint_slot_bit(layout, slot, true)] = written == 1
-                state[mir_lint_slot_bit(layout, slot, false)] = written == 2
+                mir_lint_state_set(&state, mir_lint_slot_bit(layout, slot, true), written == 1)
+                mir_lint_state_set(&state, mir_lint_slot_bit(layout, slot, false), written == 2)
             }
         }
     }

@@ -35,7 +35,7 @@ use jet_foundation::MIR::{
     MirCOverlayOverride, MirCallArg, MirCallFallibility, MirCallSignature, MirCallbackAdapter,
     MirCallbackId, MirCallee, MirCaptureFacts, MirCaptureOperand, MirCaptureParam, MirCffiFacts,
     MirCliCommand, MirCliDefault, MirCliEntry, MirCliInput, MirCliInputShape, MirCliValueKind,
-    MirCloseAdapter, MirConstant, MirConstantDef, MirConstantId, MirCoreCallId, MirCoreClosureKind,
+    MirCloseAdapter, MirConstant, MirConstantDef, MirConstantId, MirCopyFact, MirCoreCallId, MirCoreClosureKind,
     MirCoveragePoint, MirDbQueryMetadata, MirDbTableFact, MirDropAction, MirDropKind,
     MirEffectFacts, MirEntryKind, MirEntryOutput, MirEntrySpec, MirFailureCarrier, MirFieldId,
     MirForeign, MirForeignAbi, MirForeignId, MirForeignLanguage, MirFunction, MirFunctionForm,
@@ -1529,6 +1529,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
             }
         }
     }
+    inline_known_constant_reads(&mut functions, &program.declarations.constants, &constants);
 
     Ok(MirProgram {
         schema_version: MIR_SCHEMA_VERSION,
@@ -2620,6 +2621,83 @@ fn lower_constant_rows(rows: &[super::tir_to_mir_types::TirConstantDef]) -> Vec<
         .collect::<Vec<_>>();
     result.sort_unstable_by_key(|row| row.id);
     result
+}
+
+/// The most scalar leaves a constant may hold and still be copied into each
+/// use site; larger values stay one shared item.
+const INLINE_CONSTANT_LEAVES: usize = 8;
+/// The longest text a copied constant may carry per leaf.
+const INLINE_CONSTANT_TEXT_BYTES: usize = 256;
+
+/// Card #4258 (D-CONSTMARK1): a read of an immutable module constant whose
+/// folded value is a scalar, text, or a small record or enum case of those
+/// becomes a MIR `Constant` at the use site, so the optimizer can fold it and
+/// no backend calls an accessor. `#Static` keeps the `Global` read of the
+/// one addressable item; `#Inline` copies any value.
+/// Tables stay one shared item; the emitter caches a large one.
+fn inline_known_constant_reads(
+    functions: &mut [MirFunction],
+    rows: &[super::tir_to_mir_types::TirConstantDef],
+    constants: &[MirConstantDef],
+) {
+    let rows = rows
+        .iter()
+        .map(|row| (row.key.as_str(), row))
+        .collect::<HashMap<_, _>>();
+    let values = constants
+        .iter()
+        .filter(|constant| !constant.is_storage)
+        .filter_map(|constant| {
+            let row = rows.get(constant.key.as_str())?;
+            let copied = !row.addressable
+                && (row.force_inline || inline_constant_fits(&constant.value, &mut 0));
+            copied.then_some((constant.key.as_str(), &constant.value))
+        })
+        .collect::<HashMap<_, _>>();
+    if values.is_empty() {
+        return;
+    }
+    for function in functions {
+        for block in &mut function.blocks {
+            for instruction in &mut block.instructions {
+                let MirOperation::Global { name } = &instruction.operation else {
+                    continue;
+                };
+                if let Some(value) = values.get(name.as_str()) {
+                    // A sized-integer read keeps its width, as a literal does.
+                    let mut constant = (*value).clone();
+                    if let MirConstant::Int { width: width @ None, .. } = &mut constant {
+                        *width = instruction.ty.as_ref().and_then(MirType::fixed_int);
+                    }
+                    instruction.operation = MirOperation::Constant(constant);
+                }
+            }
+        }
+    }
+}
+
+fn inline_constant_fits(value: &MirConstant, leaves: &mut usize) -> bool {
+    match value {
+        MirConstant::Int { .. }
+        | MirConstant::Float { .. }
+        | MirConstant::Bool(_)
+        | MirConstant::Char(_)
+        | MirConstant::Unit
+        | MirConstant::BigInt(_) => {}
+        MirConstant::String(text) if text.len() <= INLINE_CONSTANT_TEXT_BYTES => {}
+        MirConstant::Struct { fields, .. } => {
+            return fields
+                .iter()
+                .all(|(_, field)| inline_constant_fits(field, leaves));
+        }
+        MirConstant::Enum { args, .. } => {
+            return args.iter().all(|(_, arg)| inline_constant_fits(arg, leaves));
+        }
+        MirConstant::Present(inner) => return inline_constant_fits(inner, leaves),
+        _ => return false,
+    }
+    *leaves += 1;
+    *leaves <= INLINE_CONSTANT_LEAVES
 }
 
 fn lower_constant_value(value: &CtValue) -> Option<MirConstant> {
@@ -5044,6 +5122,11 @@ pub(super) struct LowerCtx<'a> {
     /// parameters, so a read-parameter place is recognized without scanning
     /// the emitted instructions.
     read_parameter_values: HashSet<MirValueId>,
+    /// Places of read-only aliases (`bind_local_alias` with `mutable:
+    /// false`): a read window, an immutable binding of a read parameter's
+    /// place, or a walked list's item. Such a local names another value's
+    /// slot, so a consuming use copies it instead of moving out of the owner.
+    read_alias_places: HashSet<MirPlaceId>,
     pub(super) drop_live_places: HashMap<MirPlaceId, MirPlaceId>,
     /// Every file-owner leaf place registered for cleanup in this function.
     pub(super) file_owner_places: Vec<MirPlaceId>,
@@ -5230,6 +5313,7 @@ impl<'a> LowerCtx<'a> {
             window_aliases: HashSet::new(),
             read_windows: HashSet::new(),
             read_parameter_values: HashSet::new(),
+            read_alias_places: HashSet::new(),
             drop_live_places: HashMap::new(),
             file_owner_places: Vec::new(),
             send_fn_locals: HashSet::new(),
@@ -7612,6 +7696,21 @@ impl<'a> LowerCtx<'a> {
             }
             operation => operation,
         };
+        // #4318: an implicit copy (materialize, share) of a Copy-ABI value is
+        // a bitwise `Scalar` read. The source is almost always the value just
+        // lowered, so the search from the end stops at once.
+        let operation = match operation {
+            MirOperation::Copy { value, fact } => MirOperation::Copy {
+                value,
+                fact: self
+                    .values
+                    .iter()
+                    .rev()
+                    .find(|row| row.0 == value)
+                    .map_or(fact, |row| fact.for_ownership(row.3.mode)),
+            },
+            operation => operation,
+        };
         self.retype_absent_operands(&operation, value_type.as_ref())?;
         let absent = value_type
             .as_ref()
@@ -8089,6 +8188,17 @@ impl<'a> LowerCtx<'a> {
         kind: MirIndexKind,
         access: MirAccess,
     ) -> Result<MirPlaceId, LowerError> {
+        // D-MEM-COPYSEM1: reading one element of a compiler-copied container
+        // place reads that element in place. The copy of the whole container
+        // (a whole `local.list` on every `local.list[i]` read) is never
+        // observable through a read, and the element read copies the element
+        // as before. A user `~` copy is a distinct node and is never elided.
+        let base = match &base.kind {
+            TExprKind::Clone(inner, _) if access == MirAccess::Read && tir_place_path(inner) => {
+                &**inner
+            }
+            _ => base,
+        };
         let result_ty = self.index_element_type(&base.ty, kind)?;
         let base_place = if let Some(place) =
             super::tir_to_mir_expr::lower_receiver_place(self, base, access)?
@@ -8445,6 +8555,9 @@ impl<'a> LowerCtx<'a> {
         let local_identity = self.reserve_identity("local", self.span(), &local.name, "")?;
         let local_id = MirLocalId(stable_id("mir-local", &local_identity));
         self.local_places.insert(local.name.clone(), place);
+        if !mutable {
+            self.read_alias_places.insert(place);
+        }
         self.locals.push(MirLocal {
             id: local_id,
             name: local.name.clone(),
@@ -8548,24 +8661,15 @@ impl<'a> LowerCtx<'a> {
         &mut self,
         expr: &TExpr,
     ) -> Result<Option<MirPlaceId>, LowerError> {
-        fn place_path(expr: &TExpr) -> bool {
-            match &expr.kind {
-                TExprKind::Local(local) => !local.is_persistent(),
-                TExprKind::Field {
-                    recv, boxed: false, ..
-                } => place_path(recv),
-                _ => false,
-            }
-        }
         let expr = match &expr.kind {
-            TExprKind::Clone(inner)
+            TExprKind::Clone(inner, _)
             | TExprKind::Borrow {
                 place: inner,
                 mutable: false,
             } => &**inner,
             _ => expr,
         };
-        if !place_path(expr) {
+        if !tir_place_path(expr) {
             return Ok(None);
         }
         let Some(place) =
@@ -8574,6 +8678,66 @@ impl<'a> LowerCtx<'a> {
             return Ok(None);
         };
         Ok(self.read_parameter_place(place).then_some(place))
+    }
+
+    /// #4318 §4: the place a stable loop source names. Like
+    /// [`Self::read_window_place`], but the root may also be a local or any
+    /// parameter: sema proved the loop body never mentions the source's root
+    /// (`TStmt::ForIn::source_stable`), so nothing changes the place while the
+    /// loop runs. A write window alias or a closure capture is not a stable
+    /// root: its owner is reachable under another name.
+    pub(super) fn stable_source_place(
+        &mut self,
+        expr: &TExpr,
+    ) -> Result<Option<MirPlaceId>, LowerError> {
+        let expr = match &expr.kind {
+            TExprKind::Clone(inner, _)
+            | TExprKind::Borrow {
+                place: inner,
+                mutable: false,
+            } => &**inner,
+            _ => expr,
+        };
+        if !tir_place_path(expr) {
+            return Ok(None);
+        }
+        let mut root = expr;
+        while let TExprKind::Field { recv, .. } = &root.kind {
+            root = recv;
+        }
+        if let TExprKind::Local(local) = &root.kind {
+            if self.window_aliases.contains(&local.name) {
+                return Ok(None);
+            }
+        }
+        let Some(place) =
+            super::tir_to_mir_expr::lower_receiver_place(self, expr, MirAccess::Read)?
+        else {
+            return Ok(None);
+        };
+        let Some(row) = self.places.iter().find(|candidate| candidate.id == place) else {
+            return Ok(None);
+        };
+        let rooted = matches!(row.base, MirPlaceBase::Local(_) | MirPlaceBase::Parameter(_))
+            && row.projections.iter().all(|projection| {
+                matches!(
+                    projection,
+                    MirProjection::Field { .. }
+                        | MirProjection::Payload { .. }
+                        | MirProjection::Index {
+                            kind: MirIndexKind::List,
+                            ..
+                        }
+                )
+            });
+        Ok(rooted.then_some(place))
+    }
+
+    /// True when `local` is a read-only alias (see `read_alias_places`).
+    pub(super) fn local_is_read_alias(&self, local: &TLocal) -> bool {
+        self.local_places
+            .get(&self.resolved_local_name(local))
+            .is_some_and(|place| self.read_alias_places.contains(place))
     }
 
     /// D-MEM-COPYSEM1: true when `place` is rooted at a read parameter through
@@ -10291,7 +10455,13 @@ impl<'a> LowerCtx<'a> {
                         Some(ty.clone()),
                         MirOperation::Copy {
                             value: read,
-                            materialize_view: facts.materialized.contains(source),
+                            // A cloned capture fills the closure's owning
+                            // slot from a local the scope keeps.
+                            fact: if facts.materialized.contains(source) {
+                                MirCopyFact::ViewMaterialize
+                            } else {
+                                MirCopyFact::Materialize
+                            },
                         },
                     )?
                 }
@@ -11314,7 +11484,7 @@ impl<'a> LowerCtx<'a> {
                 let place = self.lower_place(&TPlace::Expr(Box::new((**place).clone())), access)?;
                 (access, Some(place))
             }
-            TExprKind::Clone(_)
+            TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)
             | TExprKind::Move(_)
@@ -11506,5 +11676,16 @@ impl<'a> LowerCtx<'a> {
             }
             _ => Err(self.error(self.span(), "checked scan is not a text or binary pattern")),
         }
+    }
+}
+
+/// D-MEM-COPYSEM1: `expr` names a plain place: a non-persistent local or a
+/// field path below one. A recursive (boxed) field is a place too: reading
+/// through its box never copies the subtree it holds.
+fn tir_place_path(expr: &TExpr) -> bool {
+    match &expr.kind {
+        TExprKind::Local(local) => !local.is_persistent(),
+        TExprKind::Field { recv, .. } => tir_place_path(recv),
+        _ => false,
     }
 }

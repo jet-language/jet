@@ -11,6 +11,7 @@ use jet_foundation.[
     SymbolKind,
     TGenericParam,
     TagMarker,
+    TraitImplBlock,
     Type,
     TypeTupleField,
     ViewProvenance,
@@ -403,8 +404,9 @@ fn sema_type_graph_symbol_nominal(graph: SemaRegistrationGraph, resolved: SemaRe
 
 fn sema_type_graph_canonical_symbol_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
     nominal :: sema_type_graph_symbol_nominal(graph, resolved)
+    // Compiler-owned nominals keep the bare shared spelling (`Ordering`).
     if nominal == {
-        .Val(value) -> "{value.symbol.module_name}::{value.symbol.name}"
+        .Val(value) -> if value.compiler_owned -> value.symbol.name else -> "{value.symbol.module_name}::{value.symbol.name}"
         .None -> resolved.symbol.name
     }
 }
@@ -547,6 +549,23 @@ fn sema_type_graph_impl_matches_trait(graph: SemaRegistrationGraph, implementati
     Val(resolved.id.key == trait_symbol.id.key)
 }
 
+// Rust `register_struct_trait_impls` / `register_trait_impl_block`: a trait
+// block written inside a struct or enum body implements that trait exactly
+// like an `impl` item. The block's trait name resolves in the owner's module.
+fn sema_type_graph_inline_impl_matches_trait(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, trait_symbol: Symbol) -> Bool {
+    item :: sema_registration_nominal_source_item(nominal.source) ?? return false
+    blocks :: if item == {
+        .Struct(definition) -> definition.trait_impls
+        .Enum(definition) -> definition.trait_impls
+        else -> [TraitImplBlock]{}
+    }
+    loop block in blocks {
+        resolved :: sema_type_graph_trait_symbol(graph, nominal.symbol.module_name, block.trait_name) ?? next
+        if resolved.id.key == trait_symbol.id.key -> return true
+    }
+    false
+}
+
 fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
     if actual_resolved == {
         .Named(name) -> {
@@ -568,6 +587,7 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
             if target_matches -> return Val(true)
         }
     }
+    if sema_type_graph_inline_impl_matches_trait(graph, nominal, trait_symbol) -> return Val(true)
     if unresolved_impl || !graph.complete -> return None
     return Val(false)
 }

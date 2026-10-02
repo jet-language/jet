@@ -3035,6 +3035,9 @@ fn jet_int_encode_pointer(node: *mut JetIntNode) -> u64 {
     }
     JET_INT_POINTER_TAG | pointer
 }
+// Pointer-path refcounting stays out of line so the inline-integer fast paths
+// of Clone and Drop inline into callers in other crates as a tag test.
+#[inline(never)]
 unsafe fn jet_int_retain(node: *mut JetIntNode) {
     loop {
         // SAFETY: the caller holds an existing owner for this raw word.
@@ -3061,6 +3064,7 @@ unsafe fn jet_int_retain(node: *mut JetIntNode) {
     }
 }
 
+#[inline(never)]
 unsafe fn jet_int_release(node: *mut JetIntNode) {
     loop {
         // SAFETY: callers consume one valid owner.
@@ -3248,7 +3252,11 @@ impl JetInt {
         }
     }
 
+    #[inline]
     pub fn to_i64(&self) -> Option<i64> {
+        if self.is_inline() {
+            return Some(self.0 as i64);
+        }
         self.to_big().try_i64()
     }
 
@@ -3303,10 +3311,16 @@ impl JetInt {
     }
 
 
+    #[inline]
     pub fn compare(&self, other: &Self) -> std::cmp::Ordering {
         if self.is_inline() && other.is_inline() {
             return (self.0 as i64).cmp(&(other.0 as i64));
         }
+        self.compare_big(other)
+    }
+
+    #[inline(never)]
+    fn compare_big(&self, other: &Self) -> std::cmp::Ordering {
         self.to_big().compare(&other.to_big())
     }
 
@@ -3345,6 +3359,7 @@ impl std::iter::Product<JetInt> for JetInt {
 
 
 impl Clone for JetInt {
+    #[inline]
     fn clone(&self) -> Self {
         // SAFETY: `self` owns one reference, so the node cannot reach zero
         // while this method retains it.
@@ -3353,6 +3368,7 @@ impl Clone for JetInt {
 }
 
 impl Drop for JetInt {
+    #[inline]
     fn drop(&mut self) {
         if jet_int_is_pointer(self.0) {
             // SAFETY: Drop consumes this owner's reference.
@@ -3374,6 +3390,7 @@ impl fmt::Display for JetInt {
 }
 
 impl PartialEq for JetInt {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.compare(other) == std::cmp::Ordering::Equal
     }
@@ -3393,12 +3410,14 @@ impl std::hash::Hash for JetInt {
 }
 
 impl PartialOrd for JetInt {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.compare(other))
     }
 }
 
 impl Ord for JetInt {
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.compare(other)
     }

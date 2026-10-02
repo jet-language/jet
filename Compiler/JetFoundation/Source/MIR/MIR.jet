@@ -4,79 +4,82 @@
 
 pub MIR_SCHEMA_VERSION :: prep { 6 }
 
-pub struct MIRFunctionID { pub value: Int }
+// Every MIR identity is a fixed 64-bit word, as in the Rust reference
+// (`mir_id!` newtypes over `u64`): a stable FNV-1a hash or, in fixtures, a
+// small dense number. Ids never cross into exact `Int`.
+pub struct MIRFunctionID { pub value: U64 }
 
-pub struct MIRBlockID { pub value: Int }
+pub struct MIRBlockID { pub value: U64 }
 
-pub struct MIRValueID { pub value: Int }
+pub struct MIRValueID { pub value: U64 }
 
-pub struct MIRPlaceID { pub value: Int }
+pub struct MIRPlaceID { pub value: U64 }
 
-pub struct MIRLocalID { pub value: Int }
+pub struct MIRLocalID { pub value: U64 }
 
-pub struct MIROpID { pub value: Int }
+pub struct MIROpID { pub value: U64 }
 
-pub struct MIRTypeID { pub value: Int }
+pub struct MIRTypeID { pub value: U64 }
 
-pub struct MIRCoreCallID { pub value: Int }
+pub struct MIRCoreCallID { pub value: U64 }
 
-pub struct MIRScopeID { pub value: Int }
+pub struct MIRScopeID { pub value: U64 }
 
-pub struct MIRClosureID { pub value: Int }
+pub struct MIRClosureID { pub value: U64 }
 
-pub struct MIRModuleID { pub value: Int }
+pub struct MIRModuleID { pub value: U64 }
 
-pub struct MIRImportID { pub value: Int }
+pub struct MIRImportID { pub value: U64 }
 
-pub struct MIRTraitID { pub value: Int }
+pub struct MIRTraitID { pub value: U64 }
 
-pub struct MIRImplID { pub value: Int }
+pub struct MIRImplID { pub value: U64 }
 
-pub struct MIRConstantID { pub value: Int }
+pub struct MIRConstantID { pub value: U64 }
 
-pub struct MIRGCEditSiteID { pub value: Int }
+pub struct MIRGCEditSiteID { pub value: U64 }
 
-pub struct MIRForeignID { pub value: Int }
+pub struct MIRForeignID { pub value: U64 }
 
-pub struct MIRLinkUnitID { pub value: Int }
+pub struct MIRLinkUnitID { pub value: U64 }
 
-pub struct MIRCallbackID { pub value: Int }
+pub struct MIRCallbackID { pub value: U64 }
 
-pub struct MIRHandleID { pub value: Int }
+pub struct MIRHandleID { pub value: U64 }
 
-pub struct MIRArtifactID { pub value: Int }
+pub struct MIRArtifactID { pub value: U64 }
 
-pub struct MIRHarnessID { pub value: Int }
+pub struct MIRHarnessID { pub value: U64 }
 
-pub struct MIRJobID { pub value: Int }
+pub struct MIRJobID { pub value: U64 }
 
-pub struct MIRTestID { pub value: Int }
+pub struct MIRTestID { pub value: U64 }
 
-pub struct MIRCoveragePointID { pub value: Int }
+pub struct MIRCoveragePointID { pub value: U64 }
 
-pub struct MIRTraitMethodID { pub value: Int }
+pub struct MIRTraitMethodID { pub value: U64 }
 
-pub struct MIROutputCheckID { pub value: Int }
+pub struct MIROutputCheckID { pub value: U64 }
 
-pub struct MIRDataPlanNodeID { pub value: Int }
+pub struct MIRDataPlanNodeID { pub value: U64 }
 
-pub struct MIRPreludeCallID { pub value: Int }
+pub struct MIRPreludeCallID { pub value: U64 }
 
-pub struct MIRFieldID { pub value: Int }
+pub struct MIRFieldID { pub value: U64 }
 
-pub struct MIRSourceFileID { pub value: Int }
+pub struct MIRSourceFileID { pub value: U64 }
 
-pub struct MIRSiteID { pub value: Int }
+pub struct MIRSiteID { pub value: U64 }
 
 // Stable FNV-1a over namespace, NUL, and canonical identity; IDs never depend
 // on process hash seeds, allocation order, or a backend's naming scheme.
-pub fn stable_id(namespace: String, identity: String) -> Int Never! {
-    mask :: 0xffffffffffffffff
-    hash := 0xcbf29ce484222325
-    loop byte in namespace.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
-    hash = (hash * 0x100000001b3) & mask
-    loop byte in identity.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
-    if hash == 0 -> return 1
+pub fn stable_id(namespace: String, identity: String) -> U64 Never! {
+    prime :: U64{0x100000001b3}
+    hash := U64{0xcbf29ce484222325}
+    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash = hash.wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    if hash == 0 -> return U64{1}
     hash
 }
 
@@ -1770,6 +1773,30 @@ pub enum MIRSemanticOp {
     HostCall(call: MIRPreludeCallID, args: [MIRCallArg])
 }
 
+// #4318: why a MIR Copy duplicates its operand (MIRRust MirCopyFact). Every
+// copy carries the sema decision that made it; lowering and backends never
+// print a clone without one, and the legality verifier checks the fact
+// against the operand's type.
+pub enum MIRCopyFact { Explicit Materialize Share Scalar ViewMaterialize }
+
+// Stable wire name (digests, emitted copy tags).
+pub fn mir_copy_fact_name(fact: MIRCopyFact) -> String Never! {
+    if fact == {
+        .Explicit -> "explicit"
+        .Materialize -> "materialize"
+        .Share -> "share"
+        .Scalar -> "scalar"
+        .ViewMaterialize -> "view_materialize"
+    }
+}
+
+// An implicit copy (materialize, share) of a Copy-ABI value is a bitwise read;
+// the user's `~` and view materialization keep their fact.
+pub fn mir_copy_fact_for_ownership(fact: MIRCopyFact, mode: MIROwnershipMode) -> MIRCopyFact Never! {
+    if mode == MIROwnershipMode.Copy && (fact == MIRCopyFact.Materialize || fact == MIRCopyFact.Share) -> return MIRCopyFact.Scalar
+    ~fact
+}
+
 pub enum MIROperation {
     Parameter(index: Int, name: String)
     Capture(slot: Int)
@@ -1780,7 +1807,7 @@ pub enum MIROperation {
     WritePlace(place: MIRPlaceID, value: MIRValueID)
     ReplacePlace(place: MIRPlaceID, value: MIRValueID)
     InitializeUninit(place: MIRPlaceID)
-    Copy(value: MIRValueID, materialize_view: Bool)
+    Copy(value: MIRValueID, fact: MIRCopyFact)
     Move(value: MIRValueID)
     Constant(value: MIRConstant)
     Unary(op: MIRUnaryOp, value: MIRValueID)
@@ -1928,7 +1955,7 @@ pub struct MIRDecisionIdentity {
 pub struct MIRDecisionEdit { pub span: Span, pub replacement: String }
 
 pub struct MIRDecisionRow {
-    pub id: Int
+    pub id: U64
     pub kind: MIRDecisionKind
     pub disposition: MIRDecisionDisposition
     pub function: MIRFunctionID?

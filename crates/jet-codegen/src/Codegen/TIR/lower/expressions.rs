@@ -1472,7 +1472,10 @@ fn lower_pre_contracts_for_args(
         if arg.clone || arg.arc_clone {
             init = TExpr {
                 ty: init.ty.clone(),
-                kind: TExprKind::Clone(Box::new(init)),
+                kind: TExprKind::Clone(
+                    Box::new(init),
+                    crate::Codegen::TIR::call_arg_copy_fact(arg.arc_clone),
+                ),
             };
             arg.clone = false;
             arg.arc_clone = false;
@@ -3920,7 +3923,7 @@ pub(crate) fn lower_debug_trace(call: &crate::AST::Call, cx: &Cx, env: &mut Lowe
     {
         value = TExpr {
             ty: value.ty.clone(),
-            kind: TExprKind::Clone(Box::new(value)),
+            kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
         };
     }
     let site: String = match call.args.get(1).map(|arg| &arg.expr) {
@@ -4885,7 +4888,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     TExprKind::ExplicitCopy(Box::new(operand))
                 } else {
                     env.note_clone(&ty);
-                    TExprKind::Clone(Box::new(operand))
+                    TExprKind::Clone(Box::new(operand), jet_foundation::MIR::MirCopyFact::Materialize)
                 };
                 TExpr { ty, kind }
             })
@@ -5747,7 +5750,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             TExprKind::ExplicitCopy(Box::new(operand))
                         } else {
                             env.note_clone(&ty);
-                            TExprKind::Clone(Box::new(operand))
+                            TExprKind::Clone(Box::new(operand), jet_foundation::MIR::MirCopyFact::Explicit)
                         };
                         return TExpr { ty, kind };
                     });
@@ -6100,7 +6103,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let arg = lower_expr(&call.args[0].expr, cx, env);
                         return TExpr {
                             ty: arg.ty.clone(),
-                            kind: TExprKind::Clone(Box::new(arg)),
+                            kind: TExprKind::Clone(Box::new(arg), jet_foundation::MIR::MirCopyFact::Materialize),
                         };
                     });
                 }
@@ -9056,7 +9059,7 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type, line: u32) {
                 work.push(rhs);
                 work.push(lhs);
             }
-            TExprKind::Clone(inner)
+            TExprKind::Clone(inner, _)
             | TExprKind::ExplicitCopy(inner)
             | TExprKind::MaterializeView(inner)
             | TExprKind::Move(inner) => work.push(inner),
@@ -9306,7 +9309,7 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         env.note_clone(&ty);
         TExpr {
             ty,
-            kind: TExprKind::Clone(Box::new(lowered)),
+            kind: TExprKind::Clone(Box::new(lowered), jet_foundation::MIR::MirCopyFact::Materialize),
         }
     } else {
         lowered
@@ -9493,7 +9496,7 @@ pub(crate) fn wrap_foreign_undo(
             let_ty: crate::Codegen::TIR::TLetTy::inferred(),
             init: TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::Clone(Box::new(value)),
+                kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
             },
             gc_promotion: None,
             gc_transferred: false,
@@ -9703,7 +9706,10 @@ impl OrderedArg for crate::Codegen::TIR::TCallArg {
         if self.clone || self.arc_clone {
             value = TExpr {
                 ty: value.ty.clone(),
-                kind: TExprKind::Clone(Box::new(value)),
+                kind: TExprKind::Clone(
+                    Box::new(value),
+                    crate::Codegen::TIR::call_arg_copy_fact(self.arc_clone),
+                ),
             };
             self.clone = false;
             self.arc_clone = false;
@@ -9737,7 +9743,7 @@ impl OrderedArg for crate::Codegen::TIR::TExternArg {
         if self.clone {
             value = TExpr {
                 ty: value.ty.clone(),
-                kind: TExprKind::Clone(Box::new(value)),
+                kind: TExprKind::Clone(Box::new(value), jet_foundation::MIR::MirCopyFact::Materialize),
             };
             self.clone = false;
         }
@@ -9778,7 +9784,7 @@ impl OrderedArg for TExpr {
                     | TExprKind::ExternCall { .. }
                     | TExprKind::HostCall(_)
                     | TExprKind::InlineBlock(_)
-                    | TExprKind::Clone(_)
+                    | TExprKind::Clone(..)
                     | TExprKind::StrLit(_)
                     | TExprKind::Print(_)
             )

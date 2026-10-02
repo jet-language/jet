@@ -116,10 +116,12 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
 }
 
 // D-HOLE1: `opt.map(f: T -> R) -> R?`; the callback's own failure carrier
-// stays at the call boundary, so the result wraps its success value.
+// stays at the call boundary, so the result wraps its success value. The
+// callback result is open (Rust `finish_builtin_method` adopts it), so it is
+// checked like a collection callback and validated below.
 fn sema_value_method_option_map(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     required := Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    callback :: sema_check_expression_with_lambda_escapes(args[0].expr, Val(required), environment, &scopes, &state, &tail_store, &context, Val(false), &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    callback :: sema_expression_lambda_collection_callback(args[0].expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if sema_call_host_callback_assignable(required, callback.ty, environment) != (Val(true)) {
         &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "argument 1 to `.map()` should be {sema_type_show(required)}, not {sema_type_show(callback.ty)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, callback.ty)))
         return SemaMethodSpecialCheck{handled: true, value: None}

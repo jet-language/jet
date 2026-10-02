@@ -1,0 +1,68 @@
+{
+  "status": "Implementation specification; compiler sources were inspected read-only, not modified",
+  "problem": "Rust republishes synthetic builtin trait names as module-qualified nominal identities, copies that complete union into every module registry, then copies it again into every ModuleState",
+  "rust_sites": [
+    {"path": "crates/jet-foundation/src/Traits.rs", "lines": "235-239, 2543-2775", "role": "Every module gets synthetic builtin auto-trait names, even when its source declares no nominal types"},
+    {"path": "crates/jet-foundation/src/Traits.rs", "lines": "341-365", "role": "Qualifies all six sets without restricting them to actual local nominal declarations; merges the growing union into every registry"},
+    {"path": "crates/jet-foundation/src/Names.rs", "lines": "433-435", "role": "nominal_identity formats an identity for any supplied name, without checking whether that declaration exists"},
+    {"path": "crates/jet-foundation/src/Traits.rs", "lines": "369-378", "role": "Six extend(iter().cloned()) operations allocate owned HashSet tables and owned strings"},
+    {"path": "crates/jet-sema/src/Sema/Bundle/Pipeline/CheckInner.rs", "lines": "1630-1634", "role": "Copies the already-expanded module registry sets a second time into every ModuleState; retains both collections during checking"}
+  ],
+  "jet_has_same_union_copy": false,
+  "jet_sites": [
+    {"path": "Compiler/JetFoundation/Source/Types/Types.jet", "lines": "341-342", "role": "symbol_id is an identity formatter, but is not fed a per-module union of synthetic builtin names"},
+    {"path": "Compiler/JetSema/Source/Sema/Registration/Items.jet", "lines": "1081-1141", "role": "Nominal registration creates rows for actual nominal AST declarations; unmatched item kinds return None"},
+    {"path": "Compiler/JetSema/Source/Sema/Registration/Items.jet", "lines": "492-517, 905-921", "role": "One graph owns indexes of actual nominal rows; no six per-module canonical union sets"},
+    {"path": "Compiler/JetSema/Source/Sema/Registration/Items.jet", "lines": "1995-2006", "role": "Err, Ordering and RemoveBy are injected once each into a selected owner module, not once into every module"},
+    {"path": "Compiler/JetSema/Source/Sema/Registration/TypeMetadata.jet", "lines": "103-126", "role": "Computes Printable/Debug/Equatable selection from one resolved declaration and the owning module's explicit impl map"},
+    {"path": "Compiler/JetSema/Source/Sema/Expressions/Literals.jet", "lines": "766-780", "role": "Resolves the real owner before consulting Printable metadata"},
+    {"path": "Compiler/JetSema/Source/Sema/Calls/Direct.jet", "lines": "154-166", "role": "Resolves the real owner before consulting Debug metadata"},
+    {"path": "Compiler/JetSema/Source/Sema/Comparability.jet", "lines": "89-106", "role": "Resolves the real owner before consulting Equatable metadata"},
+    {"path": "Compiler/JetSema/Source/Sema/Registration/Derives.jet", "lines": "1705-1726, 1775-1786", "role": "Equatable/Comparable candidate maps are local to the module's actual declarations, not a copied bundle union"},
+    {"path": "Compiler/JetSema/Source/Sema/CheckProgram.jet", "lines": "1531-1545, 1574, 1829-1842", "role": "FixSelfA's existing pass environment is reused across modules; module results retain only source_module.nominals and module-local metadata"},
+    {"path": "Compiler/JetSema/Source/Sema/Scopes.jet", "lines": "518-548", "role": "The environment takes ownership of one graph copy and resets module-specific fields in place"}
+  ],
+  "self_compile_conclusion": "This specific Rust union-copy defect is not present in the live Jet source and therefore is not a source-level explanation of the live jetc0 286-module self-compile. The separate Jet whole-graph environment-copy defect was already removed by FixSelfA. No dynamic Jet-port timing was performed in this investigation.",
+  "shared_contract": {
+    "ownership": "One immutable canonical trait-fact table per bundle/registration-graph version. Module registries retain only their own bare-name/local facts and a shared handle or borrowed reference to the canonical table.",
+    "identity": "Canonical facts are keyed by a resolved actual nominal declaration identity, never by qualifying arbitrary builtin names with each consumer module's identity. Synthetic builtin facts have one compiler-owned table/predicate and do not multiply with empty modules.",
+    "queries": "Resolve source aliases, visibility and shadowing to the owner first. Query by the already-resolved owner/declaration key. Local derive expansion iterates only the owner's local selections. Do not allocate or flatten a union to satisfy a query or a codegen consumer.",
+    "invalidation": "Recompute at registration/graph-version boundaries after declarations or marker/impl inputs change, not per module, body, query, or generated consumer.",
+    "complexity": "Retained facts and publication work must be O(actual nominal facts + module count + fixed builtin facts), not O(module count * published facts)."
+  },
+  "rust_changes": [
+    "Introduce a canonical auto-trait facts object for Printable, Debug, Equatable, Comparable, Encode and Decode, frozen once per bundle after the existing structural fixed point. Arc-share it across TraitRegistry/ModuleState and later semantic consumers. Keep existing local selections separate and module-local.",
+    "At Traits.rs:341-361 publish only actual owner declarations: intersect selected local names with the registry's local nominal declarations and the name ledger's real type declaration rows before obtaining a canonical identity. Do not publish names merely because register_synthetic_display_debug inserted them. Preserve a real user/Core declaration that happens to have a builtin spelling.",
+    "Do not change the generic formatting behavior of NameLedger::nominal_identity blindly: audit its callers and enforce real-declaration membership at publication, or introduce a declaration-validated nominal identity query for that operation. Formatting an unresolved name must never create a trait fact.",
+    "Remove the global extend/cloned loop at Traits.rs:363-365. Replace CheckInner.rs:1634 with attaching the shared canonical handle and transferring/merging only that module's local selections. No second full union is permitted; temporary bundle_auto_derives results must not retain duplicate global tables.",
+    "Replace global-membership uses of auto_derive_set/direct HashSet access with a non-allocating has_auto_derive(trait, resolved owner/declaration) query that consults local facts, the canonical shared facts, and compiler-owned builtin facts correctly. Provide local-only iteration for derive/serde expansion; do not return an allocated local-plus-global set.",
+    "Migrate consumers in Traits.rs:1785-1804 and 2049-2074; jet-sema SchemaMigration.rs, Registration/Derives.rs, Registration/Serde.rs and CheckerInfer/stdlib_lints/display_lint.rs. Update App.rs:22 and GateLedger.rs:199 to reuse the frozen bundle facts rather than independently rebuilding a replicated Vec<TraitRegistry>.",
+    "Audit jet-codegen/Codegen/Context.rs:6631-6634 and TIR/mod.rs:5063-5066,5452-5454: codegen needs selections for actual owned types, not a copied bundle union in every Cx or per-module metadata map. Publish per-type TIR/MIR trait flags from the shared canonical answer, or retain the shared query handle; preserve schema and generated derive behavior."
+  ],
+  "jet_changes": [
+    "Do not add the Rust union-copy architecture: the port already avoids it. Retain FixSelfA's one environment per pass and borrowed module/function checking.",
+    "For a common once-per-bundle facts boundary, add a frozen trait-fact table/index to the graph-pass environment, keyed by existing registered nominal SymbolID keys or nominal row positions. Build it once from actual graph.modules[*].nominals and owning-module impl/marker inputs. Empty modules contribute no nominal facts; compiler-owned builtins retain their one existing owner or a fixed builtin predicate.",
+    "Cache the existing TypeMetadata.jet:108-126 selection answers once per resolved nominal and graph version. Route Literals.jet:766-780, Calls/Direct.jet:154-166 and Comparability.jet:89-106 through the borrowed owner-keyed table rather than recomputing declaration fields/impl membership at each query. Preserve current trait-selection semantics; this is not permission to add new language capabilities.",
+    "Keep Derives.jet's local candidate maps local. If consolidating their Equatable/Comparable solved answers with the canonical table, compute each owner's rows once and have local derive/serde expansion consume only those rows; never copy every owner's rows into each module's registration/module-result records.",
+    "Thread the one facts object by borrow through CheckProgram.jet:1535-1545 and Scopes.jet:518-548. Do not store a value copy in each SemaGraphModuleResult or nominal query context. Refresh only when the source registration graph version changes, including comptime specialization/marker input changes.",
+    "Continue obtaining identities from the resolved registration row. The generic Types.jet:341 formatter is not a declaration existence test; call sites must not synthesize builtin trait identities for each empty consumer module."
+  ],
+  "acceptance": [
+    "An empty-module ladder must not increase canonical builtin fact cardinality. A bundle with no source nominals has only fixed compiler/Core nominal facts, independent of its empty module count.",
+    "A bundle containing T real nominal declarations and M consumer modules stores O(T + M) trait metadata; all consumers share the same canonical object. A pointer-identity/reference-ownership assertion or deterministic published-fact/table-copy counters should establish that there is one global table, not M copies.",
+    "Preserve qualified/grouped imports, private/public visibility, duplicate leaf names across files/packages, builtin-name shadowing, negative markers, explicit impl suppression, package auto-derive defaults, generic structural bounds, and recursive structural fixed-point behavior. Cover actual imported Core error types as well as empty modules.",
+    "Run the module scaling gate at baseline 1 and 64/128/256, plus a many-nominal/many-consumer fixture. Compare heaptrack allocation stacks before/after: merge_auto_derives must not retain whole-union HashSet or string-copy allocation sites per module. Check and build must have consistent canonical answers.",
+    "Main verifies compiler tests/builds only after both compiler halves and all callers land; this task did not edit or build compiler sources."
+  ],
+  "observed_evidence": {
+    "rss_receipt": "/home/nate/.cache/jet-test-scratch/sol/SolScaleGate/module-profile-fPWJni/receipt.json",
+    "rss_kib_64_128_256": [225368, 706808, 2607048],
+    "anonymous_kib_64_128_256": [177172, 658780, 2572852],
+    "heaptrack_receipt": "/home/nate/.cache/jet-test-scratch/sol/SolScaleGate/module-profile-A0ddWD/receipt.json",
+    "heaptrack_reports": ["/home/nate/.cache/jet-test-scratch/sol/SolScaleGate/module-profile-A0ddWD/64/heaptrack-report.txt", "/home/nate/.cache/jet-test-scratch/sol/SolScaleGate/module-profile-A0ddWD/128/heaptrack-report.txt"],
+    "peak_heap_decimal_mb_64_128": [144.54, 552.89],
+    "two_leading_hashset_sites_each_decimal_mb_64_128": [26.63, 105.68],
+    "paired_string_clone_sites_each_decimal_mb_64_128": [14.27, 56.95],
+    "note": "Heaptrack's reported peak consumption per site is not a cumulative-allocation-byte metric. Reports were generated with backtrace merging disabled. /proc sampling for 256 completes the requested 64/128/256 breakdown without needing a 256-module heaptrack process under the small lane."
+  }
+}

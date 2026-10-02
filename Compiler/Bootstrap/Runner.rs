@@ -600,39 +600,33 @@ fn append_embedded_compiler_image(
         write!(source, "{byte}")
             .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     }
-    source.push_str(
-        "];\n\
+    source.push_str("];\n");
+    writeln!(
+        source,
+        "#[doc(hidden)]\n\
+         const __JET_BOOTSTRAP_COMPILER_ARTIFACT: ::jet_foundation::MIR::MirArtifactId = ::jet_foundation::MIR::MirArtifactId({});\n\
          #[doc(hidden)]\n\
-         pub(crate) fn __jet_bootstrap_restore_compiler_image() -> Result<\n\
-             crate::compiler_bootstrap_compiler_image::RestoredCompilerImage<crate::__JetBootstrapSourceProgram>,\n\
-             crate::compiler_bootstrap_compiler_image::CompilerImageError,\n\
-         > {\n\
-             crate::compiler_bootstrap_compiler_image::restore_compiler_image(\n\
+         const __JET_BOOTSTRAP_COMPILER_ENTRY_FUNCTION: ::jet_foundation::MIR::MirFunctionId = ::jet_foundation::MIR::MirFunctionId({});",
+        artifact_id.0, entry_function.0
+    )
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+    // Callers that only select the compiler artifact or compare source
+    // authority read the envelope prefix; the MIR program is decoded (and the
+    // whole archive verified) once, on first use by a reader of the program.
+    source.push_str(
+        "#[doc(hidden)]\n\
+         fn __jet_bootstrap_compiler_image_envelope() -> Result<crate::compiler_bootstrap_compiler_image::CompilerImageEnvelope, String> {\n\
+             crate::compiler_bootstrap_compiler_image::read_compiler_image_envelope(\n\
                  __JET_BOOTSTRAP_COMPILER_IMAGE_BYTES,\n\
-                 __JET_BOOTSTRAP_COMPILER_SOURCE_AUTHORITY_DIGEST,\n",
-    );
-    writeln!(
-        source,
-        "                 ::jet_foundation::MIR::MirArtifactId({}),",
-        artifact_id.0
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    writeln!(
-        source,
-        "                 ::jet_foundation::MIR::MirFunctionId({}),",
-        entry_function.0
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    source.push_str(
-        "                 crate::__jet_bootstrap_mir_program_from_host,\n\
+                 __JET_BOOTSTRAP_COMPILER_SOURCE_AUTHORITY_DIGEST,\n\
+                 __JET_BOOTSTRAP_COMPILER_ARTIFACT,\n\
+                 __JET_BOOTSTRAP_COMPILER_ENTRY_FUNCTION,\n\
              )\n\
-         }\n",
-    );
-    source.push_str(
-        "\n#[doc(hidden)]\n\
+             .map_err(|error| error.to_string())\n\
+         }\n\
+         \n#[doc(hidden)]\n\
          struct __JetBootstrapCompilerImage {\n\
              header: crate::compiler_bootstrap_compiler_image::CompilerImageHeader,\n\
-             source_program: ::std::sync::Arc<crate::__JetBootstrapSourceProgram>,\n\
              program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\
          }\n\
          #[doc(hidden)]\n\
@@ -640,10 +634,15 @@ fn append_embedded_compiler_image(
          #[doc(hidden)]\n\
          fn __jet_bootstrap_compiler_image() -> Result<::std::sync::Arc<__JetBootstrapCompilerImage>, String> {\n\
              __JET_BOOTSTRAP_COMPILER_IMAGE.get_or_init(|| {\n\
-                 let restored = __jet_bootstrap_restore_compiler_image().map_err(|error| error.to_string())?;\n\
+                 let restored = crate::compiler_bootstrap_compiler_image::restore_compiler_image(\n\
+                     __JET_BOOTSTRAP_COMPILER_IMAGE_BYTES,\n\
+                     __JET_BOOTSTRAP_COMPILER_SOURCE_AUTHORITY_DIGEST,\n\
+                     __JET_BOOTSTRAP_COMPILER_ARTIFACT,\n\
+                     __JET_BOOTSTRAP_COMPILER_ENTRY_FUNCTION,\n\
+                 )\n\
+                 .map_err(|error| error.to_string())?;\n\
                  Ok(::std::sync::Arc::new(__JetBootstrapCompilerImage {\n\
                      header: restored.header,\n\
-                     source_program: ::std::sync::Arc::new(restored.source_program),\n\
                      program: ::std::sync::Arc::new(restored.program),\n\
                  }))\n\
              }).clone()\n\
@@ -667,7 +666,7 @@ pub(crate) fn invoke_bootstrap_entry<Output>(
 /// diagnostics; Native artifacts reach the AOT backend, Web artifacts retain
 /// their exact target payloads, and user-program Source runtime artifacts use
 /// the checked whole-entry JIT seam, separate from the compiler factory entry.
-// Runs only inside the generated compiler artifact: it restores the compiler
+// Runs only inside the generated compiler artifact: it reads the compiler
 // image that `append_embedded_compiler_image` embeds at that crate's root.
 #[cfg(jet_bootstrap_compiler_artifact)]
 pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig>(
@@ -1061,13 +1060,13 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
             ),
         ));
     };
-    let compiler_image = match crate::__jet_bootstrap_compiler_image() {
+    let compiler_image = match crate::__jet_bootstrap_compiler_image_envelope() {
         Ok(image) => image,
         Err(error) => {
             retire_bootstrap_resources(resources, completion_scope)?;
             return Err(BootstrapRunError::Codec(
                 BootstrapHostCodecError::InvalidMetadata(format!(
-                    "cannot restore canonical compiler image before native emission: {error}"
+                    "cannot read canonical compiler image envelope before native emission: {error}"
                 )),
             ));
         }
@@ -1077,7 +1076,7 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
             lease.snapshot(),
         );
     let compiling_canonical_source =
-        source_authority_digest == compiler_image.header.source_authority_digest;
+        source_authority_digest == compiler_image.source_authority_digest;
     let Some(source_program_ref) = source_program.as_ref() else {
         retire_bootstrap_resources(resources, completion_scope)?;
         return Err(BootstrapRunError::Codec(
@@ -1102,15 +1101,12 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
                     return Err(BootstrapRunError::Codec(error));
                 }
             };
-            if compiler_image.header.entry_function != compiler_root {
-                retire_bootstrap_resources(resources, completion_scope)?;
-                return Err(BootstrapRunError::Codec(
-                    BootstrapHostCodecError::InvalidMetadata(
-                        "canonical compiler image private root differs from the checked source factory"
-                            .to_string(),
-                    ),
-                ));
-            }
+            // The image's numeric root is a reference inside that image only:
+            // the Rust seed and the Jet compiler assign function IDs with
+            // different key framings, so the fresh root is never compared to
+            // it by number. Equal canonical source authority plus the unique,
+            // ABI-checked `jet_bootstrap_compile` binding above is the root's
+            // cross-generation identity.
             let Some(native_artifact) =
                 artifact_for_function_target(program, compiler_root, MirArtifactTarget::RustAot)
             else {
@@ -1158,9 +1154,9 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
             let embedded_image = compiler_output.then(|| {
                 (
                     crate::__JET_BOOTSTRAP_COMPILER_IMAGE_BYTES.to_vec(),
-                    compiler_image.header.source_authority_digest,
-                    compiler_image.header.artifact,
-                    compiler_image.header.entry_function,
+                    compiler_image.source_authority_digest,
+                    compiler_image.artifact,
+                    compiler_image.entry_function,
                 )
             });
             (native_artifact, embedded_image)
@@ -1459,14 +1455,13 @@ fn package_bootstrap_artifact(
                  backend,
                  source_resume_factory,\n\
                  |source_program, program, artifact, entry, snapshot| {\n\
-                     let compiler_image = crate::__jet_bootstrap_compiler_image()\n\
+                     let compiler_image = crate::__jet_bootstrap_compiler_image_envelope()\n\
                          .map_err(crate::BootstrapHostCodecError::InvalidMetadata)?;\n\
                      let source_authority_digest =\n\
                          crate::compiler_bootstrap_compiler_image::compiler_image_source_authority_digest(snapshot);\n\
-                     if source_authority_digest != compiler_image.header.source_authority_digest\n\
-                         || entry != compiler_image.header.entry_function {\n\
+                     if source_authority_digest != compiler_image.source_authority_digest {\n\
                          return Err(crate::BootstrapHostCodecError::InvalidMetadata(\n\
-                             \"private compiler-image archive root differs from canonical source authority\".to_string(),\n\
+                             \"private compiler-image archive source differs from canonical source authority\".to_string(),\n\
                          ));\n\
                      }\n\
                      crate::compiler_bootstrap_compiler_image::archive_compiler_image(\n\
