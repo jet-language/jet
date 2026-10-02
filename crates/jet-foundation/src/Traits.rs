@@ -3899,7 +3899,9 @@ mod tests {
             assert!(traits.type_implements_trait(&ty, PRINTABLE));
             assert!(!traits.type_implements_trait(&ty, "UserTrait"));
         }
-        assert!(!traits.type_implements_trait(&Type::Float32, COMPARABLE));
-        assert!(!traits.implements_trait("Float", COMPARABLE));
+        // D-TRAIT-OVERLOAD1=A: Float implements Numeric, which builds on
+        // Comparable, so a `T: Comparable` bound admits both float widths.
+        assert!(traits.type_implements_trait(&Type::Float32, COMPARABLE));
+        assert!(traits.implements_trait("Float", COMPARABLE));
     }
 }

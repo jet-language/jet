@@ -441,6 +441,25 @@ Report: [mine-for-jet-2026-09-30-spj-papers](../../research/mine-for-jet-2026-09
 - Champagne Prototyping (VL/HCC 2004) — https://www.microsoft.com/en-us/research/publication/champagne-prototyping-research-technique-early-evaluation-complex-end-user-programming-systems
 - A Monad for Deterministic Parallelism (Haskell 2011) — https://simon.peytonjones.org/deterministic-parallelism
 
+### Systems-language talks and sources (mined 2026-10-01)
+
+Report: [mine-for-jet-2026-10-01-systems-langs](../../research/mine-for-jet-2026-10-01-systems-langs.md).
+
+- https://www.youtube.com/watch?v=5_oqWE9otaE
+- https://www.youtube.com/watch?v=i9nFvSpcCzo
+- https://www.youtube.com/watch?v=42y2Q9io3Xs
+- https://www.youtube.com/watch?v=UBgam9XUHs0
+- https://www.youtube.com/watch?v=aKYdj0f1iQI
+- https://www.youtube.com/watch?v=UmL_CA-v3O8
+- https://www.youtube.com/watch?v=JRcXUuQYR90
+- https://www.youtube.com/watch?v=wuGx35UIKTk
+- https://harelang.org
+- https://github.com/modular/modular
+- https://eyg.run
+- https://roc-lang.org
+- https://skiplang.com
+- https://dev.epicgames.com/documentation/en-us/fortnite/verse-language-reference
+
 ## Developer experience (e14)
 
 Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths remain provenance records.

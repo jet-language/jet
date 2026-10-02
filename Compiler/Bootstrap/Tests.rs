@@ -22,14 +22,41 @@ const BOOTSTRAP_UNITS_RELATIVE: &str = ".cache/jet-luna/compiler-bootstrap/units
 const BACKEND_UNIT_PROFILE: &str = "debug = \"line-tables-only\"\n";
 /// Parallel rustc jobs (and codegen tokens) of a backend build. The
 /// stage-zero backend build runs inside the bootstrap test's memory cap, so
-/// at most this many unit or repository crates compile at once.
-const BACKEND_BUILD_JOBS: &str = "2";
+/// at most this many unit or repository crates compile at once. Measured
+/// peaks: sharded unit crates <= 2.1 GB each, jet_jit 5.7 GB, so six jobs
+/// stay well inside a 22 GB cap.
+const BACKEND_BUILD_JOBS: &str = "6";
+/// Stack for the backend build's rustc threads (`RUST_MIN_STACK`): the
+/// emitted units' deeply nested blocks overflow rustc's default 8 MiB in
+/// LLVM's debuginfo scope walk (`DwarfCompileUnit::createAndAddScopeChildren`).
+const BACKEND_RUSTC_STACK: &str = "268435456";
 /// A unit crate longer than this is sharded (`shard_unit`) into crates of
 /// about this size: rustc's memory grows with the crate, and the compiler's
 /// largest units alone would not fit the bootstrap's memory cap.
 const BACKEND_SHARD_BYTES: usize = 12 << 20;
 /// Impl methods at least this long move out of a sharded unit's facade.
 const BACKEND_DELEGATE_METHOD_BYTES: usize = 2048;
+/// A moved function at least this long is cold (`shard_unit`) whatever its
+/// kind: LLVM's optimization time and memory grow superlinearly within one
+/// function (one function is one codegen unit). Measured at opt-level 2:
+/// seven Jet functions of 200-455 KB (2.3 MB) build in 55 s at 1.1 GB, while
+/// a shard holding 2-3 MB decoders and tables took 773 s at 9.1 GB.
+const BACKEND_COLD_FUNCTION_BYTES: usize = 1 << 20;
+/// Traits whose impl methods are cold (`shard_unit`): the derived codecs run
+/// only on compiler image load and save, derived orderings rarely, and their
+/// bodies are among the program's largest functions.
+const BACKEND_COLD_TRAITS: [&str; 3] = ["__jet_Decode", "__jet_Encode", "__jet_Comparable"];
+/// Release-profile override for cold shard crates (`shard_unit`). Measured on
+/// a 12 MB shard of derived decoders and constant tables: opt-level 2 peaks at
+/// 9.1 GB in 773 s, opt-level 1 at 7.2 GB in 787 s, opt-level 0 at 2.2 GB in
+/// 53 s. Hot shards, facades and the runtime keep the profile's opt-level 2
+/// (a 12 MB hot shard: about 3 GB in 110-120 s).
+const BACKEND_COLD_PROFILE: &str = "opt-level = 0\ndebug = false\n";
+/// `BACKEND_BUILD_JOBS` of a release-profile backend build. Measured peaks:
+/// 12 MB hot shards about 3 GB (opt-level 2), the runtime 2 GB, the largest
+/// cold shard 4.6 GB (opt-level 0); with jet_jit (5.7 GB in dev) five jobs
+/// stay under a 22 GB cap.
+const BACKEND_RELEASE_BUILD_JOBS: &str = "5";
 /// `JET_STAGE_ZERO_PROFILE=release` builds this test run's backend artifacts
 /// (jetc0 above all) with this Cargo profile instead of dev: stage one is
 /// jetc0 compiling the whole compiler, where a debug jetc0 is many times
@@ -1346,10 +1373,7 @@ fn resumable_stage_zero_source(
     let source = fs::read_to_string(dir.join("stage-zero.rs")).ok()?;
     let image = fs::read(dir.join("stage-zero.image")).ok()?;
     let ffi = fs::read_to_string(dir.join("stage-zero.ffi")).ok()?;
-    let ffi = ffi.split_once('\n').map(|(name, path)| BackendFfiCrate {
-        name: name.to_string(),
-        dir: PathBuf::from(path.trim_end_matches('\n')),
-    });
+    let ffi = BackendFfiCrate::parse(&ffi);
     eprintln!("stage zero: resuming from `{}`", dir.display());
     Some((source, image, ffi))
 }
@@ -1457,6 +1481,41 @@ fn bootstrap_stage_zero_hello() {
         "jetc0_hello",
         &hello_project,
         "hello\n",
+    );
+}
+
+/// The backend project `build_backend_artifact_with_native_library` builds,
+/// written without building it, so later stages built outside `cargo test`
+/// (the stage-one scripts) use exactly the harness layout: unit-split
+/// workspace, compiler image, manifest and identity build script.
+/// `JET_BACKEND_PROJECT_REPO` is the tree the manifest and build script name;
+/// `JET_BACKEND_PROJECT_DIR`, `_PACKAGE` and `_SOURCE` name the project, its
+/// package and the emitted source. `<source>.image` is the compiler image the
+/// source embeds and `<source>.ffi` the FFI bridge it names (a retained
+/// `stage-zero.ffi`), each when present: generated compilers emit with no
+/// bridge, as the self-compile harness builds stage one and two.
+#[test]
+#[ignore = "writes the backend project named by JET_BACKEND_PROJECT_*"]
+fn bootstrap_backend_project_from_env() {
+    let var = |name: &str| {
+        std::env::var(name).unwrap_or_else(|error| panic!("`{name}` is unavailable: {error}"))
+    };
+    let source_path = PathBuf::from(var("JET_BACKEND_PROJECT_SOURCE"));
+    let source = fs::read_to_string(&source_path).unwrap_or_else(|error| {
+        panic!("cannot read backend source `{}`: {error}", source_path.display())
+    });
+    let image = fs::read(source_path.with_extension("image")).ok();
+    let ffi = fs::read_to_string(source_path.with_extension("ffi"))
+        .ok()
+        .and_then(|record| BackendFfiCrate::parse(&record));
+    write_backend_project(
+        Path::new(&var("JET_BACKEND_PROJECT_REPO")),
+        Path::new(&var("JET_BACKEND_PROJECT_DIR")),
+        &var("JET_BACKEND_PROJECT_PACKAGE"),
+        &source,
+        image.as_deref(),
+        None,
+        ffi.as_ref(),
     );
 }
 
@@ -2716,6 +2775,15 @@ impl BackendFfiCrate {
     fn dependency(&self) -> String {
         format!("{} = {{ path = {:?} }}\n", self.name, self.dir.display().to_string())
     }
+
+    /// A retained bridge record (`stage-zero.ffi`): crate name and directory
+    /// lines; empty when the program names no bridge.
+    fn parse(record: &str) -> Option<Self> {
+        record.split_once('\n').map(|(name, path)| BackendFfiCrate {
+            name: name.to_string(),
+            dir: PathBuf::from(path.trim_end_matches('\n')),
+        })
+    }
 }
 
 /// One build unit of an emitted program, built as its own crate.
@@ -2725,15 +2793,18 @@ struct BackendUnit {
     deps: Vec<String>,
     /// The exported crate source (the facade of a sharded unit).
     source: String,
-    /// Sources of the shard crates `<crate_name>_s<index>` of a unit too
-    /// large for one rustc (`shard_unit`); empty otherwise.
-    shards: Vec<String>,
+    /// The shard crates of a unit too large for one rustc (`shard_unit`);
+    /// empty otherwise.
+    shards: Vec<BackendShard>,
 }
 
-impl BackendUnit {
-    fn shard_names(&self) -> impl Iterator<Item = String> + '_ {
-        (0..self.shards.len()).map(|index| format!("{}_s{index}", self.crate_name))
-    }
+/// One shard crate of a sharded unit: `<unit>_s<index>` for hot code,
+/// `<unit>_cold<index>` for cold code (`shard_unit`), which the release
+/// profile builds unoptimized (`backend_unit_profiles`).
+struct BackendShard {
+    name: String,
+    source: String,
+    cold: bool,
 }
 
 /// An emitted program split along its unit sections (MIRRust
@@ -2850,16 +2921,17 @@ fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
                         jet_store::runtime::export_crate_source(&sharded.facade),
                         sharded.declarations,
                     );
-                    let shards = sharded
-                        .shards
-                        .iter()
-                        .map(|shard| {
-                            format!(
-                                "{prelude}use {crate_name}::*;\n{}",
-                                jet_store::runtime::export_crate_source(shard)
-                            )
-                        })
-                        .collect();
+                    let shard = |(index, text): (usize, &String), cold: bool| BackendShard {
+                        name: format!("{crate_name}_{}{index}", if cold { "cold" } else { "s" }),
+                        source: format!(
+                            "{prelude}use {crate_name}::*;\n{}",
+                            jet_store::runtime::export_crate_source(text)
+                        ),
+                        cold,
+                    };
+                    let hot = sharded.shards.iter().enumerate().map(|indexed| shard(indexed, false));
+                    let cold = sharded.cold_shards.iter().enumerate().map(|indexed| shard(indexed, true));
+                    let shards = hot.chain(cold).collect();
                     (source, shards)
                 }
                 None => (format!("{prelude}{}", jet_store::runtime::export_crate_source(&text)), Vec::new()),
@@ -2883,7 +2955,7 @@ fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
     let uses = units
         .iter()
         .map(|unit| {
-            let shards = unit.shard_names().map(|shard| format!("use {shard} as _;\n"));
+            let shards = unit.shards.iter().map(|shard| format!("use {} as _;\n", shard.name));
             std::iter::once(format!("use {}::*;\n", unit.crate_name)).chain(shards).collect::<String>()
         })
         .collect::<String>();
@@ -3051,22 +3123,33 @@ fn write_backend_workspace(
             dir.display().to_string()
         ));
         deps.push(unit.crate_name.clone());
-        for (shard, source) in unit.shard_names().zip(&unit.shards) {
-            let dir = units_root.join(&shard);
-            write_backend_crate(&dir, &shard, &deps, &ffi_dependency, source);
-            dependencies.push_str(&format!("{shard} = {{ path = {:?} }}\n", dir.display().to_string()));
+        for shard in &unit.shards {
+            let dir = units_root.join(&shard.name);
+            write_backend_crate(&dir, &shard.name, &deps, &ffi_dependency, &shard.source);
+            dependencies.push_str(&format!("{} = {{ path = {:?} }}\n", shard.name, dir.display().to_string()));
         }
     }
     dependencies
 }
 
-/// The main manifest's profile overrides for the runtime and unit crates
-/// (`BACKEND_UNIT_PROFILE`); repository crates keep the default dev profile.
-fn backend_unit_profiles(workspace: &BackendWorkspace) -> String {
-    std::iter::once("jet_runtime".to_string())
-        .chain(workspace.units.iter().flat_map(|unit| std::iter::once(unit.crate_name.clone()).chain(unit.shard_names())))
-        .map(|name| format!("\n[profile.dev.package.{name}]\n{BACKEND_UNIT_PROFILE}"))
-        .collect()
+/// The main manifest's profile overrides for the runtime and unit crates:
+/// under dev `BACKEND_UNIT_PROFILE` for each (repository crates keep the
+/// default dev profile); under the release profile `release` (which already
+/// builds everything at opt-level 2 without debuginfo or LTO)
+/// `BACKEND_COLD_PROFILE` for each cold shard.
+fn backend_unit_profiles(workspace: &BackendWorkspace, release: Option<&str>) -> String {
+    let shards = || workspace.units.iter().flat_map(|unit| &unit.shards);
+    match release {
+        None => std::iter::once("jet_runtime")
+            .chain(workspace.units.iter().map(|unit| unit.crate_name.as_str()))
+            .chain(shards().map(|shard| shard.name.as_str()))
+            .map(|name| format!("\n[profile.dev.package.{name}]\n{BACKEND_UNIT_PROFILE}"))
+            .collect(),
+        Some(profile) => shards()
+            .filter(|shard| shard.cold)
+            .map(|shard| format!("\n[profile.{profile}.package.{}]\n{BACKEND_COLD_PROFILE}", shard.name))
+            .collect(),
+    }
 }
 
 /// One library crate of the backend workspace; `deps` are sibling crates,
@@ -3099,8 +3182,11 @@ struct ShardedUnit {
     facade: String,
     /// `unsafe extern "Rust"` block members declaring each moved function.
     declarations: String,
-    /// Moved function definitions, at most about `shard_bytes` each.
+    /// Moved hot function definitions, at most about `shard_bytes` each.
     shards: Vec<String>,
+    /// Moved cold function definitions (`MovedFunction::cold`), packed the
+    /// same way into their own crates.
+    cold_shards: Vec<String>,
 }
 
 /// One function moved out of a facade: its declaration and its definition
@@ -3108,6 +3194,12 @@ struct ShardedUnit {
 struct MovedFunction {
     declaration: String,
     definition: String,
+    /// Code an optimized build should not optimize: a cold-trait impl
+    /// method (`BACKEND_COLD_TRAITS`), constant table code (a parameterless
+    /// function whose body is a `vec!` literal, or one chunk of a cached
+    /// table's row fill, whose body starts `rows.push(`), or any function of
+    /// at least `BACKEND_COLD_FUNCTION_BYTES`.
+    cold: bool,
 }
 
 /// Shard a unit's text when it is longer than `shard_bytes`. Free
@@ -3117,8 +3209,9 @@ struct MovedFunction {
 /// shards, dependent units — reaches a moved function through its symbol
 /// and no shard depends on another. Impls stay beside their types (orphan
 /// rule), but a large method body moves as a free function the method
-/// calls. `None` for a small unit or one with macros, which shards could
-/// not see.
+/// calls. Cold and hot functions pack into separate shards, so the release
+/// profile can leave the cold ones unoptimized. `None` for a small unit or
+/// one with macros, which shards could not see.
 fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
     if text.len() <= shard_bytes {
         return None;
@@ -3140,29 +3233,33 @@ fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
         }
         if let Some(function) = movable_function(item, code) {
             declarations.push_str(&function.declaration);
-            moved.push(function.definition);
+            moved.push(function);
         } else if let Some((rewritten, functions)) = delegate_impl_methods(item, code) {
             facade.push_str(&rewritten);
             for function in functions {
                 declarations.push_str(&function.declaration);
-                moved.push(function.definition);
+                moved.push(function);
             }
         } else {
             facade.push_str(item);
         }
     }
     facade.push_str(&text[end..]);
-    let mut shards: Vec<String> = Vec::new();
-    for definition in moved {
-        match shards.last_mut() {
-            Some(shard) if shard.len() + definition.len() <= shard_bytes => shard.push_str(&definition),
-            _ => shards.push(format!("{uses}{definition}")),
+    let (mut shards, mut cold_shards): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    for function in moved {
+        let packed = if function.cold { &mut cold_shards } else { &mut shards };
+        match packed.last_mut() {
+            Some(shard) if shard.len() + function.definition.len() <= shard_bytes => {
+                shard.push_str(&function.definition)
+            }
+            _ => packed.push(format!("{uses}{}", function.definition)),
         }
     }
     Some(ShardedUnit {
         facade,
         declarations,
         shards,
+        cold_shards,
     })
 }
 
@@ -3298,6 +3395,10 @@ fn movable_function(item: &str, code: &str) -> Option<MovedFunction> {
         let colon = start + parameter_colon(&code[start..end])?;
         parameters.push(format!("_: {}", item[colon + 1..end].trim()));
     }
+    // Emitted Jet code names its locals `__jet_*`: a bare `rows` is the row
+    // vector of a cached table's fill chunk.
+    let body_code = code[body + 1..].trim_start();
+    let table = (parameters.is_empty() && body_code.starts_with("vec![")) || body_code.starts_with("rows.push(");
     Some(MovedFunction {
         declaration: format!(
             "    pub {} fn {name}({}) {};\n",
@@ -3306,6 +3407,7 @@ fn movable_function(item: &str, code: &str) -> Option<MovedFunction> {
             item[close + 1..body].trim()
         ),
         definition: format!("\n#[no_mangle]\n{}", &item[lead..]),
+        cold: table || code.len() >= BACKEND_COLD_FUNCTION_BYTES,
     })
 }
 
@@ -3330,6 +3432,7 @@ fn delegate_impl_methods(item: &str, code: &str) -> Option<(String, Vec<MovedFun
         .map(|character| if character.is_ascii_alphanumeric() { character } else { '_' })
         .collect::<String>();
     let prefix = format!("__jet_impl_{self_type}_{trait_tag}_");
+    let cold_trait = BACKEND_COLD_TRAITS.contains(&trait_path.trim());
     let close = code.len() - 1;
     let (methods, tail) = masked_items(&code[brace + 1..close]);
     let mut rewritten = item[..brace + 1].to_string();
@@ -3337,8 +3440,9 @@ fn delegate_impl_methods(item: &str, code: &str) -> Option<(String, Vec<MovedFun
     for (start, end) in methods {
         let (start, end) = (brace + 1 + start, brace + 1 + end);
         match delegated_method(&item[start..end], &code[start..end], self_type, &prefix) {
-            Some((method, function)) => {
+            Some((method, mut function)) => {
                 rewritten.push_str(&method);
+                function.cold |= cold_trait;
                 moved.push(function);
             }
             None => rewritten.push_str(&item[start..end]),
@@ -3513,6 +3617,73 @@ fn backend_workspace_needs_unit_sections() {
     assert!(split_backend_workspace("// jet:cached-runtime-begin\nfn f() {}\n// jet:cached-runtime-end\nfn main() {}\n").is_none());
 }
 
+/// `shard_unit` packs cold code (cold-trait impl methods, constant tables,
+/// giant functions) into cold shards apart from hot code, so the release
+/// profile can leave only the cold code unoptimized.
+#[test]
+fn backend_shards_separate_cold_code() {
+    let steps = "    __jet_n += 1;\n".repeat(200);
+    let giant = "    __jet_n += 1;\n".repeat(BACKEND_COLD_FUNCTION_BYTES / 16);
+    let text = format!(
+        "pub struct __jet_T {{ __jet_n: i64 }}\n\
+         pub fn __jet_hot(__jet_x: i64) -> i64 {{ __jet_x + 1 }}\n\
+         pub fn __jet_list(__jet_x: i64) -> Vec<i64> {{ vec![__jet_x] }}\n\
+         #[inline] pub fn __jet_TABLE() -> Vec<i64> {{ vec![1, 2, 3] }}\n\
+         pub fn __jet_ROWS_rows_0(rows: &mut Vec<i64>) {{\n    rows.push(1);\n    rows.push(2);\n}}\n\
+         impl __jet_Decode for __jet_T {{\n    fn jet_decode(__jet_tree: &i64) -> i64 {{\n        let mut __jet_n = *__jet_tree;\n{steps}        __jet_n\n    }}\n}}\n\
+         impl __jet_Equatable for __jet_T {{\n    fn equals(&self, __jet_other: &__jet_T) -> bool {{\n        let mut __jet_n = self.__jet_n;\n{steps}        __jet_n == __jet_other.__jet_n\n    }}\n}}\n\
+         pub fn __jet_giant(mut __jet_n: i64) -> i64 {{\n{giant}    __jet_n\n}}\n"
+    );
+    let sharded = shard_unit(&text, 64 << 10).expect("a unit over the shard size shards");
+    let (hot, cold) = (sharded.shards.concat(), sharded.cold_shards.concat());
+    for name in ["fn __jet_hot(", "fn __jet_list(", "fn __jet_impl___jet_T___jet_Equatable_equals("] {
+        assert!(hot.contains(name) && !cold.contains(name), "`{name}` is hot");
+    }
+    for name in [
+        "fn __jet_TABLE(",
+        "fn __jet_ROWS_rows_0(",
+        "fn __jet_giant(",
+        "fn __jet_impl___jet_T___jet_Decode_jet_decode(",
+    ] {
+        assert!(cold.contains(name) && !hot.contains(name), "`{name}` is cold");
+    }
+    // The tables and the decoder share a cold shard; the giant fills its own.
+    assert_eq!(sharded.cold_shards.len(), 2);
+}
+
+/// The release profile leaves only cold shards unoptimized; the dev profile
+/// overrides every runtime and unit crate alike.
+#[test]
+fn backend_unit_profiles_leave_only_cold_shards_unoptimized() {
+    let shard = |name: &str, cold| BackendShard {
+        name: name.to_string(),
+        source: String::new(),
+        cold,
+    };
+    let workspace = BackendWorkspace {
+        runtime_lib: String::new(),
+        units: vec![BackendUnit {
+            crate_name: "jetc_sema".to_string(),
+            deps: Vec::new(),
+            source: String::new(),
+            shards: vec![shard("jetc_sema_s0", false), shard("jetc_sema_cold0", true)],
+        }],
+        main: String::new(),
+    };
+    let tables = |profiles: &str| {
+        profiles.lines().filter(|line| line.starts_with('[')).map(str::to_string).collect::<Vec<_>>()
+    };
+    let release = backend_unit_profiles(&workspace, Some(BACKEND_RELEASE_PROFILE_NAME));
+    assert_eq!(tables(&release), ["[profile.jet-stage-release.package.jetc_sema_cold0]"]);
+    assert!(release.contains("\nopt-level = 0\n"));
+    let dev = backend_unit_profiles(&workspace, None);
+    assert_eq!(
+        tables(&dev),
+        ["jet_runtime", "jetc_sema", "jetc_sema_s0", "jetc_sema_cold0"].map(|name| format!("[profile.dev.package.{name}]"))
+    );
+    assert!(!dev.contains("opt-level"));
+}
+
 /// The compiler image a `runner` run wrote beside its emitted source `output`
 /// (`<output>.image`); the emitted compiler source embeds it from
 /// `compiler.image`.
@@ -3532,9 +3703,12 @@ fn build_backend_artifact(
     build_backend_artifact_with_native_library(repo, project, package_name, source, None, None, None)
 }
 
-/// `compiler_image` is the image a compiler artifact's source embeds with
-/// `include_bytes!("compiler.image")`: it is written beside `src/main.rs`.
-fn build_backend_artifact_with_native_library(
+/// Write the backend Cargo project `build_backend_artifact_with_native_library`
+/// builds (main crate, unit-split workspace, compiler image, manifest, identity
+/// build script) and return its manifest path. `compiler_image` is the image a
+/// compiler artifact's source embeds with `include_bytes!("compiler.image")`:
+/// it is written beside `src/main.rs`.
+fn write_backend_project(
     repo: &Path,
     project: &Path,
     package_name: &str,
@@ -3542,7 +3716,7 @@ fn build_backend_artifact_with_native_library(
     compiler_image: Option<&[u8]>,
     native_library: Option<(&Path, &str)>,
     ffi: Option<&BackendFfiCrate>,
-) -> (PathBuf, String) {
+) -> PathBuf {
     let source_dir = project.join("src");
     fs::create_dir_all(&source_dir).unwrap_or_else(|error| {
         panic!("cannot create backend project `{}`: {error}", project.display())
@@ -3550,7 +3724,6 @@ fn build_backend_artifact_with_native_library(
     let source_path = source_dir.join("main.rs");
     let manifest_path = project.join("Cargo.toml");
     let build_script_path = project.join("build.rs");
-    let target = repo.join("target");
     let profile = backend_release_profile();
     // The build identity hashes the complete emitted text (`generated.rs`):
     // every unit crate below is a pure function of it.
@@ -3568,7 +3741,7 @@ fn build_backend_artifact_with_native_library(
                 .join(BOOTSTRAP_UNITS_RELATIVE)
                 .join(package_name);
             let dependencies = write_backend_workspace(&units_root, &workspace, ffi);
-            let profiles = backend_unit_profiles(&workspace);
+            let profiles = backend_unit_profiles(&workspace, profile);
             (workspace.main, dependencies, profiles)
         }
         None => (source.to_string(), String::new(), String::new()),
@@ -3628,13 +3801,30 @@ fn build_backend_artifact_with_native_library(
             build_script_path.display()
         )
     });
+    manifest_path
+}
+
+fn build_backend_artifact_with_native_library(
+    repo: &Path,
+    project: &Path,
+    package_name: &str,
+    source: &str,
+    compiler_image: Option<&[u8]>,
+    native_library: Option<(&Path, &str)>,
+    ffi: Option<&BackendFfiCrate>,
+) -> (PathBuf, String) {
+    let manifest_path =
+        write_backend_project(repo, project, package_name, source, compiler_image, native_library, ffi);
+    let target = repo.join("target");
+    let profile = backend_release_profile();
 
     let mut command = Command::new(repo.join("Tools/agent/jet-env"));
     command
         .current_dir(repo)
         .env("CARGO_TARGET_DIR", &target)
         .env("CARGO_INCREMENTAL", "0")
-        .env("CARGO_BUILD_JOBS", BACKEND_BUILD_JOBS)
+        .env("CARGO_BUILD_JOBS", if profile.is_some() { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS })
+        .env("RUST_MIN_STACK", BACKEND_RUSTC_STACK)
         .env("JET_NO_SCCACHE", "1")
         .env_remove("RUSTC_WRAPPER")
         .args([

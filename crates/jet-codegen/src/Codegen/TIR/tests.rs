@@ -414,8 +414,8 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
         loaded_module(files_path.alias, "use core.files as files"),
         loaded_module(
             files.alias,
-            "pub fn read_bytes(path: String) -> [U8] { [U8]{} }\n\
-             pub fn write_bytes(path: String, bytes: [U8]) {}",
+            "pub fn read_lines(path: String) -> [String] { [String]{} }\n\
+             pub fn write_lines(path: String, lines: [String]) {}",
         ),
     ];
     let bundle = crate::AST::ProgramBundle {
@@ -443,24 +443,22 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
     };
     let signatures = crate::Codegen::core_source_sig_map(&bundle);
     let read = signatures
-        .get(&("core.files".to_string(), "read_bytes".to_string()))
-        .expect("loaded core.files.read_bytes signature");
+        .get(&("core.files".to_string(), "read_lines".to_string()))
+        .expect("loaded core.files.read_lines signature");
     assert_eq!(read.params.len(), 1);
     assert!(matches!(&read.params[0].1, crate::AST::Type::String));
     assert!(matches!(
         read.return_type.as_ref(),
-        Some(crate::AST::Type::List(inner))
-            if matches!(inner.as_ref(), crate::AST::Type::Named(name) if name == "U8")
+        Some(crate::AST::Type::List(inner)) if matches!(inner.as_ref(), crate::AST::Type::String)
     ));
     let write = signatures
-        .get(&("core.files".to_string(), "write_bytes".to_string()))
-        .expect("loaded core.files.write_bytes signature");
+        .get(&("core.files".to_string(), "write_lines".to_string()))
+        .expect("loaded core.files.write_lines signature");
     assert_eq!(write.params.len(), 2);
     assert!(matches!(&write.params[0].1, crate::AST::Type::String));
     assert!(matches!(
         &write.params[1].1,
-        crate::AST::Type::List(inner)
-            if matches!(inner.as_ref(), crate::AST::Type::Named(name) if name == "U8")
+        crate::AST::Type::List(inner) if matches!(inner.as_ref(), crate::AST::Type::String)
     ));
     assert!(write.return_type.is_none());
 }
@@ -519,11 +517,14 @@ fn explicit_run_is_lowered_as_the_canonical_run_function() {
     let run = runs[0];
     assert!(run.params.is_empty(), "run must have no parameters");
     assert!(!run.is_job && !run.is_unsafe && !run.is_reactive);
+    // D-FAIL-EXIT1=A gives the bare `run` the default `Result<(), Err>`
+    // carrier; #3708 (D-FAILURE-FOUNDATION1=A) then proves this body cannot
+    // fail and projects it onto `Unit Never!`.
     assert!(matches!(
         &run.return_type,
         Some(Type::Result { ok, err })
             if matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE)
-                && matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+                && matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_NEVER)
     ));
     assert_eq!(
         run.body
@@ -1764,16 +1765,16 @@ struct Pair {
     shared: Shared<String>
     remaining: String
 }
-fn child() -> Int String! { return Ok(7) }
-fn caller() -> Int String! { return child() }
-fn generic_child<T>(value: ^T) -> T String! { return Ok(value) }
-fn generic_caller() -> Int String! { return generic_child<Int>(7) }
+fn child() -> Int Err! { return Ok(7) }
+fn caller() -> Int Err! { return child() }
+fn generic_child<T>(value: ^T) -> T Err! { return Ok(value) }
+fn generic_caller() -> Int Err! { return generic_child<Int>(7) }
 fn take_shared(pair: ^Pair) -> Shared<String> { return ^pair.shared }
 struct Box<T> {
     value: T
-    fn get(self) -> T String! { return Ok(self.value) }
+    fn get(self) -> T Err! { return Ok(self.value) }
 }
-fn boxed(item: Box<Int>) -> Int String! { return item.get() }
+fn boxed(item: Box<Int>) -> Int Err! { return item.get() }
 fn run() {}
 ";
         let bundle = checked_bundle(src);
@@ -2208,7 +2209,7 @@ fn mir_lowers_user_struct_and_instance_method() {
     // the TIR local `self`. Binding it as MIR parameter 0 is what lets a
     // user struct construct, print a field, and call an instance method.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) Int -> self.n\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
+        let src = "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
         let bundle = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
@@ -2265,8 +2266,8 @@ fn First.mark(&self, delta: Int) -> Int { self.value + delta }
 fn run() {
     firsts := [First]{ First{ value: 1 } }
     seconds := [Second]{ Second{ value: 2 } }
-    first_value :: firsts[0].mark(3)
-    second_value :: seconds[0].mark(4)
+    first_value :: &firsts[0].mark(3)
+    second_value :: &seconds[0].mark(4)
     print(\"{first_value}:{second_value}\")
 }
 ";
@@ -2426,7 +2427,7 @@ fn covers_map_builtin_methods() {
     // add/len/keys/values/has_key/clear on a map-typed param. Run the full
     // front end so this coverage proof cannot drift onto a list-only or
     // otherwise invalid method spelling that sema would reject before TIR.
-    let src = "fn f(m: [String:Int]) -> Int {\n m2 := ~m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
+    let src = "fn f(m: [String:Int]) -> Int {\n m2 := ~m\n old := &m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n &m2.clear()\n return n\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -3153,7 +3154,7 @@ fn wrap(s: String) -> String {
     return \"{HEADER}: {s}\"
 }
 fn run() {
-    wrap(\"body\")
+    print(wrap(\"body\"))
 }
 ";
     assert!(covers_after_sema(src, "wrap"));
@@ -3170,7 +3171,7 @@ fn covers_comptime_local_binding() {
 fn build() -> [Int] {
     xs := [Int]{}
     loop i in 1..3 {
-        xs.push(i * 10)
+        &xs.push(i * 10)
     }
     return xs
 }

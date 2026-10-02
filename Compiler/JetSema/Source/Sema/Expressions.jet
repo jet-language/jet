@@ -2206,6 +2206,21 @@ fn sema_expr_check_unit_conversion_source(argument: Expr, method: String, rounde
     checked
 }
 
+// Checks `value` for its own type only, on the live scope table and context:
+// both are rolled back afterwards and the ownership state is a throwaway copy,
+// so the probe leaves nothing behind except what it reports to `diagnostics`.
+// This replaces whole-table snapshots, which copied every module binding and
+// every row the function had accumulated, per probe.
+pub fn sema_probe_expression(value: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    scope_mark :: sema_scope_mark(&scopes)
+    context_mark :: sema_check_context_mark(&context)
+    probe_state := sema_ownership_state_snapshot(state)
+    checked :: sema_check_expression(value, expected, environment, &scopes, &probe_state, &tail_store, &context, &diagnostics)
+    sema_check_context_rollback(&context, context_mark)
+    sema_scope_rollback(&scopes, scope_mark)
+    checked
+}
+
 fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     destination_name := ""
     if receiver == {
@@ -2231,13 +2246,15 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     if rounded {
         rounding_mode = Val(sema_expr_unit_rounding_mode(args[1].expr) ?? return SemaMethodSpecialCheck{handled: false, value: None})
     }
-    probe_scopes := sema_scope_snapshot(scopes)
-    probe_context := sema_check_context_snapshot(context)
+    probe_scope_mark :: sema_scope_mark(&scopes)
+    probe_context_mark :: sema_check_context_mark(&context)
     probe_state := sema_ownership_state_snapshot(state)
     probe_diagnostics := [Diagnostic]{}
     probe_tail_store := sema_statement_tail_store_init()
     probe_rounded_allowed := false
-    probe_source := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, &probe_scopes, &probe_state, &probe_tail_store, &probe_context, &probe_diagnostics, &probe_rounded_allowed)
+    probe_source := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, &scopes, &probe_state, &probe_tail_store, &context, &probe_diagnostics, &probe_rounded_allowed)
+    sema_check_context_rollback(&context, probe_context_mark)
+    sema_scope_rollback(&scopes, probe_scope_mark)
     source_probe :: probe_source ?? return SemaMethodSpecialCheck{handled: false, value: None}
     source_fact :: sema_expr_unit_fact(source_probe.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_method := sema_expr_unit_conversion_method(source_fact)
@@ -2616,11 +2633,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
                 &argument_types.push(None)
             }
             else -> {
-                probe_scopes := sema_scope_snapshot(scopes)
-                probe_context := sema_check_context_snapshot(context)
-                probe_state := sema_ownership_state_snapshot(state)
                 probe_diagnostics := [Diagnostic]{}
-                checked_argument := sema_check_expression(argument.expr, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics)
+                checked_argument := sema_probe_expression(argument.expr, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics)
                 if {
                     checked_argument != None -> {
                         checked_value :: checked_argument ?? return None

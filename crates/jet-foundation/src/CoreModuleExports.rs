@@ -1017,9 +1017,11 @@ mod tests {
             core_leaf_kind("core.email", "Address"),
             Some(CoreLeafKind::Plain)
         );
+        // D-CORE-TREE1: `core.crypto` moved to Jet source (09-23), and its
+        // nominal identity comes from the crypto leaf table, not a leaf kind.
         assert_eq!(
             core_leaf_kind("core.crypto", "Secret"),
-            Some(CoreLeafKind::CryptoNominal)
+            Some(CoreLeafKind::Plain)
         );
         assert_eq!(
             core_leaf_kind("core.crypto", "VerifyKey"),
@@ -1080,6 +1082,6 @@ mod tests {
             .iter()
             .find(|entry| entry.module == "core.web")
             .expect("core.web declaration");
-        assert_eq!(web.dependencies, &["core.http"]);
+        assert_eq!(web.dependencies, &["core.http", "core.web.forms"]);
     }
 }

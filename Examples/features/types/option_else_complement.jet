@@ -1,0 +1,40 @@
+// D-FLOWTYPE1=A: the `else` of a guard table holds the payload of every
+// stable Optional an `x == None` arm tests. Arms after the `x == None` arm
+// still read the whole Optional; only `else` is proven present.
+fn pick(v: Int) -> Int? {
+    if v > 0 -> return Val(v)
+    None
+}
+
+fn classify(seed: Int) -> String {
+    x :: pick(seed)
+    if {
+        x == None -> return "none"
+        (x ?? 0) > 100 -> return "big"
+        else -> return "small {x + 1}"
+    }
+}
+
+// A one-arm `x == None` test with `else`: the `else` branch holds the payload,
+// in statement and value position alike.
+fn statement_form(seed: Int) -> Int {
+    x :: pick(seed)
+    out := 0
+    if x == None -> out = -1 else -> out = x * 2
+    out
+}
+
+fn value_form(seed: Int) -> Int {
+    x :: pick(seed)
+    if x == None -> 0 else -> x * 3
+}
+
+fn run() {
+    print(classify(0))
+    print(classify(500))
+    print(classify(4))
+    print(statement_form(0))
+    print(statement_form(5))
+    print(value_form(0))
+    print(value_form(5))
+}

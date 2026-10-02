@@ -244,20 +244,30 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     // Rust reports the E0220 owner read at the member name.
     member_span :: Span{start: span.end - member.len(), end: span.end}
     if !sema_ownership_check_owner_read(&state, Expr.Field{base: base, member: member, span: member_span}, scopes, &diagnostics) -> return None
-    probe_scopes := sema_scope_snapshot(scopes)
-    probe_context := sema_check_context_snapshot(context)
-    probe_state := sema_ownership_state_snapshot(state)
-    probe_diagnostics := [Diagnostic]{}
-    probe_tail_store := sema_statement_tail_store_init()
-    probe_base :: sema_check_expression(base, None, environment, &probe_scopes, &probe_state, &probe_tail_store, &probe_context, &probe_diagnostics)
-    if probe_base == .Val(probe_value) {
+    // The base is checked once, for real. When it is a shared handle, that
+    // check is rolled back and the locked-read rewrite is checked instead.
+    // (Probing the base before checking it re-checked every prefix of a field
+    // chain twice per level: exponential in the chain depth.)
+    base_scope_mark :: sema_scope_mark(&scopes)
+    base_context_mark :: sema_check_context_save(context)
+    base_state :: ~state
+    base_diagnostic_count :: diagnostics.len()
+    base_tail_body_count :: tail_store.bodies.len()
+    checked_base_value :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if checked_base_value == .Val(probe_value) {
         rewritten :: sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
         if rewritten == .Val(generated) {
+            sema_check_context_rollback(&context, base_context_mark)
+            sema_scope_rollback(&scopes, base_scope_mark)
+            sema_ownership_state_restore(&state, base_state)
+            loop diagnostics.len() > base_diagnostic_count -> _ := &diagnostics.pop()
+            loop tail_store.bodies.len() > base_tail_body_count -> _ := &tail_store.bodies.pop()
             checked_generated :: sema_check_expression(generated, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             return Val(checked_generated)
         }
     }
-    checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    sema_scope_commit(&scopes, base_scope_mark)
+    checked_base :: checked_base_value ?? return None
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, &context, &diagnostics) -> return None
     sema_expression_field_checked(checked_base, member, span, expected, environment, &scopes, &context, &diagnostics)
 }

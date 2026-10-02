@@ -471,7 +471,7 @@ pub fn sema_call_check_default_err(call: Call, expected: Type?, environment: Sem
             }
             // D-FAIL-INFER-UNION1=A: record what this `Err` sends down the
             // default route before the ordinary check below.
-            if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, scopes, state, &tail_store, &context)
+            if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, &scopes, state, &tail_store, &context)
         }
     }
     wrap :: result != None
@@ -524,11 +524,8 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
         slot :: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if slot >= 0 && slot < params.len() {
             if sema_call_parameter_type(params[slot]) == .Val(required) && !sema_call_inference_needs_context(args[index].expr) {
-                probe_scopes := sema_scope_snapshot(scopes)
-                probe_context := sema_check_context_snapshot(context)
-                probe_state := sema_ownership_state_snapshot(state)
                 probe_diagnostics := [Diagnostic]{}
-                value :: sema_check_expression(args[index].expr, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics)
+                value :: sema_probe_expression(args[index].expr, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics)
                 if value == .Val(checked) {
                     &parameter_types.push(required)
                     &argument_types.push(checked.ty)
@@ -558,11 +555,8 @@ fn sema_call_lambda_failure_facts(facts: &SemaCallInferenceFacts, generic_params
                                 }
                                 if generic {
                                     failure := Type.Named{name: "Never"}
-                                    probe_scopes := sema_scope_snapshot(scopes)
-                                    probe_context := sema_check_context_snapshot(context)
-                                    probe_state := sema_ownership_state_snapshot(state)
                                     probe_diagnostics := [Diagnostic]{}
-                                    value :: sema_check_expression(args[index].expr, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics)
+                                    value :: sema_probe_expression(args[index].expr, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics)
                                     if value == .Val(checked) {
                                         if checked.ty == .Fn(_, lambda_ret, _, _, _, _) {
                                             if lambda_ret == .Val(lambda_value) {

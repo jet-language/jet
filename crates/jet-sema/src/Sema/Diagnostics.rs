@@ -549,7 +549,9 @@ fn stmt_definitely_exits(stmt: &Stmt) -> bool {
         | Stmt::BreakLabelValue(..)
         | Stmt::ContinueLabel(..) => true,
         Stmt::Expr(expr) => {
-            matches!(expr.without_parens(), Expr::Todo { .. })
+            // `Expr::NoElse` as a statement is the checked dead end of a
+            // synthesized presence binding (D-FLOWTYPE1=A).
+            matches!(expr.without_parens(), Expr::Todo { .. } | Expr::NoElse(_))
                 || matches!(
                     expr.without_parens(),
                     Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC

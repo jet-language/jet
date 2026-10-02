@@ -648,6 +648,186 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
     }
 }
 
+// A rollback point for a probe check run on the live context (instead of a
+// sema_check_context_snapshot copy, which costs every row the function has
+// accumulated so far). The rows a check only appends to keep their lengths and
+// are truncated on rollback; every other field is copied into `saved` (whose
+// appended-row lists stay empty). As with a snapshot, the probe starts with no
+// `iter_borrowed` rows and no binding initializer open. A new
+// SemaCheckContext field must be added here and in the rollback.
+pub struct SemaCheckContextMark {
+    pub call_facts: Int
+    pub call_return_views: Int
+    pub local_view_provenance: Int
+    pub name_references: Int
+    pub comptime_requests: Int
+    pub comptime_body_sources: Int
+    pub comptime_body_values: Int
+    pub compute_calls: Int
+    pub autodiff_obligations: Int
+    pub copy_events: Int
+    pub noelse_chain_starts: Int
+    pub failure_edges: Int
+    pub failure_union_members: Int
+    pub failure_union_cases: Int
+    pub failure_union_edges: Int
+    pub saved: SemaCheckContext
+}
+
+pub fn sema_check_context_mark(context: &SemaCheckContext) -> SemaCheckContextMark Never! {
+    mark :: sema_check_context_save(context)
+    context.iter_borrowed = [String]{}
+    context.binding_initializer = false
+    mark
+}
+
+// A rollback point that leaves the context as it is: the check that follows
+// is the real one, rolled back only if its result is discarded.
+pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Never! {
+    SemaCheckContextMark{
+        call_facts: context.call_facts.len(),
+        call_return_views: context.call_return_views.len(),
+        local_view_provenance: context.local_view_provenance.len(),
+        name_references: context.name_references.len(),
+        comptime_requests: context.comptime_requests.len(),
+        comptime_body_sources: context.comptime_body_sources.len(),
+        comptime_body_values: context.comptime_body_values.len(),
+        compute_calls: context.compute_calls.len(),
+        autodiff_obligations: context.autodiff_obligations.len(),
+        copy_events: context.copy_events.len(),
+        noelse_chain_starts: context.noelse_chain_starts.len(),
+        failure_edges: context.failure_edges.len(),
+        failure_union_members: context.failure_union_members.len(),
+        failure_union_cases: context.failure_union_cases.len(),
+        failure_union_edges: context.failure_union_edges.len(),
+        saved: SemaCheckContext{
+            exact_int_reachable: context.exact_int_reachable,
+            unsafe_depth: context.unsafe_depth,
+            borrow_ctx: context.borrow_ctx,
+            allow_string_view_read: context.allow_string_view_read,
+            allow_fixed_constructor: context.allow_fixed_constructor,
+            generic_params: ~context.generic_params,
+            lambda_escapes: context.lambda_escapes,
+            lambda_statement_tails: ~context.lambda_statement_tails,
+            call_facts: [SemaCallSiteFact]{},
+            hardware_use: sema_hardware_use_snapshot(context.hardware_use),
+            call_return_views: [SemaCallReturnView]{},
+            local_view_provenance: [SemaLocalViewProvenance]{},
+            return_view_receiver_key: context.return_view_receiver_key,
+            return_view_parameter_keys: ~context.return_view_parameter_keys,
+            return_view_provenance: context.return_view_provenance,
+            name_references: [SemaNameReferenceFact]{},
+            comptime_requests: [SemaComptimeRequest]{},
+            comptime_body_sources: [SemaComptimeBodySource]{},
+            comptime_body_values: [SemaComptimeBodyValue]{},
+            compute_calls: [SemaComputeCallFact]{},
+            autodiff_obligations: [SemaAutodiffObligation]{},
+            autodiff_safe_panic: context.autodiff_safe_panic,
+            autodiff_unsafe_panic: context.autodiff_unsafe_panic,
+            autodiff_safe_panic_context: context.autodiff_safe_panic_context,
+            copy_events: [SemaCopyEvent]{},
+            loop_value_frames: ~context.loop_value_frames,
+            loop_break_flows: sema_loop_break_flows_snapshot(context.loop_break_flows),
+            pending_loop_value: context.pending_loop_value,
+            collect_item_types: ~context.collect_item_types,
+            last_loop_result_type: context.last_loop_result_type,
+            arrow_loop_body: context.arrow_loop_body,
+            reactive_upgrades: ~context.reactive_upgrades,
+            reactive_upgrade_names: ~context.reactive_upgrade_names,
+            reactive_local_keys: ~context.reactive_local_keys,
+            reactive_shared_keys: ~context.reactive_shared_keys,
+            taskgroups: sema_taskgroup_state_snapshot(context.taskgroups),
+            failure_carrier_root: context.failure_carrier_root,
+            failure_success_view: context.failure_success_view,
+            failure_inference: context.failure_inference,
+            inferred_failure_carrier: context.inferred_failure_carrier,
+            failure_contract_source: context.failure_contract_source,
+            function_name: context.function_name,
+            fallback_err_denial: context.fallback_err_denial,
+            noelse_chain_starts: [Int]{},
+            lost_tail_span: context.lost_tail_span,
+            value_tail_span: context.value_tail_span,
+            failure_edges: [String]{},
+            failure_direct_source: context.failure_direct_source,
+            failure_union_members: [Type]{},
+            failure_union_cases: [SemaFailureCase]{},
+            failure_union_edges: [String]{},
+            failure_union_general: context.failure_union_general,
+            iter_borrowed: ~context.iter_borrowed,
+            binding_initializer: context.binding_initializer,
+            source_nesting: context.source_nesting,
+        },
+    }
+}
+
+// Closes `mark` without rolling back: the checks since it are kept. In-place
+// edit rows stay for any enclosing mark.
+pub fn sema_scope_commit(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
+    table.open_marks = mark.saved.open_marks
+}
+
+// Restores `context` to `mark`: appended rows are dropped (a check only appends
+// to these lists; the one in-place row edit, a discarded call fact, stays
+// inside the rows its statement appended) and every other field is restored.
+pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
+    loop context.call_facts.len() > mark.call_facts -> _ := &context.call_facts.pop()
+    loop context.call_return_views.len() > mark.call_return_views -> _ := &context.call_return_views.pop()
+    loop context.local_view_provenance.len() > mark.local_view_provenance -> _ := &context.local_view_provenance.pop()
+    loop context.name_references.len() > mark.name_references -> _ := &context.name_references.pop()
+    loop context.comptime_requests.len() > mark.comptime_requests -> _ := &context.comptime_requests.pop()
+    loop context.comptime_body_sources.len() > mark.comptime_body_sources -> _ := &context.comptime_body_sources.pop()
+    loop context.comptime_body_values.len() > mark.comptime_body_values -> _ := &context.comptime_body_values.pop()
+    loop context.compute_calls.len() > mark.compute_calls -> _ := &context.compute_calls.pop()
+    loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := &context.autodiff_obligations.pop()
+    loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
+    loop context.noelse_chain_starts.len() > mark.noelse_chain_starts -> _ := &context.noelse_chain_starts.pop()
+    loop context.failure_edges.len() > mark.failure_edges -> _ := &context.failure_edges.pop()
+    loop context.failure_union_members.len() > mark.failure_union_members -> _ := &context.failure_union_members.pop()
+    loop context.failure_union_cases.len() > mark.failure_union_cases -> _ := &context.failure_union_cases.pop()
+    loop context.failure_union_edges.len() > mark.failure_union_edges -> _ := &context.failure_union_edges.pop()
+    saved :: mark.saved
+    context.exact_int_reachable = saved.exact_int_reachable
+    context.unsafe_depth = saved.unsafe_depth
+    context.borrow_ctx = saved.borrow_ctx
+    context.allow_string_view_read = saved.allow_string_view_read
+    context.allow_fixed_constructor = saved.allow_fixed_constructor
+    context.generic_params = ~saved.generic_params
+    context.lambda_escapes = saved.lambda_escapes
+    context.lambda_statement_tails = ~saved.lambda_statement_tails
+    context.hardware_use = sema_hardware_use_snapshot(saved.hardware_use)
+    context.return_view_receiver_key = saved.return_view_receiver_key
+    context.return_view_parameter_keys = ~saved.return_view_parameter_keys
+    context.return_view_provenance = saved.return_view_provenance
+    context.autodiff_safe_panic = saved.autodiff_safe_panic
+    context.autodiff_unsafe_panic = saved.autodiff_unsafe_panic
+    context.autodiff_safe_panic_context = saved.autodiff_safe_panic_context
+    context.loop_value_frames = ~saved.loop_value_frames
+    context.loop_break_flows = sema_loop_break_flows_snapshot(saved.loop_break_flows)
+    context.pending_loop_value = saved.pending_loop_value
+    context.collect_item_types = ~saved.collect_item_types
+    context.last_loop_result_type = saved.last_loop_result_type
+    context.arrow_loop_body = saved.arrow_loop_body
+    context.reactive_upgrades = ~saved.reactive_upgrades
+    context.reactive_upgrade_names = ~saved.reactive_upgrade_names
+    context.reactive_local_keys = ~saved.reactive_local_keys
+    context.reactive_shared_keys = ~saved.reactive_shared_keys
+    context.taskgroups = sema_taskgroup_state_snapshot(saved.taskgroups)
+    context.failure_carrier_root = saved.failure_carrier_root
+    context.failure_success_view = saved.failure_success_view
+    context.failure_inference = saved.failure_inference
+    context.inferred_failure_carrier = saved.inferred_failure_carrier
+    context.failure_contract_source = saved.failure_contract_source
+    context.function_name = saved.function_name
+    context.fallback_err_denial = saved.fallback_err_denial
+    context.lost_tail_span = saved.lost_tail_span
+    context.value_tail_span = saved.value_tail_span
+    context.failure_direct_source = saved.failure_direct_source
+    context.failure_union_general = saved.failure_union_general
+    context.iter_borrowed = ~saved.iter_borrowed
+    context.binding_initializer = saved.binding_initializer
+    context.source_nesting = saved.source_nesting
+}
+
 fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := [SemaHardwareDMATransferFact]{}
     loop fact in source -> &result.push(fact)
@@ -684,8 +864,7 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
 // in place and rolled back, instead of copying the whole table (which holds
 // every module declaration) per path.
 pub fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
-    table.open_marks += 1
-    SemaScopeMark{
+    mark :: SemaScopeMark{
         frames: table.frames.len(),
         bindings: table.bindings.len(),
         undo: table.binding_undo.len(),
@@ -709,8 +888,11 @@ pub fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
             transaction_wall_depth: table.transaction_wall_depth,
             unit_explicit_units: table.unit_explicit_units,
             copies_explicit: table.copies_explicit,
+            open_marks: table.open_marks,
         },
     }
+    table.open_marks += 1
+    mark
 }
 
 // Restores the table to `mark`: in-place binding edits are undone newest
@@ -746,7 +928,8 @@ pub fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.transaction_wall_depth = saved.transaction_wall_depth
     table.unit_explicit_units = saved.unit_explicit_units
     table.copies_explicit = saved.copies_explicit
-    if table.open_marks > 0 -> table.open_marks -= 1
+    // Exact even when a nested mark was abandoned by an early return.
+    table.open_marks = saved.open_marks
 }
 
 // Call before editing `table.bindings[index]` in place, so an open rollback

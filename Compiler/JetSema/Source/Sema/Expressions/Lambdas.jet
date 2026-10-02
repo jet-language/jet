@@ -25,6 +25,7 @@ use jet_foundation.[
     TEffectSpan,
     TExpr,
     TExprKind,
+    TFailureCarrier,
     TFnValueKind,
     TIfCond,
     TLambda,
@@ -1545,7 +1546,19 @@ fn sema_expression_lambda_install_loop_label(lambda: &Lambda, label: NamedSpan) 
     }
 }
 
+// The lambda is checked in its own frame on the live scope table and rolled
+// back, instead of on a copy of the whole table (every module binding) per
+// lambda; no scope state of the lambda flows back to the enclosing table.
 fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool) -> TExpr? {
+    outer_return_type :: ~scopes.return_type
+    outer_failure_carrier :: ~scopes.failure_carrier
+    lambda_mark :: sema_scope_mark(&scopes)
+    checked :: sema_expression_lambda_with_host_in_frame(lambda, expected, environment, &scopes, outer_return_type, outer_failure_carrier, &state, &tail_store, &context, &diagnostics, host_callback, host_write, host_stored)
+    sema_scope_rollback(&scopes, lambda_mark)
+    checked
+}
+
+fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, lambda_scopes: &SemaScopeTable, outer_return_type: Type?, outer_failure_carrier: TFailureCarrier?, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool) -> TExpr? {
     lambda_work := lambda
     inline_loop := lambda_work.params.len() == 0 && (lambda_work.meta.collecting_loop || lambda_work.meta.result_loop)
     if inline_loop && lambda_work.meta.loop_label == .Val(named) -> sema_expression_lambda_install_loop_label(&lambda_work, named)
@@ -1580,7 +1593,6 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
         return None
     }
 
-    lambda_scopes := sema_scope_snapshot(scopes)
     // Host callback bodies and explicitly escaping hooks are checked outside
     // the enclosing authored transaction wall.
     if host_callback || (!inline_loop && context.lambda_escapes == (Val(true))) {
@@ -1655,8 +1667,8 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
     }
     if {
         inline_loop -> {
-            lambda_scopes.return_type = scopes.return_type
-            lambda_scopes.failure_carrier = scopes.failure_carrier
+            lambda_scopes.return_type = outer_return_type
+            lambda_scopes.failure_carrier = outer_failure_carrier
         }
         else -> {
             lambda_scopes.return_type = child_return
@@ -1699,7 +1711,7 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
             executable = Val(TLambdaBody.Expr{value: checked})
         }
         .Block(statements) -> {
-            statement_return := if inline_loop -> scopes.return_type else -> body_expected
+            statement_return := if inline_loop -> outer_return_type else -> body_expected
             if !inline_loop && lambda.error_type != None -> statement_return = child_return
             statement_body := [Stmt]{}
             tail_source := Expr?{None}
@@ -1868,7 +1880,8 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
 
     found_capture_keys := [String]{}
     index = 0
-    loop index < lambda_scopes.bindings.len() {
+    // Only a capture key can match; a capture-free lambda skips the table walk.
+    loop capture_keys.len() > 0 && index < lambda_scopes.bindings.len() {
         binding :: lambda_scopes.bindings[index]
         key :: binding.symbol.id.key
         if binding.frame < frame && sema_expression_lambda_name_contains(capture_keys, key) {

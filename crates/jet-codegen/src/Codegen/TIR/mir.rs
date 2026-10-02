@@ -2443,14 +2443,13 @@ fn lower_impl_rows(
     let mut result = deduplicated;
 
     // Keep only checked method references; a method that did not enter the
-    // executable TIR cannot be represented as a valid MIR edge.
-    result.retain(|row| {
-        row.methods.iter().all(|id| {
-            functions
-                .iter()
-                .any(|function| registry.id_for(function).ok() == Some(*id))
-        })
-    });
+    // executable TIR cannot be represented as a valid MIR edge. The checked
+    // function ids are collected once (not rescanned per impl method).
+    let checked_ids: HashSet<MirFunctionId> = functions
+        .iter()
+        .filter_map(|function| registry.id_for(function).ok())
+        .collect();
+    result.retain(|row| row.methods.iter().all(|id| checked_ids.contains(id)));
     result.sort_unstable_by_key(|row| row.id);
     Ok(result)
 }
@@ -4843,6 +4842,17 @@ enum DeferredCleanup {
     },
 }
 
+/// One `#Transact` snapshot: the snapshotted place, the local holding its
+/// saved state, the snapshot type, and, for a type implementing `Rollback`,
+/// the `Rollback::restore` call that replaces the plain write-back.
+#[derive(Clone)]
+pub(super) struct TransactionRestore {
+    pub(super) place: MirPlaceId,
+    pub(super) saved: MirPlaceId,
+    pub(super) ty: Type,
+    pub(super) custom: Option<TExpr>,
+}
+
 /// One `defer close(^resource)` action. The close expression is lowered into
 /// each drop chain of its scope (and inline on the paths that clean up in
 /// place), so the consuming `^resource` is an ordinary move of the resource
@@ -5016,7 +5026,7 @@ pub(super) struct LowerCtx<'a> {
     /// per returned type.
     exit_value_slots: Vec<(MirType, MirPlaceId)>,
     deferred_closes: Vec<std::rc::Rc<DeferredClose>>,
-    pub(super) transaction_restores: Vec<(MirScopeId, Vec<(MirPlaceId, MirPlaceId, Type)>)>,
+    pub(super) transaction_restores: Vec<(MirScopeId, Vec<TransactionRestore>)>,
     contract_scopes: Vec<ContractScopeState>,
     pub(super) local_places: HashMap<String, MirPlaceId>,
     pub(super) local_types: HashMap<String, Type>,
@@ -6502,6 +6512,7 @@ impl<'a> LowerCtx<'a> {
         terminator: MirTerminator,
         from_depth: usize,
     ) -> Result<(), LowerError> {
+        self.emit_transaction_exit_restores(&terminator, from_depth)?;
         if let MirTerminator::Return { value: Some(value) } = &terminator {
             self.retype_absent_return(*value)?;
         }
@@ -6525,6 +6536,73 @@ impl<'a> LowerCtx<'a> {
         // reverse-order cleanup sequence.
         self.emit_deferred_cleanups_from(from_depth, false)?;
         self.terminate(terminator);
+        Ok(())
+    }
+
+    /// Roll back every `#Transact` scope an exit leaves before that exit's
+    /// cleanups release the saved snapshots: a `return`, `?` propagation,
+    /// `break` or `continue` out of the body restores each snapshot, innermost
+    /// transaction and newest snapshot first. The body's fallthrough commits.
+    fn emit_transaction_exit_restores(
+        &mut self,
+        terminator: &MirTerminator,
+        from_depth: usize,
+    ) -> Result<(), LowerError> {
+        if !matches!(
+            terminator,
+            MirTerminator::Return { .. } | MirTerminator::Break { .. } | MirTerminator::Continue { .. }
+        ) {
+            return Ok(());
+        }
+        // Taken while the restores lower, so a restore call never re-enters.
+        let transactions = std::mem::take(&mut self.transaction_restores);
+        let left = transactions
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, (scope, _))| {
+                self.defer_stack
+                    .iter()
+                    .rposition(|frame| frame.owner == Some(*scope))
+                    .is_some_and(|depth| depth >= from_depth)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let mut result = Ok(());
+        'restore: for transaction in left {
+            for (index, restore) in transactions[transaction].1.iter().enumerate().rev() {
+                if let Err(error) = self.emit_transaction_restore(index, restore) {
+                    result = Err(error);
+                    break 'restore;
+                }
+            }
+        }
+        self.transaction_restores = transactions;
+        result
+    }
+
+    fn emit_transaction_restore(
+        &mut self,
+        index: usize,
+        restore: &TransactionRestore,
+    ) -> Result<(), LowerError> {
+        if let Some(call) = &restore.custom {
+            lower_expr(self, call)?;
+            return Ok(());
+        }
+        let value = self.emit(
+            &format!("transaction.snapshot.{index}.restore.read"),
+            Some(restore.ty.clone()),
+            MirOperation::ReadPlace(restore.saved),
+        )?;
+        self.emit(
+            &format!("transaction.snapshot.{index}.restore.write"),
+            None,
+            MirOperation::WritePlace {
+                place: restore.place,
+                value,
+            },
+        )?;
         Ok(())
     }
 
@@ -7634,7 +7712,7 @@ impl<'a> LowerCtx<'a> {
 
     /// Give the absent values an operation consumes the exact option type
     /// of the slot each one fills: a phi's joined type, a written place's
-    /// type, or a tuple field's type.
+    /// type, a tuple field's type, or a list literal's element type.
     fn retype_absent_operands(
         &mut self,
         operation: &MirOperation,
@@ -7664,6 +7742,13 @@ impl<'a> LowerCtx<'a> {
                 if let Some(MirTypeKind::Tuple(types)) = value_type.map(MirType::kind) {
                     for ((_, value), (_, ty)) in fields.iter().zip(types) {
                         self.retype_absent(*value, ty)?;
+                    }
+                }
+            }
+            MirOperation::BuildList { values, .. } => {
+                if let Some(MirTypeKind::List(elem)) = value_type.map(MirType::kind) {
+                    for value in values {
+                        self.retype_absent(*value, elem)?;
                     }
                 }
             }

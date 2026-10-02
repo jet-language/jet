@@ -285,6 +285,24 @@ pub fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershi
     snapshot
 }
 
+// Puts back a whole-state copy (`~state`) taken before a check that is being
+// discarded.
+pub fn sema_ownership_state_restore(state: &SemaOwnershipState, saved: SemaOwnershipState) Never! {
+    state.scope_depth = saved.scope_depth
+    state.next_seq = saved.next_seq
+    state.declarations = ~saved.declarations
+    state.moved = ~saved.moved
+    state.loans = ~saved.loans
+    state.views = ~saved.views
+    state.references = ~saved.references
+    state.receiver_frames = ~saved.receiver_frames
+    state.share_known = ~saved.share_known
+    state.share_found = ~saved.share_found
+    state.fixed_length_write_params = ~saved.fixed_length_write_params
+    state.uninit = ~saved.uninit
+    state.static_roots = ~saved.static_roots
+}
+
 fn sema_ownership_next_sequence(state: &SemaOwnershipState) -> Int Never! {
     sequence := state.next_seq
     state.next_seq += 1

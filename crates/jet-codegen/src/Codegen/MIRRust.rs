@@ -1353,6 +1353,19 @@ struct FunctionIndex {
     blocks: HashMap<MirBlockId, (usize, usize)>,
     /// Positions of the blocks ending in `Jump` to each block, in body order.
     jump_sources: HashMap<MirBlockId, Vec<usize>>,
+    /// Predecessor block positions of each block, along terminator edges.
+    predecessors: Vec<Vec<usize>>,
+    /// D-MEM-COPYSEM1: per local, the (block, instruction) positions of the
+    /// operations that may change or release it: a write, move, replace, or
+    /// write borrow of one of its places, a write or move call argument
+    /// naming one, and any use of a write borrow taken from one.
+    local_writes: HashMap<MirLocalId, Vec<(usize, usize)>>,
+    /// Locals some operation reaches outside place reads and writes (a
+    /// closure capture, a raw address, a by-identity entry list): an
+    /// in-place read of one is never proven stable.
+    escaped_locals: HashSet<MirLocalId>,
+    /// `stable_local_read` answers per read value, computed on first query.
+    stable_reads: std::cell::RefCell<HashMap<MirValueId, bool>>,
 }
 
 /// Coverage branch ordinals a terminator takes.
@@ -1430,6 +1443,109 @@ impl FunctionIndex {
                 moved_captures.insert(*captured);
             }
         }
+        let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); function.blocks.len()];
+        for (block_position, block) in function.blocks.iter().enumerate() {
+            for target in block.terminator.targets().iter() {
+                if let Some((target, _)) = blocks.get(target) {
+                    predecessors[*target].push(block_position);
+                }
+            }
+        }
+        let place_local = |place: &MirPlaceId| match places.get(place).map(|row| &function.places[*row].base) {
+            Some(MirPlaceBase::Local(local)) => Some(*local),
+            _ => None,
+        };
+        let write_borrow = |value: MirValueId| {
+            values
+                .get(&value)
+                .is_some_and(|row| function.values[*row].3.mode == MirOwnershipMode::WriteBorrow)
+        };
+        let mut local_writes: HashMap<MirLocalId, Vec<(usize, usize)>> = HashMap::new();
+        let mut escaped_locals = HashSet::new();
+        let mut borrow_roots: HashMap<MirValueId, MirLocalId> = HashMap::new();
+        // Two passes: a write borrow's definition may sit in a block listed
+        // after one of its uses.
+        for pass in 0..2 {
+            local_writes.clear();
+            for (block_position, block) in function.blocks.iter().enumerate() {
+                for (position, instruction) in block.instructions.iter().enumerate() {
+                    let mut touched: Vec<MirLocalId> = Vec::new();
+                    match &instruction.operation {
+                        MirOperation::ReadPlace(place) => {
+                            if instruction.result.is_some_and(write_borrow) {
+                                touched.extend(place_local(place));
+                            }
+                        }
+                        MirOperation::AddressOf { place, access } => {
+                            if *access == MirAccess::Move {
+                                // A move through an address (a partial move):
+                                // later reads go through partial-move slots.
+                                escaped_locals.extend(place_local(place));
+                            } else if *access != MirAccess::Read {
+                                touched.extend(place_local(place));
+                            }
+                        }
+                        MirOperation::MovePlace { place }
+                            if places
+                                .get(place)
+                                .is_some_and(|row| !function.places[*row].projections.is_empty()) =>
+                        {
+                            escaped_locals.extend(place_local(place));
+                        }
+                        MirOperation::MovePlace { place }
+                        | MirOperation::InitializeUninit { place }
+                        | MirOperation::WritePlace { place, .. }
+                        | MirOperation::ReplacePlace { place, .. }
+                        | MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+                            receiver_place: Some(place),
+                            ..
+                        }) => touched.extend(place_local(place)),
+                        MirOperation::RawAddressOf { place } => escaped_locals.extend(place_local(place)),
+                        MirOperation::Closure { captures, .. } => {
+                            for capture in captures {
+                                if let MirCaptureOperand::Place(place) = capture {
+                                    escaped_locals.extend(place_local(place));
+                                }
+                            }
+                        }
+                        MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => {
+                            escaped_locals.insert(*local);
+                        }
+                        _ => {}
+                    }
+                    let args: &[MirCallArg] = match &instruction.operation {
+                        MirOperation::Call { args, .. }
+                        | MirOperation::CoreCall { args, .. }
+                        | MirOperation::IndirectCall { args, .. }
+                        | MirOperation::Semantic(
+                            MirSemanticOp::StaticPreludeCall { args, .. }
+                            | MirSemanticOp::HardwareCall { args, .. }
+                            | MirSemanticOp::ClosureMethod { args, .. }
+                            | MirSemanticOp::HostCall { args, .. },
+                        ) => args.as_slice(),
+                        _ => &[],
+                    };
+                    for arg in args {
+                        if arg.access != MirAccess::Read {
+                            touched.extend(arg.place.as_ref().and_then(place_local));
+                        }
+                    }
+                    for value in instruction.operation.value_uses() {
+                        touched.extend(borrow_roots.get(&value).copied());
+                    }
+                    if let (Some(local), Some(result)) = (touched.first(), instruction.result) {
+                        if write_borrow(result) {
+                            borrow_roots.insert(result, *local);
+                        }
+                    }
+                    if pass == 1 {
+                        for local in touched {
+                            local_writes.entry(local).or_default().push((block_position, position));
+                        }
+                    }
+                }
+            }
+        }
         Self {
             definitions,
             values,
@@ -1441,6 +1557,10 @@ impl FunctionIndex {
             moved_captures,
             blocks,
             jump_sources,
+            predecessors,
+            local_writes,
+            escaped_locals,
+            stable_reads: std::cell::RefCell::new(HashMap::new()),
         }
     }
 }
@@ -1746,6 +1866,17 @@ fn pure_slot_expression(expression: &str) -> bool {
         || expression.strip_suffix(".clone()").is_some_and(field_read_place)
 }
 
+/// A closure carrier (`RustEmitter::closure`) whose setup borrows a captured
+/// place. Kept in a function-scoped slot, the carrier's drop at function end
+/// keeps that borrow alive past every later use of the place; evaluated at
+/// its one consumer instead, the borrow ends with the consumer statement.
+fn borrowing_closure_expression(expression: &str) -> bool {
+    expression
+        .strip_prefix("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let __jet_capture_")
+        .and_then(|rest| rest.strip_suffix("}))))"))
+        .is_some_and(|body| body.contains(" = &"))
+}
+
 /// Byte offsets of `name` in `text` as a whole identifier, not a field.
 fn variable_mentions<'a>(text: &'a str, name: &'a str) -> impl Iterator<Item = usize> + 'a {
     text.match_indices(name).map(|(at, _)| at).filter(move |at| {
@@ -1754,6 +1885,46 @@ fn variable_mentions<'a>(text: &'a str, name: &'a str) -> impl Iterator<Item = u
         !before.is_some_and(|byte| is_identifier_byte(byte) || byte == b'.')
             && !after.is_some_and(is_identifier_byte)
     })
+}
+
+/// `callee(args)`, where Rust sees no disjoint fields through separate
+/// `slot.as_mut()`/`slot.as_ref()` calls: two arguments that borrow fields of
+/// one local (`&mut ((*l.as_mut()..).a), &((*l.as_ref()..).b)`) conflict
+/// (E0499/E0502). When every mention of such a local in `args` is one of
+/// those two accesses, the local is borrowed once ahead of the call and each
+/// argument projects its field from that one reference.
+fn split_local_field_borrows(callee: &str, args: &str) -> String {
+    const WRITE: &str = ".as_mut().expect(\"MIR local\")";
+    const READ: &str = ".as_ref().expect(\"MIR local\")";
+    let mut split: Vec<&str> = Vec::new();
+    for (at, _) in args.match_indices(WRITE) {
+        let digits = args[..at].bytes().rev().take_while(u8::is_ascii_digit).count();
+        if digits == 0 || !args[..at - digits].ends_with("__jet_l_") {
+            continue;
+        }
+        let name = &args[at - digits - "__jet_l_".len()..at];
+        if split.contains(&name) {
+            continue;
+        }
+        let accesses = args.matches(&format!("{name}{WRITE}")).count()
+            + args.matches(&format!("{name}{READ}")).count();
+        if accesses >= 2 && variable_mentions(args, name).count() == accesses {
+            split.push(name);
+        }
+    }
+    if split.is_empty() {
+        return format!("{callee}({args})");
+    }
+    let mut bindings = String::new();
+    let mut args = args.to_string();
+    for name in split {
+        let binding = format!("__jet_split_{}", &name["__jet_l_".len()..]);
+        let _ = write!(bindings, "let {binding} = {name}{WRITE}; ");
+        args = args
+            .replace(&format!("{name}{WRITE}"), &binding)
+            .replace(&format!("{name}{READ}"), &binding);
+    }
+    format!("{{ {bindings}{callee}({args}) }}")
 }
 
 /// The slots and bindings a pure expression reads.
@@ -1834,8 +2005,10 @@ fn attributed_statement(lines: &[String], index: usize) -> bool {
 /// pure definitions between), as a clone or take of the slot, takes `(E)` in
 /// place of that read when nothing else in the consumer or in between names a
 /// variable of `E` (an assignment target local excepted, since the right side
-/// runs first) and the read is not inside a closure. The definition and its
-/// top declaration go away. Attributed (debug-only) statements never fold.
+/// runs first) and the read is not inside a closure. A hoisted slot defined
+/// by a borrowing closure carrier (`borrowing_closure_expression`) folds the
+/// same way, as a block typed like the slot. The definition and its top
+/// declaration go away. Attributed (debug-only) statements never fold.
 fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
     let mut mentions: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     for_each_value_mention(&out[slots_start..], |_, _, id| *mentions.entry(id).or_default() += 1);
@@ -1861,7 +2034,8 @@ fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
         let expected = if hoisted { 3 } else { 2 };
         if mentions.get(&id) != Some(&expected)
             || (hoisted && !declarations.contains_key(&id))
-            || !pure_slot_expression(expression)
+            || !(pure_slot_expression(expression)
+                || (hoisted && borrowing_closure_expression(expression)))
             || attributed_statement(&lines, index)
         {
             continue;
@@ -1910,7 +2084,20 @@ fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
         if conflict {
             continue;
         }
-        let replaced = format!("{before}({expression}){after}");
+        let replaced = if pure_slot_expression(&expression) {
+            format!("{before}({expression}){after}")
+        } else {
+            // A folded closure keeps the slot's declared callable type, so
+            // the boxed closure still coerces to its `dyn` carrier.
+            let Some(declared) = lines[declarations[&id]]
+                .trim_end()
+                .split_once(": Option<")
+                .and_then(|(_, ty)| ty.strip_suffix("> = None;"))
+            else {
+                continue;
+            };
+            format!("{before}{{ let __jet_folded: {declared} = {expression}; __jet_folded }}{after}")
+        };
         lines[consumer] = replaced;
         removed[index] = true;
         if hoisted {
@@ -15907,20 +16094,18 @@ impl<'a> RustEmitter<'a> {
         self.call_arg_for_function(function, arg, borrowed)
     }
 
-    /// D-MEM-COPYSEM1: the place a `ReadPlace` value reads when that place is
-    /// rooted at a read parameter through field, payload, and list-index
-    /// projections. The parameter cannot change while the function runs, so a
-    /// consumer that only inspects the value reads the place itself instead
-    /// of a materialized copy (and the copy is never emitted when every
-    /// consumer does).
+    /// D-MEM-COPYSEM1: the place a `ReadPlace` value reads when a consumer
+    /// that only inspects the value may read that place instead of a
+    /// materialized copy (and the copy is never emitted when every consumer
+    /// does). The place projects fields, payloads, and list indexes from a
+    /// read parameter, which cannot change while the function runs, or from
+    /// an owned local that nothing changes or releases between the read and
+    /// any use of the value (`stable_local_read`).
     fn immutable_read_place(&self, function: &MirFunction, value: MirValueId) -> Option<MirPlaceId> {
         let Some(MirOperation::ReadPlace(place)) = self.value_definition(function, value) else {
             return None;
         };
         let row = self.place_row(function, *place)?;
-        let MirPlaceBase::Parameter(parameter) = &row.base else {
-            return None;
-        };
         let in_place = row.projections.iter().all(|projection| match projection {
             MirProjection::Field { field, .. } => {
                 !self.boxed_field(*field) && self.native_host_field_type(*field).is_none()
@@ -15929,15 +16114,87 @@ impl<'a> RustEmitter<'a> {
             MirProjection::Index { kind, .. } => *kind == MirIndexKind::List,
             MirProjection::Deref { .. } | MirProjection::Range { .. } => false,
         });
-        let read_parameter = matches!(
-            self.value_definition(function, *parameter),
-            Some(MirOperation::Parameter { index, .. })
-                if function
-                    .params
-                    .iter()
-                    .any(|param| param.index == *index && param.access == MirAccess::Read)
-        );
-        (in_place && read_parameter).then_some(*place)
+        if !in_place {
+            return None;
+        }
+        let stable = match &row.base {
+            MirPlaceBase::Parameter(parameter) => matches!(
+                self.value_definition(function, *parameter),
+                Some(MirOperation::Parameter { index, .. })
+                    if function
+                        .params
+                        .iter()
+                        .any(|param| param.index == *index && param.access == MirAccess::Read)
+            ),
+            MirPlaceBase::Local(local) => self.stable_local_read(function, value, *local),
+            _ => false,
+        };
+        stable.then_some(*place)
+    }
+
+    /// D-MEM-COPYSEM1: true when no operation that may change or release
+    /// `local` (`FunctionIndex::local_writes`) runs between the `ReadPlace`
+    /// defining `value` and any use of `value`, so each use reads in the
+    /// local's place exactly what the copy would hold. Only paths that do
+    /// not pass the read again count: a later pass redefines the value.
+    fn stable_local_read(&self, function: &MirFunction, value: MirValueId, local: MirLocalId) -> bool {
+        let index = self.function_index(function);
+        if let Some(stable) = index.stable_reads.borrow().get(&value) {
+            return *stable;
+        }
+        let stable = Self::local_unchanged_until_uses(function, &index, value, local);
+        index.stable_reads.borrow_mut().insert(value, stable);
+        stable
+    }
+
+    fn local_unchanged_until_uses(
+        function: &MirFunction,
+        index: &FunctionIndex,
+        value: MirValueId,
+        local: MirLocalId,
+    ) -> bool {
+        if index.escaped_locals.contains(&local) {
+            return false;
+        }
+        let Some(&(read_block, read_position)) = index.definitions.get(&value) else {
+            return false;
+        };
+        let Some(uses) = index.uses.get(&value) else {
+            return true;
+        };
+        let writes = index.local_writes.get(&local).map_or(&[][..], Vec::as_slice);
+        let first_write_after_read = writes
+            .iter()
+            .filter(|(block, position)| *block == read_block && *position > read_position)
+            .map(|(_, position)| *position)
+            .min();
+        // Blocks from which a use is reachable without passing the read.
+        let mut region: HashSet<usize> = HashSet::new();
+        let mut pending: Vec<usize> = Vec::new();
+        for (block, position) in uses {
+            if *block == read_block {
+                let at = position.unwrap_or(function.blocks[*block].instructions.len());
+                if first_write_after_read.is_some_and(|write| write <= at) {
+                    return false;
+                }
+            } else if region.insert(*block) {
+                pending.push(*block);
+            }
+        }
+        while let Some(block) = pending.pop() {
+            for predecessor in &index.predecessors[block] {
+                if *predecessor != read_block && region.insert(*predecessor) {
+                    pending.push(*predecessor);
+                }
+            }
+        }
+        if region.is_empty() {
+            return true;
+        }
+        // A use past the read block's end: the rest of the read block runs
+        // first, then any region block may (conservatively, all of it).
+        first_write_after_read.is_none()
+            && !writes.iter().any(|(block, _)| region.contains(block))
     }
 
     /// A shared reference for a consumer that only inspects `value`: the read
@@ -16297,9 +16554,9 @@ impl<'a> RustEmitter<'a> {
                 true
             }
             MirOperation::Semantic(MirSemanticOp::SharedGuardWait { guard, .. }) => *guard == value,
-            // D-MEM-COPYSEM1: variant tests, payload reads, and structural
-            // equality only inspect a subject; over a read parameter's place
-            // they read the place itself.
+            // D-MEM-COPYSEM1: variant tests, payload reads, and comparisons
+            // of non-scalar operands only inspect a subject; over a stable
+            // place (`immutable_read_place`) they read the place itself.
             MirOperation::EnumIs { subject, .. }
             | MirOperation::EnumPayload { subject, .. }
             | MirOperation::OptionIsSome { subject }
@@ -16309,13 +16566,13 @@ impl<'a> RustEmitter<'a> {
                 *subject == value && self.immutable_read_place(function, value).is_some()
             }
             MirOperation::Binary {
-                op: MirBinaryOp::Eq | MirBinaryOp::Ne,
+                op,
                 dispatch: MirBinaryDispatch::Primitive,
                 left,
                 right,
             } => {
                 (*left == value || *right == value)
-                    && self.canonical_equality_needed(self.value_type(function, *left))
+                    && self.comparison_by_reference(function, *op, *left)
                     && self.immutable_read_place(function, value).is_some()
             }
             _ => false,
@@ -17544,6 +17801,7 @@ impl<'a> RustEmitter<'a> {
                     MirOperation::Binary { .. }
                     | MirOperation::Semantic(MirSemanticOp::ColumnarRead { .. })
                     | MirOperation::Semantic(MirSemanticOp::HandleMethod { .. })
+                    | MirOperation::Semantic(MirSemanticOp::NumericBinaryMethod { .. })
                     | MirOperation::LoopRangeInit { .. }
                     | MirOperation::LoopIterInit { .. } => {
                         Some(self.instruction_location(function, instruction))
@@ -17967,6 +18225,15 @@ impl<'a> RustEmitter<'a> {
                     self.value_move(*value)
                 } else if matches!(value_ty.kind(), MirTypeKind::Int) {
                     self.value_read(*value)
+                } else if self.history_binding(*value).is_none()
+                    && matches!(
+                        self.value_ownership(*value).mode,
+                        MirOwnershipMode::Owned | MirOwnershipMode::Move
+                    )
+                {
+                    // D-MEM-COPYSEM1: an owned source read only by this copy
+                    // (`value_consume`) is dead after it, so the copy takes it.
+                    self.value_consume(function, *value)
                 } else {
                     self.value_copy(*value)
                 }
@@ -18454,6 +18721,42 @@ impl<'a> RustEmitter<'a> {
             }
             _ => None,
         }
+    }
+
+    /// D-MEM-COPYSEM1: true when `op` is a comparison whose operands (typed
+    /// like `left`) are compared through references rather than copies:
+    /// every operand type but the scalars, which copy for free.
+    fn comparison_by_reference(&self, function: &MirFunction, op: MirBinaryOp, left: MirValueId) -> bool {
+        fn scalar(emitter: &RustEmitter<'_>, ty: &MirType) -> bool {
+            let ty = if ty.identity.is_some() {
+                emitter.canonical_type(ty)
+            } else {
+                ty
+            };
+            match ty.kind() {
+                MirTypeKind::Int
+                | MirTypeKind::Float
+                | MirTypeKind::Bool
+                | MirTypeKind::Char
+                | MirTypeKind::IntN { .. }
+                | MirTypeKind::Float32
+                | MirTypeKind::Measure(_) => true,
+                MirTypeKind::InlineRange { base, .. }
+                | MirTypeKind::Tagged { inner: base, .. }
+                | MirTypeKind::Quantity { base, .. } => scalar(emitter, base),
+                _ => false,
+            }
+        }
+        matches!(
+            op,
+            MirBinaryOp::Eq
+                | MirBinaryOp::Ne
+                | MirBinaryOp::Lt
+                | MirBinaryOp::Gt
+                | MirBinaryOp::Le
+                | MirBinaryOp::Ge
+                | MirBinaryOp::Compare
+        ) && !scalar(self, self.value_type(function, left))
     }
 
     fn canonical_equality_needed(&self, ty: &MirType) -> bool {
@@ -19556,11 +19859,18 @@ impl<'a> RustEmitter<'a> {
                         let text = |value| {
                             format!(
                                 "::std::convert::AsRef::<str>::as_ref(&({}))",
-                                self.value_slot_reference(value, false)
+                                self.inspected_value_reference(function, value)
                             )
                         };
                         return self.binary(op, text(left), text(right));
                     }
+                }
+                if self.comparison_by_reference(function, op, left) {
+                    // D-MEM-COPYSEM1: a comparison only inspects its
+                    // operands, so it compares them in place, never copies.
+                    let operand =
+                        |value| format!("(*{})", self.inspected_value_reference(function, value));
+                    return self.binary(op, operand(left), operand(right));
                 }
                 self.exact_int_binary(function, op, left, right, location)
                     .unwrap_or_else(|| {
@@ -23666,17 +23976,6 @@ impl<'a> RustEmitter<'a> {
                     {
                         return callback;
                     }
-                    // `jet_shared_read<F: FnOnce(&T) -> R>` calls a host
-                    // closure, not the Rc callable carrier.
-                    if index == 1
-                        && route.symbol.name() == "jet_shared_read"
-                        && matches!(
-                            self.value_type(function, value_id).kind(),
-                            MirTypeKind::Fn(_)
-                        )
-                    {
-                        return self.host_callback_with_inputs(function, value_id, &[true]);
-                    }
                     if index > 0 && route.symbol.name() == "jet_http_shutdown_report_field" {
                         let value = self.value_move(value_id);
                         return self.native_int_argument(value, location);
@@ -24506,6 +24805,13 @@ impl<'a> RustEmitter<'a> {
             .enumerate()
             .skip(1)
             .map(|(index, arg)| {
+                // `read`/`edit`/`get_or_set` take a host `FnOnce`, not the Rc
+                // callable carrier.
+                let ty = self.value_type(function, arg.value);
+                if matches!(ty.kind(), MirTypeKind::Fn(_)) {
+                    let host_refs = vec![true; Self::callable_parameters(ty).len()];
+                    return self.host_callback_with_inputs(function, arg.value, &host_refs);
+                }
                 let borrowed = route.signature.borrow_mask[index];
                 self.call_arg_for_function(function, arg, borrowed)
             })
@@ -24528,6 +24834,31 @@ impl<'a> RustEmitter<'a> {
             }
         }
         self.validate_prelude_count(route, args.len());
+        // The Shared callback kernels (`jet_shared_read<F: FnOnce(&T) -> R>`,
+        // `jet_shared_edit<F: FnOnce(&mut T) -> R>`, their `_txn` forms and the
+        // capture projections) call a host closure, not the Rc callable carrier.
+        if matches!(
+            route.symbol.name(),
+            "jet_shared_read"
+                | "jet_shared_edit"
+                | "jet_shared_read_txn"
+                | "jet_shared_edit_txn"
+                | "jet_shared_capture_with"
+                | "jet_shared_capture_txn"
+        ) && args.last().is_some_and(|callback| {
+            matches!(self.value_type(function, callback.value).kind(), MirTypeKind::Fn(_))
+        }) {
+            let (callback, leading) = args.split_last().expect("Shared callback argument was checked");
+            let mut values = leading
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    self.call_arg_for_function(function, arg, route.signature.borrow_mask[index])
+                })
+                .collect::<Vec<_>>();
+            values.push(self.host_callback_with_inputs(function, callback.value, &[true]));
+            return format!("{}({})", self.prelude_symbol(call), values.join(", "));
+        }
         let needs_numeric_adapter = route.module == "core.clock"
             && args.iter().enumerate().any(|(index, arg)| {
                 !route.signature.borrow_mask[index]
@@ -24706,14 +25037,23 @@ impl<'a> RustEmitter<'a> {
                     && arg.access == MirAccess::Read
                     && is_string_view_type(self.value_type(function, arg.value))
                 {
-                    self.value_read(arg.value)
+                    // A view read only by borrowing consumers is never stored
+                    // (`direct_borrow_only`); read its place at the use.
+                    match self.value_definition(function, arg.value) {
+                        Some(MirOperation::ReadPlace(place))
+                            if self.direct_borrow_only(function, arg.value) =>
+                        {
+                            self.place_read(function, *place)
+                        }
+                        _ => self.value_read(arg.value),
+                    }
                 } else {
                     self.call_arg_for_function_with_literal(function, arg, borrowed, allow_literal)
                 }
             })
             .collect::<Vec<_>>()
             .join(", ");
-        format!("{symbol}{generic}({args})")
+        split_local_field_borrows(&format!("{symbol}{generic}"), &args)
     }
 
     fn history_closure(
@@ -24938,9 +25278,10 @@ impl<'a> RustEmitter<'a> {
                     self.move_place_for_capture(outer, *place)
                 }
                 (_, MirCaptureOperand::Value(value)) if move_required => self.value_move(*value),
-                (MirAccess::Read, MirCaptureOperand::Place(place)) => {
-                    self.place_reference(outer, *place, MirAccess::Read)
-                }
+                // The carrier is a `'static` `Box<dyn FnMut>`, so a read
+                // capture owns a copy of the place; a borrow could not
+                // outlive the creating frame.
+                (MirAccess::Read, MirCaptureOperand::Place(place)) => self.place_read(outer, *place),
                 // S47/M2: the environment shares the owner's cell and borrows
                 // it mutably only for the duration of each call.
                 (MirAccess::Write, MirCaptureOperand::Place(_))
@@ -24977,15 +25318,15 @@ impl<'a> RustEmitter<'a> {
             };
             if capture.access == MirAccess::Write && matches!(operand, MirCaptureOperand::Value(_))
             {
-                let _ = writeln!(setup, "let mut {name} = {captured};");
+                let _ = write!(setup, "let mut {name} = {captured}; ");
             } else {
-                let _ = writeln!(setup, "let {name} = {captured};");
+                let _ = write!(setup, "let {name} = {captured}; ");
             }
             let call_arg = if move_required {
                 name
             } else {
                 match (capture.access, operand) {
-                    (MirAccess::Read, MirCaptureOperand::Value(_)) => format!("&{name}"),
+                    (MirAccess::Read, _) => format!("&{name}"),
                     (MirAccess::Write, MirCaptureOperand::Value(_)) => format!("&mut {name}"),
                     (MirAccess::Write, MirCaptureOperand::Place(_))
                         if self.shared_capture_local(outer, operand).is_some() =>
@@ -25154,10 +25495,11 @@ impl<'a> RustEmitter<'a> {
             let name = format!("__jet_callback_arg_{index}");
             let rendered = self.rust_type(param);
             let borrowed = self.callable_parameter_borrowed(param, access);
-            parameters.push(if *host_ref {
-                format!("{name}: &{rendered}")
-            } else {
-                format!("{name}: {rendered}")
+            // A host reference to a write parameter is the kernel's `&mut T`.
+            parameters.push(match (*host_ref, access) {
+                (true, MirAccess::Write) => format!("{name}: &mut {rendered}"),
+                (true, _) => format!("{name}: &{rendered}"),
+                (false, _) => format!("{name}: {rendered}"),
             });
             arguments.push(match (*host_ref, borrowed) {
                 (true, true) | (false, false) => name,
@@ -26719,7 +27061,33 @@ impl<'a> RustEmitter<'a> {
                 call,
                 receiver,
                 argument,
-            } => self.prelude_values(*call, &[*receiver, *argument]),
+            } => {
+                let emitted = self.prelude_values(*call, &[*receiver, *argument]);
+                // The owned exact-Int Euclidean kernels take the call's
+                // source location for their division-by-zero stop.
+                let contextual = self
+                    .exact_prelude_adapter(&self.prelude_symbol(*call))
+                    .is_some_and(|(name, _)| {
+                        matches!(
+                            name,
+                            "jet_std::jet_int_owned_div_euclid" | "jet_std::jet_int_owned_rem_euclid"
+                        )
+                    });
+                if !contextual {
+                    return emitted;
+                }
+                let location = location.unwrap_or_else(|| {
+                    panic!("MIR exact Int Euclidean division is missing source location")
+                });
+                let call = emitted
+                    .strip_suffix(')')
+                    .unwrap_or_else(|| panic!("MIR Prelude call text has no argument list"));
+                format!(
+                    "{call}, {:?}, {}u32)",
+                    self.source_file_path(location.file),
+                    location.line
+                )
+            }
             MirSemanticOp::OverflowOption {
                 call,
                 left,
@@ -27780,6 +28148,21 @@ impl<'a> RustEmitter<'a> {
                 self.map_aggregate_builder(function, result),
             );
         }
+        // `Int.to_radix(base)` is checked `String`: the exact Int kernel
+        // takes both owned Ints by reference and its invalid-radix failure
+        // stops the program like any other Int fault (the builtin route
+        // carries no source location, as for `native_int_argument`).
+        if row.module == "core.builtin" && row.member == "int_to_radix" {
+            let [radix] = args else {
+                panic!("MIR Int.to_radix route expects one radix argument");
+            };
+            let root = &self.config.root_prefix;
+            return format!(
+                "{root}jet_std::jet_int_owned_to_radix({}, {}).unwrap_or_else(|error| {root}jet_arithmetic_stop(\"<mir>\", 0u32, &error))",
+                self.borrowed_value_reference(function, receiver_value, MirAccess::Read),
+                self.borrowed_value_reference(function, *radix, MirAccess::Read),
+            );
+        }
         let mut values = vec![receiver];
         values.extend(args.iter().enumerate().map(|(index, value_id)| {
             let borrowed = row.signature.borrow_mask[index + 1];
@@ -28117,8 +28500,22 @@ impl<'a> RustEmitter<'a> {
         }
 
         let value = self.place_base(function, &place.base, false, &place.projections);
-        let last_field = match place.projections.last() {
-            Some(MirProjection::Field { field, .. }) => Some(*field),
+        // A native host record's Int slot widens on every read, exactly as the
+        // value-level field read does, including a payload projected out of
+        // that slot (`limits.max_total_bytes` matched as `.Val(max)`).
+        let payloads = place
+            .projections
+            .iter()
+            .rev()
+            .take_while(|projection| matches!(projection, MirProjection::Payload { .. }))
+            .count();
+        let native_slot = match place.projections.iter().rev().nth(payloads) {
+            Some(MirProjection::Field { field, .. }) if payloads == 0 => {
+                self.native_host_field_type(*field)
+            }
+            Some(MirProjection::Field { field, .. }) => {
+                self.native_host_field_type(*field).map(|_| &place.ty)
+            }
             _ => None,
         };
         let range_window = match (place.projections.last(), &place.base) {
@@ -28131,10 +28528,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             format!("({value}).clone()")
         };
-        // A native host record's Int slot widens on every read, exactly as the
-        // value-level field read does.
-        last_field
-            .and_then(|field| self.native_host_field_type(field))
+        native_slot
             .and_then(|ty| self.native_int_result(&read, ty))
             .unwrap_or(read)
     }

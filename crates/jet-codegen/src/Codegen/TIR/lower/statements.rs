@@ -1867,6 +1867,13 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
             Type::Named(name) if name == crate::Syntax::TYPE_NEVER
         );
         if !matches!(&value.ty, Type::Result { .. } | Type::Option(_)) && !is_never {
+            // A value every path of which already left (each arm of a tail
+            // `if` table returns) has nothing to bind or return: lowering it
+            // runs those exits. Binding it would write the unit tail of a
+            // closed arm into a slot of the success type.
+            if !super::expressions::tir_expr_reaches_merge(&value) {
+                return TStmt::ExprStmt(value);
+            }
             let result = TLocal::generated("result");
             let result_name = result.name.clone();
             let result_value = TExpr {
@@ -4835,8 +4842,9 @@ fn hardware_dma_channel(expr: &crate::AST::Expr, cx: &Cx) -> Option<String> {
 /// `lower_expr`'s `Expr::Index` arm and this file's `LValue::Index` arm
 /// still trip when an unresolved `IndexKind::Unknown` has no type-derived
 /// recovery. A pre-sema fragment may carry `Unknown` only when the lowered
-/// operands identify a canonical index route.
-#[cfg(test)]
+/// operands identify a canonical index route. Release builds compile the
+/// asserts out and return the invariant-violation node instead.
+#[cfg(all(test, debug_assertions))]
 mod handoff_assert_tests {
     use super::*;
 

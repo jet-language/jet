@@ -114,14 +114,11 @@ fn sema_failure_union_unparen(value: Expr) -> Expr Never! {
     }
 }
 
-// The type a value has on its own, checked on snapshots so the ordinary
-// check that follows sees the body unchanged.
-fn sema_failure_union_probe_type(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext) -> Type? {
-    probe_scopes := sema_scope_snapshot(scopes)
-    probe_context := sema_check_context_snapshot(context)
-    probe_state := sema_ownership_state_snapshot(state)
+// The type a value has on its own, probed on the live tables and rolled back
+// so the ordinary check that follows sees the body unchanged.
+fn sema_failure_union_probe_type(value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
     probe_diagnostics := [Diagnostic]{}
-    checked :: sema_check_expression(value, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics) ?? return None
+    checked :: sema_probe_expression(value, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return None
     Val(checked.ty)
 }
 
@@ -130,7 +127,7 @@ fn sema_failure_union_probe_type(value: Expr, environment: SemaScopeEnvironment,
 // (`Err(.NotFound(n))`) becomes a case of the function's own error type with
 // the payload types of its arguments; any other value is a member, and a
 // message is the general `Err`.
-pub fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
+pub fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
     if call.args.len() != 1 || call.args[0].label != None {
         context.failure_union_general = true
         return
@@ -141,8 +138,8 @@ pub fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironme
             payload := [SemaFailureCaseField]{}
             loop argument in args {
                 if argument == {
-                    .Positional(inner) -> &payload.push(SemaFailureCaseField{label: None, ty: sema_failure_union_probe_type(inner, environment, scopes, state, &tail_store, context) ?? Type.Named{name: "_"}})
-                    .Named(label, inner) -> &payload.push(SemaFailureCaseField{label: Val(label), ty: sema_failure_union_probe_type(inner, environment, scopes, state, &tail_store, context) ?? Type.Named{name: "_"}})
+                    .Positional(inner) -> &payload.push(SemaFailureCaseField{label: None, ty: sema_failure_union_probe_type(inner, environment, &scopes, state, &tail_store, &context) ?? Type.Named{name: "_"}})
+                    .Named(label, inner) -> &payload.push(SemaFailureCaseField{label: Val(label), ty: sema_failure_union_probe_type(inner, environment, &scopes, state, &tail_store, &context) ?? Type.Named{name: "_"}})
                 }
             }
             &context.failure_union_cases.push(SemaFailureCase{name: variant, payload: payload, span: span})
@@ -153,7 +150,7 @@ pub fn sema_failure_union_record_err(call: Call, environment: SemaScopeEnvironme
         context.failure_union_general = true
         return
     }
-    ty :: sema_failure_union_probe_type(value, environment, scopes, state, &tail_store, context) ?? {
+    ty :: sema_failure_union_probe_type(value, environment, &scopes, state, &tail_store, &context) ?? {
         context.failure_union_general = true
         return
     }

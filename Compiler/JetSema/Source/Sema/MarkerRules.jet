@@ -717,12 +717,13 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
             checked_expected = Val(sema_type_resolve_declared_with_generics(graph, required, environment.module_identity, environment.generic_params))
         }
     }
-    probe_scopes := sema_scope_snapshot(scopes)
+    // Probed on the live tables, rolled back below.
+    probe_scope_mark :: sema_scope_mark(&scopes)
     probe_state := sema_ownership_state_snapshot(state)
-    probe_context := sema_check_context_snapshot(context)
-    reference_start := probe_context.name_references.len()
-    request_start := probe_context.comptime_requests.len()
-    checked := sema_check_expression(argument, checked_expected, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &diagnostics)
+    probe_context_mark :: sema_check_context_mark(&context)
+    reference_start := context.name_references.len()
+    request_start := context.comptime_requests.len()
+    checked := sema_check_expression(argument, checked_expected, environment, &scopes, &probe_state, &tail_store, &context, &diagnostics)
     checked_value := TExpr?{None}
     constant := TComptimeValue?{None}
     staged_source := SemaComptimeItemSource?{None}
@@ -749,17 +750,19 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
             checked_value = checked
             observed_type = Val(value.ty)
             if capture_constant {
-                constant = sema_marker_rules_constant_value(value, marker, source_index, reference_start, &probe_context, environment, values)
-                if constant == None && sema_marker_rules_explicit_constant(argument, probe_scopes) {
+                constant = sema_marker_rules_constant_value(value, marker, source_index, reference_start, &context, environment, values)
+                if constant == None && sema_marker_rules_explicit_constant(argument, scopes) {
                     staged_source = sema_marker_rules_comptime_source(marker, source_index, argument, checked_expected, environment, values)
                 }
             }
         }
     }
     requests := [SemaComptimeRequest]{}
-    loop index in request_start..<probe_context.comptime_requests.len() {
-        &requests.push(probe_context.comptime_requests[index])
+    loop index in request_start..<context.comptime_requests.len() {
+        &requests.push(context.comptime_requests[index])
     }
+    sema_check_context_rollback(&context, probe_context_mark)
+    sema_scope_rollback(&scopes, probe_scope_mark)
     SemaMarkerRuleArgumentObservation{
         ty: observed_type,
         constant: constant,

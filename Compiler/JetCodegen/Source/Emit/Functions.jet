@@ -355,6 +355,16 @@ fn jet_rust_emit_fold_pure(expression: String) -> Bool Never! {
     jet_rust_emit_fold_field_place(String.from_bytes(~(bytes[0..<bytes.len() - 8])) ?? "")
 }
 
+// MIRRust borrowing_closure_expression: a closure carrier whose setup borrows
+// a captured place. Kept in a function-scoped slot, the carrier's drop at
+// function end keeps that borrow alive past every later use of the place;
+// evaluated at its one consumer instead, the borrow ends with the consumer
+// statement.
+fn jet_rust_emit_fold_borrowing_closure(expression: String) -> Bool Never! {
+    prefix :: "std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({{ let __jet_capture_"
+    expression.starts_with(prefix) && expression.ends_with("}}))))") && expression.contains(" = &")
+}
+
 // MIRRust variable_mentions: offsets of `name` in `bytes` as a whole
 // identifier, not a field.
 fn jet_rust_emit_fold_mentions(bytes: [U8], name: String) -> [Int] Never! {
@@ -488,8 +498,10 @@ fn jet_rust_emit_fold_attributed(lines: [String], index: Int) -> Bool Never! {
 // between), as a clone or take of the slot, takes `(E)` in place of that read
 // when nothing else in the consumer or in between names a variable of `E` (an
 // assignment target local excepted, since the right side runs first) and the
-// read is not inside a closure. The definition and its top declaration go
-// away. Attributed (debug-only) statements never fold.
+// read is not inside a closure. A hoisted slot defined by a borrowing closure
+// carrier (`jet_rust_emit_fold_borrowing_closure`) folds the same way, as a
+// block typed like the slot. The definition and its top declaration go away.
+// Attributed (debug-only) statements never fold.
 fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start: Int) -> [String] Never! {
     body := [String]{}
     loop (index, entry) in lines {
@@ -519,7 +531,7 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
         expected :: if definition.hoisted -> 3 else -> 2
         if (mentions.get(definition.id) ?? 0) != expected -> next
         if definition.hoisted && declarations.get(definition.id) == None -> next
-        if !jet_rust_emit_fold_pure(definition.payload) || jet_rust_emit_fold_attributed(body, index) -> next
+        if !(jet_rust_emit_fold_pure(definition.payload) || (definition.hoisted && jet_rust_emit_fold_borrowing_closure(definition.payload))) || jet_rust_emit_fold_attributed(body, index) -> next
         name :: "__jet_v_{definition.id}"
         consumer := index + 1
         loop consumer < body.len() && jet_rust_emit_fold_mentions(body[consumer].bytes(), name).len() == 0 {
@@ -565,7 +577,19 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
             }
         }
         if conflict -> next
-        body[consumer] = "{before}({definition.payload}){after}"
+        replacement := "({definition.payload})"
+        if !jet_rust_emit_fold_pure(definition.payload) {
+            // A folded closure keeps the slot's declared callable type, so the
+            // boxed closure still coerces to its `dyn` carrier.
+            declaration :: body[declarations.get(definition.id) ?? index]
+            declaration_bytes :: declaration.bytes()
+            type_start :: jet_rust_emit_fold_find(declaration_bytes, ": Option<".bytes(), 0)
+            suffix :: "> = None;"
+            if type_start < 0 || !declaration.ends_with(suffix) -> next
+            declared :: String.from_bytes(~(declaration_bytes[type_start + 9..<declaration_bytes.len() - suffix.bytes().len()])) ?? ""
+            replacement = "{{ let __jet_folded: {declared} = {definition.payload}; __jet_folded }}"
+        }
+        body[consumer] = "{before}{replacement}{after}"
         removed[index] = true
         if definition.hoisted -> removed[declarations.get(definition.id) ?? index] = true
         folded = true

@@ -3,7 +3,7 @@
 //! This module deliberately knows only the checked TIR shapes and the shared
 //! MIR vocabulary.  It never consults AST nodes or chooses a backend spelling.
 
-use super::mir::{LowerCtx, LowerError};
+use super::mir::{LowerCtx, LowerError, TransactionRestore};
 use super::tir_to_mir_expr::lower_expr;
 use crate::AST::{BinOp, Type};
 use crate::Codegen::TIR::{
@@ -590,7 +590,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             collection,
             step,
             method_kind,
-            columnar: _,
+            columnar,
             by_value,
             body,
         } => lower_for_in(
@@ -603,6 +603,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             step.as_ref(),
             method_kind.as_ref(),
             *by_value,
+            *columnar,
             body,
         ),
 
@@ -1913,7 +1914,9 @@ fn lower_range_loop(
 /// walks the list in place. The loop becomes an index range over the list's
 /// length whose item is a read-only alias of its slot, so neither the list
 /// nor any item is copied. The parameter cannot change while the loop runs,
-/// so every alias reads exactly what the copied item would hold.
+/// so every alias reads exactly what the copied item would hold. A columnar
+/// list (D-SOA1) stores one column per field, so its slots are not places an
+/// alias can name; it keeps the gathered-record iteration.
 fn read_list_walk(
     ctx: &mut LowerCtx,
     label: Option<&str>,
@@ -1923,9 +1926,10 @@ fn read_list_walk(
     step: Option<&TExpr>,
     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
     by_value: bool,
+    columnar: bool,
     body: &[TStmt],
 ) -> Result<Option<TStmt>, LowerError> {
-    if method_kind.is_some() || var2.is_some() || step.is_some() || by_value {
+    if method_kind.is_some() || var2.is_some() || step.is_some() || by_value || columnar {
         return Ok(None);
     }
     let Type::List(element) = collection.ty.without_user_tags() else {
@@ -2003,9 +2007,12 @@ fn lower_for_in(
     step: Option<&TExpr>,
     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
     by_value: bool,
+    columnar: bool,
     body: &[TStmt],
 ) -> Result<(), LowerError> {
-    if let Some(walk) = read_list_walk(ctx, label, var, var2, collection, step, method_kind, by_value, body)? {
+    if let Some(walk) = read_list_walk(
+        ctx, label, var, var2, collection, step, method_kind, by_value, columnar, body,
+    )? {
         return lower_stmt(ctx, &walk);
     }
     let routes = super::loop_route_bundle();
@@ -2623,7 +2630,7 @@ fn lower_scope_member(
             ctx.push_lexical_frame();
             lower_stmts(ctx, body)?;
             ctx.pop_lexical_frame()?;
-            emit_scope_exits_on_early_paths(ctx, scope, body_block, body_block_start, &[])?;
+            emit_scope_exits_on_early_paths(ctx, scope, body_block, body_block_start)?;
             if !ctx.is_terminated() {
                 ctx.terminate(MirTerminator::Jump { target: exit });
             }
@@ -2665,14 +2672,6 @@ fn attach_scope_member(
         }
         _ => Err(ctx.error(span, "MIR scope member has no scope-enter operation")),
     }
-}
-
-#[derive(Clone)]
-struct TransactionCustomRestore {
-    index: usize,
-    receiver: TLocal,
-    receiver_ty: Type,
-    saved: TLocal,
 }
 
 fn rollback_method_lookup(owner: &Type, method: &str) -> String {
@@ -2732,7 +2731,6 @@ fn emit_scope_exits_on_early_paths(
     scope: MirScopeId,
     body_entry: MirBlockId,
     body_block_start: usize,
-    custom_restores: &[TransactionCustomRestore],
 ) -> Result<(), LowerError> {
     let body_blocks = ctx.blocks[body_block_start..]
         .iter()
@@ -2762,52 +2760,22 @@ fn emit_scope_exits_on_early_paths(
                 })
         })
         .collect::<Vec<_>>();
-    let restores = ctx
-        .transaction_restores
-        .iter()
-        .rev()
-        .find(|(candidate, _)| *candidate == scope)
-        .map(|(_, snaps)| snaps.clone())
-        .unwrap_or_default();
     let current = ctx.current_block();
     for block in early_exits {
+        // A live-flag guarded release branches, which ends `block` early; the
+        // exit itself then moves to the block the cleanups end in.
+        let exit = ctx
+            .block_by_id(block)
+            .map(|row| row.terminator.clone())
+            .ok_or_else(|| ctx.error(ctx.span(), "scope early exit has no block"))?;
         ctx.switch_to(block);
         ctx.emit_scope_cleanups(scope)?;
-        for index in (0..restores.len()).rev() {
-            let (place, saved, ty) = &restores[index];
-            if let Some(custom) = custom_restores.iter().find(|row| row.index == index) {
-                let restore = rollback_method_call(
-                    custom.receiver.clone(),
-                    custom.receiver_ty.clone(),
-                    "restore",
-                    Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
-                    vec![transaction_restore_call_arg(TExpr {
-                        ty: ty.clone(),
-                        kind: TExprKind::Local(custom.saved.clone()),
-                    })],
-                );
-                lower_expr(ctx, &restore)?;
-            } else {
-                let value = ctx.emit(
-                    &format!("transaction.snapshot.{index}.restore.read"),
-                    Some(ty.clone()),
-                    MirOperation::ReadPlace(*saved),
-                )?;
-                ctx.emit(
-                    &format!("transaction.snapshot.{index}.restore.write"),
-                    None,
-                    MirOperation::WritePlace {
-                        place: *place,
-                        value,
-                    },
-                )?;
-            }
-        }
         ctx.emit(
             &format!("scope-member.exit.early.{}", block.0),
             None,
             MirOperation::ScopeExit { scope },
         )?;
+        ctx.terminate(exit);
     }
     ctx.switch_to(current);
     Ok(())
@@ -2821,7 +2789,7 @@ fn lower_scope_member_body(
     let body_entry = ctx.current_block();
     let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
-    emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start, &[])?;
+    emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
     if ctx.is_terminated() {
         ctx.exit_scope(scope)?;
         return Ok(());
@@ -2879,7 +2847,6 @@ fn lower_transaction(
         )?;
     }
     let mut restores = Vec::new();
-    let mut custom_restores = Vec::new();
     for (index, (local, rollback_ty)) in snapshots.iter().enumerate() {
         let place = ctx.lower_place(
             &crate::Codegen::TIR::TPlace::Local(local.clone()),
@@ -2966,21 +2933,30 @@ fn lower_transaction(
                 value,
             },
         )?;
-        if rollback_ty.is_some() {
-            custom_restores.push(TransactionCustomRestore {
-                index,
-                receiver: local.clone(),
-                receiver_ty: rollback_ty.clone().expect("checked rollback owner"),
-                saved: saved_local.clone(),
-            });
-        }
-        restores.push((place, saved_place, snapshot_ty));
+        let custom = rollback_ty.as_ref().map(|owner_ty| {
+            rollback_method_call(
+                local.clone(),
+                owner_ty.clone(),
+                "restore",
+                Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                vec![transaction_restore_call_arg(TExpr {
+                    ty: snapshot_ty.clone(),
+                    kind: TExprKind::Local(saved_local.clone()),
+                })],
+            )
+        });
+        restores.push(TransactionRestore {
+            place,
+            saved: saved_place,
+            ty: snapshot_ty,
+            custom,
+        });
     }
     ctx.transaction_restores.push((scope, restores));
     let body_entry = ctx.current_block();
     let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
-    emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start, &custom_restores)?;
+    emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
     if let Some(handle) = handle {
         if ctx.is_terminated() {
             ctx.exit_scope(scope)?;

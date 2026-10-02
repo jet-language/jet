@@ -285,6 +285,26 @@ fn __jet_bootstrap_origin_from_host(value: &::jet_foundation::Diagnostics::Diagn
         @f.DiagnosticOrigin.revision@: value.revision.clone(),
     }
 }
+/// The canonical path a Jet diagnostic's source path names. The Jet driver
+/// keys sources by display path (Identity.jet `jet_driver_display_path`):
+/// relative to the entry root, or canonical for a file outside it.
+fn __jet_bootstrap_source_physical_path(
+    snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
+    display: &str,
+) -> String {
+    let Some(root) = snapshot.roots.iter().find(|root| root.identity == snapshot.entry_root_identity) else {
+        return display.to_string();
+    };
+    if root.canonical_path.is_empty() || display.starts_with('/') {
+        display.to_string()
+    } else if display.is_empty() {
+        root.canonical_path.clone()
+    } else if root.canonical_path.ends_with('/') {
+        format!("{}{display}", root.canonical_path)
+    } else {
+        format!("{}/{display}", root.canonical_path)
+    }
+}
 fn __jet_bootstrap_validate_origin(
     value: &::jet_foundation::Diagnostics::DiagnosticOrigin,
     source_path: Option<&String>,
@@ -296,7 +316,7 @@ fn __jet_bootstrap_validate_origin(
         return Err(format!("diagnostic origin `{}` has a revision that does not match its exact source bytes", value.path));
     }
     if let Some(source_path) = source_path {
-        if value.path != *source_path {
+        if value.path != *source_path && value.path != __jet_bootstrap_source_physical_path(snapshot, source_path) {
             return Err(format!("diagnostic origin path `{}` disagrees with source path `{source_path}`", value.path));
         }
     }
@@ -930,10 +950,11 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
                 generated = Some(file);
             }
         }
+        let physical = __jet_bootstrap_source_physical_path(snapshot, source_path);
         let mut selected = None;
         for root in &snapshot.roots {
             for file in root.files.iter().chain(&root.foreign_cache_files) {
-                if file.path == *source_path {
+                if file.path == physical {
                     if selected.is_some() {
                         return Err(format!("Jet diagnostic source path `{source_path}` is ambiguous in the authorized snapshot"));
                     }

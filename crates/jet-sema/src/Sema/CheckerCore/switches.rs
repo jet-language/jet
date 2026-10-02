@@ -484,6 +484,77 @@ pub(crate) fn atomic_absent_optional_subject(cond: &Expr) -> Option<(String, Spa
     }
 }
 
+/// D-FLOWTYPE1=A: the canonical refutable binding `x == .Val(x) ?? { miss }`
+/// that refines the stable Optional `x` to its payload for the statements
+/// after it. `miss` must leave directly (E0405).
+fn optional_presence_binding(
+    subject: String,
+    name_span: Span,
+    cond_span: Span,
+    span: Span,
+    miss: Vec<Stmt>,
+) -> Stmt {
+    Stmt::Val(crate::AST::Binding {
+        mutable: false,
+        markers: Vec::new(),
+        reactive_upgrade: false,
+        meta: None,
+        name: String::new(),
+        name_span: span,
+        sigil_span: None,
+        pattern: Some(crate::AST::BindPattern::Refutable {
+            pattern: Pattern::Present {
+                binding: subject.clone(),
+                binding_span: name_span,
+                inner: None,
+                span: cond_span,
+            },
+            fallback: crate::AST::OrFallback::Block {
+                body: miss,
+                value: None,
+                span,
+            },
+            names: vec![crate::AST::BindName {
+                name: subject.clone(),
+                span: name_span,
+                rename: None,
+            }],
+            span,
+            synthesized: true,
+        }),
+        ty: None,
+        ty_span: None,
+        init: Expr::Ident(subject, name_span),
+        is_comptime: false,
+        ct: None,
+        uninit: false,
+        arena_view: false,
+        string_view: false,
+        gc_promotion: None,
+        gc_transferred: false,
+    })
+}
+
+/// The Optional names a block's leading synthesized presence bindings
+/// (`optional_presence_binding`) already refine.
+fn leading_presence_refinements(body: &[Stmt]) -> HashSet<String> {
+    body.iter()
+        .map_while(|stmt| match stmt {
+            Stmt::Val(crate::AST::Binding {
+                pattern:
+                    Some(crate::AST::BindPattern::Refutable {
+                        pattern: Pattern::Present { binding, .. },
+                        synthesized: true,
+                        ..
+                    }),
+                init: Expr::Ident(subject, _),
+                ..
+            }) if subject == binding => Some(binding.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn guard_subject_path(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Ident(name, _) => Some(name.clone()),
@@ -815,45 +886,30 @@ impl<'a> Checker<'a> {
         }
         let span = *span;
         let body = std::mem::take(&mut arm.body);
-        *stmt = Stmt::Val(crate::AST::Binding {
-            mutable: false,
-            markers: Vec::new(),
-            reactive_upgrade: false,
-            meta: None,
-            name: String::new(),
-            name_span: span,
-            sigil_span: None,
-            pattern: Some(crate::AST::BindPattern::Refutable {
-                pattern: Pattern::Present {
-                    binding: subject.clone(),
-                    binding_span: name_span,
-                    inner: None,
-                    span: cond_span,
-                },
-                fallback: crate::AST::OrFallback::Block {
-                    body,
-                    value: None,
-                    span,
-                },
-                names: vec![crate::AST::BindName {
-                    name: subject.clone(),
-                    span: name_span,
-                    rename: None,
-                }],
-                span,
-                synthesized: true,
-            }),
-            ty: None,
-            ty_span: None,
-            init: Expr::Ident(subject, name_span),
-            is_comptime: false,
-            ct: None,
-            uninit: false,
-            arena_view: false,
-            string_view: false,
-            gc_promotion: None,
-            gc_transferred: false,
-        });
+        *stmt = optional_presence_binding(subject, name_span, cond_span, span, body);
+    }
+
+    /// D-FLOWTYPE1=A: the `else` of a multi-arm guard table holds the payload
+    /// of every `x == None` arm subject (`complement_condition_bindings`).
+    /// Only a single-arm table can swap that body into a Present arm, so the
+    /// proof is written as leading refutable bindings `x == .Val(x) ?? { }`
+    /// whose miss route is the checked dead end. Typed IR then binds the
+    /// payload for the `else` body, as the swapped single-arm form does.
+    fn prepend_else_presence_refinements(conditions: &[Expr], names: &[String], body: &mut Vec<Stmt>) {
+        for name in names.iter().rev() {
+            let Some((subject, name_span, cond_span)) = conditions
+                .iter()
+                .filter_map(atomic_absent_optional_subject)
+                .find(|(subject, _, _)| subject == name)
+            else {
+                continue;
+            };
+            let dead_end = vec![Stmt::Expr(Expr::NoElse(cond_span))];
+            body.insert(
+                0,
+                optional_presence_binding(subject, name_span, cond_span, cond_span, dead_end),
+            );
+        }
     }
 
     pub(crate) fn declare_condition_binding(
@@ -2475,11 +2531,13 @@ impl<'a> Checker<'a> {
         }
         if let Some(body) = else_body {
             self.flow = outside_table.clone();
-            let complement = if reordered_optional_guard {
+            let refined = leading_presence_refinements(body);
+            let mut complement = if reordered_optional_guard {
                 HashMap::new()
             } else {
                 self.complement_condition_bindings(&original_conditions)
             };
+            complement.retain(|name, _| !refined.contains(name));
             if !complement.is_empty() {
                 self.push_scope();
                 let mut restore_moved = Vec::new();
@@ -2488,6 +2546,8 @@ impl<'a> Checker<'a> {
                     .find(|condition| atomic_absent_optional_subject(condition).is_some())
                     .map(|condition| condition.span())
                     .unwrap_or(span);
+                let mut proven: Vec<String> = complement.keys().cloned().collect();
+                proven.sort();
                 for (name, ty) in complement {
                     if let Some(restored) = self.declare_condition_binding(&name, fact_span, ty) {
                         restore_moved.push(restored);
@@ -2495,6 +2555,7 @@ impl<'a> Checker<'a> {
                 }
                 self.check_switch_arm_body(body, true, span, value_expected);
                 self.pop_scope();
+                Self::prepend_else_presence_refinements(&original_conditions, &proven, body);
                 for (name, at) in restore_moved {
                     self.flow.moved.set(&name, at);
                 }

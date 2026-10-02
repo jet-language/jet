@@ -426,14 +426,22 @@ fn jet_driver_foreign_find_file(files: [JetDriverAuthorizedSourceFile], relative
     None
 }
 
+// The cache records carry their display path (`jet_driver_display_path`) from
+// here on: the driver names them only in source identities and diagnostics.
 fn jet_driver_foreign_find_cache(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, language: String, library: String) -> (cache: JetDriverAuthorizedSourceFile?, metadata: JetDriverAuthorizedSourceFile?, provenance: JetDriverAuthorizedSourceFile?) Never! {
     if root_index < 0 || root_index >= snapshot.roots.len() -> return (cache: None, metadata: None, provenance: None)
     root :: snapshot.roots[root_index]
+    entry_root :: jet_driver_entry_root_path(snapshot)
     cache_files :: root.foreign_cache_files
-    cache :: jet_driver_foreign_find_file(cache_files, jet_driver_foreign_cache_relative(language, library))
-    metadata :: jet_driver_foreign_find_file(cache_files, jet_driver_foreign_sidecar_relative(language, library, "metadata"))
-    provenance :: jet_driver_foreign_find_file(cache_files, jet_driver_foreign_sidecar_relative(language, library, "provenance"))
+    cache :: jet_driver_foreign_display_file(entry_root, jet_driver_foreign_find_file(cache_files, jet_driver_foreign_cache_relative(language, library)))
+    metadata :: jet_driver_foreign_display_file(entry_root, jet_driver_foreign_find_file(cache_files, jet_driver_foreign_sidecar_relative(language, library, "metadata")))
+    provenance :: jet_driver_foreign_display_file(entry_root, jet_driver_foreign_find_file(cache_files, jet_driver_foreign_sidecar_relative(language, library, "provenance")))
     (cache: cache, metadata: metadata, provenance: provenance)
+}
+
+fn jet_driver_foreign_display_file(entry_root: String, file: JetDriverAuthorizedSourceFile?) -> JetDriverAuthorizedSourceFile? Never! {
+    found :: file ?? return None
+    Val(JetDriverAuthorizedSourceFile{path: jet_driver_display_path(entry_root, found.path), relative_path: found.relative_path, identity: found.identity, source: found.source})
 }
 
 fn jet_driver_foreign_cache_error(path: String, reason: String, diagnostics: &[Diagnostic]) {

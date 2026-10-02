@@ -176,7 +176,8 @@ mod tests {
             r#"{"schema":"jet.report/v1","moment":"tool","status":"ok","ok":true}"#,
         )
         .unwrap_err();
-        assert!(error.contains("expected `jet.report/v2`"), "{error}");
+        let expected = format!("expected `{}`", crate::Report::REPORT_SCHEMA);
+        assert!(error.contains(&expected), "{error}");
     }
 
     #[test]

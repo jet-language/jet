@@ -333,6 +333,44 @@ fn jet_rust_emit_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction,
     rendered.join(", ")
 }
 
+// MIRRust split_local_field_borrows: `callee(args)`, where Rust sees no
+// disjoint fields through separate `slot.as_mut()`/`slot.as_ref()` calls: two
+// arguments that borrow fields of one local conflict (E0499/E0502). When every
+// mention of such a local in `args` is one of those two accesses, the local is
+// borrowed once ahead of the call and each argument projects its field from
+// that one reference.
+fn jet_rust_emit_split_local_field_borrows(callee: String, args: String) -> String Never! {
+    write :: ".as_mut().expect(\"MIR local\")"
+    read :: ".as_ref().expect(\"MIR local\")"
+    bytes :: args.bytes()
+    split := [String]{}
+    loop at in jet_rust_emit_fold_occurrences(bytes, write.bytes()) {
+        start := at
+        loop start > 0 && Int.from_u8(bytes[start - 1]) >= 48 && Int.from_u8(bytes[start - 1]) <= 57 -> start -= 1
+        if start == at || start < 8 -> next
+        if (String.from_bytes(~(bytes[start - 8..<start])) ?? "") != "__jet_l_" -> next
+        name :: String.from_bytes(~(bytes[start - 8..<at])) ?? ""
+        seen := false
+        loop other in split {
+            if other == name -> seen = true
+        }
+        if seen -> next
+        accesses :: jet_rust_emit_fold_occurrences(bytes, "{name}{write}".bytes()).len() + jet_rust_emit_fold_occurrences(bytes, "{name}{read}".bytes()).len()
+        if accesses >= 2 && jet_rust_emit_fold_mentions(bytes, name).len() == accesses -> &split.push(name)
+    }
+    if split.len() == 0 -> return "{callee}({args})"
+    bindings := ""
+    rewritten := args
+    loop name in split {
+        name_bytes :: name.bytes()
+        id :: String.from_bytes(~(name_bytes[8..<name_bytes.len()])) ?? ""
+        binding :: "__jet_split_{id}"
+        bindings = "{bindings}let {binding} = {name}{write}; "
+        rewritten = rewritten.replace("{name}{write}", binding).replace("{name}{read}", binding)
+    }
+    "{{ {bindings}{callee}({rewritten}) }}"
+}
+
 // MIRRust is_string_view_type: `View<str>`/`ViewMut<str>`, through tags.
 fn jet_rust_emit_is_string_view_type(ty: MIRType) -> Bool Never! {
     if ty.kind == {
@@ -468,14 +506,39 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
         if (left_view && right_ty.kind == MIRTypeKind.String) || (right_view && left_ty.kind == MIRTypeKind.String) {
             // A text view against a String: Rust orders `str` with `str`
             // only, so both sides read as `&str`.
-            left_text :: "::std::convert::AsRef::<str>::as_ref(&({jet_rust_emit_value_reference(left, false)}))"
-            right_text :: "::std::convert::AsRef::<str>::as_ref(&({jet_rust_emit_value_reference(right, false)}))"
+            left_text :: "::std::convert::AsRef::<str>::as_ref(&({jet_rust_emit_inspected_value_reference(&ctx, function, left)}))"
+            right_text :: "::std::convert::AsRef::<str>::as_ref(&({jet_rust_emit_inspected_value_reference(&ctx, function, right)}))"
             return jet_rust_emit_primitive_binary(&ctx, op, left_text, right_text)
         }
+    }
+    if jet_rust_emit_comparison_by_reference(&ctx, function, op, left) {
+        // D-MEM-COPYSEM1: a comparison only inspects its operands, so it
+        // compares them in place, never copies.
+        left_text :: jet_rust_emit_inspected_value_reference(&ctx, function, left)
+        right_text :: jet_rust_emit_inspected_value_reference(&ctx, function, right)
+        return jet_rust_emit_primitive_binary(&ctx, op, "(*{left_text})", "(*{right_text})")
     }
     if jet_rust_emit_exact_int_binary(&ctx, function, op, left, right, location) == .Val(exact) -> return exact
     if op == MIRBinaryOp.Compare -> return jet_rust_emit_primitive_binary(&ctx, op, jet_rust_emit_value_reference(left, false), jet_rust_emit_value_reference(right, false))
     jet_rust_emit_primitive_binary(&ctx, op, jet_rust_emit_value_read(left), jet_rust_emit_value_read(right))
+}
+
+// D-MEM-COPYSEM1: true when `op` is a comparison whose operands (typed like
+// `left`) are compared through references rather than copies: every operand
+// type but the scalars, which copy for free (MIRRust comparison_by_reference).
+fn jet_rust_emit_comparison_by_reference(ctx: &JetRustEmitContext, function: MIRFunction, op: MIRBinaryOp, left: MIRValueID) -> Bool Never! {
+    comparison :: op == MIRBinaryOp.Eq || op == MIRBinaryOp.Ne || op == MIRBinaryOp.Lt || op == MIRBinaryOp.Gt || op == MIRBinaryOp.Le || op == MIRBinaryOp.Ge || op == MIRBinaryOp.Compare
+    left_ty :: jet_rust_emit_value_type(ctx, function, left)
+    comparison && !jet_rust_emit_scalar_comparison_type(&ctx, left_ty)
+}
+
+fn jet_rust_emit_scalar_comparison_type(ctx: &JetRustEmitContext, source: MIRType) -> Bool Never! {
+    ty :: jet_rust_emit_canonical_instance(&ctx, source)
+    if ty.kind == {
+        .Int | .Float | .Bool | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_rust_emit_scalar_comparison_type(&ctx, base)
+        else -> false
+    }
 }
 
 // MIRRust canonical_type: a typed identity reads its canonical instance row.
@@ -850,8 +913,23 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MIRFunction, i
     exact :: jet_rust_emit_exact_adapter(&ctx, Val(function), symbol, args)
     mask := route.signature.borrow_mask
     mask = jet_rust_emit_exact_adapter_mask(args, symbol, mask, exact)
+    // MIRRust prelude_host_call: the Shared callback kernels (`jet_shared_read<F: FnOnce(&T) -> R>`, `jet_shared_edit<F: FnOnce(&mut T) -> R>`,
+    // their `_txn` forms and the capture projections) call a host closure, not the Rc callable carrier.
+    shared_symbols :: [String]{"jet_shared_read", "jet_shared_edit", "jet_shared_read_txn", "jet_shared_edit_txn", "jet_shared_capture_with", "jet_shared_capture_txn"}
+    last :: args.len() - 1
+    if shared_symbols.contains(mir_symbol_name(route.symbol)) && last >= 0 && jet_rust_emit_shared_read_callback(ctx, function, args[last].value) {
+        leading := [MIRCallArg]{}
+        leading_mask := [Bool]{}
+        loop index in 0..<last {
+            &leading.push(args[index])
+            &leading_mask.push(mask[index])
+        }
+        callback :: jet_rust_emit_host_callback_with_inputs(&ctx, function, args[last].value, [Bool]{true})
+        if last == 0 -> return "{exact}({callback})"
+        return "{exact}({jet_rust_emit_call_arguments(&ctx, function, leading, leading_mask)}, {callback})"
+    }
     rendered :: jet_rust_emit_call_arguments(&ctx, function, args, mask)
-    "{exact}{jet_rust_emit_generic_call_args(&ctx, type_args)}({rendered})"
+    jet_rust_emit_split_local_field_borrows("{exact}{jet_rust_emit_generic_call_args(&ctx, type_args)}", rendered)
 }
 
 fn jet_rust_emit_function_failure(ctx: &JetRustEmitContext, id: MIRFunctionID) -> MIRCallFallibility Never! {
@@ -1856,7 +1934,7 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
     }
     generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
     call := if callee == {
-        .User(id) -> "{jet_rust_emit_function_name(&ctx, id)}{generic}({rendered_args})"
+        .User(id) -> jet_rust_emit_split_local_field_borrows("{jet_rust_emit_function_name(&ctx, id)}{generic}", rendered_args)
         .Associated(id, owner) -> {
             jet_rust_emit_validate_function_dispatch(&ctx, id, owner, false, function.span)
             jet_rust_emit_associated_dispatch(&ctx, id, owner, generic, rendered_args, function.span)
@@ -3316,7 +3394,8 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
             .Place(place) -> {
                 if capture.access == {
                     .Move -> jet_rust_emit_place_move(&ctx, outer, place)
-                    .Read -> if jet_rust_emit_type_is_borrowed(capture.ty) -> jet_rust_emit_place_reference(&ctx, outer, place, MIRAccess.Read) else -> jet_rust_emit_place_read(&ctx, outer, place)
+                    // The carrier is a `'static` `Box<dyn FnMut>`: a read capture owns a copy of the place.
+                    .Read -> jet_rust_emit_place_read(&ctx, outer, place)
                     .Write -> jet_rust_emit_place_reference(&ctx, outer, place, MIRAccess.Write)
                 }
             }
@@ -3505,10 +3584,17 @@ fn jet_rust_emit_host_callback_with_inputs(ctx: &JetRustEmitContext, function: M
     send :: jet_rust_emit_value_type(ctx, function, callable).kind == .SendFn(_, _, _)
     parameter_text := [String]{}
     argument_text := [String]{}
+    conventions :: jet_rust_emit_callable_conventions(ctx, function, callable)
     loop (index, ty) in params {
         name :: "__jet_callback_arg_{index}"
         host_ref :: host_refs[index]
-        borrow :: if host_ref -> "&" else -> ""
+        // A host reference to a write parameter is the kernel's `&mut T`.
+        writes :: index < conventions.len() && conventions[index] == MIRAccess.Write
+        borrow :: if {
+            host_ref && writes -> "&mut "
+            host_ref -> "&"
+            else -> ""
+        }
         &parameter_text.push("{name}: {borrow}{jet_rust_emit_type(&ctx, ty)}")
         if {
             host_ref == mask[index] -> &argument_text.push(name)
@@ -3520,6 +3606,16 @@ fn jet_rust_emit_host_callback_with_inputs(ctx: &JetRustEmitContext, function: M
     callback :: jet_rust_emit_value_move(callable)
     invocation :: if send -> "__jet_callback({argument_text.join(", ")})" else -> jet_rust_emit_fn_value_call("__jet_callback.clone()", [String]{argument_text.join(", ")})
     "{{ let __jet_callback = {callback}; move |{parameter_text.join(", ")}| {invocation} }}"
+}
+
+fn jet_rust_emit_callable_conventions(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> [MIRAccess] Never! {
+    ty :: jet_rust_emit_value_type(ctx, function, value)
+    if ty.kind == {
+        .Fn(signature) -> return (signature.call_metadata ?? MIRCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MIRAccess]{}, policies: MIRCallablePolicyChain{policies: [MIRCallablePolicy]{}}}).conventions
+        .SendFn(_, _, conventions) -> return conventions
+        else -> {}
+    }
+    [MIRAccess]{}
 }
 
 // MIRRust send_callback_fn_wrapper: a parallel route receives a plain `Fn`
@@ -3718,8 +3814,6 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MIRFunction
     loop value in values {
         if {
             jet_rust_emit_host_borrow_callback_value(&ctx, function, value, false, false) == .Val(callback) -> &rendered.push(callback)
-            // MIRRust HandleMethod: `jet_shared_read<F: FnOnce(&T) -> R>` calls a host closure.
-            index == 1 && mir_symbol_name(row.symbol) == "jet_shared_read" && jet_rust_emit_shared_read_callback(ctx, function, value) -> &rendered.push(jet_rust_emit_host_callback_with_inputs(&ctx, function, value, [Bool]{true}))
             row.signature.borrow_mask[index] -> &rendered.push(jet_rust_emit_value_reference(value, false))
             else -> &rendered.push(jet_rust_emit_value_consume(ctx, value))
         }
@@ -3752,6 +3846,11 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
     loop arg in args -> &values.push(arg)
     row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return jet_rust_emit_semantic_values(&ctx, function, call, values)
     if row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
+    // MIRRust prelude_values_with_receiver: `Int.to_radix(base)` is checked `String`; the exact Int kernel takes both owned Ints by reference and its invalid-radix failure stops the program like any other Int fault.
+    if row.module_name == "core.builtin" && row.member == "int_to_radix" && args.len() == 1 {
+        root :: ctx.config.root_prefix
+        return "{root}jet_std::jet_int_owned_to_radix({jet_rust_emit_value_reference(receiver, false)}, {jet_rust_emit_value_reference(args[0], false)}).unwrap_or_else(|error| {root}jet_arithmetic_stop(\"<mir>\", 0u32, &error))"
+    }
     rendered := [String]{}
     loop (index, value) in values {
         borrowed :: row.signature.borrow_mask[index]
@@ -3860,7 +3959,13 @@ fn jet_rust_emit_deref(ctx: &JetRustEmitContext, function: MIRFunction, value: M
 }
 
 fn jet_rust_emit_copy(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, materialize_view: Bool, result: MIRValueID?) -> String Never! {
-    if materialize_view -> jet_rust_emit_view_copy(&ctx, function, value, result) else -> jet_rust_emit_value_read(value)
+    if materialize_view -> return jet_rust_emit_view_copy(&ctx, function, value, result)
+    if jet_rust_emit_value_type(ctx, function, value).kind == MIRTypeKind.Int -> return jet_rust_emit_value_read(value)
+    mode :: jet_rust_emit_value_mode(ctx, function, value)
+    // D-MEM-COPYSEM1: an owned source read only by this copy
+    // (jet_rust_emit_value_consume) is dead after it, so the copy takes it.
+    if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> return jet_rust_emit_value_consume(ctx, value)
+    jet_rust_emit_value_read(value)
 }
 
 // MIRRust native_int_result: a native-word kernel result re-enters the exact
@@ -4122,7 +4227,20 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     return jet_rust_emit_builtin_method_values(&ctx, function, call, receiver, args)
                 }
                 .NumericMethod(call, receiver) -> return jet_rust_emit_semantic_values(&ctx, function, call, [MIRValueID]{receiver})
-                .NumericBinaryMethod(call, receiver, argument) -> return jet_rust_emit_semantic_values(&ctx, function, call, [MIRValueID]{receiver, argument})
+                .NumericBinaryMethod(call, receiver, argument) -> {
+                    emitted := jet_rust_emit_semantic_values(&ctx, function, call, [MIRValueID]{receiver, argument})
+                    // MIRRust NumericBinaryMethod: the owned exact-Int Euclidean
+                    // kernels take the call's source location for their
+                    // division-by-zero stop.
+                    source :: jet_rust_emit_prelude_symbol(&ctx, call)
+                    target :: jet_rust_emit_exact_adapter(&ctx, None, source, [MIRCallArg]{})
+                    if !target.ends_with("jet_int_owned_div_euclid") && !target.ends_with("jet_int_owned_rem_euclid") -> return emitted
+                    euclid_location :: location ?? panic("MIR exact Int Euclidean division is missing source location")
+                    bytes :: emitted.bytes()
+                    if bytes.len() == 0 || bytes[bytes.len() - 1] != (U8{41}) -> panic("MIR Prelude call text has no argument list")
+                    call_text :: String.from_bytes(~(bytes[0..<bytes.len() - 1])) ?? ""
+                    return "{call_text}, {jet_rust_emit_source_path(&ctx, euclid_location.file)}, {euclid_location.line}u32)"
+                }
                 .OverflowOption(call, left, right, overflow_location) -> return jet_rust_emit_overflow_option(&ctx, function, call, left, right, overflow_location)
                 .HandleMethod(call, receiver, args, _, _) -> {
                     values := [MIRValueID]{receiver}

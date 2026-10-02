@@ -2460,16 +2460,18 @@ fn jet_codegen_impl_trait_matches(left: MIRTraitRef?, right: MIRTraitRef?) -> Bo
 }
 
 fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFunction], source_functions: [TFunc]) {
+    // Every function id some impl already lists, kept current as orphans are
+    // attached (instead of rescanning every impl's methods per function).
+    owned := [Int:Bool]{}
+    loop implementation in impls {
+        loop method in implementation.methods -> _ := &owned.add(method.value, true)
+    }
     loop function in functions {
         if function.form == {
             .TopLevel -> next
             else -> {}
         }
-        already_owned := false
-        loop implementation in impls {
-            if implementation.methods.contains(function.id) -> already_owned = true
-        }
-        if already_owned -> next
+        if owned.get(function.id.value) != None -> next
         owner := MIRType?{None}
         trait_ref := MIRTraitRef?{None}
         skip := false
@@ -2505,12 +2507,12 @@ fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFuncti
         }
         if matching_impl != None {
             impl_index :: matching_impl ?? panic("matching implementation index disappeared")
-            implementation := impls[impl_index]
-            &implementation.methods.push(function.id)
-            impls[impl_index] = implementation
+            &impls[impl_index].methods.push(function.id)
+            _ := &owned.add(function.id.value, true)
             next
         }
         key := jet_codegen_canonical_impl_key(module_identity, owner_type, trait_ref)
+        _ := &owned.add(function.id.value, true)
         &impls.push(MIRImplDef{
             id: MIRImplID{value: stable_id("mir-impl", key)},
             module_id: function.module_id,
@@ -2675,23 +2677,20 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     jet_codegen_sort_trait_definitions(&traits)
 
     impls := [MIRImplDef]{}
+    // Impl keys are unique in `impls` (a repeated key merges into its row), so
+    // a key -> row map finds the one row a later definition merges into.
+    impl_index_by_key := [String:Int]{}
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.impls {
             lowered :: jet_codegen_lower_impl_definition(definition, functions, modules, types) ?? next
-            duplicate := false
-            index := 0
-            loop index < impls.len() {
-                if impls[index].key == lowered.key {
-                    existing := impls[index]
-                    loop method in lowered.methods {
-                        if !existing.methods.contains(method) -> &existing.methods.push(method)
-                    }
-                    impls[index] = existing
-                    duplicate = true
+            if impl_index_by_key.get(lowered.key) == .Val(index) {
+                loop method in lowered.methods {
+                    if !impls[index].methods.contains(method) -> &impls[index].methods.push(method)
                 }
-                index += 1
+                next
             }
-            if !duplicate -> &impls.push(lowered)
+            &impl_index_by_key.add(lowered.key, impls.len()).drop("the lookup above proved this impl key has no row")
+            &impls.push(lowered)
         }
     }
     jet_codegen_attach_orphan_methods(&impls, all_function_rows, functions)

@@ -3438,7 +3438,7 @@ fn tir_stmt_reaches_merge(stmt: &TStmt) -> bool {
     }
 }
 
-fn tir_expr_reaches_merge(expr: &TExpr) -> bool {
+pub(super) fn tir_expr_reaches_merge(expr: &TExpr) -> bool {
     if matches!(&expr.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
         return false;
     }
@@ -8515,12 +8515,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let note_t = note
                     .as_ref()
                     .map(|note| Box::new(lower_expr(note, cx, env)));
-                // `?` unwraps a `Result<T, E>` to `T` (the value type). If the inner type
-                // resolved to a Result, take its ok type; else fall back to the inner type
-                // (never load-bearing in the covered subset — a `?` result feeds a binding
-                // carrying sema's `b.ty`, or an `Ok(...)` wrap whose own type is total).
+                // `?` unwraps a `Result<T, E>` or a `T?` to `T` (the value type),
+                // exactly the success value MIR's try lowering produces; a
+                // `return x?` in a `T?` function then re-wraps it in `Present`.
+                // Any other inner type stays as it is.
                 let result_ty = match &inner_t.ty {
-                    Type::Result { ok, .. } => (**ok).clone(),
+                    Type::Result { ok, .. } | Type::Option(ok) => (**ok).clone(),
                     other => other.clone(),
                 };
                 let tconvert = match convert {
@@ -9957,8 +9957,8 @@ mod source_order_tests {
         // site. Its raw value must still be evaluated first.
         let call = core_call_expr(
             unit_type(),
-            "core.units",
-            "from",
+            "core.math",
+            "pow",
             vec![print(), division()],
             Span::new(0, 1),
             vec![false, true],
@@ -9994,8 +9994,8 @@ mod source_order_tests {
     fn core_call_pins_a_local_read_after_an_earlier_call() {
         let call = core_call_expr(
             unit_type(),
-            "core.units",
-            "from",
+            "core.math",
+            "pow",
             vec![
                 TExpr {
                     ty: Type::Int,
@@ -10031,8 +10031,8 @@ mod source_order_tests {
     fn core_call_does_not_move_a_read_borrowed_string_place() {
         let call = core_call_expr(
             unit_type(),
-            "core.units",
-            "from",
+            "core.math",
+            "pow",
             vec![
                 TExpr {
                     ty: Type::String,

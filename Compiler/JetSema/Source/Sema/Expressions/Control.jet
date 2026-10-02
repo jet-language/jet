@@ -847,25 +847,48 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         &diagnostics.push(sema_error("E0405", span, "`??` only works on a fallible value, not {type_name(subject.ty)}", "the left side must be a `Result` or optional value", "call something that can fail, then write `... ?? fallback`"))
         return None
     }
-    fallback_payload := payload
-    fallback_tir := TOrFallback?{None}
     before := sema_ownership_state_snapshot(state)
     fallback_state := sema_ownership_state_snapshot(before)
-    fallback_scopes := sema_scope_snapshot(scopes)
-    sema_scope_enter(&fallback_scopes, &fallback_state, "or.fallback@{span.start}")
+    // The fallback route runs in its own frame on the live scope table and is
+    // rolled back, instead of on a copy of the whole table.
+    fallback_mark :: sema_scope_mark(&scopes)
+    route :: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+    sema_scope_rollback(&scopes, fallback_mark)
+    checked_route :: route ?? return None
+    fallback_payload :: checked_route.payload
+    if checked_route.reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
+    result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: subject, fallback: checked_route.value ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}, ambient_err: checked_route.ambient_err}, span)
+    sema_expr_expected(result, expected, environment, &diagnostics)
+}
+
+struct SemaOrFallbackRoute {
+    payload: Type
+    value: TOrFallback?
+    reaches_merge: Bool
+    ambient_err: TLocal?
+}
+
+// The fallback route of `??`, checked in its own frame on the caller's marked
+// scope table; the caller rolls the table back on every path.
+fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, fallback_state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaOrFallbackRoute? {
+    fallback_payload := payload
+    fallback_tir := TOrFallback?{None}
+    outer_return_type :: ~scopes.return_type
+    outer_loop_depth := scopes.loop_depth
+    sema_scope_enter(&scopes, &fallback_state, "or.fallback@{span.start}")
     ambient_err := TLocal?{None}
-    if subject.ty == .Result(_, error_type) {
+    if subject_ty == .Result(_, error_type) {
         error_name := BindName{name: "err", span: span, rename: None}
-        ambient_err = sema_stmt_destructure_local(error_name, error_type, false, environment, &fallback_scopes, &fallback_state, &diagnostics)
+        ambient_err = sema_stmt_destructure_local(error_name, error_type, false, environment, &scopes, &fallback_state, &diagnostics)
         if ambient_err == None -> return None
     }
     fallback_reaches_merge := false
     enclosing_err_denial :: ~context.fallback_err_denial
-    context.fallback_err_denial = sema_fallback_err_denial_for(subject.ty)
+    context.fallback_err_denial = sema_fallback_err_denial_for(subject_ty)
     if fallback == {
         .Value(other) -> {
             fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
-            checked :: sema_check_expression(other, fallback_expected, environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            checked :: sema_check_expression(other, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
             if {
                 payload == (Type.Named{name: "Never"}) -> fallback_payload = checked.ty
                 checked.ty != (Type.Named{name: "Never"}) && !sema_type_assignable(payload, checked.ty) -> {
@@ -877,31 +900,33 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
             fallback_reaches_merge = checked.ty != Type.Named{name: "Never"}
         }
         .Block(body, tail, block_span) -> {
-            block_scopes := sema_scope_snapshot(fallback_scopes)
-            sema_scope_enter(&block_scopes, &fallback_state, "or.fallback@{block_span.start}")
-            checked_block :: sema_check_statements(body, scopes.return_type, environment, &block_scopes, &fallback_state, &tail_store, &context, &diagnostics, scopes.loop_depth)
+            // The block's own frame is rolled back after it, as its copy was.
+            block_mark :: sema_scope_mark(&scopes)
+            sema_scope_enter(&scopes, &fallback_state, "or.fallback@{block_span.start}")
+            checked_block :: sema_check_statements(body, outer_return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics, outer_loop_depth)
             if !checked_block.complete {
-                sema_scope_leave(&block_scopes, &fallback_state)
+                sema_scope_leave(&scopes, &fallback_state)
                 return None
             }
             tail_value := TExpr?{None}
             if {
                 tail != None -> {
                     fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
-                    tail_value = sema_check_expression(tail, fallback_expected, environment, &block_scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                    tail_value = sema_check_expression(tail, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
                     if tail_value == None {
-                        sema_scope_leave(&block_scopes, &fallback_state)
+                        sema_scope_leave(&scopes, &fallback_state)
                         return None
                     }
                     if payload == (Type.Named{name: "Never"}) -> fallback_payload = (tail_value ?? sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty
                 }
                 payload != (Type.Named{name: "Unit"}) && payload != (Type.Named{name: "Never"}) -> {
-                    sema_scope_leave(&block_scopes, &fallback_state)
+                    sema_scope_leave(&scopes, &fallback_state)
                     &diagnostics.push(sema_error("E0405", block_span, "the fallback block needs a value", "this `or` expression must produce the success payload on its fallback path", "add a final value expression or use `or return`"))
                     return None
                 }
             }
-            sema_single_use_leave_scope(&block_scopes, &fallback_state, &diagnostics)
+            sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
+            sema_scope_rollback(&scopes, block_mark)
             if {
                 checked_block.value.len() == 0 && tail_value != None -> {
                     fallback_tir = Val(TOrFallback.Value{value: tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span)})
@@ -919,7 +944,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
             if tail_value != None && (tail_value ?? sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty == (Type.Named{name: "Never"}) -> fallback_reaches_merge = false
         }
         .Return(return_value, return_span) -> {
-            return_type :: scopes.return_type
+            return_type :: outer_return_type
             if return_value == {
                 .None -> {
                     if !sema_stmt_return_allows_empty(return_type) {
@@ -933,9 +958,9 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
                         &diagnostics.push(sema_error("E0405", return_span, "`or return value` cannot return a value from a Unit function", "the enclosing function has no return payload", "use bare `or return` or declare a return type"))
                         return None
                     }
-                    checked_return :: sema_stmt_check_return_value(returned_expr, return_type, environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
-                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, fallback_scopes, &fallback_state, &context, &diagnostics) -> return None
-                    if !sema_stmt_move_direct(returned_expr, &fallback_state, fallback_scopes, "`or return`", &diagnostics) -> return None
+                    checked_return :: sema_stmt_check_return_value(returned_expr, return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, scopes, &fallback_state, &context, &diagnostics) -> return None
+                    if !sema_stmt_move_direct(returned_expr, &fallback_state, scopes, "`or return`", &diagnostics) -> return None
                     fallback_tir = Val(TOrFallback.Return{value: Val(checked_return)})
                 }
             }
@@ -945,42 +970,40 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
                 &diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `or panic(\"message\")`"))
                 return None
             }
-            message :: sema_check_expression(args[0].expr, Val(Type.String), environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            message :: sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
             fallback_tir = Val(TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, name_span)})
         }
         .Break(route_span) -> {
-            if scopes.loop_depth <= 0 {
+            if outer_loop_depth <= 0 {
                 &diagnostics.push(sema_error("E0405", route_span, "`or break` is only valid inside a loop", "the fallback route must have an enclosing loop to leave", "move this expression into a loop"))
                 return None
             }
             fallback_tir = Val(TOrFallback.Break)
         }
         .Continue(route_span) -> {
-            if scopes.loop_depth <= 0 {
+            if outer_loop_depth <= 0 {
                 &diagnostics.push(sema_error("E0405", route_span, "`or continue` is only valid inside a loop", "the fallback route must have an enclosing loop to continue", "move this expression into a loop"))
                 return None
             }
             fallback_tir = Val(TOrFallback.Continue)
         }
         .BreakLabel(label, route_span) -> {
-            if scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
+            if outer_loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
                 &diagnostics.push(sema_error("E0405", route_span, "the `or break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 return None
             }
             fallback_tir = Val(TOrFallback.BreakLabel{label: label})
         }
         .ContinueLabel(label, route_span) -> {
-            if scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
+            if outer_loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
                 return None
             }
             fallback_tir = Val(TOrFallback.ContinueLabel{label: label})
         }
     }
     context.fallback_err_denial = enclosing_err_denial
-    sema_single_use_leave_scope(&fallback_scopes, &fallback_state, &diagnostics)
-    if fallback_reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
-    result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: subject, fallback: fallback_tir ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}, ambient_err: ambient_err}, span)
-    sema_expr_expected(result, expected, environment, &diagnostics)
+    sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
+    Val(SemaOrFallbackRoute{payload: fallback_payload, value: fallback_tir, reaches_merge: fallback_reaches_merge, ambient_err: ambient_err})
 }
 
 // A value-form dispatch table repeats its subject in every arm's test. The
@@ -1243,12 +1266,106 @@ fn sema_expression_check_condition_inner(condition: Expr, environment: SemaScope
     Val(SemaCheckedCondition{condition: TIfCond.Plain{value: value}, value: value, bindings: [SemaConditionBinding]{}})
 }
 
+// D-FLOWTYPE1=A: whether `expr` is a bare `None` / `.None`.
+pub fn sema_expression_absent_none(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Absent(_) -> true
+        .EnumLit(enum_type, variant, _, args, _, _) -> enum_type == "" && variant == "None" && args.len() == 0
+        .Paren(inner, _) | .Copy(inner, _) -> sema_expression_absent_none(inner)
+        else -> false
+    }
+}
+
+fn sema_expression_ident_name(expr: Expr) -> BindName? {
+    if expr == {
+        .Ident(name, span) -> Val(BindName{name: name, span: span, rename: None})
+        else -> None
+    }
+}
+
+// D-FLOWTYPE1=A: the name and test span of an atomic `x == None` /
+// `x == .None` test (Rust `atomic_absent_optional_subject`).
+pub fn sema_expression_absent_optional_test(condition: Expr) -> (name: BindName, span: Span)? {
+    if condition == {
+        .Binary(op, left, right, span) -> {
+            if op != BinOp.Eq -> return None
+            subject := left
+            if !sema_expression_absent_none(right) {
+                if !sema_expression_absent_none(left) -> return None
+                subject = right
+            }
+            name :: sema_expression_ident_name(subject) ?? return None
+            Val((name: name, span: span))
+        }
+        .PatternTest(subject, pattern, span) -> {
+            absent :: if pattern == {
+                .Absent(_) -> true
+                .Variant(variant, bindings, _, _) -> variant == "None" && bindings.len() == 0
+                else -> false
+            }
+            if !absent -> return None
+            name :: sema_expression_ident_name(subject) ?? return None
+            Val((name: name, span: span))
+        }
+        .Paren(inner, _) | .Copy(inner, _) -> sema_expression_absent_optional_test(inner)
+        else -> None
+    }
+}
+
+// D-FLOWTYPE1=A: the payload type of a stable Optional, an immutable local or
+// parameter of type `T?` that a proven test may refine to `T` (Rust
+// `flow_narrowable_optional_inner`).
+pub fn sema_expression_flow_optional_payload(scopes: SemaScopeTable, name: String) -> Type? {
+    index :: sema_scope_resolve_index(scopes, name) ?? return None
+    binding :: scopes.bindings[index]
+    if binding.mutable || (binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter) -> return None
+    declared :: binding.symbol.ty ?? return None
+    if declared == {
+        .Option(inner) -> Val(inner)
+        else -> None
+    }
+}
+
+// D-FLOWTYPE1=A: the S31 presence test `x == .Val(x)`, whose success branch
+// holds the payload of the Optional `x` under the same name.
+pub fn sema_expression_presence_test(name: BindName, span: Span) -> Expr Never! {
+    Expr.PatternTest{subject: Expr.Ident{name: name.name, span: name.span}, pattern: Pattern.Present{binding: name.name, binding_span: name.span, inner: None, span: span}, span: span}
+}
+
+// D-FLOWTYPE1=A: a stable `x != None` test, alone or along a `&&` chain, reads
+// as the presence test `x == .Val(x)` (Rust `rewrite_optional_flow_ne_none`).
+// None when the condition has no such test.
+fn sema_expression_rewrite_optional_ne_none(condition: Expr, scopes: SemaScopeTable) -> Expr? {
+    if condition == {
+        .Binary(op, left, right, span) -> {
+            if op == BinOp.Ne {
+                if !sema_expression_absent_none(right) -> return None
+                name :: sema_expression_ident_name(left) ?? return None
+                if sema_expression_flow_optional_payload(scopes, name.name) == None -> return None
+                return Val(sema_expression_presence_test(name, span))
+            }
+            if op != BinOp.And -> return None
+            rewritten_left :: sema_expression_rewrite_optional_ne_none(left, scopes)
+            rewritten_right :: sema_expression_rewrite_optional_ne_none(right, scopes)
+            if rewritten_left == None && rewritten_right == None -> return None
+            Val(Expr.Binary{op: op, left: rewritten_left ?? left, right: rewritten_right ?? right, span: span})
+        }
+        .Paren(inner, span) -> {
+            rewritten :: sema_expression_rewrite_optional_ne_none(inner, scopes) ?? return None
+            Val(Expr.Paren{value: rewritten, span: span})
+        }
+        else -> None
+    }
+}
+
 // Checks an `if`/arm condition. A pattern test, alone or along a `&&` chain,
 // lowers to an IfLet whose bindings the success branch declares with
 // `sema_expression_declare_condition_bindings`. The condition's own frame
 // (`pattern@…`) keeps chain bindings out of later arms and fixes their
 // symbol identities for the branch.
 pub fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
+    rewritten :: sema_expression_rewrite_optional_ne_none(condition, scopes)
+    if rewritten == .Val(presence) -> return sema_expression_check_condition(presence, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if !sema_expression_condition_binds(condition) -> return sema_expression_check_condition_inner(condition, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     _ := sema_scope_enter(&scopes, &state, "pattern@{expr_span(condition).start}")
     checked := sema_expression_check_condition_inner(condition, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1265,8 +1382,13 @@ pub fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBindin
     loop binding in bindings {
         access :: if binding.window -> AccessConvention.Write else -> AccessConvention.Read
         if !sema_scope_declare_local(&scopes, binding.symbol, binding.window, access, None, false) {
-            if track -> &diagnostics.push(sema_already_defined(binding.symbol.name, binding.symbol.span))
-            next
+            if binding.window || !sema_expression_refines_optional(scopes, binding.symbol) {
+                if track -> &diagnostics.push(sema_already_defined(binding.symbol.name, binding.symbol.span))
+                next
+            }
+            // D-FLOWTYPE1=A: `x == .Val(x)` over a stable Optional refines
+            // `x` to its payload (Rust `declare_condition_binding`).
+            sema_scope_refine_local(&scopes, binding.symbol)
         }
         if !track -> next
         sema_ownership_declare_binding(&state, binding.symbol, false)
@@ -1283,6 +1405,14 @@ pub fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBindin
             }
         }
     }
+}
+
+// D-FLOWTYPE1=A: a payload binding that shadows the stable Optional it was
+// tested from refines that name (Rust `is_optional_flow_refine`).
+fn sema_expression_refines_optional(scopes: SemaScopeTable, symbol: Symbol) -> Bool {
+    payload :: sema_expression_flow_optional_payload(scopes, symbol.name) ?? return false
+    bound :: symbol.ty ?? return false
+    type_identity_equal(payload, bound)
 }
 
 // The condition with the hoisted subject replaced by its local.
@@ -1304,6 +1434,12 @@ fn sema_expression_if_hoisted(subject: Expr, condition: Expr, then_body: [Stmt],
 fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     dispatch_subject :: sema_expression_if_dispatch_subject(condition, else_value)
     if dispatch_subject == .Val(subject) -> return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    // D-FLOWTYPE1=A: a stable `x == None` test reads as the presence test
+    // with the branches swapped, so the other branch holds the payload (Rust
+    // value `if`). Source order of evaluation is unchanged.
+    if sema_expression_absent_optional_test(condition) == .Val(test) {
+        if sema_expression_flow_optional_payload(scopes, test.name.name) != None -> return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     // Card #1440 / E0307: the outermost level of an else-less dispatch chain
     // proves coverage once, after every nested level has been checked.
     chain_head :: sema_coverage_is_noelse_chain(else_body, else_value, span) && !context.noelse_chain_starts.contains(span.start)
@@ -1316,12 +1452,16 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     checked_condition :: checked.value
     before := sema_ownership_state_snapshot(state)
     then_state := sema_ownership_state_snapshot(before)
-    then_scopes := sema_scope_snapshot(scopes)
-    sema_scope_enter(&then_scopes, &then_state, "if.then@{span.start}")
-    sema_expression_declare_condition_bindings(checked.bindings, &then_scopes, &then_state, true, &diagnostics)
-    then_result :: sema_check_statements(then_body, scopes.return_type, environment, &then_scopes, &then_state, &tail_store, &context, &diagnostics, scopes.loop_depth)
+    // Each arm runs in its own frame on the live scope table and is rolled
+    // back. Only a deferred bare `None` then-value, checked after the else arm,
+    // keeps a copy of the then-arm table.
+    then_mark :: sema_scope_mark(&scopes)
+    sema_scope_enter(&scopes, &then_state, "if.then@{span.start}")
+    sema_expression_declare_condition_bindings(checked.bindings, &scopes, &then_state, true, &diagnostics)
+    then_result :: sema_check_statements(then_body, then_mark.saved.return_type, environment, &scopes, &then_state, &tail_store, &context, &diagnostics, then_mark.saved.loop_depth)
     if !then_result.complete {
-        sema_scope_leave(&then_scopes, &then_state)
+        sema_scope_leave(&scopes, &then_state)
+        sema_scope_rollback(&scopes, then_mark)
         return None
     }
     // Owner rule (bare `None`): without an optional expected type, a bare
@@ -1330,38 +1470,49 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     sibling_rule :: !sema_expression_expects_optional(expected)
     defer_then :: sibling_rule && sema_expression_bare_absent_arm(then_value, false)
     then_first := TExpr?{None}
-    if !defer_then {
-        first :: sema_check_expression(then_value, expected, environment, &then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
-            sema_scope_leave(&then_scopes, &then_state)
+    deferred_then_scopes := sema_scope_init("")
+    if defer_then {
+        deferred_then_scopes = sema_scope_snapshot(scopes)
+    } else {
+        first :: sema_check_expression(then_value, expected, environment, &scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
+            sema_scope_leave(&scopes, &then_state)
+            sema_scope_rollback(&scopes, then_mark)
             return None
         }
         then_first = Val(first)
     }
+    sema_scope_rollback(&scopes, then_mark)
 
     else_state := sema_ownership_state_snapshot(before)
-    else_scopes := sema_scope_snapshot(scopes)
-    sema_scope_enter(&else_scopes, &else_state, "if.else@{span.start}")
-    else_result :: sema_check_statements(else_body, scopes.return_type, environment, &else_scopes, &else_state, &tail_store, &context, &diagnostics, scopes.loop_depth)
+    else_mark :: sema_scope_mark(&scopes)
+    sema_scope_enter(&scopes, &else_state, "if.else@{span.start}")
+    else_result :: sema_check_statements(else_body, else_mark.saved.return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, else_mark.saved.loop_depth)
     if !else_result.complete {
-        sema_scope_leave(&else_scopes, &else_state)
+        sema_scope_leave(&scopes, &else_state)
+        sema_scope_rollback(&scopes, else_mark)
         return None
     }
     else_expected :: if sibling_rule && sema_expression_bare_absent_arm(else_value, true) -> sema_expression_absent_sibling(then_first) else -> expected
-    else_checked :: sema_check_expression(else_value, else_expected, environment, &else_scopes, &else_state, &tail_store, &context, &diagnostics) ?? {
-        sema_scope_leave(&else_scopes, &else_state)
+    else_checked :: sema_check_expression(else_value, else_expected, environment, &scopes, &else_state, &tail_store, &context, &diagnostics) ?? {
+        sema_scope_leave(&scopes, &else_state)
+        sema_scope_rollback(&scopes, else_mark)
         return None
     }
     else_reaches_merge :: !sema_stmt_block_has_no_fallthrough(else_body) && else_checked.ty != Type.Named{name: "Never"}
-    sema_single_use_leave_scope(&else_scopes, &else_state, &diagnostics)
+    sema_single_use_leave_scope(&scopes, &else_state, &diagnostics)
+    sema_scope_rollback(&scopes, else_mark)
 
     then_checked :: then_first ?? {
-        sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, &then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
-            sema_scope_leave(&then_scopes, &then_state)
+        sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, &deferred_then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
+            sema_scope_leave(&deferred_then_scopes, &then_state)
             return None
         }
     }
     then_reaches_merge :: !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named{name: "Never"}
-    sema_single_use_leave_scope(&then_scopes, &then_state, &diagnostics)
+    // The then-arm scope exit: its table is gone, so only the ownership side
+    // of sema_single_use_leave_scope remains (the table side is discarded).
+    sema_single_use_check_scope_end(then_state, &diagnostics)
+    sema_ownership_leave_scope(&then_state)
     single_use_paths := [SemaOwnershipState]{}
     if then_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(then_state))
     if else_reaches_merge -> &single_use_paths.push(sema_ownership_state_snapshot(else_state))

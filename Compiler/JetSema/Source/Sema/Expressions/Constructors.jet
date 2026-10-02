@@ -908,12 +908,9 @@ fn sema_expression_typed_literal_whole_value(head: Type, value: Expr, environmen
         else -> {}
     }
     if sema_expression_list_element_needs_expected_type(value) -> return false
-    probe_scopes := sema_scope_snapshot(scopes)
-    probe_context := sema_check_context_snapshot(context)
-    probe_state := sema_ownership_state_snapshot(state)
     probe_diagnostics := [Diagnostic]{}
     probe_tail_store := sema_statement_tail_store_init()
-    checked :: sema_check_expression(value, Val(head), environment, &probe_scopes, &probe_state, &probe_tail_store, &probe_context, &probe_diagnostics) ?? return false
+    checked :: sema_probe_expression(value, Val(head), environment, &scopes, state, &probe_tail_store, &context, &probe_diagnostics) ?? return false
     if probe_diagnostics.len() != 0 -> return false
     _ := sema_expr_expected(checked, Val(head), environment, &probe_diagnostics) ?? return false
     probe_diagnostics.len() == 0

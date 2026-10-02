@@ -2006,6 +2006,14 @@ fn lower_builtin_arg(
         {
             value = preserve_typed_list_shape(value, expected, cx);
         }
+        // `None` carries only the `Int` placeholder; the collection's
+        // element slot (`[T?].push(None)`) names its option type.
+        if matches!(value.kind, TExprKind::Absent)
+            && matches!(expected, Type::Option(_))
+            && crate::Generics::free_type_params(expected).is_empty()
+        {
+            value.ty = expected.clone();
+        }
     }
 
     // Builtins store values directly in Rust collections, unlike ordinary call
@@ -9786,6 +9794,12 @@ fn lower_method_call_impl(
                         _ => None,
                     })
                     .or_else(|| callback_params.as_ref().map(Vec::len));
+                // #3740: a callback whose failure set is empty (`T Never!`)
+                // returns its success value directly, so a `map`/`filter`
+                // sema typed as `Result<_, Never>` runs the infallible kernel
+                // and lifts its plain value into `Ok` below.
+                let never_failing_source = matches!(method, "map" | "filter")
+                    && matches!(&source_result_ty, Type::Result { err, .. } if err.is_never());
                 let fallible_callback = callback_targ.is_some_and(|arg| {
                     matches!(
                         &arg.ty,
@@ -9794,7 +9808,8 @@ fn lower_method_call_impl(
                         } if matches!(ret.as_ref(), Type::Result { .. })
                     )
                 }) || (matches!(method, "map" | "filter")
-                    && matches!(&source_result_ty, Type::Result { .. }));
+                    && matches!(&source_result_ty, Type::Result { .. })
+                    && !never_failing_source);
                 let Some(op) = resolve_closure_op(
                     &recv_ty,
                     method,
@@ -9828,6 +9843,15 @@ fn lower_method_call_impl(
                         if let Some(first) = targs.first_mut() {
                             *first = callback;
                         }
+                    }
+                }
+                // #3740: a named `T Never!` function returns `T` directly. A
+                // plain callback slot takes that value, so name the executable
+                // return on the callback instead of the checked carrier; the
+                // value then needs no `Ok` adapter the kernel cannot accept.
+                if !callback_uses_effective_carrier {
+                    for arg in targs.iter_mut() {
+                        name_plain_callback_return(arg);
                     }
                 }
                 let callback_error = targs.first().and_then(|callback| match &callback.ty {
@@ -9874,6 +9898,22 @@ fn lower_method_call_impl(
                     // resulting generic `T: Clone` requirement with the TIR
                     // function instead of letting rustc discover it downstream.
                     env.note_clone(&recv_ty);
+                }
+                if never_failing_source && !fallible_callback {
+                    if let Type::Result { ok, .. } = &result_ty {
+                        let plain = TExpr {
+                            ty: ok.as_ref().clone(),
+                            kind: TExprKind::ClosureMethod {
+                                recv: Box::new(recv_t),
+                                op,
+                                args: targs,
+                            },
+                        };
+                        return TExpr {
+                            ty: result_ty,
+                            kind: TExprKind::Ok(Box::new(plain)),
+                        };
+                    }
                 }
                 return TExpr {
                     ty: result_ty,
@@ -13437,6 +13477,49 @@ fn prepare_generic_serde_codec(
                 },
             );
             *arg = lower_serde_encode_node(value, cx);
+        }
+    }
+}
+
+/// #3740: a named function value names its checked `T Never!` carrier, while
+/// the function itself returns `T`. A collection callback slot that takes a
+/// plain value gets the executable return, so lowering passes the function
+/// directly. `Never Never!` keeps its carrier, as the function does.
+fn name_plain_callback_return(callback: &mut TExpr) {
+    fn is_named_function(value: &TExpr) -> bool {
+        match &value.kind {
+            TExprKind::FnValue {
+                kind:
+                    crate::Codegen::TIR::TFnValueKind::NamedFn {
+                        name: Some(_),
+                        lambda: None,
+                        ..
+                    },
+            } => true,
+            TExprKind::HostCall(call) => {
+                matches!(call.as_ref(), crate::Codegen::TIR::THostCall::FnName(_))
+            }
+            _ => false,
+        }
+    }
+    let named = if let TExprKind::HostBorrowCallback { callable, .. } = &mut callback.kind {
+        let inner_named = is_named_function(callable);
+        if inner_named {
+            name_plain_callback_return(callable);
+        }
+        inner_named
+    } else {
+        is_named_function(callback)
+    };
+    if !named {
+        return;
+    }
+    if let Type::Fn { ret: Some(ret), .. } = &mut callback.ty {
+        if let Some(success) = crate::Codegen::TIR::mir::never_carrier_success(ret)
+            .filter(|success| !success.is_never())
+            .cloned()
+        {
+            **ret = success;
         }
     }
 }

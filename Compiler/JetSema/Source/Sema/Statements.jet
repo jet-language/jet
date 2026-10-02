@@ -396,6 +396,11 @@ fn sema_stmt_check_unit_if(expr: Expr, return_type: Type?, environment: SemaScop
                 loop statement in table.value -> &statements.push(statement)
                 return SemaStatementResult{value: statements, complete: true}
             }
+            // D-FLOWTYPE1=A: a stable `x == None` test reads as its presence
+            // test with the branches swapped, as in the value form.
+            if sema_expression_absent_optional_test(condition) == .Val(test) {
+                if sema_expression_flow_optional_payload(scopes, test.name.name) != None -> return sema_stmt_check_unit_if_parts(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+            }
             sema_stmt_check_unit_if_parts(condition, then_body, then_value, else_body, else_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         }
         else -> SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -413,6 +418,19 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         else -> false
     }
     if !(subject_is_true || multi_head) || arms.len() == 0 -> return SemaStatementResult{value: [TStmt]{}, complete: false}
+    // D-FLOWTYPE1=A: `if x == None -> a else -> b` over a stable Optional
+    // reads as `if x == .Val(x) -> b else -> a`, so `b` holds the payload.
+    // The guard is evaluated once at the same point; only the mutually
+    // exclusive bodies change places (Rust `check_switch`).
+    subjectless_guard :: sema_stmt_refutable_is_subjectless_guard(subject, span)
+    if subjectless_guard && arms.len() == 1 && else_body == .Val(present_body) {
+        if sema_expression_absent_optional_test(arms[0].cond) == .Val(test) {
+            if sema_expression_flow_optional_payload(scopes, test.name.name) != None {
+                present_arm :: SwitchArm{cond: sema_expression_presence_test(test.name, test.span), body: present_body, span: arms[0].span}
+                return sema_stmt_check_switch(subject, [SwitchArm]{present_arm}, Val(arms[0].body), span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+            }
+        }
+    }
     before := sema_ownership_state_snapshot(state)
     before_hardware :: sema_scope_hardware_facts(scopes)
     fallthrough_state := sema_ownership_state_snapshot(before)
@@ -473,7 +491,8 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     else_mark :: sema_scope_mark(&scopes)
     if else_body != None {
         body :: else_body
-        checked_else :: sema_stmt_check_block(body, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth)
+        complement :: sema_stmt_else_presence_names(arms, scopes)
+        checked_else :: if complement.len() == 0 -> sema_stmt_check_block(body, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, loop_depth)
         if !checked_else.complete -> complete = false
         else_result = Val(checked_else.value)
     }
@@ -502,7 +521,9 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     loop site in else_state.share_found -> sema_ownership_note_share_found(&state, site)
     sema_scope_join_hardware_paths(&scopes, before_hardware, hardware_merged, else_hardware, true)
     if !complete -> return SemaStatementResult{value: [TStmt]{}, complete: false}
-    if else_body == None {
+    // A subjectless guard table proves no coverage: its arms test their own
+    // subjects (Rust `check_switch` skips E0307 for subjectless guards).
+    if else_body == None && !subjectless_guard {
         checked_conditions := [TExpr]{}
         loop condition in conditions {
             checked :: condition ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -1796,19 +1817,21 @@ fn sema_stmt_refutable_assign_capture_identity(pattern: &TPattern, name: BindNam
     }
 }
 
-fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaRefutableFallbackCheck {
+// The miss route runs in its own frame on the live scope table, rolled back at
+// the end (instead of on a copy of the whole table).
+fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaRefutableFallbackCheck {
     before := diagnostics.len()
-    fallback_scopes := sema_scope_snapshot(scopes)
+    fallback_mark :: sema_scope_mark(&scopes)
     fallback_state := sema_ownership_state_snapshot(state)
-    sema_scope_enter(&fallback_scopes, &fallback_state, "refutable.fallback@{span.start}")
+    sema_scope_enter(&scopes, &fallback_state, "refutable.fallback@{span.start}")
     carrier := sema_expr_unwrap_tag(subject_ty)
     result := SemaRefutableFallbackCheck{tir: None, statements: [TStmt]{}, complete: false, ambient_err: None}
     if carrier == {
         .Result(_, error_ty) -> {
-            owner := sema_scope_local_owner_key(fallback_scopes)
+            owner := sema_scope_local_owner_key(scopes)
             symbol := Symbol{id: symbol_id(SymbolKind.Local, environment.module_identity, owner, "err"), kind: SymbolKind.Local, name: "err", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_ty), visibility: 0}
-            frame :: fallback_scopes.current
-            sema_scope_push_binding(&fallback_scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+            frame :: scopes.current
+            sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
             sema_ownership_declare_binding(&fallback_state, symbol, false)
             result.ambient_err = Val(tir_symbol_local("err", span, symbol.id))
         }
@@ -1819,7 +1842,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
     context.fallback_err_denial = sema_fallback_err_denial_for(carrier)
     if fallback == {
         .Value(value) -> {
-            checked := sema_check_expression(value, None, environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics)
+            checked := sema_check_expression(value, None, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
             if checked != None {
                 item :: checked ?? sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(value))
                 result.tir = Val(TOrFallback.Value{value: item})
@@ -1828,13 +1851,14 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
             &diagnostics.push(sema_error("E0405", expr_span(value), "`??` must diverge after a refutable binding", "a failed pattern match cannot continue without defining the captures", "use `return`, `panic(...)`, `break`, or `next` as the fallback"))
         }
         .Block(body, value, block_span) -> {
-            block_scopes := sema_scope_snapshot(fallback_scopes)
-            sema_scope_enter(&block_scopes, &fallback_state, "refutable.block@{block_span.start}")
-            block_return_type :: ~block_scopes.return_type
-            block_loop_depth :: block_scopes.loop_depth
-            checked_block := sema_check_statements(body, block_return_type, environment, &block_scopes, &fallback_state, &tail_store, &context, &diagnostics, block_loop_depth)
-            if value == .Val(tail) -> _ := sema_check_expression(tail, None, environment, &block_scopes, &fallback_state, &tail_store, &context, &diagnostics)
-            sema_single_use_leave_scope(&block_scopes, &fallback_state, &diagnostics)
+            block_mark :: sema_scope_mark(&scopes)
+            sema_scope_enter(&scopes, &fallback_state, "refutable.block@{block_span.start}")
+            block_return_type :: ~scopes.return_type
+            block_loop_depth :: scopes.loop_depth
+            checked_block := sema_check_statements(body, block_return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics, block_loop_depth)
+            if value == .Val(tail) -> _ := sema_check_expression(tail, None, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+            sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
+            sema_scope_rollback(&scopes, block_mark)
             diverges := value == None && (sema_stmt_refutable_block_exits(body) || sema_stmt_refutable_tir_block_has_never_expr(checked_block.value))
             valid := diverges && checked_block.complete
             if value != None || !diverges {
@@ -1852,23 +1876,23 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
             statement_value := TExpr?{None}
             if value == {
                 .None -> {
-                    if !sema_stmt_return_allows_empty(fallback_scopes.return_type) {
-                        required := sema_stmt_return_success_type(fallback_scopes.return_type)
+                    if !sema_stmt_return_allows_empty(scopes.return_type) {
+                        required := sema_stmt_return_success_type(scopes.return_type)
                         &diagnostics.push(sema_error("E0405", return_span, "`?? return` here needs a value", "this function returns {type_name(required)}, so its return route needs a value", "write `?? return <value>`"))
                     }
                 }
                 .Val(expression) -> {
                     if {
-                        fallback_scopes.return_type == None -> {
-                            _ := sema_check_expression(expression, None, environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                        scopes.return_type == None -> {
+                            _ := sema_check_expression(expression, None, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
                             &diagnostics.push(sema_error("E0405", expr_span(expression), "`?? return value` cannot return a value here", "this function returns nothing", "drop the value from the return route"))
                         }
                         else -> {
-                            fallback_return_type :: ~fallback_scopes.return_type
-                            checked :: sema_stmt_check_return_value(expression, fallback_return_type, environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                            fallback_return_type :: ~scopes.return_type
+                            checked :: sema_stmt_check_return_value(expression, fallback_return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
                             if checked != None {
                                 checked_value :: checked
-                                if sema_stmt_record_return_views(expression, checked_value.ty, fallback_scopes, &fallback_state, &context, &diagnostics) && sema_stmt_move_direct(expression, &fallback_state, fallback_scopes, "`return`", &diagnostics) {
+                                if sema_stmt_record_return_views(expression, checked_value.ty, scopes, &fallback_state, &context, &diagnostics) && sema_stmt_move_direct(expression, &fallback_state, scopes, "`return`", &diagnostics) {
                                     return_tir = Val(TOrFallback.Return{value: Val(checked_value)})
                                     statement_value = Val(checked_value)
                                 }
@@ -1877,7 +1901,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                     }
                 }
             }
-            if value == .None && sema_stmt_return_allows_empty(fallback_scopes.return_type) -> return_tir = Val(TOrFallback.Return{value: None})
+            if value == .None && sema_stmt_return_allows_empty(scopes.return_type) -> return_tir = Val(TOrFallback.Return{value: None})
             if return_tir != None {
                 result.tir = return_tir
                 &result.statements.push(TStmt.Return{value: statement_value, span: return_span})
@@ -1890,7 +1914,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                     &diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `?? panic(\"message\")`"))
                 }
                 else -> {
-                    message := sema_check_expression(args[0].expr, Val(Type.String), environment, &fallback_scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                    message := sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
                     if message != None {
                         checked :: message ?? sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: ""}}}, name_span)
                         location := sema_expression_panic_location(environment, name_span)
@@ -1904,7 +1928,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         }
         .Break(route_span) -> {
             if {
-                fallback_scopes.loop_depth <= 0 -> {
+                scopes.loop_depth <= 0 -> {
                     &diagnostics.push(sema_error("E0405", route_span, "`?? break` is only valid inside a loop", "the fallback route must have an enclosing loop to leave", "move this binding into a loop"))
                 }
                 else -> {
@@ -1916,7 +1940,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         }
         .Continue(route_span) -> {
             if {
-                fallback_scopes.loop_depth <= 0 -> {
+                scopes.loop_depth <= 0 -> {
                     &diagnostics.push(sema_error("E0405", route_span, "`?? next` is only valid inside a loop", "the fallback route must have an enclosing loop to continue", "move this binding into a loop"))
                 }
                 else -> {
@@ -1928,7 +1952,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         }
         .BreakLabel(label, route_span) -> {
             if {
-                fallback_scopes.loop_depth <= 0 || !sema_scope_has_loop_label(fallback_scopes, label) -> {
+                scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) -> {
                     &diagnostics.push(sema_error("E0405", route_span, "the `?? break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 }
                 else -> {
@@ -1940,7 +1964,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         }
         .ContinueLabel(label, route_span) -> {
             if {
-                fallback_scopes.loop_depth <= 0 || !sema_scope_has_loop_label(fallback_scopes, label) -> {
+                scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) -> {
                     &diagnostics.push(sema_error("E0405", route_span, "the `?? next` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 }
                 else -> {
@@ -1952,7 +1976,8 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         }
     }
     context.fallback_err_denial = enclosing_err_denial
-    sema_single_use_leave_scope(&fallback_scopes, &fallback_state, &diagnostics)
+    sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
+    sema_scope_rollback(&scopes, fallback_mark)
     result.complete = result.complete && diagnostics.len() == before
     result
 }
@@ -1972,7 +1997,7 @@ fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallbac
     }
     move_valid := true
     if move_subject && !sema_stmt_move_direct(binding.init, &state, scopes, "the pattern binding", &diagnostics) -> move_valid = false
-    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, scopes, state, &tail_store, &context, &diagnostics)
+    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, &scopes, state, &tail_store, &context, &diagnostics)
     locals := [TLocal]{}
     checked_pattern_tir := checked_pattern.checked
     loop name in names {
@@ -2000,66 +2025,40 @@ fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallbac
     Val(TStmt.RefutableBind{pattern: typed.pattern, init: typed.subject, fallback: checked_fallback.statements, span: span})
 }
 
-fn sema_stmt_absent_none(expr: Expr) -> Bool Never! {
-    if expr == {
-        .Absent(_) -> true
-        .EnumLit(type_name, variant, _, args, _, _) -> type_name == "" && variant == "None" && args.len() == 0
-        .Paren(inner, _) | .Copy(inner, _) -> sema_stmt_absent_none(inner)
-        else -> false
-    }
-}
-
-fn sema_stmt_ident_name(expr: Expr) -> BindName? {
-    if expr == {
-        .Ident(name, span) -> Val(BindName{name: name, span: span, rename: None})
-        else -> None
-    }
-}
-
-// D-FLOWTYPE1=A: the name an atomic `x == None` / `x == .None` test reads.
-fn sema_stmt_absent_optional_subject(condition: Expr) -> BindName? {
-    if condition == {
-        .Binary(op, left, right, _) -> {
-            if op != BinOp.Eq -> return None
-            if sema_stmt_absent_none(right) -> return sema_stmt_ident_name(left)
-            if sema_stmt_absent_none(left) -> return sema_stmt_ident_name(right)
-            None
-        }
-        .PatternTest(subject, pattern, _) -> {
-            absent :: if pattern == {
-                .Absent(_) -> true
-                .Variant(variant, bindings, _, _) -> variant == "None" && bindings.len() == 0
-                else -> false
-            }
-            if absent -> sema_stmt_ident_name(subject) else -> None
-        }
-        else -> None
-    }
-}
-
 // D-FLOWTYPE1=A: the stable Optional (an immutable local or parameter of type
 // `T?`) that a statement guard `if x == None -> …` with one arm, no `else`,
 // and a directly exiting body tests.
 fn sema_stmt_optional_exit_guard_name(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, scopes: SemaScopeTable) -> BindName? {
     if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) -> return None
     if !sema_stmt_refutable_block_exits(arms[0].body) -> return None
-    name :: sema_stmt_absent_optional_subject(arms[0].cond) ?? return None
-    index :: sema_scope_resolve_index(scopes, name.name) ?? return None
-    binding :: scopes.bindings[index]
-    if binding.mutable || (binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter) -> return None
-    declared :: binding.symbol.ty ?? return None
-    if declared == {
-        .Option(_) -> Val(name)
-        else -> None
-    }
+    test :: sema_expression_absent_optional_test(arms[0].cond) ?? return None
+    if sema_expression_flow_optional_payload(scopes, test.name.name) == None -> return None
+    Val(test.name)
 }
 
-// D-FLOWTYPE1=A: after an exiting `x == None` guard the rest of the block
-// reads `x` as its payload. Check the guard as `x ?? { arm }` and bind the
-// payload under the same name, the operation the Rust frontend reaches by
-// rewriting the guard into the refutable binding `x == .Val(x) ?? { arm }`.
-fn sema_stmt_check_optional_exit_guard(name: BindName, body: [Stmt], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
-    guarded :: Expr.OrFallback{value: Expr.Ident{name: name.name, span: name.span}, fallback: OrFallback.Block{body: body, value: None, span: span}, is_option: true, span: span}
+// D-FLOWTYPE1=A: the stable Optionals the `x == None` arms of a guard table
+// test, in arm order without repeats. The table's `else` holds each payload
+// (Rust `complement_condition_bindings`).
+fn sema_stmt_else_presence_names(arms: [SwitchArm], scopes: SemaScopeTable) -> [BindName] {
+    names := [BindName]{}
+    loop arm in arms {
+        test :: sema_expression_absent_optional_test(arm.cond) ?? next
+        if sema_expression_flow_optional_payload(scopes, test.name.name) == None -> next
+        repeated := false
+        loop name in names {
+            if name.name == test.name.name -> repeated = true
+        }
+        if !repeated -> &names.push(test.name)
+    }
+    names
+}
+
+// D-FLOWTYPE1=A: refines the stable Optional `name` to its payload for the
+// rest of the current scope. Check `x ?? fallback` and bind the payload under
+// the same name, the operation the Rust frontend reaches through the
+// refutable binding `x == .Val(x) ?? { fallback }`.
+fn sema_stmt_check_optional_refinement(name: BindName, fallback: OrFallback, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    guarded :: Expr.OrFallback{value: Expr.Ident{name: name.name, span: name.span}, fallback: fallback, is_option: true, span: span}
     value :: sema_check_expression(guarded, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     // The refinement is a new local; its identity names the guard so it never
     // collides with the carrier binding it shadows.
@@ -2069,6 +2068,27 @@ fn sema_stmt_check_optional_exit_guard(name: BindName, body: [Stmt], span: Span,
     sema_scope_refine_local(&scopes, symbol)
     sema_ownership_declare_binding(&state, symbol, false)
     Val(TStmt.Let{local: tir_symbol_local(name.name, name.span, id), let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
+}
+
+// D-FLOWTYPE1=A: the `else` of a guard table holds the payload of every
+// stable `x == None` arm subject. Each refinement leads the block as
+// `x :: x ?? <no else arm>`, as the Rust frontend prepends the dead-end
+// binding `x == .Val(x) ?? { }` (`prepend_else_presence_refinements`).
+fn sema_stmt_check_else_complement(names: [BindName], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+    sema_scope_enter(&scopes, &state, "if.else@{span.start}")
+    statements := [TStmt]{}
+    complete := true
+    loop name in names {
+        refined :: sema_stmt_check_optional_refinement(name, OrFallback.Value{value: Expr.NoElse{span: name.span}}, name.span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if refined == {
+            .Val(statement) -> &statements.push(statement)
+            .None -> complete = false
+        }
+    }
+    checked :: sema_check_statements(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+    sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+    loop statement in checked.value -> &statements.push(statement)
+    SemaStatementResult{value: statements, complete: complete && checked.complete}
 }
 
 fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
@@ -3390,7 +3410,7 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
 fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     diagnostic_start :: diagnostics.len()
     checked :: sema_stmt_check_return_value_typed(value, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if checked == None -> sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, environment, scopes, state, &tail_store, context, &diagnostics)
+    if checked == None -> sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, environment, &scopes, state, &tail_store, &context, &diagnostics)
     checked
 }
 
@@ -3413,7 +3433,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
 // D-DISCARD1=A (owner ruling): with a written return type, a value that does
 // not fit it is E0113 about the value itself (the Rust reference's
 // `check_return_expr`), replacing the generic E0108 at the value.
-fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if sema_stmt_return_success_type(return_type) == (Type.Named{name: "Unit"}) -> return
     value_span :: expr_span(value)
     found := Int?{None}
@@ -3427,11 +3447,8 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
     }
     mismatch_index :: found ?? return
     // The value's own type, inferred without the return type as a target.
-    probe_scopes := sema_scope_snapshot(scopes)
-    probe_state := sema_ownership_state_snapshot(state)
-    probe_context := sema_check_context_snapshot(context)
     probe_diagnostics := [Diagnostic]{}
-    offered :: sema_check_expression(value, None, environment, &probe_scopes, &probe_state, &tail_store, &probe_context, &probe_diagnostics) ?? return
+    offered :: sema_probe_expression(value, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return
     diagnostics[mismatch_index] = sema_return_value_mismatch(context.function_name, sema_stmt_return_required_type(return_type), offered.ty, value_span)
 }
 
@@ -3625,23 +3642,36 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
         statement :: statements[index]
         context.lambda_statement_tails[tail_frame_depth].start_index = index + 1
         if !reachable {
-            dead_scopes := sema_scope_snapshot(scopes)
+            // Checked on the live tables and rolled back; only its failure
+            // rows are kept.
+            dead_scope_mark :: sema_scope_mark(&scopes)
             dead_state := sema_ownership_state_snapshot(state)
-            dead_context := sema_check_context_snapshot(context)
+            dead_mark :: sema_check_context_mark(&context)
             // A dead last line is checked for its own diagnostics, never as the
             // value the function hands back.
-            dead_context.value_tail_span = None
-            dead_edge_start :: dead_context.failure_edges.len()
-            dead_result :: sema_check_statements([Stmt]{statement}, return_type, environment, &dead_scopes, &dead_state, &tail_store, &dead_context, &diagnostics, loop_depth)
+            context.value_tail_span = None
+            dead_result :: sema_check_statements([Stmt]{statement}, return_type, environment, &scopes, &dead_state, &tail_store, &context, &diagnostics, loop_depth)
             if !dead_result.complete -> complete = false
+            dead_edges := [String]{}
+            loop edge_index in dead_mark.failure_edges..<context.failure_edges.len() -> &dead_edges.push(context.failure_edges[edge_index])
+            dead_direct_source :: context.failure_direct_source
+            dead_members := [Type]{}
+            loop member_index in dead_mark.failure_union_members..<context.failure_union_members.len() -> &dead_members.push(context.failure_union_members[member_index])
+            dead_cases := [SemaFailureCase]{}
+            loop case_index in dead_mark.failure_union_cases..<context.failure_union_cases.len() -> &dead_cases.push(context.failure_union_cases[case_index])
+            dead_union_edges := [String]{}
+            loop union_edge_index in dead_mark.failure_union_edges..<context.failure_union_edges.len() -> &dead_union_edges.push(context.failure_union_edges[union_edge_index])
+            dead_general :: context.failure_union_general
+            sema_check_context_rollback(&context, dead_mark)
+            sema_scope_rollback(&scopes, dead_scope_mark)
             // #3708: dead source still counts toward the body's failure rows.
-            loop edge_index in dead_edge_start..<dead_context.failure_edges.len() -> &context.failure_edges.push(dead_context.failure_edges[edge_index])
-            if dead_context.failure_direct_source -> context.failure_direct_source = true
+            loop edge in dead_edges -> &context.failure_edges.push(edge)
+            if dead_direct_source -> context.failure_direct_source = true
             // D-FAIL-INFER-UNION1=A: so does a dead failure on the default route.
-            context.failure_union_members = ~dead_context.failure_union_members
-            context.failure_union_cases = ~dead_context.failure_union_cases
-            context.failure_union_edges = ~dead_context.failure_union_edges
-            context.failure_union_general = dead_context.failure_union_general
+            loop member in dead_members -> &context.failure_union_members.push(member)
+            loop failure_case in dead_cases -> &context.failure_union_cases.push(failure_case)
+            loop union_edge in dead_union_edges -> &context.failure_union_edges.push(union_edge)
+            context.failure_union_general = dead_general
             index += 1
             next
         }
@@ -3739,7 +3769,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 exit_guard :: if index + 1 < statements.len() -> sema_stmt_optional_exit_guard_name(subject, arms, else_body, span, scopes) else -> None
                 if exit_guard == {
                     .Val(guarded_name) -> {
-                        refined :: sema_stmt_check_optional_exit_guard(guarded_name, arms[0].body, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                        refined :: sema_stmt_check_optional_refinement(guarded_name, OrFallback.Block{body: arms[0].body, value: None, span: span}, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                         if refined == {
                             .Val(refined_statement) -> &output.push(refined_statement)
                             .None -> complete = false
@@ -4288,10 +4318,12 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             .Switched(marker, body, span) -> {
                 if {
                     marker.name == "Off" || marker.name == "DebugOnly" -> {
-                        erased_scopes := sema_scope_snapshot(scopes)
+                        erased_scope_mark :: sema_scope_mark(&scopes)
                         erased_state := sema_ownership_state_snapshot(state)
-                        erased_context := sema_check_context_snapshot(context)
-                        checked :: sema_check_statements(body, return_type, environment, &erased_scopes, &erased_state, &tail_store, &erased_context, &diagnostics, loop_depth)
+                        erased_mark :: sema_check_context_mark(&context)
+                        checked :: sema_check_statements(body, return_type, environment, &scopes, &erased_state, &tail_store, &context, &diagnostics, loop_depth)
+                        sema_check_context_rollback(&context, erased_mark)
+                        sema_scope_rollback(&scopes, erased_scope_mark)
                         if {
                             !checked.complete -> {
                                 complete = false

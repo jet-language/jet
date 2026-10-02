@@ -271,6 +271,34 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
     [SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
 }
 
+// The path a checked source carries through the compile: its source and
+// module identity, MIR source file, panic locations, and diagnostic keys. As
+// in the Rust driver's `relative_display`, a file beneath the entry root is
+// named relative to that root and any other path keeps its canonical form,
+// so compiler output never depends on where the project is checked out.
+fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
+    if entry_root.len() == 0 -> return ~path
+    if path == entry_root -> return ""
+    prefix :: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
+    if path.starts_with(prefix) -> path.slice(prefix.len(), path.len()) else -> path
+}
+
+// The canonical path a display path names (the inverse of
+// `jet_driver_display_path`); authority checks compare physical paths.
+fn jet_driver_physical_path(entry_root: String, display: String) -> String Never! {
+    if entry_root.len() == 0 || display.starts_with("/") -> return ~display
+    if display.len() == 0 -> return ~entry_root
+    if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
+}
+
+// The canonical path of the snapshot's entry root, or "" when it names none.
+fn jet_driver_entry_root_path(snapshot: JetDriverAuthorizedSourceSnapshot) -> String Never! {
+    loop root in snapshot.roots {
+        if root.identity == snapshot.entry_root_identity -> return root.canonical_path
+    }
+    ""
+}
+
 fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, Val(span), what, why, fix)
 }

@@ -3074,13 +3074,20 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("\"schema\":1},\"command\""), "{text}");
+        // Other sections (the source profile) carry their own row caps; only
+        // the capture policy object must stay free of fabricated limits.
+        let policy_start = text.find("\"capture_policy\":{").expect("capture policy");
+        let policy_len = text[policy_start..]
+            .find("\"schema\":1}")
+            .expect("capture policy schema");
+        let policy = &text[policy_start..policy_start + policy_len];
         assert!(
-            !text.contains("row_limit"),
-            "legacy limits were fabricated: {text}"
+            !policy.contains("row_limit"),
+            "legacy limits were fabricated: {policy}"
         );
         assert!(
-            !text.contains("rows_truncated"),
-            "legacy truncation was fabricated: {text}"
+            !policy.contains("rows_truncated"),
+            "legacy truncation was fabricated: {policy}"
         );
         assert!(
             text.contains("\"version\":1"),

@@ -238,7 +238,8 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TEx
 
     lowered_args := [MIRCallArg]{}
     loop argument in args {
-        value := jet_codegen_lower_expr(&builder, argument)
+        callback := jet_codegen_plain_callback_argument(builder, operation, argument)
+        value := jet_codegen_lower_expr(&builder, callback)
         &lowered_args.push(jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None))
     }
     if operation == TClosureOp.ParaMap && args.len() == 1 {
@@ -256,5 +257,35 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TEx
     }
     call := jet_codegen_intern_route(&builder, MIRPreludeFamily.ClosureMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: lowered_receiver, args: lowered_args, call: call}})
+}
+
+// #3740: a named `T Never!` function returns `T` directly while its checked
+// value type names the carrier. A callback slot that takes a plain value gets
+// the executable return, so the function value needs no `Ok` adapter the
+// kernel cannot accept. `Never Never!` keeps its carrier, as the function does.
+fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, operation: TClosureOp, argument: TExpr) -> TExpr Never! {
+    if operation == {
+        .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc | .EachRef -> return ~argument
+        else -> {}
+    }
+    named := if argument.kind == {
+        .FnValue(kind) -> if kind == {
+            .NamedFn(_, lambda) -> lambda == None
+            else -> false
+        }
+        .ConstRef(symbol) -> jet_codegen_find_function(builder.functions, symbol.key) != None
+        else -> false
+    }
+    if !named -> return ~argument
+    fn_type := jet_codegen_unwrap_pattern_tags(argument.ty)
+    if fn_type == .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) {
+        declared :: ret ?? return ~argument
+        success :: jet_codegen_never_carrier_success(declared) ?? return ~argument
+        if jet_codegen_unwrap_pattern_tags(success) == (Type.Named{name: "Never"}) -> return ~argument
+        plain := argument
+        plain.ty = Type.Fn{params: params, ret: Val(success), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+        return plain
+    }
+    ~argument
 }
 

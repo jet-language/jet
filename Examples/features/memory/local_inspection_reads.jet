@@ -1,0 +1,84 @@
+// Tests, `??`, matches, and comparisons only inspect an owned local, so they
+// read the local in place when nothing changes it between the read and the
+// inspection. A value bound out of the local is still its own copy: later
+// writes to the local never reach it.
+
+enum Shape {
+    Named(name: String)
+    Pair(left: String, right: String)
+    Empty
+}
+
+fn shape_for(n: Int) -> Shape {
+    if n == 0 -> return Shape.Named{name: "zero"}
+    if n == 1 -> return Shape.Pair{left: "one", right: "uno"}
+    Shape.Empty
+}
+
+fn label_for(n: Int) -> String? {
+    if n > 1 -> return Val("big {n}")
+    None
+}
+
+// A variant test and payload read of a local, then a second match on it.
+fn describe(n: Int) -> String {
+    shape :: shape_for(n)
+    if shape == .Named(name) -> return "named {name}"
+    if shape == {
+        .Pair(left, right) -> "pair {left}/{right}"
+        else -> "empty"
+    }
+}
+
+// An option test on a local that is filled in afterwards.
+fn filled(n: Int) -> String {
+    label := label_for(n)
+    if label == None {
+        label = Val("small")
+    }
+    label ?? "never"
+}
+
+// The bound payload keeps its value after the local is replaced.
+fn replaced(n: Int) -> String {
+    shape := shape_for(n)
+    if shape == .Named(name) {
+        shape = Shape.Empty
+        if shape == .Empty -> return "was {name}, now empty"
+    }
+    "unchanged"
+}
+
+fn kept_after_reset(n: Int) -> String {
+    label := label_for(n)
+    text :: label ?? return "none"
+    label = None
+    if label == None -> return "kept {text}"
+    "lost"
+}
+
+// Comparisons of owned strings, including inside a loop that rebinds them.
+fn ordered(words: [String]) -> Int {
+    count := 0
+    previous := ""
+    loop word in words {
+        current :: "{word}"
+        if previous < current -> count += 1
+        if current == previous -> count += 10
+        previous = current
+    }
+    count
+}
+
+fn run() {
+    print(describe(0))
+    print(describe(1))
+    print(describe(2))
+    print(filled(0))
+    print(filled(5))
+    print(replaced(0))
+    print(replaced(1))
+    print(kept_after_reset(3))
+    print(kept_after_reset(0))
+    print(ordered([String]{"a", "b", "b", "a", "c"}))
+}

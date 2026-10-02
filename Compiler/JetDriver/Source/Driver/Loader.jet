@@ -833,6 +833,7 @@ fn jet_driver_manifest_outputs(tokens: [Token], open_index: Int, close_index: In
 
 fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, diagnostics: &[Diagnostic]) -> JetDriverPackageInfo {
     root := snapshot.roots[root_index]
+    entry_root :: jet_driver_entry_root_path(snapshot)
     manifest_file_index := Int?{None}
     retired_manifest := false
     retired_manifest_path := ""
@@ -841,21 +842,22 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         if relative == "package.jet" -> manifest_file_index = Val(file_index)
         if relative == "jet.toml" {
             retired_manifest = true
-            retired_manifest_path = root.files[file_index].path
+            retired_manifest_path = jet_driver_display_path(entry_root, root.files[file_index].path)
         }
     }
     if manifest_file_index == None {
         if retired_manifest {
             &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains a retired package manifest", "package identity is read only from the canonical package.jet manifest", "replace the retired manifest with package.jet"))
         }
-        identity :: "source-root:{root.canonical_path.len()}:{root.canonical_path}"
+        root_display :: jet_driver_display_path(entry_root, root.canonical_path)
+        identity :: "source-root:{root_display.len()}:{root_display}"
         return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
     if retired_manifest {
         &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
     }
     manifest :: manifest_file_index ?? 0
-    manifest_path := root.files[manifest].path
+    manifest_path := jet_driver_display_path(entry_root, root.files[manifest].path)
     manifest_diagnostic_start :: diagnostics.len()
     source := root.files[manifest].source
     lexed :: lex_config(source.bytes())
@@ -1078,21 +1080,23 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
     }
     jet_driver_resolve_package_dependencies(&packages, snapshot, &diagnostics)
 
+    entry_root :: jet_driver_entry_root_path(snapshot)
     source_units := [JetDriverSourceUnit]{}
     loop root_index in 0..<snapshot.roots.len() {
         root :: snapshot.roots[root_index]
         package :: packages[root_index]
         loop (file_index, file) in root.files {
             if file.relative_path == "package.jet" || file.relative_path == "jet.toml" || !file.relative_path.ends_with(".jet") -> next
+            unit_path :: jet_driver_display_path(entry_root, file.path)
             &source_units.push(JetDriverSourceUnit{
                 root_index: root_index,
                 file_index: file_index,
                 root_identity: root.identity,
                 package_identity: package.identity,
                 module_name: jet_driver_default_module_alias(file.relative_path),
-                path: file.path,
+                path: unit_path,
                 relative_path: file.relative_path,
-                source_segments: jet_driver_source_segments(file.path, file.source),
+                source_segments: jet_driver_source_segments(unit_path, file.source),
                 source_origin: SemaSourceOrigin.Snapshot,
             })
         }
@@ -1107,8 +1111,9 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
         entry_root_index == None -> &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the entry authority root has no parsed package identity", "the compilation package comes from the selected root manifest", "select the entry package root from the authorized source snapshot"))
         else -> entry_package_identity = packages[entry_root_index ?? 0].identity
     }
+    entry_display :: jet_driver_display_path(entry_root, snapshot.entry_path)
     entry_unit_found :: loop unit in source_units {
-        if unit.path == snapshot.entry_path && unit.root_identity == snapshot.entry_root_identity {
+        if unit.path == entry_display && unit.root_identity == snapshot.entry_root_identity {
             break true
         }
     } ?? false
@@ -1240,12 +1245,15 @@ fn jet_driver_validate_authorized_snapshot(snapshot: JetDriverAuthorizedSourceSn
     diagnostics.len() == before
 }
 
+// `path` is a source's display path (`jet_driver_display_path`); the lookup
+// compares the canonical path it names.
 fn jet_driver_find_snapshot_source_file(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, path: String, diagnostics: &[Diagnostic]) -> JetDriverAuthorizedSourceFile? {
     if root_index < 0 || root_index >= snapshot.roots.len() -> return None
     root :: snapshot.roots[root_index]
+    physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
     found := JetDriverAuthorizedSourceFile?{None}
     loop file in root.files {
-        if file.path == path {
+        if file.path == physical {
             if found != None {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source provenance path resolves to multiple authorized records", "one source path must name one immutable physical file", "remove the duplicate authorized source record"))
                 return None
@@ -1254,7 +1262,7 @@ fn jet_driver_find_snapshot_source_file(snapshot: JetDriverAuthorizedSourceSnaps
         }
     }
     loop file in root.foreign_cache_files {
-        if file.path == path {
+        if file.path == physical {
             if found != None {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source provenance path resolves to both source and cache records", "one source path must name one immutable physical file", "use distinct canonical paths for source and cache records"))
                 return None
@@ -1265,13 +1273,16 @@ fn jet_driver_find_snapshot_source_file(snapshot: JetDriverAuthorizedSourceSnaps
     found
 }
 
+// Whether a display path names an authorized disk source, so that no
+// compiler-generated identity can alias one.
 fn jet_driver_source_path_is_authorized(snapshot: JetDriverAuthorizedSourceSnapshot, path: String) -> Bool Never! {
+    physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
     loop root in snapshot.roots {
         loop file in root.files {
-            if file.path == path -> return true
+            if file.path == physical -> return true
         }
         loop file in root.foreign_cache_files {
-            if file.path == path -> return true
+            if file.path == physical -> return true
         }
     }
     false
@@ -1304,6 +1315,7 @@ fn jet_driver_source_segment_bytes_match(aggregate_bytes: [U8], segment: SemaSou
 }
 
 fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], generated_sources: [MIRSourceFile]) -> JetDriverSourceFileCollection {
+    entry_root :: jet_driver_entry_root_path(snapshot)
     files := [MIRSourceFile]{}
     diagnostics := [Diagnostic]{}
     loop loaded_module in modules {
@@ -1343,11 +1355,11 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
                     next
                 }
                 file := root.files[unit.file_index]
-                if file.path != unit.path {
+                if jet_driver_display_path(entry_root, file.path) != unit.path {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source unit's path differs from its authorized file", "physical bytes and source identity remain attached to one checked file", "rebuild the source unit from its exact authorized file"))
                     next
                 }
-                aggregate_file = Val(MIRSourceFile{id: mir_source_file_id(file.path), path: file.path, source: file.source})
+                aggregate_file = Val(MIRSourceFile{id: mir_source_file_id(unit.path), path: unit.path, source: file.source})
             }
             else -> {
                 if unit.file_index != -1 || jet_driver_source_path_is_authorized(snapshot, unit.path) {
@@ -1399,7 +1411,8 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
                         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source segment does not match its exact raw source bytes", "provenance maps aggregate bytes to an in-bounds immutable physical source slice", "regenerate the aggregate from the authorized source fragment"))
                         next
                     }
-                    jet_driver_add_source_file(&files, MIRSourceFile{id: mir_source_file_id(raw.path), path: raw.path, source: raw.source}, &diagnostics)
+                    raw_path :: jet_driver_display_path(entry_root, raw.path)
+                    jet_driver_add_source_file(&files, MIRSourceFile{id: mir_source_file_id(raw_path), path: raw_path, source: raw.source}, &diagnostics)
                 }
                 else -> {
                     if jet_driver_source_path_is_authorized(snapshot, segment.source_file) {
@@ -2156,7 +2169,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     source_index_result :: jet_driver_build_source_index(catalog.source_units)
     loop diagnostic in source_index_result.diagnostics -> &diagnostics.push(diagnostic)
     if !source_index_result.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-    entry_index := source_index_result.index.by_path.get(request.authorized_sources.entry_path)
+    entry_index := source_index_result.index.by_path.get(jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path))
     if entry_index == None {
         &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry source unit is not in the selected package source snapshot", "compilation begins from one exact source file beneath the selected authority root", "select the entry source from the authorized package snapshot"))
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)

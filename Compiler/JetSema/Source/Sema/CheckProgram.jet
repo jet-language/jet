@@ -1339,7 +1339,10 @@ fn sema_check_bundle_items(graph: SemaRegistrationGraph) -> [Item] Never! {
     items
 }
 
-fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], check_bodies: Bool, checked_types: [TTypeDef]) -> SemaGraphModuleResult {
+// `fixed_length_write_params` is the bundle-wide fact of `graph`
+// (sema_fixed_length_write_params over sema_check_bundle_items), computed once
+// per graph by the caller instead of once per module.
+fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], check_bodies: Bool, checked_types: [TTypeDef], fixed_length_write_params: [String]) -> SemaGraphModuleResult {
     source_module := graph.modules[module_index]
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
@@ -1364,7 +1367,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, memory_plan: Sem
     environment.debug_sites = source_module.program.debug_sites
 
     program := source_module.program
-    environment.fixed_length_write_params = sema_fixed_length_write_params(sema_check_bundle_items(graph))
+    environment.fixed_length_write_params = fixed_length_write_params
     if program.script_body.len() > 0 || program.block_spans.len() > 0 || program.fenced_statements.len() > 0 || program.web_target_ceiling != None || program.pub_file || program.no_prelude || program.default_target != None || program.html_path != None || sema_function_memory_has_unsupported_policies(program.policy_declarations) || program.user_policy_declarations.len() > 0 || program.applied_rules.len() > 0 || program.rule_facts.len() > 0 -> complete = false
     job_diagnostics := sema_check_job_names(program.items)
     if job_diagnostics.len() > 0 {
@@ -2308,9 +2311,10 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     modules := [SemaGraphModuleResult]{}
     complete := graph.complete
     memory_plan := sema_function_memory_plan_from_graph(graph)
+    fixed_length_write_params :: sema_fixed_length_write_params(sema_check_bundle_items(graph))
     module_index := 0
     loop module_index < graph.modules.len() {
-        checked :: sema_check_registration_module(graph, memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{})
+        checked :: sema_check_registration_module(graph, memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{}, fixed_length_write_params)
         loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
         if !checked.complete -> complete = false
         &modules.push(checked)
@@ -2345,10 +2349,11 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
 pub fn sema_comptime_modules_with_values(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
     resolved_graph := sema_comptime_graph_with_values(graph, values)
     memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
+    fixed_length_write_params :: sema_fixed_length_write_params(sema_check_bundle_items(resolved_graph))
     modules := [SemaGraphModuleResult]{}
     module_index := 0
     loop module_index < resolved_graph.modules.len() {
-        &modules.push(sema_check_registration_module(resolved_graph, memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{}))
+        &modules.push(sema_check_registration_module(resolved_graph, memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, false, [TTypeDef]{}, fixed_length_write_params))
         module_index += 1
     }
     modules
@@ -2592,12 +2597,13 @@ struct SemaFinalizeModuleChecks {
 // contracts.
 fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef]) -> SemaFinalizeModuleChecks {
     memory_plan := sema_function_memory_plan_from_graph(graph)
+    fixed_length_write_params :: sema_fixed_length_write_params(sema_check_bundle_items(graph))
     diagnostics := [Diagnostic]{}
     modules := [SemaGraphModuleResult]{}
     complete := true
     module_index := 0
     loop module_index < graph.modules.len() {
-        checked := sema_check_registration_module(graph, memory_plan, module_index, values, comptime_functions, true, checked_types)
+        checked := sema_check_registration_module(graph, memory_plan, module_index, values, comptime_functions, true, checked_types, fixed_length_write_params)
         loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
         if !checked.complete -> complete = false
         &modules.push(checked)

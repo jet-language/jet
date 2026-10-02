@@ -778,7 +778,9 @@ fn jet_driver_summarize_dependency_reports(load: JetDriverLoadResult, diagnostic
     failing := [Bool]{}
     loop package in load.packages -> &failing.push(false)
     loop diagnostic in diagnostics {
-        path :: diagnostic.source_path ?? ""
+        // Diagnostics name a source by its display path; package roots are canonical.
+        source_path :: diagnostic.source_path ?? ""
+        path :: if source_path.len() == 0 -> "" else -> jet_driver_physical_path(entry_root, source_path)
         owner := -1
         owner_length := -1
         loop (index, package) in load.packages {
@@ -792,11 +794,10 @@ fn jet_driver_summarize_dependency_reports(load: JetDriverLoadResult, diagnostic
         }
         if diagnostic.severity == DIAGNOSTIC_ERROR -> failing[owner] = true
     }
-    prefix :: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
     loop index in 0..<load.packages.len() {
         if !failing[index] -> next
         package :: load.packages[index]
-        root :: if entry_root.len() > 0 && package.root_path.starts_with(prefix) -> package.root_path.slice(prefix.len(), package.root_path.len()) else -> package.root_path
+        root :: jet_driver_display_path(entry_root, package.root_path)
         &kept.push(jet_driver_diagnostic_without_span("E0626", "Dependency package `{package.name}` has errors", "a dependency package is checked as its own package, so its errors are reported by its own check and never repeated by the packages that import it", "run `jet check {root}` and fix the errors there"))
     }
     kept
@@ -1088,8 +1089,10 @@ fn jet_driver_package_facts(
     loop usage in used_core {
         if usage == "core.data.arrow" || usage.starts_with("core.data.arrow.") -> uses_arrow = true
     }
+    // The project root is relative to the entry root (`jet_driver_display_path`),
+    // so the emitted program never records where the project was checked out.
     Val(MIRPackageFacts{
-        project_root: root.canonical_path,
+        project_root: jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), root.canonical_path),
         edition: selected.edition,
         runtime_parts: jet_ring_runtime_parts_for_used_core(used_core),
         uses_arrow: uses_arrow,

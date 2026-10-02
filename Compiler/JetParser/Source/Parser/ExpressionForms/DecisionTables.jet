@@ -388,7 +388,9 @@ fn parser_expression_form_parse_guard_table(state: &JetParserState, start: Span,
         parser_expect_unified_arrow(&state, "after a value guard condition")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
         &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
-        // Malformed input that consumed nothing must not retry forever.
+        // A fatal arm error ends the table, as Rust's `?` does; malformed
+        // input that consumed nothing must not retry forever either.
+        if parser_aborting(&state) -> break
         if state.position == arm_position -> parser_bump(&state)
     }
     if arms.len() == 0 {
@@ -443,6 +445,7 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
         parser_expect_unified_arrow(&state, "after a value dispatch arm head")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
         &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
+        if parser_aborting(&state) -> break
         if state.position == arm_position -> parser_bump(&state)
         last_arm_end = branch.span.end
     }

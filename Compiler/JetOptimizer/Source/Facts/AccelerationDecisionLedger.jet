@@ -163,19 +163,21 @@ fn mir_pass_decision_disposition(decision: MIROptimizationDecision) -> MIRDecisi
 
 fn mir_pass_derive_decision_rows(program: &MIRProgram) -> Int Never! {
     count := 0
+    // One walk of every call site, instead of one per inline-always function.
+    call_counts :: mir_pass_count_calls_by_function(program)
     loop function_index in 0..<program.functions.len() {
-        rows :: mir_pass_function_decision_rows(program, program.functions[function_index], function_index == 0)
+        rows :: mir_pass_function_decision_rows(program, program.functions[function_index], function_index == 0, call_counts)
         program.functions[function_index].optimization.decision_rows = rows
         count += rows.len()
     }
     count
 }
 
-fn mir_pass_function_decision_rows(program: MIRProgram, function: MIRFunction, first_function: Bool) -> [MIRDecisionRow] Never! {
+fn mir_pass_function_decision_rows(program: MIRProgram, function: MIRFunction, first_function: Bool, call_counts: [Int:Int]) -> [MIRDecisionRow] Never! {
     rows := [MIRDecisionRow]{}
     function_name :: "{function.module_name}::{function.name}"
     if function.is_inline_always || function.optimization.inline_always {
-        remaining :: mir_pass_count_calls_to_function(program, function.id)
+        remaining :: call_counts.get(function.id.value) ?? 0
         disposition :: if remaining == 0 -> MIRDecisionDisposition.Accepted else -> MIRDecisionDisposition.Rejected
         reason :: if remaining == 0 -> "all statically resolved calls were expanded" else -> "statically resolved calls remain in canonical MIR"
         row :: mir_pass_decision_row(.Inline, disposition, Val(function.id), function_name, function.span, "inline-always", reason, "source-mir-optimizer", "remaining-calls={remaining}")
@@ -249,8 +251,9 @@ fn mir_pass_index_kind_name(kind: MIRIndexKind) -> String Never! {
     }
 }
 
-fn mir_pass_count_calls_to_function(program: MIRProgram, target: MIRFunctionID) -> Int Never! {
-    count := 0
+// Statically resolved calls per callee function id (MIRFunctionID.value).
+fn mir_pass_count_calls_by_function(program: MIRProgram) -> [Int:Int] Never! {
+    counts := [Int:Int]{}
     loop function in program.functions {
         loop block in function.blocks {
             loop instruction in block.instructions {
@@ -258,7 +261,7 @@ fn mir_pass_count_calls_to_function(program: MIRProgram, target: MIRFunctionID) 
                     .Call(callee, _, _) -> {
                         if callee == {
                             .User(id) | .Associated(id, _) | .Method(id, _) -> {
-                                if id == target -> count += 1
+                                _ := &counts.add(id.value, (counts.get(id.value) ?? 0) + 1)
                             }
                             else -> {}
                         }
@@ -268,7 +271,7 @@ fn mir_pass_count_calls_to_function(program: MIRProgram, target: MIRFunctionID) 
             }
         }
     }
-    count
+    counts
 }
 
 fn mir_pass_sort_decision_rows_for_program(program: &MIRProgram) Never! {

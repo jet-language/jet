@@ -966,7 +966,9 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, ty: Type, membe
 // is a read-only alias of its slot, so neither the list nor any item is
 // copied. The parameter cannot change while the loop runs, so every alias
 // reads exactly what the copied item would hold. False (nothing emitted)
-// when `collection` is not such a list.
+// when `collection` is not such a list. A columnar list (D-SOA1) stores one
+// column per field, so its slots are not places an alias can name; the caller
+// keeps the gathered-record iteration for it.
 fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: String, collection: TExpr, body: [TStmt], span: Span) -> Bool {
     listed := Type?{None}
     if jet_codegen_builtin_untag(collection.ty) == .List(inner) -> listed = Val(inner)
@@ -1009,8 +1011,8 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     true
 }
 
-fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: String, variable_two: String?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, by_value: Bool, body: [TStmt], span: Span) {
-    if method_kind == None && variable_two == None && step == None && !by_value && jet_codegen_lower_read_list_walk(&builder, label, variable, collection, body, span) -> return
+fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: String, variable_two: String?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span) {
+    if method_kind == None && variable_two == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, label, variable, collection, body, span) -> return
     iter_init_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_init", "jet_loop_iter_init", 5, [Bool]{false, false, false, false, false})
     iter_has_next_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_has_next", "jet_loop_iter_has_next", 1, [Bool]{true})
     iter_value_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_value", "jet_loop_iter_value", 1, [Bool]{true})
@@ -2191,7 +2193,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
         .CountedLoop(label, init, condition, step, vectorization, body, span) -> jet_codegen_lower_counted_loop(&builder, label, init, condition, step, vectorization, body, span)
         .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> jet_codegen_lower_range_loop(&builder, label, local, None, start, end, step, exclusive, vectorization, body, span)
         .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> jet_codegen_lower_range_loop(&builder, label, tir_user_local(variable, span), source, start, end, step, exclusive, vectorization, body, span)
-        .ForIn(label, variable, variable_two, source, collection, step, method_kind, _, by_value, body, span) -> jet_codegen_lower_for_in(&builder, label, variable, variable_two, source, collection, step, method_kind, by_value, body, span)
+        .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> jet_codegen_lower_for_in(&builder, label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span)
         .Loop(label, body, span) -> {
             body_block := jet_codegen_new_block(&builder, span, "loop-body")
             exit_block := jet_codegen_new_block(&builder, span, "loop-exit")

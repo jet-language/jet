@@ -182,15 +182,23 @@ fn jet_codegen_lower_type_derive_trait_id(name: String, modules: [SemaGraphModul
 }
 
 fn jet_codegen_core_owner_identity(owner: TCoreBuiltinOwner, semantic_module: SemaGraphModuleResult) -> JetCodegenNominalIdentity Never! {
-    if owner.name == "" || owner.symbol.key == "" -> panic("checked Core builtin owner has an empty canonical identity")
+    jet_codegen_check_core_owner(owner, semantic_module)
     module_identity := ""
     qualified_name := owner.name
     if owner.module_identity == .Val(identity) {
-        if identity != semantic_module.module_identity -> panic("checked Core builtin owner has a module linkage mismatch")
         module_identity = identity
         qualified_name = jet_codegen_qualified_type_key(identity, owner.name)
     }
     JetCodegenNominalIdentity{module_identity: module_identity, name: owner.name, key: owner.symbol.key, qualified_name: qualified_name}
+}
+
+// The invariants of a checked Core builtin owner, without building its
+// identity (nominal lookups validate every owner but build only matches).
+fn jet_codegen_check_core_owner(owner: TCoreBuiltinOwner, semantic_module: SemaGraphModuleResult) Never! {
+    if owner.name == "" || owner.symbol.key == "" -> panic("checked Core builtin owner has an empty canonical identity")
+    if owner.module_identity == .Val(identity) {
+        if identity != semantic_module.module_identity -> panic("checked Core builtin owner has a module linkage mismatch")
+    }
 }
 
 fn jet_codegen_merge_nominal_identity(found: JetCodegenNominalIdentity?, candidate: JetCodegenNominalIdentity) -> JetCodegenNominalIdentity? {
@@ -231,9 +239,13 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
     }
+    // A lookup that misses the current module visits every nominal of every
+    // module, so the qualified key is built only for nominals whose leaf
+    // `name` ends with (both accepted spellings end with the leaf).
     found := JetCodegenNominalIdentity?{None}
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
+            if !name.ends_with(nominal.symbol.name) -> next
             qualified_name :: jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name)
             if (name == nominal.symbol.name && jet_codegen_leaf_claims_bare_name(semantic_module.module_name, name)) || name == qualified_name {
                 candidate := JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal.symbol.name, key: qualified_name, qualified_name: qualified_name}
@@ -241,9 +253,10 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
-            candidate := jet_codegen_core_owner_identity(owner, semantic_module)
             if name == owner.name || name == owner.symbol.key {
-                found = jet_codegen_merge_nominal_identity(found, candidate)
+                found = jet_codegen_merge_nominal_identity(found, jet_codegen_core_owner_identity(owner, semantic_module))
+            } else {
+                jet_codegen_check_core_owner(owner, semantic_module)
             }
         }
     }
