@@ -1245,6 +1245,11 @@ impl<'a> MirProgramImageReader<'a> {
     }
     fn finish(self) -> Result<(), String> { if self.cursor == self.bytes.len() { Ok(()) } else { Err("native MIR image has trailing bytes".to_string()) } }
 }
+// Static compiler strings resolve to the registry row that owns them. Core
+// rows also come from tables outside `CORE_CALLS` (the TIR lowering's own
+// records), so a string no registry here owns is interned process-wide: each
+// distinct one is leaked once, and restoring images again does not grow
+// memory. The interner goes once those rows join the one registry.
 fn mir_image_static_str(value: String) -> Result<&'static str, String> {
     for record in crate::Syntax::CORE_CALLS {
         if record.module == value { return Ok(record.module); }
@@ -1260,7 +1265,18 @@ fn mir_image_static_str(value: String) -> Result<&'static str, String> {
             if let Some(item) = marker.removed_in.filter(|item| *item == value) { return Ok(item); }
         }
     }
-    Err("native MIR image contains an unknown static compiler string".to_string())
+    static UNOWNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
+        std::sync::OnceLock::new();
+    let mut unowned = UNOWNED
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "native MIR image static-string interner is poisoned".to_string())?;
+    if let Some(item) = unowned.get(value.as_str()) {
+        return Ok(*item);
+    }
+    let item: &'static str = Box::leak(value.into_boxed_str());
+    unowned.insert(item);
+    Ok(item)
 }
 "#,
     );

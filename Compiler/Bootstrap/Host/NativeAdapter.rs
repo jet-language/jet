@@ -93,19 +93,6 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              artifact: ::jet_foundation::MIR::MirArtifactId,
              receiver_type: ::jet_foundation::MIR::MirType,
              execution: ::jet_foundation::MIR::MirExecutionIdentity,
-             execution_policy: crate::BootstrapFactoryTier,
-             helper_roots: Vec<::jet_foundation::MIR::MirFunctionId>,
-             task_callback_invoke: ::jet_foundation::MIR::MirFunctionId,
-             task_root_release: ::jet_foundation::MIR::MirFunctionId,
-             owned_root_drop: ::jet_foundation::MIR::MirFunctionId,
-             owned_callback_result_drop: ::jet_foundation::MIR::MirFunctionId,\n\
-             callback_transfer: ::jet_foundation::MIR::MirFunctionId,\n\
-             callback_release: ::jet_foundation::MIR::MirFunctionId,\n\
-             task_root_take: ::jet_foundation::MIR::MirFunctionId,\n\
-             task_root_cleanup_root: ::jet_foundation::MIR::MirFunctionId,\n\
-             owned_root_cleanup_clone: ::jet_foundation::MIR::MirFunctionId,\n\
-            owned_root_drop_values: ::jet_foundation::MIR::MirFunctionId,\n\
-            shared_payload_finalize: ::jet_foundation::MIR::MirFunctionId,\n\
              template: ::jet_jit::SourceInterfaces::NativeInterfaceObject,
              native_bindings: ::std::sync::Mutex<Vec<__JetBootstrapNativeBindingRegistration>>,
          }}
@@ -232,19 +219,6 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                  receiver_type: ::jet_foundation::MIR::MirType,\n\
                  template: ::jet_jit::SourceInterfaces::NativeInterfaceObject,\n\
                  native_bindings: Vec<__JetBootstrapNativeBindingRegistration>,\n\
-                 helper_roots: Vec<::jet_foundation::MIR::MirFunctionId>,\n\
-                 task_callback_invoke: ::jet_foundation::MIR::MirFunctionId,\n\
-                 task_root_release: ::jet_foundation::MIR::MirFunctionId,\n\
-                 owned_root_drop: ::jet_foundation::MIR::MirFunctionId,\n\
-                 owned_callback_result_drop: ::jet_foundation::MIR::MirFunctionId,\n\
-                 callback_transfer: ::jet_foundation::MIR::MirFunctionId,\n\
-                 callback_release: ::jet_foundation::MIR::MirFunctionId,\n\
-                 task_root_take: ::jet_foundation::MIR::MirFunctionId,\n\
-                 task_root_cleanup_root: ::jet_foundation::MIR::MirFunctionId,\n\
-                 owned_root_cleanup_clone: ::jet_foundation::MIR::MirFunctionId,\n\
-                owned_root_drop_values: ::jet_foundation::MIR::MirFunctionId,\n\
-                shared_payload_finalize: ::jet_foundation::MIR::MirFunctionId,\n\
-                 execution_policy: crate::BootstrapFactoryTier,\n\
              ) -> Result<Self, String> {{\n\
                  if receiver_type.canonical_key() != {expected_receiver_key} {{\n\
                      return Err(\"native adapter constructor receiver type differs from the checked host-adapter field\".to_string());\n\
@@ -261,19 +235,6 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                      resources_weak: resources.downgrade(),\n\
                      artifact,\n\
                      execution,\n\
-                     execution_policy,\n\
-                     helper_roots,\n\
-                     task_callback_invoke,\n\
-                     task_root_release,\n\
-                     owned_root_drop,\n\
-                     owned_callback_result_drop,\n\
-                     callback_transfer,\n\
-                     callback_release,\n\
-                     task_root_take,\n\
-                     task_root_cleanup_root,\n\
-                     owned_root_cleanup_clone,\n\
-                     owned_root_drop_values,\n\
-                    shared_payload_finalize,\n\
                      receiver_type,\n\
                      template,\n\
                      native_bindings: ::std::sync::Mutex::new(native_bindings),\n\
@@ -318,7 +279,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
                 )))
             }
             _ => {
-                let arguments = native_operation_arguments(metadata);
+                let arguments = native_operation_arguments(metadata, false);
                 let (physical_binding, operation) = native_operation(metadata);
                 let physical_binding = if physical_binding {
                     "let compiler_program = self.root.program.as_ref(); let physical = __JetBootstrapNativePhysicalBindings::new(self); "
@@ -331,6 +292,9 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
             }
         };
         let return_type = &metadata.return_type;
+        // Checked non-optional methods are fallible (`JetOutcome<T, JetErr>`);
+        // the native implementation itself never fails them.
+        let result = if return_type.ends_with(", JetErr>") { format!("Ok({result})") } else { result };
         writeln!(
             out,
             "    fn {}({receiver}{separator}{parameters}) -> {return_type} {{ {result} }}",
@@ -360,10 +324,16 @@ fn native_operation(metadata: &MirRustTraitMethodMetadata) -> (bool, String) {
 }
 
 /// `, __jet_arg_1, ...` for the operation arguments after the machine, plus
-/// the program and physical bindings when the helper needs them.
-fn native_operation_arguments(metadata: &MirRustTraitMethodMetadata) -> String {
+/// the program and physical bindings when the helper needs them. The helper
+/// takes each argument as the checked trait method spells it; `decoded` names
+/// owned values decoded from a native interface call, which are borrowed
+/// where the trait method takes a reference.
+fn native_operation_arguments(metadata: &MirRustTraitMethodMetadata, decoded: bool) -> String {
     let mut arguments = (1..metadata.parameter_types.len())
-        .map(|index| format!(", __jet_arg_{index}"))
+        .map(|index| {
+            let borrow = if decoded && metadata.parameter_types[index].starts_with('&') { "&" } else { "" };
+            format!(", {borrow}__jet_arg_{index}")
+        })
         .collect::<String>();
     if native_operation(metadata).0 {
         arguments.push_str(", compiler_program, &physical");
@@ -695,11 +665,13 @@ fn emit_native_interface_helpers(
                 let closure = match name {
                     // Callback pumping runs Source callbacks against the typed
                     // machine; a MIR-borrowed machine cannot host them.
+                    // These checked returns are emitted fallible
+                    // (`JetOutcome<T, JetErr>`); the native side never fails them.
                     "poll_callbacks" | "drain_callbacks" => format!(
-                        "|mut machine| match machine.typed_mut() {{ Some(machine) => Ok(__jet_bootstrap_native_{name}(&adapter.root, &adapter.callbacks, machine)), None => Err(\"native adapter {name} needs the typed Source machine\".to_string()) }}"
+                        "|mut machine| match machine.typed_mut() {{ Some(machine) => Ok(Ok(__jet_bootstrap_native_{name}(&adapter.root, &adapter.callbacks, machine))), None => Err(\"native adapter {name} needs the typed Source machine\".to_string()) }}"
                     ),
                     "physical_binding" => {
-                        "|| Ok(__jet_bootstrap_native_adapter_physical_binding(&adapter))".to_string()
+                        "|| Ok(Ok(__jet_bootstrap_native_adapter_physical_binding(&adapter)))".to_string()
                     }
                     _ if metadata.parameter_types.is_empty() => {
                         return Err(BootstrapHostCodecError::InvalidMetadata(format!(
@@ -710,7 +682,7 @@ fn emit_native_interface_helpers(
                         let parameters = (1..metadata.parameter_types.len())
                             .map(|index| format!(", __jet_arg_{index}"))
                             .collect::<String>();
-                        let arguments = native_operation_arguments(metadata);
+                        let arguments = native_operation_arguments(metadata, true);
                         let (_, operation) = native_operation(metadata);
                         format!(
                             "|machine{parameters}| {{ let mut machine = machine; Ok({operation}(&mut machine{arguments})) }}"
@@ -760,18 +732,28 @@ fn emit_native_callback_scope_helpers(out: &mut String) -> Result<(), BootstrapH
     out.push_str(r#"
 struct __JetBootstrapNativeCallbackContext {
     root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,
-    resources: ::jet_jit::SourceResources::SourceResourceLeaseWeak,
     cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,
-    registration: ::std::sync::Arc<::jet_jit::SourceCallbacks::SourceCallbackJobSessionRegistration>,
+    // Keeps this callback session admitted by the invocation's job owner.
+    _registration: ::jet_jit::SourceCallbacks::SourceCallbackJobSessionRegistration,
+    failures: __JetBootstrapNativeCallbackFailures,
+}
+
+/// The sendable part of a callback scope that reports transport failures.
+/// Callbacks run only on the machine thread (the `poll_callbacks` /
+/// `drain_callbacks` pump), so the transport hooks never run Source code.
+#[derive(Clone)]
+struct __JetBootstrapNativeCallbackFailures {
+    execution: ::jet_foundation::MIR::MirExecutionIdentity,
+    resources: ::jet_jit::SourceResources::SourceResourceLeaseWeak,
     completion_scope: ::jet_jit::SourceExecutionCompletionScope,
     failed: ::std::sync::Arc<::std::sync::atomic::AtomicBool>,
 }
 
-impl __JetBootstrapNativeCallbackContext {
-    fn record_failure(&self, cause: ::jet_jit::SourceDeoptError) {
+impl __JetBootstrapNativeCallbackFailures {
+    fn record(&self, cause: ::jet_jit::SourceDeoptError) {
         self.failed.store(true, ::std::sync::atomic::Ordering::Release);
         self.completion_scope.record(::jet_jit::SourceExecutionCompletion {
-            execution: Some(self.root.execution.clone()),
+            execution: Some(self.execution.clone()),
             function: None,
             lease: self.resources.upgrade(),
             disposition: ::jet_jit::SourceExecutionCompletionDisposition::NotInvoked {
@@ -782,52 +764,29 @@ impl __JetBootstrapNativeCallbackContext {
             },
         });
     }
+}
 
-    fn submit(&self, job: ::jet_jit::SourceCallbacks::SourceCallbackJob) {
-        if let Err(job) = self.registration.submit(job) {
-            // Only the exact unstarted job is returned by the shared owner ABI.
-            // A mandatory transport hook cannot discard its owned packets.
-            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(job));
-            let failure = match result {
-                Ok(Ok(())) => return,
-                Ok(Err(failure)) => failure,
-                Err(payload) => {
-                    let message = payload.downcast_ref::<String>().cloned()
-                        .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_string()))
-                        .unwrap_or_else(|| "Source callback cleanup job panicked".to_string());
-                    ::jet_jit::JetTaskFailure::Panicked(message)
-                }
-            };
-            self.record_failure(::jet_jit::SourceDeoptError::CallbackJob(failure));
-        }
+impl __JetBootstrapNativeCallbackContext {
+    fn record_failure(&self, cause: ::jet_jit::SourceDeoptError) {
+        self.failures.record(cause);
     }
 }
 
 fn __jet_bootstrap_native_callback_transport(
-    context: ::std::sync::Arc<__JetBootstrapNativeCallbackContext>,
+    failures: __JetBootstrapNativeCallbackFailures,
 ) -> __JetBootstrapNativeCallbackSession {
-    let abandoned_context = context.clone();
     __JetBootstrapNativeCallbackSession::new(
         move |abandonment| {
-            if abandonment.is_empty() {
-                return;
+            // Payloads are machine callback leases; without the machine they
+            // can only be reported, never released.
+            if !abandonment.is_empty() {
+                failures.record(::jet_jit::SourceDeoptError::Callback(
+                    "Source callback session was abandoned with unreleased callbacks or undelivered events".to_string(),
+                ));
             }
-            let job_context = abandoned_context.clone();
-            abandoned_context.submit(Box::new(move || {
-                let scope = job_context.completion_scope.clone();
-                scope.with_current(|| __jet_bootstrap_native_callback_abandoned(job_context, abandonment))
-            }));
         },
-        move |ready| {
-            let Some(callbacks) = ready.session() else {
-                return;
-            };
-            let job_context = context.clone();
-            context.submit(Box::new(move || {
-                let scope = job_context.completion_scope.clone();
-                scope.with_current(|| __jet_bootstrap_native_callback_ready(job_context, callbacks))
-            }));
-        },
+        // The machine-thread pump drains ready events; no job is scheduled.
+        |_ready| {},
     )
 }
 
@@ -844,7 +803,7 @@ fn __jet_bootstrap_native_adapter_owner_from_context(
         cleanup: context.cleanup.clone(),
         instance: ::std::sync::OnceLock::new(),
         capability: ::std::sync::OnceLock::new(),
-        callback_failed: context.failed.clone(),
+        callback_failed: context.failures.failed.clone(),
         context,
         borrowed_session,
     })
@@ -860,21 +819,29 @@ fn __jet_bootstrap_native_adapter_owner_new(
     let jobs = root.callback_jobs.upgrade()
         .ok_or_else(|| "Source callback origin has no live job owner".to_string())?;
     let registration = ::jet_jit::SourceCallbacks::SourceCallbackJobSessionRegistration::start(jobs)?;
-    let context = ::std::sync::Arc::new(__JetBootstrapNativeCallbackContext {
-        root,
+    let failures = __JetBootstrapNativeCallbackFailures {
+        execution: root.execution.clone(),
         resources: resources.downgrade(),
-        cleanup,
-        registration: ::std::sync::Arc::new(registration),
         completion_scope,
         failed: ::std::sync::Arc::new(::std::sync::atomic::AtomicBool::new(false)),
+    };
+    let callbacks = __jet_bootstrap_native_callback_transport(failures.clone());
+    let context = ::std::sync::Arc::new(__JetBootstrapNativeCallbackContext {
+        root,
+        cleanup,
+        _registration: registration,
+        failures,
     });
-    let callbacks = __jet_bootstrap_native_callback_transport(context.clone());
     Ok(__jet_bootstrap_native_adapter_owner_from_context(context, callbacks, resources, false))
 }
 "#);
     Ok(())
 }
 
+/// The machine-thread callback pump. Callback payloads are Source callback
+/// leases (`jet_eval_callback_transfer`) that stay in the machine's callback
+/// table, so only the owner of the `&mut` machine (`poll_callbacks` /
+/// `drain_callbacks`) invokes, cleans up or releases them.
 fn emit_native_callback_helpers(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
@@ -882,162 +849,75 @@ fn emit_native_callback_helpers(
     let eval_value = symbols.type_symbol("JetEvalRuntimeValue")?;
     let eval_machine = symbols.type_symbol("JetEvalMachine")?;
     let callback_result = symbols.type_symbol("JetEvalCallbackResult")?;
-
     let span = symbols.type_symbol("Span")?;
-    let callback_transfer = callable_symbol(symbols, "jet_eval_callback_transfer")?;
-    let callback_invoke = callable_symbol(symbols, "jet_eval_callback_invoke")?;
-    let callback_release = callable_symbol(symbols, "jet_eval_callback_release")?;
-    let task_root = symbols.type_symbol("JetEvalTaskRoot")?;
-    let task_root_take = callable_symbol(symbols, "jet_eval_task_root_take")?;
-    let _task_callback_invoke = callable_symbol(symbols, "jet_eval_task_callback_invoke")?;
-    let task_root_release = callable_symbol(symbols, "jet_eval_task_root_release")?;
-    let callback_value = symbols.variant_path("JetEvalCallbackOutcome", "Value")?;
-    let merge_callback_output = callable_symbol(symbols, "jet_eval_merge_callback_output")?;
     let callback_session = "::jet_jit::SourceCallbacks::SourceCallbackSession";
-    let callback_lease = "::jet_jit::SourceCallbacks::SourceCallbackLease";
     let callback_event = "::jet_jit::SourceCallbacks::SourceCallbackEvent";
     let callback_error = "::jet_jit::SourceCallbacks::SourceCallbackError";
     let callback_reply_error = "::jet_jit::SourceCallbacks::SourceCallbackReplyError";
-    let drop_value = callable_symbol(symbols, "jet_eval_drop_value")?;
-    out.push_str(
-        r#"
-fn __jet_bootstrap_native_record_completion_box(
-    root: &__JetBootstrapNativeAdapterRoot,
-    completion: ::jet_jit::SourceExecutionCompletionBox,
-) -> Result<(), ::jet_jit::SourceExecutionCompletionBox> {
-    match ::jet_jit::SourceExecutionCompletionScope::record_current_box(completion) {
-        Ok(()) => Ok(()),
-        Err(completion) => root.completion_scope.record_box(completion),
-    }
-}
-"#,
-    );
-
-
+    let invoke = symbols.call(
+        "jet_eval_callback_invoke",
+        &[("*machine", ""), ("lease", "lease"), ("args", "args"), ("span", "span.clone()")],
+    )?;
+    let merge = symbols.call(
+        "jet_eval_merge_callback_output",
+        &[
+            ("*machine", ""),
+            ("result.@f.JetEvalCallbackResult.stdout@", "result.@f.JetEvalCallbackResult.stdout@.clone()"),
+            ("result.@f.JetEvalCallbackResult.stderr@", "result.@f.JetEvalCallbackResult.stderr@.clone()"),
+        ],
+    )?;
+    let release = symbols.call(
+        "jet_eval_callback_release",
+        &[("*machine", ""), ("lease", "lease"), ("span", "span.clone()")],
+    )?;
+    let drop_argument = symbols.call(
+        "jet_eval_drop_value",
+        &[("*machine", ""), ("value", "value"), ("span", "span.clone()")],
+    )?;
+    let drop_callback_value = symbols.call(
+        "jet_eval_drop_value",
+        &[
+            ("*machine", ""),
+            ("@deref.JetEvalCallbackOutcome.Value.value@value", "@deref.JetEvalCallbackOutcome.Value.value@value"),
+            ("span", "span.clone()"),
+        ],
+    )?;
     writeln!(
         out,
         "#[doc(hidden)]\n\
          struct __JetBootstrapNativeCallbackPayload {{\n\
-             callback_root: {task_root},\n\
-             adapter_root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,\n\
+             lease: i64,\n\
              span: {span},\n\
          }}\n\
          type __JetBootstrapNativeCallbackSession = {callback_session}<__JetBootstrapNativeCallbackPayload, Vec<{eval_value}>, {span}, ({callback_result}, {span})>;\n\
-         type __JetBootstrapNativeCallbackLease = {callback_lease}<__JetBootstrapNativeCallbackPayload, Vec<{eval_value}>, {span}, ({callback_result}, {span})>;\n\
-         fn __jet_bootstrap_native_callback_register(\n\
-             adapter: &__JetBootstrapNativeAdapter,\n\
-             machine: &{eval_machine},\n\
-             closure: {eval_value},\n\
-             span: {span},\n\
-         ) -> Result<__JetBootstrapNativeCallbackLease, String> {{\n\
-             let source_lease = {callback_transfer}(machine, closure, span)\n\
-                 .ok_or_else(|| \"Source callback transfer failed\".to_string())?;\n\
-             let cleanup_lease = source_lease.clone();\n\
-             let callback_root = match {task_root_take}(machine, source_lease, span) {{\n\
-                 Some(root) => root,\n\
-                 None => {{\n\
-                     let _ = {callback_release}(machine, cleanup_lease, span);\n\
-                     return Err(\"Source callback root transfer failed\".to_string());\n\
-                 }}\n\
-             }};\n\
-             let payload = __JetBootstrapNativeCallbackPayload {{\n\
-                 callback_root,\n\
-                 adapter_root: adapter.root.clone(),\n\
-                 span,\n\
-             }};\n\
-             match adapter.callbacks.register(payload) {{\n\
-                 Ok(callback) => Ok(callback),\n\
-                 Err(error) => {{\n\
-                     let (reason, payload) = error.into_parts();\n\
-                     let cleanup_adapter = Box::new(__JetBootstrapNativeAdapter {{\n\
-                         root: payload.adapter_root.clone(),\n\
-                         callbacks: __JetBootstrapNativeCallbackSession::new(),\n\
-                     }});\n\
-                     let cleanup = {task_root_release}(&payload.callback_root, cleanup_adapter, payload.span);\n\
-                     {merge_callback_output}(machine, cleanup.stdout.clone(), cleanup.stderr.clone());\n\
-                     if !__jet_bootstrap_native_callback_drop_result(machine, cleanup, payload.span) {{\n\
-                         return Err(format!(\"{{reason}}; Source callback root cleanup failed\"));\n\
-                     }}\n\
-                     Err(reason.to_string())\n\
-                 }}\n\
-             }}\n\
-         }}\n\
-         fn __jet_bootstrap_native_callback_enqueue(\n\
-             callback: &__JetBootstrapNativeCallbackLease,\n\
-             args: Vec<{eval_value}>,\n\
-             span: {span},\n\
-         ) -> Result<({callback_result}, {span}), ({callback_error}, Vec<{eval_value}>, {span})> {{\n\
-             match callback.enqueue(args, span) {{\n\
-                 Ok(reply) => reply.recv().map_err(|error| (error, Vec::new(), span)),\n\
-                 Err(error) => {{\n\
-                     let (reason, args, span) = error.into_parts();\n\
-                     match callback.queue_rejected_cleanup(args, span) {{\n\
-                         Ok(()) => Err((reason, Vec::new(), span)),\n\
-                         Err(error) => {{\n\
-                             let (cleanup_error, args, span) = error.into_parts();\n\
-                             Err((cleanup_error, args, span))\n\
-                         }}\n\
-                     }}\n\
-                 }}\n\
-             }}\n\
-         }}\n\
          fn __jet_bootstrap_native_callback_drop_result(\n\
-             machine: &{eval_machine},\n\
+             machine: &mut {eval_machine},\n\
              result: {callback_result},\n\
              span: {span},\n\
          ) -> bool {{\n\
-             match result.outcome {{\n\
-                 {callback_value}(value) => {drop_value}(machine, value, span),\n\
-                 _ => false,\n\
-             }}\n\
-         }}\n\
-         fn __jet_bootstrap_native_callback_enqueue(\n\
-             callback: &__JetBootstrapNativeCallbackLease,\n\
-             args: Vec<{eval_value}>,\n\
-             span: {span},\n\
-         ) -> Result<({callback_result}, {span}), ({callback_error}, Vec<{eval_value}>, {span})> {{\n\
-             match callback.enqueue(args, span) {{\n\
-                 Ok(reply) => reply.recv().map_err(|error| (error, Vec::new(), span)),\n\
-                 Err(error) => {{\n\
-                     let (reason, args, span) = error.into_parts();\n\
-                     match callback.queue_rejected_cleanup(args, span) {{\n\
-                         Ok(()) => Err((reason, Vec::new(), span)),\n\
-                         Err(error) => {{\n\
-                             let (cleanup_error, args, span) = error.into_parts();\n\
-                             Err((cleanup_error, args, span))\n\
-                         }}\n\
-                     }}\n\
-                 }}\n\
-             }}\n\
-         }}\n\
-         fn __jet_bootstrap_native_callback_drop_result(\n\
-             machine: &{eval_machine},\n\
-             result: {callback_result},\n\
-             span: {span},\n\
-         ) -> bool {{\n\
-             match result.outcome {{\n\
-                 {callback_value}(value) => {drop_value}(machine, value, span),\n\
+             match result.@f.JetEvalCallbackResult.outcome@ {{\n\
+                 @p.JetEvalCallbackOutcome.Value@{{ value }} => {drop_callback_value},\n\
                  _ => true,\n\
              }}\n\
          }}\n\
          fn __jet_bootstrap_native_poll_callbacks(\n\
              root: &__JetBootstrapNativeAdapterRoot,\n\
              callbacks: &__JetBootstrapNativeCallbackSession,\n\
-             machine: &{eval_machine},\n\
+             machine: &mut {eval_machine},\n\
          ) -> bool {{\n\
              __jet_bootstrap_native_pump_callbacks(root, callbacks, machine, false)\n\
          }}\n\
          fn __jet_bootstrap_native_drain_callbacks(\n\
              root: &__JetBootstrapNativeAdapterRoot,\n\
              callbacks: &__JetBootstrapNativeCallbackSession,\n\
-             machine: &{eval_machine},\n\
+             machine: &mut {eval_machine},\n\
          ) -> bool {{\n\
              __jet_bootstrap_native_pump_callbacks(root, callbacks, machine, true)\n\
          }}\n\
          fn __jet_bootstrap_native_pump_callbacks(\n\
-             root: &__JetBootstrapNativeAdapterRoot,\n\
+             _root: &__JetBootstrapNativeAdapterRoot,\n\
              callbacks: &__JetBootstrapNativeCallbackSession,\n\
-             machine: &{eval_machine},\n\
+             machine: &mut {eval_machine},\n\
              drain: bool,\n\
          ) -> bool {{\n\
              if drain {{ let _ = callbacks.retire(); }}\n\
@@ -1052,35 +932,34 @@ fn __jet_bootstrap_native_record_completion_box(
                  }};\n\
                  let event_ok = match event {{\n\
                      {callback_event}::Invoke(mut invocation) => {{\n\
-                         let callback_id = invocation.callback_id();\n\
-                         let callback_lease = callbacks.with_payload(callback_id, |payload| payload.lease);\n\
-                         let mut args = invocation.take_command();\n\
+                         let callback_lease = callbacks.with_payload(invocation.callback_id(), |payload| payload.lease);\n\
+                         let args = invocation.take_command();\n\
                          let span = invocation.take_context();\n\
                          match callback_lease {{\n\
                              Ok(lease) if lease > 0 => {{\n\
-                                 let result = {callback_invoke}(machine, jet_foundation::Numeric::JetInt::from_i64(lease), args, span);\n\
-                                 {merge_callback_output}(machine, result.stdout.clone(), result.stderr.clone());\n\
+                                 let lease = jet_foundation::Numeric::JetInt::from_i64(lease);\n\
+                                 let result = {invoke};\n\
+                                 {merge};\n\
                                  match invocation.respond(Ok((result, span))) {{\n\
                                      Ok(()) => true,\n\
-                                     Err({callback_reply_error}::Disconnected(Ok((result, reply_span)))) => __jet_bootstrap_native_callback_drop_result(machine, result, reply_span),\n\
-                                     Err({callback_reply_error}::Disconnected(Err(_))) => true,\n\
+                                     Err({callback_reply_error}::Disconnected) => true,\n\
                                      Err(_) => false,\n\
                                  }}\n\
                              }}\n\
                              _ => {{\n\
                                  let mut cleanup_ok = true;\n\
-                                 for value in args.drain(..) {{ cleanup_ok &= {drop_value}(machine, value, span); }}\n\
+                                 for value in args {{ cleanup_ok &= {drop_argument}; }}\n\
                                  let replied = invocation.respond(Err({callback_error}::UnknownCallback)).is_ok();\n\
                                  cleanup_ok && replied\n\
                              }}\n\
                          }}\n\
                      }}\n\
                      {callback_event}::Cleanup(mut cleanup) => {{\n\
-                         let span = cleanup.take_context().or_else(|| callbacks.with_payload(cleanup.callback_id(), |payload| payload.span).ok());\n\
+                         let span = cleanup.take_context().or_else(|| callbacks.with_payload(cleanup.callback_id(), |payload| payload.span.clone()).ok());\n\
                          let Some(span) = span else {{ return false; }};\n\
                          let mut ok = true;\n\
-                         if let Some(mut args) = cleanup.take_command() {{\n\
-                             for value in args.drain(..) {{ ok &= {drop_value}(machine, value, span); }}\n\
+                         if let Some(args) = cleanup.take_command() {{\n\
+                             for value in args {{ ok &= {drop_argument}; }}\n\
                          }}\n\
                          cleanup.complete();\n\
                          ok\n\
@@ -1093,8 +972,9 @@ fn __jet_bootstrap_native_record_completion_box(
                          result && cleanup.complete().is_ok()\n\
                      }}\n\
                      {callback_event}::Release(release) => {{\n\
-                         let payload = release.payload();\n\
-                         let released = {callback_release}(machine, jet_foundation::Numeric::JetInt::from_i64(payload.lease), payload.span);\n\
+                         let lease = jet_foundation::Numeric::JetInt::from_i64(release.payload().lease);\n\
+                         let span = release.payload().span.clone();\n\
+                         let released = {release};\n\
                          let completed = release.complete().is_ok();\n\
                          released && completed\n\
                      }}\n\
@@ -1104,67 +984,13 @@ fn __jet_bootstrap_native_record_completion_box(
              }}\n\
          }}"
     )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    Ok(())
+    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
 
 fn emit_native_binding_helpers(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let eval_machine = symbols.type_symbol("JetEvalMachine")?;
-    let eval_result = symbols.type_symbol("JetEvalResult")?;
-    let host_type_shape = symbols.type_symbol("JetEvalHostTypeShape")?;
-    let result_transfer_receipt = symbols.type_symbol("JetEvalResultHostTransferReceipt")?;
-    let result_host_type_shape = callable_symbol(symbols, "jet_eval_result_host_type_shape")?;
-    let result_transfer_prepare =
-        callable_symbol(symbols, "jet_eval_result_host_transfer_prepare")?;
-    let result_transfer_commit =
-        callable_symbol(symbols, "jet_eval_result_host_transfer_commit")?;
-    let result_transfer_dispose =
-        callable_symbol(symbols, "jet_eval_result_host_transfer_dispose")?;
-    let result_transfer_disposition =
-        symbols.type_symbol("JetEvalResultHostTransferCommitDisposition")?;
-    let transfer_committed =
-        symbols.variant_path("JetEvalResultHostTransferCommitDisposition", "Committed")?;
-    let transfer_rejected =
-        symbols.variant_path("JetEvalResultHostTransferCommitDisposition", "Rejected")?;
-    let transfer_consumed_failure =
-        symbols.variant_path("JetEvalResultHostTransferCommitDisposition", "ConsumedFailure")?;
-    let source_binding_identity = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
-    let host_adapter_field_symbol = symbols.field_symbol("JetEvalConfig", "host_adapter")?;
-    let host_value = symbols.type_symbol("JetEvalHostValue")?;
-    let owner_native = symbols.variant_path("JetEvalHostOwner", "Native")?;
-    let owner_cursor = symbols.variant_path("JetEvalHostOwner", "Cursor")?;
-    let owner_core = symbols.variant_path("JetEvalHostOwner", "Core")?;
-    let owner_declared = symbols.variant_path("JetEvalHostOwner", "Declared")?;
-    let owner_callable = symbols.variant_path("JetEvalNativeBindingIdentity", "Callable")?;
-    let owner_interface = symbols.variant_path("JetEvalNativeBindingIdentity", "Interface")?;
-    let host_handle = symbols.variant_path("JetEvalHostValue", "Handle")?;
-    let host_data = symbols.variant_path("JetEvalHostValue", "Data")?;
-    let host_closure = symbols.variant_path("JetEvalHostValue", "Closure")?;
-    let host_shared_carrier = symbols.variant_path("JetEvalHostValue", "SharedCarrier")?;
-    let host_kind_shared = symbols.variant_path("JetEvalSharedHostKind", "Shared")?;
-    let physical_shared = symbols.variant_path("JetEvalSharedHostPhysicalRoot", "Shared")?;
-    let physical_weak = symbols.variant_path("JetEvalSharedHostPhysicalRoot", "Weak")?;
-    let carrier_physical = symbols.field_symbol("JetEvalSharedHostCarrier", "physical")?;
-    let carrier_kind = symbols.field_symbol("JetEvalSharedHostCarrier", "kind")?;
-    let value_metadata = symbols.field_symbol("JetEvalSharedValue", "metadata")?;
-    let value_physical_root = symbols.field_symbol("JetEvalSharedValueMeta", "physical_root")?;
-    let weak_metadata = symbols.field_symbol("JetEvalSharedWeak", "metadata")?;
-    let weak_physical_root = symbols.field_symbol("JetEvalSharedWeakMeta", "physical_root")?;
-    let cap_handle = symbols.field_symbol("JetEvalSharedHostRootCapability", "handle")?;
-    let cap_raw = symbols.field_symbol("JetEvalSharedHostRootCapability", "raw")?;
-    let cap_generation = symbols.field_symbol("JetEvalSharedHostRootCapability", "generation")?;
-    let cap_type_identity = symbols.field_symbol("JetEvalSharedHostRootCapability", "type_identity")?;
-    let cap_physical_identity = symbols.field_symbol("JetEvalSharedHostRootCapability", "physical_identity")?;
-    let weak_cap_handle = symbols.field_symbol("JetEvalSharedHostWeakCapability", "handle")?;
-    let weak_cap_raw = symbols.field_symbol("JetEvalSharedHostWeakCapability", "raw")?;
-    let weak_cap_generation = symbols.field_symbol("JetEvalSharedHostWeakCapability", "generation")?;
-    let weak_cap_type_identity = symbols.field_symbol("JetEvalSharedHostWeakCapability", "type_identity")?;
-    let weak_cap_physical_identity = symbols.field_symbol("JetEvalSharedHostWeakCapability", "physical_identity")?;
-    let ct_unit = symbols.variant_path("TComptimeValue", "Unit")?;
     let host_field = symbols.field_binding("JetEvalConfig", "host_adapter")?;
     let numeric_field = symbols.field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
     let numeric_callable_type = numeric_field.ty.option_inner().ok_or_else(|| {
@@ -1205,8 +1031,8 @@ fn emit_native_binding_helpers(
 
     let generated = r#"
         type __JetBootstrapNativeNumericFn =
-            dyn FnMut(&f64, &String, &String, &String, &String)
-                -> Result<f64, ::jet_foundation::Outcome::JetAbsent>;
+            dyn FnMut(f64, &String, &String, &String, &String)
+                -> Result<f64, jet_foundation::Outcome::JetAbsent>;
         type __JetBootstrapNativeNumericInner =
             ::std::cell::RefCell<Option<Box<__JetBootstrapNativeNumericFn>>>;
         type __JetBootstrapNativeNumericWrapper =
@@ -1279,12 +1105,12 @@ fn emit_native_binding_helpers(
                 carrier,
                 move |registration| {
                     ::std::rc::Rc::new(::std::cell::RefCell::new(Some(
-                        Box::new(move |value, source_unit, destination_unit, scale_num, scale_den| {
+                        Box::new(move |value: f64, source_unit: &String, destination_unit: &String, scale_num: &String, scale_den: &String| {
                             let _registration = &registration;
                             let _scope = active_bindings.activate(active_program.as_ref(), artifact)
                                 .unwrap_or_else(|error| panic!("numeric native callable activation failed: {error}"));
                             let values = vec![
-                                ::jet_foundation::MIR::MirRuntimeValue::Float { value: *value, f32: false },
+                                ::jet_foundation::MIR::MirRuntimeValue::Float { value, f32: false },
                                 ::jet_foundation::MIR::MirRuntimeValue::String(source_unit.clone()),
                                 ::jet_foundation::MIR::MirRuntimeValue::String(destination_unit.clone()),
                                 ::jet_foundation::MIR::MirRuntimeValue::String(scale_num.clone()),
@@ -1320,7 +1146,7 @@ fn emit_native_binding_helpers(
                                         .and_then(::jet_foundation::MIR::MirType::option_inner)
                                         .is_some_and(|expected| element.same_checked_type(expected)) =>
                                 {
-                                    Err(::jet_foundation::Outcome::JetAbsent)
+                                    Err(jet_foundation::Outcome::JetAbsent)
                                 }
                                 Ok(_) => panic!("numeric native callable returned an invalid checked Option value"),
                                 Err(error) => panic!("numeric native callable dispatch failed: {error}"),
@@ -1356,12 +1182,13 @@ fn emit_native_binding_helpers(
                 __JET_SOURCE_RESOURCE_IDENTITY__::Callable(identity) => identity,
                 _ => return Err("numeric callable registration has an interface identity".to_string()),
             };
-            let __JET_OWNER_CALLABLE__(owner) = &row.binding else {
+            let @p.JetEvalNativeBindingIdentity.Callable@(owner) = &row.binding else {
                 return Err("numeric callable registration has a non-callable Source identity".to_string());
             };
             if identity.key != crate::__JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY
-                || owner.key != identity.key
-                || !owner.callable_type.same_checked_type(&identity.callable_type)
+                || owner.@f.JetEvalNativeCallableBinding.key@ != identity.key
+                || !__jet_bootstrap_type_to_host(&owner.@f.JetEvalNativeCallableBinding.callable_type@)?
+                    .same_checked_type(&identity.callable_type)
             {
                 return Err("numeric callable registration disagrees with its exact checked identity".to_string());
             }
@@ -1373,7 +1200,7 @@ fn emit_native_binding_helpers(
                 row.capability.handle,
                 row.capability.raw,
                 &row.identity,
-            ).map_err(|error| error.to_string())?;
+            ).map_err(|error| format!("{error:?}"))?;
             Ok((identity.clone(), binding.carrier().clone()))
         }
 
@@ -1408,8 +1235,8 @@ fn emit_native_binding_helpers(
         ) -> Result<__JetBootstrapNativeBindingRegistration, String> {
             let host_field = __jet_bootstrap_native_binding_field_is(&field_path, "host_adapter");
             let numeric_field = __jet_bootstrap_native_binding_field_is(&field_path, "numeric_unit_conversion_exact");
-            if (host_field && matches!(&binding, __JET_OWNER_INTERFACE__(_)))
-                || (numeric_field && !dynamic && matches!(&binding, __JET_OWNER_CALLABLE__(_)))
+            if (host_field && matches!(&binding, @p.JetEvalNativeBindingIdentity.Interface@(..)))
+                || (numeric_field && !dynamic && matches!(&binding, @p.JetEvalNativeBindingIdentity.Callable@(..)))
             {
                 // These are the only native Source fields owned by this adapter.
             } else {
@@ -1431,35 +1258,42 @@ fn emit_native_binding_helpers(
                 .ok_or_else(|| "checked SemaRegistrationHostHooks.numeric_unit_conversion_exact lost its Option leaf".to_string())?;
             let expected_execution = program.execution_identity(Some(artifact))
                 .map_err(|error| error.to_string())?;
-            match (&identity, &binding) {
-                (__JET_SOURCE_RESOURCE_IDENTITY__::Interface { execution, artifact: owner_artifact, receiver_type },
-                 __JET_OWNER_INTERFACE__(owner_type))
+            // The Source owner identity, as its key (callables only) and checked host type.
+            let (owner_key, owner_type) = match &binding {
+                @p.JetEvalNativeBindingIdentity.Callable@(owner) => (
+                    Some(owner.@f.JetEvalNativeCallableBinding.key@.clone()),
+                    __jet_bootstrap_type_to_host(&owner.@f.JetEvalNativeCallableBinding.callable_type@)?,
+                ),
+                @p.JetEvalNativeBindingIdentity.Interface@(receiver_type) => {
+                    (None, __jet_bootstrap_type_to_host(receiver_type)?)
+                }
+            };
+            match &identity {
+                __JET_SOURCE_RESOURCE_IDENTITY__::Interface { execution, artifact: owner_artifact, receiver_type }
                     if host_field
+                        && owner_key.is_none()
                         && *execution == expected_execution
                         && *owner_artifact == artifact
                         && receiver_type.same_checked_type(expected_host)
                         && owner_type.same_checked_type(expected_host) => {}
-                (__JET_SOURCE_RESOURCE_IDENTITY__::Callable(source), __JET_OWNER_CALLABLE__(owner))
+                __JET_SOURCE_RESOURCE_IDENTITY__::Callable(source)
                     if numeric_field
                         && source.execution == expected_execution
                         && source.artifact == artifact
-                        && source.key == owner.key
+                        && owner_key.as_ref().is_some_and(|key| source.key == *key)
                         && source.key == __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY
                         && source.callable_type.same_checked_type(expected_numeric)
-                        && owner.callable_type.same_checked_type(expected_numeric) => {}
+                        && owner_type.same_checked_type(expected_numeric) => {}
                 _ => return Err("native binding identity disagrees with its exact checked Source field".to_string()),
             }
-            if identity.value_type().same_checked_type(match &binding {
-                __JET_OWNER_CALLABLE__(owner) => &owner.callable_type,
-                __JET_OWNER_INTERFACE__(receiver_type) => receiver_type,
-            }) == false {
+            if !identity.value_type().same_checked_type(&owner_type) {
                 return Err("native binding owner type disagrees with its physical capability identity".to_string());
             }
             let physical = match &identity {
                 __JET_SOURCE_RESOURCE_IDENTITY__::Callable(callable) =>
                     __JET_SOURCE_NATIVE_BINDING__::callable(&object, callable.clone())?,
                 __JET_SOURCE_RESOURCE_IDENTITY__::Interface { execution, artifact, receiver_type } =>
-                    __JET_SOURCE_NATIVE_BINDING__::interface(&object, *execution, *artifact, receiver_type.clone())?,
+                    __JET_SOURCE_NATIVE_BINDING__::interface(&object, execution.clone(), *artifact, receiver_type.clone())?,
             };
             let capability = match cleanup {
                 Some(cleanup) => cleanup.register_native_binding_root(physical)?,
@@ -1489,19 +1323,6 @@ fn emit_native_binding_helpers(
             __jet_bootstrap_native_adapter_bind_owner(owner)
         }
 
-        fn __jet_bootstrap_native_adapter_borrow_scope(
-            adapter: &__JetBootstrapNativeAdapter,
-            resources: ::jet_jit::SourceResources::SourceResourceLease,
-        ) -> Result<__JetBootstrapNativeAdapter, String> {
-            let owner = __jet_bootstrap_native_adapter_owner_from_context(
-                adapter.owner.context.clone(),
-                adapter.callbacks.clone(),
-                resources,
-                true,
-            );
-            __jet_bootstrap_native_adapter_bind_owner(owner)
-        }
-
         fn __jet_bootstrap_native_adapter_bind_owner(
             owner: ::std::sync::Arc<__JetBootstrapNativeAdapterOwner>,
         ) -> Result<__JetBootstrapNativeAdapter, String> {
@@ -1524,7 +1345,7 @@ fn emit_native_binding_helpers(
                 root.program.as_ref(),
                 root.artifact,
                 vec!["JetEvalConfig".to_string(), "host_adapter".to_string()],
-                __JET_OWNER_INTERFACE__(root.receiver_type.clone()),
+                @new.JetEvalNativeBindingIdentity.Interface@(__jet_bootstrap_type_from_host(&root.receiver_type)?),
                 __JET_SOURCE_RESOURCE_IDENTITY__::Interface {
                     execution: root.execution.clone(),
                     artifact: root.artifact,
@@ -1552,7 +1373,7 @@ fn emit_native_binding_helpers(
 
         fn __jet_bootstrap_native_adapter_physical_binding(
             adapter: &__JetBootstrapNativeAdapter,
-        ) -> __JET_HOST_VALUE__ {
+        ) -> @t.JetEvalHostValue@ {
             let arena = adapter.resources.arena();
             let current = arena.lookup_capability(adapter.capability.handle, adapter.capability.raw)
                 .unwrap_or_else(|error| panic!("native adapter capability lookup failed: {error}"));
@@ -1567,55 +1388,59 @@ fn emit_native_binding_helpers(
                     artifact: adapter.root.artifact,
                     receiver_type: adapter.root.receiver_type.clone(),
                 },
-            ).unwrap_or_else(|error| panic!("native adapter capability identity changed: {error}"));
+            ).unwrap_or_else(|error| panic!("native adapter capability identity changed: {error:?}"));
             if binding.carrier() != &adapter.instance.clone_root()
                 || !adapter.instance.matches_root(binding.carrier())
             {
                 panic!("native adapter capability no longer retains this callback-scope instance");
             }
-            __JET_HOST_HANDLE__(
-                adapter.capability.handle,
-                jet_foundation::Numeric::JetInt::from_i64(adapter.capability.raw),
-                __JET_OWNER_NATIVE__(__JET_OWNER_INTERFACE__(adapter.root.receiver_type.clone())),
-                __JET_HOST_DATA__(__JET_CT_UNIT__),
-            )
+            let receiver_type = __jet_bootstrap_type_from_host(&adapter.root.receiver_type)
+                .unwrap_or_else(|error| panic!("native adapter receiver type has no Source spelling: {error}"));
+            __jet_bootstrap_resource_host_handle(
+                &adapter.capability,
+                @new.JetEvalHostOwner.Native@(@new.JetEvalNativeBindingIdentity.Interface@(receiver_type)),
+            ).unwrap_or_else(|error| panic!("native adapter capability has no Source handle: {error}"))
         }
         fn __jet_bootstrap_native_adapter_host_runtime(
             physical: &__JetBootstrapNativePhysicalBindings,
             checked_type: &::jet_foundation::MIR::MirType,
-            value: &__JET_HOST_VALUE__,
+            value: &@t.JetEvalHostValue@,
         ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
-            let (handle, raw, receiver_type) = match value {
-                __JET_HOST_HANDLE__(
-                    handle,
-                    raw,
-                    __JET_OWNER_NATIVE__(__JET_OWNER_INTERFACE__(receiver_type)),
-                    __JET_HOST_DATA__(__JET_CT_UNIT__),
-                ) => (handle, raw, receiver_type),
-                _ => return Err("host_adapter did not return its checked native interface capability".to_string()),
+            let not_interface = || "host_adapter did not return its checked native interface capability".to_string();
+            let @p.JetEvalHostValue.Handle@(handle, raw, owner, payload) = value else { return Err(not_interface()) };
+            let @p.JetEvalHostOwner.Native@(binding) = &@deref.JetEvalHostValue.Handle.owner@*owner else { return Err(not_interface()) };
+            let @p.JetEvalNativeBindingIdentity.Interface@(receiver_type) = &@deref.JetEvalHostOwner.Native.binding@*binding else {
+                return Err(not_interface());
             };
+            if !matches!(&@deref.JetEvalHostValue.Handle.payload@*payload, @p.JetEvalHostValue.Data@(data) if matches!(&@deref.JetEvalHostValue.Data.value@*data, @p.TComptimeValue.Unit@)) {
+                return Err(not_interface());
+            }
+            let receiver_type = __jet_bootstrap_type_to_host(receiver_type)?;
+            let handle = ::jet_foundation::MIR::MirHandleId(
+                __jet_bootstrap_source_u64(&handle.@f.MIRHandleID.value@, "host_adapter capability handle")?,
+            );
             if !receiver_type.same_checked_type(checked_type)
                 || !receiver_type.same_checked_type(&physical.adapter.root.receiver_type)
-                || *handle != physical.adapter.capability.handle
+                || handle != physical.adapter.capability.handle
                 || raw.to_i64() != Some(physical.adapter.capability.raw)
             {
                 return Err("host_adapter capability is not the exact current callback-scope instance".to_string());
             }
             let current = physical.adapter.resources.arena()
-                .lookup_capability(*handle, physical.adapter.capability.raw)?;
+                .lookup_capability(handle, physical.adapter.capability.raw)?;
             if current != physical.adapter.capability {
                 return Err("host_adapter capability generation changed before encoding".to_string());
             }
             let identity = __JET_SOURCE_RESOURCE_IDENTITY__::Interface {
                 execution: physical.adapter.root.execution.clone(),
                 artifact: physical.adapter.root.artifact,
-                receiver_type: receiver_type.clone(),
+                receiver_type,
             };
             let binding = physical.adapter.resources.arena().borrow_native_binding(
-                *handle,
+                handle,
                 physical.adapter.capability.raw,
                 &identity,
-            ).map_err(|error| error.to_string())?;
+            ).map_err(|error| format!("{error:?}"))?;
             if binding.carrier() != &physical.adapter.instance.clone_root()
                 || !physical.adapter.instance.matches_root(binding.carrier())
             {
@@ -1627,22 +1452,22 @@ fn emit_native_binding_helpers(
         }
 
 
+        /// Check that a native Source field's runtime carrier is the physical
+        /// root of exactly one registration of that field.
         fn __jet_bootstrap_native_binding_project(
             physical: &__JetBootstrapNativePhysicalBindings,
             field_path: &[String],
             checked_type: &::jet_foundation::MIR::MirType,
-            _program: &::jet_foundation::MIR::MirProgram,
             value: ::jet_foundation::MIR::MirRuntimeValue,
-        ) -> Result<Option<__JET_HOST_VALUE__>, String> {
-            let Some(field) = field_path.last().map(String::as_str) else { return Ok(None); };
-            if field != "host_adapter" && field != "numeric_unit_conversion_exact" {
-                return Ok(None);
-            }
+        ) -> Result<(), String> {
+            let Some(field) = field_path.last().map(String::as_str) else {
+                return Err("native Source field has no checked field path".to_string());
+            };
             let ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(carrier) = value else {
                 return Err(format!("native Source field `{}` has no retained NativeOwned carrier", field_path.join(".")));
             };
             let rows = physical.adapter.root.native_bindings.lock().unwrap_or_else(|error| error.into_inner());
-            let mut projected = None;
+            let mut matched = false;
             for row in rows.iter().filter(|row| row.field_path.last().is_some_and(|name| name == field)) {
                 let value_type = row.identity.value_type();
                 if !value_type.same_checked_type(checked_type) {
@@ -1662,7 +1487,7 @@ fn emit_native_binding_helpers(
                     row.capability.handle,
                     row.capability.raw,
                     &row.identity,
-                ).map_err(|error| error.to_string())?;
+                ).map_err(|error| format!("{error:?}"))?;
                 if binding.carrier() != &carrier {
                     continue;
                 }
@@ -1671,137 +1496,23 @@ fn emit_native_binding_helpers(
                 {
                     continue;
                 }
-                let value = match &row.binding {
-                    __JET_OWNER_CALLABLE__(_) if field == "numeric_unit_conversion_exact" =>
-                        __JET_HOST_HANDLE__(
-                            row.capability.handle,
-                            jet_foundation::Numeric::JetInt::from_i64(row.capability.raw),
-                            __JET_OWNER_NATIVE__(row.binding.clone()),
-                            __JET_HOST_DATA__(__JET_CT_UNIT__),
-                        ),
-                    __JET_OWNER_INTERFACE__(receiver_type) if field == "host_adapter" =>
-                        __JET_HOST_HANDLE__(
-                            row.capability.handle,
-                            jet_foundation::Numeric::JetInt::from_i64(row.capability.raw),
-                            __JET_OWNER_NATIVE__(__JET_OWNER_INTERFACE__(receiver_type.clone())),
-                            __JET_HOST_DATA__(__JET_CT_UNIT__),
-                        ),
-                    _ => return Err("native Source field binding variant disagrees with its checked leaf".to_string()),
+                let leaf_matches = match &row.binding {
+                    @p.JetEvalNativeBindingIdentity.Callable@(..) => field == "numeric_unit_conversion_exact",
+                    @p.JetEvalNativeBindingIdentity.Interface@(..) => field == "host_adapter",
                 };
-                if projected.replace(value).is_some() {
+                if !leaf_matches {
+                    return Err("native Source field binding variant disagrees with its checked leaf".to_string());
+                }
+                if std::mem::replace(&mut matched, true) {
                     return Err(format!("native Source field `{}` has ambiguous physical binding registrations", field_path.join(".")));
                 }
             }
-            projected.map(Some).ok_or_else(|| format!("native Source field `{}` does not retain the supplied exact carrier", field_path.join(".")))
-        }
-        fn __jet_bootstrap_native_host_value_to_runtime(
-            adapter: &__JetBootstrapNativeAdapter,
-            result: &mut __JET_EVAL_RESULT__,
-            mut host_value: __JET_HOST_VALUE__,
-            checked_type: &::jet_foundation::MIR::MirType,
-            span: ::jet_foundation::Diagnostics::Span,
-        ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
-            let source_shape: __JET_HOST_TYPE_SHAPE__ = __JET_RESULT_HOST_TYPE_SHAPE__(
-                result,
-                checked_type.clone(),
-                span,
-            ).map_err(|_| "Source result has no checked guest HostTypeShape".to_string())?;
-            let shape = __jet_bootstrap_entry_host_type_shape_from_source(&source_shape)?;
-            let mut receipt: __JET_RESULT_TRANSFER_RECEIPT__ = __JET_RESULT_TRANSFER_PREPARE__(
-                result,
-                &host_value,
-                checked_type.clone(),
-                span,
-            ).map_err(|_| "Source result HostValue transfer could not be prepared".to_string())?;
-            let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-            let prepared = match __jet_bootstrap_entry_prepare_interpreter_transfer(
-                &host_value,
-                checked_type,
-                &shape,
-                &physical,
-            ) {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    if !__JET_RESULT_TRANSFER_DISPOSE__(result, &mut receipt, span) {
-                        return Err(format!("{error}; Source result transfer preparation cleanup failed"));
-                    }
-                    return Err(error);
-                }
-            };
-            match __JET_RESULT_TRANSFER_COMMIT__(
-                result,
-                &mut host_value,
-                &mut receipt,
-                span,
-            ) {
-                __JET_TRANSFER_COMMITTED__ => {}
-                __JET_TRANSFER_REJECTED__ => {
-                    drop(prepared);
-                    if !__JET_RESULT_TRANSFER_DISPOSE__(result, &mut receipt, span) {
-                        return Err("Source rejected result transfer and receipt disposal failed".to_string());
-                    }
-                    return Err("Source rejected result HostValue transfer".to_string());
-                }
-                __JET_TRANSFER_CONSUMED_FAILURE__ => {
-                    drop(prepared);
-                    if !__JET_RESULT_TRANSFER_DISPOSE__(result, &mut receipt, span) {
-                        return Err("Source consumed failed result transfer and receipt disposal failed".to_string());
-                    }
-                    return Err("Source consumed result HostValue transfer with failure".to_string());
-                }
-            }
-            Ok(__jet_bootstrap_entry_interpreter_transfer_commit_and_extract(
-                prepared,
-                &receipt,
-                &physical,
-            ))
-        }
-
-
-        fn __jet_bootstrap_native_adapter_callback_config(
-            adapter: &__JetBootstrapNativeAdapter,
-            packet: &__JetBootstrapNativePacket,
-            live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-        ) -> Result<__JET_EVAL_CONFIG__, String> {
-            let callback_helper = adapter.root.program.functions.iter()
-                .find(|helper| helper.id == adapter.root.task_callback_invoke)
-                .ok_or_else(|| "checked task callback helper disappeared".to_string())?;
-            let callback_root_type = &callback_helper.params.first()
-                .ok_or_else(|| "checked task callback helper has no TaskRoot parameter".to_string())?.ty;
-            let drop_helper = adapter.root.program.functions.iter()
-                .find(|helper| helper.id == adapter.root.owned_root_drop)
-                .ok_or_else(|| "checked owned-root drop helper disappeared".to_string())?;
-            let owned_root_type = &drop_helper.params.first()
-                .ok_or_else(|| "checked owned-root drop helper has no OwnedRoot parameter".to_string())?.ty;
-            let (root_type, root_value) = packet;
-            let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-            let mut config = if root_type.same_checked_type(callback_root_type) {
-                let config = crate::__jet_bootstrap_entry_jet_eval_task_root_config_from_runtime(
-                    root_type,
-                    root_value,
-                    &adapter.root.program,
-                    &physical,
-                )?;
-                config
-            } else if root_type.same_checked_type(owned_root_type) {
-                let config = crate::__jet_bootstrap_entry_jet_eval_owned_root_config_from_runtime(
-                    root_type,
-                    root_value,
-                    &adapter.root.program,
-                    &physical,
-                )?;
-                config
+            if matched {
+                Ok(())
             } else {
-                return Err("callback helper root is neither the checked TaskRoot nor OwnedRoot carrier".to_string());
-            };
-            let callback_adapter = __jet_bootstrap_native_adapter_borrow_scope(
-                adapter,
-                live_resources.clone(),
-            )?;
-            config.__JET_HOST_ADAPTER_FIELD__ = Ok(Box::new(callback_adapter));
-            Ok(config)
+                Err(format!("native Source field `{}` does not retain the supplied exact carrier", field_path.join(".")))
+            }
         }
-
 
         #[derive(Clone)]
         struct __JetBootstrapNativePhysicalBindings {
@@ -2170,7 +1881,6 @@ fn emit_native_binding_helpers(
 
 
         impl crate::BootstrapEntryPhysicalBindings for __JetBootstrapNativePhysicalBindings {
-            type InterpreterValue = __JET_HOST_VALUE__;
             type SharedMarshaller<O, T> = __JetBootstrapNativeSharedMarshaller<O, T>
             where
                 O: crate::JetSharedPhysicalOwnerApi,
@@ -2187,7 +1897,8 @@ fn emit_native_binding_helpers(
                     let source = (source_value as &dyn std::any::Any)
                         .downcast_ref::<Box<dyn __JET_TRAIT__>>()
                         .ok_or_else(|| "checked host_adapter field is not its exact Source trait object".to_string())?;
-                    let value = source.physical_binding();
+                    let value = source.__JET_PHYSICAL_BINDING_METHOD__()
+                        .map_err(|_| "host_adapter physical binding failed".to_string())?;
                     return __jet_bootstrap_native_adapter_host_runtime(self, checked_type, &value).map(Some);
                 }
                 if __jet_bootstrap_native_binding_field_is(field_path, "numeric_unit_conversion_exact") {
@@ -2204,11 +1915,10 @@ fn emit_native_binding_helpers(
                     if identity != expected {
                         return Err("numeric callback wrapper association changed checked identity".to_string());
                     }
-                    let _ = __jet_bootstrap_native_binding_project(
+                    __jet_bootstrap_native_binding_project(
                         self,
                         field_path,
                         checked_type,
-                        program,
                         ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(carrier.clone()),
                     )?;
                     return Ok(Some(::jet_foundation::MIR::MirRuntimeValue::NativeOwned(carrier)));
@@ -2251,7 +1961,7 @@ fn emit_native_binding_helpers(
                  checked_type: &::jet_foundation::MIR::MirType,
                  program: &::jet_foundation::MIR::MirProgram,
                  physical_identity: usize,
-                 root: ::jet_jit::SourceSharedInterop,
+                 root: ::jet_jit::SourceSharedInterop::SourceSharedInterop,
                  payload_shape: &crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,
              ) -> Result<Option<::jet_foundation::MIR::MirRuntimeValue>, String> {
                  let ::jet_foundation::MIR::MirTypeKind::Shared(payload_type) = checked_type.kind() else {
@@ -2293,11 +2003,11 @@ fn emit_native_binding_helpers(
                 &self,
                 field_path: &[String],
                 checked_type: &::jet_foundation::MIR::MirType,
-                program: &::jet_foundation::MIR::MirProgram,
+                _program: &::jet_foundation::MIR::MirProgram,
                 runtime_value: ::jet_foundation::MIR::MirRuntimeValue,
             ) -> Result<Option<T>, String> {
                 if __jet_bootstrap_native_binding_field_is(field_path, "host_adapter") {
-                    let _ = __jet_bootstrap_native_binding_project(self, field_path, checked_type, program, runtime_value)?;
+                    __jet_bootstrap_native_binding_project(self, field_path, checked_type, runtime_value)?;
                     let source: Box<dyn __JET_TRAIT__> = Box::new(self.adapter.clone());
                     let erased: Box<dyn std::any::Any> = Box::new(source);
                     return erased.downcast::<T>()
@@ -2305,13 +2015,7 @@ fn emit_native_binding_helpers(
                         .map_err(|_| "checked host_adapter field has an incompatible Rust leaf type".to_string());
                 }
                 if __jet_bootstrap_native_binding_field_is(field_path, "numeric_unit_conversion_exact") {
-                    let _ = __jet_bootstrap_native_binding_project(
-                        self,
-                        field_path,
-                        checked_type,
-                        program,
-                        runtime_value,
-                    )?;
+                    __jet_bootstrap_native_binding_project(self, field_path, checked_type, runtime_value)?;
                     let wrapper = __jet_bootstrap_native_numeric_wrapper_for_adapter(&self.adapter)?;
                     let erased: Box<dyn std::any::Any> = Box::new(wrapper);
                     return erased.downcast::<T>()
@@ -2353,218 +2057,17 @@ fn emit_native_binding_helpers(
                     runtime_value,
                 )
             }
-
-            fn adopt_interpreter(
-                &self,
-                field_path: &[String],
-                checked_type: &::jet_foundation::MIR::MirType,
-                program: &::jet_foundation::MIR::MirProgram,
-                interpreter_value: Self::InterpreterValue,
-            ) -> Result<Option<::jet_foundation::MIR::MirRuntimeValue>, String> {
-                use ::jet_foundation::MIR::{MirRuntimeClosure, MirRuntimeValue as V, MirTypeKind as K};
-                match interpreter_value {
-                    __JET_HOST_CLOSURE__(function, captures) => {
-                        let checked_params = match checked_type.kind() {
-                            K::Fn(signature) => &signature.params,
-                            K::SendFn { params, .. } => params,
-                            _ => return Err("checked Source closure has no Fn/SendFn type".to_string()),
-                        };
-                        let source_function = program.functions.iter()
-                            .find(|row| row.id == function)
-                            .ok_or_else(|| "Source closure function is absent from its checked program".to_string())?;
-                        if source_function.params.len() != checked_params.len()
-                            || source_function.params.iter().zip(checked_params).any(|(actual, expected)| {
-                                !actual.ty.same_checked_type(expected)
-                            })
-                            || captures.len() != source_function.capture_params.len()
-                        {
-                            return Err("Source closure captures or callable signature disagree with checked MIR".to_string());
-                        }
-                        let mut runtime_captures = Vec::with_capacity(captures.len());
-                        for (capture, parameter) in captures.into_iter().zip(&source_function.capture_params) {
-                            runtime_captures.push(__jet_bootstrap_entry_interpreter_to_runtime(
-                                capture,
-                                &parameter.ty,
-                                program,
-                                self,
-                            )?);
-                        }
-                        Ok(Some(V::Closure(MirRuntimeClosure {
-                            function,
-                            captures: runtime_captures,
-                        })))
-                    }
-                    __JET_HOST_HANDLE__(handle, raw, owner, payload) => {
-                        let raw = raw.to_string_rep().parse::<i64>()
-                            .map_err(|_| "Source HostValue handle capability is outside i64".to_string())?;
-                        let arena = self.adapter.resources.arena();
-                        match owner {
-                            __JET_OWNER_CURSOR__ => {
-                                if handle != ::jet_jit::SourceResources::loop_cursor_handle_id() {
-                                    return Err("Source Cursor HostValue disagrees with its checked handle type".to_string());
-                                }
-                                if payload != __JET_HOST_DATA__(__JET_CT_UNIT__) {
-                                    return Err("Source Cursor HostValue carries a non-unit payload".to_string());
-                                }
-                                let capability = arena.lookup_capability(handle, raw)?;
-                                if capability.handle != handle
-                                    || capability.kind != ::jet_jit::SourceResources::SourceResourceKind::NativeCursor
-                                {
-                                    return Err("Source Cursor capability has the wrong checked kind".to_string());
-                                }
-                                let cursor = arena.lookup_cursor(handle, raw)?;
-                                Ok(Some(V::NativeCursor(cursor)))
-                            }
-                            __JET_OWNER_NATIVE__(binding) => {
-                                let rows = self.adapter.root.native_bindings.lock()
-                                    .unwrap_or_else(|error| error.into_inner());
-                                let mut matching = rows.iter().filter(|row| row.binding == binding);
-                                let registration = matching.next()
-                                    .ok_or_else(|| "Source native binding capability has no exact adapter registration".to_string())?;
-                                if matching.next().is_some()
-                                    || registration.capability.handle != handle
-                                    || registration.capability.raw != raw
-                                    || !registration.identity.value_type().same_checked_type(checked_type)
-                                {
-                                    return Err("Source native binding capability disagrees with its checked identity".to_string());
-                                }
-                                if payload != __JET_HOST_DATA__(__JET_CT_UNIT__) {
-                                    return Err("Source native binding HostValue carries a non-unit payload".to_string());
-                                }
-                                let current = arena.lookup_capability(handle, raw)?;
-                                if current != registration.capability
-                                    || current.kind != ::jet_jit::SourceResources::SourceResourceKind::NativeBinding
-                                {
-                                    return Err("Source native binding capability generation or kind changed".to_string());
-                                }
-                                let native = arena.borrow_native_binding(handle, raw, &registration.identity)
-                                    .map_err(|error| error.to_string())?;
-                                if registration.dynamic
-                                    && !self.adapter.instance.matches_root(native.carrier())
-                                {
-                                    return Err("Source native binding does not retain this callback-scope instance".to_string());
-                                }
-                                Ok(Some(V::NativeOwned(native.carrier().clone_root())))
-                            }
-                            __JET_OWNER_CORE__(_) => Err(
-                                "Core owner HostValue must cross the typed Source transfer-receipt seam".to_string(),
-                            ),
-                            __JET_OWNER_DECLARED__(_) => Err(
-                                "declared owner HostValue has no registered native physical binding".to_string(),
-                            ),
-                        }
-                    }
-                    __JET_HOST_SHARED_CARRIER__(carrier) => {
-                        if carrier.__JET_CARRIER_KIND__ != __JET_HOST_KIND_SHARED__
-                            || !matches!(checked_type.kind(), K::Shared(_))
-                        {
-                            return Err("Source Shared carrier does not match its checked Shared<T> type".to_string());
-                        }
-                        let capability = match &carrier.__JET_CARRIER_PHYSICAL__ {
-                            __JET_PHYSICAL_SHARED__(entry) => entry.__JET_VALUE_METADATA__()
-                                .guard_read().value.__JET_VALUE_PHYSICAL_ROOT__.
-                                clone().ok_or_else(|| "Source Shared carrier has no physical root capability".to_string())?,
-                            _ => return Err("Source Shared carrier has a mismatched physical root variant".to_string()),
-                        };
-                        let handle = capability.__JET_CAP_HANDLE__;
-                        let raw = capability.__JET_CAP_RAW__.to_string_rep().parse::<i64>()
-                            .map_err(|_| "Source Shared capability is outside i64".to_string())?;
-                        let generation = capability.__JET_CAP_GENERATION__.to_string_rep().parse::<u32>()
-                            .map_err(|_| "Source Shared generation is outside u32".to_string())?;
-                        let type_identity = u64::try_from(capability.__JET_CAP_TYPE_IDENTITY__.to_string_rep().parse::<i64>()
-                            .map_err(|_| "Source Shared type identity is outside i64".to_string())?)
-                            .map_err(|_| "Source Shared type identity is negative".to_string())?;
-                        let physical_identity = usize::try_from(capability.__JET_CAP_PHYSICAL_IDENTITY__.to_string_rep().parse::<i64>()
-                            .map_err(|_| "Source Shared physical identity is outside i64".to_string())?)
-                            .map_err(|_| "Source Shared physical identity is negative".to_string())?;
-                        if physical_identity == 0
-                            || type_identity != ::jet_jit::SourceSharedInterop::checked_type_id_for_program(program, checked_type)
-                        {
-                            return Err("Source Shared capability has a mismatched checked owner identity".to_string());
-                        }
-                        let arena = self.adapter.resources.arena();
-                        let current = arena.lookup_capability(handle, raw)?;
-                        if current.handle != ::jet_jit::SourceResources::shared_interop_root_handle_id()
-                            || current.generation != generation
-                            || current.kind != (::jet_jit::SourceResources::SourceResourceKind::SharedInteropRoot { type_identity })
-                        {
-                            return Err("Source Shared capability generation or checked root kind changed".to_string());
-                        }
-                        let (root, lease) = arena.borrow_shared_interop_root(&current, type_identity)
-                            .map_err(|error| error.to_string())?;
-                        if root.type_id() != type_identity || root.identity() != physical_identity {
-                            return Err("Source Shared capability resolves to a different physical owner".to_string());
-                        }
-                        Ok(Some(root.with_resource_lease_owner(lease).as_native_owned()))
-                    }
-                    other => {
-                        let _ = (field_path, other);
-                        Ok(None)
-                    }
-                }
-            }
-
-            fn project_interpreter(
-                &self,
-                field_path: &[String],
-                checked_type: &::jet_foundation::MIR::MirType,
-                program: &::jet_foundation::MIR::MirProgram,
-                runtime_value: ::jet_foundation::MIR::MirRuntimeValue,
-            ) -> Result<Option<Self::InterpreterValue>, String> {
-                __jet_bootstrap_native_binding_project(self, field_path, checked_type, program, runtime_value)
-            }
         }
     "#;
     let generated = generated
-        .replace("__JET_SOURCE_BINDING_IDENTITY__", &source_binding_identity)
+        .replace("__JET_SOURCE_BINDING_IDENTITY__", "@t.JetEvalNativeBindingIdentity@")
         .replace("__JET_SOURCE_RESOURCE_IDENTITY__", &resource_identity)
         .replace("__JET_SOURCE_NATIVE_BINDING__", &source_native_binding)
-        .replace("__JET_OWNER_CALLABLE__", &owner_callable)
-        .replace("__JET_OWNER_INTERFACE__", &owner_interface)
-        .replace("__JET_OWNER_NATIVE__", &owner_native)
-        .replace("__JET_OWNER_CURSOR__", &owner_cursor)
-        .replace("__JET_OWNER_CORE__", &owner_core)
-        .replace("__JET_OWNER_DECLARED__", &owner_declared)
-        .replace("__JET_HOST_VALUE__", &host_value)
-        .replace("__JET_HOST_HANDLE__", &host_handle)
-        .replace("__JET_HOST_DATA__", &host_data)
-        .replace("__JET_HOST_CLOSURE__", &host_closure)
-        .replace("__JET_HOST_SHARED_CARRIER__", &host_shared_carrier)
-        .replace("__JET_HOST_KIND_SHARED__", &host_kind_shared)
-        .replace("__JET_PHYSICAL_SHARED__", &physical_shared)
-        .replace("__JET_PHYSICAL_WEAK__", &physical_weak)
-        .replace("__JET_CARRIER_PHYSICAL__", &carrier_physical)
-        .replace("__JET_CARRIER_KIND__", &carrier_kind)
-        .replace("__JET_VALUE_METADATA__", &value_metadata)
-        .replace("__JET_VALUE_PHYSICAL_ROOT__", &value_physical_root)
-        .replace("__JET_WEAK_METADATA__", &weak_metadata)
-        .replace("__JET_WEAK_PHYSICAL_ROOT__", &weak_physical_root)
-        .replace("__JET_CAP_HANDLE__", &cap_handle)
-        .replace("__JET_CAP_RAW__", &cap_raw)
-        .replace("__JET_CAP_GENERATION__", &cap_generation)
-        .replace("__JET_CAP_TYPE_IDENTITY__", &cap_type_identity)
-        .replace("__JET_CAP_PHYSICAL_IDENTITY__", &cap_physical_identity)
-        .replace("__JET_WEAK_CAP_HANDLE__", &weak_cap_handle)
-        .replace("__JET_WEAK_CAP_RAW__", &weak_cap_raw)
-        .replace("__JET_WEAK_CAP_GENERATION__", &weak_cap_generation)
-        .replace("__JET_WEAK_CAP_TYPE_IDENTITY__", &weak_cap_type_identity)
-        .replace("__JET_WEAK_CAP_PHYSICAL_IDENTITY__", &weak_cap_physical_identity)
-        .replace("__JET_EVAL_RESULT__", &eval_result)
-        .replace("__JET_HOST_TYPE_SHAPE__", &host_type_shape)
-        .replace("__JET_RESULT_TRANSFER_RECEIPT__", &result_transfer_receipt)
-        .replace("__JET_RESULT_HOST_TYPE_SHAPE__", &result_host_type_shape)
-        .replace("__JET_RESULT_TRANSFER_PREPARE__", &result_transfer_prepare)
-        .replace("__JET_RESULT_TRANSFER_COMMIT__", &result_transfer_commit)
-        .replace("__JET_RESULT_TRANSFER_DISPOSE__", &result_transfer_dispose)
-        .replace("__JET_EVAL_MACHINE__", &eval_machine)
-        .replace("__JET_EVAL_CONFIG__", &symbols.type_symbol("JetEvalConfig")?)
-        .replace("__JET_RESULT_TRANSFER_DISPOSITION__", &result_transfer_disposition)
-        .replace("__JET_TRANSFER_COMMITTED__", &transfer_committed)
-        .replace("__JET_TRANSFER_REJECTED__", &transfer_rejected)
-        .replace("__JET_TRANSFER_CONSUMED_FAILURE__", &transfer_consumed_failure)
-        .replace("__JET_HOST_ADAPTER_FIELD__", &host_adapter_field_symbol)
-        .replace("__JET_CT_UNIT__", &ct_unit)
-        .replace("__JET_TRAIT__", &symbols.trait_symbol("JetEvalHostAdapter")?)
+        .replace("__JET_TRAIT__", symbols.trait_symbol("JetEvalHostAdapter")?)
+        .replace(
+            "__JET_PHYSICAL_BINDING_METHOD__",
+            &symbols.trait_method_metadata("JetEvalHostAdapter", "physical_binding")?.symbol,
+        )
         .replace("__JET_HOST_OWNER__", &host_field.owner.0.to_string())
         .replace("__JET_HOST_FIELD__", &host_field.field.0.to_string())
         .replace("__JET_NUMERIC_OWNER__", &numeric_field.owner.0.to_string())

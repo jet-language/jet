@@ -22,11 +22,11 @@ use jet_jit::SourceResources::{
 use std::path::Path;
 use std::fmt::Write as _;
 
+/// The tier that ran the compiler factory. Stage zero runs it only as AOT
+/// Rust; the Jet backend's tiers replace the retired JIT and interpreter ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum BootstrapFactoryTier {
     Aot,
-    CraneliftJit,
-    SourceInterpreterDeopt,
 }
 
 /// One private compiler artifact after the canonical Host adapter has been
@@ -782,19 +782,7 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
     if let Some(resources) = resources.as_ref() {
         completion_owner.set_resources(resources.clone());
     }
-    let actual_tier_is_valid = match (factory_tier, actual_factory_tier) {
-        (BootstrapFactoryTier::Aot, BootstrapFactoryTier::Aot)
-        | (
-            BootstrapFactoryTier::CraneliftJit,
-            BootstrapFactoryTier::CraneliftJit | BootstrapFactoryTier::SourceInterpreterDeopt,
-        )
-        | (
-            BootstrapFactoryTier::SourceInterpreterDeopt,
-            BootstrapFactoryTier::SourceInterpreterDeopt,
-        ) => true,
-        _ => false,
-    };
-    if selected_factory_tier != factory_tier || !actual_tier_is_valid {
+    if selected_factory_tier != factory_tier || actual_factory_tier != factory_tier {
         retire_bootstrap_resources(resources, completion_scope)?;
         return Err(BootstrapRunError::Codec(
             BootstrapHostCodecError::InvalidMetadata(
@@ -994,6 +982,7 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
             outcome: retired.outcome,
             value: retired.value.or(adopted_value),
             completion_owner: completion_owner.clone(),
+            soft_stop: retired.soft_stop,
             stdout: retired.stdout,
             stderr: retired.stderr,
             exit_code,

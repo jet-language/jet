@@ -448,14 +448,6 @@ fn exactly_one_type_arg(
     Some(type_args[0].clone())
 }
 
-fn model_type_leaf(ty: &Type) -> Option<&str> {
-    match ty {
-        Type::Named(name) => Some(name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf)),
-        Type::TraitObject(names) if names.len() == 1 => names.first().map(String::as_str),
-        _ => None,
-    }
-}
-
 fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
     match expr {
         crate::AST::Expr::Int(value, ..) => Some(*value),

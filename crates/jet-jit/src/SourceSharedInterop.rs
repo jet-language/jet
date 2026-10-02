@@ -18,6 +18,11 @@ pub type SourceSharedInteropPayloadFinalizer =
     crate::Memory::shared_protocol::JetSharedPhysicalFinalizerBinding<MirRuntimeValue>;
 pub type SourceSharedInteropCompletionDelivery =
     crate::Memory::shared_protocol::JetSharedPhysicalCompletionDelivery;
+/// The physical-operation outcome every interop owner callback returns. Host
+/// glue linked against a separately compiled Source runtime builds it from the
+/// runtime's own outcome (the same result and completion carriers).
+pub type SourceSharedInteropOperationOutcome<T> =
+    crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<T>;
 type SourceSharedInteropPayloadFinalizerInstaller = Arc<
     dyn Fn(&mut Option<SourceSharedInteropPayloadFinalizer>) -> Result<(), String>
         + Send

@@ -395,9 +395,9 @@ fn __jet_bootstrap_harness_main() {
         .unwrap_or_else(|_| "aot".to_string());
     let factory_tier = match factory_tier_name.as_str() {
         "aot" => crate::BootstrapFactoryTier::Aot,
-        "cranelift-jit" => crate::BootstrapFactoryTier::CraneliftJit,
-        "source-interpreter-deopt" => crate::BootstrapFactoryTier::SourceInterpreterDeopt,
-        _ => panic!("unknown bootstrap factory tier `{factory_tier_name}`"),
+        _ => panic!(
+            "unknown bootstrap factory tier `{factory_tier_name}`: stage zero runs the compiler factory only as AOT"
+        ),
     };
     let source_root = std::env::var("JET_BOOTSTRAP_SOURCE_ROOT")
         .unwrap_or_else(|error| panic!("bootstrap source root is unavailable: {error}"));
@@ -419,6 +419,7 @@ fn __jet_bootstrap_harness_main() {
                 end: 1204,
             },
             1200,
+            0,
             "🧪",
         )
         .unwrap_or_else(|error| panic!("nonzero source-segment projection failed: {error}"));
@@ -441,8 +442,6 @@ fn __jet_bootstrap_harness_main() {
             .unwrap_or_else(|error| panic!("absent type identity encoding failed: {error}"));
         let present_carrier = crate::__jet_bootstrap_type_from_host(&present)
             .unwrap_or_else(|error| panic!("present type identity encoding failed: {error}"));
-        assert!(absent_carrier.identity.as_ref().is_err());
-        assert!(present_carrier.identity.as_ref().is_ok());
         let absent_roundtrip = crate::__jet_bootstrap_type_to_host(&absent_carrier)
             .unwrap_or_else(|error| panic!("absent type identity decoding failed: {error}"));
         let present_roundtrip = crate::__jet_bootstrap_type_to_host(&present_carrier)
@@ -450,7 +449,7 @@ fn __jet_bootstrap_harness_main() {
         assert_eq!(absent_roundtrip.identity, None);
         assert_eq!(present_roundtrip.identity, present.identity);
         let expected_trait =
-            ::jet_foundation::MIR::MirTraitRef::from_name("JetEvalHostAdapter");
+            ::jet_foundation::MIR::MirNominalRef::from_name("JetEvalHostAdapter");
         let trait_ty = ::jet_foundation::MIR::MirType::from_kind(
             ::jet_foundation::MIR::MirTypeKind::TraitObject(vec![expected_trait.clone()]),
         );
@@ -465,8 +464,8 @@ fn __jet_bootstrap_harness_main() {
         assert_eq!(trait_bounds, &[expected_trait]);
         let zero_trait_ty = ::jet_foundation::MIR::MirType::from_kind(
             ::jet_foundation::MIR::MirTypeKind::TraitObject(vec![
-                ::jet_foundation::MIR::MirTraitRef {
-                    id: ::jet_foundation::MIR::MirTraitId(0),
+                ::jet_foundation::MIR::MirNominalRef {
+                    id: ::jet_foundation::MIR::MirTypeId(0),
                     name: "JetEvalHostAdapter".to_string(),
                 },
             ]),
@@ -1159,7 +1158,9 @@ fn build_stage_zero(repo: &Path, task_roots: bool) -> StageZero {
     let keep = std::env::var_os("JET_STAGE_ZERO_KEEP").map(PathBuf::from);
     // A kept backend project survives a failed backend build, so the emitted
     // Rust can be re-checked (`cargo check --manifest-path <keep>/stage-zero/
-    // Cargo.toml`) without re-running the frontend.
+    // Cargo.toml`) without re-running the frontend, and
+    // `Tools/stage0-repack/repack.sh <keep>` reruns only the Host/Runner
+    // packaging after a generator edit.
     let stage_zero_project = keep
         .as_ref()
         .map_or_else(|| session.join("stage-zero"), |keep| keep.join("stage-zero"));
@@ -1177,6 +1178,7 @@ fn build_stage_zero(repo: &Path, task_roots: bool) -> StageZero {
             &stage_zero_source,
             &stage_zero_image,
             stage_zero_ffi.as_ref(),
+            &compiler_snapshot,
             &input_stamp,
         );
     }
@@ -1382,17 +1384,42 @@ fn resumable_stage_zero_source(
 /// which the backend crate holds as `src/compiler.image`) and its FFI bridge
 /// (`stage-zero.ffi`: crate name and directory, empty without a bridge) with its
 /// input stamp; the stamp is written last so a half-written source never matches.
+/// The authorized compiler sources go to `compiler-project/`, so
+/// `Tools/stage0-repack` can repackage this run after the shared assembly
+/// directory has moved on (the image binds their authority digest).
 fn retain_stage_zero_source(
     keep: &Path,
     source: &str,
     image: &[u8],
     ffi: Option<&BackendFfiCrate>,
+    compiler_snapshot: &crate::AuthorizedSourceSnapshot,
     input_stamp: &str,
 ) {
     fs::create_dir_all(keep).unwrap_or_else(|error| {
         panic!("cannot create stage-zero keep directory `{}`: {error}", keep.display())
     });
     let _ = fs::remove_file(keep.join("stage-zero.stamp"));
+    let sources = keep.join("compiler-project");
+    match fs::remove_dir_all(&sources) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("cannot clear retained compiler sources `{}`: {error}", sources.display()),
+    }
+    for file in compiler_snapshot
+        .roots
+        .iter()
+        .flat_map(|root| root.files.iter().chain(&root.foreign_cache_files))
+    {
+        let target = sources.join(&file.relative_path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).unwrap_or_else(|error| {
+                panic!("cannot create retained source directory `{}`: {error}", parent.display())
+            });
+        }
+        fs::write(&target, &file.source).unwrap_or_else(|error| {
+            panic!("cannot write retained compiler source `{}`: {error}", target.display())
+        });
+    }
     let ffi = ffi.map_or_else(String::new, |ffi| format!("{}\n{}\n", ffi.name, ffi.dir.display()));
     for (name, bytes) in [
         ("stage-zero.rs", source.as_bytes()),
@@ -1541,50 +1568,10 @@ fn bootstrap_private_self_compile_harness() {
         &task_roots_receipt,
     );
     assert_task_roots_receipt(&task_roots_output, &task_roots_receipt);
-    for (tier_name, selected, actual) in [
-        ("cranelift-jit", "CraneliftJit", &["CraneliftJit", "SourceInterpreterDeopt"][..]),
-        ("source-interpreter-deopt", "SourceInterpreterDeopt", &["SourceInterpreterDeopt"][..]),
-    ] {
-        let output = session.join(format!("{tier_name}-task-roots.out"));
-        let receipt = session.join(format!("{tier_name}-task-roots.receipt"));
-        run_generated_artifact_with_tier(
-            &stage_zero_binary,
-            "task-roots",
-            &compiler_project,
-            BOOTSTRAP_ENTRY_RELATIVE,
-            &output,
-            &receipt,
-            tier_name,
-        );
-        assert_task_roots_receipt_for_tier(&output, &receipt, selected, actual);
-    }
 
     let small_project = session.join("small-program");
     let small_entry = write_small_program(&small_project);
     assert_optional_codec_roundtrip(&stage_zero_binary, &small_project, &session, "stage-zero");
-    for (tier_name, selected, actual) in [
-        ("cranelift-jit", "CraneliftJit", &["CraneliftJit", "SourceInterpreterDeopt"][..]),
-        ("source-interpreter-deopt", "SourceInterpreterDeopt", &["SourceInterpreterDeopt"][..]),
-    ] {
-        for mode in ["factory", "runner"] {
-            let output = session.join(format!("{tier_name}-{mode}.rs"));
-            let receipt = session.join(format!("{tier_name}-{mode}.receipt"));
-            run_generated_artifact_with_tier(
-                &stage_zero_binary,
-                mode,
-                &small_project,
-                SMALL_ENTRY_RELATIVE,
-                &output,
-                &receipt,
-                tier_name,
-            );
-            match mode {
-                "factory" => assert_factory_receipt_for_tier(&receipt, selected, actual),
-                "runner" => assert_runner_receipt_for_tier(&receipt, selected, actual),
-                _ => unreachable!(),
-            }
-        }
-    }
     let stage_zero_small_source = session.join("stage-zero-small.rs");
     let stage_zero_small_receipt = session.join("stage-zero-small.receipt");
     run_generated_artifact(
@@ -1661,18 +1648,6 @@ fn bootstrap_private_self_compile_harness() {
         "distinct generated compiler artifacts must not reuse one identity"
     );
     assert_optional_codec_roundtrip(&stage_one_binary, &small_project, &session, "stage-one");
-    source_lease.revalidate().unwrap_or_else(|error| {
-        panic!("compiler source authority changed before stage-one non-AOT source runs: {error:?}")
-    });
-    assert_non_aot_compiler_source_artifacts(
-        &stage_one_binary,
-        &compiler_project,
-        &session,
-        "stage-one",
-    );
-    source_lease.revalidate().unwrap_or_else(|error| {
-        panic!("compiler source authority changed after stage-one non-AOT source runs: {error:?}")
-    });
 
     let stage_one_small_source = session.join("stage-one-small.rs");
     let stage_one_small_receipt = session.join("stage-one-small.receipt");
@@ -1746,19 +1721,7 @@ fn bootstrap_private_self_compile_harness() {
         "distinct generated compiler artifacts must not reuse one identity"
     );
     assert_optional_codec_roundtrip(&stage_two_binary, &small_project, &session, "stage-two");
-    source_lease.revalidate().unwrap_or_else(|error| {
-        panic!("compiler source authority changed before stage-two non-AOT source runs: {error:?}")
-    });
-    assert_non_aot_compiler_source_artifacts(
-        &stage_two_binary,
-        &compiler_project,
-        &session,
-        "stage-two",
-    );
     assert_mir_optimizer_compiler_source(&stage_two_binary, &compiler_project, &session);
-    source_lease.revalidate().unwrap_or_else(|error| {
-        panic!("compiler source authority changed after stage-two non-AOT source runs: {error:?}")
-    });
     assert_mir_optimizer_fixtures(&stage_two_binary, repo, &session);
 
     let invalid_project = session.join("invalid-imported-source");
@@ -2020,23 +1983,6 @@ fn bootstrap_private_self_compile_harness() {
         &partial_move_project,
         &partial_move_expected_stdout,
     );
-    for (tier_name, selected, actual_tiers) in [
-        ("cranelift-jit", "CraneliftJit", &["CraneliftJit", "SourceInterpreterDeopt"][..]),
-        ("source-interpreter", "SourceInterpreter", &["SourceInterpreter"][..]),
-    ] {
-        let label = format!("core_files_partial_move_siblings-{tier_name}");
-        compile_and_run_source_fixture_with_tier(
-            &stage_two_binary,
-            repo,
-            &session,
-            &label,
-            &partial_move_project,
-            &partial_move_expected_stdout,
-            tier_name,
-            selected,
-            actual_tiers,
-        );
-    }
     let uninit_partial_exit_project = session.join("uninit-fixed-partial-exit");
     write_source_fixture_project(
         &uninit_partial_exit_project,
@@ -2052,31 +1998,6 @@ fn bootstrap_private_self_compile_harness() {
         &uninit_partial_exit_project,
         uninit_partial_exit_expected_stdout,
     );
-    for (tier_name, selected, actual_tiers) in [
-        (
-            "cranelift-jit",
-            "CraneliftJit",
-            &["CraneliftJit", "SourceInterpreterDeopt"][..],
-        ),
-        (
-            "source-interpreter",
-            "SourceInterpreter",
-            &["SourceInterpreter"][..],
-        ),
-    ] {
-        let label = format!("uninit_fixed_partial_exit-{tier_name}");
-        compile_and_run_source_fixture_with_tier(
-            &stage_two_binary,
-            repo,
-            &session,
-            &label,
-            &uninit_partial_exit_project,
-            uninit_partial_exit_expected_stdout,
-            tier_name,
-            selected,
-            actual_tiers,
-        );
-    }
 
 
 
@@ -2323,44 +2244,6 @@ fn compile_and_run_source_fixture(
         String::from_utf8_lossy(&output.stdout),
         expected_stdout,
         "generated `{label}` fixture output differs from its executable source contract"
-    );
-}
-fn compile_and_run_source_fixture_with_tier(
-    compiler: &Path,
-    repo: &Path,
-    session: &Path,
-    label: &str,
-    project: &Path,
-    expected_stdout: &str,
-    tier: &str,
-    selected_tier: &str,
-    actual_tiers: &[&str],
-) {
-    let raw_source = session.join(format!("{label}.raw.rs"));
-    let receipt = session.join(format!("{label}.receipt"));
-    run_generated_artifact_with_tier(
-        compiler,
-        "runner",
-        project,
-        SMALL_ENTRY_RELATIVE,
-        &raw_source,
-        &receipt,
-        tier,
-    );
-    assert_runner_receipt_for_tier(&receipt, selected_tier, actual_tiers);
-    let source = fs::read_to_string(&raw_source).unwrap_or_else(|error| {
-        panic!("generated {tier} compiler did not emit `{}`: {error}", raw_source.display())
-    });
-    let backend_project = session.join(format!("{label}-backend"));
-    let (binary, _) = build_backend_artifact(repo, &backend_project, label, &source);
-    let output = Command::new(&binary)
-        .output()
-        .unwrap_or_else(|error| panic!("cannot execute generated {tier} `{label}` fixture: {error}"));
-    assert_command_success(&format!("generated {tier} `{label}` fixture"), &output);
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        expected_stdout,
-        "generated {tier} compiler output differs from the executable Source fixture contract"
     );
 }
 
@@ -3882,29 +3765,8 @@ fn run_generated_artifact(
     output_path: &Path,
     receipt_path: &Path,
 ) {
-    run_generated_artifact_with_tier(
-        binary,
-        mode,
-        source_root,
-        entry,
-        output_path,
-        receipt_path,
-        "aot",
-    );
-}
-
-fn run_generated_artifact_with_tier(
-    binary: &Path,
-    mode: &str,
-    source_root: &Path,
-    entry: &str,
-    output_path: &Path,
-    receipt_path: &Path,
-    tier: &str,
-) {
     let result = Command::new(binary)
         .env("JET_BOOTSTRAP_MODE", mode)
-        .env("JET_BOOTSTRAP_FACTORY_TIER", tier)
         .env("JET_BOOTSTRAP_SOURCE_ROOT", source_root)
         .env("JET_BOOTSTRAP_ENTRY", entry)
         .env("JET_BOOTSTRAP_OUTPUT", output_path)
@@ -3927,61 +3789,37 @@ fn run_generated_artifact_with_tier(
     );
 }
 
-fn assert_tier_provenance<'r>(receipt: &'r str, selected: &str, actual_tiers: &[&str]) -> &'r str {
-    let actual = receipt
-        .lines()
-        .find_map(|line| line.strip_prefix("actual_factory_tier="))
-        .unwrap_or_else(|| panic!("factory receipt has no actual-tier provenance"));
+fn assert_aot_provenance(receipt: &str) {
     assert!(
-        receipt
-            .lines()
-            .any(|line| line.strip_prefix("selected_factory_tier=") == Some(selected)),
-        "factory receipt selected a tier other than {selected}"
+        receipt.lines().any(|line| line == "selected_factory_tier=Aot"),
+        "factory receipt selected a tier other than Aot"
     );
     assert!(
-        actual_tiers.contains(&actual),
-        "factory actual tier {actual} is not allowed for selected tier {selected}"
+        receipt.lines().any(|line| line == "actual_factory_tier=Aot"),
+        "factory receipt ran a tier other than Aot"
     );
-    actual
 }
 
 fn assert_factory_receipt(path: &Path) {
-    assert_factory_receipt_for_tier(path, "Aot", &["Aot"]);
-}
-
-fn assert_factory_receipt_for_tier(path: &Path, selected: &str, actual_tiers: &[&str]) {
     let receipt = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read factory receipt `{}`: {error}", path.display()));
     assert!(receipt.lines().any(|line| line == "mode=factory"));
     assert!(receipt.lines().any(|line| line == "complete=true"));
-    assert_tier_provenance(&receipt, selected, actual_tiers);
+    assert_aot_provenance(&receipt);
     assert_receipt_count_at_least(&receipt, "source_bytes", 1);
     assert_receipt_count_at_least(&receipt, "callables", 1);
 }
 
 fn assert_runner_receipt(path: &Path) {
-    assert_runner_receipt_for_tier(path, "Aot", &["Aot"]);
-}
-
-fn assert_runner_receipt_for_tier(path: &Path, selected: &str, actual_tiers: &[&str]) {
     let receipt = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read Runner receipt `{}`: {error}", path.display()));
     assert!(receipt.lines().any(|line| line == "mode=runner"));
     assert!(receipt.lines().any(|line| line == "complete=true"));
-    assert_tier_provenance(&receipt, selected, actual_tiers);
+    assert_aot_provenance(&receipt);
     assert_receipt_count_at_least(&receipt, "source_bytes", 1);
 }
 
 fn assert_task_roots_receipt(output_path: &Path, receipt_path: &Path) {
-    assert_task_roots_receipt_for_tier(output_path, receipt_path, "Aot", &["Aot"]);
-}
-
-fn assert_task_roots_receipt_for_tier(
-    output_path: &Path,
-    receipt_path: &Path,
-    selected: &str,
-    actual_tiers: &[&str],
-) {
     let output = fs::read_to_string(output_path).unwrap_or_else(|error| {
         panic!(
             "cannot read task-root fixture output `{}`: {error}",
@@ -3995,12 +3833,9 @@ fn assert_task_roots_receipt_for_tier(
             receipt_path.display()
         )
     });
-    let actual = assert_tier_provenance(&receipt, selected, actual_tiers);
     assert_eq!(
         receipt,
-        format!(
-            "mode=task-roots\nstatus=passed\nselected_factory_tier={selected}\nactual_factory_tier={actual}\ncallback_capture_params=1\ncallback_escapes=true\ncallback_moves=0\ncursor_close_count=1\nshared_producer_machine_retired=true\nshared_parent_retirement_requested=true\nshared_parent_retirement_deferred=true\nshared_consumer_completed=true\nshared_payload_finalizer_completed=true\nretained_roots=0\n"
-        )
+        "mode=task-roots\nstatus=passed\nselected_factory_tier=Aot\nactual_factory_tier=Aot\ncallback_capture_params=1\ncallback_escapes=true\ncallback_moves=0\ncursor_close_count=1\nshared_producer_machine_retired=true\nshared_parent_retirement_requested=true\nshared_parent_retirement_deferred=true\nshared_consumer_completed=true\nshared_payload_finalizer_completed=true\nretained_roots=0\n"
     );
 }
 
@@ -4027,47 +3862,6 @@ fn assert_optional_codec_roundtrip(binary: &Path, project: &Path, session: &Path
         "identity=absent,present\n"
     );
 }
-fn assert_non_aot_compiler_source_artifacts(
-    binary: &Path,
-    compiler_project: &Path,
-    session: &Path,
-    stage: &str,
-) {
-    for (tier, selected) in [
-        ("cranelift-jit", "CraneliftJit"),
-        ("source-interpreter", "SourceInterpreter"),
-    ] {
-        let actual_tiers: &[&str] = if tier == "cranelift-jit" {
-            &["CraneliftJit", "SourceInterpreterDeopt"]
-        } else {
-            &["SourceInterpreter"]
-        };
-        for mode in ["factory", "runner"] {
-            let name = format!("{stage}-compiler-source-{tier}-{mode}");
-            let output = session.join(format!("{name}.rs"));
-            let receipt = session.join(format!("{name}.receipt"));
-            run_generated_artifact_with_tier(
-                binary,
-                mode,
-                compiler_project,
-                BOOTSTRAP_ENTRY_RELATIVE,
-                &output,
-                &receipt,
-                tier,
-            );
-            match mode {
-                "factory" => assert_factory_receipt_for_tier(&receipt, selected, actual_tiers),
-                "runner" => assert_runner_receipt_for_tier(&receipt, selected, actual_tiers),
-                _ => unreachable!("only factory and runner modes are exercised"),
-            }
-            assert!(
-                output.is_file(),
-                "{stage} {tier} {mode} did not emit a full compiler-source backend artifact"
-            );
-        }
-    }
-}
-
 fn assert_mir_optimizer_compiler_source(binary: &Path, compiler_project: &Path, session: &Path) {
     let output = session.join("compiler-source-optimizer-evidence.out");
     let receipt = session.join("compiler-source-optimizer-evidence.receipt");

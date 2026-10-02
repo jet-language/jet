@@ -14,7 +14,9 @@ use crate::Codegen::MIRRust::{
     MirRustTraitMethodMetadata, MirRustVariantMetadata,
 };
 use jet_jit::SourceResources::SourceResourceRetireError;
-use jet_foundation::MIR::{MirFieldId, MirProgram, MirType, MirTypeId};
+use jet_foundation::MIR::{
+    MirFieldId, MirProgram, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirVariantPayload,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Write as _};
@@ -379,6 +381,7 @@ pub(crate) fn invoke_with_authority<R>(
 /// `JetDriverRecordStore`. The host owns where records live; the compiler
 /// names a record only by schema and key. Every failure is a miss: an unknown
 /// schema, an unreadable or undecodable record, or a rejected publish.
+#[derive(Clone)]
 pub(crate) struct BootstrapRecordStore {
     store: jet_store::Store,
 }
@@ -622,6 +625,9 @@ impl BootstrapBindingDescriptor {
 
 pub(crate) struct BootstrapCodecSymbols<'a> {
     metadata: &'a BootstrapBindingDescriptor,
+    // The checked program the bindings were emitted from: the authority for
+    // payload shapes and the emitter's boxed (recursive) edges.
+    program: &'a MirProgram,
     types: BTreeMap<&'a str, &'a str>,
     // First row per key, matching the linear-scan meaning these replace: the
     // host glue walks the whole compiler type graph once per root, so each
@@ -642,11 +648,14 @@ pub(crate) struct BootstrapCodecSymbols<'a> {
 const MISSING_SYMBOL: &str = "__jet_bootstrap_missing_symbol";
 
 impl<'a> BootstrapCodecSymbols<'a> {
-    pub(crate) fn new(metadata: &'a BootstrapBindingDescriptor) -> Result<Self, BootstrapHostCodecError> {
+    pub(crate) fn new(
+        metadata: &'a BootstrapBindingDescriptor,
+        program: &'a MirProgram,
+    ) -> Result<Self, BootstrapHostCodecError> {
         let mut types = BTreeMap::new();
         let mut definitions = HashMap::new();
         for row in &metadata.types {
-            types.insert(row.source_name.as_str(), row.symbol.as_str());
+            types.entry(row.source_name.as_str()).or_insert(row.symbol.as_str());
             definitions.entry(row.source_name.as_str()).or_insert(row.ty);
         }
         let mut fields = HashMap::new();
@@ -661,7 +670,16 @@ impl<'a> BootstrapCodecSymbols<'a> {
                 .entry((row.owner, row.source_name.as_str()))
                 .or_insert(row.symbol.as_str());
         }
-        Ok(Self { metadata, types, definitions, fields, field_ids, variants, missed: RefCell::new(Vec::new()) })
+        Ok(Self {
+            metadata,
+            program,
+            types,
+            definitions,
+            fields,
+            field_ids,
+            variants,
+            missed: RefCell::new(Vec::new()),
+        })
     }
 
     /// Keep a packaging failure and go on, so `finish` reports it with the rest.
@@ -773,6 +791,376 @@ impl<'a> BootstrapCodecSymbols<'a> {
     ) -> Result<String, BootstrapHostCodecError> {
         Ok(self.variant_symbol(owner, variant)?.to_string())
     }
+
+    /// The checked definition row of a bound nominal type.
+    pub(crate) fn definition(&self, owner: &str) -> Result<&'a MirTypeDef, BootstrapHostCodecError> {
+        let id = self.definition_id(owner)?;
+        self.program
+            .types
+            .iter()
+            .find(|definition| definition.id == id)
+            .ok_or_else(|| BootstrapHostCodecError::MissingType(owner.to_string()))
+    }
+
+    /// The emitted Rust path and checked payload of `owner::variant`.
+    fn variant_payload(
+        &self,
+        owner: &str,
+        variant: &str,
+    ) -> Result<(String, &'a MirTypeDef, &'a MirVariantPayload), BootstrapHostCodecError> {
+        let path = self.variant_path(owner, variant)?;
+        let definition = self.definition(owner)?;
+        let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "bootstrap codec type `{owner}` is not an enum"
+            )));
+        };
+        let payload = variants
+            .iter()
+            .find(|candidate| candidate.name == variant)
+            .map(|candidate| &candidate.payload)
+            .ok_or_else(|| BootstrapHostCodecError::MissingVariant {
+                owner: owner.to_string(),
+                variant: variant.to_string(),
+            })?;
+        Ok((path, definition, payload))
+    }
+
+    /// Pairs each listed payload field with its emitted symbol and whether the
+    /// emitter boxes it. The list must name exactly the declared payload, so a
+    /// drifted Jet declaration fails packaging instead of emitting stale Rust.
+    fn named_payload<'f, T: Copy>(
+        &self,
+        owner: &str,
+        variant: &str,
+        definition: &MirTypeDef,
+        declared: &[jet_foundation::MIR::MirField],
+        listed: &[(&'f str, T)],
+    ) -> Result<Vec<(&str, bool, T)>, BootstrapHostCodecError> {
+        let mismatch = || {
+            BootstrapHostCodecError::InvalidMetadata(format!(
+                "host glue lists payload [{}] for `{owner}::{variant}`, the checked payload is [{}]",
+                listed.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", "),
+                declared.iter().map(|field| field.name.as_str()).collect::<Vec<_>>().join(", "),
+            ))
+        };
+        if listed.len() != declared.len() {
+            return Err(mismatch());
+        }
+        listed
+            .iter()
+            .map(|(name, item)| {
+                let field = declared.iter().find(|field| field.name == *name).ok_or_else(mismatch)?;
+                let symbol = self
+                    .field_binding_by_id(definition.id, owner, field.id, &field.name)?
+                    .symbol
+                    .as_str();
+                let boxed = definition.boxed_edges.iter().any(|edge| *edge == format!("{variant}.{name}"));
+                Ok((symbol, boxed, *item))
+            })
+            .collect()
+    }
+
+    /// A Rust pattern for `owner::variant`. Each entry is a checked payload
+    /// field name, optionally `field: binding` (the binding defaults to the
+    /// field name); `[".."]` ignores the whole payload. Boxed payload fields
+    /// bind the `Box` itself.
+    pub(crate) fn variant_pattern(
+        &self,
+        owner: &str,
+        variant: &str,
+        bindings: &[&str],
+    ) -> Result<String, BootstrapHostCodecError> {
+        let (path, definition, payload) = self.variant_payload(owner, variant)?;
+        let ignore_all = bindings == [".."];
+        Ok(match payload {
+            MirVariantPayload::Unit if bindings.is_empty() || ignore_all => path,
+            MirVariantPayload::Single(_) if ignore_all => format!("{path}(..)"),
+            MirVariantPayload::Single(_) if bindings.len() == 1 => {
+                let binding = bindings[0].split_once(':').map_or(bindings[0], |(_, binding)| binding.trim());
+                format!("{path}({binding})")
+            }
+            MirVariantPayload::Named(_) if ignore_all => format!("{path} {{ .. }}"),
+            MirVariantPayload::Named(declared) => {
+                let listed = bindings
+                    .iter()
+                    .map(|entry| match entry.split_once(':') {
+                        Some((field, binding)) => (field.trim(), binding.trim()),
+                        None => (entry.trim(), entry.trim()),
+                    })
+                    .collect::<Vec<_>>();
+                let fields = self.named_payload(owner, variant, definition, declared, &listed)?;
+                format!(
+                    "{path} {{ {} }}",
+                    fields
+                        .iter()
+                        .map(|(symbol, _, binding)| format!("{symbol}: {binding}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            _ => {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "host glue binds {} payload values of `{owner}::{variant}`, which has a different checked payload",
+                    bindings.len()
+                )))
+            }
+        })
+    }
+
+    /// A Rust constructor for `owner::variant` from `(field, expression)`
+    /// pairs naming exactly the checked payload. Fields the emitter boxes are
+    /// wrapped in `Box::new`.
+    pub(crate) fn variant_value(
+        &self,
+        owner: &str,
+        variant: &str,
+        values: &[(&str, &str)],
+    ) -> Result<String, BootstrapHostCodecError> {
+        let (path, definition, payload) = self.variant_payload(owner, variant)?;
+        let boxed = |boxed: bool, value: &str| {
+            if boxed { format!("Box::new({value})") } else { value.to_string() }
+        };
+        Ok(match payload {
+            MirVariantPayload::Unit if values.is_empty() => path,
+            MirVariantPayload::Single(_) if values.len() == 1 => format!(
+                "{path}({})",
+                boxed(definition.boxed_edges.iter().any(|edge| edge == variant), values[0].1)
+            ),
+            MirVariantPayload::Named(declared) => {
+                let fields = self.named_payload(owner, variant, definition, declared, values)?;
+                format!(
+                    "{path} {{ {} }}",
+                    fields
+                        .iter()
+                        .map(|(symbol, is_boxed, value)| format!("{symbol}: {}", boxed(*is_boxed, value)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            _ => {
+                return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                    "host glue builds `{owner}::{variant}` from {} values, which does not match its checked payload",
+                    values.len()
+                )))
+            }
+        })
+    }
+
+    /// `symbol: value` for one struct field, wrapping `value` in `Box::new`
+    /// when the emitter boxes the field.
+    pub(crate) fn field_init(
+        &self,
+        owner: &str,
+        field: &str,
+        value: &str,
+    ) -> Result<String, BootstrapHostCodecError> {
+        let symbol = self.field_symbol(owner, field)?;
+        Ok(if self.definition(owner)?.boxed_edges.iter().any(|edge| edge == field) {
+            format!("{symbol}: Box::new({value})")
+        } else {
+            format!("{symbol}: {value}")
+        })
+    }
+
+    /// `symbol(arguments)` calling one checked Source callable. Each
+    /// `(place, owned)` value is passed the way the emitter spells its
+    /// parameter (`&mut place`, `&place`, or the owned expression), so the
+    /// call follows the checked access of every parameter.
+    pub(crate) fn call(
+        &self,
+        source_name: &str,
+        values: &[(&str, &str)],
+    ) -> Result<String, BootstrapHostCodecError> {
+        let binding = checked_bootstrap_callable(self.metadata, source_name)?;
+        if binding.metadata.parameter_types.len() != values.len() {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "host glue calls `{source_name}` with {} arguments; its checked signature has {}",
+                values.len(),
+                binding.metadata.parameter_types.len()
+            )));
+        }
+        Ok(format!(
+            "{}({})",
+            binding.metadata.symbol,
+            bootstrap_call_arguments(&binding.metadata.parameter_types, values)
+        ))
+    }
+
+    /// Whether the emitter boxes `owner`'s edge (`field` for a struct field,
+    /// `Variant.field` for a payload field, `Variant` for a single payload).
+    pub(crate) fn boxed_edge(definition: &MirTypeDef, edge: &str) -> bool {
+        definition.boxed_edges.iter().any(|candidate| candidate == edge)
+    }
+
+    /// A Rust struct literal of `owner` from `(field, expression)` pairs naming
+    /// exactly its checked fields; boxed fields are wrapped in `Box::new`.
+    pub(crate) fn struct_value(
+        &self,
+        owner: &str,
+        values: &[(&str, &str)],
+    ) -> Result<String, BootstrapHostCodecError> {
+        let definition = self.definition(owner)?;
+        let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "bootstrap codec type `{owner}` is not a struct"
+            )));
+        };
+        let listed = values.iter().map(|(name, _)| *name).collect::<Vec<_>>();
+        if listed.len() != fields.len() || fields.iter().any(|field| !listed.contains(&field.name.as_str())) {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "host glue builds `{owner}` from fields [{}], the checked fields are [{}]",
+                listed.join(", "),
+                fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>().join(", "),
+            )));
+        }
+        let initializers = values
+            .iter()
+            .map(|(field, value)| self.field_init(owner, field, value))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(format!("{} {{ {} }}", self.type_symbol(owner)?, initializers.join(", ")))
+    }
+
+    /// `*` when the emitter boxes `owner.field` (a struct field) or
+    /// `owner::variant.field` (a payload field), else empty: a dereference
+    /// prefix that turns a read of the emitted field into the checked type.
+    fn boxed_deref(&self, owner: &str, edge: &str) -> Result<&'static str, BootstrapHostCodecError> {
+        Ok(if self.definition(owner)?.boxed_edges.iter().any(|candidate| candidate == edge) { "*" } else { "" })
+    }
+
+    /// Render a host-glue template against the binding metadata. Markers:
+    /// `@t.Type@` type, `@f.Type.field@` field symbol, `@v.Type.Variant@`
+    /// variant path, `@deref.Type.field@` / `@deref.Type.Variant.field@` the
+    /// boxed-edge dereference prefix, and the shape-checked literals
+    /// `@p.Type.Variant@{ field, field: binding }` (pattern),
+    /// `@new.Type.Variant@{ field: expr }` (enum value) and
+    /// `@s.Type@{ field: expr }` (struct value). Literal fields use checked Jet
+    /// names; a unit variant takes no braces and `{ .. }` ignores a payload.
+    /// A pattern or enum value may instead list its payload positionally,
+    /// directly after the marker: `@p.Type.Variant@(binding, binding)` and
+    /// `@new.Type.Variant@(expr, expr)` name every declared payload field in
+    /// declaration order (`(..)` ignores a payload).
+    ///
+    /// A marker that does not match the checked shape is recorded and spelled
+    /// `MISSING_SYMBOL`, so one packaging run reports every drifted marker.
+    pub(crate) fn render(&self, template: &str) -> Result<String, BootstrapHostCodecError> {
+        let mut out = String::with_capacity(template.len());
+        let mut rest = template;
+        while let Some(start) = rest.find('@') {
+            out.push_str(&rest[..start]);
+            let after = &rest[start + 1..];
+            let marker = after.find('@').map(|end| &after[..end]).filter(|marker| {
+                matches!(marker.split('.').next(), Some("t" | "f" | "v" | "p" | "new" | "s" | "deref"))
+                    && marker.contains('.')
+                    && marker.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+            });
+            let Some(marker) = marker else {
+                out.push('@');
+                rest = after;
+                continue;
+            };
+            rest = &after[marker.len() + 1..];
+            match self.render_marker(marker, &mut rest) {
+                Ok(rendered) => out.push_str(&rendered),
+                Err(error) => {
+                    self.record(error);
+                    out.push_str(MISSING_SYMBOL);
+                }
+            }
+        }
+        out.push_str(rest);
+        Ok(out)
+    }
+
+    /// One `@marker@`; a literal marker also consumes its `{ ... }` or
+    /// `( ... )` body from `rest`.
+    fn render_marker(&self, marker: &str, rest: &mut &str) -> Result<String, BootstrapHostCodecError> {
+        let parts = marker.split('.').collect::<Vec<_>>();
+        let invalid = || BootstrapHostCodecError::InvalidMetadata(format!("malformed host glue marker `@{marker}@`"));
+        Ok(match parts.as_slice() {
+            ["t", owner] => self.type_symbol(owner)?.to_string(),
+            ["f", owner, field] => self.field_symbol(owner, field)?.to_string(),
+            ["v", owner, variant] => self.variant_path(owner, variant)?,
+            ["deref", owner, field] => self.boxed_deref(owner, field)?.to_string(),
+            ["deref", owner, variant, field] => self.boxed_deref(owner, &format!("{variant}.{field}"))?.to_string(),
+            [kind @ ("p" | "new" | "s"), owner, tail @ ..] => {
+                let entries = match template_literal_body(*rest) {
+                    Some(('{', body, remaining)) => {
+                        *rest = remaining;
+                        template_literal_entries(body)
+                    }
+                    Some((_, body, remaining)) => {
+                        *rest = remaining;
+                        let [variant] = tail else { return Err(invalid()) };
+                        self.positional_entries(owner, variant, body)?
+                    }
+                    None => Vec::new(),
+                };
+                let rendered = entries
+                    .iter()
+                    .map(|(name, value)| Ok((*name, value.map(|value| self.render(value)).transpose()?)))
+                    .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
+                match (*kind, tail) {
+                    ("p", [variant]) => {
+                        let bindings = rendered
+                            .iter()
+                            .map(|(name, binding)| match binding {
+                                Some(binding) => format!("{name}: {binding}"),
+                                None => name.to_string(),
+                            })
+                            .collect::<Vec<_>>();
+                        let bindings = bindings.iter().map(String::as_str).collect::<Vec<_>>();
+                        self.variant_pattern(owner, variant, &bindings)?
+                    }
+                    ("new", [variant]) => {
+                        let values = rendered
+                            .iter()
+                            .map(|(name, value)| (*name, value.as_deref().unwrap_or(*name)))
+                            .collect::<Vec<_>>();
+                        self.variant_value(owner, variant, &values)?
+                    }
+                    ("s", []) => {
+                        let values = rendered
+                            .iter()
+                            .map(|(name, value)| (*name, value.as_deref().unwrap_or(*name)))
+                            .collect::<Vec<_>>();
+                        self.struct_value(owner, &values)?
+                    }
+                    _ => return Err(invalid()),
+                }
+            }
+            _ => return Err(invalid()),
+        })
+    }
+
+    /// Map a positional payload list onto the declared payload of
+    /// `owner::variant`, in declaration order, as `(field, Some(entry))`
+    /// pairs. `(..)` stays the ignore-all entry.
+    fn positional_entries<'t>(
+        &'t self,
+        owner: &str,
+        variant: &str,
+        body: &'t str,
+    ) -> Result<Vec<(&'t str, Option<&'t str>)>, BootstrapHostCodecError> {
+        let entries = template_positional_entries(body);
+        if entries == [".."] {
+            return Ok(vec![("..", None)]);
+        }
+        let (_, _, payload) = self.variant_payload(owner, variant)?;
+        let declared = match payload {
+            MirVariantPayload::Named(declared) => declared.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+            MirVariantPayload::Single(_) => vec!["value"],
+            _ => Vec::new(),
+        };
+        if declared.len() != entries.len() {
+            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+                "host glue lists {} positional payload values for `{owner}::{variant}`, the checked payload is [{}]",
+                entries.len(),
+                declared.join(", "),
+            )));
+        }
+        Ok(declared.into_iter().zip(entries).map(|(name, entry)| (name, Some(entry))).collect())
+    }
     pub(crate) fn callable_symbol(
         &self,
         source_name: &str,
@@ -851,6 +1239,142 @@ impl<'a> BootstrapCodecSymbols<'a> {
             )));
         }
         Ok(methods)
+    }
+}
+
+/// The `{ ... }` body that follows a shape-checked template marker (after
+/// optional whitespace), or the positional `( ... )` body directly after it,
+/// with its opening delimiter and the text after its closing one. Nested
+/// delimiters and string literals inside the body are skipped.
+fn template_literal_body(text: &str) -> Option<(char, &str, &str)> {
+    let trimmed = text.trim_start();
+    let offset = text.len() - trimmed.len();
+    let open = trimmed.chars().next().filter(|open| *open == '{' || (*open == '(' && offset == 0))?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, ch) in trimmed.char_indices() {
+        if in_string {
+            match ch {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((open, &trimmed[1..index], &text[offset + index + 1..]));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split a template literal body into `field` / `field: expression` entries
+/// at its top-level commas. `::` path separators are not field separators.
+fn template_literal_entries(body: &str) -> Vec<(&str, Option<&str>)> {
+    let mut entries = Vec::new();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut start = 0;
+    let mut colon = None;
+    let mut angle = 0usize;
+    let bytes = body.as_bytes();
+    for (index, ch) in body.char_indices() {
+        if in_string {
+            match ch {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => depth -= 1,
+            '<' | '>' => template_angle_step(body, index, ch, &mut angle),
+            ':' if depth == 0
+                && angle == 0
+                && colon.is_none()
+                && bytes.get(index + 1) != Some(&b':')
+                && (index == 0 || bytes[index - 1] != b':') =>
+            {
+                colon = Some(index)
+            }
+            ',' if depth == 0 && angle == 0 => {
+                template_literal_entry(&body[start..index], colon.map(|colon| colon - start), &mut entries);
+                start = index + 1;
+                colon = None;
+            }
+            _ => {}
+        }
+    }
+    template_literal_entry(&body[start..], colon.map(|colon| colon - start), &mut entries);
+    entries
+}
+
+/// Split a positional `( ... )` body at its top-level commas.
+fn template_positional_entries(body: &str) -> Vec<&str> {
+    let mut entries = Vec::new();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut start = 0;
+    let mut angle = 0usize;
+    for (index, ch) in body.char_indices() {
+        if in_string {
+            match ch {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => depth -= 1,
+            '<' | '>' => template_angle_step(body, index, ch, &mut angle),
+            ',' if depth == 0 && angle == 0 => {
+                entries.push(body[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    entries.push(body[start..].trim());
+    entries.retain(|entry| !entry.is_empty());
+    entries
+}
+
+/// Track generic-argument nesting opened by a turbofish (`::<`), so commas
+/// in `collect::<Result<Vec<_>, _>>()` do not split entries. A bare `<` is a
+/// comparison and `->` / `=>` are not closers.
+fn template_angle_step(body: &str, index: usize, ch: char, angle: &mut usize) {
+    match ch {
+        '<' if *angle > 0 || body[..index].ends_with("::") => *angle += 1,
+        '>' if *angle > 0 && !matches!(body[..index].chars().last(), Some('-' | '=')) => *angle -= 1,
+        _ => {}
+    }
+}
+
+fn template_literal_entry<'t>(entry: &'t str, colon: Option<usize>, entries: &mut Vec<(&'t str, Option<&'t str>)>) {
+    match colon {
+        Some(colon) => entries.push((entry[..colon].trim(), Some(entry[colon + 1..].trim()))),
+        None if !entry.trim().is_empty() => entries.push((entry.trim(), None)),
+        None => {}
     }
 }
 
@@ -961,20 +1485,13 @@ fn bootstrap_required_callable<'a>(
     Ok(&checked_bootstrap_callable(metadata, name)?.metadata)
 }
 
+/// The checked Source callables the native compile entry reads facts from:
+/// the callback-transfer helper names the Source `JetEvalMachine` ABI type
+/// (its first parameter), and the host-shape accessor projects checked types
+/// into evaluator host shapes.
 #[derive(Clone, Debug)]
 struct BootstrapNativeHelperRoots {
-    roots: Vec<jet_foundation::MIR::MirFunctionId>,
-    task_callback_invoke: jet_foundation::MIR::MirFunctionId,
-    task_root_release: jet_foundation::MIR::MirFunctionId,
-    owned_root_drop: jet_foundation::MIR::MirFunctionId,
-    owned_callback_result_drop: jet_foundation::MIR::MirFunctionId,
     callback_transfer: jet_foundation::MIR::MirFunctionId,
-    callback_release: jet_foundation::MIR::MirFunctionId,
-    task_root_take: jet_foundation::MIR::MirFunctionId,
-    task_root_cleanup_root: jet_foundation::MIR::MirFunctionId,
-    owned_root_cleanup_clone: jet_foundation::MIR::MirFunctionId,
-    owned_root_drop_values: jet_foundation::MIR::MirFunctionId,
-    shared_payload_finalize: jet_foundation::MIR::MirFunctionId,
     host_type_shape: jet_foundation::MIR::MirFunctionId,
 }
 
@@ -1002,7 +1519,7 @@ fn checked_bootstrap_native_helper_roots(
     program: &MirProgram,
     artifact_id: jet_foundation::MIR::MirArtifactId,
 ) -> Result<BootstrapNativeHelperRoots, BootstrapHostCodecError> {
-    use jet_foundation::MIR::{MirArtifactTarget, MirFunctionId};
+    use jet_foundation::MIR::MirArtifactTarget;
 
     let artifact = program
         .artifacts
@@ -1016,22 +1533,7 @@ fn checked_bootstrap_native_helper_roots(
             "native helper roots require the canonical Rust AOT compiler artifact".to_string(),
         ));
     }
-    let seeds = [
-        "jet_eval_task_callback_invoke",
-        "jet_eval_task_root_release",
-        "jet_eval_owned_root_drop",
-        "jet_eval_owned_root_drop_callback_result",
-        "jet_eval_callback_transfer",
-        "jet_eval_task_root_take",
-        "jet_eval_callback_release",
-        "jet_eval_task_root_cleanup_root",
-        "jet_eval_owned_root_cleanup_clone",
-        "jet_eval_owned_root_drop_values",
-        "jet_eval_shared_payload_finalize",
-        "jet_eval_host_type_shape_from_program",
-    ];
-    let mut roots = BTreeMap::<u64, MirFunctionId>::new();
-    for name in seeds {
+    let checked = |name: &str| {
         let binding = checked_bootstrap_callable(metadata, name)?;
         if binding.metadata.symbol.is_empty() {
             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
@@ -1048,76 +1550,16 @@ fn checked_bootstrap_native_helper_roots(
         if !artifact.modules.contains(&function.module_id)
             || !function.capture_params.is_empty()
             || !function.target_applicability.rust_aot
-            || !function.target_applicability.interpreter
         {
             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
                 "checked private Source helper `{name}` is not capture-free and executable in artifact {artifact_id:?}"
             )));
         }
-        if roots.insert(function.id.0, function.id).is_some() {
-            return Err(BootstrapHostCodecError::InvalidMetadata(format!(
-                "checked native helper `{name}` aliases another private helper ID"
-            )));
-        }
-    }
-    let task_callback_invoke =
-        checked_bootstrap_callable(metadata, "jet_eval_task_callback_invoke")?
-            .metadata
-            .function;
-    let task_root_release = checked_bootstrap_callable(metadata, "jet_eval_task_root_release")?
-        .metadata
-        .function;
-    let owned_root_drop = checked_bootstrap_callable(metadata, "jet_eval_owned_root_drop")?
-        .metadata
-        .function;
-    let owned_callback_result_drop =
-        checked_bootstrap_callable(metadata, "jet_eval_owned_root_drop_callback_result")?
-            .metadata
-            .function;
-    let callback_transfer =
-        checked_bootstrap_callable(metadata, "jet_eval_callback_transfer")?
-            .metadata
-            .function;
-    let task_root_take = checked_bootstrap_callable(metadata, "jet_eval_task_root_take")?
-        .metadata
-        .function;
-    let callback_release = checked_bootstrap_callable(metadata, "jet_eval_callback_release")?
-        .metadata
-        .function;
-    let task_root_cleanup_root =
-        checked_bootstrap_callable(metadata, "jet_eval_task_root_cleanup_root")?
-            .metadata
-            .function;
-    let owned_root_cleanup_clone =
-        checked_bootstrap_callable(metadata, "jet_eval_owned_root_cleanup_clone")?
-            .metadata
-            .function;
-    let owned_root_drop_values =
-        checked_bootstrap_callable(metadata, "jet_eval_owned_root_drop_values")?
-            .metadata
-            .function;
-    let host_type_shape =
-        checked_bootstrap_callable(metadata, "jet_eval_host_type_shape_from_program")?
-            .metadata
-            .function;
-    let shared_payload_finalize =
-        checked_bootstrap_callable(metadata, "jet_eval_shared_payload_finalize")?
-            .metadata
-            .function;
+        Ok(function.id)
+    };
     Ok(BootstrapNativeHelperRoots {
-        roots: roots.into_values().collect(),
-        task_callback_invoke,
-        task_root_release,
-        owned_root_drop,
-        owned_callback_result_drop,
-        callback_release,
-        callback_transfer,
-        task_root_take,
-        task_root_cleanup_root,
-        owned_root_cleanup_clone,
-        owned_root_drop_values,
-        host_type_shape,
-        shared_payload_finalize,
+        callback_transfer: checked("jet_eval_callback_transfer")?,
+        host_type_shape: checked("jet_eval_host_type_shape_from_program")?,
     })
 }
 
@@ -1178,7 +1620,7 @@ pub(crate) fn append_bootstrap_host_glue(
     bindings: &BootstrapBindingDescriptor,
     program: &MirProgram,
 ) -> Result<(), BootstrapHostCodecError> {
-    let symbols = BootstrapCodecSymbols::new(bindings)?;
+    let symbols = BootstrapCodecSymbols::new(bindings, program)?;
     // Packaging keeps going after a failed check or stage, recording its error
     // beside the failed lookups, so one stage-zero run reports every failure.
     let keep = |result: Result<(), BootstrapHostCodecError>| {
@@ -1247,11 +1689,10 @@ pub(crate) fn append_bootstrap_host_glue(
     .ok();
 
     let mut glue = String::new();
-    keep(emit_bootstrap_type_codec(&mut glue, &symbols));
-    keep(emit_bootstrap_value_codec(&mut glue, &symbols));
-    keep(emit_bootstrap_host_value_codec(&mut glue, &symbols));
-    keep(emit_bootstrap_host_type_shape_codec(&mut glue, &symbols));
-    keep(crate::compiler_bootstrap_diagnostic_codec::append_diagnostic_codec(&mut glue, &symbols));
+    emit_bootstrap_type_codec(&mut glue);
+    emit_bootstrap_value_codec(&mut glue);
+    emit_bootstrap_host_value_codec(&mut glue);
+    crate::compiler_bootstrap_diagnostic_codec::append_diagnostic_codec(&mut glue);
     keep(crate::compiler_bootstrap_runtime_mir_codec::append_runtime_mir_codec(&mut glue, &symbols));
     if let Some(entry) = entry {
         keep(crate::compiler_bootstrap_entry_codec::append_bootstrap_entry_codec(
@@ -1266,15 +1707,6 @@ pub(crate) fn append_bootstrap_host_glue(
     keep(emit_bootstrap_callback(&mut glue, &symbols));
     keep(emit_bootstrap_foreign_callback(&mut glue, &symbols));
     keep(emit_bootstrap_native_adapter_impl(&mut glue, &symbols));
-    if let Some(native_helper_roots) = &native_helper_roots {
-        keep(emit_bootstrap_native_execution_helpers(
-            &mut glue,
-            bindings,
-            &symbols,
-            program,
-            native_helper_roots,
-        ));
-    }
     keep(emit_bootstrap_web_asset_provider(&mut glue, &symbols));
 
     keep(emit_bootstrap_manifest_adapter(&mut glue, &symbols));
@@ -1383,1571 +1815,13 @@ fn __jet_bootstrap_native_numeric_unit_conversion(
             "generated Rust root prefix is empty".to_string(),
         ));
     }
-    symbols.finish(Ok(()))?;
+    // Every emitter writes shape-dependent spellings as metadata markers; one
+    // pass resolves them against the checked bindings and boxed edges.
+    let glue = symbols.render(&glue);
+    let glue = symbols.finish(glue)?;
     source.push_str(&glue);
     Ok(())
 
-}
-fn emit_bootstrap_native_execution_helpers(
-    out: &mut String,
-    _bindings: &BootstrapBindingDescriptor,
-    symbols: &BootstrapCodecSymbols<'_>,
-    _program: &MirProgram,
-    helpers: &BootstrapNativeHelperRoots,
-) -> Result<(), BootstrapHostCodecError> {
-    let source_program = symbols.type_symbol("MIRProgram")?;
-    let eval_config = symbols.type_symbol("JetEvalConfig")?;
-    let span_type = symbols.type_symbol("Span")?;
-    let task_callback_root = symbols.field_binding("JetEvalTaskCallbackInvokeResult", "root")?;
-    let task_callback_result = symbols.field_binding("JetEvalTaskCallbackInvokeResult", "result")?;
-    let task_callback_reusable =
-        symbols.field_binding("JetEvalTaskCallbackInvokeResult", "reusable")?;
-    let task_callback_cleanup_root =
-        symbols.field_binding("JetEvalTaskCallbackInvokeResult", "cleanup_root")?;
-    let owned_drop_disposition = symbols.field_binding("JetEvalOwnedRootDropResult", "disposition")?;
-    let result_complete = symbols.field_symbol("JetEvalResult", "complete")?;
-    let result_value = symbols.field_symbol("JetEvalResult", "value")?;
-    let result_error = symbols.field_symbol("JetEvalResult", "error")?;
-    let result_internal_problem = symbols.field_symbol("JetEvalResult", "internal_problem")?;
-    let result_stdout = symbols.field_symbol("JetEvalResult", "stdout")?;
-    let result_stderr = symbols.field_symbol("JetEvalResult", "stderr")?;
-    let result_soft_stop = symbols.field_symbol("JetEvalResult", "soft_stop")?;
-    let result_exit_code = symbols.field_symbol("JetDriverCompileResult", "exit_code")?;
-    let error_diagnostic = symbols.field_symbol("JetEvalError", "diagnostic")?;
-    let diagnostic_code = symbols.field_symbol("Diagnostic", "code")?;
-    let diagnostic_what = symbols.field_symbol("Diagnostic", "what")?;
-    let internal_problem_message = symbols.field_symbol("JetEvalInternalProblem", "message")?;
-
-
-    let task_callback_invoke = helpers.task_callback_invoke.0.to_string();
-    let task_root_release = helpers.task_root_release.0.to_string();
-    let owned_root_drop = helpers.owned_root_drop.0.to_string();
-    let owned_callback_result_drop = helpers.owned_callback_result_drop.0.to_string();
-    let owned_callback_result_drop_symbol =
-        symbols.callable_symbol("jet_eval_owned_root_drop_callback_result")?;
-    let start_deopt = symbols.callable_symbol("jet_eval_start_deopt")?;
-    let result_host_projection = symbols.callable_symbol("jet_eval_result_host_projection")?;
-    let retire_result = symbols.callable_symbol("jet_eval_retire_result")?;
-    let callback_invoke_symbol =
-        symbols.callable_symbol("jet_eval_task_callback_invoke")?;
-    let root_release_symbol = symbols.callable_symbol("jet_eval_task_root_release")?;
-    let owned_drop_symbol = symbols.callable_symbol("jet_eval_owned_root_drop")?;
-    let callback_root_field = task_callback_root.field.0.to_string();
-    let callback_result_field = task_callback_result.field.0.to_string();
-    let callback_reusable_field = task_callback_reusable.field.0.to_string();
-    let callback_cleanup_root_field = task_callback_cleanup_root.field.0.to_string();
-    let owned_drop_disposition_field = owned_drop_disposition.field.0.to_string();
-
-    let generated = r#"
-enum __JetBootstrapNativeHelperExecution<T> {
-    InvocationFailure {
-        completion: Option<::jet_jit::SourceExecutionCompletion>,
-        tier: Option<::jet_jit::SourceExecutionTier>,
-        error: String,
-    },
-    Complete {
-        projection: __JetBootstrapNativeHelperProjection<T>,
-        completion: Option<::jet_jit::SourceExecutionCompletion>,
-        tier: ::jet_jit::SourceExecutionTier,
-    },
-}
-
-struct __JetBootstrapNativeTaskCallbackOutput {
-    task_root: Option<__JetBootstrapNativePacket>,
-    callback_result: Option<__JetBootstrapNativePacket>,
-    reusable: bool,
-    cleanup_root: Option<__JetBootstrapNativePacket>,
-    tier: crate::BootstrapFactoryTier,
-    actual_tier: Option<::jet_jit::SourceExecutionTier>,
-    outcome: Option<::jet_foundation::JitBackend::RunOutcome>,
-    soft_stop: bool,
-    stdout: String,
-    stderr: String,
-    execution_error: Option<String>,
-    completion: Option<::jet_jit::SourceExecutionCompletion>,
-    span: __SPAN__,
-}
-
-struct __JetBootstrapNativeTaskRootReleaseOutput {
-    callback_result: Option<__JetBootstrapNativePacket>,
-    tier: crate::BootstrapFactoryTier,
-    actual_tier: Option<::jet_jit::SourceExecutionTier>,
-    outcome: Option<::jet_foundation::JitBackend::RunOutcome>,
-    soft_stop: bool,
-    stdout: String,
-    stderr: String,
-    execution_error: Option<String>,
-    completion: Option<::jet_jit::SourceExecutionCompletion>,
-}
-
-struct __JetBootstrapNativeOwnedDropOutput {
-    updated_root: Option<__JetBootstrapNativePacket>,
-    drop_result: Option<__JetBootstrapNativePacket>,
-    tier: crate::BootstrapFactoryTier,
-    actual_tier: Option<::jet_jit::SourceExecutionTier>,
-    outcome: Option<::jet_foundation::JitBackend::RunOutcome>,
-    soft_stop: bool,
-    stdout: String,
-    stderr: String,
-    execution_error: Option<String>,
-    completion: Option<::jet_jit::SourceExecutionCompletion>,
-}
-
-struct __JetBootstrapNativeHelperProjection<T> {
-    value: T,
-    outcome: Option<::jet_foundation::JitBackend::RunOutcome>,
-    soft_stop: bool,
-    stdout: String,
-    stderr: String,
-    execution_error: Option<String>,
-}
-fn __jet_bootstrap_native_restore_helper_result(
-    execution: &mut ::jet_jit::SourceHelperExecution<'_>,
-    mut result: ::jet_jit::SourceExecutionRetirement,
-) {
-    execution.outcome = result.outcome.take();
-    execution.value = result.value.take();
-    execution.soft_stop = result.soft_stop;
-    execution.stdout = std::mem::take(&mut result.stdout);
-    execution.stderr = std::mem::take(&mut result.stderr);
-}
-
-fn __jet_bootstrap_native_project_helper_result<T>(
-    execution: &mut ::jet_jit::SourceHelperExecution<'_>,
-    program: &::jet_foundation::MIR::MirProgram,
-    result_type: &::jet_foundation::MIR::MirType,
-    project: impl FnOnce(
-        ::jet_foundation::MIR::MirRuntimeValue,
-    ) -> Result<T, (String, ::jet_foundation::MIR::MirRuntimeValue)>,
-) -> __JetBootstrapNativeHelperProjection<T> {
-    let Some(mut result) = execution.take_result() else {
-        return __JetBootstrapNativeHelperProjection {
-            value: None,
-            outcome: None,
-            soft_stop: false,
-            stdout: String::new(),
-            stderr: String::new(),
-            execution_error: Some("Source helper produced no checked execution outcome".to_string()),
-        };
-    };
-    let Some(value) = result.value.take() else {
-        return __JetBootstrapNativeHelperProjection {
-            value: None,
-            outcome: result.outcome,
-            soft_stop: result.soft_stop,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            execution_error: Some("Source helper produced no checked result value".to_string()),
-        };
-    };
-    if let Err(error) = crate::compiler_bootstrap_entry_codec::validate_runtime_value(
-        program, result_type, &value, 0,
-    ) {
-        result.value = Some(value);
-        __jet_bootstrap_native_restore_helper_result(execution, result);
-        return __JetBootstrapNativeHelperProjection {
-            value: None,
-            outcome: None,
-            soft_stop: false,
-            stdout: String::new(),
-            stderr: String::new(),
-            execution_error: Some(error),
-        };
-    }
-    match project(value) {
-        Ok(value) => {
-            let execution_error = match result.outcome.as_ref() {
-                Some(::jet_foundation::JitBackend::RunOutcome::Ran { .. }) => None,
-                Some(outcome) => Some(format!("Source helper execution returned {outcome:?}")),
-                None => Some("Source helper execution produced no outcome".to_string()),
-            };
-            __JetBootstrapNativeHelperProjection {
-                value: Some(value),
-                outcome: result.outcome,
-                soft_stop: result.soft_stop,
-                stdout: result.stdout,
-                stderr: result.stderr,
-                execution_error,
-            }
-        }
-        Err((error, value)) => {
-            result.value = Some(value);
-            __jet_bootstrap_native_restore_helper_result(execution, result);
-            __JetBootstrapNativeHelperProjection {
-                value: None,
-                outcome: None,
-                soft_stop: false,
-                stdout: String::new(),
-                stderr: String::new(),
-                execution_error: Some(error),
-            }
-        }
-    }
-}
-
-
-
-fn __jet_bootstrap_native_record_fields(
-    program: &::jet_foundation::MIR::MirProgram,
-    record_type: &::jet_foundation::MIR::MirType,
-    record_value: ::jet_foundation::MIR::MirRuntimeValue,
-    field_ids: &[::jet_foundation::MIR::MirFieldId],
-) -> Result<
-    Vec<(::jet_foundation::MIR::MirType, ::jet_foundation::MIR::MirRuntimeValue)>,
-    (String, ::jet_foundation::MIR::MirRuntimeValue),
-> {
-    use ::jet_foundation::MIR::{MirRuntimeValue as V, MirTypeDefKind as D};
-    let type_id = match record_type.nominal_id() {
-        Some(type_id) => type_id,
-        None => return Err(("Source helper output is not a checked record type".to_string(), record_value)),
-    };
-    let Some(definition) = program.types.iter().find(|row| row.id == type_id) else {
-        return Err(("Source helper output record type is absent from checked MIR".to_string(), record_value));
-    };
-    let D::Struct { fields, .. } = &definition.kind else {
-        return Err(("Source helper output is not a checked record".to_string(), record_value));
-    };
-    if let Err(error) = crate::compiler_bootstrap_entry_codec::validate_runtime_value(
-        program, record_type, &record_value, 0,
-    ) {
-        return Err((error, record_value));
-    }
-    if !matches!(&record_value, V::Struct { .. }) {
-        return Err(("Source helper output carrier is not a checked record".to_string(), record_value));
-    }
-    if fields.len() != field_ids.len() {
-        return Err(("Source helper output does not contain exactly the checked projected fields".to_string(), record_value));
-    }
-    for (index, field_id) in field_ids.iter().enumerate() {
-        if fields.get(index).is_none_or(|field| field.id != *field_id) {
-            return Err(("Source helper output fields are not in checked declaration order".to_string(), record_value));
-        }
-    }
-    let value_fields = match record_value {
-        V::Struct { fields, .. } => fields,
-        _ => unreachable!("record runtime value was checked above"),
-    };
-    Ok(fields.iter()
-        .zip(value_fields)
-        .map(|(field, (_, value))| (field.ty.clone(), value))
-        .collect())
-}
-
-fn __jet_bootstrap_native_deliver_completion(
-    adapter: &__JetBootstrapNativeAdapter,
-    completion: ::jet_jit::SourceExecutionCompletion,
-) -> Option<::jet_jit::SourceExecutionCompletion> {
-    match adapter.root.completion_scope.upgrade() {
-        Some(scope) => {
-            scope.record(completion);
-            None
-        }
-        None => Some(completion),
-    }
-}
-
-fn __jet_bootstrap_native_execute_source_helper<'a, T>(
-    adapter: &__JetBootstrapNativeAdapter,
-    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-    helper_roots: &[::jet_foundation::MIR::MirFunctionId],
-    helper_function: ::jet_foundation::MIR::MirFunctionId,
-    entry_values: Vec<::jet_jit::SourceHelperArgument<'a>>,
-    execution_policy: ::jet_jit::SourceExecutionPolicy,
-    source_program: &::std::sync::Arc<__SOURCE_PROGRAM__>,
-    config: &__EVAL_CONFIG__,
-    project: impl FnOnce(
-        &mut ::jet_jit::SourceHelperExecution<'a>,
-    ) -> __JetBootstrapNativeHelperProjection<T>,
-) -> __JetBootstrapNativeHelperExecution<T> {
-    let resume_adapter = adapter.clone();
-    let resume_program = source_program.clone();
-    let resume_config = config.clone();
-    match ::jet_jit::execute_source_helper_entry(
-        adapter.root.program.as_ref(),
-        adapter.root.artifact,
-        helper_roots,
-        helper_function,
-        live_resources,
-        entry_values,
-        execution_policy,
-        &::jet_pkg_model::Package::ReleaseDevtoolsPolicy::development(),
-        move |request| __jet_bootstrap_native_resume_source(
-            &resume_adapter,
-            &resume_program,
-            &resume_config,
-            request,
-        ),
-    ) {
-        Ok(execution) => {
-            let tier = execution.tier;
-            let (mut execution, projection) =
-                execution.with_completion_scope(|execution| project(execution));
-            let completion = __jet_bootstrap_native_deliver_completion(
-                adapter,
-                execution.retire(),
-            );
-            __JetBootstrapNativeHelperExecution::Complete {
-                projection,
-                completion,
-                tier,
-            }
-        }
-        Err(error) => {
-            let tier = match error.failure() {
-                ::jet_jit::SourceHelperInvocationFailure::NotInvoked { .. } => None,
-                ::jet_jit::SourceHelperInvocationFailure::Invoked { tier, .. } => *tier,
-            };
-            let message = error.to_string();
-            let completion = __jet_bootstrap_native_deliver_completion(
-                adapter,
-                error.into_completion(),
-            );
-            __JetBootstrapNativeHelperExecution::InvocationFailure {
-                completion,
-                tier,
-                error: message,
-            }
-        }
-    }
-}
-
-fn __jet_bootstrap_native_resume_source(
-    adapter: &__JetBootstrapNativeAdapter,
-    source_program: &::std::sync::Arc<__SOURCE_PROGRAM__>,
-    config: &__EVAL_CONFIG__,
-    request: &mut ::jet_jit::SourceDeoptRequest,
-) -> Result<::jet_jit::SourceDeoptReply, String> {
-    if !request.entry {
-        return Err("mid-function Source resume has no retained Source continuation".to_string());
-    }
-    if request.snapshot.identity.execution != adapter.root.execution
-        || request.snapshot.identity.function != request.function
-    {
-        return Err("Source helper entry handoff identity differs from the checked compiler execution".to_string());
-    }
-    if request.entry_params.len() != request.entry_values.len() {
-        return Err("Source helper entry handoff parameter/value counts disagree".to_string());
-    }
-    let function = adapter.root.program.functions.iter()
-        .find(|row| row.id == request.function)
-        .ok_or_else(|| format!("Source helper entry function {:?} is absent", request.function))?;
-    if !adapter.root.program.artifacts.iter()
-        .find(|row| row.id == adapter.root.artifact)
-        .is_some_and(|artifact| artifact.modules.contains(&function.module_id))
-        || !function.capture_params.is_empty()
-        || !function.target_applicability.interpreter
-        || function.params.len() != request.entry_params.len()
-    {
-        return Err("Source helper entry function is outside its checked private helper roots".to_string());
-    }
-    for (actual, checked) in request.entry_params.iter().zip(function.params.iter()) {
-        if actual.index != checked.index
-            || actual.name != checked.name
-            || actual.span != checked.span
-            || !actual.ty.same_checked_type(&checked.ty)
-            || actual.access != checked.access
-            || actual.ownership != checked.ownership
-            || actual.public_label != checked.public_label
-            || actual.variadic != checked.variadic
-            || actual.default_present != checked.default_present
-        {
-            return Err("Source helper entry parameters differ from checked MIR".to_string());
-        }
-    }
-    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-    let entry_values = std::mem::take(&mut request.entry_values);
-    let mut source_args = Vec::with_capacity(entry_values.len());
-    for (parameter, value) in function.params.iter().zip(entry_values) {
-        let path = vec![function.name.clone(), parameter.name.clone()];
-        source_args.push(__jet_bootstrap_entry_host_value_from_runtime(
-            value,
-            &parameter.ty,
-            adapter.root.program.as_ref(),
-            &path,
-            &physical,
-            0,
-        )?);
-    }
-    let span = crate::compiler_bootstrap_diagnostic_codec::__jet_bootstrap_span_from_host(
-        &function.span,
-    )?;
-    let mut result = __JET_EVAL_START_DEOPT__(
-        source_program.as_ref(),
-        config,
-        request.function,
-        source_args,
-    );
-    if let Some(problem) = result.__RESULT_INTERNAL_PROBLEM__.as_ref().ok() {
-        let detail = format!("Source helper interpreter reported an internal problem: {}", problem.__INTERNAL_PROBLEM_MESSAGE__);
-        return if __JET_EVAL_RETIRE_RESULT__(&mut result, span) {
-            Err(detail)
-        } else {
-            Err(format!("{detail}; Source helper result session retirement failed"))
-        };
-    }
-    if let Some(error) = result.__RESULT_ERROR__.as_ref().ok() {
-        let detail = format!(
-            "Source helper interpreter reported {}: {}",
-            error.__ERROR_DIAGNOSTIC__.__DIAGNOSTIC_CODE__,
-            error.__ERROR_DIAGNOSTIC__.__DIAGNOSTIC_WHAT__,
-        );
-        return if __JET_EVAL_RETIRE_RESULT__(&mut result, span) {
-            Err(detail)
-        } else {
-            Err(format!("{detail}; Source helper result session retirement failed"))
-        };
-    }
-    let stdout = result.__RESULT_STDOUT__.clone();
-    let stderr = result.__RESULT_STDERR__.clone();
-    let soft_stop = result.__RESULT_SOFT_STOP__;
-    let exit_code = result.__RESULT_EXIT_CODE__
-        .as_ref()
-        .ok()
-        .and_then(|value| value.to_i64())
-        .and_then(|value| i32::try_from(value).ok())
-        .unwrap_or(0);
-    let helper_return_type = &function.return_type;
-    let value = if !result.__RESULT_COMPLETE__ && !soft_stop {
-        Err("Source helper interpreter stopped without a result or soft-stop".to_string())
-    } else if result.__RESULT_VALUE__.as_ref().ok().is_some() {
-        match __JET_EVAL_RESULT_HOST_PROJECTION__(&result, span) {
-            Ok(host_value) => __jet_bootstrap_native_host_value_to_runtime(
-                adapter,
-                &mut result,
-                host_value,
-                helper_return_type,
-                span,
-            ).map(Some),
-            Err(_) => Err("Source helper result value could not be projected through its retained Source machine".to_string()),
-        }
-    } else {
-        Ok(None)
-    };
-    let retired = __JET_EVAL_RETIRE_RESULT__(&mut result, span);
-    let value = match (value, retired) {
-        (Ok(value), true) => value,
-        (Err(error), true) => return Err(error),
-        (Ok(_), false) => return Err("Source helper deopt result session retirement failed".to_string()),
-        (Err(error), false) => return Err(format!("{error}; Source helper result session retirement failed")),
-    };
-    Ok(::jet_jit::SourceDeoptReply {
-        bits: 0,
-        outcome: Some(::jet_foundation::JitBackend::RunOutcome::Ran {
-            stdout: stdout.clone(),
-            stderr: stderr.clone(),
-            exit_code,
-        }),
-        value,
-        session: None,
-        soft_stop,
-        stdout,
-        stderr,
-    })
-}
-
-fn __jet_bootstrap_native_empty_task_callback_output(
-    adapter: &__JetBootstrapNativeAdapter,
-    span: __SPAN__,
-) -> __JetBootstrapNativeTaskCallbackOutput {
-    __JetBootstrapNativeTaskCallbackOutput {
-        task_root: None,
-        callback_result: None,
-        reusable: false,
-        cleanup_root: None,
-        tier: adapter.root.execution_policy,
-        actual_tier: None,
-        outcome: None,
-        soft_stop: false,
-        stdout: String::new(),
-        stderr: String::new(),
-        execution_error: None,
-        completion: None,
-        span,
-    }
-}
-
-fn __jet_bootstrap_native_preflight_completion(
-    adapter: &__JetBootstrapNativeAdapter,
-    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-    message: String,
-    entry_values: Vec<::jet_foundation::MIR::MirRuntimeValue>,
-) -> Option<::jet_jit::SourceExecutionCompletion> {
-    let error = ::jet_jit::SourceHelperInvocationError::not_invoked(
-        ::jet_jit::SourceDeoptError::InvalidRequest(message),
-        entry_values,
-        live_resources.clone(),
-    );
-    __jet_bootstrap_native_deliver_completion(adapter, error.into_completion())
-}
-
-fn __jet_bootstrap_native_task_callback_not_invoked(
-    adapter: &__JetBootstrapNativeAdapter,
-    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-    entry_values: Vec<::jet_foundation::MIR::MirRuntimeValue>,
-    span: __SPAN__,
-    message: String,
-) -> __JetBootstrapNativeTaskCallbackOutput {
-    let mut output = __jet_bootstrap_native_empty_task_callback_output(adapter, span);
-    output.execution_error = Some(message.clone());
-    output.completion = __jet_bootstrap_native_preflight_completion(
-        adapter,
-        live_resources,
-        message,
-        entry_values,
-    );
-    output
-}
-
-fn __jet_bootstrap_native_task_callback_invoke(
-    adapter: &__JetBootstrapNativeAdapter,
-    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-    task_root: Option<__JetBootstrapNativePacket>,
-    args: Vec<::jet_foundation::MIR::MirRuntimeValue>,
-    span: __SPAN__,
-) -> __JetBootstrapNativeTaskCallbackOutput {
-    let output_span = span.clone();
-    let Some((root_type, root_value)) = task_root else {
-        return __jet_bootstrap_native_task_callback_not_invoked(
-            adapter,
-            live_resources,
-            vec![::jet_foundation::MIR::MirRuntimeValue::List(args)],
-            output_span,
-            "Source task callback has no checked task-root packet".to_string(),
-        );
-    };
-    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-    match adapter.root.execution_policy {
-        crate::BootstrapFactoryTier::Aot => {
-            let helper = adapter.root.program.functions.iter()
-                .find(|row| row.id == adapter.root.task_callback_invoke);
-            let Some(helper) = helper else {
-                return __jet_bootstrap_native_task_callback_not_invoked(
-                    adapter,
-                    live_resources,
-                    vec![root_value, ::jet_foundation::MIR::MirRuntimeValue::List(args)],
-                    output_span,
-                    "checked task callback helper disappeared".to_string(),
-                );
-            };
-            let value_type = match helper.params.get(1).map(|parameter| parameter.ty.kind()) {
-                Some(::jet_foundation::MIR::MirTypeKind::List(value_type)) => value_type.as_ref(),
-                Some(::jet_foundation::MIR::MirTypeKind::FixedList { elem, .. }) => elem.as_ref(),
-                _ => return __jet_bootstrap_native_task_callback_not_invoked(
-                    adapter,
-                    live_resources,
-                    vec![root_value, ::jet_foundation::MIR::MirRuntimeValue::List(args)],
-                    output_span,
-                    "checked task callback helper has no runtime-value list argument".to_string(),
-                ),
-            };
-            let mut source_root = match __jet_bootstrap_entry_jet_eval_task_root_from_runtime(
-                &root_type,
-                root_value,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(source_root) => source_root,
-                Err(error) => {
-                    let (message, value) = error.into_parts();
-                    return __jet_bootstrap_native_task_callback_not_invoked(
-                        adapter,
-                        live_resources,
-                        vec![value, ::jet_foundation::MIR::MirRuntimeValue::List(args)],
-                        output_span,
-                        message,
-                    );
-                }
-            };
-            let source_args = match args.into_iter().map(|value| {
-                __jet_bootstrap_entry_jet_eval_runtime_value_from_runtime(
-                    value_type,
-                    value,
-                    &adapter.root.program,
-                    &physical,
-                ).map_err(|error| error.into_parts())
-            }).collect::<Result<Vec<_>, _>>() {
-                Ok(source_args) => source_args,
-                Err((message, value)) => {
-                    let mut output = __jet_bootstrap_native_empty_task_callback_output(adapter, output_span);
-                    output.actual_tier = Some(::jet_jit::SourceExecutionTier::Native);
-                    output.execution_error = Some(message);
-                    output.completion = __jet_bootstrap_native_preflight_completion(
-                        adapter,
-                        live_resources,
-                        "AOT callback argument conversion failed".to_string(),
-                        vec![value],
-                    );
-                    return output;
-                }
-            };
-            let source_result = __JET_TASK_CALLBACK_INVOKE__(
-                &mut source_root,
-                &source_args,
-                Box::new(adapter.clone()),
-                span,
-            );
-            let mut output = __jet_bootstrap_native_empty_task_callback_output(adapter, output_span);
-            output.actual_tier = Some(::jet_jit::SourceExecutionTier::Native);
-            match __jet_bootstrap_entry_jet_eval_task_root_to_runtime(
-                &source_result.__TASK_CALLBACK_ROOT_FIELD__,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(packet) => output.task_root = Some(packet),
-                Err(error) => {
-                    output.execution_error = Some(error);
-                    return output;
-                }
-            }
-            match __jet_bootstrap_entry_jet_eval_callback_result_to_runtime(
-                &source_result.__TASK_CALLBACK_RESULT_FIELD__,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(packet) => output.callback_result = Some(packet),
-                Err(error) => {
-                    output.execution_error = Some(error);
-                    return output;
-                }
-            }
-            match __jet_bootstrap_entry_jet_eval_owned_root_to_runtime(
-                &source_result.__TASK_CALLBACK_CLEANUP_ROOT_FIELD__,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(packet) => output.cleanup_root = Some(packet),
-                Err(error) => {
-                    output.execution_error = Some(error);
-                    return output;
-                }
-            }
-            output.reusable = source_result.__TASK_CALLBACK_REUSABLE_FIELD__;
-            output
-        }
-        crate::BootstrapFactoryTier::CraneliftJit
-        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
-            let root_packet = (root_type.clone(), root_value);
-            let engine_config = match __jet_bootstrap_native_adapter_callback_config(
-                adapter,
-                &root_packet,
-                live_resources,
-            ) {
-                Ok(config) => config,
-                Err(error) => return __jet_bootstrap_native_task_callback_not_invoked(
-                    adapter,
-                    live_resources,
-                    vec![root_packet.1, ::jet_foundation::MIR::MirRuntimeValue::List(args)],
-                    output_span,
-                    error,
-                ),
-            };
-            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
-                &physical,
-                &adapter.root.receiver_type,
-                &adapter.physical_binding(),
-            ) {
-                Ok(value) => value,
-                Err(error) => return __jet_bootstrap_native_task_callback_not_invoked(
-                    adapter,
-                    live_resources,
-                    vec![root_packet.1, ::jet_foundation::MIR::MirRuntimeValue::List(args)],
-                    output_span,
-                    error,
-                ),
-            };
-            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
-                &span,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(value) => value,
-                Err(error) => return __jet_bootstrap_native_task_callback_not_invoked(
-                    adapter,
-                    live_resources,
-                    vec![root_packet.1, ::jet_foundation::MIR::MirRuntimeValue::List(args), adapter_value],
-                    output_span,
-                    error,
-                ),
-            };
-            let Some(helper) = adapter.root.program.functions.iter()
-                .find(|row| row.id == adapter.root.task_callback_invoke)
-            else {
-                return __jet_bootstrap_native_task_callback_not_invoked(
-                    adapter,
-                    live_resources,
-                    vec![root_packet.1, ::jet_foundation::MIR::MirRuntimeValue::List(args), adapter_value, span_value],
-                    output_span,
-                    "checked task callback helper disappeared".to_string(),
-                );
-            };
-            let return_type = helper.return_type.clone();
-            let mut output = __jet_bootstrap_native_empty_task_callback_output(adapter, output_span);
-            match __jet_bootstrap_native_execute_source_helper(
-                adapter,
-                live_resources,
-                &adapter.root.helper_roots,
-                adapter.root.task_callback_invoke,
-                vec![
-                    ::jet_jit::SourceHelperArgument::Owned(root_packet.1),
-                    ::jet_jit::SourceHelperArgument::Owned(
-                        ::jet_foundation::MIR::MirRuntimeValue::List(args),
-                    ),
-                    ::jet_jit::SourceHelperArgument::Owned(adapter_value),
-                    ::jet_jit::SourceHelperArgument::Owned(span_value),
-                ],
-                match adapter.root.execution_policy {
-                    crate::BootstrapFactoryTier::CraneliftJit =>
-                        ::jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
-                    crate::BootstrapFactoryTier::SourceInterpreterDeopt =>
-                        ::jet_jit::SourceExecutionPolicy::SourceOnly,
-                    crate::BootstrapFactoryTier::Aot => unreachable!(),
-                },
-                &adapter.root.source_program,
-                &engine_config,
-                |execution| __jet_bootstrap_native_project_helper_result(
-                    execution,
-                    adapter.root.program.as_ref(),
-                    &return_type,
-                    |value| {
-                        __jet_bootstrap_native_record_fields(
-                            adapter.root.program.as_ref(),
-                            &return_type,
-                            value,
-                            &[
-                                ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_ROOT_FIELD_ID__),
-                                ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_RESULT_FIELD_ID__),
-                                ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_REUSABLE_FIELD_ID__),
-                                ::jet_foundation::MIR::MirFieldId(__TASK_CALLBACK_CLEANUP_ROOT_FIELD_ID__),
-                            ],
-                        ).map(|mut fields| {
-                            let cleanup_root = fields.pop().expect("checked callback cleanup root");
-                            let reusable = fields.pop().expect("checked callback reusable field");
-                            let callback_result = fields.pop().expect("checked callback result");
-                            let task_root = fields.pop().expect("checked updated task root");
-                            let reusable = match reusable.1 {
-                                ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => value,
-                                _ => unreachable!("checked reusable result field is Bool"),
-                            };
-                            ((task_root.0, task_root.1), (callback_result.0, callback_result.1), reusable, (cleanup_root.0, cleanup_root.1))
-                        })
-                    },
-                ),
-            ) {
-                __JetBootstrapNativeHelperExecution::InvocationFailure { completion, tier, error } => {
-                    output.actual_tier = tier;
-                    output.execution_error = Some(error);
-                    output.completion = completion;
-                }
-                __JetBootstrapNativeHelperExecution::Complete { projection, completion, tier } => {
-                    output.actual_tier = Some(tier);
-                    output.completion = completion;
-                    output.outcome = projection.outcome;
-                    output.soft_stop = projection.soft_stop;
-                    output.stdout = projection.stdout;
-                    output.stderr = projection.stderr;
-                    output.execution_error = projection.execution_error;
-                    if let Some((task_root, callback_result, reusable, cleanup_root)) = projection.value {
-                        output.task_root = Some(task_root);
-                        output.callback_result = Some(callback_result);
-                        output.reusable = reusable;
-                        output.cleanup_root = Some(cleanup_root);
-                    }
-                }
-            }
-            output
-        }
-    }
-}
-
-
-fn __jet_bootstrap_native_empty_task_root_release_output(
-    adapter: &__JetBootstrapNativeAdapter,
-) -> __JetBootstrapNativeTaskRootReleaseOutput {
-    __JetBootstrapNativeTaskRootReleaseOutput {
-        callback_result: None,
-        tier: adapter.root.execution_policy,
-        actual_tier: None,
-        outcome: None,
-        soft_stop: false,
-        stdout: String::new(),
-        stderr: String::new(),
-        execution_error: None,
-        completion: None,
-    }
-}
-
-fn __jet_bootstrap_native_task_root_release(
-    adapter: &__JetBootstrapNativeAdapter,
-    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-    task_root: __JetBootstrapNativePacket,
-    span: __SPAN__,
-) -> __JetBootstrapNativeTaskRootReleaseOutput {
-    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-    let (root_type, root_value) = task_root;
-    match adapter.root.execution_policy {
-        crate::BootstrapFactoryTier::Aot => {
-            let source_root = match __jet_bootstrap_entry_jet_eval_task_root_from_runtime(
-                &root_type,
-                root_value,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(source_root) => source_root,
-                Err(error) => {
-                    let (message, value) = error.into_parts();
-                    let mut output = __jet_bootstrap_native_empty_task_root_release_output(adapter);
-                    output.actual_tier = Some(::jet_jit::SourceExecutionTier::Native);
-                    output.execution_error = Some(message.clone());
-                    output.completion = __jet_bootstrap_native_preflight_completion(
-                        adapter, live_resources, message, vec![value],
-                    );
-                    return output;
-                }
-            };
-            let source_result = __JET_TASK_ROOT_RELEASE__(
-                &source_root,
-                Box::new(adapter.clone()),
-                span,
-            );
-            let mut output = __jet_bootstrap_native_empty_task_root_release_output(adapter);
-            output.actual_tier = Some(::jet_jit::SourceExecutionTier::Native);
-            match __jet_bootstrap_entry_jet_eval_callback_result_to_runtime(
-                &source_result,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(packet) => output.callback_result = Some(packet),
-                Err(error) => output.execution_error = Some(error),
-            }
-            output
-        }
-        crate::BootstrapFactoryTier::CraneliftJit
-        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
-            let packet = (root_type, root_value);
-            let engine_config = match __jet_bootstrap_native_adapter_callback_config(
-                adapter, &packet, live_resources,
-            ) {
-                Ok(config) => config,
-                Err(error) => {
-                    let mut output = __jet_bootstrap_native_empty_task_root_release_output(adapter);
-                    output.execution_error = Some(error.clone());
-                    output.completion = __jet_bootstrap_native_preflight_completion(
-                        adapter, live_resources, error, vec![packet.1],
-                    );
-                    return output;
-                }
-            };
-            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
-                &physical,
-                &adapter.root.receiver_type,
-                &adapter.physical_binding(),
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    let mut output = __jet_bootstrap_native_empty_task_root_release_output(adapter);
-                    output.execution_error = Some(error.clone());
-                    output.completion = __jet_bootstrap_native_preflight_completion(
-                        adapter, live_resources, error, vec![packet.1],
-                    );
-                    return output;
-                }
-            };
-            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
-                &span, &adapter.root.program, &physical,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    let mut output = __jet_bootstrap_native_empty_task_root_release_output(adapter);
-                    output.execution_error = Some(error.clone());
-                    output.completion = __jet_bootstrap_native_preflight_completion(
-                        adapter, live_resources, error, vec![packet.1, adapter_value],
-                    );
-                    return output;
-                }
-            };
-            let Some(helper) = adapter.root.program.functions.iter()
-                .find(|row| row.id == adapter.root.task_root_release)
-            else {
-                let mut output = __jet_bootstrap_native_empty_task_root_release_output(adapter);
-                output.execution_error = Some("checked task-root release helper disappeared".to_string());
-                output.completion = __jet_bootstrap_native_preflight_completion(
-                    adapter,
-                    live_resources,
-                    "checked task-root release helper disappeared".to_string(),
-                    vec![packet.1, adapter_value, span_value],
-                );
-                return output;
-            };
-            let return_type = helper.return_type.clone();
-            let mut output = __jet_bootstrap_native_empty_task_root_release_output(adapter);
-            match __jet_bootstrap_native_execute_source_helper(
-                adapter,
-                live_resources,
-                &adapter.root.helper_roots,
-                adapter.root.task_root_release,
-                vec![
-                    ::jet_jit::SourceHelperArgument::Owned(packet.1),
-                    ::jet_jit::SourceHelperArgument::Owned(adapter_value),
-                    ::jet_jit::SourceHelperArgument::Owned(span_value),
-                ],
-                match adapter.root.execution_policy {
-                    crate::BootstrapFactoryTier::CraneliftJit =>
-                        ::jet_jit::SourceExecutionPolicy::JitWithSourceFallback,
-                    crate::BootstrapFactoryTier::SourceInterpreterDeopt =>
-                        ::jet_jit::SourceExecutionPolicy::SourceOnly,
-                    crate::BootstrapFactoryTier::Aot => unreachable!(),
-                },
-                &adapter.root.source_program,
-                &engine_config,
-                |execution| __jet_bootstrap_native_project_helper_result(
-                    execution,
-                    adapter.root.program.as_ref(),
-                    &return_type,
-                    |value| Ok((return_type.clone(), value)),
-                ),
-            ) {
-                __JetBootstrapNativeHelperExecution::InvocationFailure { completion, tier, error } => {
-                    output.actual_tier = tier;
-                    output.execution_error = Some(error);
-                    output.completion = completion;
-                }
-                __JetBootstrapNativeHelperExecution::Complete { projection, completion, tier } => {
-                    output.actual_tier = Some(tier);
-                    output.completion = completion;
-                    output.outcome = projection.outcome;
-                    output.soft_stop = projection.soft_stop;
-                    output.stdout = projection.stdout;
-                    output.stderr = projection.stderr;
-                    output.execution_error = projection.execution_error;
-                    output.callback_result = projection.value;
-                }
-            }
-            output
-        }
-    }
-}
-fn __jet_bootstrap_native_owned_drop_invocation_failure(
-    _adapter: &__JetBootstrapNativeAdapter,
-    _helper_function: ::jet_foundation::MIR::MirFunctionId,
-    error: ::jet_jit::SourceHelperInvocationError,
-) -> __JetBootstrapNativeOwnedDropOutput {
-    __JetBootstrapNativeOwnedDropOutput {
-        drop_result: None,
-        tier: None,
-        invocation_failure: Some(error),
-        retirement_failure: None,
-        execution_error: None,
-    }
-}
-
-fn __jet_bootstrap_native_owned_root_drop(
-    adapter: &__JetBootstrapNativeAdapter,
-    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-    root: __JetBootstrapNativePacket,
-    value: ::jet_foundation::MIR::MirRuntimeValue,
-    span: __SPAN__,
-) -> __JetBootstrapNativeOwnedDropOutput {
-    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-    let Some(helper) = adapter.root.program.functions.iter()
-        .find(|row| row.id == adapter.root.owned_root_drop)
-    else {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(
-                    "checked owned-root drop helper disappeared".to_string(),
-                ),
-                vec![root.1, value],
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    };
-    let Some(root_parameter) = helper.params.first() else {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(
-                    "checked owned-root drop helper has no root parameter".to_string(),
-                ),
-                vec![root.1, value],
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    };
-    let Some(value_parameter) = helper.params.get(1) else {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(
-                    "checked owned-root drop helper has no value parameter".to_string(),
-                ),
-                vec![root.1, value],
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    };
-    if !root.0.same_checked_type(&root_parameter.ty) {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(
-                    "Source owned-root drop packet type differs from its checked helper parameter".to_string(),
-                ),
-                vec![root.1, value],
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    }
-    let validation_error = crate::compiler_bootstrap_entry_codec::validate_runtime_value(
-        adapter.root.program.as_ref(),
-        &root.0,
-        &root.1,
-        0,
-    ).err().or_else(|| {
-        crate::compiler_bootstrap_entry_codec::validate_runtime_value(
-            adapter.root.program.as_ref(),
-            &value_parameter.ty,
-            &value,
-            0,
-        ).err()
-    });
-    if let Some(error) = validation_error {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                vec![root.1, value],
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    }
-    match adapter.root.execution_policy {
-        crate::BootstrapFactoryTier::Aot => {
-            let source_root = match __jet_bootstrap_entry_jet_eval_owned_root_from_runtime(
-                &root.0,
-                root.1,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(source_root) => source_root,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: Some(error.error),
-                },
-            };
-            let source_value = match __jet_bootstrap_entry_jet_eval_runtime_value_from_runtime(
-                &value_parameter.ty,
-                value,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(source_value) => source_value,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: Some(error.error),
-                },
-            };
-            let source_result = __JET_OWNED_ROOT_DROP__(
-                &source_root,
-                source_value,
-                Box::new(adapter.clone()),
-                span,
-            );
-            match __jet_bootstrap_entry_jet_eval_owned_root_drop_result_to_runtime(
-                &source_result,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(packet) => __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: Some(packet),
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-                Err(error) => __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: Some(error),
-                },
-            }
-        }
-        crate::BootstrapFactoryTier::CraneliftJit
-        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
-            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
-                &physical,
-                &adapter.root.receiver_type,
-                &adapter.physical_binding(),
-            ) {
-                Ok(value) => value,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: None,
-                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                        vec![root.1, value],
-                        live_resources.clone(),
-                    )),
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-            };
-            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
-                &span,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(value) => value,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: None,
-                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                        vec![root.1, value],
-                        live_resources.clone(),
-                    )),
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-            };
-            let engine_config = match __jet_bootstrap_native_adapter_callback_config(
-                adapter,
-                &root,
-                live_resources,
-            ) {
-                Ok(config) => config,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: None,
-                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                        vec![root.1, value],
-                        live_resources.clone(),
-                    )),
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-            };
-            match __jet_bootstrap_native_execute_source_helper(
-                adapter,
-                live_resources,
-                &adapter.root.helper_roots,
-                adapter.root.owned_root_drop,
-                vec![root.1, value, adapter_value, span_value],
-                &adapter.root.program,
-                &engine_config,
-            ) {
-                __JetBootstrapNativeHelperExecution::InvocationFailure(error) =>
-                    __jet_bootstrap_native_owned_drop_invocation_failure(
-                        adapter,
-                        adapter.root.owned_root_drop,
-                        error,
-                    ),
-                __JetBootstrapNativeHelperExecution::Complete {
-                    retirement,
-                    tier,
-                    validation_error,
-                } => {
-                    let Some(helper) = adapter.root.program.functions.iter()
-                        .find(|row| row.id == adapter.root.owned_root_drop)
-                    else {
-                        return __JetBootstrapNativeOwnedDropOutput {
-                            drop_result: None,
-                            tier: Some(tier),
-                            invocation_failure: None,
-                            retirement_failure: None,
-                            execution_error: Some("checked owned-root drop helper disappeared".to_string()),
-                        };
-                    };
-                    match retirement {
-                        __JetBootstrapNativeHelperRetirement::Complete(mut retirement) => {
-                            let drop_result = retirement.value.take()
-                                .map(|value| (helper.return_type.clone(), value));
-                            let missing_result = drop_result.is_none();
-                            __JetBootstrapNativeOwnedDropOutput {
-                                drop_result,
-                                tier: Some(tier),
-                                invocation_failure: None,
-                                retirement_failure: None,
-                                execution_error: validation_error.or_else(|| missing_result.then(
-                                    || "owned-root drop helper produced no result packet".to_string(),
-                                )),
-                            }
-                        }
-                        __JetBootstrapNativeHelperRetirement::Failed(mut failure) => {
-                            let drop_result = failure.retirement.value.take()
-                                .map(|value| (helper.return_type.clone(), value));
-                            let missing_result = drop_result.is_none();
-                            __JetBootstrapNativeOwnedDropOutput {
-                                drop_result,
-                                tier: Some(tier),
-                                invocation_failure: None,
-                                retirement_failure: Some(failure),
-                                execution_error: validation_error.or_else(|| missing_result.then(
-                                    || "owned-root drop helper retirement failure has no result packet".to_string(),
-                                )),
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-fn __jet_bootstrap_native_callback_result_drop(
-    adapter: &__JetBootstrapNativeAdapter,
-    live_resources: &::jet_jit::SourceResources::SourceResourceLease,
-    root: __JetBootstrapNativePacket,
-    callback_result: Option<__JetBootstrapNativePacket>,
-    span: __SPAN__,
-) -> __JetBootstrapNativeOwnedDropOutput {
-    let Some(callback_result) = callback_result else {
-        let unit = ::jet_foundation::MIR::MirRuntimeValue::Enum {
-            type_name: "JetEvalRuntimeValue".to_string(),
-            variant: "Data".to_string(),
-            args: vec![(
-                None,
-                ::jet_foundation::MIR::MirRuntimeValue::Enum {
-                    type_name: "TComptimeValue".to_string(),
-                    variant: "Unit".to_string(),
-                    args: Vec::new(),
-                },
-            )],
-        };
-        return __jet_bootstrap_native_owned_root_drop(adapter, live_resources, root, unit, span);
-    };
-    let physical = __JetBootstrapNativePhysicalBindings::new(adapter);
-    let mut entry_values = vec![root.1, callback_result.1];
-    let Some(helper) = adapter.root.program.functions.iter()
-        .find(|row| row.id == adapter.root.owned_callback_result_drop)
-    else {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(
-                    "checked callback-result cleanup helper disappeared".to_string(),
-                ),
-                entry_values,
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    };
-    let Some(root_parameter) = helper.params.first() else {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(
-                    "checked callback-result cleanup helper has no OwnedRoot parameter".to_string(),
-                ),
-                entry_values,
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    };
-    let Some(result_parameter) = helper.params.get(1) else {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(
-                    "checked callback-result cleanup helper has no callback result parameter".to_string(),
-                ),
-                entry_values,
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    };
-    let validation_error = if !root.0.same_checked_type(&root_parameter.ty) {
-        Some("OwnedRoot packet type differs from the checked callback-result cleanup helper".to_string())
-    } else if !callback_result.0.same_checked_type(&result_parameter.ty) {
-        Some("callback result packet type differs from the checked cleanup helper".to_string())
-    } else {
-        crate::compiler_bootstrap_entry_codec::validate_runtime_value(
-            adapter.root.program.as_ref(),
-            &root.0,
-            &entry_values[0],
-            0,
-        )
-        .err()
-        .or_else(|| crate::compiler_bootstrap_entry_codec::validate_runtime_value(
-            adapter.root.program.as_ref(),
-            &callback_result.0,
-            &entry_values[1],
-            0,
-        ).err())
-    };
-    if let Some(error) = validation_error {
-        return __JetBootstrapNativeOwnedDropOutput {
-            drop_result: None,
-            tier: None,
-            invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                entry_values,
-                live_resources.clone(),
-            )),
-            retirement_failure: None,
-            execution_error: None,
-        };
-    }
-    match adapter.root.execution_policy {
-        crate::BootstrapFactoryTier::Aot => {
-            let root_value = entry_values.remove(0);
-            let callback_value = entry_values.remove(0);
-            let source_root = match __jet_bootstrap_entry_jet_eval_owned_root_from_runtime(
-                &root.0,
-                root_value,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(value) => value,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: Some(error.error),
-                },
-            };
-            let source_result = match __jet_bootstrap_entry_jet_eval_callback_result_from_runtime(
-                &callback_result.0,
-                callback_value,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(value) => value,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: Some(error.error),
-                },
-            };
-            let source_result = __JET_OWNED_CALLBACK_RESULT_DROP__(
-                &source_root,
-                source_result,
-                Box::new(adapter.clone()),
-                span,
-            );
-            match __jet_bootstrap_entry_jet_eval_owned_root_drop_result_to_runtime(
-                &source_result,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(packet) => __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: Some(packet),
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-                Err(error) => __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: Some(::jet_jit::SourceExecutionTier::Native),
-                    invocation_failure: None,
-                    retirement_failure: None,
-                    execution_error: Some(error),
-                },
-            }
-        }
-        crate::BootstrapFactoryTier::CraneliftJit
-        | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
-            let callback_config_packet = (root.0.clone(), entry_values[0].clone());
-            let (_, adapter_value) = match __jet_bootstrap_native_adapter_host_runtime(
-                &physical,
-                &adapter.root.receiver_type,
-                &adapter.physical_binding(),
-            ) {
-                Ok(value) => value,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: None,
-                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                        entry_values,
-                        live_resources.clone(),
-                    )),
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-            };
-            let (_, span_value) = match __jet_bootstrap_entry_span_to_runtime(
-                &span,
-                &adapter.root.program,
-                &physical,
-            ) {
-                Ok(value) => value,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: None,
-                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                        entry_values,
-                        live_resources.clone(),
-                    )),
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-            };
-            let engine_config = match __jet_bootstrap_native_adapter_callback_config(
-                adapter,
-                &callback_config_packet,
-                live_resources,
-            ) {
-                Ok(config) => config,
-                Err(error) => return __JetBootstrapNativeOwnedDropOutput {
-                    drop_result: None,
-                    tier: None,
-                    invocation_failure: Some(::jet_jit::SourceHelperInvocationError::not_invoked(
-                        ::jet_jit::SourceDeoptError::InvalidRequest(error),
-                        entry_values,
-                        live_resources.clone(),
-                    )),
-                    retirement_failure: None,
-                    execution_error: None,
-                },
-            };
-            entry_values.push(adapter_value);
-            entry_values.push(span_value);
-            match __jet_bootstrap_native_execute_source_helper(
-                adapter,
-                live_resources,
-                &adapter.root.helper_roots,
-                adapter.root.owned_callback_result_drop,
-                entry_values,
-                &adapter.root.program,
-                &engine_config,
-            ) {
-                __JetBootstrapNativeHelperExecution::InvocationFailure(error) =>
-                    __jet_bootstrap_native_owned_drop_invocation_failure(
-                        adapter,
-                        adapter.root.owned_callback_result_drop,
-                        error,
-                    ),
-                __JetBootstrapNativeHelperExecution::Complete {
-                    retirement,
-                    tier,
-                    validation_error,
-                } => {
-                    let Some(helper) = adapter.root.program.functions.iter()
-                        .find(|row| row.id == adapter.root.owned_callback_result_drop)
-                    else {
-                        return __JetBootstrapNativeOwnedDropOutput {
-                            drop_result: None,
-                            tier: Some(tier),
-                            invocation_failure: None,
-                            retirement_failure: None,
-                            execution_error: Some("checked callback-result cleanup helper disappeared".to_string()),
-                        };
-                    };
-                    match retirement {
-                        __JetBootstrapNativeHelperRetirement::Complete(mut retirement) => {
-                            let drop_result = retirement.value.take()
-                                .map(|value| (helper.return_type.clone(), value));
-                            let missing_result = drop_result.is_none();
-                            __JetBootstrapNativeOwnedDropOutput {
-                                drop_result,
-                                tier: Some(tier),
-                                invocation_failure: None,
-                                retirement_failure: None,
-                                execution_error: validation_error.or_else(|| missing_result.then(
-                                    || "callback-result cleanup helper produced no result packet".to_string(),
-                                )),
-                            }
-                        }
-                        __JetBootstrapNativeHelperRetirement::Failed(mut failure) => {
-                            let drop_result = failure.retirement.value.take()
-                                .map(|value| (helper.return_type.clone(), value));
-                            let missing_result = drop_result.is_none();
-                            __JetBootstrapNativeOwnedDropOutput {
-                                drop_result,
-                                tier: Some(tier),
-                                invocation_failure: None,
-                                retirement_failure: Some(failure),
-                                execution_error: validation_error.or_else(|| missing_result.then(
-                                    || "callback-result cleanup helper retirement failure has no result packet".to_string(),
-                                )),
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-"#;
-    let generated = generated
-        .replace("__SOURCE_PROGRAM__", source_program)
-        .replace("__EVAL_CONFIG__", eval_config)
-        .replace("__SPAN__", span_type)
-        .replace("__TASK_CALLBACK_INVOKE_ID__", &task_callback_invoke)
-        .replace("__TASK_ROOT_RELEASE_ID__", &task_root_release)
-        .replace("__OWNED_ROOT_DROP_ID__", &owned_root_drop)
-        .replace("__OWNED_CALLBACK_RESULT_DROP_ID__", &owned_callback_result_drop)
-        .replace("__JET_EVAL_START_DEOPT__", start_deopt)
-        .replace("__JET_EVAL_RESULT_HOST_PROJECTION__", result_host_projection)
-        .replace("__JET_EVAL_RETIRE_RESULT__", retire_result)
-        .replace("__JET_TASK_CALLBACK_INVOKE__", callback_invoke_symbol)
-        .replace("__JET_TASK_ROOT_RELEASE__", root_release_symbol)
-        .replace("__JET_OWNED_ROOT_DROP__", owned_drop_symbol)
-        .replace("__JET_OWNED_CALLBACK_RESULT_DROP__", owned_callback_result_drop_symbol)
-        .replace("__TASK_CALLBACK_ROOT_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "root")?)
-        .replace("__TASK_CALLBACK_RESULT_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "result")?)
-        .replace("__TASK_CALLBACK_REUSABLE_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "reusable")?)
-        .replace("__TASK_CALLBACK_CLEANUP_ROOT_FIELD__", symbols.field_symbol("JetEvalTaskCallbackInvokeResult", "cleanup_root")?)
-        .replace("__TASK_CALLBACK_ROOT_FIELD_ID__", &callback_root_field)
-        .replace("__TASK_CALLBACK_RESULT_FIELD_ID__", &callback_result_field)
-        .replace("__TASK_CALLBACK_REUSABLE_FIELD_ID__", &callback_reusable_field)
-        .replace("__TASK_CALLBACK_CLEANUP_ROOT_FIELD_ID__", &callback_cleanup_root_field)
-        .replace("__OWNED_DROP_DISPOSITION_FIELD_ID__", &owned_drop_disposition_field)
-        .replace("__OWNED_DROP_DISPOSITION_TYPE__", "\"JetEvalOwnedRootDropDisposition\"")
-        .replace("__RESULT_COMPLETE__", result_complete)
-        .replace("__RESULT_VALUE__", result_value)
-        .replace("__RESULT_ERROR__", result_error)
-        .replace("__RESULT_INTERNAL_PROBLEM__", result_internal_problem)
-        .replace("__RESULT_STDOUT__", result_stdout)
-        .replace("__RESULT_STDERR__", result_stderr)
-        .replace("__RESULT_SOFT_STOP__", result_soft_stop)
-        .replace("__RESULT_EXIT_CODE__", result_exit_code)
-        .replace("__ERROR_DIAGNOSTIC__", error_diagnostic)
-        .replace("__DIAGNOSTIC_CODE__", diagnostic_code)
-        .replace("__DIAGNOSTIC_WHAT__", diagnostic_what)
-        .replace("__INTERNAL_PROBLEM_MESSAGE__", internal_problem_message)
-        .replace("__JET_NATIVE_CALLBACK_OUTPUT__", "__JetBootstrapNativeTaskCallbackOutput")
-        .replace("__JET_NATIVE_OWNED_DROP_OUTPUT__", "__JetBootstrapNativeOwnedDropOutput");
-    out.push_str(&generated);
-    Ok(())
 }
 
 fn emit_bootstrap_native_compile_entry(
@@ -2961,37 +1835,14 @@ fn emit_bootstrap_native_compile_entry(
     let eval_config = symbols.type_symbol("JetEvalConfig")?;
     let request_eval_config = symbols.field_symbol("JetDriverCompileRequest", "eval_config")?;
     let request_host_adapter = symbols.field_symbol("JetEvalConfig", "host_adapter")?;
-    let request_record_store = symbols.field_symbol("JetDriverCompileRequest", "record_store")?;
     let request_host_hooks = symbols.field_symbol("JetEvalConfig", "host_hooks")?;
     let host_hooks_type = symbols.type_symbol("SemaRegistrationHostHooks")?;
     let hook_numeric = symbols.field_symbol("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
     let hook_boundary = symbols.field_symbol("SemaRegistrationHostHooks", "typed_boundary_literal_validate")?;
     let host_field = symbols.field_binding("JetEvalConfig", "host_adapter")?;
     let numeric_field = symbols.field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")?;
-    let native_callable_binding = symbols.type_symbol("JetEvalNativeCallableBinding")?;
-    let native_binding_identity = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
-    let native_callable_key = symbols.field_symbol("JetEvalNativeCallableBinding", "key")?;
-    let native_callable_type =
-        symbols.field_symbol("JetEvalNativeCallableBinding", "callable_type")?;
     let entry_id = entry.function.0.to_string();
-    let _entry_symbol = &entry.symbol;
-    let helper_roots = helpers
-        .roots
-        .iter()
-        .map(|id| format!("::jet_foundation::MIR::MirFunctionId({})", id.0))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let task_callback_invoke = helpers.task_callback_invoke.0.to_string();
-    let task_root_release = helpers.task_root_release.0.to_string();
-    let owned_root_drop = helpers.owned_root_drop.0.to_string();
-    let owned_callback_result_drop = helpers.owned_callback_result_drop.0.to_string();
     let callback_transfer = helpers.callback_transfer.0.to_string();
-    let callback_release = helpers.callback_release.0.to_string();
-    let task_root_take = helpers.task_root_take.0.to_string();
-    let task_root_cleanup_root = helpers.task_root_cleanup_root.0.to_string();
-    let owned_root_cleanup_clone = helpers.owned_root_cleanup_clone.0.to_string();
-    let owned_root_drop_values = helpers.owned_root_drop_values.0.to_string();
-    let shared_payload_finalize = helpers.shared_payload_finalize.0.to_string();
     let host_type_shape = helpers.host_type_shape.0.to_string();
     let shape_callable = checked_bootstrap_callable(bindings, "jet_eval_host_type_shape_from_program")?;
     if shape_callable.metadata.parameter_types.len() != 3 {
@@ -3193,16 +2044,16 @@ pub fn __jet_bootstrap_compile_with_native(
         if !__jet_numeric_callable_type.same_checked_type(&__jet_numeric_identity.callable_type) {
             return Err("numeric callable template differs from the exact checked config field".to_string());
         }
-        let __jet_numeric_binding = __NATIVE_BINDING_CALLABLE__ {
-            __NATIVE_CALLABLE_KEY__: __jet_numeric_identity.key.clone(),
-            __NATIVE_CALLABLE_TYPE__: __jet_numeric_identity.callable_type.clone(),
-        };
         let __jet_numeric_registration = __jet_bootstrap_native_binding_registration(
             &__jet_root_lease,
+            None,
             __jet_compiler_image.program.as_ref(),
             __jet_compiler_image.header.artifact,
             vec!["SemaRegistrationHostHooks".to_string(), "numeric_unit_conversion_exact".to_string()],
-            __NATIVE_BINDING_IDENTITY__::Callable(__jet_numeric_binding),
+            @new.JetEvalNativeBindingIdentity.Callable@{ binding: @s.JetEvalNativeCallableBinding@{
+                key: __jet_numeric_identity.key.clone(),
+                callable_type: __jet_bootstrap_type_from_host(&__jet_numeric_identity.callable_type)?,
+            } },
             ::jet_jit::SourceResources::SourceNativeBindingIdentity::Callable(
                 __jet_numeric_identity,
             ),
@@ -3215,7 +2066,7 @@ pub fn __jet_bootstrap_compile_with_native(
             .find(|function| function.id == ::jet_foundation::MIR::MirFunctionId(__HOST_TYPE_SHAPE_ID__))
             .ok_or_else(|| "checked Source host-shape accessor disappeared".to_string())?;
         let __jet_machine_type = __jet_compiler_image.program.functions.iter()
-            .find(|function| function.id == ::jet_foundation::MIR::MirFunctionId(__TASK_ROOT_TAKE_ID__))
+            .find(|function| function.id == ::jet_foundation::MIR::MirFunctionId(__CALLBACK_TRANSFER_ID__))
             .and_then(|function| function.params.first())
             .map(|parameter| &parameter.ty)
             .ok_or_else(|| "checked Source Machine parameter disappeared".to_string())?;
@@ -3245,6 +2096,7 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_bindings,
             __jet_compiler_image.program.clone(),
             __jet_compiler_image.source_program.clone(),
+            __jet_machine_abi_shape,
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),
             __jet_callback_jobs.clone(),
@@ -3252,79 +2104,23 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_receiver_type,
             __jet_template,
             vec![__jet_numeric_registration],
-            vec![__HELPER_ROOTS__],
-            ::jet_foundation::MIR::MirFunctionId(__TASK_CALLBACK_INVOKE_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__TASK_ROOT_RELEASE_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__OWNED_ROOT_DROP_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__OWNED_CALLBACK_RESULT_DROP_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__CALLBACK_TRANSFER_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__CALLBACK_RELEASE_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__TASK_ROOT_TAKE_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__TASK_ROOT_CLEANUP_ROOT_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__OWNED_ROOT_CLEANUP_CLONE_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__OWNED_ROOT_DROP_VALUES_ID__),
-            ::jet_foundation::MIR::MirFunctionId(__SHARED_PAYLOAD_FINALIZE_ID__),
-            __jet_selected_tier,
         )?;
         __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_HOST_ADAPTER__ =
             Ok(Box::new(__jet_native_adapter.clone()));
         __jet_request.__REQUEST_EVAL_CONFIG__.__REQUEST_HOST_HOOKS__ =
             crate::jet_std::JetShared::new(__HOOKS_TYPE__ {
                 __HOOK_NUMERIC__: Ok(__jet_bootstrap_native_numeric_wrapper_for_adapter(&__jet_native_adapter)?),
-                __HOOK_BOUNDARY__: Err(::jet_foundation::Outcome::JetAbsent),
+                __HOOK_BOUNDARY__: Err(jet_foundation::Outcome::JetAbsent),
             });
         __jet_runtime_config = Some(__RUNTIME_CONFIG__(&__jet_request.__REQUEST_EVAL_CONFIG__));
-        let __jet_source_helper_context = __jet_runtime_config.as_ref()
-            .ok_or_else(|| "Source runtime config disappeared before helper execution".to_string())?;
         let _activation = __jet_resource_session.activate();
-
-        let (__jet_result, __jet_actual_factory_tier) = match __jet_selected_tier {
-            crate::BootstrapFactoryTier::Aot => (
-                match __jet_image_entry {
-                    ::jet_foundation::MIR::MirFunctionId(__ENTRY_ID__) => __FACTORY_SYMBOL__(__jet_request),
-                    _ => return Err("restored compiler image selected an unknown generated factory entry".to_string()),
-                },
-                crate::BootstrapFactoryTier::Aot,
-            ),
-            crate::BootstrapFactoryTier::CraneliftJit
-            | crate::BootstrapFactoryTier::SourceInterpreterDeopt => {
-                // The record store is a typed Rust trait object with no
-                // native interface binding, so it cannot cross into Source
-                // execution. There every lookup misses and checks run in full.
-                __jet_request.__REQUEST_RECORD_STORE__ = Err(Default::default());
-                let __jet_physical = __JetBootstrapNativePhysicalBindings::new(&__jet_native_adapter);
-                let __jet_request_value = __jet_bootstrap_entry_request_to_runtime(
-                    __jet_request,
-                    __jet_compiler_image.program.clone(),
-                    &__jet_physical,
-                )?;
-                let (__jet_value, __jet_tier) = __jet_bootstrap_native_execute_source_helper(
-                    &__jet_native_adapter,
-                    &__jet_native_adapter.resources,
-                    &[__jet_image_entry],
-                    __jet_image_entry,
-                    vec![__jet_request_value],
-                    &__jet_compiler_image.source_program,
-                    __jet_source_helper_context,
-                )?;
-                let __jet_function = __jet_compiler_image.program.functions.iter()
-                    .find(|function| function.id == __jet_image_entry)
-                    .ok_or_else(|| "checked private factory root disappeared".to_string())?;
-                let __jet_result = __jet_bootstrap_entry_result_from_runtime(
-                    &__jet_function.return_type,
-                    __jet_value,
-                    &__jet_compiler_image.program,
-                    &__jet_physical,
-                ).map_err(|error| error.error)?;
-                let __jet_tier = match __jet_tier {
-                    ::jet_jit::SourceExecutionTier::Native => crate::BootstrapFactoryTier::CraneliftJit,
-                    ::jet_jit::SourceExecutionTier::Source => crate::BootstrapFactoryTier::SourceInterpreterDeopt,
-                };
-                (__jet_result, __jet_tier)
-            }
+        // D-EXEC1: the compiler factory runs only as the linked Rust AOT root.
+        let crate::BootstrapFactoryTier::Aot = __jet_selected_tier;
+        let __jet_result = match __jet_image_entry {
+            ::jet_foundation::MIR::MirFunctionId(__ENTRY_ID__) => __FACTORY_SYMBOL__(__jet_request),
+            _ => return Err("restored compiler image selected an unknown generated factory entry".to_string()),
         };
         drop(_activation);
-        drop(__jet_source_helper_context);
         drop(__jet_resource_session);
         Ok(__JetBootstrapCompileLease {
             result: __jet_result,
@@ -3333,7 +2129,7 @@ pub fn __jet_bootstrap_compile_with_native(
             runtime_config: __jet_runtime_config.take()
                 .ok_or_else(|| "Source runtime config was consumed before factory completion".to_string())?,
             selected_factory_tier: __jet_selected_tier,
-            actual_factory_tier: __jet_actual_factory_tier,
+            actual_factory_tier: crate::BootstrapFactoryTier::Aot,
         })
     })();
 
@@ -3368,18 +2164,7 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__EVAL_CONFIG__", eval_config)
         .replace("__COMPILE_REQUEST__", &entry.parameter_types[0])
         .replace("__ENTRY_ID__", &entry_id)
-        .replace("__HELPER_ROOTS__", &helper_roots)
-        .replace("__TASK_CALLBACK_INVOKE_ID__", &task_callback_invoke)
-        .replace("__TASK_ROOT_RELEASE_ID__", &task_root_release)
-        .replace("__OWNED_ROOT_DROP_ID__", &owned_root_drop)
-        .replace("__OWNED_CALLBACK_RESULT_DROP_ID__", &owned_callback_result_drop)
         .replace("__CALLBACK_TRANSFER_ID__", &callback_transfer)
-        .replace("__CALLBACK_RELEASE_ID__", &callback_release)
-        .replace("__TASK_ROOT_TAKE_ID__", &task_root_take)
-        .replace("__TASK_ROOT_CLEANUP_ROOT_ID__", &task_root_cleanup_root)
-        .replace("__OWNED_ROOT_CLEANUP_CLONE_ID__", &owned_root_cleanup_clone)
-        .replace("__OWNED_ROOT_DROP_VALUES_ID__", &owned_root_drop_values)
-        .replace("__SHARED_PAYLOAD_FINALIZE_ID__", &shared_payload_finalize)
         .replace("__HOST_TYPE_SHAPE_ID__", &host_type_shape)
         .replace("__HOST_TYPE_SHAPE_SYMBOL__", &shape_callable.metadata.symbol)
         .replace("__HOST_TYPE_SHAPE_ARGUMENTS__", &shape_arguments)
@@ -3387,13 +2172,8 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__HOST_FIELD_ID__", &host_field.field.0.to_string())
         .replace("__NUMERIC_FIELD_OWNER__", &numeric_field.owner.0.to_string())
         .replace("__NUMERIC_FIELD_ID__", &numeric_field.field.0.to_string())
-        .replace("__NATIVE_BINDING_CALLABLE__", native_callable_binding)
-        .replace("__NATIVE_BINDING_IDENTITY__", native_binding_identity)
-        .replace("__NATIVE_CALLABLE_KEY__", native_callable_key)
-        .replace("__NATIVE_CALLABLE_TYPE__", native_callable_type)
         .replace("__REQUEST_EVAL_CONFIG__", request_eval_config)
         .replace("__REQUEST_HOST_ADAPTER__", request_host_adapter)
-        .replace("__REQUEST_RECORD_STORE__", request_record_store)
         .replace("__REQUEST_HOST_HOOKS__", request_host_hooks)
         .replace("__HOOKS_TYPE__", host_hooks_type)
         .replace("__HOOK_NUMERIC__", hook_numeric)
@@ -3415,6 +2195,7 @@ fn emit_bootstrap_record_store(
     let trait_symbol = symbols.trait_symbol("JetDriverRecordStore")?;
     out.push_str(
         "#[doc(hidden)]\n\
+         #[derive(Clone)]\n\
          struct __JetBootstrapRecordStore {\n\
              store: crate::compiler_bootstrap_host::BootstrapRecordStore,\n\
          }\n",
@@ -3434,7 +2215,8 @@ fn emit_bootstrap_record_store(
         };
         let (arity, body) = match metadata.name.as_str() {
             "record" => (2, "match self.store.record(&__jet_arg_0, &__jet_arg_1) { Some(bytes) => Ok(bytes), None => Err(Default::default()) }"),
-            "put_record" => (3, "self.store.put_record(&__jet_arg_0, &__jet_arg_1, &__jet_arg_2)"),
+            // The checked Bool return is emitted fallible (`JetOutcome<bool, JetErr>`).
+            "put_record" => (3, "Ok(self.store.put_record(&__jet_arg_0, &__jet_arg_1, &__jet_arg_2))"),
             "stamp" => (1, "match self.store.stamp(&__jet_arg_0) { Some(stamp) => Ok(stamp), None => Err(Default::default()) }"),
             name => {
                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
@@ -3666,13 +2448,13 @@ fn emit_bootstrap_host_factory(
             "    }});\n",
             "    match __jet_output {{\n",
             "        Ok(mut output) => {{ output.resources = Some(__jet_result.resources); Ok(output) }},\n",
-            "        Err(error) => match __jet_completion_scope.with_current(|| __jet_result.resources.retire()) {{\n",
+            "        Err(error) => {{ let error = crate::BootstrapHostCodecError::InvalidMetadata(error); match __jet_completion_scope.with_current(|| __jet_result.resources.retire()) {{\n",
             "            Ok(completions) => {{\n",
             "                for completion in completions {{ __jet_completion_scope.record(completion); }}\n",
             "                Err(error)\n",
             "            }},\n",
             "            Err(retirement) => Err(crate::BootstrapHostCodecError::ResourceRetirement {{ cause: Box::new(error), retirement }}),\n",
-            "        }},\n",
+            "        }} }},\n",
             "    }}\n",
             "}}\n",
         ),
@@ -3830,7 +2612,6 @@ fn emit_bootstrap_web_asset_provider(
 ) -> Result<(), BootstrapHostCodecError> {
     let target_type = symbols.type_symbol("JetDriverCompileTarget")?;
     let target_native = symbols.variant_path("JetDriverCompileTarget", "Native")?;
-    let target_web = symbols.variant_path("JetDriverCompileTarget", "Web")?;
     let assets_type = symbols.type_symbol("JetWebAssets")?;
     let timezone_type = symbols.type_symbol("JetWebTimezoneAsset")?;
     let timezone_name = symbols.field_symbol("JetWebTimezoneAsset", "name")?;
@@ -3873,7 +2654,7 @@ fn emit_bootstrap_web_asset_provider(
         ) -> Result<{target_type}, String> {{
             match target {{
                 {target_native} => Ok({target_native}),
-                {target_web}(assets, release_policy, profile) => {{
+                @p.JetDriverCompileTarget.Web@(assets, release_policy, profile) => {{
                     let raw = crate::Codegen::canonical_web_raw_assets()
                         .map_err(|error| error.to_string())?;
                     let assets = {assets_type} {{
@@ -3900,13 +2681,12 @@ fn emit_bootstrap_web_asset_provider(
                         {source_names}: assets.{source_names},
                         {source_contents}: assets.{source_contents},
                     }};
-                    Ok({target_web}(assets, release_policy, profile))
+                    Ok(@new.JetDriverCompileTarget.Web@(assets, release_policy, profile))
                 }}
             }}
         }}"#,
         target_type = target_type,
         target_native = target_native,
-        target_web = target_web,
         assets_type = assets_type,
         timezone_type = timezone_type,
         timezone_name = timezone_name,
@@ -4056,9 +2836,9 @@ fn emit_bootstrap_manifest_adapter(
             "    let reports = __jet_bootstrap_reports_from_result(&{value}, snapshot)?;\n",
             "    let source_program = ({value}).{result_mir}.ok();\n",
             "    let mir = source_program.as_ref().map(__jet_bootstrap_mir_program_to_host).transpose()?;\n",
-            "    let entry_function = ({value}).{result_entry_function}.as_ref().ok().map(|function| Ok(::jet_foundation::MIR::MirFunctionId(function.{function_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet entry function ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
-            "    let runtime_artifact = ({value}).{result_runtime_artifact}.as_ref().ok().map(|artifact| Ok(::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet runtime artifact ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
-            "    let web_artifact = ({value}).{result_web_artifact}.as_ref().ok().map(|artifact| Ok(::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet Web artifact ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
+            "    let entry_function = ({value}).{result_entry_function}.as_ref().ok().map(|function| Ok::<_, String>(::jet_foundation::MIR::MirFunctionId(function.{function_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet entry function ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
+            "    let runtime_artifact = ({value}).{result_runtime_artifact}.as_ref().ok().map(|artifact| Ok::<_, String>(::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet runtime artifact ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
+            "    let web_artifact = ({value}).{result_web_artifact}.as_ref().ok().map(|artifact| Ok::<_, String>(::jet_foundation::MIR::MirArtifactId(artifact.{artifact_value}.to_string_rep().parse::<u64>().map_err(|_| \"Jet Web artifact ID is not an unsigned integer\".to_string())?))).transpose()?;\n",
             "    let web_artifacts = ({value}).{result_web_artifacts}.as_ref().ok().map(|artifacts| crate::BootstrapWebArtifacts {{\n",
             "        manifest_json: artifacts.{web_manifest_json}.clone(),\n",
             "        wasm_rust: artifacts.{web_wasm_rust}.clone(),\n",
@@ -4230,1253 +3010,704 @@ fn emit_bootstrap_manifest_adapter(
     Ok(())
 }
 
-fn emit_bootstrap_type_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<(), BootstrapHostCodecError> {
-    let mir_type = symbols.type_symbol("MIRType")?;
-    let mir_type_id = symbols.type_symbol("MIRTypeID")?;
-    let mir_measure = symbols.type_symbol("MIRMeasure")?;
-    let mir_dimension = symbols.type_symbol("MIRDimension")?;
-    let mir_dimension_axis = symbols.type_symbol("MIRDimensionAxis")?;
-    let mir_abi = symbols.type_symbol("MIRABI")?;
-    let mir_size = symbols.type_symbol("MIRSize")?;
-    let mir_layout = symbols.type_symbol("MIRLayout")?;
-    let mir_nominal_ref = symbols.type_symbol("MIRNominalRef")?;
-    let mir_trait_ref = symbols.type_symbol("MIRTraitRef")?;
-    let mir_trait_id = symbols.type_symbol("MIRTraitID")?;
-    let mir_tuple_field = symbols.type_symbol("MIRTupleField")?;
-    let mir_tag_marker = symbols.type_symbol("MIRTagMarker")?;
-
-    let type_kind = symbols.field_symbol("MIRType", "kind")?;
-    let type_identity = symbols.field_symbol("MIRType", "identity")?;
-    let type_layout = symbols.field_symbol("MIRType", "layout")?;
-    let id_value = symbols.field_symbol("MIRTypeID", "value")?;
-    let dimension_axes = symbols.field_symbol("MIRDimension", "axes")?;
-    let axis_name = symbols.field_symbol("MIRDimensionAxis", "name")?;
-    let axis_exponent = symbols.field_symbol("MIRDimensionAxis", "exponent")?;
-    let nominal_id = symbols.field_symbol("MIRNominalRef", "id")?;
-    let nominal_name = symbols.field_symbol("MIRNominalRef", "name")?;
-    let trait_ref_id = symbols.field_symbol("MIRTraitRef", "id")?;
-    let trait_ref_name = symbols.field_symbol("MIRTraitRef", "name")?;
-    let trait_id_value = symbols.field_symbol("MIRTraitID", "value")?;
-    let tuple_name = symbols.field_symbol("MIRTupleField", "name")?;
-    let tuple_ty = symbols.field_symbol("MIRTupleField", "ty")?;
-    let layout_abi = symbols.field_symbol("MIRLayout", "abi")?;
-    let layout_size = symbols.field_symbol("MIRLayout", "size")?;
-    let layout_align = symbols.field_symbol("MIRLayout", "align")?;
-
-    let kind_variants = [
-        ("Int", symbols.variant_path("MIRTypeKind", "Int")?),
-        ("Float", symbols.variant_path("MIRTypeKind", "Float")?),
-        ("Bool", symbols.variant_path("MIRTypeKind", "Bool")?),
-        ("String", symbols.variant_path("MIRTypeKind", "String")?),
-        ("Char", symbols.variant_path("MIRTypeKind", "Char")?),
-        ("List", symbols.variant_path("MIRTypeKind", "List")?),
-        ("Map", symbols.variant_path("MIRTypeKind", "Map")?),
-        ("Shared", symbols.variant_path("MIRTypeKind", "Shared")?),
-        ("Option", symbols.variant_path("MIRTypeKind", "Option")?),
-        ("Result", symbols.variant_path("MIRTypeKind", "Result")?),
-        ("Fn", symbols.variant_path("MIRTypeKind", "Fn")?),
-        ("SendFn", symbols.variant_path("MIRTypeKind", "SendFn")?),
-        ("Apply", symbols.variant_path("MIRTypeKind", "Apply")?),
-        ("TraitObject", symbols.variant_path("MIRTypeKind", "TraitObject")?),
-        ("Tuple", symbols.variant_path("MIRTypeKind", "Tuple")?),
-        ("FixedList", symbols.variant_path("MIRTypeKind", "FixedList")?),
-        ("IntN", symbols.variant_path("MIRTypeKind", "IntN")?),
-        ("InlineRange", symbols.variant_path("MIRTypeKind", "InlineRange")?),
-        ("Float32", symbols.variant_path("MIRTypeKind", "Float32")?),
-        ("Tagged", symbols.variant_path("MIRTypeKind", "Tagged")?),
-        ("Union", symbols.variant_path("MIRTypeKind", "Union")?),
-        ("Quantity", symbols.variant_path("MIRTypeKind", "Quantity")?),
-        ("Measure", symbols.variant_path("MIRTypeKind", "Measure")?),
-    ];
-    let kind = |name: &str| {
-        kind_variants
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-
-    let measure_variants = [
-        ("Literal", symbols.variant_path("MIRMeasure", "Literal")?),
-        ("SignedLiteral", symbols.variant_path("MIRMeasure", "SignedLiteral")?),
-        ("Symbol", symbols.variant_path("MIRMeasure", "Symbol")?),
-        ("Combined", symbols.variant_path("MIRMeasure", "Combined")?),
-    ];
-    let measure = |name: &str| {
-        measure_variants
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-
-    let abi_variants = [
-        ("Scalar", symbols.variant_path("MIRABI", "Scalar")?),
-        ("Aggregate", symbols.variant_path("MIRABI", "Aggregate")?),
-        ("Sequence", symbols.variant_path("MIRABI", "Sequence")?),
-        ("Function", symbols.variant_path("MIRABI", "Function")?),
-        ("Nominal", symbols.variant_path("MIRABI", "Nominal")?),
-        ("Dynamic", symbols.variant_path("MIRABI", "Dynamic")?),
-        ("Never", symbols.variant_path("MIRABI", "Never")?),
-    ];
-    let abi = |name: &str| {
-        abi_variants
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-    let size_variants = [
-        ("Static", symbols.variant_path("MIRSize", "Static")?),
-        ("Dynamic", symbols.variant_path("MIRSize", "Dynamic")?),
-    ];
-    let size = |name: &str| {
-        size_variants
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-    let scalar_variants = [
-        ("Int", symbols.variant_path("MIRScalarKind", "Int")?),
-        ("Float", symbols.variant_path("MIRScalarKind", "Float")?),
-        ("Float32", symbols.variant_path("MIRScalarKind", "Float32")?),
-        ("Bool", symbols.variant_path("MIRScalarKind", "Bool")?),
-        ("Char", symbols.variant_path("MIRScalarKind", "Char")?),
-        ("Pointer", symbols.variant_path("MIRScalarKind", "Pointer")?),
-    ];
-    let scalar = |name: &str| {
-        scalar_variants
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-    let tag_variants = [
-        ("User", symbols.variant_path("MIRTagMarker", "User")?),
-        ("Internal", symbols.variant_path("MIRTagMarker", "Internal")?),
-    ];
-    let tag = |name: &str| {
-        tag_variants
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-    let internal_names = [
-        "CoreCryptoNominal",
-        "DeterministicClock",
-        "SystemClock",
-        "ExpiringSecretLoan",
-        "SharedGuardRead",
-        "SharedGuardEdit",
-        "TerminalFactSet",
-        "CppCallbackABI",
-        "AllocatorView",
-    ];
-    let internal_paths = internal_names
-        .iter()
-        .map(|name| {
-            Ok::<_, BootstrapHostCodecError>((
-                *name,
-                symbols.variant_path("MIRInternalTag", name)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let internal = |name: &str| {
-        internal_paths
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_type_id_to_host(value: &{mir_type_id}) -> Result<::jet_foundation::MIR::MirTypeId, String> {{\n\
-             let text = ({value}).{id_value}.to_string_rep();\n\
-             let id = text.parse::<u64>().map_err(|_| \"MIR type identity is not an unsigned integer\".to_string())?;\n\
-             if id == 0 {{\n\
-                 return Err(\"MIR type identity is zero\".to_string());\n\
-             }}\n\
-             Ok(::jet_foundation::MIR::MirTypeId(id))\n\
-         }}\n\
-         fn __jet_bootstrap_type_id_from_host(value: ::jet_foundation::MIR::MirTypeId) -> Result<{mir_type_id}, String> {{\n\
-             let value = jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(value.0));\n\
-             Ok({mir_type_id} {{ {id_value}: value }})\n\
-         }}"
-        , mir_type_id = mir_type_id, value = "value", id_value = id_value
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_measure_to_host(value: &{mir_measure}) -> Result<::jet_foundation::MIR::MirMeasure, String> {{
-             match value {{
-                 {literal}(kind, value) => Ok(::jet_foundation::MIR::MirMeasure::Literal {{
-                     kind: kind.clone(),
-                     value: value.to_string_rep().parse::<u64>().map_err(|_| \"measure literal is not an unsigned integer\".to_string())?,
-                 }}),
-                 {signed}(kind, value) => Ok(::jet_foundation::MIR::MirMeasure::SignedLiteral {{
-                     kind: kind.clone(),
-                     value: value.to_i64().ok_or_else(|| \"signed measure literal exceeds i64\".to_string())?,
-                 }}),
-                 {symbol}(kind, name) => Ok(::jet_foundation::MIR::MirMeasure::Symbol {{
-                     kind: kind.clone(),
-                     name: name.clone(),
-                 }}),
-                 {combined}(kind, rule, left, right) => {{
-                     let rule = match rule {{
-                         {add} => ::jet_foundation::MIR::MirMeasureRule::Add,
-                         {mul} => ::jet_foundation::MIR::MirMeasureRule::Mul,
-                         {mat} => ::jet_foundation::MIR::MirMeasureRule::Match,
-                     }};
-                     Ok(::jet_foundation::MIR::MirMeasure::Combined {{
-                         kind: kind.clone(),
-                         rule,
-                         left: Box::new(__jet_bootstrap_measure_to_host(left)?),
-                         right: Box::new(__jet_bootstrap_measure_to_host(right)?),
-                     }})
-                 }}
-             }}
-         }}"
-        ,
-        literal = measure("Literal"),
-        signed = measure("SignedLiteral"),
-        symbol = measure("Symbol"),
-        combined = measure("Combined"),
-        add = symbols.variant_path("MIRMeasureRule", "Add")?,
-        mul = symbols.variant_path("MIRMeasureRule", "Mul")?,
-        mat = symbols.variant_path("MIRMeasureRule", "Match")?,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_measure_from_host(value: &::jet_foundation::MIR::MirMeasure) -> Result<{mir_measure}, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirMeasure::Literal {{ kind, value }} => Ok({literal}(kind.clone(), jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(*value)))),
-                 ::jet_foundation::MIR::MirMeasure::SignedLiteral {{ kind, value }} => Ok({signed}(kind.clone(), jet_foundation::Numeric::JetInt::from_i64(*value))),
-                 ::jet_foundation::MIR::MirMeasure::Symbol {{ kind, name }} => Ok({symbol}(kind.clone(), name.clone())),
-                 ::jet_foundation::MIR::MirMeasure::Combined {{ kind, rule, left, right }} => {{
-                     let rule = match rule {{
-                         ::jet_foundation::MIR::MirMeasureRule::Add => {add},
-                         ::jet_foundation::MIR::MirMeasureRule::Mul => {mul},
-                         ::jet_foundation::MIR::MirMeasureRule::Match => {mat},
-                     }};
-                     Ok({combined}(
-                         kind.clone(), rule,
-                         __jet_bootstrap_measure_from_host(left)?,
-                         __jet_bootstrap_measure_from_host(right)?,
-                     ))
-                 }}
-             }}
-         }}"
-        ,
-        literal = measure("Literal"),
-        signed = measure("SignedLiteral"),
-        symbol = measure("Symbol"),
-        combined = measure("Combined"),
-        add = symbols.variant_path("MIRMeasureRule", "Add")?,
-        mul = symbols.variant_path("MIRMeasureRule", "Mul")?,
-        mat = symbols.variant_path("MIRMeasureRule", "Match")?,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_dimension_to_host(value: &{mir_dimension}) -> Result<::jet_foundation::MIR::MirDimension, String> {{
-             let mut axes = ::std::collections::BTreeMap::new();
-             for axis in &({value}).{dimension_axes} {{
-                 let name = ({axis}).{axis_name}.clone();
-                 let exponent = __jet_bootstrap_measure_to_host(&({axis}).{axis_exponent})?;
-                 if axes.insert(name, exponent).is_some() {{
-                     return Err(\"MIR dimension contains a duplicate axis name\".to_string());
-                 }}
-             }}
-             Ok(::jet_foundation::MIR::MirDimension {{ axes }})
-         }}
-         fn __jet_bootstrap_dimension_from_host(value: &::jet_foundation::MIR::MirDimension) -> Result<{mir_dimension}, String> {{
-             let mut axes = Vec::with_capacity(value.axes.len());
-             for (name, exponent) in &value.axes {{
-                 axes.push({mir_dimension_axis} {{
-                     {axis_name}: name.clone(),
-                     {axis_exponent}: __jet_bootstrap_measure_from_host(exponent)?,
-                 }});
-             }}
-             Ok({mir_dimension} {{ {dimension_axes}: axes }})
-         }}"
-        ,
-        value = "value",
-        axis = "axis",
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_tag_to_host(value: &{mir_tag_marker}) -> ::jet_foundation::MIR::MirTagMarker {{
-             match value {{
-                 {user}(name) => ::jet_foundation::MIR::MirTagMarker::User(name.clone()),
-                 {internal}(tag) => ::jet_foundation::MIR::MirTagMarker::Internal(match tag {{
-                     {core} => ::jet_foundation::MIR::MirInternalTag::CoreCryptoNominal,
-                     {clock_det} => ::jet_foundation::MIR::MirInternalTag::DeterministicClock,
-                     {clock_sys} => ::jet_foundation::MIR::MirInternalTag::SystemClock,
-                     {loan} => ::jet_foundation::MIR::MirInternalTag::ExpiringSecretLoan,
-                     {guard_read} => ::jet_foundation::MIR::MirInternalTag::SharedGuardRead,
-                     {guard_edit} => ::jet_foundation::MIR::MirInternalTag::SharedGuardEdit,
-                     {terminal} => ::jet_foundation::MIR::MirInternalTag::TerminalFactSet,
-                     {cpp} => ::jet_foundation::MIR::MirInternalTag::CppCallbackAbi,
-                     {allocator} => ::jet_foundation::MIR::MirInternalTag::AllocatorView,
-                 }}),
-             }}
-         }}
-         fn __jet_bootstrap_tag_from_host(value: &::jet_foundation::MIR::MirTagMarker) -> Result<{mir_tag_marker}, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirTagMarker::User(name) => Ok({user}(name.clone())),
-                 ::jet_foundation::MIR::MirTagMarker::Internal(tag) => Ok({internal}(match tag {{
-                     ::jet_foundation::MIR::MirInternalTag::CoreCryptoNominal => {core},
-                     ::jet_foundation::MIR::MirInternalTag::DeterministicClock => {clock_det},
-                     ::jet_foundation::MIR::MirInternalTag::SystemClock => {clock_sys},
-                     ::jet_foundation::MIR::MirInternalTag::ExpiringSecretLoan => {loan},
-                     ::jet_foundation::MIR::MirInternalTag::SharedGuardRead => {guard_read},
-                     ::jet_foundation::MIR::MirInternalTag::SharedGuardEdit => {guard_edit},
-                     ::jet_foundation::MIR::MirInternalTag::TerminalFactSet => {terminal},
-                     ::jet_foundation::MIR::MirInternalTag::CppCallbackAbi => {cpp},
-                     ::jet_foundation::MIR::MirInternalTag::AllocatorView => {allocator},
-                 }})),
-             }}
-         }}"
-        ,
-        user = tag("User"),
-        internal = tag("Internal"),
-        core = internal("CoreCryptoNominal"),
-        clock_det = internal("DeterministicClock"),
-        clock_sys = internal("SystemClock"),
-        loan = internal("ExpiringSecretLoan"),
-        guard_read = internal("SharedGuardRead"),
-        guard_edit = internal("SharedGuardEdit"),
-        terminal = internal("TerminalFactSet"),
-        cpp = internal("CppCallbackABI"),
-        allocator = internal("AllocatorView"),
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_abi_to_host(value: &{mir_abi}) -> ::jet_foundation::MIR::MirAbi {{
-             match value {{
-                 {scalar_abi}(kind) => ::jet_foundation::MIR::MirAbi::Scalar(match kind {{
-                     {scalar_int} => ::jet_foundation::MIR::MirScalarKind::Int,
-                     {scalar_float} => ::jet_foundation::MIR::MirScalarKind::Float,
-                     {scalar_float32} => ::jet_foundation::MIR::MirScalarKind::Float32,
-                     {scalar_bool} => ::jet_foundation::MIR::MirScalarKind::Bool,
-                     {scalar_char} => ::jet_foundation::MIR::MirScalarKind::Char,
-                     {scalar_pointer} => ::jet_foundation::MIR::MirScalarKind::Pointer,
-                 }}),
-                 {aggregate} => ::jet_foundation::MIR::MirAbi::Aggregate,
-                 {sequence} => ::jet_foundation::MIR::MirAbi::Sequence,
-                 {function} => ::jet_foundation::MIR::MirAbi::Function,
-                 {nominal} => ::jet_foundation::MIR::MirAbi::Nominal,
-                 {dynamic} => ::jet_foundation::MIR::MirAbi::Dynamic,
-                 {never} => ::jet_foundation::MIR::MirAbi::Never,
-             }}
-         }}
-         fn __jet_bootstrap_abi_from_host(value: &::jet_foundation::MIR::MirAbi) -> {mir_abi} {{
-             match value {{
-                 ::jet_foundation::MIR::MirAbi::Scalar(kind) => {scalar_abi}(match kind {{
-                     ::jet_foundation::MIR::MirScalarKind::Int => {scalar_int},
-                     ::jet_foundation::MIR::MirScalarKind::Float => {scalar_float},
-                     ::jet_foundation::MIR::MirScalarKind::Float32 => {scalar_float32},
-                     ::jet_foundation::MIR::MirScalarKind::Bool => {scalar_bool},
-                     ::jet_foundation::MIR::MirScalarKind::Char => {scalar_char},
-                     ::jet_foundation::MIR::MirScalarKind::Pointer => {scalar_pointer},
-                 }}),
-                 ::jet_foundation::MIR::MirAbi::Aggregate => {aggregate},
-                 ::jet_foundation::MIR::MirAbi::Sequence => {sequence},
-                 ::jet_foundation::MIR::MirAbi::Function => {function},
-                 ::jet_foundation::MIR::MirAbi::Nominal => {nominal},
-                 ::jet_foundation::MIR::MirAbi::Dynamic => {dynamic},
-                 ::jet_foundation::MIR::MirAbi::Never => {never},
-             }}
-         }}"
-        ,
-        scalar_abi = abi("Scalar"),
-        aggregate = abi("Aggregate"),
-        sequence = abi("Sequence"),
-        function = abi("Function"),
-        nominal = abi("Nominal"),
-        dynamic = abi("Dynamic"),
-        never = abi("Never"),
-        scalar_int = scalar("Int"),
-        scalar_float = scalar("Float"),
-        scalar_float32 = scalar("Float32"),
-        scalar_bool = scalar("Bool"),
-        scalar_char = scalar("Char"),
-        scalar_pointer = scalar("Pointer"),
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_size_to_host(value: &{mir_size}) -> Result<::jet_foundation::MIR::MirSize, String> {{
-             match value {{
-                 {static_size}(value) => Ok(::jet_foundation::MIR::MirSize::Static(value.to_string_rep().parse::<u64>().map_err(|_| \"layout size is not an unsigned integer\".to_string())?)),
-                 {dynamic_size} => Ok(::jet_foundation::MIR::MirSize::Dynamic),
-             }}
-         }}
-         fn __jet_bootstrap_size_from_host(value: &::jet_foundation::MIR::MirSize) -> Result<{mir_size}, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirSize::Static(value) => Ok({static_size}(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(*value)))),
-                 ::jet_foundation::MIR::MirSize::Dynamic => Ok({dynamic_size}),
-             }}
-         }}
-         fn __jet_bootstrap_layout_from_host(value: &::jet_foundation::MIR::MirLayout) -> Result<{mir_layout}, String> {{
-             Ok({mir_layout} {{
-                 {layout_abi}: __jet_bootstrap_abi_from_host(&value.abi),
-                 {layout_size}: __jet_bootstrap_size_from_host(&value.size)?,
-                 {layout_align}: __jet_bootstrap_size_from_host(&value.align)?,
-             }})
-         }}"
-        ,
-        static_size = size("Static"),
-        dynamic_size = size("Dynamic"),
-        layout_abi = layout_abi,
-        layout_size = layout_size,
-        layout_align = layout_align,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    writeln!(
-        out,
-        "fn __jet_bootstrap_type_to_host(value: &{mir_type}) -> Result<::jet_foundation::MIR::MirType, String> {{
-             let kind = match &({value}).{type_kind} {{
-                 {int} => ::jet_foundation::MIR::MirTypeKind::Int,
-                 {float} => ::jet_foundation::MIR::MirTypeKind::Float,
-                 {bool_kind} => ::jet_foundation::MIR::MirTypeKind::Bool,
-                 {string} => ::jet_foundation::MIR::MirTypeKind::String,
-                 {char_kind} => ::jet_foundation::MIR::MirTypeKind::Char,
-                 {list}(inner) => ::jet_foundation::MIR::MirTypeKind::List(Box::new(__jet_bootstrap_type_to_host(inner)?)),
-                 {map}(key, item) => ::jet_foundation::MIR::MirTypeKind::Map {{
-                     key: Box::new(__jet_bootstrap_type_to_host(key)?),
-                     value: Box::new(__jet_bootstrap_type_to_host(item)?),
-                 }},
-                 {shared}(inner) => ::jet_foundation::MIR::MirTypeKind::Shared(Box::new(__jet_bootstrap_type_to_host(inner)?)),
-                 {option}(inner) => ::jet_foundation::MIR::MirTypeKind::Option(Box::new(__jet_bootstrap_type_to_host(inner)?)),
-                 {result}(ok, err) => ::jet_foundation::MIR::MirTypeKind::Result {{
-                     ok: Box::new(__jet_bootstrap_type_to_host(ok)?),
-                     err: Box::new(__jet_bootstrap_type_to_host(err)?),
-                 }},
-                 {fn_kind}(signature) => ::jet_foundation::MIR::MirTypeKind::Fn(__jet_bootstrap_mir_MIRFunctionSignature_to_host(signature)?),
-                 {send_fn}(params, ret, conventions) => ::jet_foundation::MIR::MirTypeKind::SendFn {{
-                     params: params.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
-                     ret: ret.as_ref().ok().map(|ret| __jet_bootstrap_type_to_host(ret).map(Box::new)).transpose()?,
-                     conventions.iter().map(__jet_bootstrap_mir_MIRAccess_to_host).collect::<Result<Vec<_>, _>>()?,
-                 }},
-                 {apply}(name, args) => ::jet_foundation::MIR::MirTypeKind::Apply {{
-                     name: ::jet_foundation::MIR::MirNominalRef {{
-                         id: __jet_bootstrap_type_id_to_host(&name.{nominal_id})?,
-                         name: name.{nominal_name}.clone(),
-                     }},
-                     args: args.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
-                 }},
-                 {trait_object}(bounds) => ::jet_foundation::MIR::MirTypeKind::TraitObject(
-                     bounds.iter().map(|bound| {{
-                         let id = __jet_bootstrap_source_u64(&bound.{trait_ref_id}.{trait_id_value}, \"MIR trait identity\")?;
-                         if id == 0 {{ return Err(\"MIR trait identity is zero\".to_string()); }}
-                         Ok(::jet_foundation::MIR::MirTraitRef {{ id: ::jet_foundation::MIR::MirTraitId(id), name: bound.{trait_ref_name}.clone() }})
-                     }}).collect::<Result<Vec<_>, String>>()?,
-                 ),
-                 {tuple}(fields) => ::jet_foundation::MIR::MirTypeKind::Tuple(
-                     fields.iter().map(|field| Ok((
-                         field.{tuple_name}.clone(),
-                         __jet_bootstrap_type_to_host(&field.{tuple_ty})?,
-                     ))).collect::<Result<Vec<_>, String>>()?,
-                 ),
-                 {fixed_list}(inner, len) => ::jet_foundation::MIR::MirTypeKind::FixedList {{
-                     elem: Box::new(__jet_bootstrap_type_to_host(inner)?),
-                     len: __jet_bootstrap_measure_to_host(len)?,
-                 }},
-                 {int_n}(signed, bits) => ::jet_foundation::MIR::MirTypeKind::IntN {{
-                     signed: *signed,
-                     bits: bits.to_string_rep().parse::<u8>().map_err(|_| \"integer width is outside u8\".to_string())?,
-                 }},
-                 {range}(base, lo, hi) => ::jet_foundation::MIR::MirTypeKind::InlineRange {{
-                     base: Box::new(__jet_bootstrap_type_to_host(base)?),
-                     lo: lo.to_i64().ok_or_else(|| \"inline range lower bound exceeds i64\".to_string())?,
-                     hi: hi.to_i64().ok_or_else(|| \"inline range upper bound exceeds i64\".to_string())?,
-                 }},
-                 {float32} => ::jet_foundation::MIR::MirTypeKind::Float32,
-                 {tagged}(marker, inner) => ::jet_foundation::MIR::MirTypeKind::Tagged {{
-                     marker: __jet_bootstrap_tag_to_host(marker),
-                     inner: Box::new(__jet_bootstrap_type_to_host(inner)?),
-                 }},
-                 {union}(members) => ::jet_foundation::MIR::MirTypeKind::Union(
-                     members.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
-                 ),
-                 {quantity}(base, dimension) => ::jet_foundation::MIR::MirTypeKind::Quantity {{
-                     base: Box::new(__jet_bootstrap_type_to_host(base)?),
-                     dimension: __jet_bootstrap_dimension_to_host(dimension)?,
-                 }},
-                 {measure_kind}(value) => ::jet_foundation::MIR::MirTypeKind::Measure(
-                     __jet_bootstrap_measure_to_host(value)?,
-                 ),
-             }};
-             let mut result = ::jet_foundation::MIR::MirType::from_kind(kind);
-             if let Some(identity) = ({value}).{type_identity}.as_ref().ok() {{
-                 result = result.with_identity(__jet_bootstrap_type_id_to_host(identity)?);
-             }}
-             Ok(result)
-         }}
-         fn __jet_bootstrap_type_from_host(value: &::jet_foundation::MIR::MirType) -> Result<{mir_type}, String> {{
-             let kind = match &value.kind {{
-                 ::jet_foundation::MIR::MirTypeKind::Int => {int},
-                 ::jet_foundation::MIR::MirTypeKind::Float => {float},
-                 ::jet_foundation::MIR::MirTypeKind::Bool => {bool_kind},
-                 ::jet_foundation::MIR::MirTypeKind::String => {string},
-                 ::jet_foundation::MIR::MirTypeKind::Char => {char_kind},
-                 ::jet_foundation::MIR::MirTypeKind::List(inner) => {list}(__jet_bootstrap_type_from_host(inner)?),
-                 ::jet_foundation::MIR::MirTypeKind::Map {{ key, value }} => {map}(__jet_bootstrap_type_from_host(key)?, __jet_bootstrap_type_from_host(value)?),
-                 ::jet_foundation::MIR::MirTypeKind::Shared(inner) => {shared}(__jet_bootstrap_type_from_host(inner)?),
-                 ::jet_foundation::MIR::MirTypeKind::Option(inner) => {option}(__jet_bootstrap_type_from_host(inner)?),
-                 ::jet_foundation::MIR::MirTypeKind::Result {{ ok, err }} => {result}(__jet_bootstrap_type_from_host(ok)?, __jet_bootstrap_type_from_host(err)?),
-                 ::jet_foundation::MIR::MirTypeKind::Fn(signature) => {fn_kind}(__jet_bootstrap_mir_MIRFunctionSignature_from_host(signature)?),
-                 ::jet_foundation::MIR::MirTypeKind::SendFn {{ params, ret, conventions }} => {send_fn}(
-                     params.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?,
-                     match ret.as_deref() {{
-                         Some(ret) => Ok(__jet_bootstrap_type_from_host(ret)?),
-                         None => Err(::jet_foundation::Outcome::JetAbsent),
-                     }},
-                     conventions.iter().map(__jet_bootstrap_mir_MIRAccess_from_host).collect::<Result<Vec<_>, _>>()?,
-                 ),
-                 ::jet_foundation::MIR::MirTypeKind::Apply {{ name, args }} => {apply}({mir_nominal_ref} {{
-                     {nominal_id}: __jet_bootstrap_type_id_from_host(name.id)?,
-                     {nominal_name}: name.name.clone(),
-                 }}, args.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?),
-                 ::jet_foundation::MIR::MirTypeKind::TraitObject(bounds) => {trait_object}(bounds.iter().map(|bound| {{
-                     if bound.id.0 == 0 {{ return Err(\"MIR trait identity is zero\".to_string()); }}
-                    Ok({mir_trait_ref} {{ {trait_ref_id}: {mir_trait_id} {{ {trait_id_value}: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(bound.id.0)) }}, {trait_ref_name}: bound.name.clone() }})
-                 }}).collect::<Result<Vec<_>, String>>()?),
-                 ::jet_foundation::MIR::MirTypeKind::Tuple(fields) => {tuple}(fields.iter().map(|(name, ty)| Ok({mir_tuple_field} {{
-                     {tuple_name}: name.clone(),
-                     {tuple_ty}: __jet_bootstrap_type_from_host(ty)?,
-                 }})).collect::<Result<Vec<_>, String>>()?),
-                 ::jet_foundation::MIR::MirTypeKind::FixedList {{ elem, len }} => {fixed_list}(__jet_bootstrap_type_from_host(elem)?, __jet_bootstrap_measure_from_host(len)?),
-                 ::jet_foundation::MIR::MirTypeKind::IntN {{ signed, bits }} => {int_n}(*signed, jet_foundation::Numeric::JetInt::from_i64(i64::from(*bits))),
-                 ::jet_foundation::MIR::MirTypeKind::InlineRange {{ base, lo, hi }} => {range}(__jet_bootstrap_type_from_host(base)?, jet_foundation::Numeric::JetInt::from_i64(*lo), jet_foundation::Numeric::JetInt::from_i64(*hi)),
-                 ::jet_foundation::MIR::MirTypeKind::Float32 => {float32},
-                 ::jet_foundation::MIR::MirTypeKind::Tagged {{ marker, inner }} => {tagged}(__jet_bootstrap_tag_from_host(marker)?, __jet_bootstrap_type_from_host(inner)?),
-                 ::jet_foundation::MIR::MirTypeKind::Union(members) => {union}(members.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?),
-                 ::jet_foundation::MIR::MirTypeKind::Quantity {{ base, dimension }} => {quantity}(__jet_bootstrap_type_from_host(base)?, __jet_bootstrap_dimension_from_host(dimension)?),
-                 ::jet_foundation::MIR::MirTypeKind::Measure(value) => {measure_kind}(__jet_bootstrap_measure_from_host(value)?),
-             }};
-             Ok({mir_type} {{
-                 {type_kind}: kind,
-                 {type_identity}: match value.identity.as_ref() {{
-                     Some(identity) => Ok(__jet_bootstrap_type_id_from_host(*identity)?),
-                     None => Err(::jet_foundation::Outcome::JetAbsent),
-                 }},
-                 {type_layout}: __jet_bootstrap_layout_from_host(&value.layout)?,
-             }})
-         }}"
-        ,
-        value = "value",
-        int = kind("Int"),
-        float = kind("Float"),
-        bool_kind = kind("Bool"),
-        string = kind("String"),
-        char_kind = kind("Char"),
-        list = kind("List"),
-        map = kind("Map"),
-        shared = kind("Shared"),
-        option = kind("Option"),
-        result = kind("Result"),
-        fn_kind = kind("Fn"),
-        send_fn = kind("SendFn"),
-        apply = kind("Apply"),
-        trait_object = kind("TraitObject"),
-        tuple = kind("Tuple"),
-        fixed_list = kind("FixedList"),
-        int_n = kind("IntN"),
-        range = kind("InlineRange"),
-        float32 = kind("Float32"),
-        tagged = kind("Tagged"),
-        union = kind("Union"),
-        quantity = kind("Quantity"),
-        measure_kind = kind("Measure"),
-        mir_type = mir_type,
-        type_kind = type_kind,
-        type_identity = type_identity,
-        mir_nominal_ref = mir_nominal_ref,
-        nominal_id = nominal_id,
-        nominal_name = nominal_name,
-        mir_trait_ref = mir_trait_ref,
-        mir_trait_id = mir_trait_id,
-        trait_ref_id = trait_ref_id,
-        trait_ref_name = trait_ref_name,
-        trait_id_value = trait_id_value,
-        mir_tuple_field = mir_tuple_field,
-        tuple_name = tuple_name,
-        tuple_ty = tuple_ty,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    Ok(())
+/// The Source `MIRType` graph codec. Payload shapes and boxed edges come
+/// from the binding metadata through the `@…@` markers.
+fn emit_bootstrap_type_codec(out: &mut String) {
+    out.push_str(
+        r#"
+fn __jet_bootstrap_type_id_to_host(value: &@t.MIRTypeID@) -> Result<::jet_foundation::MIR::MirTypeId, String> {
+    let text = value.@f.MIRTypeID.value@.to_string_rep();
+    let id = text.parse::<u64>().map_err(|_| "MIR type identity is not an unsigned integer".to_string())?;
+    if id == 0 {
+        return Err("MIR type identity is zero".to_string());
+    }
+    Ok(::jet_foundation::MIR::MirTypeId(id))
 }
-
-fn emit_bootstrap_value_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<(), BootstrapHostCodecError> {
-    let ct = symbols.type_symbol("TComptimeValue")?;
-    let key = symbols.type_symbol("TComptimeKey")?;
-    let key_field = symbols.type_symbol("TComptimeKeyField")?;
-    let map_entry = symbols.type_symbol("TComptimeMapEntry")?;
-    let field = symbols.type_symbol("TComptimeField")?;
-    let enum_arg = symbols.type_symbol("TComptimeEnumArg")?;
-    let eval = symbols.type_symbol("JetEvalRuntimeValue")?;
-    let runtime_aggregate = symbols.type_symbol("JetEvalRuntimeAggregate")?;
-    let runtime_map_key = symbols.field_symbol("JetEvalRuntimeMapEntry", "key")?;
-    let runtime_map_value = symbols.field_symbol("JetEvalRuntimeMapEntry", "value")?;
-    let runtime_field_name = symbols.field_symbol("JetEvalRuntimeField", "name")?;
-    let runtime_field_value = symbols.field_symbol("JetEvalRuntimeField", "value")?;
-    let runtime_enum_name = symbols.field_symbol("JetEvalRuntimeEnumArg", "name")?;
-    let runtime_enum_value = symbols.field_symbol("JetEvalRuntimeEnumArg", "value")?;
-
-    let key_name = symbols.field_symbol("TComptimeKeyField", "name")?;
-    let key_value = symbols.field_symbol("TComptimeKeyField", "key")?;
-    let map_key = symbols.field_symbol("TComptimeMapEntry", "key")?;
-    let map_value = symbols.field_symbol("TComptimeMapEntry", "value")?;
-    let field_name = symbols.field_symbol("TComptimeField", "name")?;
-    let field_value = symbols.field_symbol("TComptimeField", "value")?;
-    let enum_name = symbols.field_symbol("TComptimeEnumArg", "name")?;
-    let enum_value = symbols.field_symbol("TComptimeEnumArg", "value")?;
-
-    let key_variants = [
-        ("Int", symbols.variant_path("TComptimeKey", "Int")?),
-        ("String", symbols.variant_path("TComptimeKey", "String")?),
-        ("Bool", symbols.variant_path("TComptimeKey", "Bool")?),
-        ("Char", symbols.variant_path("TComptimeKey", "Char")?),
-        ("Tuple", symbols.variant_path("TComptimeKey", "Tuple")?),
-        ("Struct", symbols.variant_path("TComptimeKey", "Struct")?),
-        ("Enum", symbols.variant_path("TComptimeKey", "Enum")?),
-    ];
-    let key_variant = |name: &str| {
-        key_variants
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-    let ct_names = [
-        "Int", "Float", "Bool", "Char", "String", "BigInt", "Bytes", "List", "Map", "Struct",
-        "Enum", "Present", "Failed", "Unit", "Closure",
-    ];
-    let ct_paths = ct_names
-        .iter()
-        .map(|name| {
-            Ok::<_, BootstrapHostCodecError>((*name, symbols.variant_path("TComptimeValue", name)?))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let ct_variant = |name: &str| {
-        ct_paths
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-    let report_told = symbols.variant_path("TComptimeReport", "Told")?;
-    let eval_names = [
-        "Moved",
-        "Data",
-        "Absent",
-        "Result",
-        "Closure",
-        "Address",
-        "SharedCell",
-        "Shared",
-        "SharedWeak",
-        "SharedGuard",
-        "SharedSnapshot",
-        "Condition",
-        "RangeCursor",
-        "ListCursor",
-        "ForeignHandle",
-        "Aggregate",
-        "RuntimeFailure",
-        "HostCursor",
-    ];
-    let eval_paths = eval_names
-        .iter()
-        .map(|name| {
-            Ok::<_, BootstrapHostCodecError>((
-                *name,
-                symbols.variant_path("JetEvalRuntimeValue", name)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let eval_variant = |name: &str| {
-        eval_paths
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-    let aggregate_names = ["List", "Map", "Struct", "Enum"];
-    let aggregate_paths = aggregate_names
-        .iter()
-        .map(|name| {
-            Ok::<_, BootstrapHostCodecError>((
-                *name,
-                symbols.variant_path("JetEvalRuntimeAggregate", name)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let aggregate_variant = |name: &str| {
-        aggregate_paths
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
-    };
-
-    let ct_int = ct_variant("Int");
-    let ct_float = ct_variant("Float");
-    let ct_bool = ct_variant("Bool");
-    let ct_char = ct_variant("Char");
-    let ct_string = ct_variant("String");
-    let ct_bigint = ct_variant("BigInt");
-    let ct_bytes = ct_variant("Bytes");
-    let ct_list = ct_variant("List");
-    let ct_map = ct_variant("Map");
-    let ct_struct = ct_variant("Struct");
-    let ct_enum = ct_variant("Enum");
-    let ct_present = ct_variant("Present");
-    let ct_failed = ct_variant("Failed");
-    let ct_unit = ct_variant("Unit");
-    let ct_closure = ct_variant("Closure");
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_key_to_host(value: &{key}) -> Result<::jet_foundation::MIR::MirConstKey, String> {{
-             match value {{
-                 {key_int}(value) => Ok(::jet_foundation::MIR::MirConstKey::Int(value.to_i64().ok_or_else(|| \"constant key exceeds i64\".to_string())?)),
-                 {key_string}(value) => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
-                 {key_bool}(value) => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
-                 {key_char}(value) => Ok(::jet_foundation::MIR::MirConstKey::Char(char::from_u32(value.to_i64().ok_or_else(|| \"constant key character exceeds i64\".to_string())? as u32).ok_or_else(|| \"constant key character is invalid\".to_string())?)),
-                 {key_tuple}(fields) => Ok(::jet_foundation::MIR::MirConstKey::Tuple(fields.iter().map(|field| Ok((
-                     field.{key_name}.clone(),
-                     __jet_bootstrap_key_to_host(&field.{key_value})?,
-                 ))).collect::<Result<Vec<_>, String>>()?)),
-                 {key_struct}(type_name, fields) => Ok(::jet_foundation::MIR::MirConstKey::Struct {{
-                     type_name: type_name.clone(),
-                     fields: fields.iter().map(|field| Ok((
-                         field.{key_name}.clone(),
-                         __jet_bootstrap_key_to_host(&field.{key_value})?,
-                     ))).collect::<Result<Vec<_>, String>>()?,
-                 }}),
-                 {key_enum}(type_name, variant) => Ok(::jet_foundation::MIR::MirConstKey::Enum {{
-                     type_name: type_name.clone(),
-                     variant: variant.clone(),
-                 }}),
-             }}
-         }}"
-        ,
-        key_int = key_variant("Int"),
-        key_string = key_variant("String"),
-        key_bool = key_variant("Bool"),
-        key_char = key_variant("Char"),
-        key_tuple = key_variant("Tuple"),
-        key_struct = key_variant("Struct"),
-        key_enum = key_variant("Enum"),
-        key_name = key_name,
-        key_value = key_value,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_ct_to_host(value: &{ct}) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
-             match value {{
-                 {ct_int}(value) => Ok(match value.to_i64() {{
-                     Some(value) => ::jet_foundation::MIR::MirRuntimeValue::Int(value),
-                     None => ::jet_foundation::MIR::MirRuntimeValue::BigInt(value.to_string_rep()),
-                 }}),
-                 {ct_float}(value, bits) => Ok(::jet_foundation::MIR::MirRuntimeValue::Float {{ value: *value, f32: bits.to_i64() == Some(32) }}),
-                 {ct_bool}(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::Bool(*value)),
-                 {ct_char}(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::Char(char::from_u32(value.to_i64().ok_or_else(|| \"character exceeds i64\".to_string())? as u32).ok_or_else(|| \"invalid character value\".to_string())?)),
-                 {ct_string}(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::String(value.clone())),
-                 {ct_bigint}(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::BigInt(value.clone())),
-                 {ct_bytes}(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::Bytes(value.clone())),
-                 {ct_list}(values) => Ok(::jet_foundation::MIR::MirRuntimeValue::List(values.iter().map(__jet_bootstrap_ct_to_host).collect::<Result<Vec<_>, _>>()?)),
-                 {ct_map}(entries) => Ok(::jet_foundation::MIR::MirRuntimeValue::Map(entries.iter().map(|entry| Ok((
-                     __jet_bootstrap_key_to_host(&entry.{map_key})?,
-                     __jet_bootstrap_ct_to_host(&entry.{map_value})?,
-                 ))).collect::<Result<Vec<_>, String>>()?)),
-                 {ct_struct}(type_name, fields) => Ok(::jet_foundation::MIR::MirRuntimeValue::Struct {{
-                     type_name: type_name.clone(),
-                     fields: fields.iter().map(|field| Ok((
-                         field.{field_name}.clone(),
-                         __jet_bootstrap_ct_to_host(&field.{field_value})?,
-                     ))).collect::<Result<Vec<_>, String>>()?,
-                 }}),
-                 {ct_enum}(type_name, variant, args) => Ok(::jet_foundation::MIR::MirRuntimeValue::Enum {{
-                     type_name: type_name.clone(),
-                     variant: variant.clone(),
-                     args: args.iter().map(|arg| Ok((
-                         arg.{enum_name}.clone(),
-                         __jet_bootstrap_ct_to_host(&arg.{enum_value})?,
-                     ))).collect::<Result<Vec<_>, String>>()?,
-                 }}),
-                 {ct_present}(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(__jet_bootstrap_ct_to_host(value)?))),
-                 {ct_failed}(failure) => match failure {{
-                     {report_told}(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::FailedTold(Box::new(__jet_bootstrap_ct_to_host(value)?))),
-                     _ => Err(\"clean comptime failures carry an AST type, not a MIR type\".to_string()),
-                 }},
-                 {ct_unit} => Ok(::jet_foundation::MIR::MirRuntimeValue::Unit),
-                 {ct_closure}(_) => Err(\"closure values are not materializable at the native Prelude boundary\".to_string()),
-             }}
-         }}"
-        ,
-        ct_int = ct_int,
-        ct_float = ct_float,
-        ct_bool = ct_bool,
-        ct_char = ct_char,
-        ct_string = ct_string,
-        ct_bigint = ct_bigint,
-        ct_bytes = ct_bytes,
-        ct_list = ct_list,
-        ct_map = ct_map,
-        ct_struct = ct_struct,
-        ct_enum = ct_enum,
-        ct_present = ct_present,
-        ct_failed = ct_failed,
-        ct_unit = ct_unit,
-        ct_closure = ct_closure,
-        map_key = map_key,
-        map_value = map_value,
-        field_name = field_name,
-        field_value = field_value,
-        enum_name = enum_name,
-        enum_value = enum_value,
-        report_told = report_told,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        "fn __jet_bootstrap_ct_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<{ct}, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok({ct_int}(jet_foundation::Numeric::JetInt::from_i64(*value))),
-                 ::jet_foundation::MIR::MirRuntimeValue::BigInt(value) => Ok({ct_bigint}(value.clone())),
-                 ::jet_foundation::MIR::MirRuntimeValue::Float {{ value, f32 }} => Ok({ct_float}(*value, jet_foundation::Numeric::JetInt::from_i64(if *f32 {{ 32 }} else {{ 64 }}))),
-                 ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok({ct_bool}(*value)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Char(value) => Ok({ct_char}(jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)))),
-                 ::jet_foundation::MIR::MirRuntimeValue::String(value) => Ok({ct_string}(value.clone())),
-                 ::jet_foundation::MIR::MirRuntimeValue::Bytes(value) => Ok({ct_bytes}(value.clone())),
-                 ::jet_foundation::MIR::MirRuntimeValue::List(values) => Ok({ct_list}(values.iter().map(__jet_bootstrap_ct_from_host).collect::<Result<Vec<_>, _>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Map(entries) => Ok({ct_map}(entries.iter().map(|(key, value)| Ok({map_entry} {{
-                     {map_key}: __jet_bootstrap_key_from_host(key)?,
-                     {map_value}: __jet_bootstrap_ct_from_host(value)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields }} => Ok({ct_struct}(type_name.clone(), fields.iter().map(|(name, value)| Ok({field} {{
-                     {field_name}: name.clone(),
-                     {field_value}: __jet_bootstrap_ct_from_host(value)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Enum {{ type_name, variant, args }} => Ok({ct_enum}(type_name.clone(), variant.clone(), args.iter().map(|(name, value)| Ok({enum_arg} {{
-                     {enum_name}: name.clone(),
-                     {enum_value}: __jet_bootstrap_ct_from_host(value)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Present(value) => Ok({ct_present}(__jet_bootstrap_ct_from_host(value)?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::FailedTold(value) => Ok({ct_failed}({report_told}(__jet_bootstrap_ct_from_host(value)?))),
-                 ::jet_foundation::MIR::MirRuntimeValue::Absent {{ .. }} => return Err(\"a typed absent value is returned directly as JetEvalRuntimeValue::Absent\".to_string()),
-                 ::jet_foundation::MIR::MirRuntimeValue::Unit => Ok({ct_unit}),
-                ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => return Err(\"native Prelude returned an unmaterializable value\".to_string()),
-             }}
-         }}"
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    writeln!(
-        out,
-        r#"fn __jet_bootstrap_runtime_key_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<::jet_foundation::MIR::MirConstKey, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok(::jet_foundation::MIR::MirConstKey::Int(*value)),
-                 ::jet_foundation::MIR::MirRuntimeValue::String(value) => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
-                 ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Char(value) => Ok(::jet_foundation::MIR::MirConstKey::Char(*value)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields }} if type_name == "Tuple" => Ok(::jet_foundation::MIR::MirConstKey::Tuple(fields.iter().map(|(name, value)| Ok((name.clone(), __jet_bootstrap_runtime_key_from_host(value)?))).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields }} => Ok(::jet_foundation::MIR::MirConstKey::Struct {{
-                     type_name: type_name.clone(),
-                     fields: fields.iter().map(|(name, value)| Ok((name.clone(), __jet_bootstrap_runtime_key_from_host(value)?))).collect::<Result<Vec<_>, String>>()?,
-                 }}),
-                 ::jet_foundation::MIR::MirRuntimeValue::Enum {{ type_name, variant, args }} if args.is_empty() => Ok(::jet_foundation::MIR::MirConstKey::Enum {{
-                     type_name: type_name.clone(),
-                     variant: variant.clone(),
-                 }}),
-                 _ => Err("MIR runtime value is not a canonical constant map key".to_string()),
-             }}
-         }}
-         fn __jet_bootstrap_eval_key_to_host(value: &{eval}) -> Result<::jet_foundation::MIR::MirConstKey, String> {{
-             match value {{
-                 {eval_data}(value) => __jet_bootstrap_ct_to_host(value).and_then(|value| __jet_bootstrap_runtime_key_from_host(&value)),
-                 _ => Err("runtime map key is not materialized immutable data".to_string()),
-             }}
-         }}
-         fn __jet_bootstrap_eval_aggregate_to_host(
-             value: &{runtime_aggregate},
-             allow_foreign_handles: bool,
-         ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
-             match value {{
-                 {aggregate_list}(values) => Ok(::jet_foundation::MIR::MirRuntimeValue::List(values.iter().map(|value| __jet_bootstrap_eval_to_host_inner(value, allow_foreign_handles)).collect::<Result<Vec<_>, String>>()?)),
-                 {aggregate_map}(entries) => Ok(::jet_foundation::MIR::MirRuntimeValue::Map(entries.iter().map(|entry| Ok((
-                     __jet_bootstrap_eval_key_to_host(&entry.{runtime_map_key})?,
-                     __jet_bootstrap_eval_to_host_inner(&entry.{runtime_map_value}, allow_foreign_handles)?,
-                 ))).collect::<Result<Vec<_>, String>>()?)),
-                 {aggregate_struct}(type_name, fields) => Ok(::jet_foundation::MIR::MirRuntimeValue::Struct {{
-                     type_name: type_name.clone(),
-                     fields: fields.iter().map(|field| Ok((
-                         field.{runtime_field_name}.clone(),
-                         __jet_bootstrap_eval_to_host_inner(&field.{runtime_field_value}, allow_foreign_handles)?,
-                     ))).collect::<Result<Vec<_>, String>>()?,
-                 }}),
-                 {aggregate_enum}(type_name, variant, args) => Ok(::jet_foundation::MIR::MirRuntimeValue::Enum {{
-                     type_name: type_name.clone(),
-                     variant: variant.clone(),
-                     args: args.iter().map(|arg| Ok((
-                         arg.{runtime_enum_name}.as_ref().ok().cloned(),
-                         __jet_bootstrap_eval_to_host_inner(&arg.{runtime_enum_value}, allow_foreign_handles)?,
-                     ))).collect::<Result<Vec<_>, String>>()?,
-                 }}),
-             }}
-         }}
-         fn __jet_bootstrap_eval_to_host_inner(
-             value: &{eval},
-             allow_foreign_handles: bool,
-         ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
-             match value {{
-                 {eval_moved} => Err("moved values cannot cross a native host boundary".to_string()),
-                 {eval_data}(value) => __jet_bootstrap_ct_to_host(value),
-                 {eval_absent}(element) => Ok(::jet_foundation::MIR::MirRuntimeValue::Absent {{ element: __jet_bootstrap_type_to_host(element)? }}),
-                 {eval_result}(ok, value) => {{
-                     let value = __jet_bootstrap_eval_to_host_inner(value, allow_foreign_handles)?;
-                     Ok(if *ok {{
-                         ::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(value))
-                     }} else {{
-                         ::jet_foundation::MIR::MirRuntimeValue::FailedTold(Box::new(value))
-                     }})
-                 }}
-                 {eval_foreign_handle}(_, raw, _) if allow_foreign_handles => Ok(::jet_foundation::MIR::MirRuntimeValue::Int(raw.to_i64().ok_or_else(|| "foreign handle is outside i64".to_string())?)),
-                 {eval_foreign_handle}(_, _, _) => Err("foreign handles cross only their checked C foreign-call ABI boundary".to_string()),
-                 {eval_aggregate}(aggregate) => __jet_bootstrap_eval_aggregate_to_host(aggregate, allow_foreign_handles),
-                 {eval_runtime_failure}(_, _) => Err("terminal runtime failures cannot cross a native host boundary".to_string()),
-                 {eval_host_cursor}(_, _, _, _) => Err("native iterator cursors cannot cross a serializable host boundary".to_string()),
-                {eval_closure}(_, _) | {eval_address}(_, _, _) | {eval_shared}(_, _) | {eval_shared_owner}(_) | {eval_shared_weak}(_) | {eval_shared_guard}(_) | {eval_shared_snapshot}(_) | {eval_condition}(_) | {eval_range}(_, _, _, _, _) | {eval_list_cursor}(_, _, _) => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
-             }}
-         }}
-         fn __jet_bootstrap_eval_to_host(value: &{eval}) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
-             __jet_bootstrap_eval_to_host_inner(value, false)
-         }}
-         // This projection is confined to a checked MIR foreign-call row, whose parameter facts own the C ABI.
-         fn __jet_bootstrap_eval_to_foreign_host(value: &{eval}) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
-             __jet_bootstrap_eval_to_host_inner(value, true)
-         }}"#,
-        eval = eval,
-        runtime_aggregate = runtime_aggregate,
-        runtime_map_key = runtime_map_key,
-        runtime_map_value = runtime_map_value,
-        runtime_field_name = runtime_field_name,
-        runtime_field_value = runtime_field_value,
-        runtime_enum_name = runtime_enum_name,
-        runtime_enum_value = runtime_enum_value,
-        aggregate_list = aggregate_variant("List"),
-        aggregate_map = aggregate_variant("Map"),
-        aggregate_struct = aggregate_variant("Struct"),
-        aggregate_enum = aggregate_variant("Enum"),
-        eval_moved = eval_variant("Moved"),
-        eval_data = eval_variant("Data"),
-        eval_absent = eval_variant("Absent"),
-        eval_result = eval_variant("Result"),
-        eval_foreign_handle = eval_variant("ForeignHandle"),
-        eval_aggregate = eval_variant("Aggregate"),
-        eval_runtime_failure = eval_variant("RuntimeFailure"),
-        eval_host_cursor = eval_variant("HostCursor"),
-        eval_closure = eval_variant("Closure"),
-        eval_address = eval_variant("Address"),
-        eval_shared = eval_variant("SharedCell"),
-        eval_shared_owner = eval_variant("Shared"),
-        eval_shared_weak = eval_variant("SharedWeak"),
-        eval_shared_guard = eval_variant("SharedGuard"),
-        eval_shared_snapshot = eval_variant("SharedSnapshot"),
-        eval_condition = eval_variant("Condition"),
-        eval_range = eval_variant("RangeCursor"),
-        eval_list_cursor = eval_variant("ListCursor"),
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-
-    // The reverse key projection is kept separate from value projection so a
-    // map's checked key carrier cannot accidentally be stringified.
-    writeln!(
-        out,
-        "fn __jet_bootstrap_key_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<{key}, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirConstKey::Int(value) => Ok({key_int}(jet_foundation::Numeric::JetInt::from_i64(*value))),
-                 ::jet_foundation::MIR::MirConstKey::String(value) => Ok({key_string}(value.clone())),
-                 ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok({key_bool}(*value)),
-                 ::jet_foundation::MIR::MirConstKey::Char(value) => Ok({key_char}(jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)))),
-                 ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok({key_tuple}(fields.iter().map(|(name, key)| Ok({key_field} {{
-                     {key_name}: name.clone(),
-                     {key_value}: __jet_bootstrap_key_from_host(key)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirConstKey::Struct {{ type_name, fields }} => Ok({key_struct}(type_name.clone(), fields.iter().map(|(name, key)| Ok({key_field} {{
-                     {key_name}: name.clone(),
-                     {key_value}: __jet_bootstrap_key_from_host(key)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirConstKey::Enum {{ type_name, variant }} => Ok({key_enum}(type_name.clone(), variant.clone())),
-             }}
-         }}"
-        ,
-        key = key,
-        key_int = key_variant("Int"),
-        key_string = key_variant("String"),
-        key_bool = key_variant("Bool"),
-        key_char = key_variant("Char"),
-        key_tuple = key_variant("Tuple"),
-        key_struct = key_variant("Struct"),
-        key_enum = key_variant("Enum"),
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    Ok(())
+fn __jet_bootstrap_type_id_from_host(value: ::jet_foundation::MIR::MirTypeId) -> Result<@t.MIRTypeID@, String> {
+    let value = jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(value.0));
+    Ok(@s.MIRTypeID@{ value })
 }
-
-
-fn emit_bootstrap_host_value_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<(), BootstrapHostCodecError> {
-    let ct = symbols.type_symbol("TComptimeValue")?;
-    let field = symbols.type_symbol("TComptimeField")?;
-    let enum_arg = symbols.type_symbol("TComptimeEnumArg")?;
-    let host = symbols.type_symbol("JetEvalHostValue")?;
-    let host_map_entry = symbols.type_symbol("JetEvalHostMapEntry")?;
-    let host_field = symbols.type_symbol("JetEvalHostField")?;
-    let host_enum_arg = symbols.type_symbol("JetEvalHostEnumArg")?;
-    let host_data = symbols.variant_path("JetEvalHostValue", "Data")?;
-    let host_absent = symbols.variant_path("JetEvalHostValue", "Absent")?;
-    let host_present = symbols.variant_path("JetEvalHostValue", "Present")?;
-    let host_failed = symbols.variant_path("JetEvalHostValue", "Failed")?;
-    let host_list = symbols.variant_path("JetEvalHostValue", "List")?;
-    let host_map = symbols.variant_path("JetEvalHostValue", "Map")?;
-    let host_struct = symbols.variant_path("JetEvalHostValue", "Struct")?;
-    let host_enum = symbols.variant_path("JetEvalHostValue", "Enum")?;
-    let host_map_key = symbols.field_symbol("JetEvalHostMapEntry", "key")?;
-    let host_map_value = symbols.field_symbol("JetEvalHostMapEntry", "value")?;
-    let host_field_name = symbols.field_symbol("JetEvalHostField", "name")?;
-    let host_field_value = symbols.field_symbol("JetEvalHostField", "value")?;
-    let host_enum_name = symbols.field_symbol("JetEvalHostEnumArg", "name")?;
-    let host_enum_value = symbols.field_symbol("JetEvalHostEnumArg", "value")?;
-    let ct_int = symbols.variant_path("TComptimeValue", "Int")?;
-    let ct_string = symbols.variant_path("TComptimeValue", "String")?;
-    let ct_bool = symbols.variant_path("TComptimeValue", "Bool")?;
-    let ct_char = symbols.variant_path("TComptimeValue", "Char")?;
-    let ct_struct = symbols.variant_path("TComptimeValue", "Struct")?;
-    let ct_enum = symbols.variant_path("TComptimeValue", "Enum")?;
-    let ct_field_name = symbols.field_symbol("TComptimeField", "name")?;
-    let ct_field_value = symbols.field_symbol("TComptimeField", "value")?;
-
-    writeln!(
-        out,
-        r#"fn __jet_bootstrap_ct_key_value_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<{ct}, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirConstKey::Int(value) => Ok({ct_int}(jet_foundation::Numeric::JetInt::from_i64(*value))),
-                 ::jet_foundation::MIR::MirConstKey::String(value) => Ok({ct_string}(value.clone())),
-                 ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok({ct_bool}(*value)),
-                 ::jet_foundation::MIR::MirConstKey::Char(value) => Ok({ct_char}(jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)))),
-                 ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok({ct_struct}("Tuple".to_string(), fields.iter().map(|(name, key)| Ok({field} {{
-                     {ct_field_name}: name.clone(),
-                     {ct_field_value}: __jet_bootstrap_ct_key_value_from_host(key)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirConstKey::Struct {{ type_name, fields }} => Ok({ct_struct}(type_name.clone(), fields.iter().map(|(name, key)| Ok({field} {{
-                     {ct_field_name}: name.clone(),
-                     {ct_field_value}: __jet_bootstrap_ct_key_value_from_host(key)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirConstKey::Enum {{ type_name, variant }} => Ok({ct_enum}(type_name.clone(), variant.clone(), Vec::<{enum_arg}>::new())),
-             }}
-         }}
-         fn __jet_bootstrap_host_value_from_runtime(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<{host}, String> {{
-             match value {{
-                 ::jet_foundation::MIR::MirRuntimeValue::Present(value) => Ok({host_present}(__jet_bootstrap_host_value_from_runtime(value)?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::FailedTold(value) => Ok({host_failed}(__jet_bootstrap_host_value_from_runtime(value)?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Absent {{ element }} => Ok({host_absent}(__jet_bootstrap_type_from_host(element)?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::List(values) => Ok({host_list}(values.iter().map(__jet_bootstrap_host_value_from_runtime).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Map(entries) => Ok({host_map}(entries.iter().map(|(key, value)| Ok({host_map_entry} {{
-                     {host_map_key}: {host_data}(__jet_bootstrap_ct_key_value_from_host(key)?),
-                     {host_map_value}: __jet_bootstrap_host_value_from_runtime(value)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields }} => Ok({host_struct}(type_name.clone(), fields.iter().map(|(name, value)| Ok({host_field} {{
-                     {host_field_name}: name.clone(),
-                     {host_field_value}: __jet_bootstrap_host_value_from_runtime(value)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                 ::jet_foundation::MIR::MirRuntimeValue::Enum {{ type_name, variant, args }} => Ok({host_enum}(type_name.clone(), variant.clone(), args.iter().map(|(name, value)| Ok({host_enum_arg} {{
-                     {host_enum_name}: name.clone().ok_or(::jet_foundation::Outcome::JetAbsent),
-                     {host_enum_value}: __jet_bootstrap_host_value_from_runtime(value)?,
-                 }})).collect::<Result<Vec<_>, String>>()?)),
-                ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => Err("native runtime resource requires its checked owner packet".to_string()),
-                 _ => Ok({host_data}(__jet_bootstrap_ct_from_host(value)?)),
-             }}
-         }}"#,
-        ct = ct,
-        field = field,
-        enum_arg = enum_arg,
-        host = host,
-        host_map_entry = host_map_entry,
-        host_field = host_field,
-        host_enum_arg = host_enum_arg,
-        host_data = host_data,
-        host_absent = host_absent,
-        host_present = host_present,
-        host_failed = host_failed,
-        host_list = host_list,
-        host_map = host_map,
-        host_struct = host_struct,
-        host_enum = host_enum,
-        host_map_key = host_map_key,
-        host_map_value = host_map_value,
-        host_field_name = host_field_name,
-        host_field_value = host_field_value,
-        host_enum_name = host_enum_name,
-        host_enum_value = host_enum_value,
-        ct_int = ct_int,
-        ct_string = ct_string,
-        ct_bool = ct_bool,
-        ct_char = ct_char,
-        ct_struct = ct_struct,
-        ct_enum = ct_enum,
-        ct_field_name = ct_field_name,
-        ct_field_value = ct_field_value,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    Ok(())
+fn __jet_bootstrap_measure_to_host(value: &@t.MIRMeasure@) -> Result<::jet_foundation::MIR::MirMeasure, String> {
+    match value {
+        @p.MIRMeasure.Literal@{ kind, value } => Ok(::jet_foundation::MIR::MirMeasure::Literal {
+            kind: kind.clone(),
+            value: value.to_string_rep().parse::<u64>().map_err(|_| "measure literal is not an unsigned integer".to_string())?,
+        }),
+        @p.MIRMeasure.SignedLiteral@{ kind, value } => Ok(::jet_foundation::MIR::MirMeasure::SignedLiteral {
+            kind: kind.clone(),
+            value: value.to_i64().ok_or_else(|| "signed measure literal exceeds i64".to_string())?,
+        }),
+        @p.MIRMeasure.Symbol@{ kind, name } => Ok(::jet_foundation::MIR::MirMeasure::Symbol {
+            kind: kind.clone(),
+            name: name.clone(),
+        }),
+        @p.MIRMeasure.Combined@{ kind, rule, left, right } => {
+            let rule = match rule {
+                @v.MIRMeasureRule.Add@ => ::jet_foundation::MIR::MirMeasureRule::Add,
+                @v.MIRMeasureRule.Mul@ => ::jet_foundation::MIR::MirMeasureRule::Mul,
+                @v.MIRMeasureRule.Match@ => ::jet_foundation::MIR::MirMeasureRule::Match,
+            };
+            Ok(::jet_foundation::MIR::MirMeasure::Combined {
+                kind: kind.clone(),
+                rule,
+                left: Box::new(__jet_bootstrap_measure_to_host(left)?),
+                right: Box::new(__jet_bootstrap_measure_to_host(right)?),
+            })
+        }
+    }
 }
-fn emit_bootstrap_host_type_shape_codec(
-    out: &mut String,
-    symbols: &BootstrapCodecSymbols<'_>,
-) -> Result<(), BootstrapHostCodecError> {
-    let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
-    let type_id_value = symbols.field_symbol("MIRTypeID", "value")?;
-    let shape_nodes = symbols.field_symbol("JetEvalHostTypeShape", "nodes")?;
-    let shape_root = symbols.field_symbol("JetEvalHostTypeShape", "root")?;
-    let field_name = symbols.field_symbol("JetEvalHostTypeFieldShape", "name")?;
-    let field_node = symbols.field_symbol("JetEvalHostTypeFieldShape", "node")?;
-    let owner_core = symbols.variant_path("JetEvalHostOwner", "Core")?;
-    let owner_declared = symbols.variant_path("JetEvalHostOwner", "Declared")?;
-    let host_core_owner_ty = symbols.field_symbol("JetEvalHostCoreOwner", "ty")?;
-    let nodes = [
-        "Scalar", "Option", "Result", "List", "Map", "Tuple", "Struct", "Enum", "Closure",
-        "Handle",
-    ]
-    .iter()
-    .map(|name| {
-        Ok::<_, BootstrapHostCodecError>((
-            *name,
-            symbols.variant_path("JetEvalHostTypeNode", name)?,
-        ))
+fn __jet_bootstrap_measure_from_host(value: &::jet_foundation::MIR::MirMeasure) -> Result<@t.MIRMeasure@, String> {
+    match value {
+        ::jet_foundation::MIR::MirMeasure::Literal { kind, value } => Ok(@new.MIRMeasure.Literal@{
+            kind: kind.clone(),
+            value: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(*value)),
+        }),
+        ::jet_foundation::MIR::MirMeasure::SignedLiteral { kind, value } => Ok(@new.MIRMeasure.SignedLiteral@{
+            kind: kind.clone(),
+            value: jet_foundation::Numeric::JetInt::from_i64(*value),
+        }),
+        ::jet_foundation::MIR::MirMeasure::Symbol { kind, name } => Ok(@new.MIRMeasure.Symbol@{ kind: kind.clone(), name: name.clone() }),
+        ::jet_foundation::MIR::MirMeasure::Combined { kind, rule, left, right } => {
+            let rule = match rule {
+                ::jet_foundation::MIR::MirMeasureRule::Add => @v.MIRMeasureRule.Add@,
+                ::jet_foundation::MIR::MirMeasureRule::Mul => @v.MIRMeasureRule.Mul@,
+                ::jet_foundation::MIR::MirMeasureRule::Match => @v.MIRMeasureRule.Match@,
+            };
+            Ok(@new.MIRMeasure.Combined@{
+                kind: kind.clone(),
+                rule,
+                left: __jet_bootstrap_measure_from_host(left)?,
+                right: __jet_bootstrap_measure_from_host(right)?,
+            })
+        }
+    }
+}
+fn __jet_bootstrap_dimension_to_host(value: &@t.MIRDimension@) -> Result<::jet_foundation::MIR::MirDimension, String> {
+    let mut axes = ::std::collections::BTreeMap::new();
+    for axis in value.@f.MIRDimension.axes@.iter() {
+        let name = axis.@f.MIRDimensionAxis.name@.clone();
+        let exponent = __jet_bootstrap_measure_to_host(&axis.@f.MIRDimensionAxis.exponent@)?;
+        if axes.insert(name, exponent).is_some() {
+            return Err("MIR dimension contains a duplicate axis name".to_string());
+        }
+    }
+    Ok(::jet_foundation::MIR::MirDimension { axes })
+}
+fn __jet_bootstrap_dimension_from_host(value: &::jet_foundation::MIR::MirDimension) -> Result<@t.MIRDimension@, String> {
+    let mut axes = Vec::with_capacity(value.axes.len());
+    for (name, exponent) in &value.axes {
+        axes.push(@s.MIRDimensionAxis@{
+            name: name.clone(),
+            exponent: __jet_bootstrap_measure_from_host(exponent)?,
+        });
+    }
+    Ok(@s.MIRDimension@{ axes })
+}
+fn __jet_bootstrap_tag_to_host(value: &@t.MIRTagMarker@) -> ::jet_foundation::MIR::MirTagMarker {
+    match value {
+        @p.MIRTagMarker.User@{ name } => ::jet_foundation::MIR::MirTagMarker::User(name.clone()),
+        @p.MIRTagMarker.Internal@{ internal_tag } => ::jet_foundation::MIR::MirTagMarker::Internal(match &*@deref.MIRTagMarker.Internal.internal_tag@internal_tag {
+            @v.MIRInternalTag.CoreCryptoNominal@ => ::jet_foundation::MIR::MirInternalTag::CoreCryptoNominal,
+            @v.MIRInternalTag.DeterministicClock@ => ::jet_foundation::MIR::MirInternalTag::DeterministicClock,
+            @v.MIRInternalTag.SystemClock@ => ::jet_foundation::MIR::MirInternalTag::SystemClock,
+            @v.MIRInternalTag.ExpiringSecretLoan@ => ::jet_foundation::MIR::MirInternalTag::ExpiringSecretLoan,
+            @v.MIRInternalTag.SharedGuardRead@ => ::jet_foundation::MIR::MirInternalTag::SharedGuardRead,
+            @v.MIRInternalTag.SharedGuardEdit@ => ::jet_foundation::MIR::MirInternalTag::SharedGuardEdit,
+            @v.MIRInternalTag.TerminalFactSet@ => ::jet_foundation::MIR::MirInternalTag::TerminalFactSet,
+            @v.MIRInternalTag.CppCallbackABI@ => ::jet_foundation::MIR::MirInternalTag::CppCallbackAbi,
+            @v.MIRInternalTag.AllocatorView@ => ::jet_foundation::MIR::MirInternalTag::AllocatorView,
+        }),
+    }
+}
+fn __jet_bootstrap_tag_from_host(value: &::jet_foundation::MIR::MirTagMarker) -> Result<@t.MIRTagMarker@, String> {
+    match value {
+        ::jet_foundation::MIR::MirTagMarker::User(name) => Ok(@new.MIRTagMarker.User@{ name: name.clone() }),
+        ::jet_foundation::MIR::MirTagMarker::Internal(tag) => Ok(@new.MIRTagMarker.Internal@{ internal_tag: match tag {
+            ::jet_foundation::MIR::MirInternalTag::CoreCryptoNominal => @v.MIRInternalTag.CoreCryptoNominal@,
+            ::jet_foundation::MIR::MirInternalTag::DeterministicClock => @v.MIRInternalTag.DeterministicClock@,
+            ::jet_foundation::MIR::MirInternalTag::SystemClock => @v.MIRInternalTag.SystemClock@,
+            ::jet_foundation::MIR::MirInternalTag::ExpiringSecretLoan => @v.MIRInternalTag.ExpiringSecretLoan@,
+            ::jet_foundation::MIR::MirInternalTag::SharedGuardRead => @v.MIRInternalTag.SharedGuardRead@,
+            ::jet_foundation::MIR::MirInternalTag::SharedGuardEdit => @v.MIRInternalTag.SharedGuardEdit@,
+            ::jet_foundation::MIR::MirInternalTag::TerminalFactSet => @v.MIRInternalTag.TerminalFactSet@,
+            ::jet_foundation::MIR::MirInternalTag::CppCallbackAbi => @v.MIRInternalTag.CppCallbackABI@,
+            ::jet_foundation::MIR::MirInternalTag::AllocatorView => @v.MIRInternalTag.AllocatorView@,
+        } }),
+    }
+}
+fn __jet_bootstrap_abi_to_host(value: &@t.MIRABI@) -> ::jet_foundation::MIR::MirAbi {
+    match value {
+        @p.MIRABI.Scalar@{ kind } => ::jet_foundation::MIR::MirAbi::Scalar(match &*@deref.MIRABI.Scalar.kind@kind {
+            @v.MIRScalarKind.Int@ => ::jet_foundation::MIR::MirScalarKind::Int,
+            @v.MIRScalarKind.Float@ => ::jet_foundation::MIR::MirScalarKind::Float,
+            @v.MIRScalarKind.Float32@ => ::jet_foundation::MIR::MirScalarKind::Float32,
+            @v.MIRScalarKind.Bool@ => ::jet_foundation::MIR::MirScalarKind::Bool,
+            @v.MIRScalarKind.Char@ => ::jet_foundation::MIR::MirScalarKind::Char,
+            @v.MIRScalarKind.Pointer@ => ::jet_foundation::MIR::MirScalarKind::Pointer,
+        }),
+        @v.MIRABI.Aggregate@ => ::jet_foundation::MIR::MirAbi::Aggregate,
+        @v.MIRABI.Sequence@ => ::jet_foundation::MIR::MirAbi::Sequence,
+        @v.MIRABI.Function@ => ::jet_foundation::MIR::MirAbi::Function,
+        @v.MIRABI.Nominal@ => ::jet_foundation::MIR::MirAbi::Nominal,
+        @v.MIRABI.Dynamic@ => ::jet_foundation::MIR::MirAbi::Dynamic,
+        @v.MIRABI.Never@ => ::jet_foundation::MIR::MirAbi::Never,
+    }
+}
+fn __jet_bootstrap_abi_from_host(value: &::jet_foundation::MIR::MirAbi) -> @t.MIRABI@ {
+    match value {
+        ::jet_foundation::MIR::MirAbi::Scalar(kind) => @new.MIRABI.Scalar@{ kind: match kind {
+            ::jet_foundation::MIR::MirScalarKind::Int => @v.MIRScalarKind.Int@,
+            ::jet_foundation::MIR::MirScalarKind::Float => @v.MIRScalarKind.Float@,
+            ::jet_foundation::MIR::MirScalarKind::Float32 => @v.MIRScalarKind.Float32@,
+            ::jet_foundation::MIR::MirScalarKind::Bool => @v.MIRScalarKind.Bool@,
+            ::jet_foundation::MIR::MirScalarKind::Char => @v.MIRScalarKind.Char@,
+            ::jet_foundation::MIR::MirScalarKind::Pointer => @v.MIRScalarKind.Pointer@,
+        } },
+        ::jet_foundation::MIR::MirAbi::Aggregate => @v.MIRABI.Aggregate@,
+        ::jet_foundation::MIR::MirAbi::Sequence => @v.MIRABI.Sequence@,
+        ::jet_foundation::MIR::MirAbi::Function => @v.MIRABI.Function@,
+        ::jet_foundation::MIR::MirAbi::Nominal => @v.MIRABI.Nominal@,
+        ::jet_foundation::MIR::MirAbi::Dynamic => @v.MIRABI.Dynamic@,
+        ::jet_foundation::MIR::MirAbi::Never => @v.MIRABI.Never@,
+    }
+}
+fn __jet_bootstrap_size_to_host(value: &@t.MIRSize@) -> Result<::jet_foundation::MIR::MirSize, String> {
+    match value {
+        @p.MIRSize.Static@{ bytes } => Ok(::jet_foundation::MIR::MirSize::Static(bytes.to_string_rep().parse::<u64>().map_err(|_| "layout size is not an unsigned integer".to_string())?)),
+        @v.MIRSize.Dynamic@ => Ok(::jet_foundation::MIR::MirSize::Dynamic),
+    }
+}
+fn __jet_bootstrap_size_from_host(value: &::jet_foundation::MIR::MirSize) -> Result<@t.MIRSize@, String> {
+    match value {
+        ::jet_foundation::MIR::MirSize::Static(bytes) => Ok(@new.MIRSize.Static@{ bytes: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(*bytes)) }),
+        ::jet_foundation::MIR::MirSize::Dynamic => Ok(@v.MIRSize.Dynamic@),
+    }
+}
+fn __jet_bootstrap_layout_from_host(value: &::jet_foundation::MIR::MirLayout) -> Result<@t.MIRLayout@, String> {
+    Ok(@s.MIRLayout@{
+        abi: __jet_bootstrap_abi_from_host(&value.abi),
+        size: __jet_bootstrap_size_from_host(&value.size)?,
+        align: __jet_bootstrap_size_from_host(&value.align)?,
     })
-    .collect::<Result<Vec<_>, _>>()?;
-    let node = |name: &str| {
-        nodes
-            .iter()
-            .find(|(candidate, _)| *candidate == name)
-            .map(|(_, path)| path.clone())
-            .unwrap_or_else(|| name.to_string())
+}
+fn __jet_bootstrap_type_to_host(value: &@t.MIRType@) -> Result<::jet_foundation::MIR::MirType, String> {
+    let kind = match &@deref.MIRType.kind@value.@f.MIRType.kind@ {
+        @v.MIRTypeKind.Int@ => ::jet_foundation::MIR::MirTypeKind::Int,
+        @v.MIRTypeKind.Float@ => ::jet_foundation::MIR::MirTypeKind::Float,
+        @v.MIRTypeKind.Bool@ => ::jet_foundation::MIR::MirTypeKind::Bool,
+        @v.MIRTypeKind.String@ => ::jet_foundation::MIR::MirTypeKind::String,
+        @v.MIRTypeKind.Char@ => ::jet_foundation::MIR::MirTypeKind::Char,
+        @v.MIRTypeKind.Float32@ => ::jet_foundation::MIR::MirTypeKind::Float32,
+        @p.MIRTypeKind.List@{ inner } => ::jet_foundation::MIR::MirTypeKind::List(Box::new(__jet_bootstrap_type_to_host(inner)?)),
+        @p.MIRTypeKind.Map@{ key, value: item } => ::jet_foundation::MIR::MirTypeKind::Map {
+            key: Box::new(__jet_bootstrap_type_to_host(key)?),
+            value: Box::new(__jet_bootstrap_type_to_host(item)?),
+        },
+        @p.MIRTypeKind.Shared@{ inner } => ::jet_foundation::MIR::MirTypeKind::Shared(Box::new(__jet_bootstrap_type_to_host(inner)?)),
+        @p.MIRTypeKind.Option@{ inner } => ::jet_foundation::MIR::MirTypeKind::Option(Box::new(__jet_bootstrap_type_to_host(inner)?)),
+        @p.MIRTypeKind.Result@{ ok, err } => ::jet_foundation::MIR::MirTypeKind::Result {
+            ok: Box::new(__jet_bootstrap_type_to_host(ok)?),
+            err: Box::new(__jet_bootstrap_type_to_host(err)?),
+        },
+        @p.MIRTypeKind.Fn@{ signature } => ::jet_foundation::MIR::MirTypeKind::Fn(__jet_bootstrap_mir_MIRFunctionSignature_to_host(signature)?),
+        @p.MIRTypeKind.SendFn@{ params, ret, conventions } => ::jet_foundation::MIR::MirTypeKind::SendFn {
+            params: params.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
+            ret: match (&*@deref.MIRTypeKind.SendFn.ret@ret).as_ref() {
+                Ok(ret) => Some(Box::new(__jet_bootstrap_type_to_host(ret)?)),
+                Err(_) => None,
+            },
+            conventions: conventions.iter().map(__jet_bootstrap_mir_MIRAccess_to_host).collect::<Result<Vec<_>, _>>()?,
+        },
+        @p.MIRTypeKind.Apply@{ name, args } => ::jet_foundation::MIR::MirTypeKind::Apply {
+            name: ::jet_foundation::MIR::MirNominalRef {
+                id: __jet_bootstrap_type_id_to_host(&name.@f.MIRNominalRef.id@)?,
+                name: name.@f.MIRNominalRef.name@.clone(),
+            },
+            args: args.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
+        },
+        @p.MIRTypeKind.TraitObject@{ bounds } => ::jet_foundation::MIR::MirTypeKind::TraitObject(
+            bounds.iter().map(|bound| {
+                let id = __jet_bootstrap_source_u64(&bound.@f.MIRTraitRef.id@.@f.MIRTraitID.value@, "MIR trait identity")?;
+                if id == 0 { return Err("MIR trait identity is zero".to_string()); }
+                // Host trait-object bounds are nominal refs keyed by the trait's MIR identity.
+                Ok(::jet_foundation::MIR::MirNominalRef { id: ::jet_foundation::MIR::MirTypeId(id), name: bound.@f.MIRTraitRef.name@.clone() })
+            }).collect::<Result<Vec<_>, String>>()?,
+        ),
+        @p.MIRTypeKind.Tuple@{ fields } => ::jet_foundation::MIR::MirTypeKind::Tuple(
+            fields.iter().map(|field| Ok((
+                field.@f.MIRTupleField.name@.clone(),
+                __jet_bootstrap_type_to_host(&field.@f.MIRTupleField.ty@)?,
+            ))).collect::<Result<Vec<_>, String>>()?,
+        ),
+        @p.MIRTypeKind.FixedList@{ elem, len } => ::jet_foundation::MIR::MirTypeKind::FixedList {
+            elem: Box::new(__jet_bootstrap_type_to_host(elem)?),
+            len: __jet_bootstrap_measure_to_host(len)?,
+        },
+        @p.MIRTypeKind.IntN@{ signed, bits } => ::jet_foundation::MIR::MirTypeKind::IntN {
+            signed: *signed,
+            bits: bits.to_string_rep().parse::<u8>().map_err(|_| "integer width is outside u8".to_string())?,
+        },
+        @p.MIRTypeKind.InlineRange@{ base, lo, hi } => ::jet_foundation::MIR::MirTypeKind::InlineRange {
+            base: Box::new(__jet_bootstrap_type_to_host(base)?),
+            lo: lo.to_i64().ok_or_else(|| "inline range lower bound exceeds i64".to_string())?,
+            hi: hi.to_i64().ok_or_else(|| "inline range upper bound exceeds i64".to_string())?,
+        },
+        @p.MIRTypeKind.Tagged@{ marker, inner } => ::jet_foundation::MIR::MirTypeKind::Tagged {
+            marker: __jet_bootstrap_tag_to_host(marker),
+            inner: Box::new(__jet_bootstrap_type_to_host(inner)?),
+        },
+        @p.MIRTypeKind.Union@{ members } => ::jet_foundation::MIR::MirTypeKind::Union(
+            members.iter().map(__jet_bootstrap_type_to_host).collect::<Result<Vec<_>, _>>()?,
+        ),
+        @p.MIRTypeKind.Quantity@{ base, dimension } => ::jet_foundation::MIR::MirTypeKind::Quantity {
+            base: Box::new(__jet_bootstrap_type_to_host(base)?),
+            dimension: __jet_bootstrap_dimension_to_host(dimension)?,
+        },
+        @p.MIRTypeKind.Measure@{ value: measure } => ::jet_foundation::MIR::MirTypeKind::Measure(
+            __jet_bootstrap_measure_to_host(measure)?,
+        ),
     };
+    let mut result = ::jet_foundation::MIR::MirType::from_kind(kind);
+    if let Ok(identity) = (&@deref.MIRType.identity@value.@f.MIRType.identity@).as_ref() {
+        result = result.with_identity(__jet_bootstrap_type_id_to_host(identity)?);
+    }
+    Ok(result)
+}
+fn __jet_bootstrap_type_from_host(value: &::jet_foundation::MIR::MirType) -> Result<@t.MIRType@, String> {
+    let kind = match &value.kind {
+        ::jet_foundation::MIR::MirTypeKind::Int => @v.MIRTypeKind.Int@,
+        ::jet_foundation::MIR::MirTypeKind::Float => @v.MIRTypeKind.Float@,
+        ::jet_foundation::MIR::MirTypeKind::Bool => @v.MIRTypeKind.Bool@,
+        ::jet_foundation::MIR::MirTypeKind::String => @v.MIRTypeKind.String@,
+        ::jet_foundation::MIR::MirTypeKind::Char => @v.MIRTypeKind.Char@,
+        ::jet_foundation::MIR::MirTypeKind::Float32 => @v.MIRTypeKind.Float32@,
+        ::jet_foundation::MIR::MirTypeKind::List(inner) => @new.MIRTypeKind.List@{ inner: __jet_bootstrap_type_from_host(inner)? },
+        ::jet_foundation::MIR::MirTypeKind::Map { key, value } => @new.MIRTypeKind.Map@{
+            key: __jet_bootstrap_type_from_host(key)?,
+            value: __jet_bootstrap_type_from_host(value)?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::Shared(inner) => @new.MIRTypeKind.Shared@{ inner: __jet_bootstrap_type_from_host(inner)? },
+        ::jet_foundation::MIR::MirTypeKind::Option(inner) => @new.MIRTypeKind.Option@{ inner: __jet_bootstrap_type_from_host(inner)? },
+        ::jet_foundation::MIR::MirTypeKind::Result { ok, err } => @new.MIRTypeKind.Result@{
+            ok: __jet_bootstrap_type_from_host(ok)?,
+            err: __jet_bootstrap_type_from_host(err)?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::Fn(signature) => @new.MIRTypeKind.Fn@{ signature: __jet_bootstrap_mir_MIRFunctionSignature_from_host(signature)? },
+        ::jet_foundation::MIR::MirTypeKind::SendFn { params, ret, conventions } => @new.MIRTypeKind.SendFn@{
+            params: params.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?,
+            ret: match ret.as_deref() {
+                Some(ret) => Ok(__jet_bootstrap_type_from_host(ret)?),
+                None => Err(jet_foundation::Outcome::JetAbsent),
+            },
+            conventions: conventions.iter().map(__jet_bootstrap_mir_MIRAccess_from_host).collect::<Result<Vec<_>, _>>()?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::Apply { name, args } => @new.MIRTypeKind.Apply@{
+            name: @s.MIRNominalRef@{
+                id: __jet_bootstrap_type_id_from_host(name.id)?,
+                name: name.name.clone(),
+            },
+            args: args.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::TraitObject(bounds) => @new.MIRTypeKind.TraitObject@{
+            bounds: bounds.iter().map(|bound| {
+                if bound.id.0 == 0 { return Err("MIR trait identity is zero".to_string()); }
+                Ok(@s.MIRTraitRef@{
+                    id: @s.MIRTraitID@{ value: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(bound.id.0)) },
+                    name: bound.name.clone(),
+                })
+            }).collect::<Result<Vec<_>, String>>()?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::Tuple(fields) => @new.MIRTypeKind.Tuple@{
+            fields: fields.iter().map(|(name, ty)| Ok(@s.MIRTupleField@{
+                name: name.clone(),
+                ty: __jet_bootstrap_type_from_host(ty)?,
+            })).collect::<Result<Vec<_>, String>>()?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::FixedList { elem, len } => @new.MIRTypeKind.FixedList@{
+            elem: __jet_bootstrap_type_from_host(elem)?,
+            len: __jet_bootstrap_measure_from_host(len)?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::IntN { signed, bits } => @new.MIRTypeKind.IntN@{
+            signed: *signed,
+            bits: jet_foundation::Numeric::JetInt::from_i64(i64::from(*bits)),
+        },
+        ::jet_foundation::MIR::MirTypeKind::InlineRange { base, lo, hi } => @new.MIRTypeKind.InlineRange@{
+            base: __jet_bootstrap_type_from_host(base)?,
+            lo: jet_foundation::Numeric::JetInt::from_i64(*lo),
+            hi: jet_foundation::Numeric::JetInt::from_i64(*hi),
+        },
+        ::jet_foundation::MIR::MirTypeKind::Tagged { marker, inner } => @new.MIRTypeKind.Tagged@{
+            marker: __jet_bootstrap_tag_from_host(marker)?,
+            inner: __jet_bootstrap_type_from_host(inner)?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::Union(members) => @new.MIRTypeKind.Union@{
+            members: members.iter().map(__jet_bootstrap_type_from_host).collect::<Result<Vec<_>, _>>()?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::Quantity { base, dimension } => @new.MIRTypeKind.Quantity@{
+            base: __jet_bootstrap_type_from_host(base)?,
+            dimension: __jet_bootstrap_dimension_from_host(dimension)?,
+        },
+        ::jet_foundation::MIR::MirTypeKind::Measure(measure) => @new.MIRTypeKind.Measure@{ value: __jet_bootstrap_measure_from_host(measure)? },
+    };
+    Ok(@s.MIRType@{
+        kind,
+        identity: match value.identity.as_ref() {
+            Some(identity) => Ok(__jet_bootstrap_type_id_from_host(*identity)?),
+            None => Err(jet_foundation::Outcome::JetAbsent),
+        },
+        layout: __jet_bootstrap_layout_from_host(&value.layout)?,
+    })
+}
+"#,
+    );
+}
 
-    writeln!(
-        out,
-        r#"fn __jet_bootstrap_type_from_shape(shape: &{shape}) -> Result<::jet_foundation::MIR::MirType, String> {{
-             let root = __jet_bootstrap_source_index(&shape.{shape_root}, "host result type root")?;
-             __jet_bootstrap_type_from_shape_node(shape, root, 0)
-         }}
-         fn __jet_bootstrap_type_from_shape_node(
-             shape: &{shape},
-             index: usize,
-             depth: usize,
-         ) -> Result<::jet_foundation::MIR::MirType, String> {{
-             if depth >= shape.{shape_nodes}.len() {{
-                 return Err("checked host type shape contains a recursive non-nominal type".to_string());
-             }}
-             let node = shape.{shape_nodes}.get(index)
-                 .ok_or_else(|| "checked host type shape has an invalid node reference".to_string())?;
-             match node {{
-                 {scalar}(ty) => __jet_bootstrap_type_to_host(ty),
-                 {option}(inner) => Ok(::jet_foundation::MIR::MirType::from_kind(
-                     ::jet_foundation::MIR::MirTypeKind::Option(Box::new(
-                         __jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(inner, "option type node")?, depth + 1)?,
-                     )),
-                 )),
-                 {result}(ok, error) => Ok(::jet_foundation::MIR::MirType::from_kind(
-                     ::jet_foundation::MIR::MirTypeKind::Result {{
-                         ok: Box::new(__jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(ok, "result success type node")?, depth + 1)?),
-                         err: Box::new(__jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(error, "result error type node")?, depth + 1)?),
-                     }},
-                 )),
-                 {list}(inner) => Ok(::jet_foundation::MIR::MirType::from_kind(
-                     ::jet_foundation::MIR::MirTypeKind::List(Box::new(
-                         __jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(inner, "list element type node")?, depth + 1)?,
-                     )),
-                 )),
-                 {map}(key, value) => Ok(::jet_foundation::MIR::MirType::from_kind(
-                     ::jet_foundation::MIR::MirTypeKind::Map {{
-                         key: Box::new(__jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(key, "map key type node")?, depth + 1)?),
-                         value: Box::new(__jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(value, "map value type node")?, depth + 1)?),
-                     }},
-                 )),
-                 {tuple}(fields) => Ok(::jet_foundation::MIR::MirType::from_kind(
-                     ::jet_foundation::MIR::MirTypeKind::Tuple(fields.iter().map(|field| Ok((
-                         field.{field_name}.clone(),
-                         __jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(&field.{field_node}, "tuple field type node")?, depth + 1)?,
-                     ))).collect::<Result<Vec<_>, String>>()?),
-                 )),
-                 {structure}(type_id, type_name, args, _) | {enumeration}(type_id, type_name, args, _) => {{
-                     let id = ::jet_foundation::MIR::MirTypeId(__jet_bootstrap_source_u64(&type_id.{type_id_value}, "host nominal type ID")?);
-                     let args = args.iter().map(|arg| {{
-                         __jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(arg, "nominal argument type node")?, depth + 1)
-                     }}).collect::<Result<Vec<_>, String>>()?;
-                     Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Apply {{
-                         name: ::jet_foundation::MIR::MirNominalRef {{ id, name: type_name.clone() }},
-                         args,
-                     }}).with_identity(id))
-                 }}
-                {handle}(owner) => match owner {{
-                    {owner_core}(owner) => __jet_bootstrap_type_to_host(&owner.{host_core_owner_ty}),
-                    {owner_declared}(ty) => __jet_bootstrap_type_to_host(ty),
-                    _ => Err("cursor owner shape does not expose a native MIR type".to_string()),
-                }},
-                 {closure}(_, _) => Err("closure type shape cannot be passed to a native Prelude route".to_string()),
-             }}
-         }}"#,
-        shape = shape,
-        shape_root = shape_root,
-        shape_nodes = shape_nodes,
-        field_name = field_name,
-        field_node = field_node,
-        type_id_value = type_id_value,
-        scalar = node("Scalar"),
-        option = node("Option"),
-        result = node("Result"),
-        list = node("List"),
-        map = node("Map"),
-        tuple = node("Tuple"),
-        structure = node("Struct"),
-        enumeration = node("Enum"),
-        handle = node("Handle"),
-        closure = node("Closure"),
-        owner_core = owner_core,
-        owner_declared = owner_declared,
-        host_core_owner_ty = host_core_owner_ty,
-    )
-    .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-    Ok(())
+/// The Source comptime-value and evaluator-value codecs (shapes from the
+/// binding metadata through the `@…@` markers). The reverse key projection is
+/// kept separate from value projection so a map's checked key carrier cannot
+/// accidentally be stringified.
+fn emit_bootstrap_value_codec(out: &mut String) {
+    out.push_str(
+        r#"
+fn __jet_bootstrap_key_fields_to_host(fields: &[@t.TComptimeKeyField@]) -> Result<Vec<(String, ::jet_foundation::MIR::MirConstKey)>, String> {
+    fields.iter().map(|field| Ok((
+        field.@f.TComptimeKeyField.name@.clone(),
+        __jet_bootstrap_key_to_host(&field.@f.TComptimeKeyField.key@)?,
+    ))).collect()
+}
+fn __jet_bootstrap_key_to_host(value: &@t.TComptimeKey@) -> Result<::jet_foundation::MIR::MirConstKey, String> {
+    match value {
+        @p.TComptimeKey.Int@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Int(value.to_i64().ok_or_else(|| "constant key exceeds i64".to_string())?)),
+        @p.TComptimeKey.String@{ value } => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
+        @p.TComptimeKey.Bool@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
+        @p.TComptimeKey.Char@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Char(char::from_u32(value.to_i64().ok_or_else(|| "constant key character exceeds i64".to_string())? as u32).ok_or_else(|| "constant key character is invalid".to_string())?)),
+        @p.TComptimeKey.Tuple@{ fields } => Ok(::jet_foundation::MIR::MirConstKey::Tuple(__jet_bootstrap_key_fields_to_host(fields)?)),
+        @p.TComptimeKey.Struct@{ type_name, fields } => Ok(::jet_foundation::MIR::MirConstKey::Struct {
+            type_name: type_name.clone(),
+            fields: __jet_bootstrap_key_fields_to_host(fields)?,
+        }),
+        @p.TComptimeKey.Enum@{ type_name, variant } => Ok(::jet_foundation::MIR::MirConstKey::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+        }),
+    }
+}
+fn __jet_bootstrap_ct_to_host(value: &@t.TComptimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
+    match value {
+        @p.TComptimeValue.Int@{ value } => Ok(match value.to_i64() {
+            Some(value) => ::jet_foundation::MIR::MirRuntimeValue::Int(value),
+            None => ::jet_foundation::MIR::MirRuntimeValue::BigInt(value.to_string_rep()),
+        }),
+        @p.TComptimeValue.Float@{ value, bits } => Ok(::jet_foundation::MIR::MirRuntimeValue::Float { value: *value, f32: bits.to_i64() == Some(32) }),
+        @p.TComptimeValue.Bool@{ value } => Ok(::jet_foundation::MIR::MirRuntimeValue::Bool(*value)),
+        @p.TComptimeValue.Char@{ value } => Ok(::jet_foundation::MIR::MirRuntimeValue::Char(char::from_u32(value.to_i64().ok_or_else(|| "character exceeds i64".to_string())? as u32).ok_or_else(|| "invalid character value".to_string())?)),
+        @p.TComptimeValue.String@{ value } => Ok(::jet_foundation::MIR::MirRuntimeValue::String(value.clone())),
+        @p.TComptimeValue.BigInt@{ decimal } => Ok(::jet_foundation::MIR::MirRuntimeValue::BigInt(decimal.clone())),
+        @p.TComptimeValue.Bytes@{ value } => Ok(::jet_foundation::MIR::MirRuntimeValue::Bytes(value.to_vec())),
+        @p.TComptimeValue.List@{ values } => Ok(::jet_foundation::MIR::MirRuntimeValue::List(values.iter().map(__jet_bootstrap_ct_to_host).collect::<Result<Vec<_>, _>>()?)),
+        @p.TComptimeValue.Map@{ entries } => Ok(::jet_foundation::MIR::MirRuntimeValue::Map(entries.iter().map(|entry| Ok((
+            __jet_bootstrap_key_to_host(&entry.@f.TComptimeMapEntry.key@)?,
+            __jet_bootstrap_ct_to_host(&entry.@f.TComptimeMapEntry.value@)?,
+        ))).collect::<Result<Vec<_>, String>>()?)),
+        @p.TComptimeValue.Struct@{ type_name, fields } => Ok(::jet_foundation::MIR::MirRuntimeValue::Struct {
+            type_name: type_name.clone(),
+            fields: fields.iter().map(|field| Ok((
+                field.@f.TComptimeField.name@.clone(),
+                __jet_bootstrap_ct_to_host(&field.@f.TComptimeField.value@)?,
+            ))).collect::<Result<Vec<_>, String>>()?,
+        }),
+        @p.TComptimeValue.Enum@{ type_name, variant, args } => Ok(::jet_foundation::MIR::MirRuntimeValue::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: args.iter().map(|arg| Ok((
+                (&@deref.TComptimeEnumArg.name@arg.@f.TComptimeEnumArg.name@).as_ref().ok().cloned(),
+                __jet_bootstrap_ct_to_host(&arg.@f.TComptimeEnumArg.value@)?,
+            ))).collect::<Result<Vec<_>, String>>()?,
+        }),
+        @p.TComptimeValue.Present@{ value } => Ok(::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(__jet_bootstrap_ct_to_host(value)?))),
+        @p.TComptimeValue.Failed@{ report } => match &*@deref.TComptimeValue.Failed.report@report {
+            @p.TComptimeReport.Told@{ value } => Ok(::jet_foundation::MIR::MirRuntimeValue::FailedTold(Box::new(__jet_bootstrap_ct_to_host(value)?))),
+            @p.TComptimeReport.Clean@{ .. } => Err("clean comptime failures carry an AST type, not a MIR type".to_string()),
+        },
+        @v.TComptimeValue.Unit@ => Ok(::jet_foundation::MIR::MirRuntimeValue::Unit),
+        @p.TComptimeValue.Closure@{ .. } => Err("closure values are not materializable at the native Prelude boundary".to_string()),
+    }
+}
+fn __jet_bootstrap_ct_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<@t.TComptimeValue@, String> {
+    match value {
+        ::jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok(@new.TComptimeValue.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
+        ::jet_foundation::MIR::MirRuntimeValue::BigInt(value) => Ok(@new.TComptimeValue.BigInt@{ decimal: value.clone() }),
+        ::jet_foundation::MIR::MirRuntimeValue::Float { value, f32 } => Ok(@new.TComptimeValue.Float@{
+            value: *value,
+            bits: jet_foundation::Numeric::JetInt::from_i64(if *f32 { 32 } else { 64 }),
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(@new.TComptimeValue.Bool@{ value: *value }),
+        ::jet_foundation::MIR::MirRuntimeValue::Char(value) => Ok(@new.TComptimeValue.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
+        ::jet_foundation::MIR::MirRuntimeValue::String(value) => Ok(@new.TComptimeValue.String@{ value: value.clone() }),
+        ::jet_foundation::MIR::MirRuntimeValue::Bytes(value) => Ok(@new.TComptimeValue.Bytes@{ value: value.clone() }),
+        ::jet_foundation::MIR::MirRuntimeValue::List(values) => Ok(@new.TComptimeValue.List@{ values: values.iter().map(__jet_bootstrap_ct_from_host).collect::<Result<Vec<_>, _>>()? }),
+        ::jet_foundation::MIR::MirRuntimeValue::Map(entries) => Ok(@new.TComptimeValue.Map@{
+            entries: entries.iter().map(|(key, value)| Ok(@s.TComptimeMapEntry@{
+                key: __jet_bootstrap_key_from_host(key)?,
+                value: __jet_bootstrap_ct_from_host(value)?,
+            })).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Struct { type_name, fields } => Ok(@new.TComptimeValue.Struct@{
+            type_name: type_name.clone(),
+            fields: fields.iter().map(|(name, value)| Ok(@s.TComptimeField@{
+                name: name.clone(),
+                value: __jet_bootstrap_ct_from_host(value)?,
+            })).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Enum { type_name, variant, args } => Ok(@new.TComptimeValue.Enum@{
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: args.iter().map(|(name, value)| Ok(@s.TComptimeEnumArg@{
+                name: name.clone().ok_or(jet_foundation::Outcome::JetAbsent),
+                value: __jet_bootstrap_ct_from_host(value)?,
+            })).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Present(value) => Ok(@new.TComptimeValue.Present@{ value: __jet_bootstrap_ct_from_host(value)? }),
+        ::jet_foundation::MIR::MirRuntimeValue::FailedTold(value) => Ok(@new.TComptimeValue.Failed@{
+            report: @new.TComptimeReport.Told@{ value: __jet_bootstrap_ct_from_host(value)? },
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Absent { .. } => Err("a typed absent value is returned directly as JetEvalRuntimeValue::Absent".to_string()),
+        ::jet_foundation::MIR::MirRuntimeValue::Unit => Ok(@v.TComptimeValue.Unit@),
+        ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => Err("native Prelude returned an unmaterializable value".to_string()),
+    }
+}
+fn __jet_bootstrap_runtime_key_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<::jet_foundation::MIR::MirConstKey, String> {
+    match value {
+        ::jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok(::jet_foundation::MIR::MirConstKey::Int(*value)),
+        ::jet_foundation::MIR::MirRuntimeValue::String(value) => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
+        ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
+        ::jet_foundation::MIR::MirRuntimeValue::Char(value) => Ok(::jet_foundation::MIR::MirConstKey::Char(*value)),
+        ::jet_foundation::MIR::MirRuntimeValue::Struct { type_name, fields } if type_name == "Tuple" => Ok(::jet_foundation::MIR::MirConstKey::Tuple(fields.iter().map(|(name, value)| Ok((name.clone(), __jet_bootstrap_runtime_key_from_host(value)?))).collect::<Result<Vec<_>, String>>()?)),
+        ::jet_foundation::MIR::MirRuntimeValue::Struct { type_name, fields } => Ok(::jet_foundation::MIR::MirConstKey::Struct {
+            type_name: type_name.clone(),
+            fields: fields.iter().map(|(name, value)| Ok((name.clone(), __jet_bootstrap_runtime_key_from_host(value)?))).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Enum { type_name, variant, args } if args.is_empty() => Ok(::jet_foundation::MIR::MirConstKey::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+        }),
+        _ => Err("MIR runtime value is not a canonical constant map key".to_string()),
+    }
+}
+fn __jet_bootstrap_eval_key_to_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirConstKey, String> {
+    match value {
+        @p.JetEvalRuntimeValue.Data@{ value } => __jet_bootstrap_ct_to_host(value).and_then(|value| __jet_bootstrap_runtime_key_from_host(&value)),
+        _ => Err("runtime map key is not materialized immutable data".to_string()),
+    }
+}
+fn __jet_bootstrap_eval_aggregate_to_host(
+    value: &@t.JetEvalRuntimeAggregate@,
+    allow_foreign_handles: bool,
+) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
+    match value {
+        @p.JetEvalRuntimeAggregate.List@{ values } => Ok(::jet_foundation::MIR::MirRuntimeValue::List(values.iter().map(|value| __jet_bootstrap_eval_to_host_inner(value, allow_foreign_handles)).collect::<Result<Vec<_>, String>>()?)),
+        @p.JetEvalRuntimeAggregate.Map@{ entries } => Ok(::jet_foundation::MIR::MirRuntimeValue::Map(entries.iter().map(|entry| Ok((
+            __jet_bootstrap_eval_key_to_host(&entry.@f.JetEvalRuntimeMapEntry.key@)?,
+            __jet_bootstrap_eval_to_host_inner(&entry.@f.JetEvalRuntimeMapEntry.value@, allow_foreign_handles)?,
+        ))).collect::<Result<Vec<_>, String>>()?)),
+        @p.JetEvalRuntimeAggregate.Struct@{ type_name, fields } => Ok(::jet_foundation::MIR::MirRuntimeValue::Struct {
+            type_name: type_name.clone(),
+            fields: fields.iter().map(|field| Ok((
+                field.@f.JetEvalRuntimeField.name@.clone(),
+                __jet_bootstrap_eval_to_host_inner(&field.@f.JetEvalRuntimeField.value@, allow_foreign_handles)?,
+            ))).collect::<Result<Vec<_>, String>>()?,
+        }),
+        @p.JetEvalRuntimeAggregate.Enum@{ type_name, variant, args } => Ok(::jet_foundation::MIR::MirRuntimeValue::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: args.iter().map(|arg| Ok((
+                (&@deref.JetEvalRuntimeEnumArg.name@arg.@f.JetEvalRuntimeEnumArg.name@).as_ref().ok().cloned(),
+                __jet_bootstrap_eval_to_host_inner(&arg.@f.JetEvalRuntimeEnumArg.value@, allow_foreign_handles)?,
+            ))).collect::<Result<Vec<_>, String>>()?,
+        }),
+    }
+}
+fn __jet_bootstrap_eval_to_host_inner(
+    value: &@t.JetEvalRuntimeValue@,
+    allow_foreign_handles: bool,
+) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
+    match value {
+        @v.JetEvalRuntimeValue.Moved@ => Err("moved values cannot cross a native host boundary".to_string()),
+        @p.JetEvalRuntimeValue.Data@{ value } => __jet_bootstrap_ct_to_host(value),
+        @p.JetEvalRuntimeValue.Absent@{ element } => Ok(::jet_foundation::MIR::MirRuntimeValue::Absent { element: __jet_bootstrap_type_to_host(element)? }),
+        @p.JetEvalRuntimeValue.Result@{ ok, value } => {
+            let value = __jet_bootstrap_eval_to_host_inner(value, allow_foreign_handles)?;
+            Ok(if *ok {
+                ::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(value))
+            } else {
+                ::jet_foundation::MIR::MirRuntimeValue::FailedTold(Box::new(value))
+            })
+        }
+        @p.JetEvalRuntimeValue.ForeignHandle@{ handle: _, raw, token: _ } if allow_foreign_handles => Ok(::jet_foundation::MIR::MirRuntimeValue::Int(raw.to_i64().ok_or_else(|| "foreign handle is outside i64".to_string())?)),
+        @p.JetEvalRuntimeValue.ForeignHandle@{ .. } => Err("foreign handles cross only their checked C foreign-call ABI boundary".to_string()),
+        @p.JetEvalRuntimeValue.Aggregate@{ value: aggregate } => __jet_bootstrap_eval_aggregate_to_host(aggregate, allow_foreign_handles),
+        @p.JetEvalRuntimeValue.RuntimeFailure@{ .. } => Err("terminal runtime failures cannot cross a native host boundary".to_string()),
+        @p.JetEvalRuntimeValue.HostCursor@{ .. } | @p.JetEvalRuntimeValue.Stream@{ .. } => Err("native iterator cursors cannot cross a serializable host boundary".to_string()),
+        @p.JetEvalRuntimeValue.Closure@{ .. } | @p.JetEvalRuntimeValue.Address@{ .. } | @p.JetEvalRuntimeValue.SharedCell@{ .. } | @p.JetEvalRuntimeValue.Shared@{ .. } | @p.JetEvalRuntimeValue.SharedWeak@{ .. } | @p.JetEvalRuntimeValue.SharedGuard@{ .. } | @p.JetEvalRuntimeValue.SharedSnapshot@{ .. } | @p.JetEvalRuntimeValue.Condition@{ .. } | @p.JetEvalRuntimeValue.RangeCursor@{ .. } | @p.JetEvalRuntimeValue.ListCursor@{ .. } => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
+    }
+}
+fn __jet_bootstrap_eval_to_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
+    __jet_bootstrap_eval_to_host_inner(value, false)
+}
+// This projection is confined to a checked MIR foreign-call row, whose parameter facts own the C ABI.
+fn __jet_bootstrap_eval_to_foreign_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
+    __jet_bootstrap_eval_to_host_inner(value, true)
+}
+fn __jet_bootstrap_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR::MirConstKey)]) -> Result<Vec<@t.TComptimeKeyField@>, String> {
+    fields.iter().map(|(name, key)| Ok(@s.TComptimeKeyField@{
+        name: name.clone(),
+        key: __jet_bootstrap_key_from_host(key)?,
+    })).collect()
+}
+fn __jet_bootstrap_key_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeKey@, String> {
+    match value {
+        ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeKey.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
+        ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeKey.String@{ value: value.clone() }),
+        ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeKey.Bool@{ value: *value }),
+        ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeKey.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
+        ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok(@new.TComptimeKey.Tuple@{ fields: __jet_bootstrap_key_fields_from_host(fields)? }),
+        ::jet_foundation::MIR::MirConstKey::Struct { type_name, fields } => Ok(@new.TComptimeKey.Struct@{
+            type_name: type_name.clone(),
+            fields: __jet_bootstrap_key_fields_from_host(fields)?,
+        }),
+        ::jet_foundation::MIR::MirConstKey::Enum { type_name, variant } => Ok(@new.TComptimeKey.Enum@{ type_name: type_name.clone(), variant: variant.clone() }),
+    }
+}
+"#,
+    );
+}
+
+/// Native Prelude results back into Source host values, and checked host
+/// type shapes into MIR types (shapes through the `@…@` markers).
+fn emit_bootstrap_host_value_codec(out: &mut String) {
+    out.push_str(
+        r#"
+fn __jet_bootstrap_ct_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR::MirConstKey)]) -> Result<Vec<@t.TComptimeField@>, String> {
+    fields.iter().map(|(name, key)| Ok(@s.TComptimeField@{
+        name: name.clone(),
+        value: __jet_bootstrap_ct_key_value_from_host(key)?,
+    })).collect()
+}
+fn __jet_bootstrap_ct_key_value_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeValue@, String> {
+    match value {
+        ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeValue.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
+        ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeValue.String@{ value: value.clone() }),
+        ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeValue.Bool@{ value: *value }),
+        ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeValue.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
+        ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok(@new.TComptimeValue.Struct@{
+            type_name: "Tuple".to_string(),
+            fields: __jet_bootstrap_ct_key_fields_from_host(fields)?,
+        }),
+        ::jet_foundation::MIR::MirConstKey::Struct { type_name, fields } => Ok(@new.TComptimeValue.Struct@{
+            type_name: type_name.clone(),
+            fields: __jet_bootstrap_ct_key_fields_from_host(fields)?,
+        }),
+        ::jet_foundation::MIR::MirConstKey::Enum { type_name, variant } => Ok(@new.TComptimeValue.Enum@{
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: Vec::<@t.TComptimeEnumArg@>::new(),
+        }),
+    }
+}
+fn __jet_bootstrap_host_value_from_runtime(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<@t.JetEvalHostValue@, String> {
+    match value {
+        ::jet_foundation::MIR::MirRuntimeValue::Present(value) => Ok(@new.JetEvalHostValue.Present@{ value: __jet_bootstrap_host_value_from_runtime(value)? }),
+        ::jet_foundation::MIR::MirRuntimeValue::FailedTold(value) => Ok(@new.JetEvalHostValue.Failed@{ value: __jet_bootstrap_host_value_from_runtime(value)? }),
+        ::jet_foundation::MIR::MirRuntimeValue::Absent { element } => Ok(@new.JetEvalHostValue.Absent@{ element: __jet_bootstrap_type_from_host(element)? }),
+        ::jet_foundation::MIR::MirRuntimeValue::List(values) => Ok(@new.JetEvalHostValue.List@{
+            values: values.iter().map(__jet_bootstrap_host_value_from_runtime).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Map(entries) => Ok(@new.JetEvalHostValue.Map@{
+            entries: entries.iter().map(|(key, value)| Ok(@s.JetEvalHostMapEntry@{
+                key: @new.JetEvalHostValue.Data@{ value: __jet_bootstrap_ct_key_value_from_host(key)? },
+                value: __jet_bootstrap_host_value_from_runtime(value)?,
+            })).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Struct { type_name, fields } => Ok(@new.JetEvalHostValue.Struct@{
+            type_name: type_name.clone(),
+            fields: fields.iter().map(|(name, value)| Ok(@s.JetEvalHostField@{
+                name: name.clone(),
+                value: __jet_bootstrap_host_value_from_runtime(value)?,
+            })).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Enum { type_name, variant, args } => Ok(@new.JetEvalHostValue.Enum@{
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: args.iter().map(|(name, value)| Ok(@s.JetEvalHostEnumArg@{
+                name: name.clone().ok_or(jet_foundation::Outcome::JetAbsent),
+                value: __jet_bootstrap_host_value_from_runtime(value)?,
+            })).collect::<Result<Vec<_>, String>>()?,
+        }),
+        ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => Err("native runtime resource requires its checked owner packet".to_string()),
+        _ => Ok(@new.JetEvalHostValue.Data@{ value: __jet_bootstrap_ct_from_host(value)? }),
+    }
+}
+fn __jet_bootstrap_type_from_shape(shape: &@t.JetEvalHostTypeShape@) -> Result<::jet_foundation::MIR::MirType, String> {
+    let root = __jet_bootstrap_source_index(&shape.@f.JetEvalHostTypeShape.root@, "host result type root")?;
+    __jet_bootstrap_type_from_shape_node(shape, root, 0)
+}
+fn __jet_bootstrap_type_from_shape_node(
+    shape: &@t.JetEvalHostTypeShape@,
+    index: usize,
+    depth: usize,
+) -> Result<::jet_foundation::MIR::MirType, String> {
+    if depth >= shape.@f.JetEvalHostTypeShape.nodes@.len() {
+        return Err("checked host type shape contains a recursive non-nominal type".to_string());
+    }
+    let node = shape.@f.JetEvalHostTypeShape.nodes@.get(index)
+        .ok_or_else(|| "checked host type shape has an invalid node reference".to_string())?;
+    let child = |node: &jet_foundation::Numeric::JetInt, label: &str| {
+        __jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(node, label)?, depth + 1)
+    };
+    match node {
+        @p.JetEvalHostTypeNode.Scalar@{ ty } => __jet_bootstrap_type_to_host(ty),
+        @p.JetEvalHostTypeNode.Option@{ inner } => Ok(::jet_foundation::MIR::MirType::from_kind(
+            ::jet_foundation::MIR::MirTypeKind::Option(Box::new(child(inner, "option type node")?)),
+        )),
+        @p.JetEvalHostTypeNode.Result@{ ok, error } => Ok(::jet_foundation::MIR::MirType::from_kind(
+            ::jet_foundation::MIR::MirTypeKind::Result {
+                ok: Box::new(child(ok, "result success type node")?),
+                err: Box::new(child(error, "result error type node")?),
+            },
+        )),
+        @p.JetEvalHostTypeNode.List@{ inner } => Ok(::jet_foundation::MIR::MirType::from_kind(
+            ::jet_foundation::MIR::MirTypeKind::List(Box::new(child(inner, "list element type node")?)),
+        )),
+        @p.JetEvalHostTypeNode.Map@{ key, value } => Ok(::jet_foundation::MIR::MirType::from_kind(
+            ::jet_foundation::MIR::MirTypeKind::Map {
+                key: Box::new(child(key, "map key type node")?),
+                value: Box::new(child(value, "map value type node")?),
+            },
+        )),
+        @p.JetEvalHostTypeNode.Tuple@{ fields } => Ok(::jet_foundation::MIR::MirType::from_kind(
+            ::jet_foundation::MIR::MirTypeKind::Tuple(fields.iter().map(|field| Ok((
+                field.@f.JetEvalHostTypeFieldShape.name@.clone(),
+                child(&field.@f.JetEvalHostTypeFieldShape.node@, "tuple field type node")?,
+            ))).collect::<Result<Vec<_>, String>>()?),
+        )),
+        @p.JetEvalHostTypeNode.Struct@{ type_id, type_name, args, fields: _ } | @p.JetEvalHostTypeNode.Enum@{ type_id, type_name, args, variants: _ } => {
+            let id = ::jet_foundation::MIR::MirTypeId(__jet_bootstrap_source_u64(&type_id.@f.MIRTypeID.value@, "host nominal type ID")?);
+            let args = args.iter().map(|arg| child(arg, "nominal argument type node")).collect::<Result<Vec<_>, String>>()?;
+            Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Apply {
+                name: ::jet_foundation::MIR::MirNominalRef { id, name: type_name.clone() },
+                args,
+            }).with_identity(id))
+        }
+        @p.JetEvalHostTypeNode.Handle@{ ty: _, owner } => match owner {
+            @p.JetEvalHostOwner.Core@{ owner } => __jet_bootstrap_type_to_host(&owner.@f.JetEvalHostCoreOwner.ty@),
+            @p.JetEvalHostOwner.Declared@{ ty } => __jet_bootstrap_type_to_host(ty),
+            _ => Err("cursor owner shape does not expose a native MIR type".to_string()),
+        },
+        @p.JetEvalHostTypeNode.Closure@{ .. } => Err("closure type shape cannot be passed to a native Prelude route".to_string()),
+    }
+}
+"#,
+    );
 }
 
 
@@ -5492,9 +3723,6 @@ fn emit_bootstrap_source_resource_bridge(
     let host_outcome = symbols.type_symbol("JetEvalHostOutcome")?;
     let host_transfer = symbols.type_symbol("JetEvalHostTransfer")?;
     let host_value = symbols.type_symbol("JetEvalHostValue")?;
-    let host_result_outcome = symbols.field_symbol("JetEvalHostResult", "outcome")?;
-    let host_result_transfers = symbols.field_symbol("JetEvalHostResult", "transfers")?;
-    let host_result_writebacks = symbols.field_symbol("JetEvalHostResult", "writebacks")?;
     let host_writeback = symbols.type_symbol("JetEvalHostWriteback")?;
     let transfer_argument = symbols.field_symbol("JetEvalHostTransfer", "argument")?;
     let transfer_path = symbols.field_symbol("JetEvalHostTransfer", "path")?;
@@ -5513,20 +3741,7 @@ fn emit_bootstrap_source_resource_bridge(
     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
     let shape_root = symbols.field_symbol("JetEvalHostTypeShape", "root")?;
     let shape_nodes = symbols.field_symbol("JetEvalHostTypeShape", "nodes")?;
-    let node_option = symbols.variant_path("JetEvalHostTypeNode", "Option")?;
-    let node_result = symbols.variant_path("JetEvalHostTypeNode", "Result")?;
-    let node_handle = symbols.variant_path("JetEvalHostTypeNode", "Handle")?;
-    let host_data = symbols.variant_path("JetEvalHostValue", "Data")?;
-    let host_handle = symbols.variant_path("JetEvalHostValue", "Handle")?;
-    let host_failed = symbols.variant_path("JetEvalHostValue", "Failed")?;
     let host_owner_cursor = symbols.variant_path("JetEvalHostOwner", "Cursor")?;
-    let host_owner_core = symbols.variant_path("JetEvalHostOwner", "Core")?;
-    let result_value = symbols.variant_path("JetEvalHostOutcome", "Value")?;
-    let result_runtime_failure =
-        symbols.variant_path("JetEvalHostOutcome", "RuntimeFailure")?;
-    let eval_foreign_handle = symbols.variant_path("JetEvalRuntimeValue", "ForeignHandle")?;
-    let ct_bool = symbols.variant_path("TComptimeValue", "Bool")?;
-    let ct_unit = symbols.variant_path("TComptimeValue", "Unit")?;
     let cap_type = "::jet_jit::SourceResources::SourceResourceHandle";
     let mir_type_kind = "::jet_foundation::MIR::MirTypeKind";
     let mir_handle = "::jet_foundation::MIR::MirHandleId";
@@ -5540,10 +3755,12 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
              transfers: Vec<{host_transfer}>,
              writebacks: Vec<{host_writeback}>,
          ) -> {host_result} {{
-             {host_result} {{
-                 {host_result_transfers}: transfers,
-                 {host_result_writebacks}: writebacks,
-                 {host_result_outcome}: outcome,
+             @s.JetEvalHostResult@{{
+                 transfers,
+                 callback_transfers: Vec::new(),
+                 fixed_backing_transfers: Vec::new(),
+                 writebacks,
+                 outcome,
              }}
          }}
          fn __jet_bootstrap_host_reply_with_transfers(outcome: {host_outcome}, transfers: Vec<{host_transfer}>) -> {host_result} {{
@@ -5558,9 +3775,9 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                  let node = shape.{shape_nodes}.get(node_index)
                      .ok_or_else(|| "host resource type shape has an invalid node reference".to_string())?;
                  match node {{
-                     {node_option}(inner) => node_index = __jet_bootstrap_source_index(inner, "host resource type node")?,
-                     {node_result}(ok, _) => node_index = __jet_bootstrap_source_index(ok, "host resource result node")?,
-                     {node_handle}(owner) => return Ok(owner.clone()),
+                     @p.JetEvalHostTypeNode.Option@{{ inner }} => node_index = __jet_bootstrap_source_index(inner, "host resource type node")?,
+                     @p.JetEvalHostTypeNode.Result@{{ ok, error: _ }} => node_index = __jet_bootstrap_source_index(ok, "host resource result node")?,
+                     @p.JetEvalHostTypeNode.Handle@{{ ty: _, owner }} => return Ok(owner.clone()),
                      _ => return Err("checked host resource type shape is not a native handle".to_string()),
                  }}
              }}
@@ -5578,7 +3795,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
         {{
             let owner = __jet_bootstrap_shape_owner(shape)?;
             let core_owner = match &owner {{
-                {host_owner_core}(core_owner) => core_owner,
+                @p.JetEvalHostOwner.Core@{{ owner: core_owner }} => core_owner,
                 _ => return Err("checked resource shape does not declare a Core owner".to_string()),
             }};
             let fact = __jet_bootstrap_mir_MIRCoreOwner_to_host(&core_owner.{host_core_owner_fact})?;
@@ -5600,12 +3817,12 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
              owner: {host_owner},
          ) -> Result<{host_value}, String> {{
              let handle_value = jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(capability.handle.0));
-             Ok({host_handle}(
-                 {source_handle} {{ {handle_value}: handle_value }},
-                 jet_foundation::Numeric::JetInt::from_i64(capability.raw),
+             Ok(@new.JetEvalHostValue.Handle@{{
+                 handle: {source_handle} {{ {handle_value}: handle_value }},
+                 raw: jet_foundation::Numeric::JetInt::from_i64(capability.raw),
                  owner,
-                {host_data}({ct_unit}),
-             ))
+                 payload: @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }},
+             }})
          }}
          fn __jet_bootstrap_resource_factory_result(
              result: Result<{cap_type}, {native_error}>,
@@ -5614,11 +3831,11 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
          ) -> {host_result} {{
              match result {{
                  Ok(capability) => match __jet_bootstrap_resource_host_handle(&capability, owner) {{
-                    Ok(value) => __jet_bootstrap_host_reply({result_value}(value)),
+                    Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }}),
                      Err(detail) => __jet_bootstrap_host_failure(span, detail),
                  }},
                  Err({native_error}::Value(value)) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-                    Ok(value) => __jet_bootstrap_host_reply({result_value}({host_failed}(value))),
+                    Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value: @new.JetEvalHostValue.Failed@{{ value }} }}),
                      Err(detail) => __jet_bootstrap_host_failure(span, detail),
                  }},
                  Err({native_error}::Internal(detail)) => __jet_bootstrap_host_failure(span, detail),
@@ -5631,7 +3848,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
         ) -> {host_result} {{
             match error {{
                 {native_error}::Value(value) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-                    Ok(value) => __jet_bootstrap_host_reply_with_transfers({result_runtime_failure}(value, span), transfers),
+                    Ok(value) => __jet_bootstrap_host_reply_with_transfers(@new.JetEvalHostOutcome.RuntimeFailure@{{ value, span }}, transfers),
                     Err(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers),
                 }},
                 {native_error}::Internal(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers),
@@ -5648,7 +3865,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
             value: &{eval},
             consumed: &{cap_type},
         ) -> Result<{host_transfer}, String> {{
-            let {eval_foreign_handle}(handle, raw, token) = value else {{
+            let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token }} = value else {{
                 return Err("committed Source resource transfer has no checked foreign-handle input".to_string());
             }};
             let handle = __jet_bootstrap_source_u64(&handle.{handle_value}, "Source resource transfer handle")?;
@@ -5661,21 +3878,21 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                 {transfer_argument}: jet_foundation::Numeric::JetInt::from_i64(0),
                 {transfer_path}: Vec::new(),
                 {transfer_token}: token.clone(),
-                {transfer_handle}: {mir_handle}(handle),
+                {transfer_handle}: {source_handle} {{ {handle_value}: jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(handle)) }},
                 {transfer_raw}: raw.clone(),
             }})
         }}
          fn __jet_bootstrap_cursor_error(error: {native_error}, span: {span}) -> {host_result} {{
              match error {{
                  {native_error}::Value(value) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-                    Ok(value) => __jet_bootstrap_host_reply({result_runtime_failure}(value, span)),
+                    Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.RuntimeFailure@{{ value, span }}),
                      Err(detail) => __jet_bootstrap_host_failure(span, detail),
                  }},
                  {native_error}::Internal(detail) => __jet_bootstrap_host_failure(span, detail),
              }}
          }}
          fn __jet_bootstrap_source_handle_from_eval(value: &{eval}) -> Result<({mir_handle}, i64), String> {{
-             let {eval_foreign_handle}(handle, raw, _) = value else {{
+             let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token: _ }} = value else {{
                  return Err("checked Source resource operation requires a live native handle".to_string());
              }};
              let handle = __jet_bootstrap_source_u64(&handle.{handle_value}, "Source resource handle")?;
@@ -5692,14 +3909,18 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
              span: {span},
              compiler_program: &::jet_foundation::MIR::MirProgram,
              physical: &P,
-         ) -> Option<Result<{host_result}, ::jet_foundation::Outcome::JetAbsent>>
+         ) -> Option<Result<{host_result}, jet_foundation::Outcome::JetAbsent>>
          where
              T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
              P: crate::BootstrapEntryPhysicalBindings,
          {{
              let module = row.{row_module}.as_str();
              let member = row.{row_member}.as_str();
-             let symbol = __jet_bootstrap_symbol_name(&row.{row_symbol});
+             let host_symbol = match __jet_bootstrap_mir_MIRSymbol_to_host(&row.{row_symbol}) {{
+                 Ok(symbol) => symbol,
+                 Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
+             }};
+             let symbol = host_symbol.name();
              if module == "core.prelude" && member == "loop_iter_init" {{
                  if symbol != "jet_loop_iter_init" || args.len() != 5 {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical native loop initializer row".to_string())));
@@ -5751,7 +3972,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                      raw: source_raw,
                      source_kind,
                  }};
-                let loop_kind = match ::jet_jit::SourceResources::SourceResourceKind::from_loop_source(&source_kind) {{
+                let loop_kind = match ::jet_jit::SourceResources::SourceResourceKind::from_loop_source(&key.source_kind) {{
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
@@ -5770,8 +3991,8 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                     }}
                 }}
                 return Some(Ok(match cursor.result {{
-                    Ok((capability, _)) => match __jet_bootstrap_resource_host_handle(&capability, {host_owner_cursor}) {{
-                        Ok(value) => __jet_bootstrap_host_reply_with_transfers({result_value}(value), transfers),
+                    Ok((capability, _)) => match __jet_bootstrap_resource_host_handle(&capability, @v.JetEvalHostOwner.Cursor@) {{
+                        Ok(value) => __jet_bootstrap_host_reply_with_transfers(@new.JetEvalHostOutcome.Value@{{ value }}, transfers),
                         Err(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers),
                     }},
                     Err(error) => __jet_bootstrap_cursor_error_with_transfers(error, span, transfers),
@@ -5808,15 +4029,15 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                  }};
                  let value = match member {{
-                     "loop_iter_has_next" => cursor.has_next().map(|value| {host_data}({ct_bool}(value))),
+                     "loop_iter_has_next" => cursor.has_next().map(|value| @new.JetEvalHostValue.Data@{{ value: @new.TComptimeValue.Bool@{{ value }} }}),
                      "loop_iter_value" => cursor.value().and_then(|value| {{
                          __jet_bootstrap_host_value_from_runtime(&value)
                              .map_err(|detail| {native_error}::internal(detail))
                      }}),
-                     _ => cursor.advance().map(|_| {host_data}({ct_unit})),
+                     _ => cursor.advance().map(|_| @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }}),
                  }};
                  return Some(Ok(match value {{
-                    Ok(value) => __jet_bootstrap_host_reply({result_value}(value)),
+                    Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }}),
                      Err(error) => __jet_bootstrap_cursor_error(error, span),
                  }}));
              }}
@@ -5872,14 +4093,15 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
          }}
          fn __jet_bootstrap_native_handle_call<T>(
              _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-             operation: String,
-             handle: {source_handle},
-             raw: jet_foundation::Numeric::JetInt,
-             span: {span},
-         ) -> ::std::result::Result<{host_result}, ::jet_foundation::Outcome::JetAbsent> {{
+             operation: &String,
+             handle: &{source_handle},
+             raw: &jet_foundation::Numeric::JetInt,
+             span: &{span},
+         ) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent> {{
              if operation != "resource_release" {{
-                 return Err(::jet_foundation::Outcome::JetAbsent);
+                 return Err(jet_foundation::Outcome::JetAbsent);
              }}
+             let span = span.clone();
              let handle = match __jet_bootstrap_source_u64(&handle.{handle_value}, "Source resource handle") {{
                  Ok(value) => {mir_handle}(value),
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
@@ -5892,7 +4114,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                  return Ok(__jet_bootstrap_host_failure(span, "Source resource release has no active arena".to_string()));
              }};
              match arena.release_resource(handle, raw) {{
-                Ok(()) => Ok(__jet_bootstrap_host_reply({result_value}({host_data}({ct_unit})))),
+                Ok(_released) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value: @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }} }})),
                  Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
              }}
          }}"#,
@@ -5901,6 +4123,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
         host_argument = host_argument,
         host_argument_value = host_argument_value,
         host_result = host_result,
+        host_writeback = host_writeback,
         host_value = host_value,
         host_owner = host_owner,
         source_handle = source_handle,
@@ -5908,24 +4131,12 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
         row_module = row_module,
         row_member = row_member,
         row_symbol = row_symbol,
-        host_data = host_data,
-        host_handle = host_handle,
-        host_failed = host_failed,
         host_owner_cursor = host_owner_cursor,
-        host_owner_core = host_owner_core,
         host_core_owner_fact = host_core_owner_fact,
         host_core_owner_ty = host_core_owner_ty,
-        result_value = result_value,
-        result_runtime_failure = result_runtime_failure,
-        eval_foreign_handle = eval_foreign_handle,
-        ct_bool = ct_bool,
-        ct_unit = ct_unit,
         shape = shape,
         shape_root = shape_root,
         shape_nodes = shape_nodes,
-        node_option = node_option,
-        node_result = node_result,
-        node_handle = node_handle,
         cap_type = cap_type,
         mir_type_kind = mir_type_kind,
         mir_handle = mir_handle,
@@ -5933,10 +4144,6 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
         resource_key = resource_key,
         host_outcome = host_outcome,
         host_transfer = host_transfer,
-        host_result_outcome = host_result_outcome,
-        host_result_transfers = host_result_transfers,
-        host_result_writebacks = host_result_writebacks,
-        host_writeback = host_writeback,
         transfer_argument = transfer_argument,
         transfer_path = transfer_path,
         transfer_token = transfer_token,
@@ -5959,43 +4166,48 @@ fn emit_bootstrap_callback(
     let host_result = symbols.type_symbol("JetEvalHostResult")?;
     let host_outcome = symbols.type_symbol("JetEvalHostOutcome")?;
     let span = symbols.type_symbol("Span")?;
-    let result_value = symbols.variant_path("JetEvalHostOutcome", "Value")?;
-    let result_effect = symbols.variant_path("JetEvalHostOutcome", "Effect")?;
-    let result_control = symbols.variant_path("JetEvalHostOutcome", "Control")?;
-    let result_failure = symbols.variant_path("JetEvalHostOutcome", "Failure")?;
     let internal_problem = symbols.type_symbol("JetEvalInternalProblem")?;
     let internal_problem_span = symbols.field_symbol("JetEvalInternalProblem", "span")?;
     let internal_problem_message = symbols.field_symbol("JetEvalInternalProblem", "message")?;
-    let result_internal_problem = symbols.variant_path("JetEvalHostOutcome", "InternalProblem")?;
-    let error_source = symbols.variant_path("JetEvalErrorKind", "Source")?;
 
     writeln!(
         out,
         "fn __jet_bootstrap_host_failure_outcome(span: {span}, detail: String) -> {host_outcome} {{
-            {result_internal_problem}({internal_problem} {{
+            @new.JetEvalHostOutcome.InternalProblem@{{ problem: {internal_problem} {{
                 {internal_problem_span}: Ok(span),
                 {internal_problem_message}: detail,
-            }})
+            }} }}
         }}
         fn __jet_bootstrap_host_failure(span: {span}, detail: String) -> {host_result} {{
             __jet_bootstrap_host_reply(__jet_bootstrap_host_failure_outcome(span, detail))
         }}
          fn __jet_bootstrap_native_host_call<T, P>(
              machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-             row: {row},
+             target: &@t.JetEvalHostCallTarget@,
+             static_operand: &::std::result::Result<@t.JetEvalHostStaticOperand@, jet_foundation::Outcome::JetAbsent>,
              args: Vec<{host_argument}>,
-             result_shape: ::std::result::Result<{shape}, ::jet_foundation::Outcome::JetAbsent>,
-             arg_shapes: Vec<{shape}>,
-             span: {span},
+             result_shape: &::std::result::Result<{shape}, jet_foundation::Outcome::JetAbsent>,
+             arg_shapes: &Vec<{shape}>,
+             span: &{span},
              compiler_program: &::jet_foundation::MIR::MirProgram,
              physical: &P,
-         ) -> ::std::result::Result<{host_result}, ::jet_foundation::Outcome::JetAbsent>
+         ) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent>
          where
              T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
              P: crate::BootstrapEntryPhysicalBindings,
          {{
+             // The host serves plain Prelude rows; take-pattern targets and
+             // static operands stay unavailable, which the evaluator reports.
+             let @p.JetEvalHostCallTarget.Prelude@{{ row }} = target else {{
+                 return Err(jet_foundation::Outcome::JetAbsent);
+             }};
+             if static_operand.is_ok() {{
+                 return Err(jet_foundation::Outcome::JetAbsent);
+             }}
+             let row = &@deref.JetEvalHostCallTarget.Prelude.row@*row;
+             let span = span.clone();
              let result_shape = result_shape.as_ref().ok();
-             if let Some(outcome) = __jet_bootstrap_native_source_resource_call(machine, &row, &args, result_shape, &arg_shapes, span, compiler_program, physical) {{
+             if let Some(outcome) = __jet_bootstrap_native_source_resource_call(machine, row, &args, result_shape, arg_shapes, span.clone(), compiler_program, physical) {{
                  return outcome;
              }}
              let native_args = match args.iter().map(|value| __jet_bootstrap_eval_to_host(&value.{host_argument_value})).collect::<Result<Vec<_>, String>>() {{
@@ -6010,7 +4222,7 @@ fn emit_bootstrap_callback(
                  Ok(value) => value,
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
-             let native_row = match __jet_bootstrap_mir_MIRPreludeCall_to_host(&row) {{
+             let native_row = match __jet_bootstrap_mir_MIRPreludeCall_to_host(row) {{
                  Ok(row) => row,
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
@@ -6021,21 +4233,21 @@ fn emit_bootstrap_callback(
                  native_span,
              );
              match outcome {{
-                 None => Err(::jet_foundation::Outcome::JetAbsent),
+                 None => Err(jet_foundation::Outcome::JetAbsent),
                 Some(Ok(crate::Comptime::AmbientMirPreludeResult::Value(value))) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-                    Ok(value) => Ok(__jet_bootstrap_host_reply({result_value}(value))),
+                    Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }})),
                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
                 }},
                 Some(Ok(crate::Comptime::AmbientMirPreludeResult::Effect {{ value, stdout, stderr }})) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-                    Ok(value) => Ok(__jet_bootstrap_host_reply({result_effect}(value, stdout, stderr))),
+                    Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Effect@{{ value, stdout, stderr }})),
                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
                 }},
                 Some(Ok(crate::Comptime::AmbientMirPreludeResult::Control {{ value, stdout, stderr, exit_code }})) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-                    Ok(value) => Ok(__jet_bootstrap_host_reply({result_control}(value, stdout, stderr, jet_foundation::Numeric::JetInt::from_i64(i64::from(exit_code))))),
+                    Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Control@{{ value, stdout, stderr, exit_code: jet_foundation::Numeric::JetInt::from_i64(i64::from(exit_code)) }})),
                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
                 }},
                 Some(Err(error)) => match __jet_bootstrap_diagnostic_from_host(&error) {{
-                    Ok(diagnostic) => Ok(__jet_bootstrap_host_reply({result_failure}({error_source}, diagnostic))),
+                    Ok(diagnostic) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Failure@{{ kind: @v.JetEvalErrorKind.Source@, diagnostic }})),
                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
                 }},
              }}
@@ -6128,7 +4340,6 @@ fn emit_bootstrap_foreign_callback(
     let foreign_abi_fastcall = symbols.variant_path("MIRForeignABI", "Fastcall")?;
     let foreign_abi_vectorcall = symbols.variant_path("MIRForeignABI", "Vectorcall")?;
     let foreign_abi_rust = symbols.variant_path("MIRForeignABI", "Rust")?;
-    let foreign_abi_platform = symbols.variant_path("MIRForeignABI", "Platform")?;
     let foreign_language_c = symbols.variant_path("MIRForeignLanguage", "C")?;
     let foreign_language_cpp = symbols.variant_path("MIRForeignLanguage", "Cpp")?;
     let foreign_language_rust = symbols.variant_path("MIRForeignLanguage", "Rust")?;
@@ -6147,9 +4358,6 @@ fn emit_bootstrap_foreign_callback(
     let access_read = symbols.variant_path("MIRAccess", "Read")?;
     let access_write = symbols.variant_path("MIRAccess", "Write")?;
     let access_move = symbols.variant_path("MIRAccess", "Move")?;
-    let result_value = symbols.variant_path("JetEvalHostOutcome", "Value")?;
-    let result_failure = symbols.variant_path("JetEvalHostOutcome", "Failure")?;
-    let error_source = symbols.variant_path("JetEvalErrorKind", "Source")?;
 
     writeln!(
         out,
@@ -6227,7 +4435,7 @@ fn emit_bootstrap_foreign_callback(
                  {foreign_abi_fastcall} => ::jet_foundation::MIR::MirForeignAbi::Fastcall,
                  {foreign_abi_vectorcall} => ::jet_foundation::MIR::MirForeignAbi::Vectorcall,
                  {foreign_abi_rust} => ::jet_foundation::MIR::MirForeignAbi::Rust,
-                 {foreign_abi_platform}(name) => ::jet_foundation::MIR::MirForeignAbi::Platform(name),
+                 @p.MIRForeignABI.Platform@{{ name }} => ::jet_foundation::MIR::MirForeignAbi::Platform(name),
              }};
              let foreign_language = match value.{foreign_language} {{
                  {foreign_language_c} => ::jet_foundation::MIR::MirForeignLanguage::C,
@@ -6279,11 +4487,12 @@ fn emit_bootstrap_foreign_callback(
          }}
          fn __jet_bootstrap_native_foreign_call<T>(
              _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-             row: {foreign},
+             row: &{foreign},
              args: Vec<{host_argument}>,
-             span: {span},
-         ) -> ::std::result::Result<{host_result}, ::jet_foundation::Outcome::JetAbsent> {{
-             let native_row = match __jet_bootstrap_foreign_to_host(&row) {{
+             span: &{span},
+         ) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent> {{
+             let span = span.clone();
+             let native_row = match __jet_bootstrap_foreign_to_host(row.clone()) {{
                  Ok(value) => value,
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
@@ -6296,9 +4505,9 @@ fn emit_bootstrap_foreign_callback(
                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
              }};
              match crate::Comptime::try_ambient_mir_extern_call(&native_row, native_args, native_span) {{
-                 None => Err(::jet_foundation::Outcome::JetAbsent),
+                 None => Err(jet_foundation::Outcome::JetAbsent),
                  Some(Err(error)) => match __jet_bootstrap_diagnostic_from_host(&error) {{
-                    Ok(diagnostic) => Ok(__jet_bootstrap_host_reply({result_failure}({error_source}, diagnostic))),
+                    Ok(diagnostic) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Failure@{{ kind: @v.JetEvalErrorKind.Source@, diagnostic }})),
                      Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
                  }},
                  Some(Ok(result)) => {{
@@ -6317,7 +4526,7 @@ fn emit_bootstrap_foreign_callback(
                          Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
                      }};
                      Ok(__jet_bootstrap_host_reply_with_transfers_and_writebacks(
-                         {result_value}(value),
+                         @new.JetEvalHostOutcome.Value@{{ value }},
                          Vec::new(),
                          writebacks,
                      ))

@@ -120,27 +120,27 @@ pub(crate) fn dom_runtime_source() -> &'static str {
 }
 /// Raw canonical Web inputs for the Source Web emitter. This provider supplies
 /// neutral assets only; it does not inspect MIR or select/combine features.
-#[allow(dead_code)]
-pub(crate) struct CanonicalWebRawAssets {
-    pub(crate) dom_runtime: &'static str,
-    pub(crate) execution_prelude: &'static str,
-    pub(crate) event_prelude: &'static str,
-    pub(crate) realtime_prelude: &'static str,
-    pub(crate) data_prelude: &'static str,
-    pub(crate) history_prelude: &'static str,
-    pub(crate) compute_prelude: &'static str,
-    pub(crate) raylib_prelude: &'static str,
-    pub(crate) game_prelude: &'static str,
-    pub(crate) task_group_prelude: &'static str,
-    pub(crate) runtime_stop_metadata: String,
-    pub(crate) game_default_frame_budget: i64,
-    pub(crate) game_frame_budget_error: &'static str,
-    pub(crate) harfbuzz_wasm: &'static [u8],
-    pub(crate) timezone_data: Vec<(String, Vec<u8>)>,
+/// The self-hosted compiler's bootstrap host reads them through
+/// `Codegen::canonical_web_raw_assets`.
+pub struct CanonicalWebRawAssets {
+    pub dom_runtime: &'static str,
+    pub execution_prelude: &'static str,
+    pub event_prelude: &'static str,
+    pub realtime_prelude: &'static str,
+    pub data_prelude: &'static str,
+    pub history_prelude: &'static str,
+    pub compute_prelude: &'static str,
+    pub raylib_prelude: &'static str,
+    pub game_prelude: &'static str,
+    pub task_group_prelude: &'static str,
+    pub runtime_stop_metadata: String,
+    pub game_default_frame_budget: i64,
+    pub game_frame_budget_error: &'static str,
+    pub harfbuzz_wasm: &'static [u8],
+    pub timezone_data: Vec<(String, Vec<u8>)>,
 }
 
-#[allow(dead_code)]
-pub(crate) fn canonical_web_raw_assets() -> Result<CanonicalWebRawAssets, std::io::Error> {
+pub fn canonical_web_raw_assets() -> Result<CanonicalWebRawAssets, std::io::Error> {
     Ok(CanonicalWebRawAssets {
         dom_runtime: DOM_RUNTIME,
         execution_prelude: JS_EXECUTION_PRELUDE,

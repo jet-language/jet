@@ -193,7 +193,7 @@ pub use Plugin::{emit_plugin, PluginArtifacts};
 pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
-pub use Web::build_wasm_jet_source_map;
+pub use Web::{build_wasm_jet_source_map, canonical_web_raw_assets, CanonicalWebRawAssets};
 
 /// Build the interpreter's bundle-wide Core alias map from the same import
 /// resolver used by AOT and JIT lowering. In particular, member-list imports
