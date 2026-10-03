@@ -1,0 +1,10 @@
+// #4460 failing control: an Int past the host word range must stop at the
+// native `from_bits` boundary on every tier, never reach the kernel.
+use core.math as math
+
+fn run() {
+    huge :: 1 << 70
+    print("before")
+    print("value={math.from_bits(huge)}")
+    print("after")
+}

@@ -1175,8 +1175,6 @@ fn jet_jit_web_virtual_plan(
     total: i64, offset: i64, width: i64, height: i64, estimate: i64, overscan: i64,
 ) -> i64 {
     with_rt(|rt| {
-        let [total, offset, width, height, estimate, overscan] =
-            [total, offset, width, height, estimate, overscan].map(|raw| web_int_value(rt, raw));
         let plan = web_rt::jet_web_virtual_plan(total, offset, width, height, estimate, overscan);
         web_virtual_plan_handle(rt, &plan)
     })
@@ -1187,8 +1185,6 @@ fn jet_jit_web_virtual_plan_measured(
     measurements: i64,
 ) -> i64 {
     with_rt(|rt| {
-        let [total, offset, width, height, estimate, overscan] =
-            [total, offset, width, height, estimate, overscan].map(|raw| web_int_value(rt, raw));
         let measurements = web_virtual_measurements(rt, measurements)
             .expect("Web virtual measurements require checked row carriers");
         let plan = web_rt::jet_web_virtual_plan_measured(
@@ -1203,8 +1199,6 @@ fn jet_jit_web_virtual_plan_from_sizes(
     sizes: i64,
 ) -> i64 {
     with_rt(|rt| {
-        let [total, offset, width, height, estimate, overscan] =
-            [total, offset, width, height, estimate, overscan].map(|raw| web_int_value(rt, raw));
         let sizes = web_raw_list(rt, sizes)
             .expect("Web virtual sizes require a checked Int list")
             .into_iter().map(|raw| web_int_value(rt, raw)).collect();
@@ -1220,7 +1214,7 @@ fn jet_jit_web_virtual_plan_measure(plan: i64, index: i64, size: i64) -> i64 {
         let plan = web_virtual_plan_value(rt, plan)
             .expect("Web virtual plan requires its checked record carrier");
         let plan = web_rt::jet_web_virtual_plan_measure(
-            &plan, web_int_value(rt, index), web_int_value(rt, size),
+            &plan, index, size,
         );
         web_virtual_plan_handle(rt, &plan)
     })
@@ -1285,19 +1279,16 @@ fn jet_jit_web_virtual_plan_viewport_state(viewport: i64) -> i64 {
 
 fn jet_jit_web_virtual_plan_scroll_to(viewport: i64, offset: i64) {
     let viewport = web_virtual_plan_viewport(viewport);
-    let offset = with_rt(|rt| web_int_value(rt, offset));
     web_rt::jet_web_virtual_plan_scroll_to(&viewport, offset);
 }
 
 fn jet_jit_web_virtual_plan_resize(viewport: i64, width: i64, height: i64) {
     let viewport = web_virtual_plan_viewport(viewport);
-    let [width, height] = with_rt(|rt| [width, height].map(|raw| web_int_value(rt, raw)));
     web_rt::jet_web_virtual_plan_resize(&viewport, width, height);
 }
 
 fn jet_jit_web_virtual_plan_viewport_measure(viewport: i64, index: i64, size: i64) {
     let viewport = web_virtual_plan_viewport(viewport);
-    let [index, size] = with_rt(|rt| [index, size].map(|raw| web_int_value(rt, raw)));
     web_rt::jet_web_virtual_plan_viewport_measure(&viewport, index, size);
 }
 
@@ -1746,8 +1737,7 @@ fn jet_jit_web_query_subscribe(source: i64) -> i64 {
 }
 
 fn jet_jit_web_query_invalidate(query: i64) -> i64 {
-    let generation = web_rt::jet_web_query_invalidate(&web_query(query));
-    with_rt(|rt| web_int_handle(rt, generation))
+    web_rt::jet_web_query_invalidate(&web_query(query))
 }
 fn jet_jit_web_query_cancel(query: i64) -> i64 {
     i64::from(web_rt::jet_web_query_cancel(&web_query(query)))
@@ -2358,7 +2348,7 @@ fn jet_jit_web_forms_typed_set_async_validator(
         (
             rt.heap.clone_string(name).expect("checked validated form field"),
             timing,
-            web_int_value(rt, debounce) as u64,
+            debounce as u64,
         )
     });
     web_result_handle(
@@ -2600,7 +2590,6 @@ fn jet_jit_web_table_filter_by(table: i64, column: i64, value: i64) -> i64 {
 }
 
 fn jet_jit_web_table_paginate(table: i64, index: i64, size: i64) -> i64 {
-    let (index, size) = with_rt(|rt| (web_int_value(rt, index), web_int_value(rt, size)));
     let table = web_rt::jet_web_table_paginate(&web_table(table), index, size);
     with_rt(|rt| web_table_handle(rt, table))
 }
@@ -2732,13 +2721,7 @@ fn jet_jit_web_table_filter(rows: i64, callback: i64) -> i64 {
 }
 
 fn jet_jit_web_table_page(rows: i64, page_index: i64, page_size: i64) -> i64 {
-    let (rows, page_index, page_size) = with_rt(|rt| {
-        (
-            web_raw_list(rt, rows).expect("checked Table rows"),
-            web_int_value(rt, page_index),
-            web_int_value(rt, page_size),
-        )
-    });
+    let rows = with_rt(|rt| web_raw_list(rt, rows).expect("checked Table rows"));
     let page = web_rt::jet_web_table_page(&rows, page_index, page_size);
     with_rt(|rt| web_table_page_handle(rt, &page))
 }
@@ -2750,17 +2733,8 @@ fn jet_jit_web_virtual_window(
     estimated_item_size: i64,
     overscan: i64,
 ) -> i64 {
-    let values = with_rt(|rt| {
-        [
-            web_int_value(rt, total_count),
-            web_int_value(rt, scroll_offset),
-            web_int_value(rt, viewport_size),
-            web_int_value(rt, estimated_item_size),
-            web_int_value(rt, overscan),
-        ]
-    });
     let window = web_rt::jet_web_virtual_window(
-        values[0], values[1], values[2], values[3], values[4],
+        total_count, scroll_offset, viewport_size, estimated_item_size, overscan,
     );
     with_rt(|rt| web_virtual_window_handle(rt, &window))
 }
@@ -2773,24 +2747,13 @@ fn jet_jit_web_virtual_window_measured(
     overscan: i64,
     measurements: i64,
 ) -> i64 {
-    let (values, measurements) = with_rt(|rt| {
-        (
-            [
-                web_int_value(rt, total_count),
-                web_int_value(rt, scroll_offset),
-                web_int_value(rt, viewport_size),
-                web_int_value(rt, fallback_item_size),
-                web_int_value(rt, overscan),
-            ],
-            web_raw_list(rt, measurements).unwrap_or_default(),
-        )
-    });
+    let measurements = with_rt(|rt| web_raw_list(rt, measurements).unwrap_or_default());
     let window = web_rt::jet_web_virtual_window_measured(
-        values[0],
-        values[1],
-        values[2],
-        values[3],
-        values[4],
+        total_count,
+        scroll_offset,
+        viewport_size,
+        fallback_item_size,
+        overscan,
         &measurements,
     );
     with_rt(|rt| web_virtual_window_handle(rt, &window))
@@ -2831,10 +2794,7 @@ fn jet_jit_web_store_new(name: i64, initial: i64) -> i64 {
 }
 
 fn jet_jit_web_store_with_history(name: i64, initial: i64, history_limit: i64) -> i64 {
-    let (name, history_limit) = with_rt(|rt| (
-        rt.heap.clone_string(name).expect("checked Store name"),
-        web_int_value(rt, history_limit),
-    ));
+    let name = with_rt(|rt| rt.heap.clone_string(name).expect("checked Store name"));
     let store = web_rt::jet_web_store_with_history(name, initial, history_limit);
     with_rt(|rt| {
         rt.web.stores.push(store);
@@ -2935,12 +2895,10 @@ fn jet_jit_web_store_forward(store: i64) -> i64 {
 }
 
 fn jet_jit_web_store_jump(store: i64, generation: i64) -> i64 {
-    let generation = with_rt(|rt| web_int_value(rt, generation));
     web_optional_raw(web_rt::jet_web_store_jump(&web_store(store), generation))
 }
 
 fn jet_jit_web_store_scrub(store: i64, generation: i64) -> i64 {
-    let generation = with_rt(|rt| web_int_value(rt, generation));
     web_optional_raw(web_rt::jet_web_store_scrub(&web_store(store), generation))
 }
 
@@ -2962,7 +2920,6 @@ fn jet_jit_web_store_history(store: i64) -> i64 {
 }
 
 fn jet_jit_web_store_history_at(store: i64, index: i64) -> i64 {
-    let index = with_rt(|rt| web_int_value(rt, index));
     let transaction = web_rt::jet_web_store_history_at(&web_store(store), index);
     let value = transaction.map(|transaction| {
         with_rt(|rt| web_store_transaction_handle(rt, transaction))
@@ -2986,7 +2943,6 @@ fn jet_jit_web_store_events(store: i64) -> i64 {
 }
 
 fn jet_jit_web_store_events_since(store: i64, sequence: i64) -> i64 {
-    let sequence = with_rt(|rt| web_int_value(rt, sequence));
     web_store_events_handle(web_rt::jet_web_store_events_since(&web_store(store), sequence))
 }
 
@@ -2995,7 +2951,6 @@ fn jet_jit_web_store_clear_history(store: i64) {
 }
 
 fn jet_jit_web_store_set_history_limit(store: i64, limit: i64) {
-    let limit = with_rt(|rt| web_int_value(rt, limit));
     web_rt::jet_web_store_set_history_limit(&web_store(store), limit);
 }
 
@@ -3004,18 +2959,15 @@ fn jet_jit_web_store_history_enabled(store: i64) -> i64 {
 }
 
 fn jet_jit_web_store_history_limit(store: i64) -> i64 {
-    let value = web_rt::jet_web_store_history_limit(&web_store(store));
-    with_rt(|rt| web_int_handle(rt, value))
+    web_rt::jet_web_store_history_limit(&web_store(store))
 }
 
 fn jet_jit_web_store_cursor(store: i64) -> i64 {
-    let value = web_rt::jet_web_store_cursor(&web_store(store));
-    with_rt(|rt| web_int_handle(rt, value))
+    web_rt::jet_web_store_cursor(&web_store(store))
 }
 
 fn jet_jit_web_store_current_generation(store: i64) -> i64 {
-    let value = web_rt::jet_web_store_current_generation(&web_store(store));
-    with_rt(|rt| web_int_handle(rt, value))
+    web_rt::jet_web_store_current_generation(&web_store(store))
 }
 
 fn jet_jit_web_store_facts_json(store: i64) -> i64 {
@@ -3182,12 +3134,11 @@ fn jet_jit_web_store_patch(store: i64, action: i64, fields: i64, callback: i64) 
 }
 
 fn jet_jit_web_store_patch_generation(patch: i64) -> i64 {
-    let generation = with_rt(|rt| {
+    with_rt(|rt| {
         let patch = rt.web.store_patches.get(patch.saturating_sub(1) as usize)
             .and_then(Option::as_ref).expect("checked live WebStorePatch handle");
         web_rt::jet_web_store_patch_generation(patch)
-    });
-    with_rt(|rt| web_int_handle(rt, generation))
+    })
 }
 
 fn jet_jit_web_store_patch_transaction(patch: i64) -> i64 {

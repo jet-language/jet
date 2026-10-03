@@ -1,0 +1,25 @@
+// Card #4460: `to_bits` and `round` return raw machine words that must
+// re-enter the exact Int carrier on every tier, including words past the
+// inline range; `from_bits` narrows its Int back to the machine word.
+use core.math as math
+
+fn run() {
+    small :: math.to_bits(1.5)
+    wide :: math.to_bits(100000.0)
+    negative :: math.to_bits(-1.5)
+    infinity :: math.to_bits(1.0 / 0.0)
+    print("small={small}")
+    print("wide={wide}")
+    print("negative={negative}")
+    print("infinity={infinity}")
+    print("again={math.to_bits(1.5)}")
+    print("wide-plus-one={wide + 1}")
+
+    print("roundtrip-wide={math.from_bits(wide)}")
+    print("roundtrip-negative={math.from_bits(negative)}")
+    print("roundtrip-small={math.from_bits(small)}")
+
+    big :: math.round(4.0e18)
+    print("round-big={big}")
+    print("round-big-half={big / 2}")
+}

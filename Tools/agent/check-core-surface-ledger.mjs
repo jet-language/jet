@@ -1669,7 +1669,8 @@ function translateCoreCallConstructor(name, args, context) {
 }
 
 function translateCoreCallMethod(record, name, args, context) {
-  if (name === "without_direct_aot" || name === "without_direct_jit") {
+  if (name === "without_direct_aot" || name === "without_direct_jit" ||
+      name === "with_native_int_result") {
     expectRustArgumentCount(name, args, 0, context);
     return "core_call_" + name + "(" + record + ")";
   }

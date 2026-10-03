@@ -114,6 +114,20 @@ fn jet_jit_int_from_int(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(n))
 }
 
+/// Narrow an exact `Int` carrier into the raw machine word a Core kernel
+/// takes, exactly as AOT narrows a declared `Int` argument
+/// (`jet_int_owned_to_i64` + `jet_arithmetic_stop`): an Int past the host
+/// range stops with the same report instead of reaching the kernel.
+fn jet_jit_int_to_native(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_to_i64(value) {
+        Some(value) => value,
+        None => {
+            rt.set_arithmetic_stop(0, "native Int argument exceeds host range");
+            0
+        }
+    })
+}
+
 fn jet_jit_int_from_u64(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_from_u64(n as u64))
 }
@@ -1373,6 +1387,7 @@ host_fns! {
     row_fraction_to_string: "jet_fraction_to_string" => jet_jit_fraction_to_string: sig_unary;
     row_fraction_to_float: "jet_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
     int_from_int: "jet_jit_int_from_int" => jet_jit_int_from_int: sig_unary;
+    int_to_native: "jet_jit_int_to_native" => jet_jit_int_to_native: sig_unary;
     int_from_u64: "jet_jit_int_from_u64" => jet_jit_int_from_u64: sig_unary;
     int_from_str: "jet_jit_int_from_str" => jet_jit_int_from_str: sig_unary;
     int_add: "jet_jit_int_add" => jet_jit_int_add: sig_binary;

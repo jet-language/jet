@@ -1231,6 +1231,7 @@ fn jet_codegen_core_call_row(record: CoreCallRecord) -> MIRCoreCall Never! {
         aot_direct: record.aot_direct,
         jit_direct: record.jit_direct,
         jit_symbol: record.jit_symbol,
+        native_int_result: record.native_int_result,
         marker: record.marker,
     }
 }
@@ -1312,7 +1313,7 @@ fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !jet_codegen_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
     if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
     if left.pure_route != right.pure_route || left.interpreter_route != right.interpreter_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.jit_direct != right.jit_direct || left.jit_symbol != right.jit_symbol -> return false
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.jit_direct != right.jit_direct || left.jit_symbol != right.jit_symbol || left.native_int_result != right.native_int_result -> return false
     if !jet_codegen_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !jet_codegen_core_completion_equal(left.frame_completion, right.frame_completion) || !jet_codegen_core_capability_equal(left.capability, right.capability) || !jet_codegen_string_rows_equal(left.ui_capabilities, right.ui_capabilities) -> return false
     jet_codegen_authority_decisions_equal(left.authority, right.authority) && jet_codegen_core_markers_equal(left.marker, right.marker)
 }

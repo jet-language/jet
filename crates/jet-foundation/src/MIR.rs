@@ -6926,6 +6926,9 @@ pub struct MirCoreCall {
     pub aot_direct: bool,
     pub jit_direct: bool,
     pub jit_symbol: Option<String>,
+    /// The registry's raw-machine-word `Int` result fact
+    /// (`CoreCallRecord::native_int_result`).
+    pub native_int_result: bool,
     pub marker: Option<CoreMarkerApplication>,
 }
 
@@ -6956,6 +6959,7 @@ impl MirCoreCall {
             aot_direct: record.aot_direct,
             jit_direct: record.jit_direct,
             jit_symbol: record.jit_symbol.map(str::to_string),
+            native_int_result: record.native_int_result,
             marker: record.marker,
         }
     }

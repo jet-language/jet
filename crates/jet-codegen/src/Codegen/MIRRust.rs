@@ -32,6 +32,59 @@ enum HistoryScalarKind {
     SignedInteger,
     UnsignedInteger,
 }
+/// Where a native `Int` result's Rust shape is decided. A Core row's shape is
+/// the registry's raw-machine-word fact; a native host slot (record field,
+/// enum payload, Prelude route) is chosen by its declared Rust type.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NativeIntSource {
+    MachineWord,
+    DeclaredSlot,
+}
+/// Prelude kernels whose listed argument positions take the owned exact
+/// `Int` carrier rather than a raw machine word. Every engine that lowers a
+/// Core call reads this one table; a row named here is never narrowed.
+pub fn exact_prelude_adapter(bare: &str) -> Option<(&'static str, &'static [usize])> {
+        Some(match bare {
+            "jet_fraction_from_parts" => ("jet_fraction_from_owned_parts", &[0, 1]),
+            "JetDate::new" => ("jet_local_date_owned", &[0, 1, 2]),
+            "JetLocalTime::new" => ("jet_local_time_owned", &[0, 1, 2]),
+            "JetPeriod::new" => ("jet_period_owned", &[0, 1, 2]),
+            "jet_std::jet_int_abs" => ("jet_std::jet_int_owned_abs", &[0]),
+            "jet_std::jet_int_add" => ("jet_std::jet_int_owned_add", &[0, 1]),
+            "jet_std::jet_int_sub" => ("jet_std::jet_int_owned_sub", &[0, 1]),
+            "jet_std::jet_int_mul" => ("jet_std::jet_int_owned_mul", &[0, 1]),
+            "jet_std::jet_int_bit_and" => ("jet_std::jet_int_owned_bit_and", &[0, 1]),
+            "jet_std::jet_int_bit_or" => ("jet_std::jet_int_owned_bit_or", &[0, 1]),
+            "jet_std::jet_int_bit_xor" => ("jet_std::jet_int_owned_bit_xor", &[0, 1]),
+            "jet_std::jet_int_neg" => ("jet_std::jet_int_owned_neg", &[0]),
+            "jet_std::jet_int_not" => ("jet_std::jet_int_owned_not", &[0]),
+            "jet_std::jet_int_div" => ("jet_std::jet_int_owned_div", &[0, 1]),
+            "jet_std::jet_int_rem" => ("jet_std::jet_int_owned_rem", &[0, 1]),
+            "jet_std::jet_int_div_euclid" => ("jet_std::jet_int_owned_div_euclid", &[0, 1]),
+            "jet_std::jet_int_rem_euclid" => ("jet_std::jet_int_owned_rem_euclid", &[0, 1]),
+            "jet_std::jet_int_floor_div" => ("jet_std::jet_int_owned_floor_div", &[0, 1]),
+            "jet_std::jet_int_mod" => ("jet_std::jet_int_owned_mod", &[0, 1]),
+            "jet_std::jet_int_pow" => ("jet_std::jet_int_owned_pow", &[0, 1]),
+            "jet_std::jet_int_shl" => ("jet_std::jet_int_owned_shl", &[0, 1]),
+            "jet_std::jet_int_shr" => ("jet_std::jet_int_owned_shr", &[0, 1]),
+            "jet_std::jet_int_checked_widen" => ("jet_std::jet_int_owned_checked_widen", &[0]),
+            "jet_std::jet_int_try_from_checked" => {
+                ("jet_std::jet_int_owned_try_from_checked", &[0])
+            }
+            "jet_std::jet_int_checked_fixed" => ("jet_std::jet_int_owned_checked_fixed", &[0]),
+            "jet_numeric_int_bit_count" => ("jet_std::jet_int_owned_bit_count", &[0]),
+            "jet_inline_range_from_int" => ("jet_std::jet_int_owned_inline_range", &[0]),
+            "jet_std::jet_int_to_radix" => ("jet_std::jet_int_owned_to_radix", &[0, 1]),
+            "jet_std::jet_int_from_radix" => ("jet_std::jet_int_owned_from_radix", &[1]),
+            "jet_std::jet_int_parse" => ("jet_std::jet_int_owned_parse", &[]),
+            "jet_fmt_decimal_int" => ("jet_std::jet_fmt_decimal_int_owned", &[0, 1]),
+            "jet_fmt_grouped_int" => ("jet_std::jet_fmt_grouped_int_owned", &[0, 1]),
+            "jet_fmt_hex" => ("jet_std::jet_fmt_hex_owned", &[0, 1]),
+            "jet_fmt_bin" => ("jet_std::jet_fmt_bin_owned", &[0]),
+            "jet_fmt_oct" => ("jet_std::jet_fmt_oct_owned", &[0]),
+            _ => return None,
+        })
+}
 fn quote_rust_string(value: &str) -> String {
     crate::Codegen::escape_rust_str(value)
 }
@@ -3951,7 +4004,16 @@ impl<'a> RustEmitter<'a> {
                 }
                 MirScopeKind::Context if enter => {
                     if let Some(deadline) = scope.deadline {
-                        return format!("jet_ctx_push_deadline({})", self.value_transfer(deadline));
+                        // The deadline leaf takes milliseconds as a machine
+                        // word: the checked `Int` narrows once, as every
+                        // declared-`Int` native argument does.
+                        let value = self.value_transfer(deadline);
+                        let value = if matches!(self.value_type(function, deadline).kind(), MirTypeKind::Int) {
+                            self.native_int_argument(value, None)
+                        } else {
+                            value
+                        };
+                        return format!("jet_ctx_push_deadline({value})");
                     }
                 }
                 MirScopeKind::Context => {
@@ -19602,14 +19664,18 @@ impl<'a> RustEmitter<'a> {
             MirOperation::ResultErr { value } => format!("Err({})", self.value_move(*value)),
             MirOperation::Call { callee, args, type_args } => {
                 let emitted = self.call(function, callee, args, type_args);
-                if matches!(callee, MirCallee::Prelude(_) | MirCallee::Core(_)) {
-                    result
+                match callee {
+                    MirCallee::Core(id) => self.core_int_result(
+                        self.core_row(*id),
+                        emitted,
+                        result.map(|value| self.value_type(function, value)),
+                    ),
+                    MirCallee::Prelude(_) => result
                         .and_then(|value| {
                             self.native_int_result(&emitted, self.value_type(function, value))
                         })
-                        .unwrap_or(emitted)
-                } else {
-                    self.call_result_expression(function, callee, result, emitted)
+                        .unwrap_or(emitted),
+                    _ => self.call_result_expression(function, callee, result, emitted),
                 }
             }
             MirOperation::CoreCall { call, route, args, type_args, data_plan, fallibility, .. } => {
@@ -23907,8 +23973,18 @@ impl<'a> RustEmitter<'a> {
             type_args,
             location,
         );
-        result_type
-            .and_then(|ty| self.native_int_result(&emitted, ty))
+        self.core_int_result(row, emitted, result_type)
+    }
+
+    /// A Core row's `Int` results cross the kernel boundary by one registry
+    /// fact (`MirCoreCall::native_int_result`): a raw-machine-word row widens
+    /// each `Int` leaf from `i64`; every other row already returns the owned
+    /// exact carrier and passes through unchanged.
+    fn core_int_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+        if !row.native_int_result {
+            return emitted;
+        }
+        ty.and_then(|ty| self.native_int_widening(&emitted, ty, NativeIntSource::MachineWord))
             .unwrap_or(emitted)
     }
 
@@ -23969,24 +24045,34 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn native_int_result(&self, value: &str, ty: &MirType) -> Option<String> {
+        self.native_int_widening(value, ty, NativeIntSource::DeclaredSlot)
+    }
+
+    fn native_int_widening(&self, value: &str, ty: &MirType, source: NativeIntSource) -> Option<String> {
         match ty.kind() {
             MirTypeKind::Tagged {
                 marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
                 ..
             } => None,
-            MirTypeKind::Int => Some(format!(
-                "{}jet_std::jet_int_owned_from_native_result({value})",
-                self.config.root_prefix,
-            )),
+            MirTypeKind::Int => Some(match source {
+                NativeIntSource::DeclaredSlot => format!(
+                    "{}jet_std::jet_int_owned_from_native_result({value})",
+                    self.config.root_prefix,
+                ),
+                NativeIntSource::MachineWord => format!(
+                    "{}jet_std::jet_int_owned_from_i64({value})",
+                    self.config.root_prefix,
+                ),
+            }),
             MirTypeKind::InlineRange { base, .. }
             | MirTypeKind::Tagged { inner: base, .. }
-            | MirTypeKind::Quantity { base, .. } => self.native_int_result(value, base),
+            | MirTypeKind::Quantity { base, .. } => self.native_int_widening(value, base, source),
             MirTypeKind::Option(inner) => self
-                .native_int_result("__jet_value", inner)
+                .native_int_widening("__jet_value", inner, source)
                 .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
             MirTypeKind::Result { ok, err } => {
-                let ok = self.native_int_result("__jet_value", ok);
-                let err = self.native_int_result("__jet_error", err);
+                let ok = self.native_int_widening("__jet_value", ok, source);
+                let err = self.native_int_widening("__jet_error", err, source);
                 match (ok, err) {
                     (Some(ok), Some(err)) => Some(format!(
                         "({value}).map(|__jet_value| {ok}).map_err(|__jet_error| {err})"
@@ -24003,7 +24089,7 @@ impl<'a> RustEmitter<'a> {
                     .enumerate()
                     .map(|(index, (_, field))| {
                         let original = format!("__jet_value.{index}");
-                        if let Some(converted) = self.native_int_result(&original, field) {
+                        if let Some(converted) = self.native_int_widening(&original, field, source) {
                             needs_conversion = true;
                             converted
                         } else {
@@ -24020,11 +24106,16 @@ impl<'a> RustEmitter<'a> {
                     format!("{{ let __jet_value = {value}; ({values}) }}")
                 })
             }
-            MirTypeKind::List(inner) => self.native_int_result("__jet_value", inner).map(|inner| {
+            MirTypeKind::List(inner) => self.native_int_widening("__jet_value", inner, source).map(|inner| {
                 format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
             }),
-            // A native count map (`JetMap<K, i64>`) widens its values once.
-            MirTypeKind::Map { value: inner, .. } if matches!(inner.kind(), MirTypeKind::Int) => {
+            // A native count map (`JetMap<K, i64>`) widens its values once. No
+            // registry row returns one as a raw machine word, so the declared
+            // Rust slot alone selects this conversion.
+            MirTypeKind::Map { value: inner, .. }
+                if source == NativeIntSource::DeclaredSlot
+                    && matches!(inner.kind(), MirTypeKind::Int) =>
+            {
                 Some(format!(
                     "{}jet_std::jet_int_map_owned_from_native_result({value})",
                     self.config.root_prefix,
@@ -25927,49 +26018,7 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn exact_prelude_adapter(&self, symbol: &str) -> Option<(&'static str, &'static [usize])> {
-        let bare = symbol
-            .strip_prefix(&self.config.root_prefix)
-            .unwrap_or(symbol);
-        Some(match bare {
-            "jet_fraction_from_parts" => ("jet_fraction_from_owned_parts", &[0, 1]),
-            "JetDate::new" => ("jet_local_date_owned", &[0, 1, 2]),
-            "JetLocalTime::new" => ("jet_local_time_owned", &[0, 1, 2]),
-            "JetPeriod::new" => ("jet_period_owned", &[0, 1, 2]),
-            "jet_std::jet_int_abs" => ("jet_std::jet_int_owned_abs", &[0]),
-            "jet_std::jet_int_add" => ("jet_std::jet_int_owned_add", &[0, 1]),
-            "jet_std::jet_int_sub" => ("jet_std::jet_int_owned_sub", &[0, 1]),
-            "jet_std::jet_int_mul" => ("jet_std::jet_int_owned_mul", &[0, 1]),
-            "jet_std::jet_int_bit_and" => ("jet_std::jet_int_owned_bit_and", &[0, 1]),
-            "jet_std::jet_int_bit_or" => ("jet_std::jet_int_owned_bit_or", &[0, 1]),
-            "jet_std::jet_int_bit_xor" => ("jet_std::jet_int_owned_bit_xor", &[0, 1]),
-            "jet_std::jet_int_neg" => ("jet_std::jet_int_owned_neg", &[0]),
-            "jet_std::jet_int_not" => ("jet_std::jet_int_owned_not", &[0]),
-            "jet_std::jet_int_div" => ("jet_std::jet_int_owned_div", &[0, 1]),
-            "jet_std::jet_int_rem" => ("jet_std::jet_int_owned_rem", &[0, 1]),
-            "jet_std::jet_int_div_euclid" => ("jet_std::jet_int_owned_div_euclid", &[0, 1]),
-            "jet_std::jet_int_rem_euclid" => ("jet_std::jet_int_owned_rem_euclid", &[0, 1]),
-            "jet_std::jet_int_floor_div" => ("jet_std::jet_int_owned_floor_div", &[0, 1]),
-            "jet_std::jet_int_mod" => ("jet_std::jet_int_owned_mod", &[0, 1]),
-            "jet_std::jet_int_pow" => ("jet_std::jet_int_owned_pow", &[0, 1]),
-            "jet_std::jet_int_shl" => ("jet_std::jet_int_owned_shl", &[0, 1]),
-            "jet_std::jet_int_shr" => ("jet_std::jet_int_owned_shr", &[0, 1]),
-            "jet_std::jet_int_checked_widen" => ("jet_std::jet_int_owned_checked_widen", &[0]),
-            "jet_std::jet_int_try_from_checked" => {
-                ("jet_std::jet_int_owned_try_from_checked", &[0])
-            }
-            "jet_std::jet_int_checked_fixed" => ("jet_std::jet_int_owned_checked_fixed", &[0]),
-            "jet_numeric_int_bit_count" => ("jet_std::jet_int_owned_bit_count", &[0]),
-            "jet_inline_range_from_int" => ("jet_std::jet_int_owned_inline_range", &[0]),
-            "jet_std::jet_int_to_radix" => ("jet_std::jet_int_owned_to_radix", &[0, 1]),
-            "jet_std::jet_int_from_radix" => ("jet_std::jet_int_owned_from_radix", &[1]),
-            "jet_std::jet_int_parse" => ("jet_std::jet_int_owned_parse", &[]),
-            "jet_fmt_decimal_int" => ("jet_std::jet_fmt_decimal_int_owned", &[0, 1]),
-            "jet_fmt_grouped_int" => ("jet_std::jet_fmt_grouped_int_owned", &[0, 1]),
-            "jet_fmt_hex" => ("jet_std::jet_fmt_hex_owned", &[0, 1]),
-            "jet_fmt_bin" => ("jet_std::jet_fmt_bin_owned", &[0]),
-            "jet_fmt_oct" => ("jet_std::jet_fmt_oct_owned", &[0]),
-            _ => return None,
-        })
+        exact_prelude_adapter(symbol.strip_prefix(&self.config.root_prefix).unwrap_or(symbol))
     }
 
     fn call_arg_needs_trait_box(&self, function: &MirFunction, arg: &MirCallArg) -> bool {

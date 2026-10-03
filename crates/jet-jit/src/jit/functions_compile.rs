@@ -5237,7 +5237,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let Some(deadline) = deadline else {
             return Ok(());
         };
+        // The deadline leaf takes milliseconds as a machine word (AOT narrows
+        // the checked `Int` the same way).
+        let is_int = matches!(self.mir_value_type(deadline)?.kind(), MirTypeKind::Int);
         let deadline = self.cast(builder, self.value(deadline)?, types::I64)?;
+        let deadline = if is_int {
+            self.native_int_argument(builder, deadline)?
+        } else {
+            deadline
+        };
         let _ = self.call_host(builder, self.host.conc.deadline_push, &[deadline])?;
         Ok(())
     }
@@ -16306,7 +16314,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirCallee::Indirect(value) => {
                 self.indirect_call(builder, *value, args, result_type, expected)
             }
-            MirCallee::Core(id) => self.call_core(builder, *id, None, &[], args, None, expected),
+            MirCallee::Core(id) => {
+                self.call_core(builder, *id, None, &[], args, result_type, expected)
+            }
         }
     }
 
@@ -16946,12 +16956,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 &signature,
             )? {
                 let mut values = self.lower_call_args(builder, args, &source_signature)?;
+                self.narrow_core_int_args(builder, &row.module, &row.member, args, &mut values)?;
                 values.push(key);
                 values
             } else {
-                self.lower_core_call_args(builder, &row.module, &row.member, args, &signature)?
+                let mut values =
+                    self.lower_core_call_args(builder, &row.module, &row.member, args, &signature)?;
+                self.narrow_core_int_args(builder, &row.module, &row.member, args, &mut values)?;
+                values
             };
             self.bind_core_callbacks(builder, args, &callbacks, &mut values)?;
+            let native_int_result = row.native_int_result;
             return self
                 .call_declared_values(builder, host, &signature, values)
                 .and_then(|results| {
@@ -16960,6 +16975,14 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .first()
                         .copied()
                         .ok_or_else(|| "MIR Core call returned no value".to_string())?;
+                    // The registry's raw-machine-word fact, the same one AOT
+                    // widens by: an unflagged host already returns the owned
+                    // exact carrier and is never reinterpreted.
+                    let value = if native_int_result {
+                        self.native_int_result(builder, value, result_type)?
+                    } else {
+                        value
+                    };
                     expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
                 });
         }
@@ -16976,7 +16999,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             ));
         }
         if let Some(route) = route {
-            return self.call_prelude_args_bound(builder, route, args, &callbacks, expected);
+            let native_int_result = row.native_int_result;
+            let core_key = (row.module.clone(), row.member.clone());
+            let value = self.call_prelude_args_bound(
+                builder,
+                route,
+                args,
+                &callbacks,
+                Some(core_key),
+                expected,
+            )?;
+            return if native_int_result {
+                self.native_int_result(builder, value, result_type)
+            } else {
+                Ok(value)
+            };
         }
         Err(format!("MIR Core call {:?} has no resolved JIT symbol", id))
     }
@@ -18720,7 +18757,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         args: &[MirCallArg],
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
-        self.call_prelude_args_bound(builder, id, args, &[], expected)
+        self.call_prelude_args_bound(builder, id, args, &[], None, expected)
     }
 
     fn cell_get_or_set_args(
@@ -18883,6 +18920,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         id: jet_foundation::MIR::MirPreludeCallId,
         args: &[MirCallArg],
         callbacks: &[CallbackShape],
+        // A Core row reached through its route keeps AOT's declared-`Int`
+        // argument ABI; ordinary Prelude rows carry their own slot types.
+        core_ints: Option<(String, String)>,
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
         let row = self
@@ -19065,10 +19105,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             &signature,
         )? {
             let mut values = self.lower_call_args(builder, args, &source_signature)?;
+            if let Some((module, member)) = &core_ints {
+                self.narrow_core_int_args(builder, module, member, args, &mut values)?;
+            }
             values.push(key);
             values
         } else {
-            self.lower_core_call_args(builder, &row.module, &row.member, args, &signature)?
+            let mut values =
+                self.lower_core_call_args(builder, &row.module, &row.member, args, &signature)?;
+            if let Some((module, member)) = &core_ints {
+                self.narrow_core_int_args(builder, module, member, args, &mut values)?;
+            }
+            values
         };
         if is_collection_closure {
             let receiver = args
@@ -19640,6 +19688,74 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR native Int result merge has no value".to_string())
+    }
+
+    /// AOT's declared-`Int` Core ABI (`core_call_symbol_for_function`): a Core
+    /// kernel takes each declared `Int` parameter as a raw machine word, so the
+    /// exact carrier narrows here, once, for every resident host. Hosts never
+    /// read a Core `Int` argument as an owned carrier.
+    fn narrow_core_int_args(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        module: &str,
+        member: &str,
+        args: &[MirCallArg],
+        values: &mut [Value],
+    ) -> Result<(), String> {
+        // `core.reactive.signal` constructs its signal on the exact carrier, and
+        // an exact-adapter kernel takes the owned carrier at every position.
+        if (module == "core.reactive" && member == "signal")
+            || jet_foundation::Syntax::core_call(module, member).is_some_and(|row| {
+                jet_codegen::Codegen::MIRRust::exact_prelude_adapter(row.symbol.name()).is_some()
+            })
+        {
+            return Ok(());
+        }
+        let declared = jet_codegen::Sema::core_call_signature(module, member)
+            .map(|(params, _)| params)
+            .unwrap_or_default();
+        for (index, arg) in args.iter().enumerate() {
+            let declared_int = matches!(declared.get(index), Some((_, jet_codegen::AST::Type::Int)))
+                || (module == "core.tasks"
+                    && member == jet_foundation::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD
+                    && index == 0);
+            if !declared_int
+                || index >= values.len()
+                || !matches!(self.mir_value_type(arg.value)?.kind(), MirTypeKind::Int)
+            {
+                continue;
+            }
+            values[index] = self.native_int_argument(builder, values[index])?;
+        }
+        Ok(())
+    }
+
+    /// Narrow one exact `Int` carrier to its raw machine word; an inline word
+    /// is already the value, a spilled one stops past the host range.
+    fn native_int_argument(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        value: Value,
+    ) -> Result<Value, String> {
+        let value = self.cast(builder, value, types::I64)?;
+        let inline = self.exact_inline(builder, value);
+        let fallback = builder.create_block();
+        let merge = builder.create_block();
+        builder.append_block_param(merge, types::I64);
+        builder.ins().brif(inline, merge, &[value], fallback, &[]);
+        builder.switch_to_block(fallback);
+        let narrowed = self
+            .call_host(builder, self.host.num.int_to_native, &[value])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR native Int argument narrowing returned no value".to_string())?;
+        builder.ins().jump(merge, &[narrowed]);
+        builder.switch_to_block(merge);
+        builder
+            .block_params(merge)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR native Int argument merge has no value".to_string())
     }
 
     fn call_i64_binary(
@@ -20750,7 +20866,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             .into_iter()
                             .map(|(arity, index)| (arity, index + 1))
                             .collect::<Vec<_>>();
-                        self.call_prelude_args_bound(builder, *call, &values, &callbacks, expected)
+                        self.call_prelude_args_bound(builder, *call, &values, &callbacks, None, expected)
                             .map(Some)
                     }
                 }

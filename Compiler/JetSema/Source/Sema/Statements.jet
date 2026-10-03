@@ -3857,11 +3857,22 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
                 }
                 else -> {}
             }
+            // D-FAILURE-FOUNDATION1=A (Rust `check_return`): every direct call
+            // but an unshadowed `Ok`/`Err` checks against the success slot, so
+            // its failure propagates through the transparent carrier and the
+            // payload is lifted into this carrier. Such a returned call is
+            // never this body's own failure source, and a `T Never!` callee
+            // meets a fallible slot.
             if value == {
                 .Call(call) -> {
                     if (call.name == "Ok" || failure_reachable) && sema_expression_contextual_result_call(call, Val(required), scopes) != None -> return true
                     if failure_reachable && sema_call_default_err_candidate(call, Val(required), scopes) -> return true
+                    if call.name != "Ok" && call.name != "Err" -> return false
+                    if sema_scope_resolve_index(scopes, call.name) == .Val(index) {
+                        if !sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err") -> return false
+                    }
                 }
+                .MethodCall(_, _, _, _, _, _, _, _, _, _) | .CallValue(_, _, _) -> return false
                 else -> {}
             }
         }

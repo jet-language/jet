@@ -78,9 +78,26 @@ fn jet_jit_math_is_finite(x: f64) -> i8 {
     i8::from(math_rt::jet_std_math_is_finite(x))
 }
 
+// Core-call lowering narrows every declared `Int` argument to its raw machine
+// word and widens scalar `Int` results of raw-word rows; compound results
+// (lists, records, packed options) are built here, so their `Int` cells must
+// already hold exact carriers. List inputs narrow each carrier the way AOT
+// narrows a declared `[Int]` argument.
+fn int_cell(rt: &mut crate::runtime_host::JitRuntime, value: i64) -> i64 {
+    rt.heap.int_from_i64(value)
+}
+fn int_word(rt: &mut crate::runtime_host::JitRuntime, carrier: i64) -> i64 {
+    match rt.heap.int_to_i64(carrier) {
+        Some(value) => value,
+        None => {
+            rt.set_arithmetic_stop(0, "native Int argument exceeds host range");
+            0
+        }
+    }
+}
 fn opt_i64(v: Option<i64>) -> i64 {
     match v {
-        Some(n) => n.wrapping_add(1),
+        Some(n) => Concurrency::with_runtime_mut(|rt| int_cell(rt, n)).wrapping_add(1),
         None => 0,
     }
 }
@@ -96,7 +113,10 @@ fn list_i64s(list: i64) -> Vec<i64> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list).unwrap_or(0);
         (0..len)
-            .map(|index| rt.heap.list_get_int(list, index).unwrap_or(0))
+            .map(|index| {
+                let carrier = rt.heap.list_get_int(list, index).unwrap_or(0);
+                int_word(rt, carrier)
+            })
             .collect()
     })
 }
@@ -107,6 +127,7 @@ fn alloc_i64_list(values: &[i64]) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let handle = rt.heap.alloc_empty_list();
         for &value in values {
+            let value = int_cell(rt, value);
             let _ = rt.heap.list_push_int(handle, value);
         }
         handle
@@ -315,7 +336,10 @@ fn list_i64_matrix(list: i64) -> Vec<Vec<i64>> {
                 let inner = rt.heap.list_get_int(list, outer_index).unwrap_or(0);
                 let inner_len = rt.heap.list_len(inner).unwrap_or(0);
                 (0..inner_len)
-                    .map(|inner_index| rt.heap.list_get_int(inner, inner_index).unwrap_or(0))
+                    .map(|inner_index| {
+                        let carrier = rt.heap.list_get_int(inner, inner_index).unwrap_or(0);
+                        int_word(rt, carrier)
+                    })
                     .collect()
             })
             .collect()
@@ -327,6 +351,7 @@ fn alloc_i64_matrix(values: &[Vec<i64>]) -> i64 {
         for row in values {
             let inner = rt.heap.alloc_empty_list();
             for &value in row {
+                let value = int_cell(rt, value);
                 let _ = rt.heap.list_push_int(inner, value);
             }
             let _ = rt.heap.list_push_int(outer, inner);
@@ -438,11 +463,13 @@ fn jet_jit_coll_heapreplace(items: i64, value: i64) -> i64 {
 
 fn pair_list_opt(values: &[i64], value: Option<i64>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_int_list(values.to_vec());
+        let cells = values.iter().map(|value| int_cell(rt, *value)).collect();
+        let list = rt.heap.alloc_int_list(cells);
+        let payload = value.map(|value| int_cell(rt, value));
         let option = crate::runtime_host::alloc_jit_result(
             rt,
-            value.is_some(),
-            value.unwrap_or_default() as u64,
+            payload.is_some(),
+            payload.unwrap_or_default() as u64,
         );
         let h = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(h, 0, list);
@@ -453,7 +480,9 @@ fn pair_list_opt(values: &[i64], value: Option<i64>) -> i64 {
 
 fn pair_list_i64(values: &[i64], value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_int_list(values.to_vec());
+        let cells = values.iter().map(|value| int_cell(rt, *value)).collect();
+        let list = rt.heap.alloc_int_list(cells);
+        let value = int_cell(rt, value);
         let h = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(h, 0, list);
         let _ = rt.heap.record_set_int(h, 1, value);
@@ -926,6 +955,7 @@ fn pair_ff(a: f64, b: f64) -> i64 {
 
 fn pair_fi(a: f64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        let b = int_cell(rt, b);
         let h = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_float(h, 0, a);
         let _ = rt.heap.record_set_int(h, 1, b);
@@ -935,6 +965,8 @@ fn pair_fi(a: f64, b: i64) -> i64 {
 
 fn pair_ii(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        let a = int_cell(rt, a);
+        let b = int_cell(rt, b);
         let h = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(h, 0, a);
         let _ = rt.heap.record_set_int(h, 1, b);
@@ -981,10 +1013,20 @@ fn jet_jit_math_isqrt(v: i64) -> i64 {
     opt_i64(math_rt::jet_std_math_isqrt(v))
 }
 fn jet_jit_math_factorial(v: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| match rt.heap.int_factorial(v) {
-        Some(value) => value.wrapping_add(1),
-        None => 0,
+    Concurrency::with_runtime_mut(|rt| {
+        let v = int_cell(rt, v);
+        match rt.heap.int_factorial(v) {
+            Some(value) => value.wrapping_add(1),
+            None => 0,
+        }
     })
+}
+// Raw-word `math.sum_int` / `prod_int` / `prod`: the shared kernels AOT calls.
+fn jet_jit_math_sum_int(values: i64) -> i64 {
+    math_rt::jet_std_math_sum_int(&list_i64s(values))
+}
+fn jet_jit_math_prod_int(values: i64) -> i64 {
+    math_rt::jet_std_math_prod_int_ref(&list_i64s(values))
 }
 fn jet_jit_math_binomial(n: i64, k: i64) -> i64 {
     opt_i64(math_rt::jet_std_math_binomial(n, k))
@@ -1363,6 +1405,8 @@ host_fns! {
     ilogb: "jet_jit_math_ilogb" => jet_jit_math_ilogb: f64_i64;
     isqrt: "jet_jit_math_isqrt" => jet_jit_math_isqrt: i64_i64;
     factorial: "jet_jit_math_factorial" => jet_jit_math_factorial: i64_i64;
+    sum_int: "jet_jit_math_sum_int" => jet_jit_math_sum_int: i64_i64;
+    prod_int: "jet_jit_math_prod_int" => jet_jit_math_prod_int: i64_i64;
     binomial: "jet_jit_math_binomial" => jet_jit_math_binomial: i64_i64_i64;
     perm: "jet_jit_math_perm" => jet_jit_math_perm: i64_i64_i64;
     rising_factorial: "jet_jit_math_rising_factorial" => jet_jit_math_rising_factorial: i64_i64_i64;
