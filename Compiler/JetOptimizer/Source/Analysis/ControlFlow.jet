@@ -193,11 +193,37 @@ fn mir_pass_predecessor_map(function: MIRFunction) -> [U64:[MIRBlockID]] Never! 
     predecessors
 }
 
-// CHK immediate dominators over indexed reverse postorder. Entry and every
-// predecessor-free block are roots, matching the old set intersection. A
+// Dominance for the optimizer's analyses: the entry and every predecessor-free
+// block are roots, matching the old set intersection.
+fn mir_pass_dominators(function: MIRFunction) -> MIRPassDominance Never! {
+    mir_pass_rooted_dominators(function, [MIRBlockID]{function.entry}, true)
+}
+
+// Legality dominance: the entry and every failure/unwind cleanup target are
+// the only roots. A block none of them reaches is unnumbered, so it dominates
+// nothing and every use in it counts as dominated (Rust `ensure_use`; the
+// optimizer's legality skips such blocks). Lowering leaves such blocks behind
+// on purpose, e.g. the release a statically dead drop flag guarded, for
+// UnreachableBlockElimination.
+// Rust: crates/jet-foundation/src/MIROptimization.rs::dominator_map
+fn mir_pass_legality_dominators(function: MIRFunction) -> MIRPassDominance Never! {
+    roots := [MIRBlockID]{function.entry}
+    loop drop in function.drops {
+        if drop.edge == {
+            .Failure(target) | .Unwind(target) -> &roots.push(target)
+            else -> {}
+        }
+    }
+    mir_pass_rooted_dominators(function, roots, false)
+}
+
+// CHK immediate dominators over indexed reverse postorder from `root_blocks`
+// (plus, with `predecessor_free_roots`, every block no terminator targets). A
 // rootless region never constrains a rooted row and keeps its universal set.
 // Rust: crates/jet-foundation/src/MIR.rs::MirDominators::compute
-fn mir_pass_dominators(function: MIRFunction) -> MIRPassDominance Never! {
+fn mir_pass_rooted_dominators(function: MIRFunction, root_blocks: [MIRBlockID], predecessor_free_roots: Bool) -> MIRPassDominance Never! {
+    root_ids := [U64:Bool]{}
+    loop root in root_blocks -> &root_ids.add(root.value, true).drop("a root may repeat")
     blocks := [MIRBlockID]{}
     positions := [U64:Int]{}
     successors := [[Int]]{}
@@ -222,7 +248,7 @@ fn mir_pass_dominators(function: MIRFunction) -> MIRPassDominance Never! {
     exit := [Int]{}
     parents := [Int]{}
     loop (position, block) in function.blocks {
-        &roots.push(block.id == function.entry || predecessors[position].len() == 0)
+        &roots.push(root_ids.get(block.id.value) != None || (predecessor_free_roots && predecessors[position].len() == 0))
         &visited.push(false)
         &number.push(-1)
         &enter.push(-1)

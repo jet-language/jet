@@ -28,6 +28,9 @@ use jet_foundation.[
     Type,
     VariantField,
     VariantPayload,
+    core_enum_payload_variants,
+    core_enum_variant_payload,
+    core_enum_variants,
     diagnostic_with_edit,
     type_identity_equal,
     type_name,
@@ -161,6 +164,24 @@ fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
     }
 }
 
+// A Core enum with no source declaration (`IOError`, `ProcessSignal`, ...):
+// the variant's payload comes from the generated Core enum rows.
+fn sema_pattern_core_enum_payload(owner_name: String, variant: String, span: Span, diagnostics: &[Diagnostic]) -> SemaPatternPayload {
+    result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false}
+    if core_enum_payload_variants(owner_name) == None && core_enum_variants(owner_name) == None {
+        &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
+        return result
+    }
+    result.range_forbidden = true
+    payload :: core_enum_variant_payload(owner_name, variant) ?? {
+        &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
+        return result
+    }
+    result.types = payload
+    result.known = true
+    result
+}
+
 // D-ERR-CASES1=A: the tag of the one union member whose enum declares the
 // case `variant`, when `variant` is not itself a member tag. `None` for an
 // unknown or ambiguous case, which reaches the ordinary E0305 member check.
@@ -235,8 +256,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
         return result
     }
     nominal_row :: sema_pattern_nominal_row(graph, env.module_identity, normalized) ?? {
-        &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
-        return result
+        return sema_pattern_core_enum_payload(owner_name, variant, span, &diagnostics)
     }
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     result.owner = Val(nominal.symbol.id)

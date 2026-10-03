@@ -260,22 +260,25 @@ pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunct
     SemaCallDirectTarget{symbol: function.symbol, signature: signature, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
 
-pub fn sema_call_method_candidate_from_registration(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], receiver_type: Type?, receiver_convention: AccessConvention, receiver_offset: Int, method: TMethodRef, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
-    generic_params :: sema_inference_registration_params(function.generic_params)
+// `signature` is the registered function's signature as the caller
+// specialized it; only it and `function_generic_params` are read, so a caller
+// never copies the registered row (and its declaration body) to swap one field.
+pub fn sema_call_method_candidate_from_registration(signature: Type, function_generic_params: [SemaRegistrationGenericParam], graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], receiver_type: Type?, receiver_convention: AccessConvention, receiver_offset: Int, method: TMethodRef, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+    generic_params :: sema_inference_registration_params(function_generic_params)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
             &diagnostics.push(sema_error("E0119", span, "`{method.name}` is not generic", "only a registered generic method accepts type arguments", "remove the explicit type arguments"))
             return None
         }
-        return SemaCallMethodCandidate{method: method, signature: function.signature, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
+        return SemaCallMethodCandidate{method: method, signature: signature, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
     if type_args.len() == 0 {
-        return SemaCallMethodCandidate{method: method, signature: function.signature, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
+        return SemaCallMethodCandidate{method: method, signature: signature, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
     context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, lexical_generic_params, None)
     result :: sema_infer_validate_explicit(graph, &context, type_args, span, &diagnostics) ?? return None
-    signature :: sema_inference_substitute_type_bindings(function.signature, result.substitutions)
-    SemaCallMethodCandidate{method: method, signature: signature, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
+    substituted :: sema_inference_substitute_type_bindings(signature, result.substitutions)
+    SemaCallMethodCandidate{method: method, signature: substituted, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
 
 fn sema_call_method_receiver_candidate_type(candidate: SemaCallMethodCandidate) -> Type? {

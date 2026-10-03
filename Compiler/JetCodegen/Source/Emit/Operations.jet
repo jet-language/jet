@@ -166,7 +166,7 @@ fn jet_rust_emit_route_call(ctx: &JetRustEmitContext, id: MIRPreludeCallID, args
         return "__jet_invalid_prelude_call()"
     }
     source :: jet_rust_emit_prelude_symbol(&ctx, id)
-    target :: jet_rust_emit_exact_adapter(&ctx, None, source, [MIRCallArg]{})
+    target :: jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, source)
     positions :: jet_rust_emit_exact_adapter_positions(target)
     rendered := [String]{}
     index := 0
@@ -349,11 +349,13 @@ fn jet_rust_emit_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction,
 // arguments that borrow fields of one local conflict (E0499/E0502). When every
 // mention of such a local in `args` is one of those two accesses, the local is
 // borrowed once ahead of the call and each argument projects its field from
-// that one reference.
+// that one reference. Field borrows of a split owner conflict the same way
+// (jet_rust_emit_split_partial_field_borrows).
 fn jet_rust_emit_split_local_field_borrows(callee: String, args: String) -> String Never! {
     write :: ".as_mut().expect(\"MIR local\")"
     read :: ".as_ref().expect(\"MIR local\")"
-    bytes :: args.bytes()
+    partial :: jet_rust_emit_split_partial_field_borrows(args)
+    bytes :: partial.args.bytes()
     split := [String]{}
     loop at in jet_rust_emit_fold_occurrences(bytes, write.bytes()) {
         start := at
@@ -369,9 +371,9 @@ fn jet_rust_emit_split_local_field_borrows(callee: String, args: String) -> Stri
         accesses :: jet_rust_emit_fold_occurrences(bytes, "{name}{write}".bytes()).len() + jet_rust_emit_fold_occurrences(bytes, "{name}{read}".bytes()).len()
         if accesses >= 2 && jet_rust_emit_fold_mentions(bytes, name).len() == accesses -> &split.push(name)
     }
-    if split.len() == 0 -> return "{callee}({args})"
-    bindings := ""
-    rewritten := args
+    if split.len() == 0 && partial.bindings == "" -> return "{callee}({partial.args})"
+    bindings := partial.bindings
+    rewritten := partial.args
     loop name in split {
         name_bytes :: name.bytes()
         id :: String.from_bytes(~(name_bytes[8..<name_bytes.len()])) ?? ""
@@ -380,6 +382,172 @@ fn jet_rust_emit_split_local_field_borrows(callee: String, args: String) -> Stri
         rewritten = rewritten.replace("{name}{write}", binding).replace("{name}{read}", binding)
     }
     "{{ {bindings}{callee}({rewritten}) }}"
+}
+
+// MIRRust PartialFieldBorrow: one split owner's field borrow, the
+// partial_field_reference text `match {slot}.{as_ref|as_mut}() {{
+// Some(__jet_whole) => {whole}, None => {split} }}` at bytes start..<end.
+struct JetRustEmitPartialFieldBorrow {
+    pub start: Int
+    pub end: Int
+    pub slot: String
+    pub mutable: Bool
+    pub whole: String
+    pub split: String
+}
+
+// The destructuring bindings ahead of a call and its rewritten arguments.
+struct JetRustEmitPartialFieldSplit {
+    pub bindings: String
+    pub args: String
+}
+
+// MIRRust split_partial_field_borrows: field borrows of one split owner
+// conflict as the borrows of one local do: each `match slot.as_ref()`/`match
+// slot.as_mut()` borrows all of `slot` (E0499/E0502). When every mention of
+// such an owner in `args` is one of two or more such borrows, at least one
+// mutable, the owner is borrowed once ahead of the call: one destructuring
+// `let` takes every field borrow from the one `&mut` whole, or from the split
+// field slots, and each argument names its binding. A nested owner's borrows
+// in the split arm split the same way.
+fn jet_rust_emit_split_partial_field_borrows(args: String) -> JetRustEmitPartialFieldSplit Never! {
+    bindings := ""
+    current := args
+    settled := [String]{}
+    loop {
+        borrows :: jet_rust_emit_partial_field_borrows(current)
+        slot := ""
+        loop borrow in borrows {
+            if slot != "" || !borrow.mutable -> next
+            seen := false
+            loop other in settled {
+                if other == borrow.slot -> seen = true
+            }
+            if !seen -> slot = borrow.slot
+        }
+        if slot == "" -> break
+        &settled.push(slot)
+        owned := [JetRustEmitPartialFieldBorrow]{}
+        loop borrow in borrows {
+            if borrow.slot == slot -> &owned.push(borrow)
+        }
+        if owned.len() < 2 || jet_rust_emit_fold_mentions(current.bytes(), slot).len() != owned.len() -> next
+        slot_bytes :: slot.bytes()
+        stem := slot
+        if slot.starts_with("__jet_") -> stem = String.from_bytes(~(slot_bytes[6..<slot_bytes.len()])) ?? ""
+        names := [String]{}
+        wholes := [String]{}
+        splits := [String]{}
+        loop (index, borrow) in owned {
+            &names.push("__jet_split_whole_{stem}_{index}")
+            &wholes.push(borrow.whole)
+            &splits.push(borrow.split)
+        }
+        nested :: jet_rust_emit_split_partial_field_borrows(splits.join(", "))
+        split :: if nested.bindings == "" -> "({nested.args})" else -> "{{ {nested.bindings}({nested.args}) }}"
+        separator :: ", "
+        listed_names :: names.join(separator)
+        listed_wholes :: wholes.join(separator)
+        bindings = "{bindings}let ({listed_names}) = match {slot}.as_mut() {{ Some(__jet_whole) => ({listed_wholes}), None => {split} }}; "
+        bytes :: current.bytes()
+        rewritten := ""
+        end := 0
+        loop (index, borrow) in owned {
+            kept :: String.from_bytes(~(bytes[end..<borrow.start])) ?? ""
+            rewritten = "{rewritten}{kept}{names[index]}"
+            end = borrow.end
+        }
+        tail :: String.from_bytes(~(bytes[end..<bytes.len()])) ?? ""
+        current = "{rewritten}{tail}"
+    }
+    JetRustEmitPartialFieldSplit{bindings: bindings, args: current}
+}
+
+// MIRRust partial_field_borrows: every split owner field borrow in `text`
+// outside any brace block or closure, where it could sit under a condition or
+// another owner's arm.
+fn jet_rust_emit_partial_field_borrows(text: String) -> [JetRustEmitPartialFieldBorrow] Never! {
+    bytes :: text.bytes()
+    found := [JetRustEmitPartialFieldBorrow]{}
+    depth := 0
+    quoted := false
+    escaped := false
+    at := 0
+    loop at < bytes.len() {
+        code :: Int.from_u8(bytes[at])
+        if quoted {
+            quoted = escaped || code != 34
+            escaped = !escaped && code == 92
+        } else if code == 34 {
+            quoted = true
+        } else if code == 123 {
+            depth += 1
+        } else if code == 125 {
+            if depth > 0 -> depth -= 1
+        } else if code == 109 && depth == 0 {
+            if jet_rust_emit_partial_field_borrow(bytes, at) == .Val(borrow) {
+                if !jet_rust_emit_fold_inside_closure(bytes, at) {
+                    at = borrow.end
+                    &found.push(borrow)
+                    next
+                }
+            }
+        }
+        at += 1
+    }
+    found
+}
+
+// MIRRust partial_field_borrow: the split owner field borrow starting at byte
+// `at` of `bytes`, if any.
+fn jet_rust_emit_partial_field_borrow(bytes: [U8], at: Int) -> JetRustEmitPartialFieldBorrow? Never! {
+    if at > 0 && jet_rust_emit_identifier_byte(bytes[at - 1]) -> return None
+    if !jet_rust_emit_bytes_at(bytes, "match ".bytes(), at) -> return None
+    slot_start :: at + 6
+    slot_end := slot_start
+    loop slot_end < bytes.len() && jet_rust_emit_identifier_byte(bytes[slot_end]) -> slot_end += 1
+    if slot_end == slot_start -> return None
+    mutable := true
+    if !jet_rust_emit_bytes_at(bytes, ".as_mut()".bytes(), slot_end) {
+        if !jet_rust_emit_bytes_at(bytes, ".as_ref()".bytes(), slot_end) -> return None
+        mutable = false
+    }
+    whole_arm :: " {{ Some(__jet_whole) => ".bytes()
+    arms :: slot_end + 9
+    if !jet_rust_emit_bytes_at(bytes, whole_arm, arms) -> return None
+    open :: arms + 1
+    depth := 0
+    quoted := false
+    escaped := false
+    close := -1
+    index := open
+    loop index < bytes.len() && close < 0 {
+        code :: Int.from_u8(bytes[index])
+        if quoted {
+            quoted = escaped || code != 34
+            escaped = !escaped && code == 92
+        } else if code == 34 {
+            quoted = true
+        } else if code == 123 {
+            depth += 1
+        } else if code == 125 {
+            depth -= 1
+            if depth == 0 -> close = index
+        }
+        index += 1
+    }
+    if close < 0 -> return None
+    body_start :: arms + whole_arm.len()
+    split_arm :: ", None => ".bytes()
+    divider :: jet_rust_emit_fold_find(bytes, split_arm, body_start)
+    if divider < 0 || divider + split_arm.len() > close -> return None
+    split_start :: divider + split_arm.len()
+    split_end := close
+    loop split_end > split_start && Int.from_u8(bytes[split_end - 1]) == 32 -> split_end -= 1
+    slot :: String.from_bytes(~(bytes[slot_start..<slot_end])) ?? ""
+    whole :: String.from_bytes(~(bytes[body_start..<divider])) ?? ""
+    split :: String.from_bytes(~(bytes[split_start..<split_end])) ?? ""
+    Val(JetRustEmitPartialFieldBorrow{start: at, end: close + 1, slot: slot, mutable: mutable, whole: whole, split: split})
 }
 
 // MIRRust is_string_view_type: `View<str>`/`ViewMut<str>`, through tags.
@@ -472,7 +640,7 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
     if dispatch == .Prelude(call, dispatch_location) {
         route :: jet_rust_emit_prelude_row(&ctx, call) ?? return "unreachable!(\"missing Prelude route\")"
         symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
-        exact :: jet_rust_emit_exact_adapter(&ctx, None, symbol, [MIRCallArg]{})
+        exact :: jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, symbol)
         adapted :: exact != symbol
         if adapted {
             if jet_rust_emit_exact_int_binary(&ctx, function, op, left, right, dispatch_location) == .Val(direct) -> return direct
@@ -882,15 +1050,10 @@ fn jet_rust_emit_generic_call_args(ctx: &JetRustEmitContext, type_args: [MIRType
     "::<{rendered.join(", ")}>"
 }
 
-fn jet_rust_emit_exact_adapter_integer_args(ctx: JetRustEmitContext, function: MIRFunction?, args: [MIRCallArg], positions: [Int]) -> Bool Never! {
+fn jet_rust_emit_exact_adapter_integer_args(ctx: JetRustEmitContext, function: MIRFunction, args: [MIRCallArg], positions: [Int]) -> Bool Never! {
     loop position in positions {
-        if position < 0 || position >= args.len() {
-            if function == None -> next
-            return false
-        }
-        if function == .Val(checked_function) {
-            if !mir_type_is_integer(jet_rust_emit_value_type(ctx, checked_function, args[position].value)) -> return false
-        }
+        if position < 0 || position >= args.len() -> return false
+        if !mir_type_is_integer(jet_rust_emit_value_type(ctx, function, args[position].value)) -> return false
     }
     true
 }
@@ -902,44 +1065,53 @@ fn jet_rust_emit_adapter_symbol_is(symbol: String, root: String, name: String) -
     symbol == rooted || symbol == name
 }
 
-fn jet_rust_emit_exact_adapter(ctx: &JetRustEmitContext, function: MIRFunction?, symbol: String, args: [MIRCallArg]) -> String Never! {
-    root := ctx.config.root_prefix
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fraction_from_parts") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_fraction_from_owned_parts"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "JetDate::new") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1, 2}) -> return "{root}jet_local_date_owned"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "JetLocalTime::new") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1, 2}) -> return "{root}jet_local_time_owned"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "JetPeriod::new") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1, 2}) -> return "{root}jet_period_owned"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_abs") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_abs"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_add") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_add"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_sub") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_sub"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_mul") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_mul"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_bit_and") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_bit_and"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_bit_or") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_bit_or"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_bit_xor") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_bit_xor"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_neg") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_neg"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_not") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_not"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_div") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_div"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_rem") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_rem"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_div_euclid") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_div_euclid"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_rem_euclid") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_rem_euclid"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_floor_div") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_floor_div"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_mod") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_mod"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_pow") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_pow"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_shl") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_shl"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_shr") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_shr"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_checked_widen") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_checked_widen"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_try_from_checked") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_try_from_checked"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_checked_fixed") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_checked_fixed"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_numeric_int_bit_count") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_bit_count"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_inline_range_from_int") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_int_owned_inline_range"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_to_radix") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_int_owned_to_radix"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_from_radix") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{1}) -> return "{root}jet_std::jet_int_owned_from_radix"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_parse") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{}) -> return "{root}jet_std::jet_int_owned_parse"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_decimal_int") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_fmt_decimal_int_owned"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_grouped_int") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_fmt_grouped_int_owned"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_hex") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0, 1}) -> return "{root}jet_std::jet_fmt_hex_owned"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_bin") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_fmt_bin_owned"
-    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_oct") && jet_rust_emit_exact_adapter_integer_args(ctx, function, args, [Int]{0}) -> return "{root}jet_std::jet_fmt_oct_owned"
+// The owned-integer adapter a runtime symbol routes to, or the symbol itself.
+fn jet_rust_emit_exact_adapter_target(root: String, symbol: String) -> String Never! {
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fraction_from_parts") -> return "{root}jet_fraction_from_owned_parts"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "JetDate::new") -> return "{root}jet_local_date_owned"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "JetLocalTime::new") -> return "{root}jet_local_time_owned"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "JetPeriod::new") -> return "{root}jet_period_owned"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_abs") -> return "{root}jet_std::jet_int_owned_abs"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_add") -> return "{root}jet_std::jet_int_owned_add"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_sub") -> return "{root}jet_std::jet_int_owned_sub"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_mul") -> return "{root}jet_std::jet_int_owned_mul"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_bit_and") -> return "{root}jet_std::jet_int_owned_bit_and"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_bit_or") -> return "{root}jet_std::jet_int_owned_bit_or"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_bit_xor") -> return "{root}jet_std::jet_int_owned_bit_xor"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_neg") -> return "{root}jet_std::jet_int_owned_neg"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_not") -> return "{root}jet_std::jet_int_owned_not"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_div") -> return "{root}jet_std::jet_int_owned_div"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_rem") -> return "{root}jet_std::jet_int_owned_rem"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_div_euclid") -> return "{root}jet_std::jet_int_owned_div_euclid"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_rem_euclid") -> return "{root}jet_std::jet_int_owned_rem_euclid"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_floor_div") -> return "{root}jet_std::jet_int_owned_floor_div"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_mod") -> return "{root}jet_std::jet_int_owned_mod"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_pow") -> return "{root}jet_std::jet_int_owned_pow"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_shl") -> return "{root}jet_std::jet_int_owned_shl"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_shr") -> return "{root}jet_std::jet_int_owned_shr"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_checked_widen") -> return "{root}jet_std::jet_int_owned_checked_widen"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_try_from_checked") -> return "{root}jet_std::jet_int_owned_try_from_checked"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_checked_fixed") -> return "{root}jet_std::jet_int_owned_checked_fixed"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_numeric_int_bit_count") -> return "{root}jet_std::jet_int_owned_bit_count"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_inline_range_from_int") -> return "{root}jet_std::jet_int_owned_inline_range"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_to_radix") -> return "{root}jet_std::jet_int_owned_to_radix"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_from_radix") -> return "{root}jet_std::jet_int_owned_from_radix"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_std::jet_int_parse") -> return "{root}jet_std::jet_int_owned_parse"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_decimal_int") -> return "{root}jet_std::jet_fmt_decimal_int_owned"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_grouped_int") -> return "{root}jet_std::jet_fmt_grouped_int_owned"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_hex") -> return "{root}jet_std::jet_fmt_hex_owned"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_bin") -> return "{root}jet_std::jet_fmt_bin_owned"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fmt_oct") -> return "{root}jet_std::jet_fmt_oct_owned"
     ~symbol
+}
+
+// The adapter of a checked call: taken only when every adapted argument of
+// `function`'s call is an integer. `function` is read in place, so emitting a
+// call no longer copies its whole function to wrap it in an Option.
+fn jet_rust_emit_exact_adapter(ctx: &JetRustEmitContext, function: MIRFunction, symbol: String, args: [MIRCallArg]) -> String Never! {
+    target :: jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, symbol)
+    if target == symbol || !jet_rust_emit_exact_adapter_integer_args(ctx, function, args, jet_rust_emit_exact_adapter_positions(target)) -> return ~symbol
+    target
 }
 
 fn jet_rust_emit_exact_adapter_positions(target: String) -> [Int] Never! {
@@ -975,7 +1147,7 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MIRFunction, i
         return "unreachable!(\"Prelude call arity\")"
     }
     symbol :: jet_rust_emit_prelude_symbol(&ctx, id)
-    exact :: jet_rust_emit_exact_adapter(&ctx, Val(function), symbol, args)
+    exact :: jet_rust_emit_exact_adapter(&ctx, function, symbol, args)
     mask := route.signature.borrow_mask
     mask = jet_rust_emit_exact_adapter_mask(args, symbol, mask, exact)
     // MIRRust prelude_host_call: the Shared callback kernels (`jet_shared_read<F: FnOnce(&T) -> R>`, `jet_shared_edit<F: FnOnce(&mut T) -> R>`,
@@ -1986,7 +2158,7 @@ fn jet_rust_emit_core_callee_mask(ctx: &JetRustEmitContext, function: MIRFunctio
         mask = row.borrow_mask
     }
     source :: jet_rust_emit_core_symbol(&ctx, id)
-    target :: jet_rust_emit_exact_adapter(&ctx, Val(function), source, args)
+    target :: jet_rust_emit_exact_adapter(&ctx, function, source, args)
     jet_rust_emit_exact_adapter_mask(args, source, mask, target)
 }
 
@@ -2040,7 +2212,7 @@ fn jet_rust_emit_prelude_call_borrow_mask(ctx: &JetRustEmitContext, function: MI
     route :: jet_rust_emit_prelude_route(ctx, id, false) ?? return [Bool]{}
     if route.signature.borrow_mask.len() != args.len() -> return [Bool]{}
     symbol :: jet_rust_emit_prelude_symbol(&ctx, id)
-    exact :: jet_rust_emit_exact_adapter(&ctx, Val(function), symbol, args)
+    exact :: jet_rust_emit_exact_adapter(&ctx, function, symbol, args)
     mask := jet_rust_emit_exact_adapter_mask(args, symbol, route.signature.borrow_mask, exact)
     shared_symbols :: [String]{"jet_shared_read", "jet_shared_edit", "jet_shared_read_txn", "jet_shared_edit_txn", "jet_shared_capture_with", "jet_shared_capture_txn"}
     last :: args.len() - 1
@@ -2078,7 +2250,7 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
         .TraitMethod(method, trait_ref, receiver) -> jet_rust_emit_trait_method_call(&ctx, function, method, trait_ref, receiver, args, type_args)
         .Core(id) -> {
             source := jet_rust_emit_core_symbol(&ctx, id)
-            target := jet_rust_emit_exact_adapter(&ctx, Val(function), source, args)
+            target := jet_rust_emit_exact_adapter(&ctx, function, source, args)
             "{target}{generic}({rendered_args})"
         }
         .Prelude(id) -> jet_rust_emit_prelude_call(&ctx, function, id, args, type_args)
@@ -2377,7 +2549,8 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     aot_direct := false
     loop row in jet_rust_emit_core_rows(ctx, call) { if row.id == call -> aot_direct = row.aot_direct }
     if module_name == "core.math" && !aot_direct && source_math.contains(member) {
-        loop candidate in ctx.program.functions {
+        loop candidate_index in 0..<ctx.program.functions.len() {
+            candidate := ctx.program.functions[candidate_index]
             if candidate.module_name == module_name && candidate.name == member && candidate.form == MIRFunctionForm.TopLevel {
                 if candidate.id == function.id || candidate.params.len() != args.len() {
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core math call does not match its Jet source function", "source-routed core.math calls select another top-level function with the same arity", Val(function.span))
@@ -2402,7 +2575,7 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Core route borrow metadata does not match its arguments", "Core operation arguments must match the route Prelude signature exactly", Val(function.span))
     }
     source :: jet_rust_emit_core_symbol(&ctx, call)
-    target :: jet_rust_emit_exact_adapter(&ctx, Val(function), source, args)
+    target :: jet_rust_emit_exact_adapter(&ctx, function, source, args)
     mask :: jet_rust_emit_exact_adapter_mask(args, source, route_info.signature.borrow_mask, target)
     rendered :: if source != target -> jet_rust_emit_call_arguments(&ctx, function, args, mask) else -> jet_rust_emit_core_call_arguments(&ctx, function, module_name, member, source, args, mask, location)
     generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
@@ -3032,10 +3205,17 @@ fn jet_rust_emit_plain_payload_pattern(ctx: &JetRustEmitContext, owner: MIRTypeI
 }
 
 // MIRRust ref_payload_reference: the shared reference a reference binding's
-// write binds: the stable place it reads, or the payload borrowed in it.
+// write binds: the stable place it reads, or the payload borrowed in it
+// (through the move of an unwrapped payload).
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::ref_payload_reference
 fn jet_rust_emit_ref_payload_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
-    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return "unreachable!(\"MIR reference binding read is missing\")"
+    written :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return "unreachable!(\"MIR reference binding read is missing\")"
+    instruction := written
+    if written.operation == .Move(payload) {
+        instruction = jet_rust_emit_find_value_instruction(ctx, function, payload) ?? return "unreachable!(\"MIR reference binding read is missing\")"
+    }
+    // An element of an in-place loop borrows the walked list's row.
+    if instruction.operation == .LoopIterValue(_, cursor) -> return "{{ let (items, at) = *{jet_rust_emit_value_slot(cursor)}.as_ref().expect(\"MIR value\"); &items[at] }}"
     read := value
     if instruction.operation == {
         .EnumPayload(subject, _, _, _) | .OptionValue(subject) | .ResultValue(subject, _) -> read = subject
@@ -3413,7 +3593,7 @@ fn jet_rust_emit_numeric_conversion(ctx: &JetRustEmitContext, function: MIRFunct
         return "unreachable!(\"MIR numeric conversion parameters\")"
     }
     symbol :: jet_rust_emit_prelude_symbol(&ctx, route.id)
-    adapted :: if source.kind == MIRTypeKind.Int -> jet_rust_emit_exact_adapter(&ctx, None, symbol, [MIRCallArg]{}) else -> symbol
+    adapted :: if source.kind == MIRTypeKind.Int -> jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, symbol) else -> symbol
     adapter :: adapted != symbol
     input :: if adapter -> jet_rust_emit_value_reference(value, false) else -> jet_rust_emit_value_owned(ctx, function, value)
     args := [String]{}
@@ -3560,9 +3740,12 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MIRTypeID, val
 fn jet_rust_emit_global_symbol(ctx: &JetRustEmitContext, name: String) -> String Never! {
     if name == "transaction" -> return "{ctx.config.root_prefix}jet_transaction()"
     if name == "stm" -> return "{ctx.config.root_prefix}jet_stm::begin()"
+    // The scans below name only their row and locals, so they walk
+    // `ctx.program.constants` in place instead of copying every constant.
+    root := ctx.config.root_prefix
     loop constant in ctx.program.constants {
         if constant.name == name || constant.key == name {
-            path :: "{ctx.config.root_prefix}{jet_rust_emit_generated_path(constant.key)}"
+            path :: "{root}{jet_rust_emit_generated_path(constant.key)}"
             return if constant.is_storage -> "({path}).get()" else -> "{path}()"
         }
     }
@@ -3573,10 +3756,11 @@ fn jet_rust_emit_global_symbol(ctx: &JetRustEmitContext, name: String) -> String
 // of `name` stores in its value slot, when `name` is a shared constant.
 fn jet_rust_emit_shared_constant_accessor(ctx: &JetRustEmitContext, name: String) -> String? Never! {
     no_os :: jet_rust_emit_is_no_os(&ctx)
+    root := ctx.config.root_prefix
     loop constant in ctx.program.constants {
         if constant.name == name || constant.key == name {
             if !jet_rust_emit_shared_constant(no_os, constant) -> return None
-            return Val("{ctx.config.root_prefix}{jet_rust_emit_generated_path(constant.key)}_shared()")
+            return Val("{root}{jet_rust_emit_generated_path(constant.key)}_shared()")
         }
     }
     None
@@ -3593,8 +3777,9 @@ fn jet_rust_emit_shared_constant_value(ctx: &JetRustEmitContext, function: MIRFu
 // The persistent cell a static place names: the storage constant whose key the
 // checked persistent local carries.
 fn jet_rust_emit_static_path(ctx: &JetRustEmitContext, name: String) -> String Never! {
+    root := ctx.config.root_prefix
     loop constant in ctx.program.constants {
-        if constant.key == name && constant.is_storage -> return "{ctx.config.root_prefix}{jet_rust_emit_generated_path(constant.key)}"
+        if constant.key == name && constant.is_storage -> return "{root}{jet_rust_emit_generated_path(constant.key)}"
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR static place has no storage constant", "persistent places name exactly one checked storage constant", None)
     "{ctx.config.root_prefix}{jet_rust_emit_generated_path(name)}"
@@ -4734,7 +4919,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     // kernels take the call's source location for their
                     // division-by-zero stop.
                     source :: jet_rust_emit_prelude_symbol(&ctx, call)
-                    target :: jet_rust_emit_exact_adapter(&ctx, None, source, [MIRCallArg]{})
+                    target :: jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, source)
                     if !target.ends_with("jet_int_owned_div_euclid") && !target.ends_with("jet_int_owned_rem_euclid") -> return emitted
                     euclid_location :: location ?? panic("MIR exact Int Euclidean division is missing source location")
                     bytes :: emitted.bytes()
@@ -4855,6 +5040,12 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         }
         .LoopRangeAdvance(call, cursor) -> return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Write)
         .LoopIterInit(call, collection, step, by_value, source_kind) -> {
+            // MIRRust operation_expression: an in-place loop
+            // (ref_bindings.cursors) walks the list's place by
+            // row index; its element binds a reference to the row.
+            if result == .Val(cursor) {
+                if ctx.ref_bindings.cursors.get(cursor.value) == .Val(place) -> return "({jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)}, 0usize)"
+            }
             loc :: location ?? {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR iterator cursor is missing its instruction source location", "checked iterator cursors carry the location their host-range trap reports", Val(function.span))
                 return "unreachable!(\"MIR iterator cursor location\")"
@@ -4887,6 +5078,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             return jet_rust_emit_prelude_args_exact(&ctx, function, call, args)
         }
         .LoopIterHasNext(call, cursor) -> {
+            if ctx.ref_bindings.cursors.get(cursor.value) != None -> return "{{ let (items, at) = *{jet_rust_emit_value_slot(cursor)}.as_ref().expect(\"MIR value\"); at < items.len() }}"
             if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_has_next({jet_rust_emit_value_reference(cursor, false)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Read)
         }
@@ -4895,6 +5087,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Write)
         }
         .LoopIterAdvance(call, cursor) -> {
+            if ctx.ref_bindings.cursors.get(cursor.value) != None -> return "{{ {jet_rust_emit_value_slot(cursor)}.as_mut().expect(\"MIR value\").1 += 1; }}"
             if jet_rust_emit_byte_loop_cursor(ctx, function, cursor) -> return "jet_loop_iter_bytes_advance({jet_rust_emit_value_reference(cursor, true)})"
             return jet_rust_emit_prelude_cursor_call(&ctx, function, call, cursor, MIRAccess.Write)
         }

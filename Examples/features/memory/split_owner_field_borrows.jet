@@ -1,0 +1,45 @@
+// A record one of whose fields moves out is kept whole or as separate field
+// slots. One call that reads one field and edits a sibling field borrows both
+// from that one record, whether it is whole or split, and the edit stays.
+
+struct Bundle {
+    names: [String]
+    notes: [String]
+    label: String
+}
+
+struct Taken {
+    names: [String]
+}
+
+fn record(names: [String], marker: String, notes: &[String]) -> Bool {
+    &notes.push("{marker} {names.len()}")
+    names.len() > 1
+}
+
+// On the early path the record's last use moves one field out; the later
+// call still reads that field and edits its sibling in place.
+fn tally(early: Bool) -> Int {
+    bundle := Bundle{names: [String]{"x", "y", "z"}, notes: [String]{}, label: "tally"}
+    if early {
+        taken :: Taken{names: bundle.names}
+        return taken.names.len()
+    }
+    grew :: record(bundle.names, bundle.label, &bundle.notes)
+    if grew -> return bundle.notes.len() * 10 + bundle.names.len()
+    0
+}
+
+fn run() {
+    bundle := Bundle{names: [String]{"a", "b"}, notes: [String]{}, label: "first"}
+    whole :: record(bundle.names, "whole", &bundle.notes)
+    moved :: ^bundle.label
+    split :: record(bundle.names, moved, &bundle.notes)
+    bundle.label = "second"
+    &bundle.names.push("c")
+    again :: record(bundle.names, bundle.label, &bundle.notes)
+    print("{whole} {split} {again}")
+    loop note in bundle.notes -> print(note)
+    print("{bundle.label} {bundle.names.len()}")
+    print("tally {tally(true)} {tally(false)}")
+}

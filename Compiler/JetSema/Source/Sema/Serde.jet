@@ -22,7 +22,9 @@ fn sema_serde_named_leaf(name: String) -> String Never! {
 
 fn sema_serde_type_definition(environment: SemaScopeEnvironment, name: String) -> TTypeDef? {
     if environment.registration_graph == .Val(graph) {
-        resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
+        // A resolved type carries its canonical identity (`module::Name`),
+        // which the graph lookup resolves in its declaring module.
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
         row :: sema_scope_checked_type_row(environment, resolved.target_module_identity, resolved.symbol.name) ?? return None
         return Val(environment.checked_types[row])
     }

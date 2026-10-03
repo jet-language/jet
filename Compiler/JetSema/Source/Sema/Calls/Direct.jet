@@ -235,6 +235,10 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     unit :: Type.Named{name: "Unit"}
+    // The trace adds no effect: its stderr write is a known-pure call site, so
+    // pure (`-[]>`) and memoized functions keep their rows (Rust sema records
+    // no effect for `debug`).
+    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "debug", call.name_span, [EffectRowEntry]{}, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     write :: sema_tir_expr(unit, TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, data_plan: None, fallibility: TFailureCarrier.Infallible}, call.name_span)
     body :: [TStmt]{
         TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: traced, gc_promotion: None, gc_transferred: false, span: call.name_span},
@@ -500,6 +504,7 @@ pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: 
     alias := parts[0]
     member := parts[1]
     module_name :: sema_call_core_import_module(environment, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if sema_call_core_variadic_print(environment, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     expected_type_arg_count := 0
     if core_call_typed_signature(module_name, member, call.args.len()) == {
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
@@ -732,7 +737,7 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
     loop index in 0..<args.len() {
         slot :: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if slot >= 0 && slot < params.len() {
-            if sema_call_parameter_type(params[slot]) == .Val(required) && !sema_call_inference_needs_context(args[index].expr) {
+            if sema_call_argument_parameter_type(params[slot], args[index]) == .Val(required) && !sema_call_inference_needs_context(args[index].expr) {
                 probe_diagnostics := [Diagnostic]{}
                 value :: sema_probe_expression(args[index].expr, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics)
                 if value == .Val(checked) {
@@ -850,7 +855,10 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     result_type :: sema_call_resolved_type(result_type_raw, environment)
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
-    if sema_contract_function_for_symbol(environment, candidate.symbol.id) == .Val(contract) {
+    // The callee's declaration is copied only when it has `pre` clauses.
+    contract_callee := Func?{None}
+    if sema_contract_function_has_pre(environment, candidate.symbol.id) -> contract_callee = sema_contract_function_for_symbol(environment, candidate.symbol.id)
+    if contract_callee == .Val(contract) {
         slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], args[source_index])
         checked_contract :: sema_contract_check_call(contract, &lowered, slots, call.name_span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         contract_bindings = checked_contract.bindings

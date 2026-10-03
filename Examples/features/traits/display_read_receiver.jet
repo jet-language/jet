@@ -1,0 +1,31 @@
+struct Label {
+    text: String
+}
+
+impl Label.Display {
+    fn display(self) -> String { "label:{self.text}" }
+}
+
+struct Envelope {
+    text: String
+    impl Display {
+        fn display(self) -> String { "envelope:{self.text}" }
+    }
+}
+
+fn show(value: Label) {
+    print(value)
+    print("interpolation:{value}")
+    print(value.display())
+    print("retained:{value.text}")
+}
+
+fn run() {
+    value :: Label{text: "kept"}
+    show(value)
+    print("after:{value.text}")
+    nested :: Envelope{text: "kept"}
+    print("{nested}")
+    print(nested.display())
+    print("after:{nested.text}")
+}

@@ -1801,15 +1801,17 @@ fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owne
     inferred
 }
 
-pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffectGraphResult {
+pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffectGraphResult {
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
     results := [SemaEffectModuleResult]{}
-    source_indices :: loop module_row in inputs -> sema_effect_source_index(module_row.sources)
+    source_indices :: loop module_index in 0..<inputs.len() -> sema_effect_source_index(inputs[module_index].sources)
     node_by_key := [String:Int]{}
-    loop module_row in inputs -> &results.push(SemaEffectModuleResult{module_identity: module_row.module_identity, functions: module_row.functions, diagnostics: [Diagnostic]{}, complete: true})
-    loop (module_index, module_row) in inputs {
-        loop function in module_row.functions {
+    loop module_index in 0..<inputs.len() -> &results.push(SemaEffectModuleResult{module_identity: inputs[module_index].module_identity, functions: [TFunc]{}, diagnostics: [Diagnostic]{}, complete: true})
+    loop module_index in 0..<inputs.len() {
+        module_row :: inputs[module_index]
+        loop function_index in 0..<module_row.functions.len() {
+            function :: module_row.functions[function_index]
             source := sema_effect_source_for(function, module_row.sources, source_indices[module_index])
             function_diagnostics := [Diagnostic]{}
             if node_by_key.get(function.key) == None -> node_by_key[function.key] = nodes.len()
@@ -1817,10 +1819,12 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
             sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, function_diagnostics)
         }
     }
-    fact_indices :: loop module_row in inputs -> sema_effect_call_index(module_row.call_facts, node_by_key)
+    fact_indices :: loop module_index in 0..<inputs.len() -> sema_effect_call_index(inputs[module_index].call_facts, node_by_key)
 
-    loop (module_index, module_row) in inputs {
-        loop function in module_row.functions {
+    loop module_index in 0..<inputs.len() {
+        module_row :: inputs[module_index]
+        loop function_index in 0..<module_row.functions.len() {
+            function :: module_row.functions[function_index]
             node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
             function_diagnostics := [Diagnostic]{}
             sema_effect_collect_function(&nodes, node_index, function, fact_indices[module_index], &function_diagnostics)
@@ -1845,7 +1849,8 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
         }
         sema_effect_publish_diagnostics(&diagnostics, &results, nodes[node_index].module_index, inputs[nodes[node_index].module_index].source_segments, function_diagnostics)
     }
-    loop (module_index, module_row) in inputs {
+    loop module_index in 0..<inputs.len() {
+        module_row :: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
         sema_effect_check_trait_bounds(module_row, source_indices[module_index], nodes, node_by_key, solved, &bound_diagnostics)
         sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, bound_diagnostics)
@@ -1855,9 +1860,11 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
         sema_effect_check_memory_denials(nodes, node_by_key, node_index, &memory_diagnostics)
         sema_effect_publish_diagnostics(&diagnostics, &results, nodes[node_index].module_index, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
     }
-    loop (module_index, module_row) in inputs {
+    loop module_index in 0..<inputs.len() {
+        module_row :: inputs[module_index]
         region_diagnostics := [Diagnostic]{}
-        loop function in module_row.functions {
+        loop function_index in 0..<module_row.functions.len() {
+            function :: module_row.functions[function_index]
             source :: sema_effect_source_for(function, module_row.sources, source_indices[module_index]) ?? next
             if source.fx_regions.len() == 0 -> next
             node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
@@ -1869,7 +1876,8 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
         }
         sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, region_diagnostics)
     }
-    loop (module_index, module_row) in inputs {
+    loop module_index in 0..<inputs.len() {
+        module_row :: inputs[module_index]
         discarded := [Diagnostic]{}
         loop fact in module_row.call_facts {
             if !fact.discarded -> next
@@ -1880,14 +1888,14 @@ pub fn sema_effects_check_modules(inputs: [SemaEffectModuleInput]) -> SemaEffect
         }
         sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, discarded)
     }
-    loop module_index in 0..<inputs.len() {
-        module_row := inputs[module_index]
-        functions := module_row.functions
-        loop function_index in 0..<functions.len() {
-            node_index :: sema_effect_node_index(node_by_key, functions[function_index].key) ?? next
-            functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
+    // All source reads are finished. Transfer each owned list into its result
+    // before stamping solved effects; neither side needs a second list.
+    loop module_index in 0..<results.len() {
+        results[module_index].functions = ^inputs[module_index].functions
+        loop function_index in 0..<results[module_index].functions.len() {
+            node_index :: sema_effect_node_index(node_by_key, results[module_index].functions[function_index].key) ?? next
+            results[module_index].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
-        results[module_index].functions = functions
         results[module_index].complete = !sema_has_error_since(diagnostics, 0)
     }
     complete :: !sema_has_error_since(diagnostics, 0)

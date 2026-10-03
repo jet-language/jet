@@ -76,7 +76,6 @@ use jet_foundation.[
     MIRTypedHeadKind,
     MIRUnaryOp,
     MIRUnionCoercion,
-    MIRUnitFormat,
     MIRValueID,
     Span,
     SymbolID,
@@ -206,28 +205,109 @@ fn jet_codegen_lower_binary(op: TBinaryOp) -> MIRBinaryOp Never! {
     }
 }
 
-fn jet_codegen_lower_string_format(format: TStrFormat) -> MIRStringFormat Never! {
-    if format == {
-        .Display -> MIRStringFormat.Display
-        .Debug -> MIRStringFormat.Debug
-        .Pretty -> MIRStringFormat.Pretty
-        .Fixed(digits) -> MIRStringFormat.Fixed{digits: digits}
-        .Grouped(digits) -> MIRStringFormat.Grouped{digits: digits}
-        .Hex(digits) -> MIRStringFormat.Hex{digits: digits}
-        .Pad(width, fill) -> MIRStringFormat.Pad{width: width, fill: fill}
-        .PadLeft(width, fill) -> MIRStringFormat.PadLeft{width: width, fill: fill}
-        .Sci(digits) -> MIRStringFormat.Sci{digits: digits}
-        .Percent(digits) -> MIRStringFormat.Percent{digits: digits}
-        .Bin -> MIRStringFormat.Bin
-        .Oct -> MIRStringFormat.Oct
-        .Unit(unit_format) -> {
-            if unit_format == {
-                .Symbol -> MIRStringFormat.Unit{format: MIRUnitFormat.Symbol}
-                .Name -> MIRStringFormat.Unit{format: MIRUnitFormat.Name}
-                else -> MIRStringFormat.Unit{format: MIRUnitFormat.Bare}
-            }
-        }
+// Rust: crates/jet-codegen/src/Codegen/TIR/routes.rs::string_format_route
+// (`is_int`): an integer-valued selector takes the integer kernel.
+fn jet_codegen_string_format_integer(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .IntN(_, _) -> true
+        .InlineRange(base, _, _) -> jet_codegen_string_format_integer(base)
+        .Named(name) -> name == "Int"
+        .Tagged(_, inner) -> jet_codegen_string_format_integer(inner)
+        else -> false
     }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_expr
+// (`TExprKind::StrLit`): a selector is lowered to the String it renders before
+// `BuildString`, so every interpolated part is a displayed value. Display,
+// Debug and unit selectors take the direct render; every other selector calls
+// its `core.text.fmt` kernel with the selector's constants.
+fn jet_codegen_lower_string_format_value(builder: &JetCodegenBuilder, value: MIRValueID, value_type: Type, format: TStrFormat, span: Span) -> MIRValueID Never! {
+    if format == {
+        .Display -> return jet_codegen_lower_direct_render(&builder, value, value_type, "Display", "display", "jet_fmt_display", span)
+        .Debug -> return jet_codegen_lower_direct_render(&builder, value, value_type, "Debug", "debug", "jet_fmt_debug", span)
+        .Unit(_) -> {
+            // Rust routes.rs::quantity_format_route.
+            call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.text.fmt", "quantity", "jet_fmt_quantity", 1, [Bool]{false}, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
+            return jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}, type_args: [MIRType]{}})
+        }
+        else -> {}
+    }
+    integer :: jet_codegen_string_format_integer(value_type)
+    member := ""
+    symbol := ""
+    digits := Int?{None}
+    pad_width := Int?{None}
+    pad_fill := ""
+    if format == {
+        .Pretty -> {
+            member = "pretty"
+            symbol = "jet_fmt_pretty"
+        }
+        .Fixed(count) -> {
+            member = "fixed"
+            symbol = if integer -> "jet_fmt_decimal_int" else -> "jet_fmt_decimal"
+            digits = Val(count)
+        }
+        .Grouped(count) -> {
+            member = "grouped"
+            symbol = if integer -> "jet_fmt_grouped_int" else -> "jet_fmt_grouped"
+            digits = Val(count)
+        }
+        .Hex(count) -> {
+            member = "hex"
+            symbol = if integer -> "jet_fmt_hex" else -> "jet_fmt_hex_decimal"
+            digits = Val(count)
+        }
+        .Sci(count) -> {
+            member = "sci"
+            symbol = "jet_fmt_sci"
+            digits = Val(count)
+        }
+        .Percent(count) -> {
+            member = "percent"
+            symbol = "jet_fmt_percent"
+            digits = Val(count)
+        }
+        .Pad(width, fill) -> {
+            member = "pad"
+            symbol = "jet_fmt_pad"
+            pad_width = Val(width)
+            pad_fill = fill
+        }
+        .PadLeft(width, fill) -> {
+            member = "pad_left"
+            symbol = "jet_fmt_pad_left"
+            pad_width = Val(width)
+            pad_fill = fill
+        }
+        .Bin -> {
+            member = "bin"
+            symbol = if integer -> "jet_fmt_bin" else -> "jet_fmt_bin_decimal"
+        }
+        .Oct -> {
+            member = "oct"
+            symbol = if integer -> "jet_fmt_oct" else -> "jet_fmt_oct_decimal"
+        }
+        else -> panic("checked string selector has no direct render")
+    }
+    borrow_mask := [Bool]{}
+    args := [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}
+    if digits == .Val(count) {
+        borrow_mask = [Bool]{integer, false}
+        constant := jet_codegen_emit_value(&builder, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: count, width: None, spelling: None}})
+        &args.push(jet_codegen_numeric_call_arg(constant, span))
+    } else if pad_width == .Val(width_value) {
+        borrow_mask = [Bool]{true, false, true}
+        width := jet_codegen_emit_value(&builder, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: width_value, width: None, spelling: None}})
+        fill := jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: pad_fill}})
+        &args.push(jet_codegen_numeric_call_arg(width, span))
+        &args.push(jet_codegen_numeric_call_arg(fill, span))
+    } else {
+        borrow_mask = [Bool]{true}
+    }
+    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.text.fmt", member, symbol, borrow_mask.len(), borrow_mask, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
+    jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
 }
 
 fn jet_codegen_exact_int_type(ty: Type) -> Bool Never! {
@@ -1639,7 +1719,9 @@ fn jet_codegen_lower_string_part(builder: &JetCodegenBuilder, part: TStrPart) ->
         .Literal(text) -> MIRStringPart{kind: MIRStringPartKind.Literal{text: text}}
         .Interpolation(value, format) -> {
             lowered := jet_codegen_lower_expr(&builder, value)
-            MIRStringPart{kind: MIRStringPartKind.Interpolation{value: lowered, format: jet_codegen_lower_string_format(format)}}
+            if format == .Display -> return MIRStringPart{kind: MIRStringPartKind.Interpolation{value: lowered, format: MIRStringFormat.Display}}
+            shown := jet_codegen_lower_string_format_value(&builder, lowered, value.ty, format, value.span)
+            MIRStringPart{kind: MIRStringPartKind.Interpolation{value: shown, format: MIRStringFormat.Display}}
         }
     }
 }
@@ -2097,13 +2179,15 @@ fn jet_codegen_lower_enum_slot(builder: &JetCodegenBuilder, argument: TEnumArg, 
 }
 
 fn jet_codegen_lower_enum_constructor(builder: &JetCodegenBuilder, expression: TExpr, owner: SymbolID, variant: SymbolID, payload: TEnumPayload) -> MIRValueID {
-    loop semantic_module in builder.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key != owner.key -> next
+    loop module_index in 0..<builder.modules.len() {
+        loop nominal_index in 0..<builder.modules[module_index].nominals.len() {
+            if builder.modules[module_index].nominals[nominal_index].symbol.id.key != owner.key -> next
+            // Only the matched owner is needed while lowering mutates builder.
+            nominal := builder.modules[module_index].nominals[nominal_index]
             loop candidate in nominal.variants {
                 if candidate.symbol.id.key != variant.key -> next
                 definition := TTypeDef?{None}
-                loop declared in semantic_module.declarations.type_defs {
+                loop declared in builder.modules[module_index].declarations.type_defs {
                     if declared.name == nominal.symbol.name -> definition = Val(declared)
                 }
                 declared :: definition ?? panic("checked enum constructor has no type declaration")
@@ -4277,7 +4361,10 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, owner_type: T
     panic("checked host projection nominal disappeared from Codegen input")
 }
 
-fn jet_codegen_direct_display_function(builder: JetCodegenBuilder, value_type: Type) -> TFunc? {
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_direct_string_format
+// (`{T}::{trait}::{member}`): the user's checked render method for the value's
+// nominal type, when it declares one.
+fn jet_codegen_direct_render_function(builder: JetCodegenBuilder, value_type: Type, trait_name: String, member: String) -> TFunc? {
     untagged_type := jet_codegen_unwrap_pattern_tags(value_type)
     value_name := ""
     if untagged_type == {
@@ -4291,17 +4378,17 @@ fn jet_codegen_direct_display_function(builder: JetCodegenBuilder, value_type: T
     value_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, value_name, builder.generic_type_names)
     nominal_identity :: value_identity ?? return None
     selected := TFunc?{None}
-    row := builder.function_index.first_by_name.get("display") ?? -1
+    row := builder.function_index.first_by_name.get(member) ?? -1
     loop row >= 0 {
         function :: builder.function_index.rows[row]
         row = builder.function_index.next_by_name[row]
         if function.kind == {
             .TraitMethod(_, convention, owner, trait_symbol, _) -> {
-                if convention == None || jet_codegen_symbol_name(builder, trait_symbol) != "Display" -> next
+                if convention == None || jet_codegen_symbol_name(builder, trait_symbol) != trait_name -> next
                 owner_name :: jet_codegen_type_head_name(owner) ?? next
                 owner_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
                 if owner_identity == None || (owner_identity ?? nominal_identity).key != nominal_identity.key -> next
-                if selected != None -> panic("checked Display method for a type is ambiguous")
+                if selected != None -> panic("checked {trait_name} method for a type is ambiguous")
                 selected = Val(function)
             }
             else -> {}
@@ -4311,15 +4398,52 @@ fn jet_codegen_direct_display_function(builder: JetCodegenBuilder, value_type: T
 }
 
 fn jet_codegen_lower_direct_display(builder: &JetCodegenBuilder, value: MIRValueID, value_type: Type, span: Span) -> MIRValueID Never! {
-    direct := jet_codegen_direct_display_function(builder, value_type)
+    jet_codegen_lower_direct_render(&builder, value, value_type, "Display", "display", "jet_fmt_display", span)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_direct_string_format
+// A union renders the member it holds (D-UNIONTYPE1=A,
+// lower_union_string_format); a nominal with its own render method calls it;
+// every other value calls the `core.text.fmt` kernel.
+fn jet_codegen_lower_direct_render(builder: &JetCodegenBuilder, value: MIRValueID, value_type: Type, trait_name: String, member: String, symbol: String, span: Span) -> MIRValueID Never! {
+    if jet_codegen_unwrap_pattern_tags(value_type) == .Union(members) -> return jet_codegen_lower_union_render(&builder, value, value_type, members, trait_name, member, symbol, span)
+    direct := jet_codegen_direct_render_function(builder, value_type, trait_name, member)
     if direct != None {
-        function :: direct ?? panic("checked Display method disappeared")
+        function :: direct ?? panic("checked {trait_name} method disappeared")
         return jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Call{callee: MIRCallee.User{function: jet_codegen_function_id(function)}, args: [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}, type_args: [MIRType]{}})
     }
-    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.text.fmt", "display", "jet_fmt_display", 1, [Bool]{true}, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
+    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.text.fmt", member, symbol, 1, [Bool]{true}, None, TFailureCarrier.Infallible, MIRPreludeABI.Value)
     args := [MIRCallArg]{jet_codegen_numeric_call_arg(value, span)}
     jet_codegen_apply_host_route_access(builder, &args, [Bool]{true})
     jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: args, type_args: [MIRType]{}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_union_string_format
+// Branches on the member tag and renders that member with its own render;
+// the last member needs no test because the union is closed.
+fn jet_codegen_lower_union_render(builder: &JetCodegenBuilder, value: MIRValueID, value_type: Type, members: [Type], trait_name: String, member: String, symbol: String, span: Span) -> MIRValueID Never! {
+    owner :: jet_codegen_lower_type_for_function(jet_codegen_unwrap_pattern_tags(value_type), builder).identity ?? panic("checked union type has no MIR identity")
+    join := jet_codegen_new_block(&builder, span, "union-format-join")
+    incoming := [MIRPhiIncoming]{}
+    loop (index, member_type) in members {
+        variant :: jet_codegen_union_member_tag(member_type)
+        next_block := MIRBlockID?{None}
+        if index + 1 < members.len() {
+            test := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.EnumIs{subject: value, owner: owner, variant: variant})
+            arm := jet_codegen_new_block(&builder, span, "union-format-arm")
+            following := jet_codegen_new_block(&builder, span, "union-format-next")
+            jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: test, then_target: arm, else_target: following})
+            jet_codegen_switch_block(&builder, arm)
+            next_block = Val(following)
+        }
+        payload := jet_codegen_emit_value(&builder, span, member_type, MIROperation.EnumPayload{subject: value, owner: owner, variant: variant, index: 0})
+        rendered := jet_codegen_lower_direct_render(&builder, payload, member_type, trait_name, member, symbol, span)
+        &incoming.push(MIRPhiIncoming{block: builder.current, value: rendered})
+        jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join})
+        if next_block == .Val(following) -> jet_codegen_switch_block(&builder, following)
+    }
+    jet_codegen_switch_block(&builder, join)
+    jet_codegen_emit_value(&builder, span, Type.String, MIROperation.Phi{incoming: incoming})
 }
 
 fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? {

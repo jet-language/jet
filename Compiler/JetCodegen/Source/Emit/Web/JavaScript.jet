@@ -251,7 +251,10 @@ fn jet_web_emit_js_app(ctx: &JetWebEmitContext) -> String {
     }
     jet_web_emit_module_registry(&ctx, &lines)
     jet_web_emit_wasm_export_bridges(&ctx, &lines)
-    loop function in ctx.functions -> jet_web_emit_js_function(&ctx, function, &lines)
+    loop function_index in 0..<ctx.functions.len() {
+        function := ctx.functions[function_index]
+        jet_web_emit_js_function(&ctx, function, &lines)
+    }
     jet_web_emit_js_entry(&ctx, &lines)
     lines.join("\n")
 }

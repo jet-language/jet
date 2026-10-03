@@ -529,7 +529,12 @@ fn sema_compiler_index_fact_registry(registration: SemaRegistrationGraph) -> TCo
         })
     }
     all_items := [Item]{}
-    loop registration_module in registration.modules -> &all_items.extend(registration_module.program.items)
+    loop registration_module in registration.modules {
+        loop item_index in 0..<registration_module.program.items.len() {
+            item :: registration_module.program.items[item_index]
+            &all_items.push(item)
+        }
+    }
     loop fact in sema_state_graph_facts(all_items) {
         members := [String]{}
         loop node in fact.states -> &members.push(node.name)

@@ -53,6 +53,10 @@ pub const RESERVED_TYPES: &[&str] = &[
     "Cell",
     "CellReadGuard",
     "CellEditGuard",
+    // #4432: `Unit` is the built-in no-information type (`-> Unit`,
+    // `Result<Unit, E>`); the compiler carries it as `Type::Named("Unit")`, so
+    // a user type of that name would be indistinguishable from it.
+    Syntax::INTERNAL_UNIT_TYPE,
     // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
     // `Queue`) — `View` is already a widely-used user type name across the
     // jetpack UI component kit (Examples/features/ui/*.jet, crates/jet-driver/

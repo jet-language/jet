@@ -12,6 +12,7 @@ use jet_foundation.[
     MIRFunctionID,
     MIRGenericParam,
     MIRNominalRef,
+    MIRPlaceID,
     MIRPreludeCall,
     MIRPreludeCallID,
     MIRProgram,
@@ -239,14 +240,28 @@ fn jet_rust_emit_empty_move_facts() -> JetRustEmitMoveFacts Never! {
 
 // MIRRust RefBindings (#4318): binding locals stored as a shared reference to
 // the value they bind, keyed by local id value, and the reads whose only use
-// binds one of them (their write borrows in place; they have no slot).
+// binds one of them (their write borrows in place; they have no slot). Read
+// loops that walk their list in place map their cursor to the walked list
+// place; the collection values they walk have no slot.
 pub struct JetRustEmitRefBindings {
     pub locals: [U64:Bool]
     pub payloads: [U64:Bool]
+    pub cursors: [U64:MIRPlaceID]{[U64:MIRPlaceID]{}}
+    pub collections: [U64:Bool]{[U64:Bool]{}}
 }
 
 fn jet_rust_emit_empty_ref_bindings() -> JetRustEmitRefBindings Never! {
     JetRustEmitRefBindings{locals: [U64:Bool]{}, payloads: [U64:Bool]{}}
+}
+
+// MIRRust borrowed_loop_candidates: one read loop that may walk its list in
+// place: its cursor, the collection it walks, the list place, and the
+// reference binding that place is rooted at, if any.
+struct JetRustEmitLoopCandidate {
+    cursor: MIRValueID
+    collection: MIRValueID
+    place: MIRPlaceID
+    root: MIRLocalID?
 }
 
 // One binding write of a reference binding candidate: the bound read and the
@@ -287,6 +302,13 @@ pub struct JetRustEmitBodyIndex {
     pub write_slots: [U64:Int]{[U64:Int]{}}
     pub local_writes: [[JetRustEmitUse]]{[[JetRustEmitUse]]{}}
     pub escaped_locals: [U64:Bool]{[U64:Bool]{}}
+    // MIRRust parameter_writes / escaped_parameters: per parameter index, the
+    // instructions that may change one of its places, with the place each
+    // changes, and the parameters place-based tracking cannot follow or a
+    // drop action releases a place of.
+    pub parameter_write_slots: [Int:Int]{[Int:Int]{}}
+    pub parameter_writes: [[JetRustEmitPlaceWrite]]{[[JetRustEmitPlaceWrite]]{}}
+    pub escaped_parameters: [Int:Bool]{[Int:Bool]{}}
     // Temporary values whose own slot some instruction reads through a
     // projecting place (jet_rust_emit_inspected_only).
     pub slot_read_values: [U64:Bool]{[U64:Bool]{}}
@@ -312,6 +334,13 @@ pub struct JetRustEmitBodyIndex {
 pub struct JetRustEmitUse {
     pub block: Int
     pub instruction: Int
+}
+
+// One instruction that may change a parameter place, and that place.
+pub struct JetRustEmitPlaceWrite {
+    pub block: Int
+    pub instruction: Int
+    pub place: MIRPlaceID
 }
 
 fn jet_rust_emit_empty_body_index() -> JetRustEmitBodyIndex Never! {
@@ -806,6 +835,9 @@ fn jet_rust_emit_compiler_trait_symbol(name: String) -> String Never! {
     }
 }
 
+// The context owns its MIR snapshot; the public emission caller retains the
+// checked program for its compile result. Do not copy that snapshot again
+// during item traversal or metadata collection.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::new
 fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetRustEmitContext Never! {
     functions := [String:String]{}
@@ -971,7 +1003,8 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         return ctx
     }
 
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
         key :: jet_rust_emit_id_key(function.id.value)
         if ctx.function_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR function identity is duplicated", "each checked function must have one stable source-emission symbol", Val(function.span))
@@ -1086,7 +1119,8 @@ fn jet_rust_emit_type_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTypeMeta
 
 fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCallableMetadata] Never! {
     out := [JetRustEmitCallableMetadata]{}
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
         if !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
         top_level :: if function.form == {
             .TopLevel -> true
@@ -1220,17 +1254,16 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
     out
 }
 
-fn jet_rust_emit_result(ctx: JetRustEmitContext, source: String) -> JetRustEmitResult Never! {
+fn jet_rust_emit_result(ctx: &JetRustEmitContext, source: String) -> JetRustEmitResult Never! {
     if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
-    state := ctx
     bytes :: source.bytes().len()
-    type_metadata :: jet_rust_emit_type_metadata(&state)
-    callable_metadata :: jet_rust_emit_callable_metadata(&state)
-    field_metadata :: jet_rust_emit_field_metadata(&state)
-    variant_metadata :: jet_rust_emit_variant_metadata(&state)
-    trait_metadata :: jet_rust_emit_trait_metadata(&state)
-    trait_method_metadata :: jet_rust_emit_trait_method_metadata(&state)
-    if state.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
+    type_metadata :: jet_rust_emit_type_metadata(&ctx)
+    callable_metadata :: jet_rust_emit_callable_metadata(&ctx)
+    field_metadata :: jet_rust_emit_field_metadata(&ctx)
+    variant_metadata :: jet_rust_emit_variant_metadata(&ctx)
+    trait_metadata :: jet_rust_emit_trait_metadata(&ctx)
+    trait_method_metadata :: jet_rust_emit_trait_method_metadata(&ctx)
+    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
     manifest :: JetRustEmitManifest{
         schema_version: ctx.program.schema_version,
         target: ctx.config.target,

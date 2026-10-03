@@ -1826,8 +1826,123 @@ fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span
 }
 
 
+// Canonical value equality: a byte string equals the U8 list with the same
+// items, and exact integers compare by value across Int and BigInt carriers.
+// Rust: crates/jet-codegen/src/Codegen/MIREval.rs::mir_values_equal
 fn jet_eval_value_equal(left: TComptimeValue, right: TComptimeValue) -> Bool Never! {
+    if left == .Bytes(left_bytes) {
+        if right == .Bytes(right_bytes) -> return left_bytes == right_bytes
+        if right == .List(right_values) -> return jet_eval_bytes_equal_list(left_bytes, right_values)
+    }
+    if left == .List(left_values) {
+        if right == .Bytes(right_bytes) -> return jet_eval_bytes_equal_list(right_bytes, left_values)
+    }
+    if left == .BigInt(left_decimal) {
+        if right == .BigInt(right_decimal) -> return left_decimal == right_decimal
+        if right == .Int(right_number) -> return left_decimal == "{right_number}"
+    }
+    if left == .Int(left_number) {
+        if right == .BigInt(right_decimal) -> return "{left_number}" == right_decimal
+    }
     left == right
+}
+
+fn jet_eval_bytes_equal_list(bytes: [U8], values: [TComptimeValue]) -> Bool Never! {
+    if bytes.len() != values.len() -> return false
+    loop index in 0..<bytes.len() {
+        if values[index] != (TComptimeValue.Int{value: Int.from_u8(bytes[index])}) -> return false
+    }
+    true
+}
+
+// `[K:V]` iterates in key order on every tier, so a new interpreter entry
+// lands at its sorted position: before the first key that is not less.
+// Rust: crates/jet-codegen/src/Codegen/MIREval.rs::insert_map_entry
+fn jet_eval_insert_map_entry(entries: [TComptimeMapEntry], key: TComptimeKey, value: TComptimeValue) -> [TComptimeMapEntry] Never! {
+    output := [TComptimeMapEntry]{}
+    placed := false
+    loop entry in entries {
+        if !placed && jet_eval_key_compare(entry.key, key) >= 0 {
+            &output.push(TComptimeMapEntry{key: key, value: value})
+            placed = true
+        }
+        &output.push(entry)
+    }
+    if !placed -> &output.push(TComptimeMapEntry{key: key, value: value})
+    output
+}
+
+// The total key order: variant rank (Int, String, Bool, Char, Tuple, Struct,
+// Enum), then payload. Rust: the derived `Ord` of MIR.rs::MirConstKey.
+fn jet_eval_key_compare(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
+    rank_order :: jet_eval_int_order(jet_eval_key_rank(left), jet_eval_key_rank(right))
+    if rank_order != 0 -> return rank_order
+    if left == .Int(left_number) {
+        if right == .Int(right_number) -> return jet_eval_int_order(left_number, right_number)
+    }
+    if left == .String(left_text) {
+        if right == .String(right_text) -> return jet_eval_string_order(left_text, right_text)
+    }
+    if left == .Bool(left_flag) {
+        if right == .Bool(right_flag) -> return jet_eval_int_order(if left_flag -> 1 else -> 0, if right_flag -> 1 else -> 0)
+    }
+    if left == .Char(left_code) {
+        if right == .Char(right_code) -> return jet_eval_int_order(left_code, right_code)
+    }
+    if left == .Tuple(left_fields) {
+        if right == .Tuple(right_fields) -> return jet_eval_key_fields_compare(left_fields, right_fields)
+    }
+    if left == .Struct(left_name, left_fields) {
+        if right == .Struct(right_name, right_fields) {
+            name_order :: jet_eval_string_order(left_name, right_name)
+            if name_order != 0 -> return name_order
+            return jet_eval_key_fields_compare(left_fields, right_fields)
+        }
+    }
+    if left == .Enum(left_name, left_variant) {
+        if right == .Enum(right_name, right_variant) {
+            name_order :: jet_eval_string_order(left_name, right_name)
+            if name_order != 0 -> return name_order
+            return jet_eval_string_order(left_variant, right_variant)
+        }
+    }
+    0
+}
+
+fn jet_eval_key_rank(key: TComptimeKey) -> Int Never! {
+    if key == {
+        .Int(_) -> 0
+        .String(_) -> 1
+        .Bool(_) -> 2
+        .Char(_) -> 3
+        .Tuple(_) -> 4
+        .Struct(_, _) -> 5
+        .Enum(_, _) -> 6
+    }
+}
+
+fn jet_eval_key_fields_compare(left: [TComptimeKeyField], right: [TComptimeKeyField]) -> Int Never! {
+    loop index in 0..<left.len() {
+        if index >= right.len() -> return 1
+        name_order :: jet_eval_string_order(left[index].name, right[index].name)
+        if name_order != 0 -> return name_order
+        key_order :: jet_eval_key_compare(left[index].key, right[index].key)
+        if key_order != 0 -> return key_order
+    }
+    if left.len() < right.len() -> return -1
+    0
+}
+
+fn jet_eval_int_order(left: Int, right: Int) -> Int Never! {
+    if left < right -> return -1
+    if left > right -> return 1
+    0
+}
+
+fn jet_eval_string_order(left: String, right: String) -> Int Never! {
+    if left < right -> return -1
+    if left > right -> return 1
+    0
 }
 
 fn jet_eval_find_field(value: TComptimeValue, name: String) -> TComptimeValue? {
@@ -1876,7 +1991,10 @@ fn jet_eval_constant_runtime(constant: MIRConstant, machine: &JetEvalMachine, sp
 
 fn jet_eval_constant_data(constant: MIRConstant, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if constant == {
-        .Int(value, _, _) -> return Val(jet_eval_decimal_value("{value}"))
+        .Int(value, width, _) -> {
+            if width == .Val(integer_width) -> return Val(jet_eval_integer_constant_value(value, integer_width.signed, integer_width.bits))
+            return Val(jet_eval_decimal_value("{value}"))
+        }
         .Float(value, f32, _) -> return Val(TComptimeValue.Float{value: value, bits: if f32 -> 32 else -> 64})
         .Bool(value) -> return Val(TComptimeValue.Bool{value: value})
         .Char(value) -> return Val(TComptimeValue.Char{value: value})
@@ -1940,6 +2058,24 @@ fn jet_eval_constant_data(constant: MIRConstant, machine: &JetEvalMachine, span:
     }
     jet_eval_compiler_fail(&machine, span, "MIR constant conversion reached an invalid report")
     None
+}
+
+// MIREval `mir_integer_constant_value`: an unsigned constant's i64 payload is
+// its bit pattern, so it reads back as the masked unsigned value; a U64
+// pattern with the top bit set is the exact value `payload + 2^64`.
+fn jet_eval_integer_constant_value(value: Int, signed: Bool, bits: Int) -> TComptimeValue Never! {
+    if signed -> return TComptimeValue.Int{value: value}
+    if bits < 64 {
+        mask :: if bits == 63 -> 9223372036854775807 else -> (1 << bits) - 1
+        return TComptimeValue.Int{value: value & mask}
+    }
+    if value >= 0 -> return TComptimeValue.Int{value: value}
+    // value + 2^63 lies in 0..<2^63; add 2^63 = 9223372036854775808 through
+    // its last decimal digit so no step leaves the Int range.
+    low :: value + 9223372036854775807 + 1
+    digit :: low % 10 + 8
+    high :: low /% 10 + 922337203685477580 + digit /% 10
+    TComptimeValue.BigInt{decimal: "{high}{digit % 10}"}
 }
 
 fn jet_eval_key_from_mir(key: MIRConstKey) -> TComptimeKey Never! {

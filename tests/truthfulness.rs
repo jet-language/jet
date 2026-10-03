@@ -176,13 +176,17 @@ fn llm_digest_regenerates_byte_identically() {
     )
     .expect("digest machine output is JSON");
     assert_eq!(
-        jet_foundation::JSON::json_int(
-            jet_foundation::JSON::json_get(&report, "schema_version").unwrap()
-        ),
-        Some(1)
+        jet_foundation::JSON::json_get(&report, "schema").and_then(jet_foundation::JSON::json_str),
+        Some("jet.status/v1")
     );
     assert_eq!(
-        jet_foundation::JSON::json_get(&report, "digest").and_then(jet_foundation::JSON::json_str),
+        jet_foundation::JSON::json_get(&report, "action").and_then(jet_foundation::JSON::json_str),
+        Some("inspect.digest")
+    );
+    assert_eq!(
+        jet_foundation::JSON::json_get(&report, "digest")
+            .and_then(|digest| jet_foundation::JSON::json_get(digest, "value"))
+            .and_then(jet_foundation::JSON::json_str),
         Some(generated.as_str())
     );
 

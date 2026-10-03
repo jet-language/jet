@@ -143,7 +143,10 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              if receiver_type.canonical_key() != {expected_receiver_key} {{\n\
                  return Err(\"native adapter receiver type differs from the exact checked JetEvalConfig.host_adapter leaf\".to_string());\n\
              }}\n\
-             let template = bindings.create_object(()).map_err(|error| error.to_string())?;\n"
+             let template = bindings.create_object(()).map_err(|error| error.to_string())?;\n\
+             // The image's sealed identity: restore proved it equals the\n\
+             // archived execution identity, so no method re-digests the program.\n\
+             let execution = program.sealed_execution_identity(Some(artifact)).map_err(|error| error.to_string())?;\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
@@ -164,8 +167,9 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
         writeln!(
             out,
             "    {{\n\
-             let descriptor = ::jet_jit::SourceInterfaces::NativeInterfaceMethod::checked(\n\
+             let descriptor = ::jet_jit::SourceInterfaces::NativeInterfaceMethod::checked_for_execution(\n\
                  program,\n\
+                 execution.clone(),\n\
                  artifact,\n\
                  ::jet_foundation::MIR::MirTraitId({trait_id}),\n\
                  ::jet_foundation::MIR::MirTraitMethodId({method_id}),\n\
@@ -604,8 +608,9 @@ fn emit_native_interface_helpers(
             if !::std::sync::Arc::ptr_eq(&instance.root, &owner.root) {
                 return Err("native adapter instance and owner have different immutable roots".to_string());
             }
-            let checked = ::jet_jit::SourceInterfaces::NativeInterfaceMethod::checked(
+            let checked = ::jet_jit::SourceInterfaces::NativeInterfaceMethod::checked_for_execution(
                 owner.root.program.as_ref(),
+                owner.root.execution.clone(),
                 owner.root.artifact,
                 trait_id,
                 method_id,
@@ -1051,8 +1056,10 @@ fn emit_native_binding_helpers(
             let callable_type = checked.option_inner()
                 .ok_or_else(|| "checked numeric callback field lost its Option leaf".to_string())?
                 .clone();
-            let identity = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked(
-                program,
+            let execution = program.sealed_execution_identity(Some(artifact))
+                .map_err(|error| error.to_string())?;
+            let identity = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
+                execution,
                 artifact,
                 crate::__JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY,
                 callable_type.clone(),
@@ -1082,8 +1089,10 @@ fn emit_native_binding_helpers(
             )?;
             let callable_type = checked.option_inner()
                 .ok_or_else(|| "checked numeric callback field lost its Option leaf".to_string())?;
-            let expected = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked(
-                program.as_ref(),
+            let execution = program.sealed_execution_identity(Some(artifact))
+                .map_err(|error| error.to_string())?;
+            let expected = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
+                execution.clone(),
                 artifact,
                 crate::__JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY,
                 callable_type.clone(),
@@ -1095,6 +1104,7 @@ fn emit_native_binding_helpers(
                 .map_err(|error| error.to_string())?;
             let active_bindings = bindings.clone();
             let active_program = program.clone();
+            let active_execution = execution;
             let callback_identity = identity.clone();
             let wrapper = bindings.create_native_callable_rc_wrapper(
                 identity,
@@ -1103,7 +1113,7 @@ fn emit_native_binding_helpers(
                     ::std::rc::Rc::new(::std::cell::RefCell::new(Some(
                         Box::new(move |value: f64, source_unit: &String, destination_unit: &String, scale_num: &String, scale_den: &String| {
                             let _registration = &registration;
-                            let _scope = active_bindings.activate(active_program.as_ref(), artifact)
+                            let _scope = active_bindings.activate_for_execution(active_program.as_ref(), artifact, active_execution.clone())
                                 .unwrap_or_else(|error| panic!("numeric native callable activation failed: {error}"));
                             let values = vec![
                                 ::jet_foundation::MIR::MirRuntimeValue::Float { value, f32: false },
@@ -1884,7 +1894,7 @@ fn emit_native_binding_helpers(
                 &self,
                 field_path: &[String],
                 checked_type: &::jet_foundation::MIR::MirType,
-                program: &::jet_foundation::MIR::MirProgram,
+                _program: &::jet_foundation::MIR::MirProgram,
                 source_value: &T,
             ) -> Result<Option<::jet_foundation::MIR::MirRuntimeValue>, String> {
                 if __jet_bootstrap_native_binding_field_is(field_path, "host_adapter") {
@@ -1900,8 +1910,8 @@ fn emit_native_binding_helpers(
                         .downcast_ref::<__JetBootstrapNativeNumericWrapper>()
                         .ok_or_else(|| "checked numeric callback field is not its exact typed wrapper".to_string())?;
                     let (identity, carrier) = __jet_bootstrap_native_numeric_association(wrapper)?;
-                    let expected = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked(
-                        program,
+                    let expected = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
+                        self.adapter.root.execution.clone(),
                         self.adapter.root.artifact,
                         crate::__JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY,
                         checked_type.clone(),

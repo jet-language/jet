@@ -242,7 +242,8 @@ The `const` keyword is retired and is recognized only to teach its replacement
 described below.
 
 Names cannot shadow an existing name in the same scope (E0118), and definitions
-are unique (E0105). A name that would shadow a built-in is rejected with E0106;
+are unique (E0105). A name that would shadow a built-in is rejected with E0106,
+including a type named after a built-in type such as `Unit`, `Queue`, or `Set`;
 unknown names and types are E0102/E0107 and E0119, with suggestions where the
 checker has a useful candidate.
 

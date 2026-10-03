@@ -157,7 +157,7 @@ All operands of every semantic operation are defined (`value.typed`).
 | `OptionLift2{function}` | Function is callable. |
 | `OverflowOption` | Result is an Option. |
 | `NumericMethod`, `NumericBinaryMethod` | Receiver is numeric. |
-| `ClosureMethod{receiver}`, `HostBorrowCallback{callable}`, `CCallback{lambda}`, `HTTPRouterRegister{handler}` | The named value is callable. |
+| `HostBorrowCallback{callable}`, `CCallback{lambda}`, `HTTPRouterRegister{handler}` | The named value is callable. `ClosureMethod{receiver}` names the collection or carrier the closure route runs over, not the closure. |
 | `CoreClosureCall{closure}` | Closure, when present, is callable. |
 | `GCEdit{index}` | Index, when present, is an integer. |
 | `TypedTextInterp` | One more literal than holes; one HTML proof flag per hole. |
@@ -174,7 +174,7 @@ All operands of every semantic operation are defined (`value.typed`).
 | `Jump`, `Continue` | Target block exists. |
 | `Branch` | Condition is Bool; both targets exist. |
 | `Switch` | Subject defined; each arm condition is Bool; every target exists. |
-| `Return{value}` | A value is compatible with the function's return type; no value only in a generator or a function returning unit or `Never`. |
+| `Return{value}` | A value is compatible with the function's return type; no value only in a generator, a function returning unit or `Never`, or a fallible function whose failure carrier is `Result` with a unit success (its implicit `Ok(())`). |
 | `Yield{value, resume}` | The function is a generator; the value is compatible with its item type; the resume target exists. |
 | `Break` | Target exists. |
 | `Unreachable` | No operands. |

@@ -317,7 +317,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
 
     for item in source {
         match item {
-            Item::Struct(s) => {
+            Item::Struct(s) if !is_reserved_type(&s.name) => {
                 let comparable = struct_comparable
                     && (has_derive(&s.derives, crate::Generics::COMPARABLE)
                         || auto.auto_comparable.contains(&s.name));
@@ -346,7 +346,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                     ));
                 }
             }
-            Item::Enum(e) => {
+            Item::Enum(e) if !is_reserved_type(&e.name) => {
                 let comparable = enum_comparable
                     && (has_derive(&e.derives, crate::Generics::COMPARABLE)
                         || auto.auto_comparable.contains(&e.name));
@@ -375,7 +375,9 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                     ));
                 }
             }
-            Item::Distinct(d) if !invalid_distinct_names.contains(&d.name) => {
+            Item::Distinct(d)
+                if !is_reserved_type(&d.name) && !invalid_distinct_names.contains(&d.name) =>
+            {
                 let owner_type = Type::Named(d.name.clone());
                 let type_info = provider_type_info(
                     crate::Comptime::build_distinct_type_info(d, ""),
@@ -520,6 +522,40 @@ fn applied_owner_type(name: &str, type_params: &[crate::AST::TypeParam]) -> Type
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reserved_nominals_generate_no_builtin_items() {
+        jet_codegen::Codegen::MIREval::install_mir_bridge();
+        for src in [
+            "#[Comparable, Encode, Decode]\nstruct Unit { name: String }",
+            "#[Comparable, Encode, Decode]\nenum Unit { Named(String) }",
+            "#Comparable\nUnit :: distinct Int",
+            "#[Comparable, Encode, Decode]\nstruct Cell { name: String }",
+        ] {
+            let (tokens, lex_diags) = crate::Lexer::lex(src);
+            assert!(lex_diags.is_empty(), "{src}: {lex_diags:?}");
+            let mut program = crate::Parser::parse(&tokens).expect("source parses");
+            let original = crate::Formatter::format_synthetic_program(&program);
+            let mut diags = Vec::new();
+            expand_builtin_derive_items(&mut program.items, &mut diags);
+            assert!(diags.is_empty(), "derive expansion: {src}: {diags:?}");
+            assert_eq!(
+                crate::Formatter::format_synthetic_program(&program),
+                original,
+                "derive expansion must leave a rejected nominal unchanged: {src}"
+            );
+            crate::Sema::Registration::expand_builtin_serde_items(
+                &mut program.items,
+                &mut diags,
+            );
+            assert!(diags.is_empty(), "serde expansion: {src}: {diags:?}");
+            assert_eq!(
+                crate::Formatter::format_synthetic_program(&program),
+                original,
+                "serde expansion must leave a rejected nominal unchanged: {src}"
+            );
+        }
+    }
 
     #[test]
     fn recursive_enum_derive_compares_same_variant_payloads_only() {

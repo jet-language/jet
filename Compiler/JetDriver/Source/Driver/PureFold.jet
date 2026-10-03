@@ -121,7 +121,8 @@ fn jet_driver_pure_fold_evaluate_sites(program: ^MIRProgram, sites: [JetDriverPu
     site :: sites[index]
     evaluated := jet_eval_pure_function(^program, site.synthetic, jet_eval_default_config())
     &folded.push(jet_driver_pure_fold_folded(evaluated.value, site.ty))
-    jet_driver_pure_fold_evaluate_sites(^evaluated.program, sites, index + 1, &folded)
+    remaining := ^evaluated.program
+    jet_driver_pure_fold_evaluate_sites(^remaining, sites, index + 1, &folded)
 }
 
 // Replace a scalar join whose live edges all carry one constant with that

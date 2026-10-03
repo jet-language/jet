@@ -448,6 +448,11 @@ pub struct SemaCheckContext {
     // statement and per expression level, against the limit the parser and
     // the TIR evaluator share.
     pub source_nesting: Int{0}
+    // D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects, where a
+    // bare `.member` chain reads the implicit `it`.
+    pub implicit_loop_subject_depth: Int{0}
+    // D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes (L0512).
+    pub subject_shorthand_depth: Int{0}
     // Why this body stopped without a diagnostic: a construct the checker
     // does not handle yet or a lost compiler invariant. These reach the
     // driver's internal-problem report (I2), never the user's diagnostics.
@@ -538,8 +543,7 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
             &name_rows.push([Int]{index})
         }
     }
-    boxed_edges := [String:[String]]{}
-    if graph == .Val(value) -> boxed_edges = sema_checked_program_boxed_edges(value)
+    boxed_edges := sema_scope_environment_boxed_edges(graph)
     SemaScopeEnvironment{
         registration_graph: graph,
         module_identity: module_identity,
@@ -557,6 +561,13 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
         generic_params: [TGenericParam]{},
         comptime_body_values: [SemaComptimeBodyValue]{},
     }
+}
+
+// The boxed field edges of `graph`, read in place: matching the owned graph
+// parameter against `.Val(…)` would copy the whole graph first.
+fn sema_scope_environment_boxed_edges(graph: SemaRegistrationGraph?) -> [String:[String]] Never! {
+    value :: graph ?? return [String:[String]]{}
+    sema_checked_program_boxed_edges(value)
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
@@ -745,6 +756,8 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         failure_union_edges: ~source.failure_union_edges,
         failure_union_general: source.failure_union_general,
         source_nesting: source.source_nesting,
+        implicit_loop_subject_depth: source.implicit_loop_subject_depth,
+        subject_shorthand_depth: source.subject_shorthand_depth,
     }
 }
 
@@ -858,6 +871,8 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             iter_borrowed: ~context.iter_borrowed,
             binding_initializer: context.binding_initializer,
             source_nesting: context.source_nesting,
+            implicit_loop_subject_depth: context.implicit_loop_subject_depth,
+            subject_shorthand_depth: context.subject_shorthand_depth,
         },
     }
 }
@@ -929,6 +944,8 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.iter_borrowed = ~saved.iter_borrowed
     context.binding_initializer = saved.binding_initializer
     context.source_nesting = saved.source_nesting
+    context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
+    context.subject_shorthand_depth = saved.subject_shorthand_depth
 }
 
 // Records why the body being checked is incomplete when no diagnostic says so.

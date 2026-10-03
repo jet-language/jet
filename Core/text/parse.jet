@@ -208,7 +208,7 @@ pub fn parse_float(text: String) -> Float? Never! {
     seen := false
     loop i < raw.len() {
         n :: raw[i]
-        if n == 46 -> break
+        if n == 46 || n == 101 || n == 69 -> break
         d :: n
         if d < 48 || d > 57 -> return None
         acc = acc * Float{10} + Float{d - 48}
@@ -505,7 +505,27 @@ pub fn is_upper(text: String) -> Bool Never! {
     any
 }
 
-pub fn is_title(text: String) -> Bool Never! { text == title(text) && text.bytes().len() > 0 }
+/// A titlecased word starts upper/title and continues lower; uncased text alone is false.
+pub fn is_title(text: String) -> Bool Never! {
+    has_cased := false
+    expect_upper := true
+    loop ch in unicode.scalars(text) {
+        lower :: unicode.lower(ch)
+        upper :: unicode.upper(ch)
+        if lower != upper {
+            // Uppercase and titlecase scalars both have a distinct lowercase mapping.
+            starts_word :: ch != lower
+            if starts_word != expect_upper -> return false
+            has_cased = true
+            expect_upper = false
+        } else if unicode.is_alphabetic(ch) {
+            return false
+        } else {
+            expect_upper = true
+        }
+    }
+    has_cased
+}
 
 pub fn is_ascii(text: String) -> Bool Never! {
     loop b in text.bytes() {
@@ -564,13 +584,14 @@ pub fn isprintable(text: String) -> Bool Never! {
     }
     true
 }
+/// Expand tab stops in decoded-scalar columns, resetting at either CR or LF.
 pub fn expandtabs(text: String, tabsize: Int) -> String Never! {
     out := ""
     column := 0
     width := tabsize
     if width < 0 -> width = 0
-    loop b in text.bytes() {
-        n :: b
+    loop ch in unicode.scalars(text) {
+        n :: ch.bytes()[0]
         if {
             n == 9 -> {
                 spaces := 0
@@ -579,7 +600,6 @@ pub fn expandtabs(text: String, tabsize: Int) -> String Never! {
                 column = column + spaces
             }
             else -> {
-                ch :: String.from_bytes([U8]{b}) ?? ""
                 out = "{out}{ch}"
                 if n == 10 || n == 13 -> column = 0 else -> column = column + 1
             }

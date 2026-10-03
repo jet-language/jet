@@ -327,13 +327,6 @@ fn sema_ownership_type_tuple_is_copy(fields: [TypeTupleField]) -> Bool Never! {
     true
 }
 
-fn sema_ownership_type_tuple_is_cloneable(fields: [TypeTupleField]) -> Bool Never! {
-    loop field in fields {
-        if !sema_ownership_type_cloneable_known(field.ty) -> return false
-    }
-    true
-}
-
 pub fn sema_ownership_type_is_copy(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
@@ -423,31 +416,32 @@ fn sema_ownership_diag_read_shared_guard_write(span: Span) -> Diagnostic {
     sema_error("E0205", span, "cannot edit through this read-only `SharedGuard` view", "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access", "keep the edit at the acquisition site, or pass the guard to a helper with the write-access marker `&`, such as `&guard: SharedGuard<T>`")
 }
 
-// Structural cloneability is known for the core value constructors.  A
-// nominal `Clone` implementation is registry-owned and is intentionally left
-// unresolved instead of turning an unknown type into a conservative error.
-fn sema_ownership_type_cloneable_known(ty: Type) -> Bool Never! {
-    if sema_ownership_type_is_copy(ty) -> return true
-    if ty == {
-        .String -> true
-        .List(inner) -> sema_ownership_type_cloneable_known(inner)
-        .Map(key, _, value) -> sema_ownership_type_cloneable_known(key) && sema_ownership_type_cloneable_known(value)
-        .Option(inner) -> sema_ownership_type_cloneable_known(inner)
-        .Result(ok, err) -> sema_ownership_type_cloneable_known(ok) && sema_ownership_type_cloneable_known(err)
-        .Tuple(fields) -> sema_ownership_type_tuple_is_cloneable(fields)
-        .FixedList(inner, _) -> sema_ownership_type_cloneable_known(inner)
-        .Tagged(_, inner) -> sema_ownership_type_cloneable_known(inner)
-        .Quantity(base, _) -> sema_ownership_type_cloneable_known(base)
-        else -> false
-    }
-}
-
+// Structural cloneability is known for the core value constructors. A
+// nominal, trait, or function part is registry-owned: it leaves the whole
+// answer unresolved (None) for the registry check, never a conservative
+// `false` for a composite that holds it (`Effect?`, `[Row]`).
 pub fn sema_ownership_type_cloneable(ty: Type) -> Bool? {
-    if sema_ownership_type_cloneable_known(ty) -> return Val(true)
+    if sema_ownership_type_is_copy(ty) -> return Val(true)
     if ty == {
+        .String -> Val(true)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_ownership_type_cloneable(inner)
+        .Map(key, _, value) | .Result(key, value) -> sema_ownership_types_cloneable([Type]{key, value})
+        .Tuple(fields) -> sema_ownership_types_cloneable(loop field in fields -> field.ty)
         .Named(_) | .Apply(_, _) | .TraitObject(_) | .Fn(_, _, _, _, _, _) -> None
         else -> Val(false)
     }
+}
+
+// Every part cloneable: one known refusal decides, else an unresolved part
+// leaves the composite unresolved.
+fn sema_ownership_types_cloneable(parts: [Type]) -> Bool? {
+    unresolved := false
+    loop part in parts {
+        answer :: sema_ownership_type_cloneable(part)
+        if answer == (Val(false)) -> return Val(false)
+        if answer == None -> unresolved = true
+    }
+    if unresolved -> None else -> Val(true)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -557,7 +551,7 @@ fn sema_ownership_note_place_reference(state: &SemaOwnershipState, expr: Expr, p
 
 pub fn sema_ownership_finalize_references(state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     loop fact in state.declarations {
-        if fact.references == 0 && !sema_ownership_intentional_name(fact.name) {
+        if fact.references == 0 && !sema_ownership_intentional_name(fact.name) && !sema_ownership_flow_narrowing(state, fact) {
             // Rust `CheckerReferences::emit_unused_binding_lints`: the
             // registry row wording, with the `_name` rename as the edit.
             what := "Local binding `{fact.name}` is never read."
@@ -573,6 +567,17 @@ pub fn sema_ownership_finalize_references(state: &SemaOwnershipState, diagnostic
             &diagnostics.push(diagnostic_with_edit(sema_lint(code, fact.span, what, why, fix), TextEdit{span: fact.span, new_text: "_{fact.name}"}))
         }
     }
+}
+
+// D-FLOWTYPE1=A: `x == None` over a stable optional reads as the presence
+// test `x == .Val(x)`, which rebinds the payload under the same name at the
+// read of `x`. That rebinding is the narrowed `x` itself (Rust refines the
+// one binding's type), so it is not a separate unused local.
+fn sema_ownership_flow_narrowing(state: SemaOwnershipState, fact: SemaOwnershipBindingFact) -> Bool Never! {
+    loop reference in state.references {
+        if reference.name == fact.name && reference.def_key != fact.key && sema_ownership_span_same(reference.use_span, fact.span) -> return true
+    }
+    false
 }
 
 fn sema_ownership_recompute_reference_counts(state: &SemaOwnershipState) Never! {
@@ -1439,6 +1444,13 @@ fn sema_ownership_note_share_found(state: &SemaOwnershipState, found: SemaOwners
     &state.share_found.push(found)
 }
 
+// D-COPY-DEFAULT1=A: a share site found on a branch path is found for the
+// function even when that path's check stops early (its E0121 is the reason
+// it stopped) or never reaches the join; the next pass treats it as a share.
+pub fn sema_ownership_keep_share_found(state: &SemaOwnershipState, branch: SemaOwnershipState) Never! {
+    loop site in branch.share_found -> sema_ownership_note_share_found(&state, site)
+}
+
 // E0121 names the consumer every move recorder supplies and points a labelled
 // caret at the move site, so the reader sees both where the value went and
 // the later use. The reuse stays the primary span.
@@ -1752,6 +1764,19 @@ pub fn sema_ownership_mark_unmarked_move(state: &SemaOwnershipState, expr: Expr,
     sema_ownership_mark_move_as(&state, expr, scopes, consumer, true, &diagnostics)
 }
 
+// Rust `note_move_if_direct_ident`: an unmarked owning position (binding,
+// assignment, return, element) moves only a bare name, seen through
+// parentheses and the `Val`/`Ok`/`Err`/tainted constructors. A field or
+// element read there (`m :: parts[0]`, `x = row.width`) leaves its owner
+// whole; lowering materializes the copy.
+fn sema_ownership_unmarked_moves_name(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Ident(_, _) -> true
+        .Paren(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Tainted(inner, _, _) -> sema_ownership_unmarked_moves_name(inner)
+        else -> false
+    }
+}
+
 fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, unmarked: Bool, diagnostics: &[Diagnostic]) -> Bool {
     // D-COPY-DEFAULT1=A: a share site copies; the source stays usable.
     if unmarked && sema_ownership_is_share_site(state, expr_span(expr)) -> return true
@@ -1766,7 +1791,8 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
         // `note_move_if_direct_ident`: an unmarked owning position moves a
         // local only; a read or write parameter keeps its value (the binding
         // and return audits report E0120 where it would have to copy).
-        if sema_ownership_type_is_copy(info.symbol.ty ?? Type.Named{name: "Unit"}) || (unmarked && sema_ownership_binding_is_borrowed_param(info)) {
+        root_ty :: info.symbol.ty ?? Type.Named{name: "Unit"}
+        if sema_ownership_type_is_copy(root_ty) || (unmarked && sema_ownership_binding_is_borrowed_param(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
             loop place in places -> sema_ownership_note_place_reference(&state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
             return true
         }

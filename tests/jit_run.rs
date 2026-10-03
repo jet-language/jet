@@ -177,6 +177,59 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
 }
 
 #[test]
+fn struct_call_word_preserves_bits_on_every_native_tier() {
+    assert!(jet_jit::cranelift_host_supported(), "#4383 requires the resident JIT");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let golden = fs::read_to_string(root.join("Examples/features/expected/basics/struct_call_word.out"))
+        .expect("word-call golden");
+    for (relative, expected) in [
+        ("tests/fixtures/struct_call_word_original.jet", "wrapped: 7299585414513572552\n"),
+        ("Examples/features/basics/struct_call_word.jet", golden.as_str()),
+    ] {
+        let file = root.join(relative);
+        let shown = file.to_string_lossy();
+        for interpret in [true, false] {
+            jet_jit::reset_jit_trace_for_test();
+            let outcome = dev_iteration(&shown, false, interpret);
+            match outcome {
+                RunOutcome::Ran { stdout, stderr, exit_code } => {
+                    assert_eq!(exit_code, 0, "{relative}: {stderr}");
+                    assert_eq!(stdout, expected, "{relative}, interpret={interpret}");
+                    assert!(stderr.is_empty(), "{relative}: {stderr}");
+                }
+                RunOutcome::Problems(diags) => panic!("{relative}: {diags:?}"),
+            }
+            assert_eq!(jet_jit::jit_executed_for_test(), !interpret);
+            assert!(!jet_jit::fallback_invoked_for_test());
+            assert!(!jet_jit::deopt_invoked_for_test());
+        }
+        let aot = run_jet(&file, true);
+        assert_eq!(aot.status.code(), Some(0), "{}", String::from_utf8_lossy(&aot.stderr));
+        assert_eq!(aot.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
+fn struct_call_word_wrong_expectation_is_an_assertion_failure() {
+    assert!(jet_jit::cranelift_host_supported(), "#4383 requires the resident JIT");
+    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/struct_call_word_failure.jet");
+    for interpret in [true, false] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if interpret {
+            command.arg("--interpret");
+        }
+        let output = command.arg(&file).env("NO_COLOR", "1").output().unwrap();
+        assert_eq!(output.status.code(), Some(70), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("E3001"));
+    }
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(70), "{}", String::from_utf8_lossy(&aot.stderr));
+    assert!(String::from_utf8_lossy(&aot.stderr).contains("E3001"));
+}
+
+#[test]
 fn bounded_workers_example_has_total_tir() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("Examples/features/concurrency/bounded_workers.jet");

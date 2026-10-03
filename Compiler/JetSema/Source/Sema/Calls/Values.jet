@@ -91,7 +91,10 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     contract_nodes := [TContract]{}
     if sema_call_value_root_name(callee) == .Val(root_name) {
         if sema_scope_resolve(scopes, root_name) == .Val(target) {
-            if sema_contract_function_for_symbol(environment, target.id) == .Val(contract) {
+            // The callee's declaration is copied only when it has `pre` clauses.
+            contract_callee := Func?{None}
+            if sema_contract_function_has_pre(environment, target.id) -> contract_callee = sema_contract_function_for_symbol(environment, target.id)
+            if contract_callee == .Val(contract) {
                 slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], checked_args[source_index])
                 checked_contract :: sema_contract_check_call(contract, &lowered, slots, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 contract_bindings = checked_contract.bindings
@@ -117,10 +120,12 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
 }
 
 fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
-    expected_function := Type.Fn{params: [Type]{}, ret: expected, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    // With no expected value (an unannotated binding), the loop's own result
+    // type stands; a written expectation becomes the callable's result.
+    expected_function := if expected == .Val(result) -> Val(Type.Fn{params: [Type]{}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None
     previous_escapes := context.lambda_escapes
     context.lambda_escapes = Val(false)
-    checked_lambda := sema_expression_lambda(lambda, Val(expected_function), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_lambda := sema_expression_lambda(lambda, expected_function, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     context.lambda_escapes = previous_escapes
     lambda_value :: checked_lambda ?? return None
     signature :: lambda_value.ty

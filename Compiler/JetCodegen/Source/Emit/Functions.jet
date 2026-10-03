@@ -2129,7 +2129,15 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
     values_start :: lines.len()
     loop value in function.values {
-        if ctx.ref_bindings.payloads.get(value.id.value) == None -> &lines.push("    {jet_rust_emit_value_declaration(&ctx, function, value)}")
+        if ctx.ref_bindings.payloads.get(value.id.value) != None || ctx.ref_bindings.collections.get(value.id.value) != None -> next
+        // MIRRust emit_slots: an in-place loop cursor holds the walked list
+        // and the next row.
+        if ctx.ref_bindings.cursors.get(value.id.value) == .Val(place) {
+            row :: ctx.body_index.place_rows.get(place.value) ?? panic("Jet Rust emitter reached an in-place loop without its list place")
+            &lines.push("    let mut {jet_rust_emit_value_slot(value.id)}: Option<(&{jet_rust_emit_type(&ctx, function.places[row].ty)}, usize)> = None;")
+            next
+        }
+        &lines.push("    {jet_rust_emit_value_declaration(&ctx, function, value)}")
     }
     values_end :: lines.len()
     // Slots that park later payloads of a moved enum subject.

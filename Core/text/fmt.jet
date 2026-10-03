@@ -1,3 +1,4 @@
+use core.math as math
 use core.text as unicode
 // core.text.fmt — deterministic number, quantity, and display formatting.
 // Radix helpers use lowercase digits; text padding counts UTF-8 scalars.
@@ -35,6 +36,7 @@ pub fn grouped(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed
 pub fn decimal(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
 pub fn percent(n: Float, frac: Int) -> String Never! { "{float_fixed(n * 100.0, frac)}%" }
 pub fn sci(n: Float, frac: Int) -> String Never! {
+    if !math.is_finite(n) -> return "{n}"
     if n == 0.0 -> return "{float_fixed(0.0, frac)}e+00"
     sign := ""
     value := n
@@ -90,18 +92,44 @@ pub fn pretty(value: String) -> String Never! {
     trim_right(out)
 }
 
-pub fn bytes(n: Int) -> String Never! {
-    sign := ""
-    value := n
-    if value < 0 {
-        sign = "-"
-        value = -value
+/// Decimal byte display (1000-based), with the unit selected before rounding.
+pub fn bytes(n: Int) -> String Never! { bytes_scaled(n, 1000) }
+
+/// Binary byte display (1024-based), with the same signed rounding rules.
+pub fn bytes_binary(n: Int) -> String Never! { bytes_scaled(n, 1024) }
+
+fn bytes_scaled(n: Int, base: Int) -> String Never! {
+    value :: abs_int(n)
+    if value < base -> return "{n} B"
+    sign :: if n < 0 -> "-" else -> ""
+    divisor := base
+    unit := 1
+    loop unit < 6 && value >= divisor * base {
+        divisor = divisor * base
+        unit = unit + 1
     }
-    if value < 1024 -> return "{sign}{value} B"
-    if value < 1048576 -> return "{sign}{value / 1024} KiB"
-    if value < 1073741824 -> return "{sign}{value / 1048576} MiB"
-    if value < 1099511627776 -> return "{sign}{value / 1073741824} GiB"
-    "{sign}{value / 1099511627776} TiB"
+    suffix := if base == 1000 -> "kB" else -> "KiB"
+    if unit == 2 -> suffix = if base == 1000 -> "MB" else -> "MiB"
+    if unit == 3 -> suffix = if base == 1000 -> "GB" else -> "GiB"
+    if unit == 4 -> suffix = if base == 1000 -> "TB" else -> "TiB"
+    if unit == 5 -> suffix = if base == 1000 -> "PB" else -> "PiB"
+    if unit == 6 -> suffix = if base == 1000 -> "EB" else -> "EiB"
+    if value >= divisor * 10 {
+        rounded := value /% divisor
+        if (value % divisor) * 2 >= divisor -> rounded = rounded + 1
+        return "{sign}{rounded} {suffix}"
+    }
+    // One fractional digit uses ties-to-even; whole units use half-away.
+    scaled :: value * 10
+    tenths := scaled /% divisor
+    remainder :: scaled % divisor
+    if remainder * 2 > divisor || (remainder * 2 == divisor && tenths % 2 != 0) {
+        tenths = tenths + 1
+    }
+    whole :: tenths /% 10
+    digit :: tenths % 10
+    if digit == 0 -> return "{sign}{whole} {suffix}"
+    "{sign}{whole}.{digit} {suffix}"
 }
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.
@@ -113,13 +141,13 @@ pub fn duration(n: Int) -> String Never! {
         rest = -rest
     }
     if rest < 1000 -> return "{sign}{rest}ms"
-    days := rest / 86400000
+    days := rest /% 86400000
     rest = rest %% 86400000
-    hours := rest / 3600000
+    hours := rest /% 3600000
     rest = rest %% 3600000
-    minutes := rest / 60000
+    minutes := rest /% 60000
     rest = rest %% 60000
-    seconds := rest / 1000
+    seconds := rest /% 1000
     parts := [String]{}
     if days > 0 -> &parts.push("{days}d")
     if hours > 0 -> &parts.push("{hours}h")
@@ -203,7 +231,7 @@ fn float_fixed(n: Float, frac: Int) -> String Never! {
         i = i + 1
     }
     scaled := n * scale
-    rounded := if scaled < 0.0 -> Int{scaled - 0.5} else -> Int{scaled + 0.5}
+    rounded := math.round(scaled)
     sign := ""
     if rounded < 0 {
         sign = "-"

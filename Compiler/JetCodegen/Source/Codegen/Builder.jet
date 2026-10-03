@@ -256,6 +256,8 @@ fn jet_codegen_qualified_function_key(module_identity: String, key: String) -> S
     "{module_identity.len()}:{module_identity}{key}"
 }
 
+// The index owns its function rows: callers retain their checked input, and
+// comptime sessions retain this index after the input call has returned.
 fn jet_codegen_function_index(functions: [TFunc]) -> JetCodegenFunctionIndex Never! {
     first_by_key := [String:Int]{}
     first_by_name := [String:Int]{}
@@ -465,6 +467,11 @@ pub struct JetCodegenOwnerIndex {
     pub hooks: JetCodegenHookIndex
     // Checked constant positions and lazy use-site classification, program-wide.
     pub constants: JetCodegenConstantIndex
+    // Set by a comptime session for the closure it lowers: a type row then
+    // lists only the methods in `closure_methods` (qualified keys of the
+    // closure's functions), as if every other method were absent from it.
+    pub closure_only: Bool
+    pub closure_methods: [String:Bool]
 }
 
 pub struct JetCodegenTypeDefRow {
@@ -502,14 +509,16 @@ fn jet_codegen_owner_index(modules: [SemaGraphModuleResult]) -> JetCodegenOwnerI
                 else -> {}
             }
         }
-        loop implementation in modules[module_row].impls {
-            loop method in implementation.methods {
+        loop implementation_row in 0..<modules[module_row].impls.len() {
+            implementation :: modules[module_row].impls[implementation_row]
+            loop method_row in 0..<implementation.methods.len() {
+                method :: implementation.methods[method_row]
                 method_key :: jet_codegen_qualified_function_key(module_identity, method.symbol.id.key)
                 if impl_method_targets.get(method_key) == None -> impl_method_targets[method_key] = implementation.target_type
             }
         }
     }
-    JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows, hooks: jet_codegen_hook_index(modules), constants: jet_codegen_constant_index(modules)}
+    JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows, hooks: jet_codegen_hook_index(modules), constants: jet_codegen_constant_index(modules), closure_only: false, closure_methods: [String:Bool]{}}
 }
 
 pub struct JetCodegenOwnerTypeBindings {
@@ -543,8 +552,11 @@ fn jet_codegen_function_owner_pattern(function: TFunc, owners: JetCodegenOwnerIn
 }
 
 fn jet_codegen_function_type_generic_names(function: TFunc, owners: JetCodegenOwnerIndex) -> [String] Never! {
-    listed :: owners.type_method_generics.get(jet_codegen_qualified_function_key(function.module_identity, function.key))
-    if listed == .Val(names) -> return names
+    method_key :: jet_codegen_qualified_function_key(function.module_identity, function.key)
+    if !owners.closure_only || owners.closure_methods.get(method_key) != None {
+        listed :: owners.type_method_generics.get(method_key)
+        if listed == .Val(names) -> return names
+    }
     owner_pattern :: jet_codegen_function_owner_pattern(function, owners) ?? return [String]{}
     owner_name := if owner_pattern == {
         .Named(name) | .Apply(name, _) -> name
@@ -679,7 +691,8 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::new
-fn jet_codegen_new_builder(function: TFunc, function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], field_symbols: [String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
+// The program-wide inputs move into the builder, which owns them.
+fn jet_codegen_new_builder(function: TFunc, function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
     owners :: jet_codegen_owner_index(modules)
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
@@ -878,7 +891,8 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Neve
 }
 
 // The per-function state of `builder`, saved around a nested (lambda)
-// function lowered on the same builder.
+// function lowered on the same builder. The snapshot must own its nested
+// rows independently: beginning the child resets the builder's list.
 // Rust: none (Jet-only pass)
 fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionState Never! {
     JetCodegenFunctionState{
@@ -931,7 +945,7 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionS
 }
 
 // Rust: none (Jet-only pass)
-fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: JetCodegenFunctionState) Never! {
+fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: ^JetCodegenFunctionState) Never! {
     builder.function = state.function
     builder.current_span = state.current_span
     builder.current_line = state.current_line
@@ -959,7 +973,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: JetCod
     builder.prelude_call_positions = state.prelude_call_positions
     builder.core_calls = state.core_calls
     builder.used_core = state.used_core
-    builder.nested_functions = state.nested_functions
+    builder.nested_functions = ^state.nested_functions
     builder.callbacks = state.callbacks
     builder.checked_vector_facts = state.checked_vector_facts
     builder.transactions = state.transactions

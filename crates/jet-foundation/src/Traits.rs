@@ -1596,7 +1596,18 @@ impl TraitRegistry {
                             .iter()
                             .map(|p| (p.convention, p.ty.clone()))
                             .collect();
-                        if !sig_matches_trait(&params, &m.return_type, sig, &assoc) {
+                        // Compiler-owned Display borrows its receiver. The general
+                        // matcher below compares types, not access conventions.
+                        let display_receiver_matches = trait_name != DISPLAY
+                            || m.params.first().zip(sig.params.first()).is_some_and(
+                                |(actual, expected)| {
+                                    actual.name == expected.name
+                                        && actual.convention == expected.convention
+                                },
+                            );
+                        if !display_receiver_matches
+                            || !sig_matches_trait(&params, &m.return_type, sig, &assoc)
+                        {
                             let expected =
                                 Generics::trait_method_expected_signature(type_name, sig, &assoc);
                             diags.push(e0907(trait_name, &m.name, &expected, m.name_span));
@@ -2539,13 +2550,13 @@ impl TraitRegistry {
         "ServiceStateStore",
     ];
 
-    /// D-DISPLAYDBG1: register synthetic `Display` + `Debug` protocol hooks.
+    /// D-DISPLAY-SHAPE + D-MEM1: Display reads its receiver (`display(self)`).
     pub fn register_synthetic_display_debug(&mut self) {
         self.register_synthetic_trait_method(
             crate::Syntax::TRAIT_DISPLAY,
             "display",
             Some(Type::String),
-            AccessConvention::Move,
+            AccessConvention::Read,
         );
         // Debug is auto-derived; manual impl is allowed but uncommon.
         self.register_synthetic_trait_method(

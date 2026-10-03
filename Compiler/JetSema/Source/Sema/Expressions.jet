@@ -378,11 +378,13 @@ struct SemaExprOperatorResolution {
     candidate: SemaCallMethodCandidate
     receiver_is_left: Bool
 }
-fn sema_expr_operator_candidate_from_function(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, owner_type: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: String, caller_package: String, lexical_generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+// `signature` is `function`'s signature specialized to the receiver; the
+// registered row itself is only read.
+fn sema_expr_operator_candidate_from_function(function: SemaRegistrationFunction, signature: Type, graph: SemaRegistrationGraph?, owner_type: Type, trait_symbol: Symbol?, trait_name: String, method: String, rhs: Type, span: Span, caller_module: String, caller_package: String, lexical_generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     if function.symbol.name != method || function.parameters.len() == 0 -> return None
     trait_symbol_value :: trait_symbol ?? return None
     method_ref := TMethodRef{symbol: function.symbol.id, name: method, mangled: false, trait_owner: Val(trait_symbol_value.id), operator_identity: Val("{type_name(owner_type)}::{trait_name}::{method}<{type_name(rhs)}>")}
-    sema_call_method_candidate_from_registration(function, graph, caller_module, caller_package, lexical_generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, [Type]{}, span, &diagnostics)
+    sema_call_method_candidate_from_registration(signature, function.generic_params, graph, caller_module, caller_package, lexical_generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, [Type]{}, span, &diagnostics)
 }
 
 fn sema_expr_operator_resolution(op: BinOp, lhs: Type, rhs: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExprOperatorResolution? {
@@ -524,9 +526,9 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
         // while the registered row keeps the declared spelling; infer such a
         // receiver against the declaration resolved in its own module.
         owner_module :: graph.modules[module_index].module_identity
-        inference_nominal := nominal
-        if receiver_canonical -> inference_nominal.ty = sema_type_resolve_declared(graph, nominal.ty, owner_module)
-        owner_inference :: sema_infer_registered_nominal(inference_nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
+        inference_ty := nominal.ty
+        if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, owner_module)
+        owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? next
         if !owner_inference.complete || !owner_inference.compatible -> next
         owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
         loop implementation in graph.modules[module_index].impls {
@@ -541,9 +543,8 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
             if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
             loop function in implementation.methods {
                 if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-                specialized := function
-                specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
-                candidate :: sema_expr_operator_candidate_from_function(specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, qualified_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+                specialized :: sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+                candidate :: sema_expr_operator_candidate_from_function(function, specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, qualified_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                 duplicate := false
                 loop existing in candidates {
                     if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
@@ -568,15 +569,15 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                             trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
                             loop source_method in block.methods {
                                 if source_method.name != method -> next
-                                registered := SemaRegistrationFunction?{None}
-                                loop function in nominal.methods {
-                                    if function.declaration.span == source_method.span -> registered = Val(function)
+                                registered := -1
+                                loop (index, candidate_function) in nominal.methods {
+                                    if candidate_function.declaration.span == source_method.span -> registered = index
                                 }
-                                function :: registered ?? next
+                                if registered < 0 -> next
+                                function :: nominal.methods[registered]
                                 if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-                                specialized := function
-                                specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
-                                candidate :: sema_expr_operator_candidate_from_function(specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+                                specialized :: sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+                                candidate :: sema_expr_operator_candidate_from_function(function, specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                                 duplicate := false
                                 loop existing in candidates {
                                     if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
@@ -597,15 +598,15 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
                             trait_symbol :: sema_type_graph_trait_symbol(graph, graph.modules[module_index].module_identity, trait_name)
                             loop source_method in block.methods {
                                 if source_method.name != method -> next
-                                registered := SemaRegistrationFunction?{None}
-                                loop function in nominal.methods {
-                                    if function.declaration.span == source_method.span -> registered = Val(function)
+                                registered := -1
+                                loop (index, candidate_function) in nominal.methods {
+                                    if candidate_function.declaration.span == source_method.span -> registered = index
                                 }
-                                function :: registered ?? next
+                                if registered < 0 -> next
+                                function :: nominal.methods[registered]
                                 if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-                                specialized := function
-                                specialized.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
-                                candidate :: sema_expr_operator_candidate_from_function(specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+                                specialized :: sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+                                candidate :: sema_expr_operator_candidate_from_function(function, specialized, environment.registration_graph, owner_type, trait_symbol, trait_name, method, block_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
                                 duplicate := false
                                 loop existing in candidates {
                                     if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
@@ -640,7 +641,7 @@ fn sema_expr_registration_operator_candidates(graph: SemaRegistrationGraph, rece
         if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
         loop function in implementation.methods {
             if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[module_index].module_identity, graph.modules[module_index].package_identity) -> next
-            candidate :: sema_expr_operator_candidate_from_function(function, environment.registration_graph, owner_type, trait_symbol, trait_name, method, implementation_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
+            candidate :: sema_expr_operator_candidate_from_function(function, function.signature, environment.registration_graph, owner_type, trait_symbol, trait_name, method, implementation_rhs, span, caller_module, caller_package, environment.generic_params, &diagnostics) ?? next
             duplicate := false
             loop existing in candidates {
                 if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity {
@@ -2184,21 +2185,27 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
     trait_candidates := sema_call_trait_method_candidates(graph, receiver_type, method, type_args, caller_module, caller_package, environment.generic_params, span, &diagnostics)
     if trait_candidates.len() > 0 -> return trait_candidates
     receiver_name :: sema_expr_type_base_name(receiver_type) ?? return candidates
+    // The rows are keyed by the declared spelling (`Rect`); a resolved
+    // receiver carries its canonical identity (`module::Rect`), so the row key
+    // is the canonical leaf, and such a receiver is inferred against the
+    // declaration resolved in its own module (as operator lookup does).
+    receiver_canonical :: receiver_name.contains("::")
     found_owner := false
-    loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
+    loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)) {
         owner_index :: nominal_row.module_index
         nominal :: graph.modules[owner_index].nominals[nominal_row.row]
         found_owner = true
-        owner_inference :: sema_infer_registered_nominal(nominal, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
+        inference_ty := nominal.ty
+        if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, graph.modules[owner_index].module_identity)
+        owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, environment.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
         if !owner_inference.complete || !owner_inference.compatible -> next
         owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
         loop function in nominal.methods {
             if function.symbol.name != method || function.parameters.len() == 0 -> next
             if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[owner_index].module_identity, graph.modules[owner_index].package_identity) -> next
-            method_function := function
-            method_function.signature = sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
+            method_signature :: sema_inference_substitute_type_bindings(function.signature, owner_inference.substitutions)
             method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-            candidate :: sema_call_method_candidate_from_registration(method_function, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
+            candidate :: sema_call_method_candidate_from_registration(method_signature, function.generic_params, environment.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
             &candidates.push(candidate)
         }
     }
@@ -2213,10 +2220,14 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
 fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, receiver_type: Type, method: String) -> Bool Never! {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
-    receiver_name :: sema_expr_type_base_name(receiver_type) ?? return false
+    // A resolved receiver carries its canonical identity (`module::URL`).
+    base_name :: sema_expr_type_base_name(receiver_type) ?? return false
+    receiver_name :: sema_expr_operator_row_name(base_name)
     if !sema_text_handle_known_method(receiver_name, method) && !sema_network_handle_known_method(receiver_name, method) -> return false
     loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
-        loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+        methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
+        loop method_index in 0..<methods.len() {
+            function :: methods[method_index]
             if function.symbol.name == method && function.parameters.len() > 0 -> return true
         }
     }
@@ -2365,9 +2376,10 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     probe_context_mark :: sema_check_context_mark(&context)
     probe_state := sema_ownership_state_snapshot(state)
     probe_diagnostics := [Diagnostic]{}
-    probe_tail_store := sema_statement_tail_store_init()
+    // The probe shares the enclosing statement-tail store: the liveness
+    // frames in `context` index it.
     probe_rounded_allowed := false
-    probe_source := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, &scopes, &probe_state, &probe_tail_store, &context, &probe_diagnostics, &probe_rounded_allowed)
+    probe_source := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, &scopes, &probe_state, &tail_store, &context, &probe_diagnostics, &probe_rounded_allowed)
     sema_check_context_rollback(&context, probe_context_mark)
     sema_scope_rollback(&scopes, probe_scope_mark)
     source_probe :: probe_source ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -2508,6 +2520,10 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
     alias_span :: if receiver == {.Ident(_, span) -> span else -> method_span}
     if !sema_expr_core_module_alias_visible(alias, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
     module_name :: sema_call_core_import_module(environment, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if sema_call_core_variadic_print(environment, scopes, alias, method, args.len(), alias_span, &context) {
+        printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: printed.value}
+    }
     expected_type_arg_count := 0
     if core_call_typed_signature(module_name, method, args.len()) == {
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
@@ -2690,6 +2706,18 @@ fn sema_expr_inferred_new_owner(expected: Type?) -> Type? {
     }
 }
 
+// Whether the struct `receiver` names declares a field `name` of function type.
+fn sema_expr_function_field(receiver: Type, name: String, environment: SemaScopeEnvironment) -> Bool {
+    type_name :: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
+    definition :: sema_serde_type_definition(environment, type_name) ?? return false
+    if definition.kind == .Struct(fields, _) {
+        loop field in fields {
+            if field.name == name -> return sema_call_type_is_function(sema_call_resolved_type(field.ty, environment))
+        }
+    }
+    false
+}
+
 fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // D-SHAPE3a=A: `.new(...)` leaves only the static receiver implicit; the
     // ordinary expected type names it (E0356 when there is none).
@@ -2715,6 +2743,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if checked_text.handled -> return checked_text.value
     explicit_unit := sema_expr_try_explicit_unit_method(receiver, method, method_span, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if explicit_unit.handled -> return explicit_unit.value
+    enum_variant := sema_expression_enum_variant_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if enum_variant.handled -> return enum_variant.value
     pre_receiver := sema_expr_try_method_static_routes(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if pre_receiver.handled -> return pre_receiver.value
     hardware_pre_receiver := sema_expr_try_hardware_pre_receiver(receiver, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2742,6 +2772,13 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: projected_value.return_view_facts})
         if !sema_expr_record_call_fact(environment, &scopes, &context, method_span, projected_value, &diagnostics) -> return None
         return Val(projected_value.value)
+    }
+    // Rust `infer_method_call`: a struct field holding a function value is
+    // called through the field (`worker.step(4)`), ahead of method lookup.
+    if sema_expr_function_field(receiver_value.ty, method, environment) {
+        call_end := method_span.end
+        if args.len() > 0 -> call_end = expr_span(args[args.len() - 1].expr).end
+        return sema_expr_check_indirect_call(Expr.Field{base: receiver, member: method, span: method_span}, args, Span{start: expr_span(receiver).start, end: call_end}, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     take_pattern := sema_expr_check_take_pattern_method(receiver, receiver_value, method, args, method_span, expected, environment, &scopes, &state, &diagnostics)
     if take_pattern.handled -> return take_pattern.value
@@ -3013,13 +3050,12 @@ fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
 
 // Rust `infer_binary`: the left operand keeps the surrounding expectation,
 // and a literal before a measurement (or a unit under `*` or `/`) is Float.
-fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, context: &SemaCheckContext) -> Type? {
+fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
     if !sema_expr_decimal_literal_operand(left, true) -> return None
     if sema_expr_expects_machine_float(expected) -> return ~expected
     if !sema_expr_unit_probe_shape(right) -> return None
     probe_diagnostics := [Diagnostic]{}
-    probe_tail_store := sema_statement_tail_store_init()
-    probed :: sema_probe_expression(right, None, environment, &scopes, state, &probe_tail_store, &context, &probe_diagnostics) ?? return None
+    probed :: sema_probe_expression(right, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return None
     if sema_expr_measurement_type(probed.ty) || ((op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(probed.ty, environment)) -> return Val(Type.Float)
     None
 }
@@ -3028,7 +3064,7 @@ fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: 
 // right takes the left operand's type, and Float beside a measurement or a
 // scalable unit under `*` or `/`.
 fn sema_expr_decimal_rhs_expected(op: BinOp, lhs: Type, environment: SemaScopeEnvironment) -> Type? {
-    if !(op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Le || op == BinOp.Gt || op == BinOp.Ge) -> return None
+    if !sema_expr_same_type_operator(op) -> return None
     if sema_expr_measurement_type(lhs) -> return Val(Type.Float)
     if (op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(lhs, environment) -> return Val(Type.Float)
     // Any other left type is no Float carrier, so the literal stays Decimal
@@ -3037,10 +3073,34 @@ fn sema_expr_decimal_rhs_expected(op: BinOp, lhs: Type, environment: SemaScopeEn
     None
 }
 
+fn sema_expr_same_type_operator(op: BinOp) -> Bool Never! {
+    op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Le || op == BinOp.Gt || op == BinOp.Ge
+}
+
+// Rust `expr_wants_expected_type` beyond the decimal literal: an inferred
+// struct literal, an untyped typed literal, a contextual enum case (`.Red`,
+// `Val(x)`), or a bare `None` needs the surrounding type, which a same-type
+// operator takes from its left operand.
+fn sema_expr_wants_expected_form(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _) -> sema_expr_wants_expected_form(inner)
+        .Unary(op, inner, _) -> op == UnOp.Neg && sema_expr_wants_expected_form(inner)
+        .StructLit(_, _, _, _, _, inferred, _) -> inferred
+        .TypedLit(head, _, _) -> head == None
+        .EnumLit(type_name, _, _, _, _, _) -> type_name == ""
+        .Absent(_) -> true
+        else -> false
+    }
+}
+
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked_lhs :: sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, &scopes, state, &context), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked_lhs :: sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, &scopes, state, &tail_store, &context), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     rhs_expected := Type?{None}
-    if sema_expr_decimal_literal_operand(right, false) -> rhs_expected = sema_expr_decimal_rhs_expected(op, checked_lhs.ty, environment)
+    if {
+        sema_expr_decimal_literal_operand(right, false) -> rhs_expected = sema_expr_decimal_rhs_expected(op, checked_lhs.ty, environment)
+        sema_expr_same_type_operator(op) && sema_expr_wants_expected_form(right) -> rhs_expected = Val(checked_lhs.ty)
+        else -> {}
+    }
     checked_rhs :: sema_check_expression(right, rhs_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5, and
     // `x != 5` is its opposite. The plain side lifts once, so the comparison
@@ -3227,8 +3287,8 @@ fn sema_expr_core_import_module(environment: SemaScopeEnvironment, alias: String
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    input := sema_core_module_input_from_registration(graph.modules[module_index], false, [String]{})
-    imported :: sema_core_import_find(input.imports, alias) ?? return None
+    imports :: sema_core_registration_imports(graph.modules[module_index])
+    imported :: sema_core_import_find(imports, alias) ?? return None
     target := sema_registration_module_index(graph, imported.module_name)
     if target != None {
         index :: target ?? return None
@@ -3435,7 +3495,94 @@ pub fn sema_leave_source_nesting(context: &SemaCheckContext) Never! {
     context.source_nesting -= 1
 }
 
+// The parser's empty receiver `Ident("")` of a lower-case `.member` chain.
+fn sema_expr_is_bare_subject(expr: Expr) -> Bool Never! {
+    if expr == .Ident(name, _) -> return name == ""
+    false
+}
+
+// D-SUBJECT-CALL1=A (Rust `is_bare_member_chain`): `.a.b(x)` rooted in the
+// parser's empty receiver.
+fn sema_expr_is_bare_member_chain(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Field(base, _, _) -> sema_expr_is_bare_subject(base) || sema_expr_is_bare_member_chain(base)
+        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> sema_expr_is_bare_subject(receiver) || sema_expr_is_bare_member_chain(receiver)
+        else -> false
+    }
+}
+
+// D-SHAPE3a=A: `.new(...)` is inferred construction, never subject shorthand.
+fn sema_expr_is_inferred_constructor(expr: Expr) -> Bool Never! {
+    if expr == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> return method == "new" && sema_expr_is_bare_subject(receiver)
+    false
+}
+
+fn sema_expr_bare_member_chain_text(expr: Expr) -> String Never! {
+    if expr == {
+        .Ident(name, _) -> if name == "" -> "" else -> ".member"
+        .Field(base, member, _) -> "{sema_expr_bare_member_chain_text(base)}.{member}"
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> "{sema_expr_bare_member_chain_text(receiver)}.{method}(…)"
+        else -> ".member"
+    }
+}
+
+// The chain with its empty receiver named `subject`.
+fn sema_expr_replace_bare_subject(expr: Expr, subject: String) -> Expr Never! {
+    if expr == {
+        .Ident(name, span) -> if name == "" -> Expr.Ident{name: subject, span: span} else -> ~expr
+        .Field(base, member, span) -> Expr.Field{base: sema_expr_replace_bare_subject(base, subject), member: member, span: span}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen}
+        else -> ~expr
+    }
+}
+
+// D-SUBJECT-CALL1=A (Rust `infer_inner`): where a one-parameter callable is
+// expected, a bare member chain is that callable's subject shorthand, the
+// ordinary lambda `(__jet_subject: T) -> __jet_subject.chain`. None when the
+// expectation is no unary callable or a bindingless loop owns the subject.
+pub fn sema_expr_subject_shorthand(expr: Expr, expected: Type?, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Lambda? {
+    if context.implicit_loop_subject_depth > 0 || !sema_expr_is_bare_member_chain(expr) -> return None
+    required :: expected ?? return None
+    if required == .Fn(params, _, _, _, _, _) {
+        if params.len() != 1 -> return None
+        span :: expr_span(expr)
+        chain :: sema_expr_bare_member_chain_text(expr)
+        if context.subject_shorthand_depth > 0 -> &diagnostics.push(sema_lint("L0512", span, "subject shorthand `{chain}` is nested inside another subject shorthand", "implicit subjects become hard to track when shorthand scopes nest", "rewrite it with a named binding: `(item) -> item{chain}`"))
+        subject :: "__jet_subject"
+        return Val(Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: subject, name_span: span, ty: Val(params[0]), ty_span: None}}, result_type: None, error_type: None, effects: None, body: LambdaBody.Expr{value: sema_expr_replace_bare_subject(expr, subject)}, span: span, meta: ast_empty_lambda_meta()})
+    }
+    None
+}
+
+// D-SUBJECT-CALL1=A / D-LOOP-SUBJECT1=A (Rust `infer_inner`): inside a
+// bindingless loop a bare member chain reads the implicit `it`; where a
+// one-parameter callable is expected it is subject shorthand; elsewhere it
+// is no value. Unhandled when `expr` is not a bare member chain.
+fn sema_expr_check_bare_member_chain(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if !sema_expr_is_bare_member_chain(expr) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if context.implicit_loop_subject_depth > 0 -> return SemaMethodSpecialCheck{handled: true, value: sema_check_expression(sema_expr_replace_bare_subject(expr, "it"), expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)}
+    required :: expected ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    span :: expr_span(expr)
+    chain :: sema_expr_bare_member_chain_text(expr)
+    shorthand :: sema_expr_subject_shorthand(expr, expected, context, &diagnostics)
+    if shorthand == .Val(lambda) {
+        context.subject_shorthand_depth += 1
+        value :: sema_check_expression(Expr.Lambda{lambda: lambda}, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        context.subject_shorthand_depth -= 1
+        return SemaMethodSpecialCheck{handled: true, value: value}
+    }
+    if required == .Fn(params, _, _, _, _, _) {
+        &diagnostics.push(sema_error("E-SUBJECT-CALL-ARITY", span, "a bare member chain cannot supply a {params.len()}-parameter callable here", "lower-case `.member` shorthand supplies exactly one subject; a callable with {params.len()} parameters needs all parameters named", "write the full lambda, for example `(first, second) -> first{chain}`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if sema_expr_is_inferred_constructor(expr) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    &diagnostics.push(sema_error("E-SUBJECT-CALL", span, "a bare member chain cannot be used as a value of type {type_name(required)} here", "lower-case `.member` is shorthand only for a one-parameter callable; this argument expects an ordinary value", "write a value of type {type_name(required)}, or use `(subject: {type_name(required)}) -> subject{chain}`"))
+    SemaMethodSpecialCheck{handled: true, value: None}
+}
+
 pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    bare_member :: sema_expr_check_bare_member_chain(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if bare_member.handled -> return bare_member.value
     if !sema_enter_source_nesting(&context, expr_span(expr), &diagnostics) -> return None
     // D-FAILURE-FOUNDATION1=A: a call root auto-propagates its Result carrier
     // unless a carrier consumer claimed it. Grouping is transparent, so the

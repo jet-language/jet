@@ -58,8 +58,8 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, alias: String
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    input := sema_core_module_input_from_registration(graph.modules[module_index], false, [String]{})
-    imported :: sema_core_import_find(input.imports, alias) ?? return None
+    imports :: sema_core_registration_imports(graph.modules[module_index])
+    imported :: sema_core_import_find(imports, alias) ?? return None
     module_name := imported.module_name
     target_index :: sema_registration_module_index(graph, imported.module_name)
     if target_index != None {
@@ -148,11 +148,13 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     if graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity -> return None
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return None
     owner_index :: sema_registration_module_index(graph, export.source_module_identity) ?? return None
-    loop function in graph.modules[owner_index].functions {
-        if function.symbol.id.key == export.symbol.id.key {
-            return sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, span, &diagnostics)
-        }
+    // Search by index so the function collection stays borrowed.
+    found := -1
+    loop index in 0..<graph.modules[owner_index].functions.len() {
+        function :: graph.modules[owner_index].functions[index]
+        if found < 0 && function.symbol.id.key == export.symbol.id.key -> found = index
     }
+    if found >= 0 -> return sema_call_direct_target_from_registration(graph.modules[owner_index].functions[found], environment.registration_graph, environment.module_identity, environment.package_identity, type_args, span, &diagnostics)
     &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
     None
 }
@@ -259,6 +261,21 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     if !sema_call_core_check_type_args(imported.module_name, member, expected_type_arg_count, infer_when_omitted, type_args, span, &diagnostics) -> return None
     record :: sema_call_core_record(imported.module_name, member, actual_arity, span, &diagnostics) ?? return None
     Val(SemaCoreCallRoute.Core{record: record})
+}
+
+// D-VERDICT-1321-1 (Rust core_call.rs `("core.term", "print")`): an imported
+// `core.term` print with other than one argument is the qualified twin of the
+// ambient variadic `print`, checked and lowered exactly like it (Rust
+// `print_values`). True when this alias call is that print; the alias
+// reference is then recorded.
+pub fn sema_call_core_variadic_print(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, actual_arity: Int, alias_span: Span, context: &SemaCheckContext) -> Bool Never! {
+    if actual_arity == 1 -> return false
+    imported :: sema_call_core_import_target(environment, alias) ?? return false
+    if imported.module_name != "core.term" -> return false
+    if !sema_call_core_import_is_unshadowed(environment, scopes, imported) -> return false
+    member :: sema_call_core_import_member(imported, requested_member) ?? return false
+    if member != "print" -> return false
+    sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context)
 }
 
 

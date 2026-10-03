@@ -95,7 +95,16 @@ fn sema_expression_present(value: Expr, span: Span, expected: Type?, environment
         }
     }
     payload :: sema_check_expression(value, expected_inner, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    if expected_inner == .Val(inner_ty) && !sema_type_assignable(inner_ty, payload.ty) -> return None
+    // The payload fills the declared slot through the registration graph: a
+    // declared `module::Name` and a literal's written `Name` are one type. A
+    // refusal is reported here, never dropped silently.
+    if expected_inner == .Val(inner_ty) {
+        fits :: sema_expr_expected_assignable(inner_ty, payload.ty, environment) ?? return None
+        if !fits {
+            &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(inner_ty, environment), sema_expr_expected_type(payload.ty, environment), expr_span(value)))
+            return None
+        }
+    }
     sema_expr_expected(sema_tir_expr(result_ty ?? Type.Option{inner: payload.ty}, TExprKind.Present{value: payload}, span), expected, environment, &diagnostics)
 }
 
@@ -232,9 +241,12 @@ fn sema_expression_result_payload(value: Expr, success: Bool, span: Span, expect
     ok_ty := expected_ok ?? Type.Named{name: "Unit"}
     err_ty := expected_err ?? Type.Named{name: "Err"}
     required :: if success -> ok_ty else -> err_ty
-    if expected != None && !sema_type_assignable(required, payload.ty) {
-        &diagnostics.push(sema_type_mismatch(required, payload.ty, expr_span(value)))
-        return None
+    if expected != None {
+        fits :: sema_expr_expected_assignable(required, payload.ty, environment) ?? return None
+        if !fits {
+            &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(required, environment), sema_expr_expected_type(payload.ty, environment), expr_span(value)))
+            return None
+        }
     }
     if expected == None {
         if success -> ok_ty = payload.ty else -> err_ty = payload.ty
@@ -878,9 +890,12 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     fallback_mark :: sema_scope_mark(&scopes)
     route :: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
     sema_scope_rollback(&scopes, fallback_mark)
-    checked_route :: route ?? return None
+    checked_route :: route ?? {
+        sema_ownership_keep_share_found(&state, fallback_state)
+        return None
+    }
     fallback_payload :: checked_route.payload
-    if checked_route.reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
+    if checked_route.reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true) else -> sema_ownership_keep_share_found(&state, fallback_state)
     route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}
     // D-FAILURE-FOUNDATION1=A (Rust `lower_or_fallback`): a mixed `T? E!`
     // carrier has two failure routes, so `??` removes them one at a time:
@@ -928,9 +943,11 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         .Value(other) -> {
             fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
             checked :: sema_check_expression(other, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            fallback_fits := true
+            if payload != (Type.Named{name: "Never"}) && checked.ty != (Type.Named{name: "Never"}) -> fallback_fits = sema_expr_expected_assignable(payload, checked.ty, environment) ?? return None
             if {
                 payload == (Type.Named{name: "Never"}) -> fallback_payload = checked.ty
-                checked.ty != (Type.Named{name: "Never"}) && !sema_type_assignable(payload, checked.ty) -> {
+                checked.ty != (Type.Named{name: "Never"}) && !fallback_fits -> {
                     &diagnostics.push(sema_error("E0405", expr_span(other), "the fallback is {type_name(checked.ty)}, but the success value is {type_name(payload)}", "both sides of `??` must be the same type", "make the fallback produce {type_name(payload)}"))
                     return None
                 }
@@ -1481,6 +1498,19 @@ fn sema_expression_if_hoisted(subject: Expr, condition: Expr, then_body: [Stmt],
     Val(sema_tir_expr(table.ty, TExprKind.InlineBlock{body: [TStmt]{binding, TStmt.ExprStmt{value: table, span: span}}}, span))
 }
 
+// A multi-arm table (`if x == { None -> a  Val(v) -> b }`) reads as an `if`
+// chain whose next level tests the same name again. Rust checks such a table
+// as one switch over the declared type, so the `None` arm does not narrow
+// `x` for the arms after it; only a two-way `if x == None` swaps.
+fn sema_expression_if_continues_dispatch(else_value: Expr, name: String) -> Bool Never! {
+    if else_value == .If(next_condition, _, _, _, _, _) {
+        if sema_expression_if_condition_subject(next_condition) == .Val(subject) {
+            if subject == .Ident(subject_name, _) -> return subject_name == name
+        }
+    }
+    false
+}
+
 fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     dispatch_subject :: sema_expression_if_dispatch_subject(condition, else_value)
     if dispatch_subject == .Val(subject) -> return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1488,7 +1518,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // with the branches swapped, so the other branch holds the payload (Rust
     // value `if`). Source order of evaluation is unchanged.
     if sema_expression_absent_optional_test(condition) == .Val(test) {
-        if sema_expression_flow_optional_payload(scopes, test.name.name) != None -> return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if sema_expression_flow_optional_payload(scopes, test.name.name) != None && !sema_expression_if_continues_dispatch(else_value, test.name.name) -> return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     // Card #1440 / E0307: the outermost level of an else-less dispatch chain
     // proves coverage once, after every nested level has been checked.
@@ -1512,6 +1542,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if !then_result.complete {
         sema_scope_leave(&scopes, &then_state)
         sema_scope_rollback(&scopes, then_mark)
+        sema_ownership_keep_share_found(&state, then_state)
         return None
     }
     // Owner rule (bare `None`): without an optional expected type, a bare
@@ -1527,6 +1558,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         first :: sema_check_expression(then_value, expected, environment, &scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
             sema_scope_leave(&scopes, &then_state)
             sema_scope_rollback(&scopes, then_mark)
+            sema_ownership_keep_share_found(&state, then_state)
             return None
         }
         then_first = Val(first)
@@ -1540,12 +1572,16 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if !else_result.complete {
         sema_scope_leave(&scopes, &else_state)
         sema_scope_rollback(&scopes, else_mark)
+        sema_ownership_keep_share_found(&state, then_state)
+        sema_ownership_keep_share_found(&state, else_state)
         return None
     }
     else_expected :: if sibling_rule && sema_expression_bare_absent_arm(else_value, true) -> sema_expression_absent_sibling(then_first) else -> expected
     else_checked :: sema_check_expression(else_value, else_expected, environment, &scopes, &else_state, &tail_store, &context, &diagnostics) ?? {
         sema_scope_leave(&scopes, &else_state)
         sema_scope_rollback(&scopes, else_mark)
+        sema_ownership_keep_share_found(&state, then_state)
+        sema_ownership_keep_share_found(&state, else_state)
         return None
     }
     else_reaches_merge :: !sema_stmt_block_has_no_fallthrough(else_body) && else_checked.ty != Type.Named{name: "Never"}
@@ -1555,6 +1591,8 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     then_checked :: then_first ?? {
         sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, &deferred_then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
             sema_scope_leave(&deferred_then_scopes, &then_state)
+            sema_ownership_keep_share_found(&state, then_state)
+            sema_ownership_keep_share_found(&state, else_state)
             return None
         }
     }
@@ -1574,11 +1612,14 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         else_reaches_merge -> sema_ownership_join_paths(&state, before, else_state, before, false)
         else -> sema_ownership_join_paths(&state, before, before, before, false)
     }
+    // A share site found on an arm that leaves is still found.
+    sema_ownership_keep_share_found(&state, then_state)
+    sema_ownership_keep_share_found(&state, else_state)
     joined_then := then_checked
     joined_else := else_checked
     result_ty :: if {
         then_reaches_merge && else_reaches_merge -> if {
-            type_identity_equal(then_checked.ty, else_checked.ty) -> then_checked.ty
+            sema_expression_nominal_identity(then_checked.ty, else_checked.ty, environment) -> then_checked.ty
             else -> {
                 // A decision table in a fallible context mixes `Ok`/`Err`
                 // arms with plain success values; the plain side lifts into
@@ -1603,6 +1644,14 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if else_table_head -> sema_coverage_check_redundant_else(sema_coverage_else_chain_conditions(checked_condition, else_checked, span), span, environment, &diagnostics)
     value :: sema_tir_expr(result_ty, TExprKind.IfExpr{cond: checked.condition, then_body: then_result.value, then_value: joined_then, else_body: else_result.value, else_value: joined_else}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
+}
+
+// Rust `nominal_type_identity`: two spellings of one declared type (the
+// written `Kind` and the canonical `module::Kind` a resolved type carries)
+// are the same type at a merge.
+fn sema_expression_nominal_identity(left: Type, right: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+    if type_identity_equal(left, right) -> return true
+    type_identity_equal(sema_expr_expected_type(left, environment), sema_expr_expected_type(right, environment))
 }
 
 // The expected `T E!` carrier when one branch already produces it and the

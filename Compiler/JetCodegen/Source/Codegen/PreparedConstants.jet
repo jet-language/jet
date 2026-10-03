@@ -26,7 +26,7 @@ use jet_sema.[
 fn jet_codegen_prepared_constant_root(modules: [SemaGraphModuleResult], symbol: SymbolID) -> TComptimeValue? {
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.constants {
-            if definition.key != symbol.key -> next
+            if jet_codegen_constant_symbol_key(definition) != symbol.key -> next
             if !definition.is_comptime -> return None
             return Val(definition.value)
         }

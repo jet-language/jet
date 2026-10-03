@@ -1205,7 +1205,7 @@ fn mir_lint_semantic(ctx: MIRLintContext, instruction: MIRInstruction, semantic:
             mir_lint_expect_class(ctx, rule, "checked arithmetic", ty, [MIRLintClass]{MIRLintClass.Option})
         }
         .NumericMethod(_, receiver) | .NumericBinaryMethod(_, receiver, _) -> mir_lint_expect_value_class(ctx, rule, "numeric receiver", receiver, mir_lint_numeric())
-        .ClosureMethod(value, _, _) | .HostBorrowCallback(value, _) | .CCallback(_, _, value) | .HTTPRouterRegister(_, _, _, value, _, _, _, _) -> mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
+        .HostBorrowCallback(value, _) | .CCallback(_, _, value) | .HTTPRouterRegister(_, _, _, value, _, _, _, _) -> mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
         .CoreClosureCall(_, _, _, closure, _, _) -> {
             value :: closure ?? return None
             mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
@@ -1271,6 +1271,11 @@ fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProb
         .Return(value) -> {
             if value == .Val(returned) -> return mir_lint_expect_value(ctx, rule, "returned value", function.return_type, returned)
             if function.generator != None -> return None
+            // A fallible unit function's bare return is its implicit success
+            // (`Ok(())`), as the Rust backend's default return emits it.
+            if function.failure == .Result(success, _) {
+                if mir_lint_class(ctx.index, success) == .Unit -> return None
+            }
             mir_lint_expect_class(ctx, rule, "bare return of a function returning", function.return_type, [MIRLintClass]{MIRLintClass.Unit})
         }
         .Yield(value, resume) -> {

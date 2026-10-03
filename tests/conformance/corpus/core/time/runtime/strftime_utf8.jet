@@ -1,0 +1,77 @@
+// #4442: exercise the canonical Core formatter with real Prelude civil carriers.
+// Formatter expansion/precision policy stays unchanged; #4441 owns that ballot.
+use core.time as time_format
+
+fn strftime_utf8_datetime() -> DateTime Never! {
+    time_format.datetime(2024, 2, 29, 13, 4, 5).add_nanoseconds(123456789)
+}
+
+#Test("strftime preserves complete UTF-8 literal runs around directives") {
+    dt :: strftime_utf8_datetime()
+    assert_eq(time_format.strftime("é漢🙂%Y é%mé漢👩‍💻%d終🙂", dt), "é漢🙂2024 é02é漢👩‍💻29終🙂")
+    assert_eq(time_format.strftime("é%H🙂%M漢%f終é", dt), "é13🙂04漢123456終é")
+}
+
+#Test("strftime literal-only UTF-8 and empty output") {
+    dt :: strftime_utf8_datetime()
+    assert_eq(time_format.strftime("é漢é👩‍💻🙂", dt), "é漢é👩‍💻🙂")
+    assert_eq(time_format.strftime("", dt), "")
+}
+
+#Test("strftime escaped percent beside UTF-8") {
+    dt :: strftime_utf8_datetime()
+    assert_eq(time_format.strftime("é%%漢%%🙂%Y%%é", dt), "é%漢%🙂2024%é")
+    assert_eq(time_format.strftime("%%é", dt), "%é")
+    assert_eq(time_format.strftime("🙂%%", dt), "🙂%")
+}
+
+#Test("strftime unsupported percent Unicode preserves every original byte") {
+    dt :: strftime_utf8_datetime()
+    assert_eq(time_format.strftime("%é|%漢|%🙂|%́|%👩‍💻", dt), "%é|%漢|%🙂|%́|%👩‍💻")
+    assert_eq(time_format.strftime("é%漢%Y%🙂é%", dt), "é%漢2024%🙂é%")
+}
+
+#Test("strftime keeps all existing ASCII directives and microsecond precision") {
+    dt :: strftime_utf8_datetime()
+    assert_eq(time_format.strftime("%A|%a|%b|%B|%c|%d|%f|%H|%I|%j|%m|%M|%U|%W|%w|%y|%Y|%Z|%%", dt), "Thursday|Thu|Feb|February|Thu Feb 29 13:04:05 2024|29|123456|13|01|060|02|04|08|09|4|24|2024|UTC|%")
+    assert_eq(time_format.strftime("%f", time_format.datetime(2024, 2, 29, 0, 0, 0)), "000000")
+}
+
+#Test("strftime keeps unsupported ASCII and trailing-percent behavior") {
+    dt :: strftime_utf8_datetime()
+    assert_eq(time_format.strftime("start %Q %S %z %n %t end%", dt), "start %Q %S %z %n %t end%")
+    assert_eq(time_format.strftime("%", dt), "%")
+    assert_eq(time_format.strftime("%%%", dt), "%%")
+    assert_eq(time_format.strftime("ASCII %Y-%m-%d %H:%M", dt), "ASCII 2024-02-29 13:04")
+}
+
+// #4458: C/POSIX %U (Sunday-first) and %W (Monday-first) week numbers; days
+// before the year's first Sunday/Monday are week 00. Oracle: C strftime.
+#Test("strftime week numbers follow C Sunday and Monday year-start boundaries") {
+    cases :: [
+        (y: 2023, m: 1, d: 1, want: "Sun 01 00 0 001"),
+        (y: 2023, m: 1, d: 2, want: "Mon 01 01 1 002"),
+        (y: 2023, m: 1, d: 7, want: "Sat 01 01 6 007"),
+        (y: 2023, m: 1, d: 8, want: "Sun 02 01 0 008"),
+        (y: 2023, m: 12, d: 31, want: "Sun 53 52 0 365"),
+        (y: 2024, m: 1, d: 1, want: "Mon 00 01 1 001"),
+        (y: 2024, m: 1, d: 6, want: "Sat 00 01 6 006"),
+        (y: 2024, m: 1, d: 7, want: "Sun 01 01 0 007"),
+        (y: 2024, m: 1, d: 8, want: "Mon 01 02 1 008"),
+        (y: 2024, m: 2, d: 29, want: "Thu 08 09 4 060"),
+        (y: 2024, m: 12, d: 31, want: "Tue 52 53 2 366"),
+        (y: 2016, m: 12, d: 31, want: "Sat 52 52 6 366"),
+        (y: 2021, m: 1, d: 1, want: "Fri 00 00 5 001"),
+        (y: 2021, m: 1, d: 3, want: "Sun 01 00 0 003"),
+        (y: 2021, m: 1, d: 4, want: "Mon 01 01 1 004"),
+        (y: 2028, m: 12, d: 31, want: "Sun 53 52 0 366"),
+        (y: 2000, m: 2, d: 29, want: "Tue 09 09 2 060"),
+        (y: 2019, m: 1, d: 1, want: "Tue 00 00 2 001"),
+        (y: 2020, m: 1, d: 1, want: "Wed 00 00 3 001"),
+        (y: 2015, m: 1, d: 1, want: "Thu 00 00 4 001"),
+        (y: 2022, m: 1, d: 1, want: "Sat 00 00 6 001"),
+    ]
+    loop row in cases {
+        assert_eq(time_format.strftime("%a %U %W %w %j", time_format.datetime(row.y, row.m, row.d, 0, 0, 0)), row.want)
+    }
+}

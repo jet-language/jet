@@ -453,7 +453,10 @@ fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, 
         .Result(ok, err) -> Type.Result{ok: sema_type_resolve_declared_recursive(graph, ok, caller_module_identity, generic_params), err: sema_type_resolve_declared_recursive(graph, err, caller_module_identity, generic_params)}
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
             rewritten :: loop parameter in params -> sema_type_resolve_declared_recursive(graph, parameter, caller_module_identity, generic_params)
-            Type.Fn{params: rewritten, ret: ret.map((value) -> sema_type_resolve_declared_recursive(graph, value, caller_module_identity, generic_params)), effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+            // A plain branch, not `ret.map(…)`: a callback would capture (copy) the whole graph.
+            resolved_ret := Type?{None}
+            if ret == .Val(value) -> resolved_ret = Val(sema_type_resolve_declared_recursive(graph, value, caller_module_identity, generic_params))
+            Type.Fn{params: rewritten, ret: resolved_ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }
         .TraitObject(bounds) -> Type.TraitObject{bounds: loop bound in bounds -> sema_type_graph_resolve_trait_bound(graph, bound, caller_module_identity)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: sema_type_resolve_declared_recursive(graph, field.ty, caller_module_identity, generic_params)}}

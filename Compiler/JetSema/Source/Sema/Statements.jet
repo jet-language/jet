@@ -692,7 +692,7 @@ fn sema_stmt_check_unit_if(expr: Expr, return_type: Type?, environment: SemaScop
             // D-FLOWTYPE1=A: a stable `x == None` test reads as its presence
             // test with the branches swapped, as in the value form.
             if sema_expression_absent_optional_test(condition) == .Val(test) {
-                if sema_expression_flow_optional_payload(scopes, test.name.name) != None -> return sema_stmt_check_unit_if_parts(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+                if sema_expression_flow_optional_payload(scopes, test.name.name) != None && !sema_expression_if_continues_dispatch(else_value, test.name.name) -> return sema_stmt_check_unit_if_parts(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
             }
             sema_stmt_check_unit_if_parts(condition, then_body, then_value, else_body, else_value, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         }
@@ -770,6 +770,9 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         sema_expression_declare_condition_bindings(arm_bindings, &scopes, &branch_state, true, &diagnostics)
         if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arm.body)
         branch := sema_check_statements(arm.body, return_type, environment, &scopes, &branch_state, &tail_store, &context, &diagnostics, loop_depth)
+        // An arm whose body did not check leaves no complete TIR for it; the
+        // table must not lower that arm as an empty fall-through.
+        if !branch.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
             if !sema_stmt_check_value_block_end(arm.body, branch.value, return_type, arm.span, context.function_name, &diagnostics) -> complete = false
@@ -2888,6 +2891,15 @@ fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvi
     Val(TStmt.Inline{body: [TStmt]{}, span: Span{start: binding.name_span.start, end: init_span.end}})
 }
 
+// Rust `Stmt::Assign` with a compound op checks the update value against the
+// place type: `text += "…"` appends to a String place (the binary `+`
+// itself is not text joining, which stays E0109); every other compound op
+// keeps its binary operator typing.
+fn sema_stmt_compound_result(op: BinOp, place: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Type? {
+    if op == BinOp.Add && place == Type.String && offered == Type.String -> return Val(Type.String)
+    sema_expr_binary_type(op, place, offered, span, &diagnostics)
+}
+
 fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     index :: sema_scope_resolve_index(scopes, name)
     if index == None {
@@ -2895,6 +2907,11 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         return None
     }
     binding :: ~scopes.bindings[index]
+    // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
+    // module-level write target; it writes the binding's runtime storage cell.
+    if binding.symbol.kind == SymbolKind.Constant && sema_stmt_module_storage_binding(environment, binding.symbol.id) {
+        return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if !binding.mutable {
         &diagnostics.push(sema_error("E0111", name_span, "`{name}` was made immutable, so it can't change", "only mutable bindings and write-access parameters can be changed", "declare it as a mutable binding"))
         return None
@@ -2933,7 +2950,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     tir_op := TBinaryOp?{None}
     if op != None {
         operator :: op
-        result :: sema_expr_binary_type(operator, required, checked.ty, op_span, &diagnostics) ?? return None
+        result :: sema_stmt_compound_result(operator, required, checked.ty, op_span, &diagnostics) ?? return None
         if !sema_type_assignable(required, result) {
             &diagnostics.push(sema_type_mismatch(required, result, op_span))
             return None
@@ -2952,6 +2969,53 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     // A new value has no `#Track` origin (Rust `clear_origin`).
     scopes.bindings[index].origin = None
     Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
+}
+
+// Rust `is_global_mutable_binding`: this module's own `name := …` binding that
+// is not prepared while building.
+fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, id: SymbolID) -> Bool Never! {
+    loop declaration in environment.declarations {
+        if declaration.symbol_id.key != id.key -> next
+        if declaration.item == .Const(definition) -> return definition.mutable && !definition.is_comptime
+        return false
+    }
+    false
+}
+
+// Rust `Stmt::Assign` on a module-level mutable binding: the value checks
+// against the declared place type, and the write lands in the binding's
+// persistent storage cell (Rust TIR `persistent_local`).
+fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    required :: symbol.ty ?? {
+        // An unchecked module binding already carries its initializer's report.
+        _ := sema_check_expression(expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return None
+    }
+    expected := Type?{None}
+    if op == None -> expected = Val(required)
+    if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) -> expected = Val(required)
+    checked_value :: sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked := checked_value
+    if op != None && sema_stmt_compound_widens(checked.ty, required) {
+        widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+        checked = sema_expr_numeric_literal_conversion(checked, required, checked.span, widen_line, &diagnostics) ?? return None
+    }
+    tir_op := TBinaryOp?{None}
+    if op != None {
+        operator :: op
+        result :: sema_stmt_compound_result(operator, required, checked.ty, op_span, &diagnostics) ?? return None
+        if !sema_type_assignable(required, result) {
+            &diagnostics.push(sema_type_mismatch(required, result, op_span))
+            return None
+        }
+        tir_op = Val(sema_stmt_binary_type(operator))
+    }
+    if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
+    line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
+    storage := tir_persistent_local(name, environment.module_identity, required, name_span)
+    storage.mutable = true
+    place :: sema_tir_expr(required, TExprKind.Local{local: storage}, name_span)
+    Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, clone_value: false, line: line, span: Span{start: name_span.start, end: expr_span(expr).end}})
 }
 
 // Rust `source != target && source.numeric_widening_to(target).is_some()`.
@@ -3632,7 +3696,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     tir_op := TBinaryOp?{None}
     if op != None {
         operator :: op
-        result :: sema_expr_binary_type(operator, place.ty, checked.ty, op_span, &diagnostics) ?? return None
+        result :: sema_stmt_compound_result(operator, place.ty, checked.ty, op_span, &diagnostics) ?? return None
         if !sema_type_assignable(place.ty, result) {
             &diagnostics.push(sema_type_mismatch(place.ty, result, op_span))
             return None
@@ -3769,6 +3833,12 @@ fn sema_stmt_return_expr_is_carrier(value: Expr, return_type: Type?, scopes: Sem
     normalized := sema_expr_unwrap_tag(required)
     if value == {
         .Paren(inner, _) | .Tainted(inner, _, _) | .Copy(inner, _) -> return sema_stmt_return_expr_is_carrier(inner, return_type, scopes)
+        // Rust `check_return_expr` checks a value `if` against the whole
+        // return type. A `T?` slot lifts each plain arm itself, so any value
+        // `if` there is checked as the carrier (an arm may be a bound `T?`
+        // local, a `Val(x)`, a `None`, or a plain `x`). A `T !E` slot keeps
+        // the payload route unless every arm builds the carrier.
+        .If(_, _, then_value, _, else_value, _) -> return normalized == .Option(_) || (sema_stmt_return_expr_is_carrier(then_value, return_type, scopes) && sema_stmt_return_expr_is_carrier(else_value, return_type, scopes))
         else -> {}
     }
     if normalized == {
@@ -3874,9 +3944,25 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
     diagnostics[mismatch_index] = sema_return_value_mismatch(context.function_name, sema_stmt_return_required_type(return_type), offered.ty, value_span)
 }
 
+// Rust `check_return_expr` infers the value against the whole return type,
+// so a value whose own type already is the carrier (`list[i]` of `[T?]`,
+// `row.field` of `T !E`) returns as-is. The syntactic carrier test above
+// cannot see such a value's type, so it is inferred here on its own.
+fn sema_stmt_return_probed_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    if !sema_stmt_return_is_carrier(return_type) -> return false
+    if sema_stmt_return_known_type(value, scopes) != None -> return false
+    if value == {
+        .Index(_, _, _, _) | .Field(_, _, _) -> {}
+        else -> return false
+    }
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(value, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return false
+    sema_stmt_return_types_are_carriers(probed.ty, sema_stmt_return_required_type(return_type))
+}
+
 fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     required := sema_stmt_return_required_type(return_type)
-    if sema_stmt_return_expr_is_carrier(value, return_type, scopes) {
+    if sema_stmt_return_expr_is_carrier(value, return_type, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, &scopes, state, &tail_store, &context) {
         carrier :: sema_check_expression(value, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
         // here) is this body's own failure source.
@@ -4446,7 +4532,18 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         iter_borrowed_depth := context.iter_borrowed.len()
                         if sema_stmt_for_in_driven_root(collection_expr) == .Val(driven) -> &context.iter_borrowed.push(driven)
                         references_before := state.references.len()
+                        // D-LOOP-SUBJECT1=A: a bindingless `loop xs -> .member`
+                        // binds the implicit `it`, which bare member chains in
+                        // the body read; a nested bindingless loop is E0380.
+                        bindingless :: var == "it" && var2 == None
+                        nested_bindingless :: bindingless && context.implicit_loop_subject_depth > 0
+                        if nested_bindingless {
+                            &diagnostics.push(sema_error("E0380", expr_span(collection_expr), "this loop needs a named source binding", "an implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding", "write `loop item in source -> ...`; give nested loops named bindings"))
+                            valid = false
+                        }
+                        if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth += 1
                         nested := sema_check_statements(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth + 1)
+                        if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth -= 1
                         source_stable := stable_root_key != None && !sema_stmt_for_in_body_mentions(state, references_before, stable_root_key ?? "")
                         loop context.iter_borrowed.len() > iter_borrowed_depth -> _ := &context.iter_borrowed.pop()
                         context.arrow_loop_body = previous_arrow_loop_body

@@ -74,7 +74,6 @@ use jet_foundation.[
 struct MIRPassLegalityTables {
     prelude_calls: [MIRPreludeCall]
     prelude_positions: [U64:Int]
-    prelude_purity: [U64:Bool]
     prelude_failure: String?
     core_calls: [MIRCoreCall]
     core_positions: [U64:Int]
@@ -125,7 +124,6 @@ fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
     MIRPassLegalityTables{
         prelude_calls: program.prelude_calls,
         prelude_positions: prelude_positions,
-        prelude_purity: mir_pass_prelude_purity(program.prelude_calls),
         prelude_failure: mir_pass_validate_prelude_rows(program.prelude_calls),
         core_calls: program.core_calls,
         core_positions: core_positions,
@@ -264,7 +262,9 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
         }
     }
 
-    dominance :: mir_pass_dominators(function)
+    // A use in a block no root reaches is dominated (the block never runs and
+    // UnreachableBlockElimination removes it); see mir_pass_legality_dominators.
+    dominance :: mir_pass_legality_dominators(function)
     loop block in function.blocks {
         index := 0
         loop instruction in block.instructions {
@@ -353,9 +353,6 @@ fn mir_pass_validate_function_legality(
                 definitions,
             )
             if operation_failure != None -> return operation_failure
-            if function.is_pure && mir_pass_operation_has_effect(instruction.operation, function, tables) {
-                return Val("pure function contains an effectful MIR operation")
-            }
         }
     }
     drop_failure := mir_pass_validate_drops(function, definitions)
@@ -625,11 +622,6 @@ fn mir_pass_validate_place(
 fn mir_pass_prelude(tables: MIRPassLegalityTables, id: MIRPreludeCallID) -> MIRPreludeCall? {
     position :: tables.prelude_positions.get(id.value) ?? return None
     Val(tables.prelude_calls[position])
-}
-
-// Rust: crates/jet-foundation/src/MIROptimization.rs::prelude_call_is_pure
-fn mir_pass_legality_prelude_is_pure(tables: MIRPassLegalityTables, id: MIRPreludeCallID) -> Bool Never! {
-    tables.prelude_purity.get(id.value) ?? false
 }
 
 fn mir_pass_append_optional_place(places: &[MIRPlaceID], optional: MIRPlaceID?) Never! {
@@ -1565,7 +1557,93 @@ fn mir_pass_consumed_values(operation: MIROperation) -> [MIRValueID] Never! {
 }
 
 fn mir_pass_event_dominates(event: MIRPassMoveEvent, block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> Bool Never! {
-    if event.block == block -> event.index < index else -> mir_pass_dominates(dominance, event.block, block)
+    mir_pass_precedes(event.block, event.index, block, index, dominance)
+}
+
+// Block storage order is not execution order: one point precedes another
+// when it comes earlier in the same block or its block dominates the other.
+fn mir_pass_precedes(first_block: MIRBlockID, first_index: Int, second_block: MIRBlockID, second_index: Int, dominance: MIRPassDominance) -> Bool Never! {
+    if first_block == second_block -> first_index < second_index else -> mir_pass_dominates(dominance, first_block, second_block)
+}
+
+// One move or reinitializing write of a place path, grouped by path root.
+struct MIRPassPlaceEvent {
+    pub projections: [String]
+    pub block: MIRBlockID
+    pub index: Int
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::mir_place_path (root)
+fn mir_pass_place_root(place: MIRPlace) -> String Never! {
+    if place.base == {
+        .Local(local) -> "local:{local.value}"
+        .Parameter(value) -> "parameter:{value.value}"
+        .Capture(value) -> "capture:{value.value}"
+        .Temporary(value) -> "temporary:{value.value}"
+        .Static(name) -> "static:{name}"
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::mir_index_kind_key
+fn mir_pass_index_kind_key(kind: MIRIndexKind) -> Int Never! {
+    if kind == {
+        .List -> 1
+        .FixedListProof -> 2
+        .Map -> 3
+        .Lane -> 4
+        .Pool -> 5
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::mir_place_path (projections)
+fn mir_pass_place_projection_keys(place: MIRPlace) -> [String] Never! {
+    keys := [String]{}
+    loop projection in place.projections {
+        key :: if projection == {
+            .Field(field, _) -> "0:{field.value}"
+            .Index(kind, index, _, _, _, _, _) -> "{mir_pass_index_kind_key(kind)}:{index.value}"
+            .Deref(_) -> "6:0"
+            .Payload(kind, _) -> if kind == {
+                .Option -> "7:0"
+                .Result(ok) -> if ok -> "8:1" else -> "8:0"
+                .Enum(owner, _, variant_index) -> "9:{owner.value}:{variant_index}"
+            }
+            .Range(range, _, _) -> "10:{range.value}"
+        }
+        &keys.push(key)
+    }
+    keys
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::mir_place_path_is_prefix
+// (both paths share one root: events are grouped by root).
+fn mir_pass_place_path_is_prefix(prefix: [String], path: [String]) -> Bool Never! {
+    if prefix.len() > path.len() -> return false
+    loop position in 0..<prefix.len() {
+        if prefix[position] != path[position] -> return false
+    }
+    true
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs::verify_moves_and_borrows
+// (`has_live_move` for a move use). A move of a path conflicts with an
+// earlier move of an overlapping path that precedes it, unless a write of a
+// prefix of the moved path between them reinitialized it. Moves on disjoint
+// branches (one place moved in each dispatch arm) never conflict.
+fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlaceEvent], path: [String], block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> Bool Never! {
+    loop earlier in moved {
+        overlaps :: mir_pass_place_path_is_prefix(earlier.projections, path) || mir_pass_place_path_is_prefix(path, earlier.projections)
+        if !overlaps || !mir_pass_precedes(earlier.block, earlier.index, block, index, dominance) -> next
+        restored := false
+        loop write in reinitialized {
+            if mir_pass_place_path_is_prefix(write.projections, earlier.projections) && mir_pass_precedes(earlier.block, earlier.index, write.block, write.index, dominance) && mir_pass_precedes(write.block, write.index, block, index, dominance) {
+                restored = true
+                break
+            }
+        }
+        if !restored -> return true
+    }
+    false
 }
 
 fn mir_pass_validate_moves(
@@ -1578,7 +1656,45 @@ fn mir_pass_validate_moves(
     dominators :: mir_pass_dominators(function)
     // A value is consumed at most once (checked below), so one event per value.
     consumed := [U64:MIRPassMoveEvent]{}
-    moved_places := [U64:Bool]{}
+    // Place moves and reinitializing writes, grouped by path root and
+    // collected before any check: block storage order is not execution order.
+    move_slots := [String:Int]{}
+    moves := [[MIRPassPlaceEvent]]{}
+    write_slots := [String:Int]{}
+    writes := [[MIRPassPlaceEvent]]{}
+    loop block in function.blocks {
+        if reachable_rows.get(block.id.value) == None -> next
+        index := 0
+        loop instruction in block.instructions {
+            target :: if instruction.operation == {
+                .MovePlace(place) -> Val(place)
+                .InitializeUninit(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> Val(place)
+                else -> MIRPlaceID?{None}
+            }
+            if target == .Val(place_id) {
+                if mir_pass_defined_place(function, definitions, place_id) == .Val(place) {
+                    root :: mir_pass_place_root(place)
+                    event :: MIRPassPlaceEvent{projections: mir_pass_place_projection_keys(place), block: block.id, index: index}
+                    if instruction.operation == .MovePlace(_) {
+                        if move_slots.get(root) == .Val(slot) {
+                            &moves[slot].push(event)
+                        } else {
+                            move_slots[root] = moves.len()
+                            &moves.push([MIRPassPlaceEvent]{event})
+                        }
+                    } else {
+                        if write_slots.get(root) == .Val(slot) {
+                            &writes[slot].push(event)
+                        } else {
+                            write_slots[root] = writes.len()
+                            &writes.push([MIRPassPlaceEvent]{event})
+                        }
+                    }
+                }
+            }
+            index += 1
+        }
+    }
     loop block in function.blocks {
         if reachable_rows.get(block.id.value) != None {
             index := 0
@@ -1612,8 +1728,10 @@ fn mir_pass_validate_moves(
                         if instruction.operation == {
                             .MovePlace(_) -> {
                                 if place.access != .Move -> return Val("MovePlace uses a non-move place")
-                                if moved_places.get(place_id.value) != None -> return Val("place is moved more than once")
-                                &moved_places.add(place_id.value, true).drop("checked absent above")
+                                root :: mir_pass_place_root(place)
+                                moved_at :: if move_slots.get(root) == .Val(slot) -> moves[slot] else -> [MIRPassPlaceEvent]{}
+                                written_at :: if write_slots.get(root) == .Val(slot) -> writes[slot] else -> [MIRPassPlaceEvent]{}
+                                if mir_pass_move_is_live(moved_at, written_at, mir_pass_place_projection_keys(place), block.id, index, dominators) -> return Val("place is moved more than once")
                                 if place.base == {
                                     .Static(_) -> {
                                         if place.projections.len() != 0 -> return Val("static move place has a projection")
@@ -1740,79 +1858,6 @@ fn mir_pass_host_callback_consumer(operation: MIROperation, tables: MIRPassLegal
     id :: call ?? return false
     route :: mir_pass_prelude(tables, id) ?? return false
     route.family == .StaticPrelude || route.family == .ClosureMethod || route.family == .Host
-}
-
-fn mir_pass_operation_has_effect(operation: MIROperation, function: MIRFunction, tables: MIRPassLegalityTables) -> Bool Never! {
-    if operation == {
-        .Semantic(semantic) -> {
-            calls :: mir_semantic_op_prelude_calls(semantic)
-            if calls.len() == 0 -> return true
-            loop call in calls { if !mir_pass_legality_prelude_is_pure(tables, call) -> return true }
-            return false
-        }
-        .Call(callee, _, _) -> {
-            if callee == {
-                .Prelude(call) -> return !mir_pass_legality_prelude_is_pure(tables, call)
-                else -> return true
-            }
-        }
-        .CoreCall(_, route, _, _, fallibility, _) -> return !mir_pass_legality_prelude_is_pure(tables, route) || fallibility != .Infallible
-        .Binary(_, dispatch, _, _, _) -> {
-            if dispatch == {
-                .Prelude(call, _) -> return !mir_pass_legality_prelude_is_pure(tables, call)
-                else -> return false
-            }
-        }
-        .Convert(_, _, _, conversion) -> {
-            if conversion == {
-                .Prelude(call, _, fallibility) -> return !mir_pass_legality_prelude_is_pure(tables, call) || fallibility != .Infallible
-                else -> return false
-            }
-        }
-        .Index(call, _, _, _, _, _, _)
-        | .Slice(call, _, _, _, _, _)
-        | .Todo(call, _, _)
-        | .LoopRangeInit(call, _, _, _, _)
-        | .LoopRangeHasNext(call, _)
-        | .LoopRangeValue(call, _)
-        | .LoopRangeAdvance(call, _)
-        | .LoopIterInit(call, _, _, _, _)
-        | .LoopIterHasNext(call, _)
-        | .LoopIterValue(call, _)
-        | .LoopIterAdvance(call, _) -> return !mir_pass_legality_prelude_is_pure(tables, call)
-        .MovePlace(_) | .WritePlace(_, _) | .ReplacePlace(_, _) | .InitializeUninit(_) | .Drop(_, _) -> return true
-        .AddressOf(_, access) -> return access == .Write
-        .RawAddressOf(_) -> return true
-        .IndirectCall(_, _, _) -> return true
-        .Closure(_, _, _) -> return true
-        .ReadPlace(place) -> {
-            row :: mir_pass_find_place(function.places, place) ?? return true
-            loop projection in row.projections {
-                if projection == {
-                    .Index(_, _, call, write_call, _, _, _) -> {
-                        if !mir_pass_legality_prelude_is_pure(tables, call) -> return true
-                        if write_call == .Val(setter) {
-                            if !mir_pass_legality_prelude_is_pure(tables, setter) -> return true
-                        }
-                    }
-                    // A range window checks its bounds and may stop.
-                    .Range(_, _, _) -> return true
-                    else -> {}
-                }
-            }
-            return false
-        }
-        .WritePlace(place, _)
-        | .ReplacePlace(place, _) -> {
-            row :: mir_pass_find_place(function.places, place) ?? return true
-            if row.base == {
-                .Static(_) | .Parameter(_) | .Capture(_) -> return true
-                else -> {}
-            }
-            return true
-        }
-        else -> return false
-    }
 }
 
 fn mir_pass_local_id_seen(rows: [MIRLocalID], id: MIRLocalID) -> Bool Never! {

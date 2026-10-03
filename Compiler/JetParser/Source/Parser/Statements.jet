@@ -2,6 +2,8 @@
 use jet_foundation.[
     AccessConvention,
     BinOp,
+    BindName,
+    BindNameRename,
     BindPattern,
     Binding,
     Call,
@@ -460,6 +462,7 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             binding_kind :: parser_kind_at(&state, 1)
             if {
                 binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(&state)
+                (binding_kind == TOKEN_LBRACE || binding_kind == TOKEN_DOT) && parser_pattern_binding_ahead(&state) -> parser_parse_pattern_binding_statement(&state)
                 else -> parser_parse_assignment_or_expression(&state)
             }
         }
@@ -469,7 +472,10 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return parser_parse_prep_block(&state)
             parser_parse_comptime_binding(&state)
         }
-        else -> parser_parse_assignment_or_expression(&state)
+        else -> {
+            if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
+            parser_parse_assignment_or_expression(&state)
+        }
     }
 }
 
@@ -1286,6 +1292,119 @@ fn parser_parse_prep_loop(state: &JetParserState) -> Stmt {
     body :: parser_parse_loop_after_keyword(&state, keyword.span, None)
     end :: parser_lookahead(&state, -1).span
     Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: state.derive_template_depth > 0, span: parser_cover(start.span, end)}
+}
+
+// D-BIND-BARE1 / S74 (Rust `looks_like_sigil_binding` destructuring arms): a
+// `[ … ]`, `( … )`, `Type{ … }` or retired `Type.{ … }` target whose matching
+// close is followed by `::` or `:=`. Bounded by the bracket depth.
+fn parser_pattern_binding_ahead(state: &JetParserState) -> Bool Never! {
+    offset := 0
+    if parser_current_kind(&state) == TOKEN_IDENT {
+        offset = 1
+        if parser_kind_at(&state, 1) == TOKEN_DOT && parser_kind_at(&state, 2) == TOKEN_LBRACE -> offset = 2
+        if parser_kind_at(&state, offset) != TOKEN_LBRACE -> return false
+    }
+    open :: parser_kind_at(&state, offset)
+    close := TOKEN_RBRACE
+    if open == TOKEN_LBRACKET -> close = TOKEN_RBRACKET
+    if open == TOKEN_LPAREN -> close = TOKEN_RPAREN
+    if open != TOKEN_LBRACKET && open != TOKEN_LPAREN && open != TOKEN_LBRACE -> return false
+    // Rust `try_bind_pattern`: `( name: … )` opens a named tuple, never a pattern.
+    if open == TOKEN_LPAREN && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON -> return false
+    depth := 0
+    loop {
+        kind :: parser_kind_at(&state, offset)
+        if kind == TOKEN_EOF -> return false
+        if kind == open -> depth += 1
+        if kind == close {
+            depth -= 1
+            if depth == 0 {
+                after :: parser_kind_at(&state, offset + 1)
+                return after == TOKEN_COLON_COLON || after == TOKEN_COLON_EQ
+            }
+        }
+        offset += 1
+    }
+    false
+}
+
+// S74 (Rust `sigil_binding` + `try_bind_pattern`): a destructuring binding
+// `[a, b] :: list`, `(a, b) :: tuple` or `Type{x, y: local, ..} :: value`.
+fn parser_parse_pattern_binding_statement(state: &JetParserState) -> Stmt {
+    start :: parser_current(&state)
+    pattern := BindPattern.List{elems: [BindName]{}, span: start.span}
+    if start.kind == {
+        TOKEN_LBRACKET -> {
+            parser_bump(&state)
+            elems :: parser_pattern_binding_names(&state, TOKEN_RBRACKET, "for a list-pattern binding")
+            close :: parser_expect(&state, TOKEN_RBRACKET, "`]` to close the list pattern")
+            pattern = BindPattern.List{elems: elems, span: parser_cover(start.span, close.span)}
+        }
+        TOKEN_LPAREN -> {
+            parser_bump(&state)
+            elems :: parser_pattern_binding_names(&state, TOKEN_RPAREN, "for a tuple-pattern binding")
+            close :: parser_expect(&state, TOKEN_RPAREN, "`)` to close the tuple pattern")
+            pattern = BindPattern.Tuple{elems: elems, span: parser_cover(start.span, close.span)}
+        }
+        else -> {
+            type_name :: parser_expect_name(&state, "for a struct pattern")
+            if parser_current_kind(&state) == TOKEN_DOT {
+                dot :: parser_bump(&state)
+                name :: type_name.payload.decoded
+                parser_add_fatal_code(&state, "E0320", dot.span, "struct pattern uses `{name}{{…}}`, not `{name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{name}{{…}}`")
+            }
+            parser_expect(&state, TOKEN_LBRACE, "`{{` to open the struct pattern")
+            fields := [BindName]{}
+            rest := Span?{None}
+            if parser_current_kind(&state) != TOKEN_RBRACE {
+                loop {
+                    if parser_current_kind(&state) == TOKEN_DOT_DOT {
+                        rest = Val(parser_bump(&state).span)
+                        break
+                    }
+                    field :: parser_expect_name(&state, "for a struct-pattern field")
+                    rename := BindNameRename?{None}
+                    if parser_current_kind(&state) == TOKEN_COLON {
+                        parser_bump(&state)
+                        local :: parser_expect_name(&state, "as the renamed binding")
+                        rename = Val(BindNameRename{name: local.payload.decoded, span: local.span})
+                    }
+                    &fields.push(BindName{name: field.payload.decoded, span: field.span, rename: rename})
+                    if parser_current_kind(&state) != TOKEN_COMMA -> break
+                    parser_bump(&state)
+                    if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                }
+            }
+            close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the struct pattern")
+            span :: parser_cover(type_name.span, close.span)
+            pattern = BindPattern.Struct{type_name: type_name.payload.decoded, type_span: type_name.span, fields: fields, rest: rest, span: span}
+        }
+    }
+    sigil :: parser_bump(&state)
+    value :: parser_parse_expression(&state, 1, 0)
+    binding := ast_binding("", parser_bind_pattern_span(pattern), sigil.kind == TOKEN_COLON_EQ, value.expr, Val(sigil.span))
+    binding.pattern = Val(pattern)
+    parser_finish_statement(&state)
+    Stmt.Val{binding: binding}
+}
+
+// The comma-separated names of a list or tuple pattern, up to `close`.
+fn parser_pattern_binding_names(state: &JetParserState, close: Int, context: String) -> [BindName] {
+    elems := [BindName]{}
+    if parser_current_kind(&state) == close -> return elems
+    loop {
+        name :: parser_expect_name(&state, context)
+        &elems.push(BindName{name: name.payload.decoded, span: name.span, rename: None})
+        if parser_current_kind(&state) != TOKEN_COMMA -> break
+        parser_bump(&state)
+    }
+    elems
+}
+
+fn parser_bind_pattern_span(pattern: BindPattern) -> Span Never! {
+    if pattern == {
+        .Struct(_, _, _, _, span) | .List(_, span) | .Tuple(_, span) | .Refutable(_, _, _, span) -> span
+    }
 }
 
 fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {

@@ -2064,12 +2064,9 @@ pub fn __jet_bootstrap_compile_with_native(
             .ok_or_else(|| "checked Source Machine parameter disappeared".to_string())?;
         // The Source projection exists only for these host-shape queries,
         // which read type, field, Core-owner and handle rows: it is converted
-        // from the body-free signature program and dropped below, so the image
-        // keeps only the native program resident.
+        // from the restored body-free signature program and dropped below.
         let mut __jet_shape_program = crate::__jet_bootstrap_mir_program_from_host(
-            &crate::compiler_bootstrap_compiler_image::compiler_image_signature_program(
-                __jet_compiler_image.program.as_ref(),
-            ),
+            __jet_compiler_image.program.as_ref(),
         )?;
         let mut __jet_shape_for = |checked_type: &::jet_foundation::MIR::MirType|
             -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {

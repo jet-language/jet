@@ -1,0 +1,16 @@
+struct Word { pub value: U64 }
+
+fn hash2(namespace: String, identity: String) -> U64 Never! {
+    prime :: U64{0x100000001b3}
+    hash := U64{0xcbf29ce484222325}
+    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash = hash.wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash
+}
+
+fn wrap(identity: String) -> Word Never! { Word{value: hash2("mir-type", identity)} }
+
+fn run() {
+    print("wrapped: {wrap("Unit").value}")
+}

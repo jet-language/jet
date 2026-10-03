@@ -133,7 +133,7 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
         // MIRRust emit_instruction: a reference binding's move into a drop
         // copies nothing, and the read it binds is borrowed by its write.
         if jet_rust_emit_ref_binding_drop(&ctx, function, value) != None -> return lines
-        if ctx.ref_bindings.payloads.get(value.value) != None -> return lines
+        if ctx.ref_bindings.payloads.get(value.value) != None || ctx.ref_bindings.collections.get(value.value) != None -> return lines
         if jet_rust_emit_partial_projection_only(&ctx, function, value) -> return lines
         if jet_rust_emit_inspected_only(&ctx, function, value) -> return lines
     }

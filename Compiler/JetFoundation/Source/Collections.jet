@@ -584,6 +584,16 @@ fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
     }
 }
 
+// E0106 (#4432): `Unit` is the built-in no-information type (`-> Unit`,
+// `Result<Unit, E>`) the compiler carries as `Type.Named{name: "Unit"}`, so a
+// user type of that name would be indistinguishable from it. The Rust
+// reference's `Collections::RESERVED_TYPES` reserves it with the other
+// built-in type names; porting the rest of that list is the E0106 row of the
+// Rust-Jet parity ledger.
+pub fn sema_reserved_type_name(name: String) -> Bool Never! {
+    name == "Unit"
+}
+
 pub fn sema_collection_receiver_element(receiver: Type) -> Type? {
     kind :: sema_collection_kind(receiver) ?? return None
     Val(sema_collection_kind_element(kind))

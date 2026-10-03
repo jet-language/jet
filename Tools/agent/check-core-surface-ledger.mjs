@@ -2733,6 +2733,169 @@ function generatedCoreEnumRows(source, declarations) {
 function writeCoreEnumRows(source, declarations) {
   writeFileSync(join(ROOT, CORE_ENUM_ROWS_PATH), generatedCoreEnumRows(source, declarations));
 }
+// Compiler-owned Core enum families with payload shapes, projected from the
+// Rust checker's variant tables (`resolve_enum_variants_cloned`). A family
+// whose enum Core.jet also declares is omitted: Rust resolves the Core.jet
+// declaration (`core_declared_enum_variants`) before these tables.
+const CORE_TYPES_RS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs";
+const CHECKER_ITEMS_RS_PATH = "crates/jet-sema/src/Sema/CheckerItems.rs";
+const SYNTAX_RS_DIR = "crates/jet-foundation/src/Syntax";
+const CORE_ENUM_PAYLOAD_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet";
+
+function rustSyntaxConstants() {
+  const strings = new Map();
+  const lists = new Map();
+  for (const name of readdirSync(join(ROOT, SYNTAX_RS_DIR)).sort()) {
+    if (!name.endsWith(".rs")) continue;
+    const text = read(SYNTAX_RS_DIR + "/" + name);
+    for (const match of text.matchAll(/pub const (\w+): &str = "([^"]*)";/g)) strings.set(match[1], match[2]);
+    for (const match of text.matchAll(/pub const (\w+): &\[&str\] =\s*&\[([^\]]*)\];/g)) {
+      lists.set(match[1], Array.from(match[2].matchAll(/"([^"]*)"/g), (item) => item[1]));
+    }
+  }
+  return { strings, lists };
+}
+
+function rustFunctionBody(source, name, rel) {
+  const start = source.indexOf("fn " + name + "(");
+  if (start < 0) throw new Error(rel + " has no fn " + name);
+  const open = source.indexOf("{", source.indexOf(")", start));
+  let depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, index).replace(/\/\/[^\n]*/g, "");
+    }
+  }
+  throw new Error(rel + " fn " + name + " has no closing brace");
+}
+
+function rustSyntaxString(expression, constants, rel) {
+  const text = expression.trim();
+  const literal = /^"([^"]*)"$/.exec(text);
+  if (literal) return literal[1];
+  const constant = /^(?:crate::)?Syntax::(\w+)$/.exec(text);
+  if (constant && constants.strings.has(constant[1])) return constants.strings.get(constant[1]);
+  throw new Error(rel + ": unsupported enum or type name expression `" + text + "`");
+}
+
+function rustSyntaxList(name, constants, rel) {
+  if (!constants.lists.has(name)) throw new Error(rel + ": unknown Syntax list " + name);
+  return constants.lists.get(name);
+}
+
+// Rust `Type` payload expressions as Jet `Type` row expressions.
+function rustPayloadType(expression, constants, rel) {
+  const text = expression.replace(/\s+/g, "");
+  const scalar = { "Type::Int": "Type.Int", "Type::Bool": "Type.Bool", "Type::String": "Type.String", "Type::Char": "Type.Char", "Type::Float": "Type.Float" };
+  if (scalar[text]) return scalar[text];
+  const named = /^Type::Named\((.+)\.to_string\(\)\)$/.exec(text);
+  if (named) return "Type.Named{name: " + jetStringExpression(rustSyntaxString(named[1], constants, rel)) + "}";
+  const list = /^Type::List\(Box::new\((.+)\)\)$/.exec(text);
+  if (list) return "Type.List{element: " + rustPayloadType(list[1], constants, rel) + "}";
+  throw new Error(rel + ": unsupported payload type `" + text + "`");
+}
+
+// A nullary variant-table function: unit name lists (`[..]` literals or
+// `Syntax::*_VARIANTS`) plus explicit `"Name".to_string(), (zero,
+// VariantPayload::Single(T, zero))` inserts.
+function rustNullaryVariantRows(body, constants, rel, name) {
+  if (/VariantPayload::Named/.test(body)) throw new Error(rel + " fn " + name + ": named payloads are not projected");
+  const rows = [];
+  const singles = Array.from(body.matchAll(/"(\w+)"\.to_string\(\),\s*\(\s*zero,\s*VariantPayload::Single\(\s*([\s\S]+?),\s*zero\s*\)/g));
+  if (singles.length !== (body.match(/VariantPayload::Single/g) || []).length) {
+    throw new Error(rel + " fn " + name + ": unrecognized single-payload shape");
+  }
+  const units = [];
+  for (const match of body.matchAll(/&?\[((?:\s*"[^"]*"\s*,?)+)\]|Syntax::(\w+_VARIANTS)/g)) {
+    if (match[2]) units.push(...rustSyntaxList(match[2], constants, rel));
+    else units.push(...Array.from(match[1].matchAll(/"([^"]*)"/g), (item) => item[1]));
+  }
+  if (units.length && !/VariantPayload::Unit/.test(body)) throw new Error(rel + " fn " + name + ": name list without a unit payload");
+  if (/if \*name ==/.test(body)) throw new Error(rel + " fn " + name + ": per-name payload branch is not projected");
+  for (const variant of units) rows.push({ variant, payload: [] });
+  for (const match of singles) rows.push({ variant: match[1], payload: [rustPayloadType(match[2], constants, rel)] });
+  return rows;
+}
+
+// `core_io_variants`: the unit `IOOperation` menu and the `IOError` tree whose
+// one named variant carries its own payload and every other carries the
+// shared context record.
+function rustIOVariantFamilies(source, constants) {
+  const body = rustFunctionBody(source, "core_io_variants", CORE_TYPES_RS_PATH);
+  const operation = /if enum_name == (Syntax::\w+) \{\s*for name in Syntax::(\w+) \{\s*variants\.insert\(\(\*name\)\.to_string\(\), \(zero, VariantPayload::Unit\)\);/.exec(body);
+  const error = /if !is_io_error_type_name\(enum_name\)[\s\S]*?for name in Syntax::(\w+) \{\s*let payload = if \*name == "(\w+)" \{\s*VariantPayload::Single\(\s*([\s\S]+?),\s*zero,?\s*\)\s*\} else \{\s*VariantPayload::Single\(([\s\S]+?), zero\)\s*\};/.exec(body);
+  const errorName = /fn is_io_error_type_name\(name: &str\) -> bool \{\s*name == (Syntax::\w+)/.exec(source);
+  if (!operation || !error || !errorName) throw new Error(CORE_TYPES_RS_PATH + ": core_io_variants changed shape; update the payload-row projection");
+  const special = rustPayloadType(error[3], constants, CORE_TYPES_RS_PATH);
+  const context = rustPayloadType(error[4], constants, CORE_TYPES_RS_PATH);
+  return [
+    {
+      name: rustSyntaxString(operation[1], constants, CORE_TYPES_RS_PATH),
+      rows: rustSyntaxList(operation[2], constants, CORE_TYPES_RS_PATH).map((variant) => ({ variant, payload: [] })),
+    },
+    {
+      name: rustSyntaxString(errorName[1], constants, CORE_TYPES_RS_PATH),
+      rows: rustSyntaxList(error[1], constants, CORE_TYPES_RS_PATH).map((variant) => ({
+        variant,
+        payload: [variant === error[2] ? special : context],
+      })),
+    },
+  ];
+}
+
+function coreEnumPayloadFamilies(declarations) {
+  const constants = rustSyntaxConstants();
+  const coreTypes = read(CORE_TYPES_RS_PATH);
+  const resolver = rustFunctionBody(read(CHECKER_ITEMS_RS_PATH), "resolve_enum_variants_cloned", CHECKER_ITEMS_RS_PATH);
+  const families = [];
+  for (const match of resolver.matchAll(/if enum_name == ([^{]+?) \{\s*return Some\((core_\w+_variants)\(\)\);\s*\}/g)) {
+    families.push({
+      name: rustSyntaxString(match[1], constants, CHECKER_ITEMS_RS_PATH),
+      rows: rustNullaryVariantRows(rustFunctionBody(coreTypes, match[2], CORE_TYPES_RS_PATH), constants, CORE_TYPES_RS_PATH, match[2]),
+    });
+  }
+  if (!/core_io_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_io_variants");
+  families.push(...rustIOVariantFamilies(coreTypes, constants));
+  const declared = new Set();
+  for (const module of declarations.modules) {
+    for (const type of module.types) {
+      if (!type.genericArity && type.variants && type.variants.length) declared.add(type.name);
+    }
+  }
+  return families.filter((family) => !declared.has(family.name));
+}
+
+function generatedCoreEnumPayloadRows(declarations) {
+  const sources = [CHECKER_ITEMS_RS_PATH, CORE_TYPES_RS_PATH];
+  const syntax = readdirSync(join(ROOT, SYNTAX_RS_DIR)).filter((name) => name.endsWith(".rs")).sort()
+    .map((name) => read(SYNTAX_RS_DIR + "/" + name)).join("");
+  const lines = [
+    "// BEGIN GENERATED CORE ENUM PAYLOAD ROWS",
+    "// Source: " + sources.join(", ") + ", " + SYNTAX_RS_DIR,
+    "// Source SHA-256: " + sha256(sources.map(read).join("") + syntax),
+    "// Compiler-owned Core enum families without a Core.jet declaration, in",
+    "// Rust `resolve_enum_variants_cloned` order; each row is one variant and",
+    "// its positional payload types (none for a unit variant).",
+    "pub CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
+  ];
+  for (const family of coreEnumPayloadFamilies(declarations)) {
+    for (const row of family.rows) {
+      lines.push(
+        "    CoreEnumPayloadRow{enum_name: " + jetStringExpression(family.name) +
+        ", variant: " + jetStringExpression(row.variant) +
+        ", payload: [Type]{" + row.payload.join(", ") + "}},",
+      );
+    }
+  }
+  lines.push("}", "// END GENERATED CORE ENUM PAYLOAD ROWS", "");
+  return lines.join("\n");
+}
+function writeCoreEnumPayloadRows(declarations) {
+  writeFileSync(join(ROOT, CORE_ENUM_PAYLOAD_ROWS_PATH), generatedCoreEnumPayloadRows(declarations));
+}
+
 
 function writeRingDependencyTable(source, declarations) {
   const path = join(ROOT, RING_LAYER_PATH);
@@ -2809,6 +2972,10 @@ function validateGeneratedViews(source, declarations) {
       read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {
     throw new Error("CoreEnumRows.jet is stale; run --write to regenerate from Core.jet");
   }
+  if (!existsSync(join(ROOT, CORE_ENUM_PAYLOAD_ROWS_PATH)) ||
+      read(CORE_ENUM_PAYLOAD_ROWS_PATH) !== generatedCoreEnumPayloadRows(declarations)) {
+    throw new Error("CoreEnumPayloadRows.jet is stale; run --write to regenerate from the Rust checker tables");
+  }
   validateCoreCallRegistry(source, declarations);
 }
 
@@ -2823,6 +2990,7 @@ function writeCoreViews() {
   writeCoreCallTable(source, declarations);
   writeCoreCallRegistry(source, declarations);
   writeCoreEnumRows(source, declarations);
+  writeCoreEnumPayloadRows(declarations);
   process.stdout.write("wrote generated Core views, dispatcher, and Jet CoreCall registry\n");
   return { source, declarations };
 }

@@ -47,6 +47,9 @@ pub(crate) struct CompilerImageEnvelope {
 
 pub(crate) struct RestoredCompilerImage {
     pub(crate) header: CompilerImageHeader,
+    /// The body-free projection (`compiler_image_signature_program`): every
+    /// reader of a restored image reads rows, signatures and the sealed
+    /// identity, so the decoded bodies are dropped before restore returns.
     pub(crate) program: MirProgram,
 }
 
@@ -259,8 +262,11 @@ pub(crate) fn read_compiler_image_envelope(
 /// so restore verifies the checksum (linear in the bytes) and the factory
 /// root, takes the program digest from the optimizer seal, and never
 /// re-verifies, re-encodes or re-digests the whole compiler program. The
-/// Source-typed projection of the program is not built here: the one reader
-/// that needs it converts it for the duration of its use.
+/// sealed identity is checked against the archived execution identity here,
+/// so later readers use it in place of a whole-program digest. Only the
+/// body-free signature program is returned: the decoded function bodies are
+/// most of the restored program and no reader of the image needs them, so
+/// they are not kept resident for the whole compiler run.
 pub(crate) fn restore_compiler_image(
     bytes: &[u8],
     expected_source_authority_digest: [u8; 32],
@@ -293,7 +299,10 @@ pub(crate) fn restore_compiler_image(
         entry_function: raw_header.entry_function,
         identity,
     };
-    Ok(RestoredCompilerImage { header, program })
+    Ok(RestoredCompilerImage {
+        header,
+        program: compiler_image_signature_program(&program),
+    })
 }
 
 fn check_envelope(

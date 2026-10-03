@@ -5262,7 +5262,7 @@ fn persist_decode_slot(
 ) -> Result<MirRuntimeValue, String> {
     let kind = persist_effective_kind(descriptor);
     match slot {
-        JetVal::Int(raw) | JetVal::RecordRef(raw) => {
+        JetVal::Int(raw) | JetVal::Word { value: raw, .. } | JetVal::RecordRef(raw) => {
             persist_decode_raw(rt, *raw, descriptor, state, depth)
         }
         JetVal::ExactInt(value) if kind == RuntimeValueKind::Int => {
@@ -6222,6 +6222,7 @@ fn persist_decode_raw(
     let kind = persist_effective_kind(descriptor);
     let value = match kind {
         RuntimeValueKind::Unit => Ok(MirRuntimeValue::Unit),
+        RuntimeValueKind::Int if descriptor.integer_width.is_some() => Ok(MirRuntimeValue::Int(raw)),
         RuntimeValueKind::Int => match rt.heap.int_to_i64(raw) {
             Some(value) => Ok(MirRuntimeValue::Int(value)),
             None => Ok(MirRuntimeValue::BigInt(rt.heap.int_to_string(raw))),
@@ -6657,6 +6658,11 @@ fn persist_encode_slot(
 ) -> Result<JetVal, String> {
     let kind = persist_effective_kind(descriptor);
     match kind {
+        RuntimeValueKind::Int if descriptor.integer_width.is_some_and(|width| width.bits == 64) => {
+            let unsigned = !descriptor.integer_width.expect("checked fixed width").signed;
+            persist_encode_raw(rt, value, descriptor, state, depth)
+                .map(|value| JetVal::Word { value, unsigned })
+        }
         RuntimeValueKind::String => match value {
             MirRuntimeValue::String(value) => Ok(JetVal::String(value.clone())),
             _ => Err(format!("persistent `{}` expects a string", descriptor.name)),
@@ -6740,6 +6746,7 @@ fn persist_encode_raw(
             _ => Err(format!("persistent `{}` expects unit", descriptor.name)),
         },
         RuntimeValueKind::Int => match value {
+            MirRuntimeValue::Int(value) if descriptor.integer_width.is_some() => Ok(*value),
             MirRuntimeValue::Int(value) => Ok(rt.heap.int_from_i64(*value)),
             MirRuntimeValue::BigInt(value) => rt
                 .heap
@@ -8800,7 +8807,7 @@ fn runtime_eq_handle(slot: RuntimeEqSlot<'_>) -> Option<i64> {
 fn runtime_eq_int_slot(slot: RuntimeEqSlot<'_>) -> Result<RuntimeEqInt<'_>, String> {
     match slot {
         RuntimeEqSlot::Raw(value) => Ok(RuntimeEqInt::Raw(value)),
-        RuntimeEqSlot::Cell(JetVal::Int(value)) => Ok(RuntimeEqInt::Raw(*value)),
+        RuntimeEqSlot::Cell(JetVal::Int(value) | JetVal::Word { value, .. }) => Ok(RuntimeEqInt::Raw(*value)),
         RuntimeEqSlot::Cell(JetVal::ExactInt(value)) => Ok(RuntimeEqInt::Big(value)),
         RuntimeEqSlot::Cell(_) => Err("JIT equality integer field has an invalid carrier".to_string()),
     }
@@ -11366,6 +11373,18 @@ fn jet_jit_struct_get_str(h: i64, idx: i64) -> i64 {
 fn jet_jit_struct_set_i64(h: i64, idx: i64, v: i64) {
     with_runtime_mut(|rt| {
         let _ = rt.heap.record_set_int(h, idx, v);
+    });
+}
+
+fn jet_jit_struct_set_word(h: i64, idx: i64, v: i64) {
+    with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_word(h, idx, v, false);
+    });
+}
+
+fn jet_jit_struct_set_uword(h: i64, idx: i64, v: i64) {
+    with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_word(h, idx, v, true);
     });
 }
 
@@ -18472,6 +18491,8 @@ host_fns! {
     pattern_capture_char: "jet_jit_pattern_capture_char" => jet_jit_pattern_capture_char: sig_struct_get_i32;
     struct_get_str: "jet_jit_struct_get_str" => jet_jit_struct_get_str: sig_struct_get_i64;
     struct_set_i64: "jet_jit_struct_set_i64" => jet_jit_struct_set_i64: sig_struct_set_i64;
+    struct_set_word: "jet_jit_struct_set_word" => jet_jit_struct_set_word: sig_struct_set_i64;
+    struct_set_uword: "jet_jit_struct_set_uword" => jet_jit_struct_set_uword: sig_struct_set_i64;
     struct_set_record: "jet_jit_struct_set_record" => jet_jit_struct_set_record: sig_struct_set_record;
     struct_set_f64: "jet_jit_struct_set_f64" => jet_jit_struct_set_f64: sig_struct_set_f64;
     struct_set_bool: "jet_jit_struct_set_bool" => jet_jit_struct_set_bool: sig_struct_set_i8;

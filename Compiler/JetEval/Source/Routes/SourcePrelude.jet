@@ -34,39 +34,25 @@ pub enum JetEvalSourceLookup {
     Target(value: JetEvalSourceTarget)
 }
 
-// The optional helper is intentionally side-effect free. Callers that need to
-// distinguish an absent source module from a malformed/unsupported canonical
-// row should use jet_eval_source_lookup instead.
-pub fn jet_eval_source_target(program: MIRProgram, row: MIRPreludeCall) -> JetEvalSourceTarget? {
-    lookup :: jet_eval_source_lookup(program, row)
-    if lookup == {
-        .Target(value) -> Val(value)
-        else -> None
-    }
-}
-
-// Return the registered source-compatible formatting row for a source member.
-// The source-member matcher above remains the single owner of symbol, arity,
-// and borrow-mask classification; callers retain their own value marshalling.
-pub fn jet_eval_source_row(program: MIRProgram, member: String) -> MIRPreludeCall? {
-    loop index in 0..<program.prelude_calls.len() {
-        if !jet_eval_source_route_shape_valid(program.prelude_calls[index]) {
-            next
-        }
-        source_member :: jet_eval_source_member(program.prelude_calls[index]) ?? next
-        if source_member == member {
-            return Val(program.prelude_calls[index])
-        }
-    }
-    None
+// Resolve a Core/text/fmt source function by member for an interpolation
+// selector. Checked MIR keeps selectors on the BuildString part, so no
+// Prelude row is interned for them; the function's own arity and interpreter
+// applicability are the ABI facts that remain to check.
+pub fn jet_eval_source_member_function(program: MIRProgram, member: String, arity: Int) -> MIRFunctionID? {
+    function :: jet_eval_source_find_function(program, member) ?? return None
+    if function.arity != arity || !function.interpreter -> return None
+    Val(function.id)
 }
 
 // Resolve a registered Prelude row to a loaded Core source function. A route
 // in the known Core formatting family which has no source equivalent is
-// Invalid rather than silently falling through to a second evaluator policy.
+// Invalid rather than silently falling through to a second evaluator policy;
+// `display`/`debug` are evaluator-owned structural renderers (MIREval
+// `display_core_pure_value` / `mir_show` / CorePureParity `debug`), so their
+// rows fall through to the Prelude dispatcher.
 pub fn jet_eval_source_lookup(program: MIRProgram, row: MIRPreludeCall) -> JetEvalSourceLookup Never! {
     source_member :: jet_eval_source_member(row) ?? {
-        if row.module_name == "core.text.fmt" -> return JetEvalSourceLookup.Invalid{reason: "Core formatting route has no source-backed evaluator target"}
+        if row.module_name == "core.text.fmt" && row.member != "display" && row.member != "debug" -> return JetEvalSourceLookup.Invalid{reason: "Core formatting route has no source-backed evaluator target"}
         return JetEvalSourceLookup.Unavailable
     }
     function :: jet_eval_source_find_function(program, source_member) ?? return JetEvalSourceLookup.Unavailable

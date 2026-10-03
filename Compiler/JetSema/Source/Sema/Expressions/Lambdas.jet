@@ -1372,10 +1372,15 @@ pub fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, e
     context.lambda_escapes = Val(false)
     open_result := false
     if expected == .Val(.Fn(_, ret, _, _, _, _)) && ret == None -> open_result = true
-    checked := if expr == {
+    // D-SUBJECT-CALL1=A: `.member` shorthand is the ordinary unary lambda.
+    shorthand :: sema_expr_subject_shorthand(expr, expected, context, &diagnostics)
+    if shorthand != None -> context.subject_shorthand_depth += 1
+    source :: if shorthand == .Val(lambda) -> Expr.Lambda{lambda: lambda} else -> expr
+    checked := if source == {
         .Lambda(lambda) -> sema_expression_lambda_with_host(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, true)
-        else -> sema_check_expression(expr, if open_result -> None else -> expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        else -> sema_check_expression(source, if open_result -> None else -> expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    if shorthand != None -> context.subject_shorthand_depth -= 1
     context.lambda_escapes = previous_lambda_escapes
     checked
 }

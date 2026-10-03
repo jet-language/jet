@@ -370,7 +370,7 @@ fn expand_builtin_serde_items_with_auto_here(
                     generated_items.extend(union_codec_items(e, source));
                 }
             }
-            Item::Struct(s) => {
+            Item::Struct(s) if !is_reserved_type(&s.name) => {
                 let explicit_encode = has_explicit_codec(source, &s.name, crate::Generics::ENCODE);
                 let explicit_decode = has_explicit_codec(source, &s.name, crate::Generics::DECODE);
                 // An explicit marker is a request to materialize the compiler
@@ -416,7 +416,7 @@ fn expand_builtin_serde_items_with_auto_here(
                     }
                 }
             }
-            Item::Enum(e) => {
+            Item::Enum(e) if !is_reserved_type(&e.name) => {
                 let explicit_encode = has_explicit_codec(source, &e.name, crate::Generics::ENCODE);
                 let explicit_decode = has_explicit_codec(source, &e.name, crate::Generics::DECODE);
                 let encode = has_derive(&e.derives, crate::Generics::ENCODE)

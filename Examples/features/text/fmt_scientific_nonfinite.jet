@@ -1,0 +1,47 @@
+use core.math as math
+use core.text.fmt as fmt
+
+fn finite(label: String, n: Float, frac: Int, expected: String) {
+    actual :: fmt.sci(n, frac)
+    if actual != expected -> panic("{label}: expected {expected}, got {actual}")
+    print("{label}: {actual}")
+}
+
+// Nonfinite values use ordinary Float display, independent of precision.
+fn nonfinite(label: String, n: Float) {
+    precisions :: [Int]{-2, 0, 2, 6, 9223372036854775807}
+    loop frac in precisions {
+        actual :: fmt.sci(n, frac)
+        ordinary :: "{n}"
+        if actual != ordinary -> panic("{label}: expected {ordinary}, got {actual}")
+        print("{label}/{frac}: {actual}")
+    }
+}
+
+fn run() {
+    nonfinite("NaN", math.nan())
+    nonfinite("positive infinity", math.infinity())
+    nonfinite("negative infinity", -math.infinity())
+
+    finite("zero/0", Float{0.0}, 0, "0e+00")
+    finite("zero/2", Float{0.0}, 2, "0.00e+00")
+    finite("negative zero/2", Float{-0.0}, 2, "0.00e+00")
+    finite("positive/0", Float{1.25}, 0, "1e+00")
+    finite("positive/1", Float{1.25}, 1, "1.3e+00")
+    finite("positive/2", Float{1.25}, 2, "1.25e+00")
+    finite("positive/6", Float{1.25}, 6, "1.250000e+00")
+    finite("negative/0", Float{-1.25}, 0, "-1e+00")
+    finite("negative/1", Float{-1.25}, 1, "-1.3e+00")
+    finite("negative/2", Float{-1.25}, 2, "-1.25e+00")
+    finite("negative/6", Float{-1.25}, 6, "-1.250000e+00")
+    finite("small/2", Float{0.00125}, 2, "1.25e-03")
+    finite("negative small/2", Float{-0.00125}, 2, "-1.25e-03")
+    finite("large/2", Float{125000.0}, 2, "1.25e+05")
+    finite("negative large/2", Float{-125000.0}, 2, "-1.25e+05")
+    finite("tiny/2", Float{1e-300}, 2, "10.00e-301")
+    finite("huge/2", Float{1e300}, 2, "1.00e+300")
+    finite("normalization boundary/2", Float{10.0}, 2, "1.00e+01")
+    finite("rounding carry/2", Float{9.999}, 2, "10.00e+00")
+    finite("negative precision", Float{1.5}, -2, "2e+00")
+    finite("negative precision and value", Float{-1.5}, -2, "-2e+00")
+}

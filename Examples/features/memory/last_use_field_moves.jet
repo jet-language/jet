@@ -1,0 +1,111 @@
+// Values that nothing reads afterwards move instead of copying: a list built
+// in a loop that can stop early and then returned or stored in a record, an
+// owned field handed off with `^` and refilled before anything reads it, and
+// an optional unwrapped with `^x ?? ...`. Value semantics stay exact: a
+// value still read later is copied, and an owner a view still reads keeps
+// its value.
+
+struct Graph {
+    names: [String]
+}
+
+struct Env {
+    graph: Graph?
+    count: Int
+}
+
+enum Host {
+    Leaf(n: Int)
+    Group(name: String, items: [Host])
+}
+
+struct SourceUnit {
+    name: String
+    path: String
+}
+
+struct Entry {
+    name: String
+    path: String
+}
+
+// Two fields of a loop's element copy feed a record and the copy is never
+// refilled: the fields stay copies, so the copy is whole when it is dropped.
+fn entries(units: [SourceUnit]) -> [Entry] {
+    out := [Entry]{}
+    loop index in 0..<units.len() {
+        unit := units[index]
+        &out.push(Entry{name: unit.name, path: unit.path})
+    }
+    out
+}
+
+fn project(n: Int) -> Host? {
+    if n < 0 -> return None
+    Val(Host.Leaf{n: n})
+}
+
+fn gather(values: [Int]) -> [Host]? {
+    output := [Host]{}
+    loop value in values -> &output.push(project(value) ?? return None)
+    Val(output)
+}
+
+fn group(name: String, values: [Int]) -> Host? {
+    output := [Host]{}
+    loop value in values -> &output.push(project(value) ?? return None)
+    Val(Host.Group{name: name, items: output})
+}
+
+fn add_name(graph: &Graph, name: String) {
+    &graph.names.push(name)
+}
+
+fn stage(start: Graph, names: [String]) -> Int {
+    env := Env{graph: Val(start), count: 0}
+    loop name in names {
+        staged := ^env.graph
+        env.graph = None
+        resolved := ^staged ?? {
+            return -1
+        }
+        add_name(&resolved, name)
+        env.graph = Val(^resolved)
+        env.count += 1
+    }
+    graph :: env.graph ?? Graph{names: [String]{}}
+    env.count * 10 + graph.names.len()
+}
+
+fn total(values: View<Int>) -> Int {
+    sum := 0
+    loop value in values -> sum += value
+    sum
+}
+
+fn run() {
+    hosts := gather([Int]{1, 2, 3}) ?? [Host]{}
+    missing := gather([Int]{1, -2}) ?? [Host]{}
+    print("gather {hosts.len()} missing {missing.len()}")
+
+    grouped := group("g", [Int]{4, 5}) ?? Host.Leaf{n: 0}
+    if grouped == {
+        .Group(name, items) -> print("group {name} {items.len()}")
+        .Leaf(n) -> print("leaf {n}")
+    }
+
+    print("stage {stage(Graph{names: [String]{"a"}}, [String]{"b", "c"})}")
+
+    env := Env{graph: Val(Graph{names: [String]{"x"}}), count: 0}
+    copied := env.graph ?? Graph{names: [String]{}}
+    &copied.names.push("y")
+    kept := env.graph ?? Graph{names: [String]{}}
+    print("copied {copied.names.len()} kept {kept.names.len()}")
+
+    records :: [Int]{1, 2, 3}
+    window :: records[0..<records.len()]
+    print("total {total(window)} records {records.len()}")
+
+    listed := entries([SourceUnit]{SourceUnit{name: "a", path: "a.jet"}, SourceUnit{name: "b", path: "b.jet"}})
+    print("entries {listed.len()} {listed[1].name} {listed[1].path}")
+}

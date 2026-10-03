@@ -1582,7 +1582,6 @@ fn sema_derive_has_trait_impl(index: SemaDeriveItemIndex, type_name: String, tra
 // every declaration that relied on it, transitively, loses the derive.
 
 pub struct SemaDeriveReadiness {
-    pub items: [Item]
     pub index: SemaDeriveItemIndex
     pub trait_name: String
     pub candidates: [String:Int]
@@ -1601,7 +1600,7 @@ fn sema_derive_builtin_supports(name: String, trait_name: String) -> Bool {
 }
 
 // Rust `implements_trait` over this module's declarations.
-fn sema_derive_implements(readiness: &SemaDeriveReadiness, name: String) -> Bool {
+fn sema_derive_implements(readiness: &SemaDeriveReadiness, items: [Item], name: String) -> Bool {
     if readiness.candidates.get(name) == .Val(node) {
         &readiness.relied_on.push(node)
         return true
@@ -1609,7 +1608,7 @@ fn sema_derive_implements(readiness: &SemaDeriveReadiness, name: String) -> Bool
     if sema_derive_builtin_supports(name, readiness.trait_name) -> return true
     if sema_derive_has_trait_impl(readiness.index, name, readiness.trait_name) -> return true
     position :: readiness.index.nominals.get(name) ?? return false
-    if readiness.items[position] == {
+    if items[position] == {
         .Struct(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
         .Enum(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
         .Distinct(definition) -> readiness.trait_name == "Equatable" || sema_derive_has_name(definition.derives, readiness.trait_name)
@@ -1633,41 +1632,41 @@ fn sema_derive_native_ordering_ready(ty: Type) -> Bool {
     }
 }
 
-fn sema_derive_type_ready(readiness: &SemaDeriveReadiness, ty: Type, type_params: [TypeParam]) -> Bool {
+fn sema_derive_type_ready(readiness: &SemaDeriveReadiness, items: [Item], ty: Type, type_params: [TypeParam]) -> Bool {
     comparable :: readiness.trait_name == "Comparable"
     if ty == {
-        .List(inner) | .Option(inner) | .FixedList(inner, _) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, inner, type_params)
-        .Result(ok, err) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, ok, type_params) && sema_derive_type_ready(&readiness, err, type_params)
-        .Map(key, _, value) -> !comparable && sema_derive_type_ready(&readiness, key, type_params) && sema_derive_type_ready(&readiness, value, type_params)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, inner, type_params)
+        .Result(ok, err) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, ok, type_params) && sema_derive_type_ready(&readiness, items, err, type_params)
+        .Map(key, _, value) -> !comparable && sema_derive_type_ready(&readiness, items, key, type_params) && sema_derive_type_ready(&readiness, items, value, type_params)
         .Tuple(fields) -> {
             if comparable -> return sema_derive_native_ordering_ready(ty)
             loop field in fields {
-                if !sema_derive_type_ready(&readiness, field.ty, type_params) -> return false
+                if !sema_derive_type_ready(&readiness, items, field.ty, type_params) -> return false
             }
             true
         }
         .Union(members) -> {
             if comparable -> return sema_derive_native_ordering_ready(ty)
             loop member in members {
-                if !sema_derive_type_ready(&readiness, member, type_params) -> return false
+                if !sema_derive_type_ready(&readiness, items, member, type_params) -> return false
             }
             true
         }
         .Apply(name, args) -> {
             if comparable -> return false
-            if !sema_derive_implements(&readiness, name) -> return false
+            if !sema_derive_implements(&readiness, items, name) -> return false
             loop arg in args {
-                if !sema_derive_type_ready(&readiness, arg, type_params) -> return false
+                if !sema_derive_type_ready(&readiness, items, arg, type_params) -> return false
             }
             true
         }
-        .Tagged(_, inner) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, inner, type_params)
-        .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_derive_type_ready(&readiness, inner, type_params)
+        .Tagged(_, inner) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, inner, type_params)
+        .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_derive_type_ready(&readiness, items, inner, type_params)
         .Named(name) -> {
             loop param in type_params {
                 if param.name == name -> return param.bounds.contains(readiness.trait_name)
             }
-            sema_derive_implements(&readiness, name)
+            sema_derive_implements(&readiness, items, name)
         }
         .Float | .Float32 -> !comparable
         .Int | .Bool | .String | .Char | .IntN(_, _) | .Measure(_) -> true
@@ -1675,12 +1674,12 @@ fn sema_derive_type_ready(readiness: &SemaDeriveReadiness, ty: Type, type_params
     }
 }
 
-fn sema_derive_fields_ready(readiness: &SemaDeriveReadiness, item: Item) -> Bool {
+fn sema_derive_fields_ready(readiness: &SemaDeriveReadiness, items: [Item], item: Item) -> Bool {
     if item == {
         .Struct(definition) -> {
             loop field in definition.fields {
                 if field.computed != None -> next
-                if !sema_derive_type_ready(&readiness, field.ty, definition.type_params) -> return false
+                if !sema_derive_type_ready(&readiness, items, field.ty, definition.type_params) -> return false
             }
             true
         }
@@ -1688,10 +1687,10 @@ fn sema_derive_fields_ready(readiness: &SemaDeriveReadiness, item: Item) -> Bool
             loop variant in definition.variants {
                 if variant.payload == {
                     .Unit -> {}
-                    .Single(ty, _) -> if !sema_derive_type_ready(&readiness, ty, definition.type_params) -> return false
+                    .Single(ty, _) -> if !sema_derive_type_ready(&readiness, items, ty, definition.type_params) -> return false
                     .Named(fields) -> {
                         loop field in fields {
-                            if !sema_derive_type_ready(&readiness, field.ty, definition.type_params) -> return false
+                            if !sema_derive_type_ready(&readiness, items, field.ty, definition.type_params) -> return false
                         }
                     }
                 }
@@ -1703,7 +1702,7 @@ fn sema_derive_fields_ready(readiness: &SemaDeriveReadiness, item: Item) -> Bool
 }
 
 fn sema_derive_auto_selected(items: [Item], index: SemaDeriveItemIndex, trait_name: String) -> [String:Bool] {
-    readiness := SemaDeriveReadiness{items: items, index: index, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}}
+    readiness := SemaDeriveReadiness{index: index, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}}
     names := [String]{}
     nodes := [Item]{}
     loop item in items {
@@ -1733,7 +1732,7 @@ fn sema_derive_auto_selected(items: [Item], index: SemaDeriveItemIndex, trait_na
     }
     loop (node, item) in nodes {
         readiness.relied_on = [Int]{}
-        if sema_derive_fields_ready(&readiness, item) {
+        if sema_derive_fields_ready(&readiness, items, item) {
             loop dependency in readiness.relied_on {
                 if dependency != node -> &dependents[dependency].push(node)
             }
@@ -1828,8 +1827,8 @@ pub fn sema_derive_expand_builtin_items(items: [Item], diagnostics: &[Diagnostic
                 loop trait_name in sema_derive_builtin_traits() {
                     if trait_name == "Comparable" && !sema_derive_has_name(definition.derives, "Comparable") -> next
                     if sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
-                    block :: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
-                    &generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: block.methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}})
+                    block := sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
+                    &generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: ^block.methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}})
                 }
             }
             else -> {}

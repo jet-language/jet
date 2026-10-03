@@ -72,14 +72,30 @@ pub fn is_link_local(addr: IPv4) -> Bool Never! { addr.a == 169 && addr.b == 254
 
 pub fn is_multicast(addr: IPv4) -> Bool Never! { addr.a >= 224 && addr.a <= 239 }
 
-pub fn is_reserved(addr: IPv4) -> Bool Never! { addr.a == 240 || addr.a == 0 }
+pub fn is_reserved(addr: IPv4) -> Bool Never! { addr.a >= 240 }
 
 pub fn is_unspecified(addr: IPv4) -> Bool Never! {
     addr.a == 0 && addr.b == 0 && addr.c == 0 && addr.d == 0
 }
 
 pub fn is_global(addr: IPv4) -> Bool Never! {
-    !is_private(addr) && !is_loopback(addr) && !is_link_local(addr) && !is_multicast(addr) && !is_reserved(addr) && !is_unspecified(addr)
+    if is_private(addr) || is_loopback(addr) || is_link_local(addr) || is_multicast(addr) || is_reserved(addr) || is_unspecified(addr) -> return false
+    if addr.a == 0 -> return false // "This network" /8 is a separate class, never global.
+    // IANA IPv4 Special-Purpose Address Space, updated 2025-10-09:
+    // reject Globally Reachable=False rows, with more-specific True exceptions.
+    if addr.a == 100 && addr.b >= 64 && addr.b <= 127 -> return false // Shared address space /10.
+    if addr.a == 192 {
+        if addr.b == 0 && addr.c == 0 -> return addr.d == 9 || addr.d == 10
+        if addr.b == 0 && addr.c == 2 -> return false // TEST-NET-1 /24.
+        // The deprecated /24 parent has a blank global field; only this /32 is False.
+        if addr.b == 88 && addr.c == 99 && addr.d == 2 -> return false
+    }
+    if addr.a == 198 {
+        if addr.b == 18 || addr.b == 19 -> return false // Benchmarking /15.
+        if addr.b == 51 && addr.c == 100 -> return false // TEST-NET-2 /24.
+    }
+    if addr.a == 203 && addr.b == 0 && addr.c == 113 -> return false // TEST-NET-3 /24.
+    true
 }
 
 pub fn network(cidr: String) -> Network IOError! {
@@ -488,7 +504,7 @@ pub fn ipv6_compressed(addr: IPv6) -> String Never! {
             i = i + 1
         }
     }
-    if best_n < 2 -> return ipv6_to_string(addr)
+    if best_n < 2 -> best_i = -1
     s := ""
     i = 0
     loop i < 8 {

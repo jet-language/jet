@@ -301,7 +301,10 @@ pub fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: 
     equality := op == BinOp.Eq || op == BinOp.Ne
     ordering := op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
     if !equality && !ordering -> return skipped
-    if !type_identity_equal(lhs.ty, rhs.ty) || sema_comparability_scalar_operand(lhs.ty) -> return skipped
+    // A declared type names a nominal by its canonical `module::Name` while a
+    // literal keeps the written `Name`; the operands compare by the identity
+    // both spellings resolve to.
+    if !type_identity_equal(sema_expr_expected_type(lhs.ty, environment), sema_expr_expected_type(rhs.ty, environment)) || sema_comparability_scalar_operand(lhs.ty) -> return skipped
     shown := type_name(lhs.ty)
     label := "`{sema_expr_binary_name(op)}`"
     if equality {

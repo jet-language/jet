@@ -1498,10 +1498,6 @@ fn sema_checked_declaration_params(graph: SemaRegistrationGraph, caller_module: 
     result
 }
 
-fn sema_checked_function_key(module_row: SemaRegistrationModule, owner_name: String, function: SemaRegistrationFunction) -> String Never! {
-    if owner_name == "" -> sema_checked_module_key(module_row, function.declaration.name) else -> "{module_row.module_identity}::{owner_name}::{function.declaration.name}"
-}
-
 fn sema_checked_trait_method_key(module_row: SemaRegistrationModule, trait_name: String, method: TraitMethodSig) -> String Never! {
     // Trait defaults are registered under their source callable key, matching
     // the canonical TIR producer.  Implementations use the owner-qualified
@@ -1518,7 +1514,7 @@ fn sema_checked_trait_method(graph: SemaRegistrationGraph, method: SemaRegistrat
         parameter_start = 1
     }
     parameters :: loop index in parameter_start..<method.parameters.len() -> method.parameters[index]
-    qualified_return :: declaration.return_type.map((value) -> sema_checked_qualify_type(graph, value, module_row.module_identity))
+    qualified_return :: sema_checked_qualify_optional_type(graph, declaration.return_type, module_row.module_identity)
     TTraitMethod{
         key: sema_checked_trait_method_key(module_row, trait_name, declaration),
         name: declaration.name,
@@ -2129,14 +2125,16 @@ fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaReg
     result
 }
 
-fn sema_checked_nominal_methods(module_row: SemaRegistrationModule, definition: Item, methods: [SemaRegistrationFunction]) -> [String] Never! {
-    owner :: sema_registration_root_name(definition)
+// A type row names each method by its function's SymbolId key, the key its
+// checked TFunc carries (Rust tir_to_mir_types.rs::resolve_type_methods
+// resolves these through the checked function registry).
+fn sema_checked_nominal_methods(definition: Item, methods: [SemaRegistrationFunction]) -> [String] Never! {
     keys := [String]{}
     if definition == {
         .Struct(value) -> loop method in value.methods {
             loop registered in methods {
                 if registered.declaration.name == method.name {
-                    &keys.push(sema_checked_function_key(module_row, owner, registered))
+                    &keys.push(registered.symbol.id.key)
                     break
                 }
             }
@@ -2144,7 +2142,7 @@ fn sema_checked_nominal_methods(module_row: SemaRegistrationModule, definition: 
         .Enum(value) -> loop method in value.methods {
             loop registered in methods {
                 if registered.declaration.name == method.name {
-                    &keys.push(sema_checked_function_key(module_row, owner, registered))
+                    &keys.push(registered.symbol.id.key)
                     break
                 }
             }
@@ -2199,7 +2197,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
             ownership = sema_checked_ownership(single_use)
             sema_checked_validate_layout(value, &diagnostics)
             fields :: sema_checked_struct_fields(graph, module_row, value, generic_params, &diagnostics)
-            kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(module_row, definition, nominal.methods)})
+            kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(definition, nominal.methods)})
         }
         .Enum(value) -> {
             derives = sema_checked_derive_names(value.derives)
@@ -2215,7 +2213,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
                 enum_layout = Val(jet_target_layout_enum_facts_in_module(engine, value, module_row.module_identity))
             }
             variants :: sema_checked_variants(graph, module_row, value, generic_params, &diagnostics)
-            kind = Val(TTypeDefKind.Enum{variants: variants, methods: sema_checked_nominal_methods(module_row, definition, nominal.methods)})
+            kind = Val(TTypeDefKind.Enum{variants: variants, methods: sema_checked_nominal_methods(definition, nominal.methods)})
         }
         .Distinct(value) -> {
             derives = sema_checked_derive_names(value.derives)
@@ -2384,7 +2382,7 @@ fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrat
         delegation_field: definition.delegation_field,
         compiler_generated: definition.is_generated_serde,
         serde: sema_checked_serde_codec(definition.trait_name),
-        operator_rhs: definition.operator_rhs.map((value) -> sema_checked_qualify_type(graph, value, module_row.module_identity)),
+        operator_rhs: sema_checked_qualify_optional_type(graph, definition.operator_rhs, module_row.module_identity),
         operator_marker: sema_checked_operator_marker(definition.operator_marker),
         target_os: sema_checked_target_os(definition.os_target),
     }
@@ -2577,6 +2575,27 @@ fn sema_checked_coherence_operator_valid(trait_name: String, owner_type: Type, r
     }
 }
 
+// D-DISPLAY-SHAPE + D-MEM1: the compiler-owned Display hook is
+// `display(self) -> String`, with a read receiver. It has no source nominal
+// for sema_checked_validate_impl to find; check it at the shared top-level
+// and inline impl coherence boundary, just as Rust checks built-in shapes.
+fn sema_checked_coherence_display(methods: [Func], span: Span, diagnostics: &[Diagnostic]) {
+    found := false
+    loop method in methods {
+        if method.name != "display" -> next
+        found = true
+        matches := method.params.len() == 1 && method.return_type == (Val(Type.String))
+        if matches {
+            receiver :: method.params[0]
+            matches = receiver.name == "self" && receiver.convention == AccessConvention.Read
+        }
+        if !matches {
+            &diagnostics.push(sema_error("E0907", method.name_span, "`display` doesn't match the `Display` contract", "a trait implementation must use the trait method's receiver, parameters, return type, and effects", "write `fn display(self) -> String`, matching the `Display` declaration exactly, including `self`, types, labels, return type, and effects"))
+        }
+    }
+    if !found -> &diagnostics.push(sema_error("E0906", span, "`impl …: Display` is missing `display`", "every `Display` method must appear in the impl block", "add the missing method signatures and bodies"))
+}
+
 // Rust `validate_trait_impl` up to the orphan rule: E0731, E0908, E0902.
 fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, trait_name: String, operator_rhs: Type?, operator_marker: OperatorMarker?, methods: [Func], local_type: Bool, span: Span, state: &SemaCheckedCoherence, diagnostics: &[Diagnostic]) {
     if !sema_checked_coherence_operator_marker(operator_marker, Val(trait_name), operator_rhs, span, &diagnostics) -> return
@@ -2613,6 +2632,7 @@ fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: Sem
         &diagnostics.push(sema_error("E0902", span, "this `impl` can't live here", "at least one of the trait or the type must be defined in this program (orphan rule)", "define the trait or type in this file, or move the impl"))
         return
     }
+    if trait_name == "Display" -> sema_checked_coherence_display(methods, span, &diagnostics)
     if operator_trait && sema_checked_coherence_operator_valid(trait_name, owner_type, rhs, methods) -> sema_checked_coherence_add_operator(&state, owner_name, trait_name, rhs)
 }
 
@@ -2668,7 +2688,8 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     field_name :: definition.delegation_field ?? return
     owner_module :: implementation.target_module_identity ?? return
     owner_index :: sema_registration_module_index(graph, owner_module) ?? return
-    loop nominal in graph.modules[owner_index].nominals {
+    loop nominal_index in 0..<graph.modules[owner_index].nominals.len() {
+        nominal :: graph.modules[owner_index].nominals[nominal_index]
         if nominal.kind != SemaRegistrationNominalKind.Struct || nominal.symbol.name != definition.type_name -> next
         loop field in nominal.fields {
             if field.symbol.name != field_name -> next
@@ -2736,7 +2757,7 @@ fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRe
         delegation_field: None,
         compiler_generated: block.compiler_generated,
         serde: sema_checked_serde_codec(Val(block.trait_name)),
-        operator_rhs: block.operator_rhs.map((value) -> sema_checked_qualify_type(graph, value, module_row.module_identity)),
+        operator_rhs: sema_checked_qualify_optional_type(graph, block.operator_rhs, module_row.module_identity),
         operator_marker: sema_checked_operator_marker(block.operator_marker),
         target_os: None,
     }
@@ -3048,6 +3069,13 @@ fn sema_checked_runtime_constant_supported(definition: ConstDef, value: CtValue)
 
 fn sema_checked_qualify_type(graph: SemaRegistrationGraph, ty: Type, caller_module: String) -> Type Never! {
     sema_type_resolve_declared(graph, ty, caller_module)
+}
+
+// `ty.map((value) -> sema_checked_qualify_type(graph, …))` without the
+// callback, which would capture (copy) the whole graph and module row.
+fn sema_checked_qualify_optional_type(graph: SemaRegistrationGraph, ty: Type?, caller_module: String) -> Type? Never! {
+    value :: ty ?? return None
+    Val(sema_type_resolve_declared(graph, value, caller_module))
 }
 
 fn sema_checked_qualify_type_with_generics(graph: SemaRegistrationGraph, ty: Type, caller_module: String, generic_params: [TGenericParam]) -> Type Never! {

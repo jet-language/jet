@@ -26,11 +26,41 @@ Manage the package-signing key
 .B registry vendor
 Copy dependencies into vendor/
 .TP
+.B db
+Run a bounded SQL console and manage database migrations
+.TP
+.B db migrate
+Create, preview, inspect, apply, resume, and roll back versioned database migrations
+.TP
 .B inspect
 Explore code, builds, packages, and bindings
 .TP
-.B inspect live
-Watch a running Jet process
+.B inspect types
+Show registered type and operator facts
+.TP
+.B inspect rights
+Show required and granted rights
+.TP
+.B inspect claims
+Show receipt-backed claims
+.TP
+.B inspect shapes
+Show semantic shapes and projections
+.TP
+.B inspect accel
+Show vector proof and acceleration gate decisions
+.TP
+.B inspect decisions
+Show compiler decisions and their evidence
+.TP
+.B inspect structure
+Show structure and lifecycle facts
+.TP
+.B inspect build
+Show build identity, provenance, and coverage
+.TP
+.B inspect gates
+Show the complete compile-time gate ledger
 .TP
 .B inspect graph
 Show the build graph
@@ -48,7 +78,7 @@ Read compiler facts as versioned JSON
 Show code affected by a symbol
 .TP
 .B inspect provenance
-read dependency provenance
+Read dependency provenance
 .TP
 .B inspect digest
 Write the one-file LLM surface digest
@@ -57,16 +87,13 @@ Write the one-file LLM surface digest
 List typed environment reads in a config surface
 .TP
 .B inspect semindex
-search the code index
+Search the code index
 .TP
 .B inspect output
-inspect one selected Output
+Inspect one selected Output
 .TP
 .B inspect expand
-show expanded meaning of Jet code (use --json for canonical facts)
-.TP
-.B inspect gates
-read the complete compile-time gate ledger
+Show expanded meaning of Jet code (use --json for canonical facts)
 .TP
 .B inspect schema
 Inspect saved data schema versions
@@ -95,8 +122,8 @@ List dependencies with available updates
 .B inspect reserved
 List reserved words and sigils
 .TP
-.B inspect structure
-Inspect liveness, lifecycle, and import-edge facts
+.B bind
+Resolve and record a checked foreign binding plan
 .TP
 .B project
 Inspect project files and modules
@@ -146,14 +173,20 @@ Run a program or project
 .B jobs
 List, inspect, watch, or run named project jobs
 .TP
+.B generate
+Run an explicit source generator with authority and a receipt
+.TP
 .B check
-check code without creating a binary
+Check code without creating a binary
 .TP
 .B fill
 Propose checked code for typed goals
 .TP
 .B test
 Run tests
+.TP
+.B test-compare
+Compare one recorded observation corpus against its relation
 .TP
 .B prove
 Create a proof report for code and tests
@@ -164,6 +197,12 @@ Show what the project has proved
 .B build
 Create a native executable
 .TP
+.B package
+Create a desktop or game application bundle
+.TP
+.B flash
+Flash firmware to a target board
+.TP
 .B cc
 Compile and link C with the pinned Jetpack toolchain
 .TP
@@ -171,10 +210,10 @@ Compile and link C with the pinned Jetpack toolchain
 Compile and link C++ with the pinned Jetpack toolchain
 .TP
 .B dev
-Watch and run a program; optionally open the Canvas IDE
+Watch and run a program; optionally open Canvas or a local app
 .TP
 .B learn
-Run the offline first learning arc
+Practice Jet with offline code exercises
 .TP
 .B try
 Speculatively apply a plan and re-check its claims
@@ -192,7 +231,7 @@ Open a Jet notebook (.jetnb) or Jupyter adapter
 Convert supported source code into editable Jet
 .TP
 .B new
-Create a Jet project
+Create a Jet project or backend source scaffold
 .TP
 .B fmt
 Format Jet and configured project files
@@ -279,10 +318,10 @@ Manage development services
 Manage Jet settings and trust
 .TP
 .B add
-add and download a dependency
+Add and download a dependency
 .TP
 .B remove
-remove a dependency
+Remove a dependency
 .TP
 .B fetch
 Download locked dependencies
@@ -312,7 +351,7 @@ Show values moved into automatic memory management
 Show values moved into automatic memory management
 .TP
 .B clean
-remove unused package-store data
+Remove unused package-store data
 .TP
 .B emit
 Print generated build output
@@ -321,7 +360,7 @@ Print generated build output
 Evaluate pure Jet and print the value (`--json` for JSON)
 .TP
 .B budget
-check performance limits or update baselines
+Check performance limits or update baselines
 .TP
 .B perf
 Collect and inspect performance traces
@@ -344,9 +383,6 @@ Compare two .jettrace artifacts
 .B perf export
 Export a loss-declared projection of a .jettrace
 .TP
-.B report
-Write a private local report bundle
-.TP
 .B fuzz
 Find failing inputs for property tests
 .TP
@@ -357,11 +393,8 @@ Show the Jet version
 Show command help
 .SH Flags
 .TP
-.B --attach
-With inspect live: Process id to observe
-.TP
-.B --once
-With inspect live: Print one snapshot and exit
+.B --live
+With inspect: Process id for a live plane scope
 .TP
 .B --observe
 With run: Expose bounded live runtime facts for attachment
@@ -397,13 +430,13 @@ Emit machine-readable facts or diagnostics
 With inspect digest: Emit one digest topic
 .TP
 .B --to
-With publish/cache: Foreign registry, or prune target size
+With publish/cache/db migrate: Foreign registry, prune target size, or migration target version
 .TP
 .B --list-topics
 With inspect digest: List digest topics
 .TP
 .B --kind
-With inspect gates/authority: Filter one gate kind
+With inspect gates/package: Filter one gate or bundle kind
 .TP
 .B --quiet
 Suppress non-error status output
@@ -412,7 +445,7 @@ Suppress non-error status output
 Color: auto | always | never
 .TP
 .B --version
-Print compiler version
+With package/new: Set bundle or migration version; global flag prints compiler version
 .TP
 .B --endpoint
 With self-update: Signed toolchain channel endpoint
@@ -427,7 +460,22 @@ With self-update: Toolchain target triple
 With self-update: Public trust-key file
 .TP
 .B --apply
-With self-update: Install the verified artifact
+With self-update/generate/new: Apply the verified artifact or planned source writes
+.TP
+.B --preview
+With new: Preview deterministic backend source writes without applying them
+.TP
+.B --remove
+With new: Remove only unchanged outputs recorded by the scaffold receipt
+.TP
+.B --path
+With new: Route or output path, defaulting to `/<name>`
+.TP
+.B --route
+With new: Alias for `--path`
+.TP
+.B --model
+With new: Model name recorded beside the route source
 .TP
 .B --allow-unofficial
 With self-update: Explicitly allow a local keyless channel
@@ -460,16 +508,16 @@ With project parts: Show modules omitted from automatic discovery
 With fmt -: Path label used in diagnostics when reading from stdin
 .TP
 .B --small
-With build/run: Favor a smaller binary
+With build/run/jobs: Favor a smaller binary
 .TP
 .B --lib
 With build: Emit the native Library and C header
 .TP
 .B --output
-With build/run/dev: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)
+With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)
 .TP
 .B --locked
-With build/fetch: Require locked dependency and provenance facts
+With build/fetch/jobs/run: Require locked dependency and provenance facts
 .TP
 .B --effect
 With find: Require an effect such as FS.Read
@@ -478,7 +526,7 @@ With find: Require an effect such as FS.Read
 With find: Search by input/output example
 .TP
 .B --lock
-With fetch: Lock a manifest-less script's inline deps instead of fetching a project
+With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy
 .TP
 .B --read-only
 With shared-store enroll: Grant read-only broker access
@@ -507,14 +555,26 @@ With keygen/key: Registry name to generate or manage a signing key for
 .B --pkg
 With bind: Library name for the generated binding module
 .TP
+.B --shape
+With bind: Binding facade shape: automatic or native
+.TP
+.B --freeze
+With bind: Record the resolved binding plan in the project lock
+.TP
+.B --policy
+With bind: Binding policy: automatic or frozen
+.TP
+.B --accept
+With bind --update: Accept exactly this candidate plan digest
+.TP
+.B --import
+With build: Import and inspect an existing foreign build graph
+.TP
 .B --clang
 With bind cpp: Path to the clang binary used to parse the header
 .TP
 .B --ar
 With bind cpp: Path to the ar archiver used to build the static library
-.TP
-.B --message
-With yank: Human-readable reason for yanking the version
 .TP
 .B --before
 With schema squash: Re-baseline migrations before this version
@@ -535,7 +595,13 @@ With vendor: Directory to copy dependencies into (default vendor/)
 With build: Also write an SPDX SBOM next to the binary
 .TP
 .B --verbose
-With build: Print the bridge steps
+With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision
+.TP
+.B --template
+With new: Start from a named template: cli, ui, web, or overrides
+.TP
+.B --sort
+With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)
 .TP
 .B --online
 With doctor: Allow network checks
@@ -544,7 +610,10 @@ With doctor: Allow network checks
 With doctor: Apply auto-fixable problems
 .TP
 .B --dry-run
-With rewrite commands: Preview changes without writing
+With package/rewrite commands/generate: Preview changes without writing
+.TP
+.B --entry
+With generate: Source file containing the generator job
 .TP
 .B --keep
 With try: Keep a clean speculative edit
@@ -559,7 +628,7 @@ With fix: Apply safety classes beyond formatting and behavior-preserving
 With dev: Interpret past unsupported features (no guarantees)
 .TP
 .B --interpret
-With dev: Force the tier-0 TIR interpreter
+With dev/jobs: Force the tier-0 TIR interpreter
 .TP
 .B --trace-tiers
 With run/dev: Print per-function Cranelift vs interpreter tier selection; with test: print AOT marker
@@ -570,11 +639,29 @@ With dev: Always rerun from scratch after a save
 .B --swap
 With dev: Hot-swap compatible edits and restart after type changes
 .TP
+.B --reload
+With explain: Explain the checked reload decision for a source or project path
+.TP
 .B --watch
-With run/dev/learn: Re-run on dependency changes; --watch=off runs once
+With run/dev/learn/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once
+.TP
+.B --graph
+With jobs: Show the checked job dependency graph
+.TP
+.B --status
+With jobs: Show fresh or stale status for declared jobs
+.TP
+.B --explain
+With jobs/package: Explain dependencies, phases, cache identity, and admission facts
 .TP
 .B --canvas
 With dev: Open the full Canvas IDE over this dev session
+.TP
+.B --app
+With dev: Select a checked local-app function
+.TP
+.B --share
+With dev: Select local-app sharing authority: loopback or lan
 .TP
 .B --canvas-host
 With dev: With --canvas, bind host (loopback by default)
@@ -594,6 +681,15 @@ With dev: With --canvas, enable request/rebuild audit output
 .B --project
 With repl: Load package settings and imports from this directory
 .TP
+.B --console
+With repl: Open the project-loaded capability-gated console
+.TP
+.B --sandbox
+With repl: Use the reversible data sandbox (`--sandbox data`)
+.TP
+.B --console-ttl
+With repl: Expire console authority after this many milliseconds
+.TP
 .B --protocol
 With notebook: Use the bounded headless JSONL/script session
 .TP
@@ -604,16 +700,25 @@ With notebook: Use the bounded headless session
 With notebook: Bind the local HTTP client to this address
 .TP
 .B --token
-With notebook: Require this bearer token for clients
+With notebook/dev: Require a bearer token for the session
+.TP
+.B --no-prepare
+With run: Refuse Jetpack project environment preparation
 .TP
 .B --pure
 With eval: Reject code with side effects
 .TP
+.B --allow
+With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS
+.TP
+.B --deny
+With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS
+.TP
 .B --offline
-With cc/c++: Reuse only cached signed toolchain data
+With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data
 .TP
 .B --fixtures
-With cc/c++ tests: Use an explicit fixture bundle
+With env/run/dev/test/cc/c++: Use an explicit fixture bundle
 .TP
 .B --project-root
 With cc/c++: Scope source paths to a project directory
@@ -670,10 +775,166 @@ With cc/c++: Print the pinned compiler version
 With cc/c++: Print pinned toolchain details or compile verbosely
 .TP
 .B --gate
-With build/run/dev: Allow one audited gate as --gate name=allow
+With build/run/dev/jobs: Allow one audited gate as --gate name=allow
 .TP
 .B --target
-With build/run/dev/cc/c++: Select a target: a rustc triple or board.<name>
+With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)
+.TP
+.B --up
+With db migrate/new: Checked forward SQL
+.TP
+.B --sql
+With db migrate/new: Alias for checked forward SQL
+.TP
+.B --down
+With db migrate/new: Checked inverse SQL for rollback
+.TP
+.B --database
+With db migrate: Project-relative database path (receipt identity is redacted)
+.TP
+.B --risk
+With db migrate/new: Data-risk note shown before writes
+.TP
+.B --step
+With db migrate: Number of ordered migrations to apply or roll back
+.TP
+.B --format
+With db: Output format: human, text, json, jsonl, or csv
+.TP
+.B --csv
+With db: Select deterministic CSV output
+.TP
+.B --jsonl
+With db: Emit one JSON value per row
+.TP
+.B --machine
+With db: Select machine-readable output
+.TP
+.B --human
+With db: Select human-readable output
+.TP
+.B --no-color
+With db: Disable color in console output
+.TP
+.B --force-color
+With db: Force color in console output
+.TP
+.B --query
+With db: Execute one SQL query
+.TP
+.B --script
+With db: Execute SQL from a script path
+.TP
+.B --table
+With db: Set an explicit table identity as NAME=PATH
+.TP
+.B --max-rows
+With db: Bound decoded input rows
+.TP
+.B --max-bytes
+With db: Bound source or script bytes
+.TP
+.B --max-output-bytes
+With db: Bound one rendered result
+.TP
+.B --image
+With flash: Firmware image to program
+.TP
+.B --audit
+With flash: Target audit JSON for the image
+.TP
+.B --adapter
+With flash: Flash adapter: probe-rs, openocd, or emulator
+.TP
+.B --package
+With package: Set the bundle package identifier
+.TP
+.B --name
+With package: Set the bundle executable name
+.TP
+.B --executable
+With package: Path to the executable to bundle
+.TP
+.B --icon
+With package: Path to the bundle icon
+.TP
+.B --icon-format
+With package: Icon format: png, icns, ico, or svg
+.TP
+.B --icon-size
+With package: Icon size in pixels
+.TP
+.B --publisher
+With package: Publisher metadata
+.TP
+.B --description
+With package: Application description metadata
+.TP
+.B --update-channel
+With package: Updater channel
+.TP
+.B --update-url
+With package: Updater URL
+.TP
+.B --game
+With package: Build a game bundle
+.TP
+.B --source
+With package: Project source or package root for a game bundle
+.TP
+.B --phase
+With package: Comma-separated game phases: build, cook, stage, package, export, deploy, run
+.TP
+.B --backend
+With package: Game build backend: aot
+.TP
+.B --renderer
+With package: Game renderer authority: headless or raylib
+.TP
+.B --cook
+With package: Alias for --cook-mode
+.TP
+.B --cook-mode
+With package: Asset cooking mode: fast, reproducible, or scripts-only
+.TP
+.B --export
+With package: Export phase or named export preset
+.TP
+.B --export-preset
+With package: Named export preset: default, store, or headless
+.TP
+.B --deploy
+With package: Include the deploy phase
+.TP
+.B --deploy-to
+With package: Explicit deployment destination
+.TP
+.B --crash-reporter
+With package: Crash reporter policy: off, on, or opt-in
+.TP
+.B --crash-consent
+With package: Crash reporter consent: not-requested, granted, or denied
+.TP
+.B --cancel
+With package: Cancel owned game staging
+.TP
+.B --resume
+With package: Resume an owned game stage
+.TP
+.B --clean
+With package: Force-clean owned game cache/staging
+.TP
+.B --force-clean
+With package: Alias for --clean
+.TP
+.B --scripts-only
+With package: Cook only script assets
+.TP
+.B --run-now
+With package: Explicitly opt into the run phase
+.TP
+.B --run
+With package: Include the run phase
 .TP
 .B --env
 With env/run/dev/test: Select one declared env.<name> module
@@ -684,11 +945,32 @@ With env/run/dev/test: Select one declared environment preset
 .B --explain-partition
 With build --target=web: Show which code becomes JavaScript or WebAssembly
 .TP
+.B --fresh
+With test: Bypass only cached test results (default off); the build cache remains reusable
+.TP
+.B --docs
+With test: Run checked documentation examples only (default off)
+.TP
+.B --where
+With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>
+.TP
+.B --capture
+With test: Capture output as failed, all, or none (default failed); watch key o cycles it
+.TP
+.B --no-capture
+With dev: Disable automatic replay capture for this session
+.TP
 .B --update-snapshots
 With test: Replace expected snapshot output
 .TP
+.B --update
+With import: Merge generated Jet into an existing target
+.TP
 .B --coverage
-With test: Show function and branch coverage
+With test/inspect build: Show function or diagnostic coverage
+.TP
+.B --verify
+With build: Rebuild and compare one indexed receipt artifact
 .TP
 .B --rust
 With emit: Print generated Rust source
@@ -700,16 +982,16 @@ With build: Copy generated Jet sources into `.jet/generated/`
 Short form of --update-snapshots
 .TP
 .B --release
-With build/run/test: Optimize for release
+With build/run/dev/jobs/test: Optimize for release
 .TP
 .B --profile
-With build/run/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
+With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
 .TP
 .B --set
-With build/run: Set one declared package setting as key=value
+With build/run/dev/jobs/test: Set one declared package setting as key=value
 .TP
 .B --builder
-With build: Select a previously bound remote builder
+With build/jobs: Select a previously bound remote builder
 .TP
 .B --a11y
 With lint: Check roles, labels, and other accessibility basics
@@ -724,10 +1006,16 @@ With lint/explain: Show typed hidden-copy and fallback costs
 With lint --complexity: Fail when a function exceeds this score
 .TP
 .B --scope
-With inspect gates/authority or trust grant: Choose a ledger or trust scope
+With inspect: Choose a ledger or trust scope
+.TP
+.B --core
+With inspect structure: Show the canonical core module export facts
 .TP
 .B --filter
 With test: Only run claims whose name contains --filter=<substr>
+.TP
+.B --grade
+With test: Select the generated property-test grade as --grade=generated
 .TP
 .B --shuffle
 With test: Run tests in random (or --shuffle=<seed>) order
@@ -741,11 +1029,32 @@ With run/build/dev/test: Use and report the stock default
 .B --measure
 With test: Measure `.measure` claims
 .TP
+.B --browser
+With test/db: Select browser engines for tests or serve a loopback database inspector
+.TP
+.B --browser-retries
+With test: Retry each browser attempt up to five times
+.TP
+.B --browser-reporter
+With test: Browser report format: text, json, or html
+.TP
+.B --browser-ui
+With test: Write/open the local browser report viewer
+.TP
+.B --browser-visual
+With test: Capture screenshots for passing browser attempts
+.TP
+.B --browser-trace
+With test: Keep redacted BiDi trace entries for every browser attempt
+.TP
+.B --browser-scaffold
+With test: Create an isolated browser-test project as --browser-scaffold=<name>
+.TP
 .B --record
-With run/dev/test: Record a named replay as --record=<name>
+With run/dev/test/debug: Record a named replay as --record=<name>
 .TP
 .B --replay
-With debug: Consume a named replay as --replay=<name>
+With inspect/debug: Consume a named replay artifact
 .TP
 .B --iterations
 With fuzz: Case budget --iterations=<n> (default 1000)
@@ -785,66 +1094,6 @@ With budget update: Apply a valid non-interactive plan
 .TP
 .B -y
 Short form of --yes
-.TP
-.B --allow-net
-With build: Allow Net access for this run
-.TP
-.B --deny-net
-With repl: Deny Net access; overrides allow and prompts
-.TP
-.B --allow-fs
-With build: Allow FS access for this run
-.TP
-.B --deny-fs
-With repl: Deny FS access; overrides allow and prompts
-.TP
-.B --allow-io
-With build: Allow IO access for this run
-.TP
-.B --deny-io
-With repl: Deny IO access; overrides allow and prompts
-.TP
-.B --allow-db
-With build: Allow DB access for this run
-.TP
-.B --deny-db
-With repl: Deny DB access; overrides allow and prompts
-.TP
-.B --allow-time
-With build: Allow Time access for this run
-.TP
-.B --deny-time
-With repl: Deny Time access; overrides allow and prompts
-.TP
-.B --allow-rand
-With build: Allow Rand access for this run
-.TP
-.B --deny-rand
-With repl: Deny Rand access; overrides allow and prompts
-.TP
-.B --allow-env
-With build: Allow Env access for this run
-.TP
-.B --deny-env
-With repl: Deny Env access; overrides allow and prompts
-.TP
-.B --allow-exec
-With build: Allow Exec access for this run
-.TP
-.B --deny-exec
-With repl: Deny Exec access; overrides allow and prompts
-.TP
-.B --allow-log
-With build: Allow Log access for this run
-.TP
-.B --deny-log
-With repl: Deny Log access; overrides allow and prompts
-.TP
-.B --allow-gpu
-With build: Allow GPU access for this run
-.TP
-.B --deny-gpu
-With repl: Deny GPU access; overrides allow and prompts
 .SH Files
 .TP
 .B pkg.jet

@@ -16,6 +16,15 @@ pub struct CoreModuleTypeExport {
     pub kind: CoreLeafKind
 }
 
+// One variant of a compiler-owned Core enum family (Rust
+// `resolve_enum_variants_cloned` tables) and its positional payload types;
+// an empty payload is a unit variant.
+pub struct CoreEnumPayloadRow {
+    pub enum_name: String
+    pub variant: String
+    pub payload: [Type]
+}
+
 pub struct CoreModuleDeclaration {
     pub module_name: String
     pub members: [String]
@@ -165,6 +174,32 @@ fn core_enum_variants_in(rows: [CoreModuleTypeExport], name: String) -> [String]
         if row.kind == .Enum(variants) -> return Val(variants)
     }
     None
+}
+
+// The variant names of a compiler-owned Core enum family with payload rows
+// (`IOError`, `IOOperation`, `ProcessStreamMode`, ...), in table order.
+pub fn core_enum_payload_variants(name: String) -> [String]? {
+    variants := [String]{}
+    loop row in CORE_ENUM_PAYLOAD_ROWS {
+        if row.enum_name == name -> &variants.push(row.variant)
+    }
+    if variants.len() == 0 -> None else -> Val(variants)
+}
+
+// The positional payload types of `name.variant` for a Core enum: the
+// payload rows of a compiler-owned family, otherwise a Core.jet enum leaf's
+// unit variant (Rust `core_declared_enum_variants`). `None` when the enum or
+// its variant is not a Core enum case.
+pub fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
+    family := false
+    loop row in CORE_ENUM_PAYLOAD_ROWS {
+        if row.enum_name != name -> next
+        if row.variant == variant -> return Val(row.payload)
+        family = true
+    }
+    if family -> return None
+    declared :: core_enum_variants(name) ?? return None
+    if declared.contains(variant) -> Val([Type]{}) else -> None
 }
 fn core_module_source_declaration_line(source_text: String, module_name: String) -> String? {
     prefix := "module {module_name} "

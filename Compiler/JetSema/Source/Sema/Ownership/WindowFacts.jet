@@ -80,13 +80,15 @@ pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
     // Name -> declaration positions in bundle order: one census answers both
     // the ambiguity count and every onward-edge lookup.
     positions := [String:[Int]]{}
-    loop (index, func) in functions {
+    loop index in 0..<functions.len() {
+        func :: functions[index]
         rows := positions.get(func.name) ?? [Int]{}
         &rows.push(index)
         positions[func.name] = rows
     }
     candidates := [SemaWindowCandidate]{}
-    loop func in functions {
+    loop function_index in 0..<functions.len() {
+        func :: functions[function_index]
         if (positions.get(func.name) ?? [Int]{}).len() > 1 -> next
         loop param in func.params {
             if param.convention != AccessConvention.Write -> next

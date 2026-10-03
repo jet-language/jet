@@ -38,6 +38,11 @@ specialized directories are regression or integration fixtures rather than a
 learning sequence; use their neighboring source and expected-output files as
 the contract.
 
+[`struct_call_word.jet`](features/basics/struct_call_word.jet) demonstrates
+fixed-width FNV results in record fields, direct and wrapper calls, and record
+copies. Its [golden](features/expected/basics/struct_call_word.out) preserves all
+64 bits independently of the exact `Int` representation.
+
 ## Auxiliary golden stream suffix
 
 The feature runner discovers `.jet` files and project directories containing a

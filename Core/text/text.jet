@@ -27,6 +27,7 @@ module parse
 module wrap
 module html
 module combinators
+module catalog
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
 pub struct Cursor {
@@ -690,8 +691,6 @@ fn decompose_cp(cp: Int, compat: Bool) -> [Int] {
     if cp == 304 -> return [Int]{73, 775}
     if compat {
         if cp >= 65281 && cp <= 65374 -> return [Int]{cp - 65248}
-        if cp == 338 -> return [Int]{79, 69}
-        if cp == 339 -> return [Int]{111, 101}
         if cp == 64256 -> return [Int]{102, 102}
         if cp == 64257 -> return [Int]{102, 105}
         if cp == 64258 -> return [Int]{102, 108}

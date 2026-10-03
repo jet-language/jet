@@ -529,12 +529,27 @@ pub fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: 
     if source_index >= 0 && source_index < binding.slots.len() -> binding.slots[source_index] else -> -1
 }
 
+// Rust `bare_arg_name` (direct_calls.rs), `check_callable_argument_ownership`,
+// and the cross-file call check (imports.rs): an unmarked argument is an
+// implicit clone (owning parameter) or a missing write-access marker (write
+// parameter) only when it is a bare name. Any other unmarked argument (a call
+// result, literal, field, or other temporary) passes: an owning parameter
+// takes it as a move and a write parameter edits it in place. The move marker
+// `^` on a read or write parameter is always rejected.
 pub fn sema_call_argument_convention(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision Never! {
     if {
-        param.convention == AccessConvention.Write && arg.convention != AccessConvention.Write -> SemaCallConventionDecision.RequiresWrite
-        param.convention == AccessConvention.Read && arg.convention == AccessConvention.Move -> SemaCallConventionDecision.RejectsMove
-        param.convention == AccessConvention.Move && arg.convention == AccessConvention.Read -> SemaCallConventionDecision.NeedsImplicitClone
+        arg.convention == AccessConvention.Move && param.convention != AccessConvention.Move -> SemaCallConventionDecision.RejectsMove
+        arg.convention != AccessConvention.Read || !sema_call_argument_is_bare_name(arg) -> SemaCallConventionDecision.Accepted
+        param.convention == AccessConvention.Write -> SemaCallConventionDecision.RequiresWrite
+        param.convention == AccessConvention.Move -> SemaCallConventionDecision.NeedsImplicitClone
         else -> SemaCallConventionDecision.Accepted
+    }
+}
+
+fn sema_call_argument_is_bare_name(arg: CallArg) -> Bool Never! {
+    if arg.expr == {
+        .Ident(_, _) -> true
+        else -> false
     }
 }
 
@@ -545,6 +560,14 @@ pub fn sema_call_parameter_type(param: SemaCallParam) -> Type? {
         .List(element) -> Val(element)
         else -> None
     }
+}
+
+// The type one written argument must have: a call spread `...xs` into the
+// variadic tail is the whole `[T]` list, every other argument one element
+// (Rust `normalize_variadic_call`).
+pub fn sema_call_argument_parameter_type(param: SemaCallParam, arg: CallArg) -> Type? {
+    if arg.spread && param.variadic -> return param.ty
+    sema_call_parameter_type(param)
 }
 
 pub fn sema_call_method_receiver_type(signature: Type, receiver_offset: Int) -> Type? {

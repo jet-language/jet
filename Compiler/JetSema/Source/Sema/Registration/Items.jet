@@ -58,6 +58,7 @@ use jet_foundation.[
     VariantPayload,
     core_module_export,
     expr_span,
+    sema_reserved_type_name,
     symbol_id,
     type_identity,
     type_identity_key,
@@ -1490,6 +1491,7 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
     }
     name :: sema_registration_root_name(item)
     if name == "" -> return true
+    if !sema_registration_reserved_type_rule(item, name, &diagnostics) -> return false
     if sema_registration_module_has_name(module_row, name) {
         &diagnostics.push(sema_defined_twice(name, "module declarations share one namespace", sema_registration_root_span(item)))
         return false
@@ -1524,6 +1526,22 @@ fn sema_registration_push_declaration(module_row: &SemaRegistrationModule, item:
         if definition.trait_name == .Val(trait_name) -> module_row.declared_trait_impls[sema_type_metadata_impl_key(definition.type_name, trait_name)] = true
     }
     &module_row.declarations.push(item)
+}
+
+// E0106: the Rust reference's `register_struct`/`register_enum`/
+// `register_distinct`/`register_type_alias` reject a built-in type name
+// before the declaration registers.
+fn sema_registration_reserved_type_rule(item: Item, name: String, diagnostics: &[Diagnostic]) -> Bool {
+    kind :: if item == {
+        .Struct(_) -> "struct"
+        .Enum(_) -> "enum"
+        .Distinct(_) -> "distinct type"
+        .TypeAlias(_) -> "type alias"
+        else -> ""
+    }
+    if kind == "" || !sema_reserved_type_name(name) -> return true
+    &diagnostics.push(sema_error("E0106", sema_registration_root_span(item), "the name `{name}` is built in and can't be redefined", "`{name}` is provided by the language itself", "choose a different name for this {kind}"))
+    false
 }
 
 // D-DIST1/D-RANGETYPE1/D-TYPEALIAS1: the registration rules of the Rust
@@ -1834,6 +1852,16 @@ fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, tem
     // D-STRUCT-ONCE1=A: root `prep loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     module_row.program.items = sema_derive_expand_template_loops(module_row.program.items, &diagnostics)
+    // Reject reserved type declarations before automatic capability expansion:
+    // an invalid nominal must not produce methods that cascade from E0106.
+    item_index := 0
+    loop item_index < module_row.program.items.len() {
+        if !sema_registration_reserved_type_rule(module_row.program.items[item_index], sema_registration_root_name(module_row.program.items[item_index]), &diagnostics) {
+            _ := &module_row.program.items.remove(item_index, .Slot)
+        } else {
+            item_index += 1
+        }
+    }
     // D-ERR-CONV: declared conversions register once per module and become
     // their checked conversion routines before any declaration is resolved.
     module_row.program.items = sema_error_conversion_items(module_row.program.items, &diagnostics)
@@ -2229,7 +2257,8 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     // registered, but no later pass sees an unexpanded body.
     loop erased_index in 0..<graph.modules.len() {
         kept := [Item]{}
-        loop item in graph.modules[erased_index].program.items {
+        loop item_index in 0..<graph.modules[erased_index].program.items.len() {
+            item :: graph.modules[erased_index].program.items[item_index]
             if item == {
                 .GenericModule(_) | .ModuleAlias(_) -> {}
                 else -> &kept.push(item)

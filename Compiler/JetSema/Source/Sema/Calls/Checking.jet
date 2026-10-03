@@ -307,7 +307,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
         parameter :: params[slot]
-        required_declared :: sema_call_parameter_type(parameter) ?? {
+        required_declared :: sema_call_argument_parameter_type(parameter, args[index]) ?? {
             &diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
             return None
         }
@@ -451,7 +451,7 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
         value :: typed.values[index]
         arg :: args[index]
         param :: params[typed.slots[index]]
-        required :: if index < typed.required_types.len() -> typed.required_types[index] else -> sema_call_resolved_type(sema_call_parameter_type(param) ?? value.ty, environment)
+        required :: if index < typed.required_types.len() -> typed.required_types[index] else -> sema_call_resolved_type(sema_call_argument_parameter_type(param, arg) ?? value.ty, environment)
         widen_to_vec :: if required == {
             .List(_) -> if value.ty == {
                 .FixedList(_, _) -> true
